@@ -10,7 +10,7 @@ import { Song, Key } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey } from './utils/musicUtils';
 import ChordSheet from './components/ChordSheet';
 import SongEditor from './components/SongEditor';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Anchor, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Anchor, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
@@ -25,6 +25,12 @@ interface GoogleUserSession {
   name: string;
   email: string;
   picture?: string;
+}
+
+interface ExportedSongLibraryPayload {
+  version: 1;
+  exportedAt: number;
+  songs: Array<Omit<StoredSong, 'updatedAt'> & { updatedAt?: number }>;
 }
 
 const buildPdfFileName = (title: string) => {
@@ -438,11 +444,14 @@ export default function App() {
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const keyMenuRef = useRef<HTMLDivElement>(null);
+  const importLibraryInputRef = useRef<HTMLInputElement>(null);
   const googleSignInRef = useRef<HTMLDivElement>(null);
   const googleIdentityInitializedRef = useRef(false);
   const [isKeyMenuOpen, setIsKeyMenuOpen] = useState(false);
   const [scale, setScale] = useState(1);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? '';
+  const logoSrc = `${import.meta.env.BASE_URL}logo.svg`;
+  const showGoogleAuth = Boolean(googleClientId);
   const song = songs.find((item) => item.id === selectedSongId) ?? songs[0];
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
@@ -687,6 +696,72 @@ export default function App() {
     setSongs(nextSongs);
     setSelectedSongId(newSong.id);
     setIsEditing(true);
+  };
+
+  const handleExportSongLibraryJson = () => {
+    const payload: ExportedSongLibraryPayload = {
+      version: 1,
+      exportedAt: Date.now(),
+      songs: songs.map(({ updatedAt, ...song }) => ({
+        ...cloneSong(song),
+        updatedAt
+      }))
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const objectUrl = window.URL.createObjectURL(blob);
+    const downloadLink = document.createElement('a');
+    downloadLink.href = objectUrl;
+    downloadLink.download = `chordmaster-library-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.URL.revokeObjectURL(objectUrl);
+  };
+
+  const handleImportSongLibraryClick = () => {
+    importLibraryInputRef.current?.click();
+  };
+
+  const handleImportSongLibrary = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const rawContent = await file.text();
+      const parsedContent = JSON.parse(rawContent) as ExportedSongLibraryPayload | Song[];
+      const importedSongs = Array.isArray(parsedContent) ? parsedContent : parsedContent.songs;
+
+      if (!Array.isArray(importedSongs) || importedSongs.length === 0) {
+        window.alert('The selected JSON file does not contain any songs.');
+        return;
+      }
+
+      const nextSongs = importedSongs.map((item, index) => ({
+        ...cloneSong(item),
+        id: item.id || `song-imported-${Date.now()}-${index + 1}`,
+        updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now()
+      })) as StoredSong[];
+
+      const confirmed = window.confirm(`Import ${nextSongs.length} songs and replace the current Song Library?`);
+      if (!confirmed) {
+        return;
+      }
+
+      const nextSelectedSongId = nextSongs[0].id;
+      setSongs(nextSongs);
+      setSelectedSongId(nextSelectedSongId);
+      setSongHistories({});
+      setSelectedSongIdsForBulkDelete([]);
+      setIsLibraryEditing(false);
+      persistSongLibrary(nextSongs, nextSelectedSongId);
+    } catch {
+      window.alert('Unable to import this JSON file. Please check the file format and try again.');
+    }
   };
 
   const handleDuplicateSong = (songId: string) => {
@@ -1027,8 +1102,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!googleClientId) {
-      setGoogleAuthError('Set VITE_GOOGLE_CLIENT_ID to enable Google sign-in.');
+    if (!showGoogleAuth) {
+      setGoogleAuthError(null);
       return;
     }
 
@@ -1089,7 +1164,7 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [googleClientId, googleUser]);
+  }, [googleClientId, googleUser, showGoogleAuth]);
 
   const handleElementClick = (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'riffLabel' | 'rhythmLabel' | 'annotation' | 'rhythm') => {
     if (!song) {
@@ -1174,7 +1249,7 @@ export default function App() {
         <div className="h-full flex">
           <div className="w-20 shrink-0 border-r border-gray-200 flex flex-col items-center py-5 gap-3 bg-white">
             <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-indigo-200 ring-1 ring-indigo-100">
-              <img src="/logo.svg" alt="ChordMaster" className="h-full w-full object-cover" />
+              <img src={logoSrc} alt="ChordMaster" className="h-full w-full object-cover" />
             </div>
 
             <button
@@ -1226,7 +1301,7 @@ export default function App() {
             <div className="px-5 py-6 border-b border-gray-200">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <img src="/logo.svg" alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                  <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
                   <div className="text-lg font-bold tracking-tight">ChordMaster</div>
                 </div>
                 <div className="text-xs font-medium text-gray-500">Song Library</div>
@@ -1261,6 +1336,31 @@ export default function App() {
                   className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                 />
               </label>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportSongLibraryJson}
+                  className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  <Download size={15} />
+                  <span>Export JSON</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleImportSongLibraryClick}
+                  className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  <Upload size={15} />
+                  <span>Import JSON</span>
+                </button>
+                <input
+                  ref={importLibraryInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={handleImportSongLibrary}
+                  className="hidden"
+                />
+              </div>
               {isLibraryEditing && (
                 <button
                   type="button"
@@ -1425,11 +1525,17 @@ export default function App() {
 
       {/* Main Content */}
       <main data-main-panel className="flex-1 flex flex-col min-w-0">
+        <div className="flex-shrink-0 border-b border-amber-200 bg-amber-50 px-8 py-2.5">
+          <p className="text-sm font-medium text-amber-800">
+            Test version: changes may not be preserved permanently. Please export your Song Library as JSON before leaving.
+          </p>
+        </div>
+
         {/* Top Control Bar */}
         <header data-topbar className="bg-white/80 backdrop-blur-md border-b border-gray-200 px-8 py-4 flex justify-between items-center z-40 flex-shrink-0">
-          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <img src="/logo.svg" alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+              <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
               <h2 className="text-lg font-bold tracking-tight">ChordMaster</h2>
             </div>
             <div className="h-4 w-px bg-gray-200" />
@@ -1438,7 +1544,7 @@ export default function App() {
 
           <div className="flex flex-col items-end gap-2">
             <div className="flex items-center gap-3 flex-wrap justify-end">
-              {googleUser ? (
+              {showGoogleAuth && googleUser ? (
                 <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-2 py-1.5 shadow-sm">
                   {googleUser.picture ? (
                     <img
@@ -1465,14 +1571,14 @@ export default function App() {
                     <LogOut size={14} />
                   </button>
                 </div>
-              ) : (
+              ) : showGoogleAuth ? (
                 <div className="flex flex-col items-end gap-1">
                   <div ref={googleSignInRef} className="flex min-h-10 min-w-[220px] items-center justify-end" />
                   {googleAuthError && (
                     <div className="text-[11px] font-medium text-amber-600">{googleAuthError}</div>
                   )}
                 </div>
-              )}
+              ) : null}
 
               <button
                 type="button"
