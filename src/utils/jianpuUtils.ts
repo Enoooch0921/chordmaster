@@ -1,0 +1,160 @@
+export type JianpuDuration = 'quarter' | 'eighth' | 'sixteenth';
+export type JianpuOctave = 'low' | 'mid' | 'high';
+
+export interface JianpuInputMode {
+  duration: JianpuDuration;
+  octave: JianpuOctave;
+  dotted: boolean;
+}
+
+export interface JianpuNoteRange {
+  start: number;
+  end: number;
+  text: string;
+  accidental: string;
+  pitch: string;
+  dotted: boolean;
+  slurStart: boolean;
+  slurEnd: boolean;
+  duration: JianpuDuration;
+  octave: JianpuOctave;
+}
+
+export interface JianpuPlaceholderRange {
+  start: number;
+  end: number;
+  text: string;
+  duration: JianpuDuration;
+  dotted: boolean;
+}
+
+const JIANPU_NOTE_REGEX = /\(*[#b^_=]*[+-]?[0-7-][',]*[=_]*\.*\)*/g;
+const JIANPU_NOTE_CORE_REGEX = /^([#b^_=]*)([+-]?)([0-7-])([',]*)([=_]*)(\.*)$/;
+const JIANPU_PLACEHOLDER_REGEX = /[qesQES]/g;
+const PLACEHOLDER_MAP: Record<string, { duration: JianpuDuration; dotted: boolean }> = {
+  q: { duration: 'quarter', dotted: false },
+  e: { duration: 'eighth', dotted: false },
+  s: { duration: 'sixteenth', dotted: false },
+  Q: { duration: 'quarter', dotted: true },
+  E: { duration: 'eighth', dotted: true },
+  S: { duration: 'sixteenth', dotted: true }
+};
+
+const DURATION_MARKERS: Record<JianpuDuration, string> = {
+  quarter: '',
+  eighth: '_',
+  sixteenth: '='
+};
+
+function getOctaveFromParts(prefix: string, octaveMarks: string): JianpuOctave {
+  const normalized = `${prefix === '+' ? "'" : prefix === '-' ? ',' : ''}${octaveMarks}`;
+  if (normalized.includes("'")) return 'high';
+  if (normalized.includes(',')) return 'low';
+  return 'mid';
+}
+
+function getDurationFromParts(durationMarks: string): JianpuDuration {
+  if (durationMarks.includes('=')) return 'sixteenth';
+  if (durationMarks.includes('_')) return 'eighth';
+  return 'quarter';
+}
+
+function buildOctaveMarks(octave: JianpuOctave, pitch: string): string {
+  if (pitch === '0' || pitch === '-') return '';
+  if (octave === 'high') return "'";
+  if (octave === 'low') return ',';
+  return '';
+}
+
+export function findJianpuNoteRanges(value: string): JianpuNoteRange[] {
+  return Array.from(value.matchAll(JIANPU_NOTE_REGEX))
+    .map((match) => {
+      const text = match[0];
+      const core = text.replace(/[()]/g, '');
+      const parsed = core.match(JIANPU_NOTE_CORE_REGEX);
+      if (!parsed) return null;
+
+      const [, accidental, octavePrefix, pitch, octaveMarks, durationMarks, dots] = parsed;
+
+      return {
+        start: match.index || 0,
+        end: (match.index || 0) + text.length,
+        text,
+        accidental,
+        pitch,
+        dotted: dots.length > 0,
+        slurStart: text.startsWith('('),
+        slurEnd: text.endsWith(')'),
+        duration: getDurationFromParts(durationMarks),
+        octave: getOctaveFromParts(octavePrefix, octaveMarks)
+      };
+    })
+    .filter((note): note is JianpuNoteRange => Boolean(note));
+}
+
+export function findJianpuPlaceholderRanges(value: string): JianpuPlaceholderRange[] {
+  return Array.from(value.matchAll(JIANPU_PLACEHOLDER_REGEX))
+    .map((match) => {
+      const text = match[0];
+      const mapped = PLACEHOLDER_MAP[text];
+      if (!mapped) return null;
+
+      return {
+        start: match.index || 0,
+        end: (match.index || 0) + text.length,
+        text,
+        duration: mapped.duration,
+        dotted: mapped.dotted
+      };
+    })
+    .filter((placeholder): placeholder is JianpuPlaceholderRange => Boolean(placeholder));
+}
+
+export function findNearestJianpuNoteRange(value: string, caret: number, preferPrevious = false): JianpuNoteRange | null {
+  const notes = findJianpuNoteRanges(value);
+  if (notes.length === 0) return null;
+
+  const containing = notes.find((note) => caret > note.start && caret < note.end);
+  if (containing) return containing;
+
+  const previous = [...notes].reverse().find((note) => note.end <= caret) || null;
+  const next = notes.find((note) => note.start >= caret) || null;
+
+  if (preferPrevious) return previous || next;
+  if (!previous) return next;
+  if (!next) return previous;
+
+  const previousDistance = Math.abs(caret - previous.end);
+  const nextDistance = Math.abs(next.start - caret);
+  return previousDistance <= nextDistance ? previous : next;
+}
+
+export function replaceJianpuRange(value: string, start: number, end: number, replacement: string): string {
+  return value.slice(0, start) + replacement + value.slice(end);
+}
+
+export function buildJianpuNoteFromMode(pitch: string, mode: JianpuInputMode): string {
+  return `${pitch}${buildOctaveMarks(mode.octave, pitch)}${DURATION_MARKERS[mode.duration]}${mode.dotted ? '.' : ''}`;
+}
+
+export function buildJianpuPlaceholder(duration: JianpuDuration, dotted = false): string {
+  const units = duration === 'quarter'
+    ? 4
+    : duration === 'eighth'
+      ? 2
+      : 1;
+  const totalUnits = units + (dotted ? units / 2 : 0);
+  return 's'.repeat(Math.max(1, Math.round(totalUnits)));
+}
+
+export function rebuildJianpuNote(note: JianpuNoteRange, overrides: Partial<Pick<JianpuNoteRange, 'accidental' | 'pitch' | 'dotted' | 'slurStart' | 'slurEnd' | 'duration' | 'octave'>>): string {
+  const accidental = overrides.accidental ?? note.accidental;
+  const pitch = overrides.pitch ?? note.pitch;
+  const dotted = overrides.dotted ?? note.dotted;
+  const slurStart = overrides.slurStart ?? note.slurStart;
+  const slurEnd = overrides.slurEnd ?? note.slurEnd;
+  const duration = overrides.duration ?? note.duration;
+  const octave = overrides.octave ?? note.octave;
+
+  return `${slurStart ? '(' : ''}${accidental}${pitch}${buildOctaveMarks(octave, pitch)}${DURATION_MARKERS[duration]}${dotted ? '.' : ''}${slurEnd ? ')' : ''}`;
+}

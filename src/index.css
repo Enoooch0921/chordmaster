@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'JianpuASCII';
+  src: url('https://cdn.jsdelivr.net/gh/RobertWinslow/jianpu-ascii-font@main/JianpuASCII.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'NotoMusic';
+  src: url('https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@master/hinted/ttf/NotoMusic/NotoMusic-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Bach';
+  src: url('/fonts/BachRhythm.ttf') format('truetype'),
+       url('/fonts/Bach41.ttf') format('truetype'),
+       url('/fonts/Bach.ttf') format('truetype'),
+       local('Bach'),
+       local('Bach Regular');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'BachSlurs';
+  src: url('/fonts/BachSlurs.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-jianpu: "JianpuASCII", sans-serif;
+  --font-music: "NotoMusic", serif;
+  --font-rhythm: "Bach", "NotoMusic", serif;
+  --font-rhythm-slur: "BachSlurs", "Bach", "NotoMusic", serif;
+}
+
+@layer base {
+  body {
+    @apply antialiased text-gray-900 bg-gray-50;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  body.exporting-pdf {
+    background: white !important;
+  }
+
+  body.exporting-pdf [data-app-root] {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  body.exporting-pdf [data-sidebar],
+  body.exporting-pdf [data-topbar],
+  body.exporting-pdf [data-editor-pane] {
+    display: none !important;
+  }
+
+  body.exporting-pdf [data-main-panel],
+  body.exporting-pdf [data-content-area] {
+    display: block !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  body.exporting-pdf [data-print-preview-container] {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.exporting-pdf [data-print-preview] {
+    transform: none !important;
+    transform-origin: top center !important;
+    width: 794px !important;
+    min-width: 794px !important;
+    max-width: 794px !important;
+    margin: 0 auto !important;
+  }
+
+  body.exporting-pdf [data-print-page] {
+    margin: 0 auto !important;
+    border: none !important;
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-bar {
+    border-color: #111827 !important;
+    border-left-width: 1px !important;
+    border-right-width: 1px !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-bar.sheet-bar-left-edge {
+    border-left-width: 2px !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-bar.sheet-bar-right-edge {
+    border-right-width: 2px !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-bar.sheet-has-repeat-start,
+  body.exporting-pdf [data-print-page] .sheet-bar.sheet-after-repeat-end,
+  body.exporting-pdf [data-print-page] .sheet-bar.sheet-after-final-bar {
+    border-left-width: 0 !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-bar.sheet-has-terminal-right {
+    border-right-width: 0 !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-repeat-start,
+  body.exporting-pdf [data-print-page] .sheet-repeat-end,
+  body.exporting-pdf [data-print-page] .sheet-final-bar {
+    inset-block: 1px !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-repeat-marker {
+    width: 16px !important;
+    overflow: visible !important;
+    z-index: 999 !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-repeat-start {
+    left: 0 !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-repeat-end,
+  body.exporting-pdf [data-print-page] .sheet-final-bar {
+    right: 0 !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-repeat-preview {
+    display: none !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-repeat-print-fallback {
+    display: flex !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-ending-bracket {
+    top: 0 !important;
+    border-top-width: 1px !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-ending-number {
+    top: -13px !important;
+  }
+
+  body.exporting-pdf [data-print-page]:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
