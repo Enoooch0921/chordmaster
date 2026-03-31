@@ -10,7 +10,7 @@ import { Song, Key } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey } from './utils/musicUtils';
 import ChordSheet from './components/ChordSheet';
 import SongEditor from './components/SongEditor';
-import { Music, Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Anchor, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Anchor, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
@@ -1173,8 +1173,8 @@ export default function App() {
       >
         <div className="h-full flex">
           <div className="w-20 shrink-0 border-r border-gray-200 flex flex-col items-center py-5 gap-3 bg-white">
-            <div className="w-11 h-11 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
-              <Music size={24} />
+            <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-indigo-200 ring-1 ring-indigo-100">
+              <img src="/logo.svg" alt="ChordMaster" className="h-full w-full object-cover" />
             </div>
 
             <button
@@ -1225,7 +1225,10 @@ export default function App() {
           >
             <div className="px-5 py-6 border-b border-gray-200">
               <div className="min-w-0">
-                <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+                <div className="flex items-center gap-2">
+                  <img src="/logo.svg" alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                  <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+                </div>
                 <div className="text-xs font-medium text-gray-500">Song Library</div>
               </div>
               <div className="mt-4 flex gap-2">
@@ -1425,7 +1428,10 @@ export default function App() {
         {/* Top Control Bar */}
         <header data-topbar className="bg-white/80 backdrop-blur-md border-b border-gray-200 px-8 py-4 flex justify-between items-center z-40 flex-shrink-0">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-bold tracking-tight">ChordMaster</h2>
+            <div className="flex items-center gap-2">
+              <img src="/logo.svg" alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+              <h2 className="text-lg font-bold tracking-tight">ChordMaster</h2>
+            </div>
             <div className="h-4 w-px bg-gray-200" />
             <span className="text-sm font-medium text-gray-500 truncate">{song.title || 'Untitled Song'}</span>
           </div>
