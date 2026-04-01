@@ -7,6 +7,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key } from '../types';
 import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey } from '../utils/musicUtils';
+import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { Repeat, Anchor, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
@@ -15,9 +16,32 @@ import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseR
 interface FormattedChordProps {
   chordString: string;
   compactModifier?: boolean;
+  nashvilleFontFamily?: string;
 }
 
-const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactModifier = false }) => {
+const splitChordQualityDisplay = (quality: string) => {
+  const trimmedQuality = quality.trim();
+  if (!trimmedQuality) {
+    return { qualityText: '', extensionTokens: [] as string[] };
+  }
+
+  const extensionMatch = trimmedQuality.match(/((?:[#b]\d+)+)$/i);
+  if (!extensionMatch || extensionMatch.index === undefined || extensionMatch.index === 0) {
+    return { qualityText: trimmedQuality, extensionTokens: [] as string[] };
+  }
+
+  const tokens = extensionMatch[1].match(/[#b]\d+/gi) || [];
+  if (tokens.length === 0) {
+    return { qualityText: trimmedQuality, extensionTokens: [] as string[] };
+  }
+
+  return {
+    qualityText: trimmedQuality.slice(0, extensionMatch.index),
+    extensionTokens: tokens
+  };
+};
+
+const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactModifier = false, nashvilleFontFamily }) => {
   if (chordString === '%') {
     return (
       <div className="flex items-center justify-center w-full h-full">
@@ -147,13 +171,172 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
   const bassMatch = bass?.match(/^([A-G1-7])([#b]?)$/);
   const bassRoot = bassMatch?.[1] || bass || '';
   const bassAccidental = bassMatch?.[2] || '';
+  const { qualityText, extensionTokens } = splitChordQualityDisplay(quality);
+  const hasExtensionTokens = extensionTokens.length > 0;
+  const isSingleExtensionToken = extensionTokens.length === 1;
+  const isNumericRoot = /^[1-7]$/.test(root);
+  const numericFigureStyle = isNumericRoot
+    ? ({ fontVariantNumeric: 'lining-nums tabular-nums', fontFeatureSettings: '"lnum" 1, "tnum" 1' } as const)
+    : undefined;
+  const numericQualityReserveEm = isNumericRoot && qualityText
+    ? Math.max(0.34, qualityText.length * 0.42)
+    : 0;
+  const numericBassReserveEm = isNumericRoot && bass
+    ? Math.max(0.7, (bassRoot.length + (bassAccidental ? 1 : 0)) * 0.42 + 0.46)
+    : 0;
+  const numericExtensionReserveEm = isNumericRoot && hasExtensionTokens
+    ? Math.max(0.88, extensionTokens.join(' ').length * 0.28 + 0.54)
+    : 0;
+  const numericSuffixReserveEm = isNumericRoot
+    ? numericQualityReserveEm + numericBassReserveEm + numericExtensionReserveEm
+    : 0;
+  const numericRootStyle = isNumericRoot
+    ? ({ ...numericFigureStyle } as const)
+    : undefined;
+  const numericChordOffsetClass = '';
+  const numericRootSizeClass = 'text-lg';
+  const numericQualityTextClass = qualityText === 'm'
+    ? 'text-[11px] leading-none'
+    : /^dim/i.test(qualityText)
+      ? 'text-[10px] leading-none'
+      : 'text-[10px] leading-none';
+  const numericQualityStyle = qualityText
+    ? ({
+        ...numericFigureStyle,
+        transform: 'translateY(-1px)'
+      } as const)
+    : numericFigureStyle;
+
+  if (isNumericRoot) {
+    const numericTextStyle = {
+      ...(numericSuffixReserveEm > 0 ? { paddingRight: `${numericSuffixReserveEm}em` } : {}),
+      ...(nashvilleFontFamily ? { fontFamily: nashvilleFontFamily } : {})
+    };
+
+    return (
+      <div className={`relative inline-block ${numericChordOffsetClass}`}>
+        <span
+          className="relative inline-flex h-[1.02em] items-end text-gray-900 font-bold font-serif whitespace-nowrap"
+          style={numericTextStyle}
+        >
+          {accidental && (
+            <span className="mr-[0.03em] text-xs leading-none -translate-y-[0.22em]" style={numericFigureStyle}>
+              {accidental}
+            </span>
+          )}
+          <span className="relative inline-block leading-none">
+            <span
+              className={`inline-block ${numericRootSizeClass} leading-none origin-bottom`}
+              style={numericRootStyle}
+            >
+              {root}
+            </span>
+            {qualityText && (
+              <span className="absolute left-full bottom-0 ml-[0.01em] inline-flex items-end whitespace-nowrap">
+                <span className={`inline-block ${numericQualityTextClass}`} style={numericQualityStyle}>
+                  <span>{qualityText}</span>
+                  {hasExtensionTokens && (
+                    <span
+                      className={`absolute inline-flex items-start gap-[0.06em] text-[7px] leading-none tracking-[-0.02em] whitespace-nowrap ${
+                        isSingleExtensionToken
+                          ? 'left-full top-[-0.86em] ml-[-1.5em]'
+                          : 'left-[0.18em] top-[-0.86em]'
+                      }`}
+                    >
+                      <span>(</span>
+                      {extensionTokens.map((token, index) => {
+                        const accidentalGlyph = token[0];
+                        const degreeText = token.slice(1);
+                        return (
+                          <span key={`${token}-${index}`} className="inline-flex items-start">
+                            <span className={`relative ${accidentalGlyph === '#' ? '-top-[0.14em]' : '-top-[0.02em]'}`}>
+                              {accidentalGlyph}
+                            </span>
+                            <span style={numericFigureStyle}>{degreeText}</span>
+                            {index < extensionTokens.length - 1 && <span className="ml-[0.14em]" />}
+                          </span>
+                        );
+                      })}
+                      <span>)</span>
+                    </span>
+                  )}
+                </span>
+              </span>
+            )}
+            {bass && (
+              <span
+                className="absolute left-full bottom-0 inline-flex items-end gap-[0.03em] whitespace-nowrap"
+                style={qualityText ? { marginLeft: `${numericQualityReserveEm + 0.08}em` } : { marginLeft: '0.06em' }}
+              >
+                <span className="font-sans text-[16px] font-semibold text-gray-900 leading-none">/</span>
+                <span
+                  className={`relative inline-block text-[11px] leading-none ${bassAccidental ? 'pr-[0.12em]' : ''}`}
+                  style={numericFigureStyle}
+                >
+                  {bassAccidental && (
+                    <span
+                      className="absolute left-full top-0 text-[7px] -translate-x-[0.2em] -translate-y-[0.3em]"
+                      style={numericFigureStyle}
+                    >
+                      {bassAccidental}
+                    </span>
+                  )}
+                  <span>{bassRoot}</span>
+                </span>
+              </span>
+            )}
+            {!qualityText && !bass && hasExtensionTokens && (
+              <span className="absolute left-full top-[-0.28em] ml-[0.08em] text-[8px] leading-none tracking-[-0.02em] whitespace-nowrap">
+                ({extensionTokens.join(' ')})
+              </span>
+            )}
+          </span>
+        </span>
+        {renderModifiers()}
+      </div>
+    );
+  }
 
   return (
     <div className={`relative inline-block ${accidental ? 'translate-x-[4.5px]' : ''}`}>
       <span className="inline-flex items-baseline text-gray-900 font-bold font-serif whitespace-nowrap">
         <span className="text-lg leading-none">{root}</span>
         {accidental && <span className="text-xs -translate-y-1.5 ml-[0.5px]">{accidental}</span>}
-        {quality && <span className="text-[10px] -translate-y-1 ml-[0.5px]">{quality}</span>}
+        {qualityText && (
+          <span className="relative inline-block ml-[0.5px]">
+            <span className="text-[10px] -translate-y-[0.55em]">{qualityText}</span>
+            {hasExtensionTokens && (
+              <span
+                className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.08em] text-[8px] leading-none tracking-[-0.02em] whitespace-nowrap ${
+                  isSingleExtensionToken
+                    ? 'left-full top-[-0.08em] ml-[-1.32em]'
+                    : 'left-[0.18em] top-[-0.86em]'
+                }`}
+              >
+                <span className={isSingleExtensionToken ? 'inline-flex h-[1em] items-center leading-none' : ''}>(</span>
+                {extensionTokens.map((token, index) => {
+                  const accidentalGlyph = token[0];
+                  const degreeText = token.slice(1);
+                  return (
+                    <span key={`${token}-${index}`} className={`inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'}`}>
+                      <span className={`relative ${accidentalGlyph === '#' ? '-top-[0.14em] -mr-[0.08em]' : '-top-[0.02em] -mr-[0.04em]'}`}>
+                        {accidentalGlyph}
+                      </span>
+                      <span>{degreeText}</span>
+                      {index < extensionTokens.length - 1 && <span className="ml-[0.14em]" />}
+                    </span>
+                  );
+                })}
+                <span className={isSingleExtensionToken ? 'inline-flex h-[1em] items-center leading-none' : ''}>)</span>
+              </span>
+            )}
+          </span>
+        )}
+        {!qualityText && hasExtensionTokens && (
+          <span className="text-[8px] -translate-y-[1.15em] ml-[0.15px] tracking-[-0.02em]">
+            ({extensionTokens.join(' ')})
+          </span>
+          )}
         {bass && (
           <span className="inline-flex items-baseline -ml-[2px]">
             <span className="text-[16px] font-bold text-gray-900 leading-none scale-y-110 origin-bottom">/</span>
@@ -398,6 +581,7 @@ const AutoShrink: React.FC<{ children: React.ReactNode; className?: string; alig
 };
 
 const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null }) => {
+  const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   const capo = song.capo || 0;
   const playKey = getPlayKey(currentKey, capo);
   const offset = getTransposeOffset(song.originalKey, playKey);
@@ -480,7 +664,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                     <div className="shrink-0">
                       <span>Key - </span>
                       <span className="text-gray-900 font-bold">
-                        <FormattedChord chordString={currentKey} />
+                        <FormattedChord chordString={currentKey} nashvilleFontFamily={nashvilleFontFamily} />
                       </span>
                     </div>
                     <span className="text-gray-400">|</span>
@@ -506,7 +690,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                           <Anchor size={14} className="text-indigo-600" />
                           <span className="text-indigo-600">Capo:</span>
                           <span className="text-indigo-700 font-bold">{capo}</span>
-                          <span className="text-gray-400 font-medium">(Play: <FormattedChord chordString={playKey} />)</span>
+                          <span className="text-gray-400 font-medium">(Play: <FormattedChord chordString={playKey} nashvilleFontFamily={nashvilleFontFamily} />)</span>
                         </div>
                       </>
                     )}
@@ -584,7 +768,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                     const sharedLaneClass = 'h-[18px] flex items-center overflow-visible';
                     const { numerator: displayNumerator, denominator: displayDenominator } = splitDisplayTimeSignature(effectiveTimeSignature);
                     const hasInlineTimeSignature = Boolean(bar?.timeSignature);
-                    const inlineTimeSignatureOffsetClass = hasInlineTimeSignature ? 'pl-3' : '';
+                    const inlineTimeSignatureOffsetClass = hasInlineTimeSignature
+                      ? bar?.repeatStart
+                        ? 'pl-8'
+                        : 'pl-6'
+                      : '';
                     const isEmpty = !bar || (bar.chords.length === 0 && !bar.riff && !bar.rhythm && !bar.annotation);
                     const isActiveBar = activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
                     const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
@@ -702,7 +890,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                                           className={`flex-1 flex items-center justify-center w-full h-full cursor-pointer ${inlineTimeSignatureOffsetClass}`}
                                           onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
-                                          <FormattedChord chordString="%" />
+                                          <FormattedChord chordString="%" nashvilleFontFamily={nashvilleFontFamily} />
                                         </div>
                                       );
                                     }
@@ -730,7 +918,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                                     
                                     return (
                                       <div 
-                                        className={`flex-1 grid w-full items-center cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${inlineTimeSignatureOffsetClass}`}
+                                        className={`flex-1 grid w-full content-start items-start pt-[3px] cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${inlineTimeSignatureOffsetClass}`}
                                         style={{ gridTemplateColumns: `repeat(${beatsPerBar}, 1fr)` }}
                                         onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                       >
@@ -739,7 +927,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                                           return (
                                             <div 
                                               key={i} 
-                                              className={`flex items-center justify-center w-full overflow-visible ${chord ? 'cursor-pointer' : ''}`}
+                                              className={`flex items-start justify-center w-full overflow-visible ${chord ? 'cursor-pointer' : ''}`}
                                               onClick={chord ? (e) => {
                                                 e.stopPropagation();
                                                 onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords');
@@ -756,6 +944,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                                                     }
                                                   })()}
                                                   compactModifier={compactModifier}
+                                                  nashvilleFontFamily={nashvilleFontFamily}
                                                 />
                                               )}
                                             </div>

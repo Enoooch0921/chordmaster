@@ -8,6 +8,7 @@ import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Song, Key } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey } from './utils/musicUtils';
+import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import ChordSheet from './components/ChordSheet';
 import SongEditor from './components/SongEditor';
 import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Anchor, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download } from 'lucide-react';
@@ -78,6 +79,7 @@ const INITIAL_SONG: Song = {
   currentKey: "E",
   tempo: 74,
   timeSignature: "4/4",
+  nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
   sections: [
     {
       id: "s1",
@@ -251,6 +253,7 @@ const createEmptySong = (title = 'Untitled Song'): StoredSong =>
     currentKey: 'C',
     tempo: 72,
     timeSignature: '4/4',
+    nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
     sections: [
       {
         id: 's1',
@@ -1536,7 +1539,7 @@ export default function App() {
             <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
-              <h2 className="text-lg font-bold tracking-tight">ChordMaster</h2>
+              <h2 className="font-display text-lg font-bold tracking-tight">ChordMaster</h2>
             </div>
             <div className="h-4 w-px bg-gray-200" />
             <span className="text-sm font-medium text-gray-500 truncate">{song.title || 'Untitled Song'}</span>

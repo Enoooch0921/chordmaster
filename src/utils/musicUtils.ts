@@ -77,6 +77,11 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key): 
 
 export function getSectionColor(title: string, useColors: boolean = true) {
   const t = title.toLowerCase();
+  const isPreChorus = t.includes('pre-chorus') || t.includes('pre chorus');
+  const isPostChorus = t.includes('post-chorus') || t.includes('post chorus');
+  const isCountIn = t.includes('count-in') || t.includes('count in') || t.includes('countoff') || t.includes('count-off') || t.includes('count off');
+  const isRefrain = t.includes('refrain');
+  const isRap = t.includes('rap');
   
   if (!useColors) {
     return {
@@ -95,6 +100,14 @@ export function getSectionColor(title: string, useColors: boolean = true) {
       accent: 'slate'
     };
   }
+  if (isPreChorus) {
+    return {
+      bg: 'bg-emerald-50',
+      border: 'border-emerald-100',
+      text: 'text-emerald-700',
+      accent: 'emerald'
+    };
+  }
   if (t.includes('verse')) {
     return {
       bg: 'bg-blue-50',
@@ -103,7 +116,7 @@ export function getSectionColor(title: string, useColors: boolean = true) {
       accent: 'blue'
     };
   }
-  if (t.includes('chorus')) {
+  if (t.includes('chorus') || isPostChorus || isRefrain) {
     return {
       bg: 'bg-rose-50',
       border: 'border-rose-100',
@@ -119,12 +132,12 @@ export function getSectionColor(title: string, useColors: boolean = true) {
       accent: 'amber'
     };
   }
-  if (t.includes('pre')) {
+  if (isCountIn || isRap) {
     return {
-      bg: 'bg-emerald-50',
-      border: 'border-emerald-100',
-      text: 'text-emerald-700',
-      accent: 'emerald'
+      bg: 'bg-indigo-50',
+      border: 'border-indigo-100',
+      text: 'text-indigo-700',
+      accent: 'indigo'
     };
   }
   // Default

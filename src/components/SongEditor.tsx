@@ -80,15 +80,28 @@ type BarInsertPosition = 'before' | 'after';
 
 const SECTION_TITLE_PRESETS = [
   'Intro',
+  'Count-In',
+  'Verse',
   'Verse 1',
   'Verse 2',
   'Verse 3',
+  'Verse 4',
   'Pre-Chorus',
+  'Pre-Chorus 1',
+  'Pre-Chorus 2',
   'Chorus',
+  'Chorus 1',
+  'Chorus 2',
+  'Post-Chorus',
+  'Refrain',
   'Turnaround',
   'Bridge',
+  'Bridge 1',
+  'Bridge 2',
+  'Interlude',
   'Tag',
   'Vamp',
+  'Rap',
   'Outro',
   'Ending'
 ];
@@ -201,6 +214,11 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     }
     return `bar-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   };
+
+  const createEmptyBar = (): Bar => ({
+    id: createBarId(),
+    chords: []
+  });
 
   useEffect(() => {
     const needsIds = song.sections.some(s => !s.id || s.bars.some(bar => !bar.id));
@@ -334,6 +352,29 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
 
   const markActiveBar = (sIdx: number, bIdx: number) => {
     onActiveBarChange?.({ sIdx, bIdx });
+  };
+
+  const queueChordInputFocus = (sIdx: number, bIdx: number, sectionId: string | null) => {
+    markActiveSection(sectionId);
+    markActiveBar(sIdx, bIdx);
+    setSelection({
+      sIdx,
+      bIdx,
+      start: 0,
+      end: 0,
+      text: '',
+      type: 'chord'
+    });
+  };
+
+  const insertEmptyBarAt = (sIdx: number, insertIndex: number) => {
+    const section = song.sections[sIdx];
+    if (!section) return;
+
+    const newBars = [...section.bars];
+    newBars.splice(insertIndex, 0, createEmptyBar());
+    updateSection(sIdx, { ...section, bars: newBars });
+    queueChordInputFocus(sIdx, insertIndex, section.id ?? null);
   };
 
   useEffect(() => {
@@ -2347,13 +2388,14 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
       
       const input = document.querySelector<HTMLInputElement>(selector);
       if (input) {
+        input.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         if (document.activeElement !== input) {
           input.focus();
         }
         input.setSelectionRange(selection.start, selection.end);
       }
     }
-  }, [selection]);
+  }, [selection, song.sections]);
 
   const handleSelection = (sIdx: number, bIdx: number, e: React.SyntheticEvent<HTMLInputElement>, type: 'riff' | 'chord' | 'rhythm' = 'riff') => {
     const input = e.currentTarget;
@@ -2559,14 +2601,16 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   };
 
   const addSection = () => {
+    const newSectionId = `s-${Date.now()}`;
     notifyChange({
       ...song,
       sections: [...song.sections, { 
-        id: `s-${Date.now()}`,
+        id: newSectionId,
         title: 'New Section', 
-        bars: [{ chords: ['C'] }] 
+        bars: [createEmptyBar()] 
       }]
     });
+    queueChordInputFocus(song.sections.length, 0, newSectionId);
   };
 
   const removeSection = (sIdx: number) => {
@@ -2586,7 +2630,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   return (
     <div ref={rootRef} className="relative pb-12">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Edit Song</h2>
+        <h2 className="font-display text-2xl font-bold text-gray-800">Edit Song</h2>
       </div>
       
       {/* Metadata */}
@@ -2918,6 +2962,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                         data-bidx={bIdx}
                         lang="en"
                         spellCheck={false}
+                        aria-keyshortcuts="Enter"
                         onFocus={e => {
                           const input = e.currentTarget;
                           const len = input.value.length;
@@ -2935,6 +2980,15 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                         onKeyUp={e => handleSelection(sIdx, bIdx, e, 'chord')}
                         onBlur={clearSelectionIfFocusLeftEditor}
                         onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+                            if ((e.nativeEvent as KeyboardEvent).isComposing) {
+                              return;
+                            }
+                            e.preventDefault();
+                            insertEmptyBarAt(sIdx, bIdx + 1);
+                            return;
+                          }
+
                           if (e.key === 'Tab') {
                             const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-chord-input]'));
                             const idx = inputs.indexOf(e.currentTarget);
@@ -3441,10 +3495,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                       suppressAddBarClickRef.current = null;
                       return;
                     }
-                    updateSection(sIdx, { 
-                      ...section, 
-                      bars: [...section.bars, { id: createBarId(), chords: ['%'] }] 
-                    });
+                    insertEmptyBarAt(sIdx, section.bars.length);
                   }}
                   className={`w-full h-full flex flex-col items-center justify-center min-h-[196px] ${dragOverTarget === `append-${sIdx}` ? 'text-indigo-500' : 'text-gray-400 hover:text-indigo-500'} transition-colors`}
                 >

@@ -4,6 +4,11 @@
  */
 
 export type Key = 'C' | 'Db' | 'D' | 'Eb' | 'E' | 'F' | 'F#' | 'Gb' | 'G' | 'Ab' | 'A' | 'Bb' | 'B';
+export type NashvilleFontPreset =
+  | 'ibm-plex-serif'
+  | 'source-serif-4'
+  | 'atkinson-hyperlegible-next'
+  | 'source-sans-3';
 
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
@@ -39,6 +44,7 @@ export interface Song {
   timeSignature: string; // e.g., "4/4"
   useSectionColors?: boolean;
   showNashvilleNumbers?: boolean;
+  nashvilleFontPreset?: NashvilleFontPreset;
   capo?: number;
   sections: Section[];
 }

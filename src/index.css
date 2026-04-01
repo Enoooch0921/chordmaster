@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @font-face {
@@ -37,7 +38,8 @@
 }
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", "PingFang TC", "Hiragino Sans GB", "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "IBM Plex Serif", "Songti TC", "Noto Serif CJK TC", "PMingLiU", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --font-jianpu: "JianpuASCII", sans-serif;
   --font-music: "NotoMusic", serif;
@@ -52,6 +54,14 @@
 }
 
 @layer utilities {
+  .font-display {
+    font-family: "Source Han Sans TC", "Noto Sans CJK TC", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .font-ui {
+    font-family: "Inter", "PingFang TC", "Hiragino Sans GB", "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", ui-sans-serif, system-ui, sans-serif;
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
