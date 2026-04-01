@@ -4,7 +4,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUp
 import { motion, AnimatePresence, Reorder, LayoutGroup } from 'motion/react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
-import { ALL_KEYS, getSectionColor } from '../utils/musicUtils';
+import { getSectionColor, normalizeChordEnharmonic } from '../utils/musicUtils';
 import { JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, rebuildJianpuNote, replaceJianpuRange } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
@@ -77,6 +77,16 @@ interface BarPanelState {
 }
 
 type BarInsertPosition = 'before' | 'after';
+
+const ORIGINAL_KEY_MENU_LAYOUT: Array<Array<Key | null>> = [
+  ['Ab', 'A', null],
+  ['Bb', 'B', null],
+  [null, 'C', 'C#'],
+  ['Db', 'D', null],
+  ['Eb', 'E', null],
+  [null, 'F', 'F#'],
+  ['Gb', 'G', 'G#']
+];
 
 const SECTION_TITLE_PRESETS = [
   'Intro',
@@ -158,9 +168,12 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   const [barPanels, setBarPanels] = useState<Record<string, BarPanelState>>({});
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
   const [copiedBarHighlight, setCopiedBarHighlight] = useState<CopiedBarHighlight | null>(null);
+  const [copiedRhythm, setCopiedRhythm] = useState<string | null>(null);
   const [tempoDraft, setTempoDraft] = useState<string>(String(song.tempo));
+  const [isOriginalKeyMenuOpen, setIsOriginalKeyMenuOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const originalKeyMenuRef = useRef<HTMLDivElement>(null);
   const barRefs = useRef(new Map<string, HTMLDivElement>());
   const sectionRefs = useRef(new Map<string, HTMLDivElement>());
   const pendingSwapAnimationRef = useRef<PendingSwapAnimation | null>(null);
@@ -251,6 +264,23 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     setTempoDraft(String(song.tempo));
   }, [song.tempo]);
 
+  useEffect(() => {
+    if (!isOriginalKeyMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (originalKeyMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setIsOriginalKeyMenuOpen(false);
+    };
+
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [isOriginalKeyMenuOpen]);
+
   const updateField = (field: keyof Song, value: any) => {
     notifyChange({ ...song, [field]: value });
   };
@@ -275,6 +305,19 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     const newSections = [...song.sections];
     newSections[sIdx] = { ...section, bars: newBars };
     notifyChange({ ...song, sections: newSections });
+  };
+
+  const handleCopyRhythm = (sIdx: number, bIdx: number) => {
+    setCopiedRhythm(song.sections[sIdx]?.bars[bIdx]?.rhythm || '');
+  };
+
+  const handlePasteRhythm = (sIdx: number, bIdx: number) => {
+    if (copiedRhythm === null) {
+      return;
+    }
+
+    updateBar(sIdx, bIdx, { rhythm: copiedRhythm || undefined });
+    focusRhythmEditor(sIdx, bIdx);
   };
 
   const clearSelectionIfFocusLeftEditor = () => {
@@ -871,6 +914,21 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   };
 
   const handleRhythmInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, sIdx: number, bIdx: number) => {
+    const isMetaKey = e.metaKey || e.ctrlKey;
+    const loweredKey = e.key.toLowerCase();
+
+    if (isMetaKey && loweredKey === 'c') {
+      e.preventDefault();
+      handleCopyRhythm(sIdx, bIdx);
+      return;
+    }
+
+    if (isMetaKey && loweredKey === 'v') {
+      e.preventDefault();
+      handlePasteRhythm(sIdx, bIdx);
+      return;
+    }
+
     if (e.key === 'Tab') {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-rhythm-input]'));
       const idx = inputs.indexOf(e.currentTarget);
@@ -2645,14 +2703,65 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
           />
         </div>
         <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Original Key</label>
-          <select 
-            value={song.originalKey} 
-            onChange={e => updateField('originalKey', e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-          >
-            {ALL_KEYS.map(k => <option key={k} value={k}>{k}</option>)}
-          </select>
+          <label className="mb-1 block text-xs font-bold uppercase text-gray-500">Original Key</label>
+          <div ref={originalKeyMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIsOriginalKeyMenuOpen((open) => !open)}
+              className={`flex w-full items-center justify-between rounded border bg-white p-2 text-left outline-none transition-colors ${
+                isOriginalKeyMenuOpen
+                  ? 'border-indigo-500 ring-2 ring-indigo-500'
+                  : 'border-gray-300 hover:border-gray-400'
+              }`}
+            >
+              <span className="text-base text-gray-800">{song.originalKey}</span>
+              <ChevronDown
+                size={18}
+                className={`text-gray-500 transition-transform ${isOriginalKeyMenuOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {isOriginalKeyMenuOpen && (
+              <div className="absolute left-0 top-full z-40 mt-2 w-full rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl">
+                <div className="mb-3 flex items-center justify-between px-1">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-400">Key</div>
+                  <div className="text-[11px] font-bold text-indigo-500">Original</div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {ORIGINAL_KEY_MENU_LAYOUT.flatMap((row, rowIndex) =>
+                    row.map((key, columnIndex) => {
+                      if (!key) {
+                        return <div key={`original-key-empty-${rowIndex}-${columnIndex}`} className="h-[48px]" />;
+                      }
+
+                      const isSelectedKey = song.originalKey === key;
+
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              updateField('originalKey', key);
+                              setIsOriginalKeyMenuOpen(false);
+                            }}
+                            className={`relative flex h-[48px] items-center justify-center rounded-[14px] border text-[16px] font-semibold tracking-tight transition-all ${
+                              isSelectedKey
+                                ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
+                                : 'border-gray-200 bg-white text-gray-800 hover:border-indigo-200 hover:bg-gray-50'
+                            }`}
+                          >
+                            {isSelectedKey && (
+                              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-fuchsia-400" />
+                            )}
+                            {key}
+                          </button>
+                        );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <div>
           <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tempo</label>
@@ -3043,7 +3152,10 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                             processedVal = val.replace(/(^|\s|\/)([ac-g])/g, (m, p1, p2) => p1 + p2.toUpperCase());
                           }
                           
-                          newBars[bIdx] = { ...bar, chords: processedVal.split(' ') };
+                          newBars[bIdx] = {
+                            ...bar,
+                            chords: processedVal.split(' ').map((token) => isNashvilleMode ? token : normalizeChordEnharmonic(token))
+                          };
                           updateSection(sIdx, { ...section, bars: newBars });
 
                           // Update selection state immediately to prevent cursor jumping on re-render
@@ -3259,8 +3371,35 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                     {/* Rhythm Section */}
                     {panelState.rhythm && (
                     <div className="bg-gray-50 rounded p-2 border border-gray-100">
-                      <div className="flex items-center justify-between gap-3 mb-1">
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase">Rhythm</label>
+                      <div className="mb-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase">Rhythm</label>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyRhythm(sIdx, bIdx)}
+                              className="group relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                              title="Copy rhythm from this bar"
+                            >
+                              <Copy size={12} />
+                              <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0.5 group-hover:opacity-100">
+                                Copy
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePasteRhythm(sIdx, bIdx)}
+                              disabled={copiedRhythm === null}
+                              className="group relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                              title={copiedRhythm === null ? 'Copy a rhythm first' : 'Paste copied rhythm into this bar'}
+                            >
+                              <ArrowDownRight size={12} />
+                              <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0.5 group-hover:opacity-100">
+                                Paste
+                              </span>
+                            </button>
+                          </div>
+                        </div>
                         {(() => {
                           const effectiveTimeSignature = getBarTimeSignature(bar);
                           const parsedRhythm = parseRhythmNotation(bar.rhythm || '', effectiveTimeSignature);
@@ -3268,10 +3407,9 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                           const totalBeats = parsedRhythm.barUnits / parsedRhythm.beatUnits;
 
                           return (
-                            <span className={`text-[10px] font-bold ${parsedRhythm.invalidTokens.length > 0 || parsedRhythm.overflow ? 'text-red-500' : 'text-gray-400'}`}>
-                              {effectiveTimeSignature} ·{' '}
-                              {filledBeats.toFixed(filledBeats % 1 === 0 ? 0 : 1)} / {totalBeats.toFixed(totalBeats % 1 === 0 ? 0 : 1)} beats
-                            </span>
+                            <div className={`mt-1 text-right text-[10px] font-bold tabular-nums ${parsedRhythm.invalidTokens.length > 0 || parsedRhythm.overflow ? 'text-red-500' : 'text-gray-400'}`}>
+                              {effectiveTimeSignature} · {filledBeats.toFixed(filledBeats % 1 === 0 ? 0 : 1)} / {totalBeats.toFixed(totalBeats % 1 === 0 ? 0 : 1)}
+                            </div>
                           );
                         })()}
                       </div>

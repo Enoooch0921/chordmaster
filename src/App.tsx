@@ -7,11 +7,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Song, Key } from './types';
-import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey } from './utils/musicUtils';
+import { getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
+import { APP_NAME, APP_VERSION, APP_GITHUB_URL, ABOUT_SECTIONS, HELP_SECTIONS, CHANGELOG_ENTRIES } from './constants/appMeta';
 import ChordSheet from './components/ChordSheet';
 import SongEditor from './components/SongEditor';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Anchor, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
@@ -19,7 +20,12 @@ const SELECTED_SONG_STORAGE_KEY = 'chordmaster.selected-song-id.v1';
 const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
 const AUTO_SAVE_STORAGE_KEY = 'chordmaster.auto-save.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
+const SIDEBAR_WIDTH_STORAGE_KEY = 'chordmaster.sidebar-width.v1';
 const GOOGLE_IDENTITY_SCRIPT_ID = 'google-identity-services-script';
+const COLLAPSED_SIDEBAR_WIDTH = 80;
+const DEFAULT_EXPANDED_SIDEBAR_WIDTH = 420;
+const MIN_EXPANDED_SIDEBAR_WIDTH = 360;
+const MAX_EXPANDED_SIDEBAR_WIDTH = 640;
 
 interface GoogleUserSession {
   sub: string;
@@ -220,6 +226,18 @@ interface SongHistoryState {
   future: Song[];
 }
 
+type AppView = 'sheet' | 'about' | 'help';
+
+const KEY_MENU_LAYOUT: Array<Array<Key | null>> = [
+  ['Ab', 'A', null],
+  ['Bb', 'B', null],
+  [null, 'C', 'C#'],
+  ['Db', 'D', null],
+  ['Eb', 'E', null],
+  [null, 'F', 'F#'],
+  ['Gb', 'G', 'G#']
+];
+
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const createSongId = () => `song-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -366,6 +384,19 @@ const loadGoogleSession = (): GoogleUserSession | null => {
   }
 };
 
+const loadSidebarWidthPreference = () => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_EXPANDED_SIDEBAR_WIDTH;
+  }
+
+  const rawValue = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+  if (!Number.isFinite(rawValue)) {
+    return DEFAULT_EXPANDED_SIDEBAR_WIDTH;
+  }
+
+  return Math.max(MIN_EXPANDED_SIDEBAR_WIDTH, Math.min(MAX_EXPANDED_SIDEBAR_WIDTH, rawValue));
+};
+
 const parseGoogleCredential = (credential: string): GoogleUserSession | null => {
   try {
     const payloadSegment = credential.split('.')[1];
@@ -435,31 +466,41 @@ export default function App() {
   const [isEditing, setIsEditing] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isLibraryEditing, setIsLibraryEditing] = useState(false);
+  const [activeAppView, setActiveAppView] = useState<AppView>('sheet');
   const [isAutoSaveEnabled, setIsAutoSaveEnabled] = useState(loadAutoSavePreference);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(initialLibraryRef.current.lastSavedAt);
   const [highlightedSectionIds, setHighlightedSectionIds] = useState<string[]>([]);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const keyMenuRef = useRef<HTMLDivElement>(null);
+  const capoMenuRef = useRef<HTMLDivElement>(null);
   const importLibraryInputRef = useRef<HTMLInputElement>(null);
   const googleSignInRef = useRef<HTMLDivElement>(null);
   const googleIdentityInitializedRef = useRef(false);
   const [isKeyMenuOpen, setIsKeyMenuOpen] = useState(false);
+  const [isCapoMenuOpen, setIsCapoMenuOpen] = useState(false);
   const [scale, setScale] = useState(1);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? '';
   const logoSrc = `${import.meta.env.BASE_URL}logo.svg`;
   const showGoogleAuth = Boolean(googleClientId);
   const song = songs.find((item) => item.id === selectedSongId) ?? songs[0];
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
+  const isSheetView = activeAppView === 'sheet';
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
+  const currentSidebarWidth = isSidebarExpanded ? sidebarWidth : COLLAPSED_SIDEBAR_WIDTH;
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
+  const activeAppViewLabel = activeAppView === 'about' ? 'About' : activeAppView === 'help' ? 'Help' : song.title || 'Untitled Song';
   const normalizedLibrarySearchQuery = librarySearchQuery.trim().toLowerCase();
+  const currentCapo = song.capo || 0;
+  const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
   const filteredSongs = songs.filter((item) => {
     if (!normalizedLibrarySearchQuery) {
       return true;
@@ -503,6 +544,44 @@ export default function App() {
     setActiveSectionId(song.sections[0]?.id ?? null);
     setActiveBar(null);
   }, [activeBar, activeSectionId, song]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!isSidebarResizing) {
+      return;
+    }
+
+    const handlePointerMove = (event: MouseEvent) => {
+      const nextWidth = Math.max(
+        MIN_EXPANDED_SIDEBAR_WIDTH,
+        Math.min(MAX_EXPANDED_SIDEBAR_WIDTH, event.clientX)
+      );
+      setSidebarWidth(nextWidth);
+    };
+
+    const handlePointerUp = () => {
+      setIsSidebarResizing(false);
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+    };
+  }, [isSidebarResizing]);
 
   useEffect(() => {
     if (!isEditing || !activeSectionId) return;
@@ -575,7 +654,15 @@ export default function App() {
     persistSongLibrary(songs, song.id);
   };
 
+  const handleAppViewChange = (nextView: AppView) => {
+    setActiveAppView((currentView) => currentView === nextView ? 'sheet' : nextView);
+    setIsKeyMenuOpen(false);
+    setIsCapoMenuOpen(false);
+  };
+
   const handleSelectSong = (nextSongId: string) => {
+    setActiveAppView('sheet');
+
     if (nextSongId === selectedSongId) {
       return;
     }
@@ -689,8 +776,32 @@ export default function App() {
     return normalizedOffset > 0 ? `+${normalizedOffset}` : `${normalizedOffset}`;
   };
 
+  const getCapoPlayKeyTextClass = (key: Key) => {
+    if (['C', 'D', 'E', 'G', 'A'].includes(key)) {
+      return 'text-gray-900';
+    }
+
+    if (key.includes('#') || key.includes('b')) {
+      return 'text-gray-400';
+    }
+
+    return 'text-gray-500';
+  };
+
+  const getCapoOptionTextClass = (key: Key) => {
+    if (['C', 'D', 'E', 'G', 'A'].includes(key)) {
+      return 'text-gray-900';
+    }
+
+    if (key.includes('#') || key.includes('b')) {
+      return 'text-gray-400';
+    }
+
+    return 'text-gray-700';
+  };
+
   const handleTranspose = (steps: number) => {
-    handleSongChange({ ...song, currentKey: transposeKey(song.currentKey, steps) });
+    handleSongChange({ ...song, currentKey: transposeKeyPreferFlats(song.currentKey, steps) });
   };
 
   const handleCreateSong = () => {
@@ -698,6 +809,7 @@ export default function App() {
     const nextSongs = [newSong, ...songs];
     setSongs(nextSongs);
     setSelectedSongId(newSong.id);
+    setActiveAppView('sheet');
     setIsEditing(true);
   };
 
@@ -793,6 +905,7 @@ export default function App() {
       [duplicatedSong.id]: { past: [], future: [] }
     }));
     setSelectedSongId(duplicatedSong.id);
+    setActiveAppView('sheet');
     setIsEditing(true);
   };
 
@@ -1098,6 +1211,10 @@ export default function App() {
       if (keyMenuRef.current && !keyMenuRef.current.contains(event.target as Node)) {
         setIsKeyMenuOpen(false);
       }
+
+      if (capoMenuRef.current && !capoMenuRef.current.contains(event.target as Node)) {
+        setIsCapoMenuOpen(false);
+      }
     };
 
     window.addEventListener('mousedown', handlePointerDown);
@@ -1229,6 +1346,14 @@ export default function App() {
     setGoogleUser(null);
   };
 
+  const handleSidebarResizeStart = (event: React.MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsSidebarPinned(true);
+    setIsSidebarHovered(true);
+    setIsSidebarResizing(true);
+  };
+
   return (
     <div
       data-app-root
@@ -1238,8 +1363,8 @@ export default function App() {
       <motion.aside
         data-sidebar
         initial={false}
-        animate={{ width: isSidebarExpanded ? 360 : 80 }}
-        transition={{ type: 'spring', bounce: 0, duration: 0.32 }}
+        animate={{ width: currentSidebarWidth }}
+        transition={isSidebarResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.32 }}
         onMouseEnter={handleSidebarHoverTrigger}
         onMouseMove={handleSidebarHoverTrigger}
         onMouseLeave={() => {
@@ -1247,8 +1372,19 @@ export default function App() {
             setIsSidebarHovered(false);
           }
         }}
-        className="flex-shrink-0 bg-white border-r border-gray-200 z-50 overflow-hidden"
+        className="relative flex-shrink-0 bg-white border-r border-gray-200 z-50 overflow-hidden"
       >
+        {isSidebarExpanded && (
+          <button
+            type="button"
+            onMouseDown={handleSidebarResizeStart}
+            className="absolute right-0 top-1/2 z-50 h-14 w-5 -translate-y-1/2 cursor-col-resize bg-transparent"
+            title="Resize song list"
+            aria-label="Resize song list"
+          >
+            <span className="absolute right-[2px] top-1/2 h-12 w-[8px] -translate-y-1/2 rounded-full border border-indigo-100 bg-white shadow-sm" />
+          </button>
+        )}
         <div className="h-full flex">
           <div className="w-20 shrink-0 border-r border-gray-200 flex flex-col items-center py-5 gap-3 bg-white">
             <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-indigo-200 ring-1 ring-indigo-100">
@@ -1283,10 +1419,40 @@ export default function App() {
               <Plus size={18} />
             </button>
 
-            <div className="mt-auto flex flex-col items-center gap-1 text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">
-              <span>Songs</span>
-              <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs text-gray-700">
-                {songs.length}
+            <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
+              <div className="flex flex-col items-center gap-1 text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">
+                <span>Songs</span>
+                <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs text-gray-700">
+                  {songs.length}
+                </div>
+              </div>
+              <div className="flex w-full flex-col items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleAppViewChange('about')}
+                  className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
+                    activeAppView === 'about'
+                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
+                  title={activeAppView === 'about' ? 'Back to Preview' : 'About'}
+                  aria-label={activeAppView === 'about' ? 'Back to Preview' : 'About'}
+                >
+                  <Info size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAppViewChange('help')}
+                  className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
+                    activeAppView === 'help'
+                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
+                  title={activeAppView === 'help' ? 'Back to Preview' : 'Help'}
+                  aria-label={activeAppView === 'help' ? 'Back to Preview' : 'Help'}
+                >
+                  <BookOpen size={18} />
+                </button>
               </div>
             </div>
           </div>
@@ -1404,7 +1570,7 @@ export default function App() {
                   }`}
                   >
                     {isLibraryEditing ? (
-                      <div className="px-3 py-3 pr-12">
+                      <div className="px-3 py-3 pr-14">
                         <div className="flex items-start gap-3">
                           <input
                             type="checkbox"
@@ -1444,7 +1610,7 @@ export default function App() {
                           handleSelectSong(item.id);
                           setIsKeyMenuOpen(false);
                         }}
-                        className="w-full px-3 py-3 pr-12 text-left"
+                        className="w-full px-3 py-3 pr-14 text-left"
                       >
                         <div className="flex items-start gap-3">
                           <div className={`mt-0.5 rounded-lg p-2 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
@@ -1466,7 +1632,7 @@ export default function App() {
                         </div>
                       </button>
                     )}
-                    <div className="absolute right-3 top-3 flex items-center gap-1">
+                    <div className="absolute right-2 top-1/2 flex w-6 -translate-y-1/2 flex-col items-center justify-center gap-0">
                       <button
                         type="button"
                         onClick={(event) => {
@@ -1474,11 +1640,11 @@ export default function App() {
                           handleDuplicateSong(item.id);
                           setIsKeyMenuOpen(false);
                         }}
-                        className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
                         aria-label={`Duplicate ${item.title || 'Untitled Song'}`}
                         title={`Duplicate ${item.title || 'Untitled Song'}`}
                       >
-                        <Copy size={14} />
+                        <Copy size={13} />
                       </button>
                       <button
                         type="button"
@@ -1488,11 +1654,11 @@ export default function App() {
                           setIsEditing(true);
                           setIsKeyMenuOpen(false);
                         }}
-                        className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
                         aria-label={`Edit ${item.title || 'Untitled Song'}`}
                         title={`Edit ${item.title || 'Untitled Song'}`}
                       >
-                        <Edit3 size={14} />
+                        <Edit3 size={13} />
                       </button>
                       <button
                         type="button"
@@ -1500,11 +1666,11 @@ export default function App() {
                           event.stopPropagation();
                           handleDeleteSong(item.id);
                         }}
-                        className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-white hover:text-rose-600"
+                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-rose-600"
                         aria-label={`Delete ${item.title || 'Untitled Song'}`}
                         title={`Delete ${item.title || 'Untitled Song'}`}
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={13} />
                       </button>
                     </div>
                   </div>
@@ -1521,6 +1687,9 @@ export default function App() {
                   ? 'Changes are saved automatically in this browser.'
                   : 'Press Save to keep changes in this browser.'}
               </div>
+              <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                v{APP_VERSION}
+              </div>
             </div>
           </motion.div>
         </div>
@@ -1536,16 +1705,20 @@ export default function App() {
 
         {/* Top Control Bar */}
         <header data-topbar className="bg-white/80 backdrop-blur-md border-b border-gray-200 px-8 py-4 flex justify-between items-center z-40 flex-shrink-0">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 min-w-0">
             <div className="flex items-center gap-2">
               <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
-              <h2 className="font-display text-lg font-bold tracking-tight">ChordMaster</h2>
+              <h2 className="font-display text-lg font-bold tracking-tight">{APP_NAME}</h2>
+              <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-500">
+                v{APP_VERSION}
+              </span>
             </div>
             <div className="h-4 w-px bg-gray-200" />
-            <span className="text-sm font-medium text-gray-500 truncate">{song.title || 'Untitled Song'}</span>
+            <span className="text-sm font-medium text-gray-500 truncate">{activeAppViewLabel}</span>
           </div>
 
           <div className="flex flex-col items-end gap-2">
+            {isSheetView ? (
             <div className="flex items-center gap-3 flex-wrap justify-end">
               {showGoogleAuth && googleUser ? (
                 <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-2 py-1.5 shadow-sm">
@@ -1627,7 +1800,7 @@ export default function App() {
               >
                 <span className="flex items-center justify-between gap-1.5">
                   <span>{song.currentKey}</span>
-                  <span className={`text-gray-500 ${getKeyOptionMeta(song.currentKey) === 'Original' ? 'text-[10px]' : 'text-xs'}`}>
+                  <span className={`${getKeyOptionMeta(song.currentKey) === 'Original' ? 'text-[10px] text-indigo-500' : 'text-xs text-gray-500'}`}>
                     {getKeyOptionMeta(song.currentKey)}
                   </span>
                 </span>
@@ -1639,48 +1812,108 @@ export default function App() {
                 <ChevronRight size={16} />
               </button>
               {isKeyMenuOpen && (
-                <div className="absolute top-full left-8 mt-2 w-[128px] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl z-50">
-                  <div className="max-h-80 overflow-y-auto py-1">
-                    {ALL_KEYS.map((key) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => {
-                          handleKeyChange(key);
-                          setIsKeyMenuOpen(false);
-                        }}
-                        className={`w-full px-3 py-2 text-sm transition-colors ${
-                          song.currentKey === key ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        <span className="flex items-center justify-between gap-1.5 font-mono">
-                          <span className="w-6 text-left">{key}</span>
-                          <span className={`w-10 text-right ${getKeyOptionMeta(key) === 'Original' ? 'text-[10px]' : ''}`}>
-                            {getKeyOptionMeta(key)}
-                          </span>
-                        </span>
-                      </button>
-                    ))}
+                <div className="absolute top-full left-1/2 z-50 mt-2 w-[184px] -translate-x-1/2 rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl">
+                  <div className="mb-2 flex items-center justify-between px-1">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">Key</div>
+                    <div className={`text-[10px] font-bold ${getKeyOptionMeta(song.currentKey) === 'Original' ? 'text-indigo-500' : 'text-gray-500'}`}>
+                      {getKeyOptionMeta(song.currentKey)}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {KEY_MENU_LAYOUT.flatMap((row, rowIndex) =>
+                      row.map((key, columnIndex) => {
+                        if (!key) {
+                          return <div key={`empty-${rowIndex}-${columnIndex}`} className="h-[42px]" />;
+                        }
+
+                        const isSelectedKey = song.currentKey === key;
+                        const isOriginalKey = song.originalKey === key;
+
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              handleKeyChange(key);
+                              setIsKeyMenuOpen(false);
+                            }}
+                            className={`relative flex h-[42px] items-center justify-center rounded-[12px] border text-[14px] font-semibold tracking-tight transition-all ${
+                              isSelectedKey
+                                ? isOriginalKey
+                                  ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
+                                  : 'border-indigo-300 bg-indigo-50 text-indigo-700 shadow-sm shadow-indigo-100'
+                                : isOriginalKey
+                                  ? 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 hover:border-fuchsia-300 hover:bg-fuchsia-100'
+                                  : 'border-gray-200 bg-white text-gray-800 hover:border-indigo-200 hover:bg-gray-50'
+                            }`}
+                          >
+                            {isOriginalKey && (
+                              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-fuchsia-400" />
+                            )}
+                            {key}
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               )}
               </div>
 
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
-              <div className="flex items-center px-2 text-gray-400">
-                <Anchor size={14} />
-              </div>
-              <select 
-                value={song.capo || 0}
-                onChange={(e) => handleSongChange({ ...song, capo: parseInt(e.target.value) })}
-                className="bg-transparent text-sm font-bold px-2 py-1.5 focus:outline-none appearance-none cursor-pointer"
-              >
-                {Array.from({ length: 12 }).map((_, i) => (
-                  <option key={i} value={i}>
-                    Capo {i} {i > 0 ? `(Play: ${getPlayKey(song.currentKey, i)})` : ''}
-                  </option>
-                ))}
-              </select>
+              <div ref={capoMenuRef} className="relative flex items-center rounded-lg bg-gray-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setIsCapoMenuOpen((open) => !open)}
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-bold text-gray-700 transition-all hover:bg-white hover:shadow-sm"
+                >
+                  <span className={getCapoOptionTextClass(currentPlayKey)}>Capo {currentCapo}</span>
+                  <span className={`text-sm font-semibold ${getCapoPlayKeyTextClass(currentPlayKey)}`}>
+                    ({currentPlayKey})
+                  </span>
+                  <ChevronDown size={14} className={`text-gray-400 transition-transform ${isCapoMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {isCapoMenuOpen && (
+                  <div className="absolute top-full right-0 z-50 mt-2 w-[132px] overflow-hidden rounded-[20px] border border-gray-200 bg-white p-2 shadow-xl">
+                    <div className="mb-2 px-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
+                      Capo
+                    </div>
+                    <div className="space-y-0.5">
+                      {Array.from({ length: 12 }).map((_, i) => {
+                        const playKey = getPlayKey(song.currentKey, i);
+                        const isSelected = currentCapo === i;
+                        const optionTextClass = getCapoOptionTextClass(playKey);
+                        const optionPlayKeyClass = getCapoPlayKeyTextClass(playKey);
+
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => {
+                              handleSongChange({ ...song, capo: i });
+                              setIsCapoMenuOpen(false);
+                            }}
+                            className={`flex w-full items-center rounded-xl px-2 py-1.5 text-left transition-colors ${
+                              isSelected
+                                ? playKey.includes('#') || playKey.includes('b')
+                                  ? 'bg-slate-100'
+                                  : ['C', 'D', 'E', 'G', 'A'].includes(playKey)
+                                    ? 'bg-indigo-50'
+                                    : 'bg-gray-100'
+                                : 'hover:bg-gray-50'
+                              }`}
+                          >
+                            <span className={`inline-flex min-w-[1.15em] justify-end text-[13px] font-bold ${isSelected && !(playKey.includes('#') || playKey.includes('b')) && ['C', 'D', 'E', 'G', 'A'].includes(playKey) ? 'text-indigo-700' : optionTextClass}`}>
+                              {i}
+                            </span>
+                            <span className={`ml-1.5 text-[13px] font-semibold ${isSelected && !(playKey.includes('#') || playKey.includes('b')) && ['C', 'D', 'E', 'G', 'A'].includes(playKey) ? 'text-indigo-700' : optionPlayKeyClass}`}>
+                              ({playKey})
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <button 
@@ -1722,13 +1955,24 @@ export default function App() {
                 <span>{isExportingPdf ? 'Preparing PDF...' : 'Export PDF'}</span>
               </button>
             </div>
+            ) : (
+            <div className="text-right">
+              <div className="text-sm font-bold text-gray-700">
+                {activeAppView === 'about' ? '關於 ChordMaster' : '使用說明'}
+              </div>
+              <div className="text-[11px] font-medium text-gray-400">
+                Version {APP_VERSION}
+              </div>
+            </div>
+            )}
             <p className="text-[11px] font-medium text-gray-400">
-              Exports The Preview Directly To A PDF File.
+              {isSheetView ? 'Exports The Preview Directly To A PDF File.' : '版本說明與操作方式會集中顯示在這裡。'}
             </p>
           </div>
         </header>
 
         {/* Content Area - Split View */}
+        {isSheetView ? (
         <div data-content-area className="flex-1 flex overflow-hidden relative">
           {/* Editor Pane */}
           <AnimatePresence initial={false}>
@@ -1817,6 +2061,109 @@ export default function App() {
             </motion.div>
           </div>
         </div>
+        ) : (
+        <div data-content-area className="flex-1 overflow-y-auto bg-[#F5F5F4] px-5 py-6 md:px-8 md:py-8">
+          <div className="mx-auto flex max-w-5xl flex-col gap-6">
+            <section className="rounded-[28px] border border-gray-200 bg-white px-6 py-7 shadow-sm md:px-8 md:py-8">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="max-w-2xl">
+                  <div className="text-xs font-bold uppercase tracking-[0.24em] text-indigo-500">
+                    {activeAppView === 'about' ? 'About' : 'Help'}
+                  </div>
+                  <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-gray-900">
+                    {activeAppView === 'about' ? 'ChordMaster 關於頁' : 'ChordMaster 使用說明'}
+                  </h1>
+                  <p className="mt-3 text-sm leading-7 text-gray-600">
+                    {activeAppView === 'about'
+                      ? '這裡集中放目前版本、產品定位與近期更新。之後每次加新功能，只要更新專案版本號，介面會同步顯示。'
+                      : '這裡放目前最重要的操作方式，方便你快速回顧編輯流程、快速鍵與備份方法。'}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-right">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-indigo-500">Current Version</div>
+                  <div className="mt-1 text-2xl font-bold text-indigo-900">v{APP_VERSION}</div>
+                </div>
+              </div>
+            </section>
+
+            {(activeAppView === 'about' ? ABOUT_SECTIONS : HELP_SECTIONS).map((section) => (
+              <section
+                key={section.title}
+                className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7"
+              >
+                <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">{section.title}</h2>
+                <p className="mt-2 text-sm leading-7 text-gray-600">{section.description}</p>
+                <div className="mt-4 grid gap-3 md:grid-cols-1">
+                  {section.bullets.map((bullet) => (
+                    <div
+                      key={bullet}
+                      className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm leading-7 text-gray-700"
+                    >
+                      {bullet}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+
+            {activeAppView === 'help' && (
+              <section className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="max-w-2xl">
+                    <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">GitHub</h2>
+                    <p className="mt-2 text-sm leading-7 text-gray-600">
+                      如果你想看原始碼、追蹤更新，或之後要整理 release note，這裡可以直接跳到 GitHub repository。
+                    </p>
+                  </div>
+                  <a
+                    href={APP_GITHUB_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-bold text-gray-800 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                  >
+                    <span>Open GitHub</span>
+                    <ExternalLink size={16} />
+                  </a>
+                </div>
+                <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                  {APP_GITHUB_URL}
+                </div>
+              </section>
+            )}
+
+            {activeAppView === 'about' && (
+              <section className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">Changelog</h2>
+                  <div className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-500">
+                    每次新增功能就同步 bump version
+                  </div>
+                </div>
+                <div className="mt-5 space-y-4">
+                  {CHANGELOG_ENTRIES.map((entry) => (
+                    <div key={`${entry.version}-${entry.title}`} className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-indigo-600 shadow-sm">
+                          v{entry.version}
+                        </span>
+                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-gray-400">{entry.date}</span>
+                      </div>
+                      <h3 className="mt-3 text-lg font-bold text-gray-900">{entry.title}</h3>
+                      <div className="mt-3 grid gap-3">
+                        {entry.bullets.map((bullet) => (
+                          <div key={bullet} className="rounded-xl bg-white px-4 py-3 text-sm leading-7 text-gray-700">
+                            {bullet}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+        </div>
+        )}
       </main>
     </div>
   );

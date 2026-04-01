@@ -7,17 +7,22 @@ import { Key } from '../types';
 
 const NOTES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const NOTES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+const NOTE_ALIASES: Record<string, string> = {
+  Cb: 'B',
+  Fb: 'E',
+  'E#': 'F',
+  'B#': 'C'
+};
 
 export const ALL_KEYS: Key[] = [
-  'C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'
+  'C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'Bb', 'B'
 ];
 
-const TRANSPOSE_KEYS: Key[] = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
-
 function getNoteIndex(note: string): number {
-  const sharpIndex = NOTES_SHARP.indexOf(note);
+  const normalizedNote = NOTE_ALIASES[note] || note;
+  const sharpIndex = NOTES_SHARP.indexOf(normalizedNote);
   if (sharpIndex !== -1) return sharpIndex;
-  return NOTES_FLAT.indexOf(note);
+  return NOTES_FLAT.indexOf(normalizedNote);
 }
 
 function shouldPreferFlats(key: string): boolean {
@@ -25,9 +30,36 @@ function shouldPreferFlats(key: string): boolean {
   return flatKeys.includes(key);
 }
 
+function shouldPreferSharps(key: string): boolean {
+  const sharpKeys = ['C', 'C#', 'D', 'E', 'F#', 'G', 'G#', 'A', 'B'];
+  return sharpKeys.includes(key);
+}
+
 function getNoteFromIndex(index: number, preferFlats: boolean = false): string {
   const normalizedIndex = ((index % 12) + 12) % 12;
   return preferFlats ? NOTES_FLAT[normalizedIndex] : NOTES_SHARP[normalizedIndex];
+}
+
+export function normalizeChordEnharmonic(chord: string): string {
+  if (!chord || chord === '%' || chord === '/') {
+    return chord;
+  }
+
+  if (chord.includes('/')) {
+    const [base, bass] = chord.split('/');
+    if (base && bass) {
+      return `${normalizeChordEnharmonic(base)}/${normalizeChordEnharmonic(bass)}`;
+    }
+  }
+
+  const match = chord.match(/^([A-G])([#b]?)(.*)$/);
+  if (!match) {
+    return chord;
+  }
+
+  const [, note, accidental, rest] = match;
+  const normalizedRoot = NOTE_ALIASES[`${note}${accidental}`] || `${note}${accidental}`;
+  return normalizedRoot + rest;
 }
 
 export function getTransposeOffset(fromKey: Key, toKey: Key): number {
@@ -41,7 +73,15 @@ export function transposeKey(key: Key, steps: number): Key {
   const keyIndex = getNoteIndex(key);
   if (keyIndex === -1) return key;
   const nextIndex = ((keyIndex + steps) % 12 + 12) % 12;
-  return TRANSPOSE_KEYS[nextIndex];
+  const nextKey = getNoteFromIndex(nextIndex, shouldPreferFlats(key) && !shouldPreferSharps(key));
+  return nextKey as Key;
+}
+
+export function transposeKeyPreferFlats(key: Key, steps: number): Key {
+  const keyIndex = getNoteIndex(key);
+  if (keyIndex === -1) return key;
+  const nextIndex = ((keyIndex + steps) % 12 + 12) % 12;
+  return getNoteFromIndex(nextIndex, true) as Key;
 }
 
 export function transposeChord(chord: string, offset: number, targetKey?: Key): string {
@@ -72,7 +112,7 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key): 
 
   const preferFlats = targetKey ? shouldPreferFlats(targetKey) : root.includes('b');
   const newRoot = getNoteFromIndex(rootIndex + offset, preferFlats);
-  return newRoot + rest;
+  return normalizeChordEnharmonic(newRoot + rest);
 }
 
 export function getSectionColor(title: string, useColors: boolean = true) {
@@ -213,11 +253,12 @@ export function parseNashvilleToChord(input: string, key: Key): string {
     }
   }
 
-  // Regex to match Nashville number pattern: (b|#)?([1-7])(rest)
-  const match = input.match(/^([b#]?)([1-7])(.*)$/);
+  // Support both b6dim7 and 6bdim7 styles.
+  const match = input.match(/^([b#]?)([1-7])([#b]?)(.*)$/);
   if (!match) return input; // Not a Nashville number, return as is
 
-  const [, accidental, degreeStr, rest] = match;
+  const [, prefixAccidental, degreeStr, suffixAccidental, rest] = match;
+  const accidental = prefixAccidental || suffixAccidental;
   const degree = parseInt(degreeStr);
   
   // Semitones for major scale degrees
@@ -238,17 +279,22 @@ export function parseNashvilleToChord(input: string, key: Key): string {
   const keyIndex = getNoteIndex(key);
   if (keyIndex === -1) return input;
 
-  // Determine if we should prefer flats based on the key
-  const preferFlats = ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(key);
+  // Preserve the accidental intent from Nashville notation:
+  // b7 in C should become Bb, not A#; #4 should become F#, not Gb.
+  const preferFlats = accidental === 'b'
+    ? true
+    : accidental === '#'
+      ? false
+      : ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(key);
   
   const root = getNoteFromIndex(keyIndex + semitones, preferFlats);
-  
-  return root + rest;
+
+  return normalizeChordEnharmonic(root + rest);
 }
 
 export function isNashville(chord: string): boolean {
   if (!chord || chord === '%' || chord === '/') return false;
-  return /^([b#]?)([1-7])/.test(chord);
+  return /^([b#]?)([1-7])([#b]?)/.test(chord);
 }
 
 export function getPlayKey(targetKey: Key, capo: number): Key {

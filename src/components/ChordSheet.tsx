@@ -8,7 +8,7 @@ import { motion } from 'motion/react';
 import { Song, Section, Bar, Key } from '../types';
 import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey } from '../utils/musicUtils';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
-import { Repeat, Anchor, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { Repeat, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation } from '../utils/rhythmUtils';
@@ -686,11 +686,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                     {capo > 0 && (
                       <>
                         <span className="text-gray-400">|</span>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <Anchor size={14} className="text-indigo-600" />
-                          <span className="text-indigo-600">Capo:</span>
-                          <span className="text-indigo-700 font-bold">{capo}</span>
-                          <span className="text-gray-400 font-medium">(Play: <FormattedChord chordString={playKey} nashvilleFontFamily={nashvilleFontFamily} />)</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-indigo-600 font-semibold">Capo {capo}</span>
+                          <span className="text-gray-400 font-medium">(<FormattedChord chordString={playKey} nashvilleFontFamily={nashvilleFontFamily} />)</span>
                         </div>
                       </>
                     )}
