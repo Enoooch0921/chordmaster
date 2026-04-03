@@ -5,14 +5,14 @@
 
 import React from 'react';
 import { motion } from 'motion/react';
-import { Song, Section, Bar, Key, AppLanguage } from '../types';
+import { Song, Section, Bar, Key, AppLanguage, NavigationMarker } from '../types';
 import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey } from '../utils/musicUtils';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { Repeat, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
-import { getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
+import { convertRelativeJianpuToAbsoluteNotation, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
 import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
@@ -48,6 +48,114 @@ const getBarDisplayLabel = (bar?: Bar) => (
   bar?.label?.trim() || bar?.riffLabel?.trim() || bar?.rhythmLabel?.trim() || ''
 );
 
+const hasChordTopModifier = (chordString?: string) => {
+  const trimmed = chordString?.trim();
+  if (!trimmed) return false;
+  return /[<>^~]+$/.test(trimmed);
+};
+
+const getPreviewRiffNotation = (notation: string | undefined, timeSignature: string) => {
+  const trimmed = notation?.trim();
+  if (!trimmed) return undefined;
+
+  // Preserve the legacy single-line marker for "this bar is unused".
+  if (trimmed === '-') {
+    return trimmed;
+  }
+
+  return serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(trimmed, timeSignature));
+};
+
+const formatEndingDisplay = (ending: string | undefined) => {
+  const trimmed = ending?.trim();
+  if (!trimmed) return '';
+  if (/[.a-z]/i.test(trimmed)) return trimmed;
+
+  const numericParts = trimmed.split(',').map((part) => part.trim()).filter(Boolean);
+  if (numericParts.length > 1 && numericParts.every((part) => /^\d+$/.test(part))) {
+    return numericParts.map((part) => `${part}.`).join(', ');
+  }
+
+  return /^\d+$/.test(trimmed) ? `${trimmed}.` : trimmed;
+};
+
+const formatBarAnnotation = (annotation: string) => (
+  annotation.split(' ').map(word => {
+    const upper = word.toUpperCase();
+    const abbreviations = ['AG', 'PNO', 'EG1', 'EG2', 'A.GTR', 'E.GTR', 'EG', 'GTR', 'DR', 'BS', 'KEY'];
+    if (abbreviations.includes(upper)) return upper;
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  }).join(' ')
+);
+
+const getSectionBadgeTone = (accent: string) => {
+  switch (accent) {
+    case 'blue':
+      return {
+        backgroundColor: 'rgba(219, 234, 254, 0.96)',
+        borderColor: 'rgba(30, 64, 175, 0.92)',
+        color: 'rgba(30, 64, 175, 0.96)'
+      };
+    case 'rose':
+      return {
+        backgroundColor: 'rgba(255, 228, 230, 0.96)',
+        borderColor: 'rgba(159, 18, 57, 0.92)',
+        color: 'rgba(159, 18, 57, 0.96)'
+      };
+    case 'amber':
+      return {
+        backgroundColor: 'rgba(254, 243, 199, 0.96)',
+        borderColor: 'rgba(146, 64, 14, 0.92)',
+        color: 'rgba(146, 64, 14, 0.96)'
+      };
+    case 'emerald':
+      return {
+        backgroundColor: 'rgba(209, 250, 229, 0.96)',
+        borderColor: 'rgba(6, 95, 70, 0.92)',
+        color: 'rgba(6, 95, 70, 0.96)'
+      };
+    case 'cyan':
+      return {
+        backgroundColor: 'rgba(207, 250, 254, 0.96)',
+        borderColor: 'rgba(14, 116, 144, 0.92)',
+        color: 'rgba(14, 116, 144, 0.96)'
+      };
+    case 'fuchsia':
+      return {
+        backgroundColor: 'rgba(250, 232, 255, 0.96)',
+        borderColor: 'rgba(162, 28, 175, 0.92)',
+        color: 'rgba(162, 28, 175, 0.96)'
+      };
+    case 'violet':
+      return {
+        backgroundColor: 'rgba(237, 233, 254, 0.96)',
+        borderColor: 'rgba(109, 40, 217, 0.92)',
+        color: 'rgba(109, 40, 217, 0.96)'
+      };
+    case 'slate':
+      return {
+        backgroundColor: 'rgba(226, 232, 240, 0.94)',
+        borderColor: 'rgba(30, 41, 59, 0.9)',
+        color: 'rgba(30, 41, 59, 0.94)'
+      };
+    default:
+      return {
+        backgroundColor: 'rgba(224, 231, 255, 0.96)',
+        borderColor: 'rgba(55, 48, 163, 0.92)',
+        color: 'rgba(55, 48, 163, 0.96)'
+      };
+  }
+};
+
+const getSectionBadgeStyle = (accent: string): React.CSSProperties => {
+  const tone = getSectionBadgeTone(accent);
+  return {
+    backgroundColor: tone.backgroundColor,
+    borderColor: tone.borderColor,
+    color: tone.color
+  };
+};
+
 const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactModifier = false, nashvilleFontFamily }) => {
   if (chordString === '%') {
     return (
@@ -72,13 +180,14 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
     );
   }
 
-  // Detect push/pull/accent markers
+  // Detect push/pull/accent/fermata markers
   let marker: 'push' | 'pull' | null = null;
   let accent = false;
+  let fermata = false;
   let cleanChord = chordString;
 
   // Extract modifiers from the end
-  while (cleanChord.endsWith('<') || cleanChord.endsWith('>') || cleanChord.endsWith('^')) {
+  while (cleanChord.endsWith('<') || cleanChord.endsWith('>') || cleanChord.endsWith('^') || cleanChord.endsWith('~')) {
     if (cleanChord.endsWith('<')) {
       marker = 'push';
       cleanChord = cleanChord.slice(0, -1);
@@ -87,6 +196,9 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
       cleanChord = cleanChord.slice(0, -1);
     } else if (cleanChord.endsWith('^')) {
       accent = true;
+      cleanChord = cleanChord.slice(0, -1);
+    } else if (cleanChord.endsWith('~')) {
+      fermata = true;
       cleanChord = cleanChord.slice(0, -1);
     }
   }
@@ -97,9 +209,23 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
   const accentWrapperClass = compactModifier
     ? `absolute ${marker ? '-top-[20px]' : '-top-[15px]'} left-1/2 -translate-x-1/2 w-4 h-4 z-20 pointer-events-none`
     : `absolute ${marker ? '-top-9' : '-top-5'} left-1/2 -translate-x-1/2 w-4 h-4 pointer-events-none`;
+  const fermataWrapperClass = compactModifier
+    ? `absolute ${marker || accent ? '-top-[28px]' : '-top-[18px]'} left-1/2 -translate-x-1/2 z-20 pointer-events-none`
+    : `absolute ${marker || accent ? '-top-10' : '-top-6'} left-1/2 -translate-x-1/2 pointer-events-none`;
 
   const renderModifiers = () => (
     <>
+      {fermata && (
+        <div className={fermataWrapperClass}>
+          <span
+            className="font-rhythm text-[22px] leading-none text-gray-900 select-none whitespace-pre"
+            style={{ fontVariantLigatures: 'normal', fontFeatureSettings: '"liga" 1, "calt" 1' }}
+            aria-hidden="true"
+          >
+            ß
+          </span>
+        </div>
+      )}
       {accent && (
         <div className={accentWrapperClass}>
           <svg viewBox="0 0 24 24" className="w-full h-full text-gray-900" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -459,6 +585,115 @@ const BarEdgeMarker: React.FC<{ type: 'repeat-start' | 'repeat-end' | 'final-bar
   );
 };
 
+const NAVIGATION_MARKER_GLYPHS: Record<NavigationMarker, string> = {
+  segno: '𝄋',
+  coda: '𝄌',
+  ds: '',
+  dc: '',
+  fine: '',
+  'ds-al-fine': '',
+  'ds-al-coda': ''
+};
+
+const TEXT_ONLY_NAVIGATION_MARKERS = new Set<NavigationMarker>([
+  'ds',
+  'dc',
+  'fine',
+  'ds-al-coda',
+  'ds-al-fine'
+]);
+
+const NavigationMarkerIcon: React.FC<{
+  marker: NavigationMarker;
+  side: 'left' | 'right';
+  offsetPx?: number;
+}> = ({ marker, side, offsetPx = 0 }) => {
+  if (TEXT_ONLY_NAVIGATION_MARKERS.has(marker)) {
+    return null;
+  }
+
+  return (
+    <div
+      className={`absolute top-0 z-[1100] select-none leading-none text-gray-900 pointer-events-none ${side === 'left' ? 'left-0' : 'right-0'}`}
+      style={{
+        transform: `translate(${side === 'left' ? `calc(-50% + ${offsetPx}px)` : `calc(50% + ${offsetPx}px)`}, -54%)`
+      }}
+      aria-hidden="true"
+    >
+      {marker === 'coda' ? (
+        <span className="inline-flex h-[20px] w-[18px] items-center justify-center overflow-hidden rounded-full bg-white">
+          <span
+            className="block translate-y-[0.5px] text-[29px] leading-none text-gray-900"
+            style={{ fontFamily: 'NotoMusic, serif' }}
+          >
+            {NAVIGATION_MARKER_GLYPHS[marker]}
+          </span>
+        </span>
+      ) : (
+        <span
+          className="inline-flex items-center justify-center rounded-full bg-white px-[1px] py-0 leading-[0.72] text-[25px]"
+          style={{ fontFamily: 'NotoMusic, serif' }}
+        >
+          {NAVIGATION_MARKER_GLYPHS[marker]}
+        </span>
+      )}
+    </div>
+  );
+};
+
+const NavigationTextTag: React.FC<{
+  text: string;
+  side: 'left' | 'right';
+  placement?: 'top' | 'inside-bottom' | 'outside-bottom' | 'outside-bottom-tight';
+  className?: string;
+  variant?: 'plain' | 'highlight';
+}> = ({ text, side, placement = 'top', className = '', variant = 'plain' }) => (
+  <div
+    className={`absolute z-20 max-w-[calc(100%-8px)] whitespace-nowrap ${side === 'left' ? 'left-1' : 'right-1'} ${
+      placement === 'top'
+        ? '-top-[18px]'
+        : placement === 'inside-bottom'
+          ? 'bottom-1'
+          : placement === 'outside-bottom-tight'
+            ? 'top-full -mt-[1px]'
+            : 'top-full mt-1'
+    } ${className}`}
+    style={{
+      textShadow: variant === 'highlight'
+        ? '0 0 2px rgba(255,255,255,0.75)'
+        : '0 0 2px rgba(255,255,255,0.95), 0 0 5px rgba(255,255,255,0.9)'
+    }}
+  >
+    <span
+      className={variant === 'highlight'
+        ? 'inline-flex items-center rounded-[4px] border-[1.5px] border-amber-900/75 bg-[#fff29c] px-1.5 py-[1px] text-[11px] font-bold leading-none text-gray-900'
+        : 'inline-flex items-center px-0 py-0 text-[9px] font-semibold leading-none text-gray-900'
+      }
+      style={{
+        fontFamily: 'Bach, "IBM Plex Serif", serif',
+        fontStyle: 'italic',
+        letterSpacing: '0.01em'
+      }}
+    >
+      {text}
+    </span>
+  </div>
+);
+
+const getDefaultRightNavigationText = (marker: NavigationMarker | undefined) => (
+  marker === 'ds'
+    ? 'D.S.'
+    : marker === 'dc'
+      ? 'D.C.'
+      : marker === 'fine'
+        ? 'Fine'
+        : marker === 'ds-al-fine'
+          ? 'D.S. al Fine'
+          : marker === 'ds-al-coda'
+            ? 'D.S. al Coda'
+            : ''
+);
+
 const ENDING_LEFT_OFFSETS = {
   sectionStart: '-left-[2px]',
   normal: '-left-[1px]',
@@ -518,7 +753,12 @@ const getSectionActiveTone = (accent: string) => {
   }
 };
 
-const AutoShrink: React.FC<{ children: React.ReactNode; className?: string; align?: 'left' | 'right' }> = ({ children, className = "", align = 'left' }) => {
+const AutoShrink: React.FC<{ children: React.ReactNode; className?: string; align?: 'left' | 'center' | 'right'; minScale?: number }> = ({
+  children,
+  className = "",
+  align = 'left',
+  minScale = 0.6
+}) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const contentRef = React.useRef<HTMLDivElement>(null);
   const [scale, setScale] = React.useState(1);
@@ -535,8 +775,7 @@ const AutoShrink: React.FC<{ children: React.ReactNode; className?: string; alig
         contentRef.current.style.whiteSpace = originalWS;
 
         if (contentWidth > containerWidth && containerWidth > 30) {
-          // Don't shrink below 0.6 to avoid "tiny text" bug
-          const newScale = Math.max(0.6, (containerWidth - 2) / contentWidth);
+          const newScale = Math.max(minScale, (containerWidth - 2) / contentWidth);
           setScale(newScale);
         } else {
           setScale(1);
@@ -561,18 +800,29 @@ const AutoShrink: React.FC<{ children: React.ReactNode; className?: string; alig
       observer.disconnect();
       clearTimeout(timer);
     };
-  }, [children]);
+  }, [children, minScale]);
+
+  const justifyClass = align === 'left'
+    ? 'justify-start'
+    : align === 'right'
+      ? 'justify-end'
+      : 'justify-center';
+  const transformOrigin = align === 'left'
+    ? 'left center'
+    : align === 'right'
+      ? 'right center'
+      : 'center center';
 
   return (
     <div 
       ref={containerRef} 
-      className={`w-full overflow-hidden flex ${align === 'left' ? 'justify-start' : 'justify-end'} ${className}`}
+      className={`w-full overflow-hidden flex ${justifyClass} ${className}`}
     >
       <div 
         ref={contentRef} 
         style={{ 
           transform: `scale(${scale})`, 
-          transformOrigin: align === 'left' ? 'left center' : 'right center',
+          transformOrigin,
           whiteSpace: 'nowrap',
           flexShrink: 0,
           display: 'inline-block'
@@ -605,7 +855,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
   // Flatten all sections into rows
   const allRows: { sectionTitle: string | null; bars: Bar[]; sIdx: number; startBIdx: number }[] = [];
   song.sections.forEach((section, sIdx) => {
-    const sectionRows = Math.ceil(section.bars.length / 4);
+    const sectionRows = Math.max(1, Math.ceil(section.bars.length / 4));
     for (let i = 0; i < sectionRows; i++) {
       allRows.push({
         sectionTitle: i === 0 ? section.title : null,
@@ -679,15 +929,25 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                         <FormattedChord chordString={currentKey} nashvilleFontFamily={nashvilleFontFamily} />
                       </span>
                     </div>
-                    <span className="text-gray-400">|</span>
-                    <div className="shrink-0">
-                      <span>{copy.editor.tempo} - </span>
-                      <span className="text-gray-900 font-bold">{song.tempo}</span>
-                    </div>
+                    {typeof song.tempo === 'number' && (
+                      <>
+                        <span className="text-gray-400">|</span>
+                        <div className="shrink-0">
+                          <span>{copy.editor.tempo} - </span>
+                          <span className="text-gray-900 font-bold">{song.tempo}</span>
+                        </div>
+                      </>
+                    )}
                     <span className="text-gray-400">|</span>
                     <div className="shrink-0 flex items-center gap-2">
                       <span>{copy.editor.timeSignature} - </span>
                       <span className="text-gray-900 font-bold">{song.timeSignature}</span>
+                      {song.showAbsoluteJianpu && (
+                        <>
+                          <span className="text-gray-400">|</span>
+                          <span className="text-gray-900 font-bold">{copy.fixedDoMode}</span>
+                        </>
+                      )}
                       {isShuffle && (
                         <>
                           <span className="text-gray-400">|</span>
@@ -746,15 +1006,29 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                   className="flex-1 flex w-full min-h-0 rounded-lg transition-all"
                 >
                   {/* Left Column: Section Title */}
-                <div className="w-16 sm:w-20 shrink-0 flex items-start pr-2 pt-1">
+                <div className="w-16 sm:w-20 shrink-0 flex items-start justify-center pr-2 pt-1">
                     {row.sectionTitle && (() => {
                       const colors = getSectionColor(row.sectionTitle, song.useSectionColors !== false);
+                      const hasManualLineBreak = row.sectionTitle.includes('\n');
                       return (
-                        <div className={`w-full ${colors.bg} border ${colors.border} rounded py-1 px-1 flex items-center justify-center min-h-[24px] transition-all ${
-                          isActiveSection ? 'scale-[1.02]' : ''
-                        }`}>
-                          <div className={`text-[11px] font-bold ${colors.text} tracking-wide whitespace-nowrap`}>
-                            {localizeSectionTitle(row.sectionTitle.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '), language)}
+                        <div className={`w-full flex justify-center transition-all ${isActiveSection ? 'scale-[1.02]' : ''}`}>
+                          <div
+                            className="flex w-full items-center justify-center rounded-sm border px-1 py-1 min-h-[24px] overflow-visible"
+                            style={getSectionBadgeStyle(colors.accent)}
+                          >
+                            {hasManualLineBreak ? (
+                              <div className="w-full whitespace-pre-line break-words px-[1px] text-center text-[10px] font-black tracking-[0.04em] leading-[1.15]">
+                                {localizeSectionTitle(row.sectionTitle, language)}
+                              </div>
+                            ) : (
+                              <div className="w-full px-[1px]">
+                                <AutoShrink align="center" minScale={0.52} className="overflow-visible">
+                                  <div className="text-[11px] font-black tracking-[0.04em] leading-none">
+                                    {localizeSectionTitle(row.sectionTitle, language)}
+                                  </div>
+                                </AutoShrink>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -767,16 +1041,28 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                     const bar = row.bars[bIdx];
                     const previousBar = row.bars[bIdx - 1];
                     const effectiveTimeSignature = bar ? getEffectiveTimeSignature(bar.timeSignature, song.timeSignature) : song.timeSignature;
-                    const canonicalRiffNotation = bar?.riff
-                      ? serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(bar.riff, effectiveTimeSignature))
-                      : undefined;
-                    const previousCanonicalRiffNotation = bIdx > 0 && row.bars[bIdx - 1]?.riff
-                      ? serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(row.bars[bIdx - 1]?.riff, getEffectiveTimeSignature(row.bars[bIdx - 1]?.timeSignature, song.timeSignature)))
-                      : undefined;
-                    const nextCanonicalRiffNotation = bIdx < row.bars.length - 1 && row.bars[bIdx + 1]?.riff
-                      ? serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(row.bars[bIdx + 1]?.riff, getEffectiveTimeSignature(row.bars[bIdx + 1]?.timeSignature, song.timeSignature)))
-                      : undefined;
+                    const canonicalRiffNotation = getPreviewRiffNotation(bar?.riff, effectiveTimeSignature);
+                    const previewRiffNotation = song.showAbsoluteJianpu
+                      ? convertRelativeJianpuToAbsoluteNotation(canonicalRiffNotation, playKey)
+                      : canonicalRiffNotation;
+                    const previousCanonicalRiffNotation = getPreviewRiffNotation(
+                      bIdx > 0 ? row.bars[bIdx - 1]?.riff : undefined,
+                      getEffectiveTimeSignature(row.bars[bIdx - 1]?.timeSignature, song.timeSignature)
+                    );
+                    const previewPreviousRiffNotation = song.showAbsoluteJianpu
+                      ? convertRelativeJianpuToAbsoluteNotation(previousCanonicalRiffNotation, playKey)
+                      : previousCanonicalRiffNotation;
+                    const nextCanonicalRiffNotation = getPreviewRiffNotation(
+                      bIdx < row.bars.length - 1 ? row.bars[bIdx + 1]?.riff : undefined,
+                      getEffectiveTimeSignature(row.bars[bIdx + 1]?.timeSignature, song.timeSignature)
+                    );
+                    const previewNextRiffNotation = song.showAbsoluteJianpu
+                      ? convertRelativeJianpuToAbsoluteNotation(nextCanonicalRiffNotation, playKey)
+                      : nextCanonicalRiffNotation;
                     const barLabel = getBarDisplayLabel(bar);
+                    const leftNavigationText = bar?.leftText?.trim();
+                    const rightNavigationText = bar?.rightText?.trim() || getDefaultRightNavigationText(bar?.rightMarker);
+                    const isRightTextOnlyMarker = Boolean(bar?.rightMarker && TEXT_ONLY_NAVIGATION_MARKERS.has(bar.rightMarker));
                     const hasBarLabel = Boolean(barLabel);
                     const globalBarNumber = (sectionBarOffsets[row.sIdx] ?? 0) + row.startBIdx + bIdx + 1;
                     const beatsPerBar = parseInt(effectiveTimeSignature.split('/')[0]) || 4;
@@ -785,9 +1071,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                     const hasChordContent = Boolean(bar && hasMeaningfulChordContent(bar.chords));
                     const showRhythmInChordLane = !hasChordContent && hasRhythm;
                     const showBottomRhythmLane = hasRhythm && !showRhythmInChordLane;
-                    const compactModifier = Boolean(bar?.ending || bar?.annotation);
+                    const showBottomLane = showBottomRhythmLane || Boolean(bar?.riff) || hasBarLabel;
+                    const compactModifier = Boolean(
+                      bar?.ending ||
+                      bar?.annotation ||
+                      leftNavigationText ||
+                      rightNavigationText
+                    );
                     const isEndingStart = Boolean(bar?.ending) && (!row.bars[bIdx - 1] || row.bars[bIdx - 1].ending !== bar.ending);
                     const isEndingEnd = Boolean(bar?.ending) && (!row.bars[bIdx + 1] || row.bars[bIdx + 1].ending !== bar.ending);
+                    const isUnusedBar = !bar;
                     const lowerLaneCount = bar
                       ? showBottomRhythmLane && hasRiff
                         ? 2
@@ -801,7 +1094,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                     const showBarNumber = Boolean(
                       bar && barNumberMode !== 'none' && (barNumberMode === 'all' || bIdx === 0)
                     );
-                    const barNumberLeftClass = hasInlineTimeSignature ? 'left-6' : 'left-1.5';
+                    const firstChordHasTopModifier = hasChordTopModifier(bar?.chords?.[0]);
+                    const barNumberLeftPx = hasInlineTimeSignature
+                      ? 24
+                      : firstChordHasTopModifier
+                        ? -6
+                        : 6;
                     const isActiveBar = activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
                     const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
                     const suppressRightBarline = bIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
@@ -843,8 +1141,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                         style={isActiveBar ? { paddingBottom: `${barPaddingBottom}px`, backgroundColor: activeTone.barFill, boxShadow: `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}` } : { paddingBottom: `${barPaddingBottom}px` }}
                       >
                         {showBarNumber && (
-                          <div className={`pointer-events-none absolute top-0.5 z-10 text-[9px] font-bold leading-none text-gray-400 ${barNumberLeftClass}`}>
-                            {globalBarNumber}
+                          <div
+                            className="pointer-events-none absolute top-1 z-10 text-[8px] font-bold leading-none text-gray-400"
+                            style={{ left: `${barNumberLeftPx}px` }}
+                          >
+                            <span className="inline-flex rounded-sm bg-white px-0.5 leading-none isolate">
+                              {globalBarNumber}
+                            </span>
                           </div>
                         )}
 
@@ -867,8 +1170,46 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                         {bar?.ending && (
                           <div className={`sheet-ending-bracket absolute -top-[1px] h-4 border-t-2 border-gray-900 z-10 pointer-events-none ${isEndingStart ? getEndingLeftOffsetClass(endingLeftBarlineType) : 'left-0'} ${isEndingEnd ? getEndingRightOffsetClass(endingRightBarlineType) : 'right-0'} ${isEndingStart ? 'border-l-2' : ''}`}>
                              {(!row.bars[bIdx - 1] || row.bars[bIdx - 1].ending !== bar.ending) && (
-                               <span className="sheet-ending-number absolute -top-4 left-0 text-[10px] font-bold font-serif">{bar.ending}.</span>
+                               <span className="sheet-ending-number absolute -top-4 left-0 text-[10px] font-bold font-serif">{formatEndingDisplay(bar.ending)}</span>
                              )}
+                          </div>
+                        )}
+
+                        {bar?.leftMarker && (
+                          <NavigationMarkerIcon
+                            marker={bar.leftMarker}
+                            side="left"
+                          />
+                        )}
+
+                        {bar?.rightMarker && (
+                          <NavigationMarkerIcon
+                            marker={bar.rightMarker}
+                            side="right"
+                          />
+                        )}
+
+                        {leftNavigationText && (
+                          <NavigationTextTag
+                            text={leftNavigationText}
+                            side="left"
+                            className={bar?.leftMarker ? 'left-5' : ''}
+                          />
+                        )}
+
+                        {rightNavigationText && (
+                          <NavigationTextTag
+                            text={rightNavigationText}
+                            side="right"
+                            placement={isRightTextOnlyMarker ? 'outside-bottom-tight' : 'top'}
+                            variant={isRightTextOnlyMarker ? 'highlight' : 'plain'}
+                            className={isRightTextOnlyMarker ? 'right-0 text-[10px]' : bar?.rightMarker ? 'right-5' : ''}
+                          />
+                        )}
+
+                        {isUnusedBar && (
+                          <div className="absolute inset-0 z-[1] flex items-center pointer-events-none">
+                            <div className="h-[2px] w-full bg-gray-400" />
                           </div>
                         )}
 
@@ -882,18 +1223,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                             {/* Annotation */}
                             {bar.annotation && (
                               <div 
-                                className={`absolute -top-4 text-[9px] font-bold tracking-wider text-indigo-600 bg-gray-100/90 backdrop-blur-sm border border-gray-200 rounded-sm px-1.5 py-0.5 z-10 whitespace-nowrap cursor-pointer hover:bg-indigo-50 hover:border-indigo-300 transition-colors ${isEndingStart ? 'left-7' : 'left-1'}`}
+                                className={`absolute -top-4 z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap cursor-pointer transition-colors ${isEndingStart ? 'left-7' : 'left-1'}`}
+                                style={getSectionBadgeStyle(colors.accent)}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'annotation');
                                 }}
                               >
-                                {bar.annotation.split(' ').map(word => {
-                                  const upper = word.toUpperCase();
-                                  const abbreviations = ['AG', 'PNO', 'EG1', 'EG2', 'A.GTR', 'E.GTR', 'EG', 'GTR', 'DR', 'BS', 'KEY'];
-                                  if (abbreviations.includes(upper)) return upper;
-                                  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-                                }).join(' ')}
+                                {formatBarAnnotation(bar.annotation)}
                               </div>
                             )}
                             {bar.timeSignature && (
@@ -978,7 +1315,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                     );
                                   })()}
                             {showBottomLane && (
-                              <div className={`absolute bottom-1 left-1 right-1 ${inlineTimeSignatureOffsetClass}`}>
+                              <div
+                                className={`absolute left-1 right-1 ${inlineTimeSignatureOffsetClass}`}
+                                style={{ bottom: '4px' }}
+                              >
                                 {showBottomRhythmLane && bar.riff ? (
                                   <div className="flex gap-1">
                                     {hasBarLabel && (
@@ -1021,12 +1361,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                           }}
                                         >
                                           <Jianpu
-                                            notation={canonicalRiffNotation}
+                                            notation={previewRiffNotation}
                                             compact
                                             scale={0.86}
                                             className="w-full"
-                                            previousNotationForCrossBar={previousCanonicalRiffNotation}
-                                            nextNotationForCrossBar={nextCanonicalRiffNotation}
+                                            previousNotationForCrossBar={previewPreviousRiffNotation}
+                                            nextNotationForCrossBar={previewNextRiffNotation}
                                           />
                                         </div>
                                       </div>
@@ -1062,12 +1402,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                           </div>
                                         ) : (
                                           <Jianpu
-                                            notation={canonicalRiffNotation}
+                                            notation={previewRiffNotation}
                                             compact
                                             scale={0.86}
                                             className="w-full"
-                                            previousNotationForCrossBar={previousCanonicalRiffNotation}
-                                            nextNotationForCrossBar={nextCanonicalRiffNotation}
+                                            previousNotationForCrossBar={previewPreviousRiffNotation}
+                                            nextNotationForCrossBar={previewNextRiffNotation}
                                           />
                                         )}
                                       </div>

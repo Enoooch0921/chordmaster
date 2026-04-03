@@ -11,9 +11,11 @@ interface JianpuProps {
   previousNotationForCrossBar?: string;
   nextNotationForCrossBar?: string;
   activeTokenIndex?: number | null;
-  activeInsertPosition?: { tokenIndex: number; slotIndex: number; slotCount: number } | null;
+  activeInsertPosition?: { tokenIndex: number; slotIndex: number; slotCount: number; spanSlots?: number } | null;
+  gridSlotCount?: number;
+  leadingOccupiedSlots?: number[];
   activeNote?: { tokenIndex: number; noteIndex: number } | null;
-  onTokenClick?: (tokenIndex: number) => void;
+  onTokenClick?: (tokenIndex: number, slotIndex: number) => void;
   onNoteClick?: (tokenIndex: number, noteIndex: number) => void;
   showPlaceholders?: boolean;
 }
@@ -63,8 +65,13 @@ const TOKEN_CAPACITY_UNITS = 4;
 const JIANPU_DIGIT_FONT = '"SF Mono", "Cascadia Mono", "Roboto Mono", "Menlo", "Consolas", ui-monospace, monospace';
 const JIANPU_SYMBOL_FONT = '"Avenir Next", "PingFang TC", "Microsoft JhengHei", ui-sans-serif, system-ui, sans-serif';
 
-const applyAutoDurationShorthand = (notes: JianpuNoteRange[], slotCount = notes.length) => {
+const applyAutoDurationShorthand = (
+  notes: JianpuNoteRange[],
+  slotCount = notes.length,
+  hasExplicitGrid = false
+) => {
   if (notes.length === 0) return notes;
+  if (hasExplicitGrid) return notes;
 
   const hasExplicitDurations = notes.some((note) => note.duration !== 'quarter');
   if (!hasExplicitDurations) {
@@ -75,27 +82,6 @@ const applyAutoDurationShorthand = (notes: JianpuNoteRange[], slotCount = notes.
       return notes.map((note) => ({ ...note, duration: 'sixteenth' as const }));
     }
     return notes;
-  }
-
-  if (notes.length === 3) {
-    const eighthCount = notes.filter((note) => note.duration === 'eighth').length;
-    const sixteenthCount = notes.filter((note) => note.duration === 'sixteenth').length;
-
-    if (eighthCount === 1 && sixteenthCount === 0) {
-      return notes.map((note) => (
-        note.duration === 'quarter'
-          ? { ...note, duration: 'sixteenth' as const }
-          : note
-      ));
-    }
-
-    if (sixteenthCount === 2 && eighthCount === 0) {
-      return notes.map((note) => (
-        note.duration === 'quarter'
-          ? { ...note, duration: 'eighth' as const }
-          : note
-      ));
-    }
   }
 
   return notes;
@@ -140,6 +126,8 @@ const Jianpu: React.FC<JianpuProps> = ({
   nextNotationForCrossBar,
   activeTokenIndex = null,
   activeInsertPosition = null,
+  gridSlotCount = TOKEN_CAPACITY_UNITS,
+  leadingOccupiedSlots = [],
   activeNote = null,
   onTokenClick,
   onNoteClick,
@@ -231,19 +219,25 @@ const Jianpu: React.FC<JianpuProps> = ({
     const notes: LayoutNote[] = [];
     const placeholders: LayoutPlaceholder[] = [];
     const underlines: UnderlineSegment[] = [];
+    const useCarryLayout = renderMode !== 'editor';
     let carryUnits = 0;
 
     tokenList.forEach((token, tokenIndex) => {
       const beatStartUnits = tokenIndex * TOKEN_WIDTH_UNITS;
+      const carryInUnits = useCarryLayout ? carryUnits : 0;
       const rawNotes = findJianpuNoteRanges(token);
       const parsedPlaceholders = findJianpuPlaceholderRanges(token);
-      const parsedNotes = applyAutoDurationShorthand(rawNotes, rawNotes.length + parsedPlaceholders.length);
+      const parsedNotes = applyAutoDurationShorthand(
+        rawNotes,
+        rawNotes.length + parsedPlaceholders.length,
+        parsedPlaceholders.length > 0
+      );
       const slotItems = [
         ...parsedNotes.map((note) => ({ kind: 'note' as const, start: note.start, end: note.end, note })),
         ...parsedPlaceholders.map((placeholder) => ({ kind: 'placeholder' as const, start: placeholder.start, end: placeholder.end, placeholder }))
       ].sort((a, b) => a.start - b.start);
       if (slotItems.length === 0) {
-        carryUnits = 0;
+        carryUnits = useCarryLayout ? Math.max(0, carryInUnits - TOKEN_CAPACITY_UNITS) : 0;
         return;
       }
 
@@ -251,9 +245,12 @@ const Jianpu: React.FC<JianpuProps> = ({
       let unitCursor = 0;
       const tokenNotes = slotItems.map((item, slotIndex) => {
         const spanUnits = item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder);
-        const unitStart = carryUnits + unitCursor;
+        const unitStart = carryInUnits + unitCursor;
         const unitEnd = unitStart + spanUnits;
-        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + getAnchorOffsetUnits(item.kind === 'note' ? item.note : item.placeholder)) / TOKEN_CAPACITY_UNITS));
+        const anchorOffsetUnits = renderMode === 'editor'
+          ? Math.max(0.5, Math.min(spanUnits, Math.max(0, TOKEN_CAPACITY_UNITS - unitStart)) / 2)
+          : getAnchorOffsetUnits(item.kind === 'note' ? item.note : item.placeholder);
+        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + anchorOffsetUnits) / TOKEN_CAPACITY_UNITS));
         unitCursor += spanUnits;
 
         if (item.kind === 'placeholder') {
@@ -285,7 +282,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       const tokenTotalUnits = slotItems.reduce((sum, item) => (
         sum + (item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder))
       ), 0);
-      carryUnits = Math.max(0, tokenTotalUnits - TOKEN_CAPACITY_UNITS);
+      carryUnits = useCarryLayout ? Math.max(0, carryInUnits + tokenTotalUnits - TOKEN_CAPACITY_UNITS) : 0;
 
       if (tokenNotes.length > 0) {
         for (let level = 1 as const; level <= 2; level += 1) {
@@ -427,15 +424,20 @@ const Jianpu: React.FC<JianpuProps> = ({
 
     nextTokenList.forEach((token, tokenIndex) => {
       const beatStartUnits = tokenIndex * TOKEN_WIDTH_UNITS;
+      const carryInUnits = carryUnits;
       const rawNotes = findJianpuNoteRanges(token);
       const parsedPlaceholders = findJianpuPlaceholderRanges(token);
-      const parsedNotes = applyAutoDurationShorthand(rawNotes, rawNotes.length + parsedPlaceholders.length);
+      const parsedNotes = applyAutoDurationShorthand(
+        rawNotes,
+        rawNotes.length + parsedPlaceholders.length,
+        parsedPlaceholders.length > 0
+      );
       const slotItems = [
         ...parsedNotes.map((note) => ({ kind: 'note' as const, start: note.start, end: note.end, note })),
         ...parsedPlaceholders.map((placeholder) => ({ kind: 'placeholder' as const, start: placeholder.start, end: placeholder.end, placeholder }))
       ].sort((a, b) => a.start - b.start);
       if (slotItems.length === 0) {
-        carryUnits = 0;
+        carryUnits = Math.max(0, carryInUnits - TOKEN_CAPACITY_UNITS);
         return;
       }
 
@@ -444,7 +446,7 @@ const Jianpu: React.FC<JianpuProps> = ({
 
       slotItems.forEach((item) => {
         const spanUnits = item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder);
-        const unitStart = carryUnits + unitCursor;
+        const unitStart = carryInUnits + unitCursor;
         const unitEnd = unitStart + spanUnits;
         const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + getAnchorOffsetUnits(item.kind === 'note' ? item.note : item.placeholder)) / TOKEN_CAPACITY_UNITS));
         unitCursor += spanUnits;
@@ -467,7 +469,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       const tokenTotalUnits = slotItems.reduce((sum, item) => (
         sum + (item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder))
       ), 0);
-      carryUnits = Math.max(0, tokenTotalUnits - TOKEN_CAPACITY_UNITS);
+      carryUnits = Math.max(0, carryInUnits + tokenTotalUnits - TOKEN_CAPACITY_UNITS);
     });
 
     return nextNotes;
@@ -521,24 +523,44 @@ const Jianpu: React.FC<JianpuProps> = ({
         const isActive = activeTokenIndex === tokenIndex;
         const insertBoxWidth = renderMode === 'editor' ? 10 : 8;
         const insertBoxHeight = renderMode === 'editor' ? 24 : 18;
+        const occupiedSlots = Math.max(0, Math.min(gridSlotCount, leadingOccupiedSlots[tokenIndex] ?? 0));
         const insertPosition = activeInsertPosition?.tokenIndex === tokenIndex
           ? activeInsertPosition
           : null;
+        const insertVisibleSpanSlots = insertPosition
+          ? Math.max(0, Math.min(insertPosition.spanSlots ?? 0, insertPosition.slotCount - insertPosition.slotIndex))
+          : 0;
         const insertLeft = insertPosition
-          ? `calc(${leftPercent + ((widthPercent / insertPosition.slotCount) * (insertPosition.slotIndex + 0.5))}% - ${insertBoxWidth / 2}px)`
+          ? `${leftPercent + ((widthPercent / insertPosition.slotCount) * insertPosition.slotIndex)}%`
           : `calc(${leftPercent + (widthPercent / 2)}% - ${insertBoxWidth / 2}px)`;
+        const insertWidth = insertPosition && insertVisibleSpanSlots > 0
+          ? `${widthPercent * (insertVisibleSpanSlots / insertPosition.slotCount)}%`
+          : `${insertBoxWidth}px`;
 
         return (
           <React.Fragment key={`token-${tokenIndex}`}>
+            {renderMode === 'editor' && occupiedSlots > 0 && (
+              <span
+                className="absolute rounded-md bg-slate-200/70"
+                style={{
+                  left: `${leftPercent}%`,
+                  top: `${metrics.digitCenterY - (insertBoxHeight / 2)}px`,
+                  width: `${(widthPercent * (occupiedSlots / gridSlotCount))}%`,
+                  height: `${insertBoxHeight}px`
+                }}
+              />
+            )}
+
             {isActive && (
               <span
                 className="absolute bg-indigo-200/45 ring-1 ring-indigo-300/90"
                 style={{
                   left: insertLeft,
                   top: `${metrics.digitCenterY - (insertBoxHeight / 2)}px`,
-                  width: `${insertBoxWidth}px`,
+                  width: insertWidth,
                   height: `${insertBoxHeight}px`,
-                  borderRadius: '4px'
+                  borderRadius: '4px',
+                  transform: insertPosition && insertVisibleSpanSlots > 0 ? undefined : 'translateX(-50%)'
                 }}
               />
             )}
@@ -614,6 +636,14 @@ const Jianpu: React.FC<JianpuProps> = ({
           : null;
         const centerLeft = centerPx !== null ? `${centerPx}px` : `${xPercent}%`;
         const isSelectedNote = activeNote?.tokenIndex === note.tokenIndex && activeNote?.noteIndex === note.noteIndex;
+        const selectionStartUnits = note.tokenIndex * TOKEN_WIDTH_UNITS
+          + (TOKEN_WIDTH_UNITS * (Math.min(note.unitStart, TOKEN_CAPACITY_UNITS) / TOKEN_CAPACITY_UNITS));
+        const selectionVisibleSpanUnits = Math.max(
+          0,
+          Math.min(note.unitEnd, TOKEN_CAPACITY_UNITS) - Math.min(note.unitStart, TOKEN_CAPACITY_UNITS)
+        );
+        const selectionLeftPercent = (selectionStartUnits / totalWidthUnits) * 100;
+        const selectionWidthPercent = ((TOKEN_WIDTH_UNITS * (selectionVisibleSpanUnits / TOKEN_CAPACITY_UNITS)) / totalWidthUnits) * 100;
         const selectionMetrics = renderMode === 'editor'
           ? note.duration === 'sixteenth'
             ? { width: 10, height: 23, radius: '4px' }
@@ -633,10 +663,16 @@ const Jianpu: React.FC<JianpuProps> = ({
               <span
                 className="absolute bg-indigo-200/60 ring-1 ring-indigo-300/90"
                 style={{
-                  left: centerLeft,
+                  left: renderMode === 'editor' && selectionVisibleSpanUnits > 0
+                    ? `${selectionLeftPercent}%`
+                    : centerLeft,
                   top: `${metrics.digitCenterY}px`,
-                  transform: 'translate(-50%, -50%)',
-                  width: `${selectionMetrics.width}px`,
+                  transform: renderMode === 'editor' && selectionVisibleSpanUnits > 0
+                    ? 'translateY(-50%)'
+                    : 'translate(-50%, -50%)',
+                  width: renderMode === 'editor' && selectionVisibleSpanUnits > 0
+                    ? `${selectionWidthPercent}%`
+                    : `${selectionMetrics.width}px`,
                   height: `${selectionMetrics.height}px`,
                   borderRadius: selectionMetrics.radius
                 }}
@@ -928,7 +964,18 @@ const Jianpu: React.FC<JianpuProps> = ({
             onMouseDown={(event) => event.preventDefault()}
             onClick={(event) => {
               event.stopPropagation();
-              onTokenClick(tokenIndex);
+              const rect = event.currentTarget.getBoundingClientRect();
+              const relativeX = rect.width > 0
+                ? (event.clientX - rect.left) / rect.width
+                : 0.5;
+              const slotIndex = Math.max(
+                0,
+                Math.min(
+                  gridSlotCount - 1,
+                  Math.floor(relativeX * gridSlotCount)
+                )
+              );
+              onTokenClick(tokenIndex, slotIndex);
             }}
             aria-label={`Select jianpu beat ${tokenIndex + 1}`}
           />

@@ -7,14 +7,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Song, Key, AppLanguage } from './types';
-import { getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
+import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
 import ChordSheet from './components/ChordSheet';
 import SongEditor from './components/SongEditor';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
@@ -28,6 +28,30 @@ const COLLAPSED_SIDEBAR_WIDTH = 80;
 const DEFAULT_EXPANDED_SIDEBAR_WIDTH = 420;
 const MIN_EXPANDED_SIDEBAR_WIDTH = 360;
 const MAX_EXPANDED_SIDEBAR_WIDTH = 640;
+const PREVIEW_TARGET_WIDTH = 794;
+const PREVIEW_MIN_SCALE = 0.35;
+const PREVIEW_MAX_SCALE = 2.4;
+const PREVIEW_ZOOM_STEP = 0.15;
+const PREVIEW_SAFETY_MARGIN = 20;
+const PREVIEW_PAGE_HEIGHT = 1123;
+const PDF_EXPORT_PIXEL_RATIO = 3;
+const VALID_KEYS = new Set<string>(ALL_KEYS);
+const VALID_NAVIGATION_MARKERS = new Set([
+  'segno',
+  'coda',
+  'ds',
+  'dc',
+  'fine',
+  'ds-al-coda',
+  'ds-al-fine'
+]);
+const VALID_BAR_NUMBER_MODES = new Set(['none', 'line-start', 'all']);
+const VALID_NASHVILLE_FONT_PRESETS = new Set([
+  'ibm-plex-serif',
+  'source-serif-4',
+  'atkinson-hyperlegible-next',
+  'source-sans-3'
+]);
 
 interface GoogleUserSession {
   sub: string;
@@ -47,6 +71,49 @@ const buildPdfFileName = (title: string) => {
   return normalized || 'ChordMaster';
 };
 
+const normalizeTempo = (tempo: unknown): number | undefined => {
+  if (tempo === '' || tempo === null || tempo === undefined) return undefined;
+  const numericTempo = typeof tempo === 'number' ? tempo : Number(tempo);
+  if (!Number.isFinite(numericTempo)) return undefined;
+  return Math.min(400, Math.max(20, Math.round(numericTempo)));
+};
+
+const normalizeOptionalText = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  return value;
+};
+
+const normalizeText = (value: unknown, fallback = ''): string => (
+  typeof value === 'string' ? value : fallback
+);
+
+const normalizeBoolean = (value: unknown): boolean | undefined => (
+  typeof value === 'boolean' ? value : undefined
+);
+
+const normalizeOptionalInteger = (value: unknown, min: number, max: number): number | undefined => {
+  if (value === '' || value === null || value === undefined) return undefined;
+  const numericValue = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numericValue)) return undefined;
+  return Math.min(max, Math.max(min, Math.round(numericValue)));
+};
+
+const normalizeNavigationMarker = (value: unknown) => (
+  typeof value === 'string' && VALID_NAVIGATION_MARKERS.has(value) ? value : undefined
+);
+
+const normalizeChordTokens = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return normalizeBarChords(value.filter((token): token is string => typeof token === 'string'));
+  }
+
+  if (typeof value === 'string') {
+    return normalizeBarChords(value.split(/\s+/).filter(Boolean));
+  }
+
+  return [];
+};
+
 const formatSongLibraryCredits = (song: Song) => {
   const lyricist = song.lyricist?.trim();
   const composer = song.composer?.trim();
@@ -62,7 +129,11 @@ const formatSongLibraryCredits = (song: Song) => {
 
 const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
   const creditParts = formatSongLibraryCredits(song);
-  const primary = `${song.currentKey} · ${song.tempo} BPM · ${song.timeSignature}`;
+  const primary = [
+    song.currentKey,
+    typeof song.tempo === 'number' ? `${song.tempo} BPM` : '',
+    song.timeSignature
+  ].filter(Boolean).join(' · ');
   const isShuffle = song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle';
 
   if (creditParts.length > 0 || isShuffle) {
@@ -85,6 +156,7 @@ const INITIAL_SONG: Song = {
   shuffle: true,
   originalKey: "E",
   currentKey: "E",
+  showAbsoluteJianpu: false,
   tempo: 74,
   timeSignature: "4/4",
   barNumberMode: 'none',
@@ -126,16 +198,16 @@ const INITIAL_SONG: Song = {
         { chords: ["E"] },
         { chords: ["B", "E/G#"] },
         { chords: ["A"] },
-        { chords: ["E"], ending: 1, riff: "3 - 4 -", riffLabel: "Riff" },
-        { chords: ["E"], ending: 1, riff: "5 - 7 i", riffLabel: "Riff", repeatEnd: true }
+        { chords: ["E"], ending: "1", riff: "3 - 4 -", riffLabel: "Riff" },
+        { chords: ["E"], ending: "1", riff: "5 - 7 i", riffLabel: "Riff", repeatEnd: true }
       ]
     },
     {
       id: "s4",
       title: "Breakdown",
       bars: [
-        { chords: ["E"], ending: 2 },
-        { chords: ["E"], ending: 2 }
+        { chords: ["E"], ending: "2" },
+        { chords: ["E"], ending: "2" }
       ]
     },
     {
@@ -204,16 +276,16 @@ const INITIAL_SONG: Song = {
         { chords: ["E", "C#m"] },
         { chords: ["B", "E/G#"] },
         { chords: ["A"] },
-        { chords: ["E"], ending: 1 },
-        { chords: ["E"], ending: 1, repeatEnd: true }
+        { chords: ["E"], ending: "1" },
+        { chords: ["E"], ending: "1", repeatEnd: true }
       ]
     },
     {
       id: "s10",
       title: "Breakdown",
       bars: [
-        { chords: ["E"], ending: 2 },
-        { chords: ["E"], ending: 2 }
+        { chords: ["E"], ending: "2" },
+        { chords: ["E"], ending: "2" }
       ]
     }
   ]
@@ -230,6 +302,22 @@ interface SongHistoryState {
 }
 
 type AppView = 'sheet' | 'about' | 'help';
+type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm';
+
+interface EditorFocusRequest {
+  sIdx: number;
+  bIdx: number;
+  field: EditorFocusField;
+  requestId: number;
+}
+
+interface PreviewDragState {
+  startX: number;
+  startY: number;
+  startScrollLeft: number;
+  startScrollTop: number;
+  moved: boolean;
+}
 
 const KEY_MENU_LAYOUT: Array<Array<Key | null>> = [
   ['Ab', 'A', null],
@@ -245,16 +333,73 @@ const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const createSongId = () => `song-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const normalizeSongBars = <T extends Song>(song: T): T => ({
-  ...song,
-  sections: song.sections.map((section) => ({
-    ...section,
-    bars: section.bars.map((bar) => ({
-      ...bar,
-      chords: normalizeBarChords(bar.chords)
-    }))
-  }))
-} as T);
+const normalizeSongBars = <T extends Song>(song: T): T => {
+  const originalKey = typeof song.originalKey === 'string' && VALID_KEYS.has(song.originalKey) ? song.originalKey as Key : 'C';
+  const currentKey = typeof song.currentKey === 'string' && VALID_KEYS.has(song.currentKey) ? song.currentKey as Key : originalKey;
+  const rawSections = Array.isArray(song.sections) ? song.sections : [];
+  const sections = rawSections.map((section, sectionIndex) => {
+    const safeSection = (section && typeof section === 'object' ? section : {}) as Partial<Song['sections'][number]> & Record<string, unknown>;
+    const rawBars = Array.isArray(safeSection.bars) ? safeSection.bars : [];
+
+    return {
+      ...safeSection,
+      id: typeof safeSection.id === 'string' && safeSection.id.trim() ? safeSection.id : undefined,
+      title: normalizeText(safeSection.title, `Section ${sectionIndex + 1}`),
+      bars: rawBars.map((bar) => {
+        const safeBar = (bar && typeof bar === 'object' ? bar : {}) as Partial<Song['sections'][number]['bars'][number]> & Record<string, unknown>;
+        return {
+          ...safeBar,
+          id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
+          chords: normalizeChordTokens(safeBar.chords),
+          timeSignature: normalizeOptionalText(safeBar.timeSignature),
+          riff: normalizeOptionalText(safeBar.riff),
+          rhythm: normalizeOptionalText(safeBar.rhythm),
+          label: normalizeOptionalText(safeBar.label),
+          riffLabel: normalizeOptionalText(safeBar.riffLabel),
+          rhythmLabel: normalizeOptionalText(safeBar.rhythmLabel),
+          annotation: normalizeOptionalText(safeBar.annotation),
+          leftMarker: normalizeNavigationMarker(safeBar.leftMarker),
+          rightMarker: normalizeNavigationMarker(safeBar.rightMarker),
+          leftText: normalizeOptionalText(safeBar.leftText),
+          rightText: normalizeOptionalText(safeBar.rightText),
+          repeatStart: Boolean(safeBar.repeatStart),
+          repeatEnd: Boolean(safeBar.repeatEnd),
+          finalBar: Boolean(safeBar.finalBar),
+          ending: normalizeOptionalText(safeBar.ending)
+        };
+      })
+    };
+  });
+
+  return {
+    ...song,
+    title: normalizeText(song.title),
+    lyricist: normalizeOptionalText(song.lyricist),
+    composer: normalizeOptionalText(song.composer),
+    translator: normalizeOptionalText(song.translator),
+    groove: normalizeOptionalText(song.groove),
+    shuffle: normalizeBoolean(song.shuffle),
+    originalKey,
+    currentKey,
+    tempo: normalizeTempo(song.tempo),
+    timeSignature: normalizeText(song.timeSignature, '4/4'),
+    useSectionColors: normalizeBoolean(song.useSectionColors),
+    showNashvilleNumbers: normalizeBoolean(song.showNashvilleNumbers),
+    showAbsoluteJianpu: normalizeBoolean(song.showAbsoluteJianpu) ?? false,
+    barNumberMode: typeof song.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(song.barNumberMode) ? song.barNumberMode : 'none',
+    nashvilleFontPreset: typeof song.nashvilleFontPreset === 'string' && VALID_NASHVILLE_FONT_PRESETS.has(song.nashvilleFontPreset)
+      ? song.nashvilleFontPreset
+      : DEFAULT_NASHVILLE_FONT_PRESET,
+    capo: normalizeOptionalInteger(song.capo, 0, 12),
+    sections: sections.length > 0 ? sections : [
+      {
+        id: undefined,
+        title: 'Verse',
+        bars: [{ chords: [] }]
+      }
+    ]
+  } as T;
+};
 
 const createStoredSong = (song: Song, id = createSongId()): StoredSong => ({
   ...cloneSong(normalizeSongBars(song)),
@@ -283,7 +428,8 @@ const createEmptySong = (title: string): StoredSong =>
     shuffle: false,
     originalKey: 'C',
     currentKey: 'C',
-    tempo: 72,
+    showAbsoluteJianpu: false,
+    tempo: 120,
     timeSignature: '4/4',
     barNumberMode: 'none',
     nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
@@ -487,6 +633,7 @@ export default function App() {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(initialLibraryRef.current.lastSavedAt);
   const [highlightedSectionIds, setHighlightedSectionIds] = useState<string[]>([]);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+  const [editorFocusRequest, setEditorFocusRequest] = useState<EditorFocusRequest | null>(null);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
@@ -501,9 +648,20 @@ export default function App() {
   const importLibraryInputRef = useRef<HTMLInputElement>(null);
   const googleSignInRef = useRef<HTMLDivElement>(null);
   const googleIdentityInitializedRef = useRef(false);
+  const editorFocusTimeoutRef = useRef<number | null>(null);
+  const editorFocusRequestIdRef = useRef(0);
+  const previewDragStateRef = useRef<PreviewDragState | null>(null);
+  const previewSuppressClickTimeoutRef = useRef<number | null>(null);
+  const suppressPreviewClickRef = useRef(false);
   const [isKeyMenuOpen, setIsKeyMenuOpen] = useState(false);
   const [isCapoMenuOpen, setIsCapoMenuOpen] = useState(false);
-  const [scale, setScale] = useState(1);
+  const [previewBaseScale, setPreviewBaseScale] = useState(1);
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewViewportWidth, setPreviewViewportWidth] = useState(PREVIEW_TARGET_WIDTH);
+  const [previewViewportHeight, setPreviewViewportHeight] = useState(1123);
+  const [previewPageHeight, setPreviewPageHeight] = useState(PREVIEW_PAGE_HEIGHT);
+  const [sheetMetrics, setSheetMetrics] = useState({ width: PREVIEW_TARGET_WIDTH, height: 1123 });
+  const [isPreviewDragging, setIsPreviewDragging] = useState(false);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? '';
   const logoSrc = `${import.meta.env.BASE_URL}logo.svg`;
   const copy = getUiCopy(language);
@@ -520,6 +678,19 @@ export default function App() {
   const currentCapo = song.capo || 0;
   const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
   const duplicateLabel = language === 'zh' ? '副本' : 'Copy';
+  const previewScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, previewBaseScale * previewZoom));
+  const previewSheetWidth = sheetMetrics.width * previewScale;
+  const previewSheetHeight = sheetMetrics.height * previewScale;
+  const previewCanvasWidth = Math.max(previewSheetWidth, previewViewportWidth);
+  const previewFitHeightScale = Math.min(
+    PREVIEW_MAX_SCALE,
+    Math.max(PREVIEW_MIN_SCALE, previewViewportHeight / Math.max(1, previewPageHeight))
+  );
+  const previewScalePercent = Math.round((previewScale / previewFitHeightScale) * 100);
+  const previewFitWidthScale = Math.min(
+    PREVIEW_MAX_SCALE,
+    Math.max(PREVIEW_MIN_SCALE, previewViewportWidth / Math.max(1, sheetMetrics.width))
+  );
   const filteredSongs = songs.filter((item) => {
     if (!normalizedLibrarySearchQuery) {
       return true;
@@ -530,7 +701,7 @@ export default function App() {
       item.originalKey,
       item.currentKey,
       item.timeSignature,
-      String(item.tempo),
+      typeof item.tempo === 'number' ? String(item.tempo) : '',
       item.lyricist,
       item.composer,
       item.translator,
@@ -755,31 +926,116 @@ export default function App() {
 
   React.useEffect(() => {
     const updateScale = () => {
-      if (previewRef.current) {
-        // Use offsetWidth to avoid jitter caused by scrollbar appearance/disappearance
-        // p-4 (16px) or md:p-12 (48px) on both sides
-        const isMobile = window.innerWidth < 768;
-        const padding = isMobile ? 32 : 96; 
-        const containerWidth = previewRef.current.offsetWidth - padding - 20; // Extra 20px safety margin
-        const targetWidth = 794;
-        
-        if (containerWidth < targetWidth) {
-          const newScale = Math.max(0.3, containerWidth / targetWidth);
-          setScale(newScale);
-        } else {
-          setScale(1);
-        }
+      if (!previewRef.current) {
+        return;
+      }
+
+      const isMobile = window.innerWidth < 768;
+      const padding = isMobile ? 32 : 96;
+      const containerWidth = Math.max(220, previewRef.current.offsetWidth - padding - PREVIEW_SAFETY_MARGIN);
+      const containerHeight = Math.max(220, previewRef.current.offsetHeight - padding - PREVIEW_SAFETY_MARGIN);
+      setPreviewViewportWidth(containerWidth);
+      setPreviewViewportHeight(containerHeight);
+
+      if (containerWidth < PREVIEW_TARGET_WIDTH) {
+        setPreviewBaseScale(Math.max(PREVIEW_MIN_SCALE, containerWidth / PREVIEW_TARGET_WIDTH));
+      } else {
+        setPreviewBaseScale(1);
       }
     };
 
     const observer = new ResizeObserver(() => {
-      // Use requestAnimationFrame to debounce and smooth out updates
       window.requestAnimationFrame(updateScale);
     });
-    if (previewRef.current) observer.observe(previewRef.current);
+
+    if (previewRef.current) {
+      observer.observe(previewRef.current);
+    }
+
     updateScale();
     return () => observer.disconnect();
   }, [isEditing]);
+
+  React.useEffect(() => {
+    const updateSheetMetrics = () => {
+      if (!sheetRef.current) {
+        return;
+      }
+
+      const nextWidth = Math.max(PREVIEW_TARGET_WIDTH, sheetRef.current.scrollWidth || PREVIEW_TARGET_WIDTH);
+      const nextHeight = Math.max(1, sheetRef.current.scrollHeight || sheetRef.current.offsetHeight || 1);
+      const firstPageHeight = sheetRef.current.querySelector<HTMLElement>('[data-print-page]')?.offsetHeight || PREVIEW_PAGE_HEIGHT;
+
+      setSheetMetrics((current) => {
+        if (current.width === nextWidth && current.height === nextHeight) {
+          return current;
+        }
+
+        return { width: nextWidth, height: nextHeight };
+      });
+      setPreviewPageHeight((current) => current === firstPageHeight ? current : firstPageHeight);
+    };
+
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(updateSheetMetrics);
+    });
+
+    if (sheetRef.current) {
+      observer.observe(sheetRef.current);
+    }
+
+    updateSheetMetrics();
+    return () => observer.disconnect();
+  }, []);
+
+  React.useEffect(() => () => {
+    if (previewSuppressClickTimeoutRef.current !== null) {
+      window.clearTimeout(previewSuppressClickTimeoutRef.current);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const handleWindowMouseMove = (event: MouseEvent) => {
+      const dragState = previewDragStateRef.current;
+      const scrollRoot = previewRef.current;
+
+      if (!dragState || !scrollRoot) {
+        return;
+      }
+
+      const deltaX = event.clientX - dragState.startX;
+      const deltaY = event.clientY - dragState.startY;
+
+      if (!dragState.moved && Math.hypot(deltaX, deltaY) >= 4) {
+        dragState.moved = true;
+        setIsPreviewDragging(true);
+        document.body.style.userSelect = 'none';
+      }
+
+      if (!dragState.moved) {
+        return;
+      }
+
+      scrollRoot.scrollLeft = dragState.startScrollLeft - deltaX;
+      scrollRoot.scrollTop = dragState.startScrollTop - deltaY;
+    };
+
+    const handleWindowMouseUp = () => {
+      if (!previewDragStateRef.current) {
+        return;
+      }
+
+      endPreviewDrag();
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, []);
 
   const handleKeyChange = (newKey: Key) => {
     handleSongChange({ ...song, currentKey: newKey });
@@ -879,7 +1135,7 @@ export default function App() {
       const nextSongs = importedSongs.map((item, index) => {
         const storedLikeItem = item as Partial<StoredSong>;
         return {
-          ...cloneSong(item),
+          ...cloneSong(normalizeSongBars(item as Song)),
           id: storedLikeItem.id || `song-imported-${Date.now()}-${index + 1}`,
           updatedAt: typeof storedLikeItem.updatedAt === 'number' ? storedLikeItem.updatedAt : Date.now()
         };
@@ -1105,6 +1361,12 @@ export default function App() {
       previewClone.style.margin = '0';
 
       // Export the clean sheet preview, not the transient editing highlight state.
+      previewClone.querySelectorAll<HTMLElement>('[data-print-page]').forEach((node) => {
+        node.style.boxShadow = 'none';
+        node.style.borderColor = 'transparent';
+        node.style.outline = 'none';
+        node.style.background = '#ffffff';
+      });
       previewClone.querySelectorAll<HTMLElement>('[data-preview-section-id]').forEach((node) => {
         node.style.backgroundColor = 'rgba(255, 255, 255, 0)';
         node.style.boxShadow = 'none';
@@ -1149,7 +1411,7 @@ export default function App() {
         const imageData = await toPng(page, {
           backgroundColor: '#ffffff',
           cacheBust: true,
-          pixelRatio: 2,
+          pixelRatio: PDF_EXPORT_PIXEL_RATIO,
           skipAutoScale: true,
           width: page.scrollWidth,
           height: page.scrollHeight,
@@ -1257,6 +1519,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      if (editorFocusTimeoutRef.current !== null) {
+        window.clearTimeout(editorFocusTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!showGoogleAuth) {
       setGoogleAuthError(null);
       return;
@@ -1321,7 +1591,16 @@ export default function App() {
     };
   }, [copy.googleCredentialError, copy.googleLoadError, googleClientId, googleUser, showGoogleAuth]);
 
-  const handleElementClick = (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm') => {
+  const focusEditorField = React.useCallback((sIdx: number, bIdx: number, field: EditorFocusField) => {
+    setEditorFocusRequest({
+      sIdx,
+      bIdx,
+      field,
+      requestId: editorFocusRequestIdRef.current += 1
+    });
+  }, []);
+
+  const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: EditorFocusField) => {
     if (!song) {
       return;
     }
@@ -1329,30 +1608,138 @@ export default function App() {
     setActiveSectionId(song.sections[sIdx]?.id ?? null);
     setActiveBar({ sIdx, bIdx });
 
+    if (editorFocusTimeoutRef.current !== null) {
+      window.clearTimeout(editorFocusTimeoutRef.current);
+      editorFocusTimeoutRef.current = null;
+    }
+
     if (!isEditing) {
       setIsEditing(true);
-      // Wait for animation and render
-      setTimeout(() => {
-        const id = `editor-s${sIdx}-b${bIdx}-${field}`;
-        const el = document.getElementById(id);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          const input = el as HTMLInputElement;
-          input.focus();
-          const len = input.value.length;
-          input.setSelectionRange(len, len);
-        }
+      editorFocusTimeoutRef.current = window.setTimeout(() => {
+        focusEditorField(sIdx, bIdx, field);
+        editorFocusTimeoutRef.current = null;
       }, 500);
     } else {
-      const id = `editor-s${sIdx}-b${bIdx}-${field}`;
-      const el = document.getElementById(id);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        const input = el as HTMLInputElement;
-        input.focus();
-        const len = input.value.length;
-        input.setSelectionRange(len, len);
+      focusEditorField(sIdx, bIdx, field);
+    }
+  }, [focusEditorField, isEditing, song]);
+
+  const previewSheet = React.useMemo(() => (
+    <ChordSheet 
+      song={song} 
+      language={language}
+      currentKey={song.currentKey} 
+      onElementClick={handleElementClick}
+      highlightedSectionIds={highlightedSectionIds}
+      activeSectionId={isEditing ? activeSectionId : null}
+      activeBar={isEditing ? activeBar : null}
+    />
+  ), [activeBar, activeSectionId, handleElementClick, highlightedSectionIds, isEditing, language, song]);
+
+  const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
+    const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));
+    const scrollRoot = previewRef.current;
+
+    if (!scrollRoot) {
+      setPreviewZoom(clampedScale / previewBaseScale);
+      return;
+    }
+
+    const widthRatio = previewSheetWidth > scrollRoot.clientWidth
+      ? Math.min(1, Math.max(0, (scrollRoot.scrollLeft + scrollRoot.clientWidth / 2) / previewSheetWidth))
+      : 0.5;
+    const heightRatio = previewSheetHeight > scrollRoot.clientHeight
+      ? Math.min(1, Math.max(0, (scrollRoot.scrollTop + scrollRoot.clientHeight / 2) / previewSheetHeight))
+      : 0;
+
+    setPreviewZoom(clampedScale / previewBaseScale);
+
+    window.requestAnimationFrame(() => {
+      const nextScrollRoot = previewRef.current;
+      if (!nextScrollRoot) {
+        return;
       }
+
+      const nextWidth = sheetMetrics.width * clampedScale;
+      const nextHeight = sheetMetrics.height * clampedScale;
+      const nextLeft = mode === 'fit-width' || mode === 'fit-height'
+        ? Math.max(0, nextWidth / 2 - nextScrollRoot.clientWidth / 2)
+        : Math.max(0, nextWidth * widthRatio - nextScrollRoot.clientWidth / 2);
+      const nextTop = mode === 'fit-width' || mode === 'fit-height'
+        ? 0
+        : Math.max(0, nextHeight * heightRatio - nextScrollRoot.clientHeight / 2);
+
+      nextScrollRoot.scrollTo({
+        left: nextLeft,
+        top: nextTop,
+        behavior: 'auto'
+      });
+    });
+  };
+
+  const handleZoomInPreview = () => {
+    setPreviewScale(previewScale + PREVIEW_ZOOM_STEP);
+  };
+
+  const handleZoomOutPreview = () => {
+    setPreviewScale(previewScale - PREVIEW_ZOOM_STEP);
+  };
+
+  const handleResetPreviewZoom = () => {
+    const isAtPageFitHeight = Math.abs(previewScale - previewFitHeightScale) < 0.01;
+
+    if (isAtPageFitHeight) {
+      setPreviewScale(previewFitWidthScale, 'fit-width');
+      return;
+    }
+
+    setPreviewScale(previewFitHeightScale, 'fit-height');
+  };
+
+  const endPreviewDrag = () => {
+    const dragState = previewDragStateRef.current;
+    previewDragStateRef.current = null;
+    setIsPreviewDragging(false);
+    document.body.style.userSelect = '';
+
+    if (dragState?.moved) {
+      suppressPreviewClickRef.current = true;
+      if (previewSuppressClickTimeoutRef.current !== null) {
+        window.clearTimeout(previewSuppressClickTimeoutRef.current);
+      }
+      previewSuppressClickTimeoutRef.current = window.setTimeout(() => {
+        suppressPreviewClickRef.current = false;
+        previewSuppressClickTimeoutRef.current = null;
+      }, 120);
+    }
+  };
+
+  const handlePreviewMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !previewRef.current) {
+      return;
+    }
+
+    previewDragStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startScrollLeft: previewRef.current.scrollLeft,
+      startScrollTop: previewRef.current.scrollTop,
+      moved: false
+    };
+  };
+
+  const handlePreviewClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!suppressPreviewClickRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    suppressPreviewClickRef.current = false;
+
+    if (previewSuppressClickTimeoutRef.current !== null) {
+      window.clearTimeout(previewSuppressClickTimeoutRef.current);
+      previewSuppressClickTimeoutRef.current = null;
     }
   };
 
@@ -1987,6 +2374,20 @@ export default function App() {
 
               <button
                 type="button"
+                onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                  song.showAbsoluteJianpu
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                <Music2 size={14} />
+                <span>1=C</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleSaveLibrary}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${
                   libraryIsDirty
@@ -2058,6 +2459,10 @@ export default function App() {
                       onActiveSectionChange={setActiveSectionId}
                       activeBar={activeBar}
                       onActiveBarChange={setActiveBar}
+                      focusRequest={editorFocusRequest}
+                      onFocusRequestHandled={(requestId) => {
+                        setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
+                      }}
                     />
                   </div>
                 </div>
@@ -2093,33 +2498,70 @@ export default function App() {
           </AnimatePresence>
 
           {/* Sheet Preview Pane */}
-          <div
-            ref={previewRef}
-            data-print-preview-container
-            className="flex-1 overflow-auto p-4 md:p-12 bg-[#F5F5F4] flex justify-center"
-          >
-            <motion.div 
-              ref={sheetRef}
-              data-print-preview
-              layout 
-              style={{ 
-                transform: `scale(${scale})`, 
-                transformOrigin: 'top center',
-                width: '794px',
-                minWidth: '794px'
-              }}
-              className="mx-auto transition-all duration-300"
+          <div className="relative flex-1 min-w-0 bg-[#F5F5F4]">
+            <div
+              ref={previewRef}
+              data-print-preview-container
+              onMouseDown={handlePreviewMouseDown}
+              onClickCapture={handlePreviewClickCapture}
+              className={`h-full overflow-auto p-4 md:p-12 ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
             >
-              <ChordSheet 
-                song={song} 
-                language={language}
-                currentKey={song.currentKey} 
-                onElementClick={handleElementClick}
-                highlightedSectionIds={highlightedSectionIds}
-                activeSectionId={isEditing ? activeSectionId : null}
-                activeBar={isEditing ? activeBar : null}
-              />
-            </motion.div>
+              <div
+                className="relative flex min-h-full min-w-full items-start justify-center"
+                style={{
+                  width: `${previewCanvasWidth}px`,
+                  height: `${previewSheetHeight}px`
+                }}
+              >
+                <div
+                  ref={sheetRef}
+                  data-print-preview
+                  style={{ 
+                    transform: `scale(${previewScale})`, 
+                    transformOrigin: 'top center',
+                    width: `${sheetMetrics.width}px`,
+                    minWidth: `${sheetMetrics.width}px`,
+                    willChange: 'transform',
+                    transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+                    marginLeft: 'auto',
+                    marginRight: 'auto'
+                  }}
+                  className="select-none"
+                >
+                  {previewSheet}
+                </div>
+              </div>
+            </div>
+            <div className="pointer-events-none absolute right-4 top-4 z-40 md:right-6 md:top-6">
+              <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
+                <button
+                  type="button"
+                  onClick={handleZoomOutPreview}
+                  disabled={previewScale <= PREVIEW_MIN_SCALE + 0.001}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={copy.zoomOutPreview}
+                >
+                  -
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetPreviewZoom}
+                  className="inline-flex min-w-[4.25rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                  title={copy.resetPreviewZoom}
+                >
+                  {previewScalePercent}%
+                </button>
+                <button
+                  type="button"
+                  onClick={handleZoomInPreview}
+                  disabled={previewScale >= PREVIEW_MAX_SCALE - 0.001}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={copy.zoomInPreview}
+                >
+                  +
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         ) : (

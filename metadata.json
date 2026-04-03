@@ -1,5 +1,5 @@
 {
   "name": "ChordMaster - 智能和弦簡譜編輯器",
-  "description": "專為樂手設計的數位和弦譜工具，支持簡譜標記、自動轉調、段落管理與排版。",
+  "description": "專為樂手設計的數位和弦譜工具，支援相對 / 固定調簡譜、導覽記號、自動轉調、段落管理與列印排版。",
   "requestFramePermissions": []
 }

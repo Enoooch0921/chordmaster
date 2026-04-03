@@ -1,3 +1,4 @@
+import { Key } from '../types';
 import { parseTimeSignature } from './rhythmUtils';
 
 export type JianpuDuration = 'quarter' | 'eighth' | 'sixteenth';
@@ -44,6 +45,66 @@ const PLACEHOLDER_MAP: Record<string, { duration: JianpuDuration; dotted: boolea
   S: { duration: 'sixteenth', dotted: true }
 };
 
+const RELATIVE_MAJOR_SCALE_OFFSETS: Record<'1' | '2' | '3' | '4' | '5' | '6' | '7', number> = {
+  '1': 0,
+  '2': 2,
+  '3': 4,
+  '4': 5,
+  '5': 7,
+  '6': 9,
+  '7': 11
+};
+
+const KEY_TO_SEMITONE_INDEX: Record<Key, number> = {
+  C: 0,
+  'C#': 1,
+  Db: 1,
+  D: 2,
+  Eb: 3,
+  E: 4,
+  F: 5,
+  'F#': 6,
+  Gb: 6,
+  G: 7,
+  'G#': 8,
+  Ab: 8,
+  A: 9,
+  Bb: 10,
+  B: 11
+};
+
+const FLAT_KEYS = new Set<Key>(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb']);
+
+const FIXED_DO_SHARP_MAP = [
+  { pitch: '1', accidental: '' },
+  { pitch: '1', accidental: '#' },
+  { pitch: '2', accidental: '' },
+  { pitch: '2', accidental: '#' },
+  { pitch: '3', accidental: '' },
+  { pitch: '4', accidental: '' },
+  { pitch: '4', accidental: '#' },
+  { pitch: '5', accidental: '' },
+  { pitch: '5', accidental: '#' },
+  { pitch: '6', accidental: '' },
+  { pitch: '6', accidental: '#' },
+  { pitch: '7', accidental: '' }
+] as const;
+
+const FIXED_DO_FLAT_MAP = [
+  { pitch: '1', accidental: '' },
+  { pitch: '2', accidental: 'b' },
+  { pitch: '2', accidental: '' },
+  { pitch: '3', accidental: 'b' },
+  { pitch: '3', accidental: '' },
+  { pitch: '4', accidental: '' },
+  { pitch: '5', accidental: 'b' },
+  { pitch: '5', accidental: '' },
+  { pitch: '6', accidental: 'b' },
+  { pitch: '6', accidental: '' },
+  { pitch: '7', accidental: 'b' },
+  { pitch: '7', accidental: '' }
+] as const;
+
 const DURATION_MARKERS: Record<JianpuDuration, string> = {
   quarter: '',
   eighth: '_',
@@ -73,6 +134,13 @@ function buildOctaveMarks(octave: JianpuOctave, pitch: string): string {
 function buildAccidentalPrefix(accidental: string, pitch: string): string {
   if (pitch === '0' || pitch === '-') return '';
   return accidental;
+}
+
+function buildAbsoluteOctaveMarks(octaveShift: number, pitch: string): string {
+  if (pitch === '0' || pitch === '-') return '';
+  if (octaveShift > 0) return "'".repeat(octaveShift);
+  if (octaveShift < 0) return ",".repeat(Math.abs(octaveShift));
+  return '';
 }
 
 export function getCanonicalJianpuBeatTokens(notation: string | undefined, timeSignature: string): string[] {
@@ -196,4 +264,47 @@ export function rebuildJianpuNote(note: JianpuNoteRange, overrides: Partial<Pick
   const octave = overrides.octave ?? note.octave;
 
   return `${slurStart ? '(' : ''}${buildAccidentalPrefix(accidental, pitch)}${pitch}${buildOctaveMarks(octave, pitch)}${DURATION_MARKERS[duration]}${dotted ? '.' : ''}${slurEnd ? ')' : ''}`;
+}
+
+export function convertRelativeJianpuToAbsoluteNotation(notation: string | undefined, key: Key): string | undefined {
+  if (!notation?.trim() || notation.trim() === '-') {
+    return notation;
+  }
+
+  const tonicSemitone = KEY_TO_SEMITONE_INDEX[key];
+  const preferFlats = FLAT_KEYS.has(key);
+  const noteRanges = findJianpuNoteRanges(notation);
+
+  if (noteRanges.length === 0) {
+    return notation;
+  }
+
+  let nextNotation = notation;
+
+  [...noteRanges].reverse().forEach((note) => {
+    if (!/^[1-7]$/.test(note.pitch)) {
+      return;
+    }
+
+    const scaleOffset = RELATIVE_MAJOR_SCALE_OFFSETS[note.pitch as keyof typeof RELATIVE_MAJOR_SCALE_OFFSETS];
+    const accidentalOffset = note.accidental.includes('b')
+      ? -1
+      : note.accidental.includes('#')
+        ? 1
+        : 0;
+    const relativeOctaveShift = note.octave === 'high'
+      ? 12
+      : note.octave === 'low'
+        ? -12
+        : 0;
+    const absoluteMidi = 60 + tonicSemitone + scaleOffset + accidentalOffset + relativeOctaveShift;
+    const semitoneClass = ((absoluteMidi - 60) % 12 + 12) % 12;
+    const absoluteOctaveShift = Math.floor((absoluteMidi - 60) / 12);
+    const fixedDoNote = (preferFlats ? FIXED_DO_FLAT_MAP : FIXED_DO_SHARP_MAP)[semitoneClass];
+    const replacement = `${note.slurStart ? '(' : ''}${fixedDoNote.accidental}${fixedDoNote.pitch}${buildAbsoluteOctaveMarks(absoluteOctaveShift, fixedDoNote.pitch)}${DURATION_MARKERS[note.duration]}${note.dotted ? '.' : ''}${note.slurEnd ? ')' : ''}`;
+
+    nextNotation = replaceJianpuRange(nextNotation, note.start, note.end, replacement);
+  });
+
+  return nextNotation;
 }

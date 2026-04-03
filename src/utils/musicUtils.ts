@@ -18,6 +18,47 @@ export const ALL_KEYS: Key[] = [
   'C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'Bb', 'B'
 ];
 
+const DEFAULT_SECTION_COLOR = {
+  bg: 'bg-indigo-50',
+  border: 'border-indigo-100',
+  text: 'text-indigo-700',
+  accent: 'indigo'
+};
+
+const SEQUENTIAL_SECTION_COLORS = [
+  {
+    bg: 'bg-blue-50',
+    border: 'border-blue-100',
+    text: 'text-blue-700',
+    accent: 'blue'
+  },
+  {
+    bg: 'bg-emerald-50',
+    border: 'border-emerald-100',
+    text: 'text-emerald-700',
+    accent: 'emerald'
+  },
+  {
+    bg: 'bg-amber-50',
+    border: 'border-amber-100',
+    text: 'text-amber-700',
+    accent: 'amber'
+  },
+  {
+    bg: 'bg-rose-50',
+    border: 'border-rose-100',
+    text: 'text-rose-700',
+    accent: 'rose'
+  },
+  DEFAULT_SECTION_COLOR,
+  {
+    bg: 'bg-slate-100',
+    border: 'border-slate-200',
+    text: 'text-slate-600',
+    accent: 'slate'
+  }
+] as const;
+
 function getNoteIndex(note: string): number {
   const normalizedNote = NOTE_ALIASES[note] || note;
   const sharpIndex = NOTES_SHARP.indexOf(normalizedNote);
@@ -115,6 +156,40 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key): 
   return normalizeChordEnharmonic(newRoot + rest);
 }
 
+function normalizeSequentialSectionToken(title: string): string {
+  return title
+    .trim()
+    .replace(/^[\s([{\uFF08\u3010]+/, '')
+    .replace(/[\s)\]}\uFF09\u3011.:：-]+$/, '');
+}
+
+function getAlphabeticSequenceIndex(token: string): number | null {
+  if (!/^[a-z]+$/i.test(token)) return null;
+
+  return token
+    .toUpperCase()
+    .split('')
+    .reduce((acc, char) => (acc * 26) + (char.charCodeAt(0) - 64), 0) - 1;
+}
+
+function getSequentialSectionColor(title: string) {
+  const token = normalizeSequentialSectionToken(title);
+  if (!token) return null;
+
+  const numericValue = token.match(/^\d+$/) ? Number.parseInt(token, 10) : Number.NaN;
+  const alphaValue = Number.isNaN(numericValue) ? getAlphabeticSequenceIndex(token) : null;
+
+  let sequenceIndex: number | null = null;
+  if (!Number.isNaN(numericValue)) {
+    sequenceIndex = Math.max(0, numericValue - 1);
+  } else if (alphaValue !== null && alphaValue >= 0) {
+    sequenceIndex = alphaValue;
+  }
+
+  if (sequenceIndex === null) return null;
+  return SEQUENTIAL_SECTION_COLORS[sequenceIndex % SEQUENTIAL_SECTION_COLORS.length];
+}
+
 export function getSectionColor(title: string, useColors: boolean = true) {
   const t = title.toLowerCase();
   const isPreChorus = t.includes('pre-chorus') || t.includes('pre chorus');
@@ -122,6 +197,8 @@ export function getSectionColor(title: string, useColors: boolean = true) {
   const isCountIn = t.includes('count-in') || t.includes('count in') || t.includes('countoff') || t.includes('count-off') || t.includes('count off');
   const isRefrain = t.includes('refrain');
   const isRap = t.includes('rap');
+  const isTurnaround = t.includes('turnaround');
+  const isBreakdown = t.includes('breakdown');
   
   if (!useColors) {
     return {
@@ -132,7 +209,7 @@ export function getSectionColor(title: string, useColors: boolean = true) {
     };
   }
 
-  if (t.includes('intro') || t.includes('solo') || t.includes('間奏') || t.includes('interlude') || t.includes('breakdown') || t.includes('outro') || t.includes('instrumental') || t.includes('ending')) {
+  if (t.includes('intro') || t.includes('solo') || t.includes('間奏') || t.includes('interlude') || t.includes('outro') || t.includes('instrumental') || t.includes('ending')) {
     return {
       bg: 'bg-slate-100',
       border: 'border-slate-200',
@@ -156,12 +233,36 @@ export function getSectionColor(title: string, useColors: boolean = true) {
       accent: 'blue'
     };
   }
-  if (t.includes('chorus') || isPostChorus || isRefrain) {
+  if (isRefrain) {
+    return {
+      bg: 'bg-fuchsia-50',
+      border: 'border-fuchsia-100',
+      text: 'text-fuchsia-700',
+      accent: 'fuchsia'
+    };
+  }
+  if (t.includes('chorus') || isPostChorus) {
     return {
       bg: 'bg-rose-50',
       border: 'border-rose-100',
       text: 'text-rose-700',
       accent: 'rose'
+    };
+  }
+  if (isTurnaround) {
+    return {
+      bg: 'bg-cyan-50',
+      border: 'border-cyan-100',
+      text: 'text-cyan-700',
+      accent: 'cyan'
+    };
+  }
+  if (isBreakdown) {
+    return {
+      bg: 'bg-violet-50',
+      border: 'border-violet-100',
+      text: 'text-violet-700',
+      accent: 'violet'
     };
   }
   if (t.includes('bridge')) {
@@ -180,13 +281,13 @@ export function getSectionColor(title: string, useColors: boolean = true) {
       accent: 'indigo'
     };
   }
-  // Default
-  return {
-    bg: 'bg-indigo-50',
-    border: 'border-indigo-100',
-    text: 'text-indigo-700',
-    accent: 'indigo'
-  };
+
+  const sequentialColor = getSequentialSectionColor(title);
+  if (sequentialColor) {
+    return sequentialColor;
+  }
+
+  return DEFAULT_SECTION_COLOR;
 }
 
 export function getNashvilleNumber(chord: string, key: Key): string {
