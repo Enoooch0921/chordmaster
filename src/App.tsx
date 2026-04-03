@@ -8,6 +8,7 @@ import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Song, Key, AppLanguage } from './types';
 import { getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
+import { normalizeBarChords } from './utils/barUtils';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
@@ -244,8 +245,19 @@ const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const createSongId = () => `song-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+const normalizeSongBars = <T extends Song>(song: T): T => ({
+  ...song,
+  sections: song.sections.map((section) => ({
+    ...section,
+    bars: section.bars.map((bar) => ({
+      ...bar,
+      chords: normalizeBarChords(bar.chords)
+    }))
+  }))
+} as T);
+
 const createStoredSong = (song: Song, id = createSongId()): StoredSong => ({
-  ...cloneSong(song),
+  ...cloneSong(normalizeSongBars(song)),
   id,
   updatedAt: Date.now()
 });
@@ -279,7 +291,7 @@ const createEmptySong = (title: string): StoredSong =>
       {
         id: 's1',
         title: 'Verse',
-        bars: [{ chords: [''] }, { chords: [''] }, { chords: [''] }, { chords: [''] }]
+        bars: [{ chords: [] }, { chords: [] }, { chords: [] }, { chords: [] }]
       }
     ]
   });
@@ -320,7 +332,7 @@ const loadSongLibrary = () => {
       };
     }
 
-    const songs = parsedSongs.map((song, index) => ({
+    const songs = parsedSongs.map((song, index) => normalizeSongBars({
       ...song,
       id: song.id || `song-restored-${index + 1}`,
       updatedAt: typeof song.updatedAt === 'number' ? song.updatedAt : Date.now()

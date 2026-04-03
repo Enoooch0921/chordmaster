@@ -13,6 +13,7 @@ import { Repeat, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import { getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
+import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
 import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
 interface FormattedChordProps {
@@ -374,12 +375,6 @@ interface ChordSheetProps {
   activeBar?: { sIdx: number; bIdx: number } | null;
 }
 
-const hasMeaningfulChordContent = (chords: string[]) =>
-  chords.some((chord) => {
-    const normalized = chord.trim();
-    return normalized !== '' && normalized !== '/';
-  });
-
 const ShuffleSymbol: React.FC<{ className?: string }> = ({ className = '' }) => (
   <span className={`relative inline-block h-[1em] w-[76px] overflow-visible align-middle text-gray-900 ${className}`} aria-label="Shuffle" role="img">
     <span className="absolute left-0 top-1/2 inline-flex -translate-y-[56%] items-end gap-[7px] overflow-visible">
@@ -425,7 +420,7 @@ const BarEdgeMarker: React.FC<{ type: 'repeat-start' | 'repeat-end' | 'final-bar
 
   return (
     <div
-      className={`sheet-repeat-marker absolute top-0 bottom-0 z-[999] w-[13px] pointer-events-none ${isStart ? 'sheet-repeat-start left-0' : ''} ${isEnd ? 'sheet-repeat-end right-0' : ''} ${type === 'final-bar' ? 'sheet-final-bar right-0' : ''}`}
+      className={`sheet-repeat-marker absolute top-0 bottom-0 z-[999] w-[13px] pointer-events-none ${isStart ? 'sheet-repeat-start -left-[4px]' : ''} ${isEnd ? 'sheet-repeat-end -right-[4px]' : ''} ${type === 'final-bar' ? 'sheet-final-bar -right-[2px]' : ''}`}
       aria-hidden="true"
     >
       <div className="sheet-repeat-preview absolute inset-0" aria-hidden="true">
@@ -802,20 +797,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                     const sharedLaneClass = 'h-[18px] flex items-center overflow-visible';
                     const { numerator: displayNumerator, denominator: displayDenominator } = splitDisplayTimeSignature(effectiveTimeSignature);
                     const hasInlineTimeSignature = Boolean(bar?.timeSignature);
-                    const inlineTimeSignatureOffsetClass = hasInlineTimeSignature
-                      ? bar?.repeatStart
-                        ? 'pl-8'
-                        : 'pl-6'
-                      : '';
+                    const inlineTimeSignatureOffsetClass = hasInlineTimeSignature ? 'pl-6' : '';
                     const showBarNumber = Boolean(
                       bar && barNumberMode !== 'none' && (barNumberMode === 'all' || bIdx === 0)
                     );
-                    const barNumberLeftClass = bar?.repeatStart
-                      ? 'left-8'
-                      : hasInlineTimeSignature
-                        ? 'left-6'
-                        : 'left-1.5';
-                    const isEmpty = !bar || (bar.chords.length === 0 && !bar.riff && !bar.rhythm && !bar.annotation && !hasBarLabel);
+                    const barNumberLeftClass = hasInlineTimeSignature ? 'left-6' : 'left-1.5';
                     const isActiveBar = activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
                     const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
                     const suppressRightBarline = bIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
@@ -886,13 +872,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                           </div>
                         )}
 
-                        {/* Default placeholder line for empty bars - only for actual sections */}
-                        {isEmpty && (
-                          <div className="absolute inset-0 flex items-center pointer-events-none">
-                            <div className="w-full h-[2px] bg-gray-400" />
-                          </div>
-                        )}
-
                         {bar && (
                           <>
                             {(() => {
@@ -919,7 +898,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                             )}
                             {bar.timeSignature && (
                               <div
-                                className={`absolute top-1/2 -translate-y-1/2 z-10 flex w-5 flex-col items-center justify-center text-[19px] font-semibold italic leading-[0.78] text-[#1e3a8a] pointer-events-none select-none ${bar.repeatStart ? 'left-3.5' : 'left-1.5'}`}
+                                className={`absolute top-1/2 -translate-y-1/2 z-10 flex w-5 flex-col items-center justify-center text-[19px] font-semibold italic leading-[0.78] text-[#1e3a8a] pointer-events-none select-none ${bar.repeatStart ? 'left-2.5' : 'left-1.5'}`}
                                 aria-hidden="true"
                               >
                                 <span>{displayNumerator}</span>
@@ -929,7 +908,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                             {/* Chords */}
                                   {(() => {
                                     // Special case for full bar repeat symbol
-                                    if (bar.chords.length === 1 && bar.chords[0] === '%') {
+                                    if (hasVisibleChordTokens(bar.chords) && bar.chords.length === 1 && bar.chords[0] === '%') {
                                       return (
                                         <div
                                           className={`flex-1 flex items-center justify-center w-full h-full cursor-pointer ${inlineTimeSignatureOffsetClass}`}

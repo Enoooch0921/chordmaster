@@ -6,6 +6,7 @@ import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { getSectionColor, normalizeChordEnharmonic } from '../utils/musicUtils';
+import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
 import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
@@ -412,7 +413,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     ...bar,
     id: createBarId(),
     riff: bar.riff ? getCanonicalJianpuNotation(bar.riff, getBarTimeSignature(bar), true) || undefined : undefined,
-    chords: [...bar.chords]
+    chords: normalizeBarChords(bar.chords)
   });
 
   const setBarRef = (barId: string | undefined, node: HTMLDivElement | null) => {
@@ -3258,26 +3259,25 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                     >
                       <GripHorizontal size={14} />
                     </button>
-                    <button 
-                      onClick={() => {
-                        const newBars = section.bars.filter((_, i) => i !== bIdx);
-                        clearEditorSelectionState();
-                        updateSection(sIdx, { ...section, bars: newBars });
-                      }}
-                      className="text-gray-300 hover:text-red-500 transition-colors p-1"
-                      title={copy.editor.deleteBar}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <div className="inline-flex min-w-[1.8rem] items-center justify-center rounded-md border border-gray-100 bg-gray-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-gray-400">
+                        {globalBarNumber}
+                      </div>
+                      <button 
+                        onClick={() => {
+                          const newBars = section.bars.filter((_, i) => i !== bIdx);
+                          clearEditorSelectionState();
+                          updateSection(sIdx, { ...section, bars: newBars });
+                        }}
+                        className="text-gray-300 hover:text-red-500 transition-colors p-1"
+                        title={copy.editor.deleteBar}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="space-y-3 pt-6">
-                    <div className="flex justify-center">
-                      <div className="inline-flex min-w-[2.25rem] items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold tabular-nums text-gray-600">
-                        {globalBarNumber}
-                      </div>
-                    </div>
-
                     {/* Chords */}
                     <div>
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5">{copy.editor.chords}</label>
@@ -3371,9 +3371,13 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                             processedVal = val.replace(/(^|\s|\/)([ac-g])/g, (m, p1, p2) => p1 + p2.toUpperCase());
                           }
                           
+                          const chordTokens = processedVal.split(' ').map((token) => (
+                            isNashvilleMode ? token : normalizeChordEnharmonic(token)
+                          ));
+
                           newBars[bIdx] = {
                             ...bar,
-                            chords: processedVal.split(' ').map((token) => isNashvilleMode ? token : normalizeChordEnharmonic(token))
+                            chords: hasVisibleChordTokens(chordTokens) ? chordTokens : []
                           };
                           updateSection(sIdx, { ...section, bars: newBars });
 
