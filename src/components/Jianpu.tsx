@@ -406,6 +406,20 @@ const Jianpu: React.FC<JianpuProps> = ({
     const noteLocalUnits = note.xUnits - (note.tokenIndex * TOKEN_WIDTH_UNITS);
     return getTokenAlignedPx(note.tokenIndex, noteLocalUnits) ?? note.xUnits;
   }, [containerWidth, getTokenAlignedPx, useSnappedPixelCenter]);
+  const getProjectedPreviewNoteCenterX = React.useCallback((
+    note: Pick<LayoutNote, 'xUnits' | 'tokenIndex'> & { xRatio: number; tokenCount: number },
+    laneWidth: number
+  ) => {
+    if (!(useSnappedPixelCenter && containerWidth !== null)) {
+      return note.xRatio * laneWidth;
+    }
+
+    const noteLocalUnits = note.xUnits - (note.tokenIndex * TOKEN_WIDTH_UNITS);
+    const leftPx = Math.round((note.tokenIndex / note.tokenCount) * laneWidth);
+    const rightPx = Math.round(((note.tokenIndex + 1) / note.tokenCount) * laneWidth);
+    const widthPx = Math.max(1, rightPx - leftPx);
+    return leftPx + Math.round((noteLocalUnits / TOKEN_WIDTH_UNITS) * widthPx);
+  }, [containerWidth, useSnappedPixelCenter]);
   const getSlurAnchorY = React.useCallback(() => {
     const digitTopY = metrics.digitCenterY - (metrics.digitFontSize * 0.52);
     const octaveDotSize = renderMode === 'editor' || compact
@@ -419,7 +433,7 @@ const Jianpu: React.FC<JianpuProps> = ({
     const nextTokenList = getTokenList(notationText);
     const nextTokenCount = Math.max(1, nextTokenList.length);
     const nextTotalWidthUnits = nextTokenCount * TOKEN_WIDTH_UNITS;
-    const nextNotes: Array<LayoutNote & { xRatio: number }> = [];
+    const nextNotes: Array<LayoutNote & { xRatio: number; tokenCount: number }> = [];
     let carryUnits = 0;
 
     nextTokenList.forEach((token, tokenIndex) => {
@@ -459,6 +473,7 @@ const Jianpu: React.FC<JianpuProps> = ({
           noteIndex: localNoteIndex++,
           xUnits,
           xRatio: xUnits / nextTotalWidthUnits,
+          tokenCount: nextTokenCount,
           unitStart,
           unitEnd,
           underlineLeftUnits: xUnits - metrics.noteHalfWidthUnits,
@@ -914,12 +929,12 @@ const Jianpu: React.FC<JianpuProps> = ({
               : null;
             const laneWidth = containerWidth ?? totalWidthUnits;
             const crossBarGap = compact ? 18 : 20;
-            const slurAnchorXBias = compact ? -2.4 : renderMode === 'editor' ? 0 : -1.2;
+            const slurAnchorXBias = compact ? 0 : renderMode === 'editor' ? 0 : -1.2;
             const rawStartX = startNote
               ? getRenderedNoteCenterX(startNote) + slurAnchorXBias
               : -edgeOvershoot;
             const rawEndX = crossBarNextEnd
-              ? laneWidth + crossBarGap + (crossBarNextEnd.xRatio * laneWidth) + slurAnchorXBias
+              ? laneWidth + crossBarGap + getProjectedPreviewNoteCenterX(crossBarNextEnd, laneWidth) + slurAnchorXBias
               : endNote
                 ? getRenderedNoteCenterX(endNote) + slurAnchorXBias
                 : laneWidth + edgeOvershoot;

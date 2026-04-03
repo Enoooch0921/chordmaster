@@ -171,6 +171,62 @@ const formatSectionTitleCase = (value: string) => (
     .join('\n')
 );
 
+interface SectionNavigationLabel {
+  main: string;
+  inlineSuffix?: string;
+  topRight?: string;
+  bottomRight?: string;
+}
+
+const getSectionNavigationLabel = (title: string, fallbackIndex: number): SectionNavigationLabel => {
+  const firstLine = title.split('\n')[0]?.trim() || '';
+  if (!firstLine) return { main: String(fallbackIndex + 1) };
+
+  const normalized = firstLine
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const rangeMatch = normalized.match(/(?:^|\s)(\d+)\s*(?:\/|-|,)\s*(\d+)\s*$/);
+  const numberMatch = normalized.match(/(?:^|\s)(\d+)$/);
+  const numberSuffix = numberMatch?.[1] || '';
+  const sharedLabel = (main: string): SectionNavigationLabel => (
+    rangeMatch
+      ? { main, topRight: rangeMatch[1], bottomRight: rangeMatch[2] }
+      : { main, inlineSuffix: numberSuffix || undefined }
+  );
+
+  if (normalized.includes('count in') || normalized.includes('countoff') || normalized.includes('count off')) return sharedLabel('CI');
+  if (normalized.includes('intro')) return sharedLabel('I');
+  if (normalized.includes('verse')) return sharedLabel('V');
+  if (normalized.includes('pre chorus')) return sharedLabel('Pc');
+  if (normalized.includes('post chorus')) return sharedLabel('Po');
+  if (normalized.includes('chorus')) return sharedLabel('C');
+  if (normalized.includes('refrain')) return sharedLabel('Rf');
+  if (normalized.includes('bridge')) return sharedLabel('B');
+  if (normalized.includes('breakdown')) return sharedLabel('Bd');
+  if (normalized.includes('turnaround')) return sharedLabel('Ta');
+  if (normalized.includes('interlude')) return sharedLabel('It');
+  if (normalized.includes('instrumental')) return sharedLabel('Is');
+  if (normalized.includes('solo')) return sharedLabel('S');
+  if (normalized.includes('tag')) return sharedLabel('Tg');
+  if (normalized.includes('vamp')) return sharedLabel('Vp');
+  if (normalized.includes('rap')) return sharedLabel('Rp');
+  if (normalized.includes('outro')) return sharedLabel('O');
+  if (normalized.includes('ending') || normalized.includes('end')) return sharedLabel('E');
+
+  const initials = firstLine
+    .split(/[\s/_-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (/^\d+$/.test(part) ? part : part.charAt(0).toUpperCase()))
+    .join('')
+    .slice(0, 4);
+
+  return { main: initials || String(fallbackIndex + 1) };
+};
+
 const getSectionTitleSuggestions = (value: string) => {
   const firstLine = value.split('\n')[0] || '';
   const normalizedQuery = normalizeSectionTitleQuery(firstLine);
@@ -249,10 +305,39 @@ const getAccentHighlight = (accent: string) => {
       return { ring: 'rgba(245, 158, 11, 0.20)', glow: 'rgba(245, 158, 11, 0.10)', dot: '#fbbf24', barRing: 'rgba(245, 158, 11, 0.36)', barGlow: 'rgba(245, 158, 11, 0.22)', barFill: 'rgba(245, 158, 11, 0.10)' };
     case 'emerald':
       return { ring: 'rgba(16, 185, 129, 0.18)', glow: 'rgba(16, 185, 129, 0.10)', dot: '#34d399', barRing: 'rgba(16, 185, 129, 0.34)', barGlow: 'rgba(16, 185, 129, 0.22)', barFill: 'rgba(16, 185, 129, 0.08)' };
+    case 'cyan':
+      return { ring: 'rgba(6, 182, 212, 0.18)', glow: 'rgba(6, 182, 212, 0.10)', dot: '#22d3ee', barRing: 'rgba(6, 182, 212, 0.34)', barGlow: 'rgba(6, 182, 212, 0.22)', barFill: 'rgba(6, 182, 212, 0.08)' };
+    case 'fuchsia':
+      return { ring: 'rgba(192, 38, 211, 0.18)', glow: 'rgba(192, 38, 211, 0.10)', dot: '#d946ef', barRing: 'rgba(192, 38, 211, 0.34)', barGlow: 'rgba(192, 38, 211, 0.22)', barFill: 'rgba(192, 38, 211, 0.08)' };
+    case 'violet':
+      return { ring: 'rgba(124, 58, 237, 0.18)', glow: 'rgba(124, 58, 237, 0.10)', dot: '#8b5cf6', barRing: 'rgba(124, 58, 237, 0.34)', barGlow: 'rgba(124, 58, 237, 0.22)', barFill: 'rgba(124, 58, 237, 0.08)' };
     case 'slate':
       return { ring: 'rgba(100, 116, 139, 0.16)', glow: 'rgba(100, 116, 139, 0.10)', dot: '#94a3b8', barRing: 'rgba(100, 116, 139, 0.28)', barGlow: 'rgba(100, 116, 139, 0.18)', barFill: 'rgba(100, 116, 139, 0.08)' };
     default:
       return { ring: 'rgba(99, 102, 241, 0.18)', glow: 'rgba(99, 102, 241, 0.10)', dot: '#818cf8', barRing: 'rgba(99, 102, 241, 0.34)', barGlow: 'rgba(99, 102, 241, 0.22)', barFill: 'rgba(99, 102, 241, 0.08)' };
+  }
+};
+
+const getAccentNavigationTone = (accent: string) => {
+  switch (accent) {
+    case 'blue':
+      return { bg: 'rgba(59, 130, 246, 0.08)', border: 'rgba(37, 99, 235, 0.48)', text: '#2563eb', activeBg: 'rgba(59, 130, 246, 0.12)', activeBorder: '#2563eb' };
+    case 'rose':
+      return { bg: 'rgba(244, 63, 94, 0.07)', border: 'rgba(190, 18, 60, 0.46)', text: '#be123c', activeBg: 'rgba(244, 63, 94, 0.11)', activeBorder: '#be123c' };
+    case 'amber':
+      return { bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(180, 83, 9, 0.48)', text: '#b45309', activeBg: 'rgba(245, 158, 11, 0.12)', activeBorder: '#b45309' };
+    case 'emerald':
+      return { bg: 'rgba(16, 185, 129, 0.08)', border: 'rgba(4, 120, 87, 0.46)', text: '#047857', activeBg: 'rgba(16, 185, 129, 0.12)', activeBorder: '#047857' };
+    case 'cyan':
+      return { bg: 'rgba(6, 182, 212, 0.08)', border: 'rgba(15, 118, 110, 0.46)', text: '#0f766e', activeBg: 'rgba(6, 182, 212, 0.12)', activeBorder: '#0f766e' };
+    case 'fuchsia':
+      return { bg: 'rgba(217, 70, 239, 0.08)', border: 'rgba(162, 28, 175, 0.46)', text: '#a21caf', activeBg: 'rgba(217, 70, 239, 0.12)', activeBorder: '#a21caf' };
+    case 'violet':
+      return { bg: 'rgba(139, 92, 246, 0.08)', border: 'rgba(109, 40, 217, 0.46)', text: '#6d28d9', activeBg: 'rgba(139, 92, 246, 0.12)', activeBorder: '#6d28d9' };
+    case 'slate':
+      return { bg: 'rgba(148, 163, 184, 0.10)', border: 'rgba(71, 85, 105, 0.42)', text: '#475569', activeBg: 'rgba(148, 163, 184, 0.16)', activeBorder: '#475569' };
+    default:
+      return { bg: 'rgba(99, 102, 241, 0.08)', border: 'rgba(79, 70, 229, 0.46)', text: '#4f46e5', activeBg: 'rgba(99, 102, 241, 0.12)', activeBorder: '#4f46e5' };
   }
 };
 
@@ -3749,6 +3834,13 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
             const sectionId = section.id || `section-${idx}`;
             const isActiveSection = activeSectionId === sectionId;
             const accentHighlight = getAccentHighlight(colors.accent);
+            const accentTone = getAccentNavigationTone(colors.accent);
+            const navLabel = getSectionNavigationLabel(section.title, idx);
+            const navLabelText = `${navLabel.main}${navLabel.inlineSuffix || ''}`;
+            const hasStackedNumbers = Boolean(navLabel.topRight || navLabel.bottomRight);
+            const isWideLabel = hasStackedNumbers
+              ? navLabel.main.length >= 2
+              : navLabelText.length >= 3;
             return (
               <Reorder.Item 
                 key={section.id || idx} 
@@ -3779,19 +3871,32 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                     const el = document.getElementById(`section-${idx}`);
                     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   }}
-                  className={`relative px-3 py-1.5 rounded-full text-xs font-bold transition-all border cursor-grab active:cursor-grabbing ${
-                    isActiveSection
-                      ? `${colors.bg} ${colors.text} ${colors.border} scale-[1.03]`
-                      : `${colors.bg} ${colors.text} ${colors.border} hover:shadow-sm`
-                  }`}
-                  style={isActiveSection ? { boxShadow: `0 0 0 2px ${accentHighlight.ring}, 0 10px 20px ${accentHighlight.glow}` } : undefined}
+                  title={section.title || `Section ${idx + 1}`}
+                  className={`relative inline-flex items-center justify-center rounded-[1.4rem] border-2 text-center font-black leading-none transition-all cursor-grab active:cursor-grabbing ${
+                    isWideLabel ? 'min-w-[2.8rem] px-2.25 h-[2.375rem] text-[14px]' : 'h-[2.375rem] min-w-[2.45rem] px-2 text-[15px]'
+                  } ${isActiveSection ? 'scale-[1.02]' : 'hover:-translate-y-[1px] hover:shadow-sm'}`}
+                  style={{
+                    backgroundColor: isActiveSection ? accentTone.activeBg : accentTone.bg,
+                    color: accentTone.text,
+                    borderColor: isActiveSection ? accentTone.activeBorder : accentTone.border,
+                    boxShadow: isActiveSection
+                      ? `0 0 0 2px ${accentHighlight.ring}, 0 10px 18px ${accentHighlight.glow}`
+                      : '0 1px 0 rgba(255,255,255,0.82) inset'
+                  }}
                 >
-                  {isActiveSection && <span className="absolute -top-1.5 -right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ backgroundColor: accentHighlight.dot }} />}
-                  <span className="block max-w-[8.5rem] whitespace-pre-line text-center leading-tight">
-                    {section.title
-                      ? localizeSectionTitle(section.title, language)
-                      : '\u00A0'}
-                  </span>
+                  {hasStackedNumbers ? (
+                    <span className="inline-flex items-center gap-[1px]">
+                      <span className="text-[14px] tracking-[-0.03em]">{navLabel.main}</span>
+                      <span className="inline-flex flex-col items-center justify-center leading-none">
+                        <span className="text-[7.5px] font-bold leading-none tracking-normal">{navLabel.topRight}</span>
+                        <span className="text-[7.5px] font-bold leading-none tracking-normal">{navLabel.bottomRight}</span>
+                      </span>
+                    </span>
+                  ) : (
+                    <span className={`block ${isWideLabel ? 'tracking-[-0.01em]' : 'tracking-[-0.03em]'}`}>
+                      {navLabelText}
+                    </span>
+                  )}
                 </button>
               </Reorder.Item>
             );
