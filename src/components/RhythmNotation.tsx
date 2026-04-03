@@ -69,8 +69,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const stroke = overflow ? '#dc2626' : '#111827';
   const guide = overflow ? 'rgba(220, 38, 38, 0.16)' : 'rgba(17, 24, 39, 0.08)';
   const accentY = ((compact ? -9 : -2) + accentVerticalOffset) * scale;
-  const tieTop = (((compact ? 5.4 : 21.6) + (renderMode === 'editor' ? (compact ? -1.4 : -1.6) : 0)) + tieVerticalOffset) * scale;
-  const tieFontSize = (compact ? 15 : 42) * scale;
+  const tieAnchorY = (((compact ? 13.2 : 46.1) + (renderMode === 'editor' ? (compact ? -1.1 : -1.3) : 0)) + tieVerticalOffset) * scale;
+  const tieStrokeWidth = (compact ? 0.9 : 1.15) * Math.max(0.9, Math.min(1.25, tieFontScale));
   const glyphFontSize = (compact ? 13 : 28) * scale;
   const editorGlyphFontSize = (compact ? 17 : 30) * scale;
   const editorBeamTop = (compact ? -2.8 : 6.6) * scale;
@@ -143,7 +143,6 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const unitToPercent = (unit: number) => `${(unit * 100) / Math.max(1, barUnits)}%`;
   const unitToPercentNumber = (unit: number) => (unit * 100) / Math.max(1, barUnits);
   const getEditorBeamAnchorUnit = (event: typeof visibleEvents[number]) => getHeadCenterUnit(event) + 0.18;
-  const tieGlyph = String.fromCodePoint(0xF05F);
   const visibleSelectableEvents = React.useMemo(
     () => visibleEvents,
     [visibleEvents]
@@ -396,37 +395,37 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         </svg>
       )}
 
-      {ties.map((tie) => {
-        const tieSpanUnits = Math.max(0.01, tie.endHeadUnit - tie.startHeadUnit);
-        const tieScaleX = Math.max(0.78, Math.min(1.22, tieSpanUnits / (compact ? 2.4 : 2.8)));
-        const effectiveTieScaleX = renderMode === 'preview'
-          ? Math.max(0.94, Math.min(1.06, tieScaleX))
-          : tieScaleX;
-        return (
-          <span
-            key={`tie-${tie.eventIndex}`}
-            className="absolute z-[1] block overflow-visible select-none pointer-events-none leading-none"
-            style={{
-              left: unitToPercent(tie.startHeadUnit),
-              width: unitToPercent(tieSpanUnits),
-              top: `${tieTop}px`
-            }}
-          >
-            <span
-              className="absolute left-0 top-0 whitespace-pre"
-              style={{
-                color: stroke,
-                fontFamily: 'BachSlurs, Bach, NotoMusic, serif',
-                fontSize: `${tieFontSize * tieFontScale}px`,
-                transform: `scaleX(${effectiveTieScaleX})`,
-                transformOrigin: 'left top'
-              }}
-            >
-              {tieGlyph}
-            </span>
-          </span>
-        );
-      })}
+      {ties.length > 0 && (
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
+          viewBox={`0 0 100 ${minHeight}`}
+          preserveAspectRatio="none"
+        >
+          {ties.map((tie) => {
+            const startX = unitToPercentNumber(tie.startHeadUnit);
+            const endX = unitToPercentNumber(tie.endHeadUnit);
+            const span = Math.max(1.8, endX - startX);
+            const controlOffset = Math.max(1.2, span * 0.28);
+            const curveDepth = Math.min(
+              compact ? 4.2 : 8.6,
+              Math.max(compact ? 2.3 : 4.8, span * (compact ? 0.34 : 0.24))
+            ) * Math.max(0.92, Math.min(1.18, tieFontScale));
+            const controlY = Math.min(minHeight - (compact ? 0.4 : 0.8), tieAnchorY + curveDepth);
+
+            return (
+              <path
+                key={`tie-${tie.eventIndex}`}
+                d={`M ${startX} ${tieAnchorY} C ${startX + controlOffset} ${controlY} ${endX - controlOffset} ${controlY} ${endX} ${tieAnchorY}`}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={tieStrokeWidth}
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })}
+        </svg>
+      )}
 
       {useEditorStyleRenderer && editorBeamGroups.length > 0 && (
         <svg

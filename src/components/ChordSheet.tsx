@@ -5,13 +5,15 @@
 
 import React from 'react';
 import { motion } from 'motion/react';
-import { Song, Section, Bar, Key } from '../types';
+import { Song, Section, Bar, Key, AppLanguage } from '../types';
 import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey } from '../utils/musicUtils';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
+import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { Repeat, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
-import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation } from '../utils/rhythmUtils';
+import { getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
+import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
 interface FormattedChordProps {
   chordString: string;
@@ -41,6 +43,10 @@ const splitChordQualityDisplay = (quality: string) => {
   };
 };
 
+const getBarDisplayLabel = (bar?: Bar) => (
+  bar?.label?.trim() || bar?.riffLabel?.trim() || bar?.rhythmLabel?.trim() || ''
+);
+
 const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactModifier = false, nashvilleFontFamily }) => {
   if (chordString === '%') {
     return (
@@ -55,10 +61,12 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
   }
 
   if (chordString === '/') {
-    // Beat slash: shorter and even thinner
+    // Beat slash: keep its own glyph box so it aligns with chord content instead of sticking to the top edge.
     return (
-      <div className="flex items-center justify-center w-full h-full">
-        <div className="w-2.5 h-[2px] bg-gray-400 rounded-full rotate-[-45deg] transform origin-center" />
+      <div className="relative inline-flex h-[1.02em] w-[0.92em] items-center justify-center translate-y-[1px]">
+        <svg viewBox="0 0 16 16" className="h-[0.92em] w-[0.7em] text-gray-400" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+          <path d="M3 13L13 3" />
+        </svg>
       </div>
     );
   }
@@ -358,8 +366,9 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
 
 interface ChordSheetProps {
   song: Song;
+  language: AppLanguage;
   currentKey: Key;
-  onElementClick?: (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'riffLabel' | 'rhythmLabel' | 'annotation' | 'rhythm') => void;
+  onElementClick?: (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm') => void;
   highlightedSectionIds?: string[];
   activeSectionId?: string | null;
   activeBar?: { sIdx: number; bIdx: number } | null;
@@ -580,7 +589,8 @@ const AutoShrink: React.FC<{ children: React.ReactNode; className?: string; alig
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onElementClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null }) => {
+  const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   const capo = song.capo || 0;
   const playKey = getPlayKey(currentKey, capo);
@@ -608,8 +618,15 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
         sIdx,
         startBIdx: i * 4
       });
-    }
+      }
   });
+  const sectionBarOffsets: number[] = [];
+  let accumulatedBarCount = 0;
+  song.sections.forEach((section) => {
+    sectionBarOffsets.push(accumulatedBarCount);
+    accumulatedBarCount += section.bars.length;
+  });
+  const barNumberMode = song.barNumberMode ?? 'none';
 
   // Pagination logic - Reduced slightly to give more breathing room for riffs/labels
   const ROWS_PER_PAGE_FIRST = 12;
@@ -662,19 +679,19 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                 <AutoShrink className="min-w-0 overflow-visible mt-4.5">
                   <div className="flex items-center gap-3 text-xs font-medium text-gray-500 tracking-widest">
                     <div className="shrink-0">
-                      <span>Key - </span>
+                      <span>{copy.key} - </span>
                       <span className="text-gray-900 font-bold">
                         <FormattedChord chordString={currentKey} nashvilleFontFamily={nashvilleFontFamily} />
                       </span>
                     </div>
                     <span className="text-gray-400">|</span>
                     <div className="shrink-0">
-                      <span>Tempo - </span>
+                      <span>{copy.editor.tempo} - </span>
                       <span className="text-gray-900 font-bold">{song.tempo}</span>
                     </div>
                     <span className="text-gray-400">|</span>
                     <div className="shrink-0 flex items-center gap-2">
-                      <span>Time - </span>
+                      <span>{copy.editor.timeSignature} - </span>
                       <span className="text-gray-900 font-bold">{song.timeSignature}</span>
                       {isShuffle && (
                         <>
@@ -698,8 +715,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
             </div>
           ) : (
             <div className="shrink-0 flex justify-between items-center mb-4 border-b border-gray-200 pb-2">
-              <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">{song.title} (Cont.)</span>
-              <span className="text-xs font-bold text-gray-400">Page {pIdx + 1}</span>
+              <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">{song.title} ({copy.continued})</span>
+              <span className="text-xs font-bold text-gray-400">{language === 'zh' ? `${copy.page} ${pIdx + 1} 頁` : `${copy.page} ${pIdx + 1}`}</span>
             </div>
           )}
 
@@ -742,7 +759,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                           isActiveSection ? 'scale-[1.02]' : ''
                         }`}>
                           <div className={`text-[11px] font-bold ${colors.text} tracking-wide whitespace-nowrap`}>
-                            {row.sectionTitle.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                            {localizeSectionTitle(row.sectionTitle.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '), language)}
                           </div>
                         </div>
                       );
@@ -755,13 +772,32 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                     const bar = row.bars[bIdx];
                     const previousBar = row.bars[bIdx - 1];
                     const effectiveTimeSignature = bar ? getEffectiveTimeSignature(bar.timeSignature, song.timeSignature) : song.timeSignature;
+                    const canonicalRiffNotation = bar?.riff
+                      ? serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(bar.riff, effectiveTimeSignature))
+                      : undefined;
+                    const previousCanonicalRiffNotation = bIdx > 0 && row.bars[bIdx - 1]?.riff
+                      ? serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(row.bars[bIdx - 1]?.riff, getEffectiveTimeSignature(row.bars[bIdx - 1]?.timeSignature, song.timeSignature)))
+                      : undefined;
+                    const nextCanonicalRiffNotation = bIdx < row.bars.length - 1 && row.bars[bIdx + 1]?.riff
+                      ? serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(row.bars[bIdx + 1]?.riff, getEffectiveTimeSignature(row.bars[bIdx + 1]?.timeSignature, song.timeSignature)))
+                      : undefined;
+                    const barLabel = getBarDisplayLabel(bar);
+                    const hasBarLabel = Boolean(barLabel);
+                    const globalBarNumber = (sectionBarOffsets[row.sIdx] ?? 0) + row.startBIdx + bIdx + 1;
                     const beatsPerBar = parseInt(effectiveTimeSignature.split('/')[0]) || 4;
                     const hasRhythm = Boolean(bar?.rhythm);
                     const hasRiff = Boolean(bar?.riff);
+                    const hasChordContent = Boolean(bar && hasMeaningfulChordContent(bar.chords));
+                    const showRhythmInChordLane = !hasChordContent && hasRhythm;
+                    const showBottomRhythmLane = hasRhythm && !showRhythmInChordLane;
                     const compactModifier = Boolean(bar?.ending || bar?.annotation);
                     const isEndingStart = Boolean(bar?.ending) && (!row.bars[bIdx - 1] || row.bars[bIdx - 1].ending !== bar.ending);
                     const isEndingEnd = Boolean(bar?.ending) && (!row.bars[bIdx + 1] || row.bars[bIdx + 1].ending !== bar.ending);
-                    const lowerLaneCount = bar ? [hasRhythm, hasRiff].filter(Boolean).length : 0;
+                    const lowerLaneCount = bar
+                      ? showBottomRhythmLane && hasRiff
+                        ? 2
+                        : (hasBarLabel || showBottomRhythmLane || hasRiff ? 1 : 0)
+                      : 0;
                     const barPaddingBottom = lowerLaneCount >= 2 ? 34 : lowerLaneCount === 1 ? 20 : 24;
                     const sharedLaneClass = 'h-[18px] flex items-center overflow-visible';
                     const { numerator: displayNumerator, denominator: displayDenominator } = splitDisplayTimeSignature(effectiveTimeSignature);
@@ -771,7 +807,15 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                         ? 'pl-8'
                         : 'pl-6'
                       : '';
-                    const isEmpty = !bar || (bar.chords.length === 0 && !bar.riff && !bar.rhythm && !bar.annotation);
+                    const showBarNumber = Boolean(
+                      bar && barNumberMode !== 'none' && (barNumberMode === 'all' || bIdx === 0)
+                    );
+                    const barNumberLeftClass = bar?.repeatStart
+                      ? 'left-8'
+                      : hasInlineTimeSignature
+                        ? 'left-6'
+                        : 'left-1.5';
+                    const isEmpty = !bar || (bar.chords.length === 0 && !bar.riff && !bar.rhythm && !bar.annotation && !hasBarLabel);
                     const isActiveBar = activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
                     const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
                     const suppressRightBarline = bIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
@@ -812,6 +856,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                         } ${isActiveBar ? 'z-20' : ''}`}
                         style={isActiveBar ? { paddingBottom: `${barPaddingBottom}px`, backgroundColor: activeTone.barFill, boxShadow: `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}` } : { paddingBottom: `${barPaddingBottom}px` }}
                       >
+                        {showBarNumber && (
+                          <div className={`pointer-events-none absolute top-0.5 z-10 text-[9px] font-bold leading-none text-gray-400 ${barNumberLeftClass}`}>
+                            {globalBarNumber}
+                          </div>
+                        )}
+
                         {/* Repeat Start |: */}
                         {bar?.repeatStart && (
                           <BarEdgeMarker type="repeat-start" />
@@ -846,10 +896,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                         {bar && (
                           <>
                             {(() => {
-                              const hasChordContent = hasMeaningfulChordContent(bar.chords);
-                              const showRhythmInChordLane = !hasChordContent && Boolean(bar.rhythm?.trim());
-                              const showBottomRhythmLane = Boolean(bar.rhythm?.trim()) && !showRhythmInChordLane;
-                              const showBottomLane = showBottomRhythmLane || Boolean(bar.riff);
+                              const showBottomLane = showBottomRhythmLane || Boolean(bar.riff) || hasBarLabel;
 
                               return (
                                 <>
@@ -954,118 +1001,98 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
                             {showBottomLane && (
                               <div className={`absolute bottom-1 left-1 right-1 ${inlineTimeSignatureOffsetClass}`}>
                                 {showBottomRhythmLane && bar.riff ? (
-                                  <div className="flex flex-col gap-0.5">
-                                    <div className="flex items-end gap-1">
-                                      {bar.rhythmLabel && (
+                                  <div className="flex gap-1">
+                                    {hasBarLabel && (
+                                      <div className="flex items-end">
                                         <div 
                                           className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'rhythmLabel');
+                                            onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'label');
                                           }}
                                         >
                                           <span className="text-[8px] font-bold text-black uppercase leading-none">
-                                            {bar.rhythmLabel}
+                                            {barLabel}
                                           </span>
-                                        </div>
-                                      )}
-                                      <div
-                                        className={`bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${bar.rhythmLabel ? 'flex-1' : ''}`}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'rhythm');
-                                        }}
-                                      >
-                                        <div className="w-full translate-y-[3px]">
-                                          <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} className="w-full" />
                                         </div>
                                       </div>
-                                    </div>
+                                    )}
 
-                                    <div className="flex items-end">
-                                      {bar.riffLabel && (
-                                        <div 
-                                          className="border border-black px-1 rounded-sm mr-1 mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
+                                    <div className="flex flex-1 flex-col gap-0.5">
+                                      <div className="flex items-end gap-1">
+                                        <div
+                                          className={`bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} flex-1`}
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'riffLabel');
+                                            onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'rhythm');
                                           }}
                                         >
-                                          <span className="text-[8px] font-bold text-black uppercase leading-none">
-                                            {bar.riffLabel}
-                                          </span>
+                                          <div className="w-full translate-y-[3px]">
+                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} className="w-full" />
+                                          </div>
                                         </div>
-                                      )}
-                                      <div 
-                                        className={`bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 flex-1 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass}`}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'riff');
-                                        }}
-                                      >
-                                        <Jianpu
-                                          notation={bar.riff}
-                                          compact
-                                          scale={0.86}
-                                          className="w-full"
-                                          previousNotationForCrossBar={bIdx > 0 ? row.bars[bIdx - 1]?.riff : undefined}
-                                          nextNotationForCrossBar={bIdx < row.bars.length - 1 ? row.bars[bIdx + 1]?.riff : undefined}
-                                        />
+                                      </div>
+
+                                      <div className="flex items-end">
+                                        <div 
+                                          className={`bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 flex-1 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'riff');
+                                          }}
+                                        >
+                                          <Jianpu
+                                            notation={canonicalRiffNotation}
+                                            compact
+                                            scale={0.86}
+                                            className="w-full"
+                                            previousNotationForCrossBar={previousCanonicalRiffNotation}
+                                            nextNotationForCrossBar={nextCanonicalRiffNotation}
+                                          />
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
                                 ) : (
                                   <div className="flex items-end gap-1 h-[18px] overflow-visible">
-                                    {showBottomRhythmLane && bar.rhythmLabel && (
+                                    {hasBarLabel && (
                                       <div 
                                         className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'rhythmLabel');
+                                          onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'label');
                                         }}
                                       >
                                         <span className="text-[8px] font-bold text-black uppercase leading-none">
-                                          {bar.rhythmLabel}
+                                          {barLabel}
                                         </span>
                                       </div>
                                     )}
 
-                                    {bar.riff && bar.riffLabel && (
-                                      <div 
-                                        className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
+                                    {(showBottomRhythmLane || bar.riff) && (
+                                      <div
+                                        className={`bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 flex-1 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass}`}
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'riffLabel');
+                                          onElementClick?.(row.sIdx, row.startBIdx + bIdx, showBottomRhythmLane ? 'rhythm' : 'riff');
                                         }}
                                       >
-                                        <span className="text-[8px] font-bold text-black uppercase leading-none">
-                                          {bar.riffLabel}
-                                        </span>
+                                        {showBottomRhythmLane ? (
+                                          <div className="w-full translate-y-[3px]">
+                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} className="w-full" />
+                                          </div>
+                                        ) : (
+                                          <Jianpu
+                                            notation={canonicalRiffNotation}
+                                            compact
+                                            scale={0.86}
+                                            className="w-full"
+                                            previousNotationForCrossBar={previousCanonicalRiffNotation}
+                                            nextNotationForCrossBar={nextCanonicalRiffNotation}
+                                          />
+                                        )}
                                       </div>
                                     )}
-
-                                    <div
-                                      className={`bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 flex-1 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass}`}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onElementClick?.(row.sIdx, row.startBIdx + bIdx, showBottomRhythmLane ? 'rhythm' : 'riff');
-                                      }}
-                                    >
-                                      {showBottomRhythmLane ? (
-                                        <div className="w-full translate-y-[3px]">
-                                          <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} className="w-full" />
-                                        </div>
-                                      ) : (
-                                        <Jianpu
-                                          notation={bar.riff!}
-                                          compact
-                                          scale={0.86}
-                                          className="w-full"
-                                          previousNotationForCrossBar={bIdx > 0 ? row.bars[bIdx - 1]?.riff : undefined}
-                                          nextNotationForCrossBar={bIdx < row.bars.length - 1 ? row.bars[bIdx + 1]?.riff : undefined}
-                                        />
-                                      )}
-                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -1099,8 +1126,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, currentKey, onElementClic
 
           {/* Footer */}
           <div className="shrink-0 mt-4 pt-4 border-t border-gray-100 flex justify-between items-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">
-            <span>Generated by ChordMaster</span>
-            <span>Page {pIdx + 1} of {pages.length}</span>
+            <span>{copy.generatedBy}</span>
+            <span>{language === 'zh' ? `${copy.page} ${pIdx + 1} / ${pages.length}` : `${copy.page} ${pIdx + 1} of ${pages.length}`}</span>
             <span>{new Date().toLocaleDateString()}</span>
           </div>
         </div>

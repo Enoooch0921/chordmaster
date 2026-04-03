@@ -1,5 +1,5 @@
 import React from 'react';
-import { JianpuNoteRange, findJianpuNoteRanges, findJianpuPlaceholderRanges } from '../utils/jianpuUtils';
+import { JianpuDuration, JianpuNoteRange, findJianpuNoteRanges, findJianpuPlaceholderRanges } from '../utils/jianpuUtils';
 
 interface JianpuProps {
   notation?: string;
@@ -59,6 +59,7 @@ interface LayoutPlaceholder {
 }
 
 const TOKEN_WIDTH_UNITS = 100;
+const TOKEN_CAPACITY_UNITS = 4;
 const JIANPU_DIGIT_FONT = '"SF Mono", "Cascadia Mono", "Roboto Mono", "Menlo", "Consolas", ui-monospace, monospace';
 const JIANPU_SYMBOL_FONT = '"Avenir Next", "PingFang TC", "Microsoft JhengHei", ui-sans-serif, system-ui, sans-serif';
 
@@ -115,10 +116,18 @@ const getDurationLevel = (note: Pick<JianpuNoteRange, 'duration'>) => {
   return 0;
 };
 
+const getBaseDurationUnits = (duration: JianpuDuration) => (
+  duration === 'quarter' ? 4 : duration === 'eighth' ? 2 : 1
+);
+
 const getLayoutUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted'>) => {
-  const baseUnits = note.duration === 'quarter' ? 4 : note.duration === 'eighth' ? 2 : 1;
+  const baseUnits = getBaseDurationUnits(note.duration);
   return baseUnits + (note.dotted ? baseUnits / 2 : 0);
 };
+
+const getAnchorOffsetUnits = (note: Pick<JianpuNoteRange, 'duration'> | Pick<LayoutPlaceholder, 'duration'>) => (
+  getBaseDurationUnits(note.duration) / 2
+);
 
 const Jianpu: React.FC<JianpuProps> = ({
   notation = '',
@@ -222,6 +231,7 @@ const Jianpu: React.FC<JianpuProps> = ({
     const notes: LayoutNote[] = [];
     const placeholders: LayoutPlaceholder[] = [];
     const underlines: UnderlineSegment[] = [];
+    let carryUnits = 0;
 
     tokenList.forEach((token, tokenIndex) => {
       const beatStartUnits = tokenIndex * TOKEN_WIDTH_UNITS;
@@ -232,20 +242,18 @@ const Jianpu: React.FC<JianpuProps> = ({
         ...parsedNotes.map((note) => ({ kind: 'note' as const, start: note.start, end: note.end, note })),
         ...parsedPlaceholders.map((placeholder) => ({ kind: 'placeholder' as const, start: placeholder.start, end: placeholder.end, placeholder }))
       ].sort((a, b) => a.start - b.start);
-      if (slotItems.length === 0) return;
-
-      const tokenUnitCount = Math.max(
-        4,
-        slotItems.reduce((sum, item) => (
-          sum + (item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder))
-        ), 0)
-      );
+      if (slotItems.length === 0) {
+        carryUnits = 0;
+        return;
+      }
 
       let localNoteIndex = 0;
       let unitCursor = 0;
       const tokenNotes = slotItems.map((item, slotIndex) => {
         const spanUnits = item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder);
-        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitCursor + (spanUnits / 2)) / tokenUnitCount));
+        const unitStart = carryUnits + unitCursor;
+        const unitEnd = unitStart + spanUnits;
+        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + getAnchorOffsetUnits(item.kind === 'note' ? item.note : item.placeholder)) / TOKEN_CAPACITY_UNITS));
         unitCursor += spanUnits;
 
         if (item.kind === 'placeholder') {
@@ -254,8 +262,8 @@ const Jianpu: React.FC<JianpuProps> = ({
             tokenIndex,
             slotIndex,
             xUnits,
-            unitStart: unitCursor - spanUnits,
-            unitEnd: unitCursor,
+            unitStart,
+            unitEnd,
             underlineLeftUnits: xUnits - metrics.noteHalfWidthUnits,
             underlineRightUnits: xUnits + metrics.noteHalfWidthUnits
           });
@@ -267,12 +275,17 @@ const Jianpu: React.FC<JianpuProps> = ({
           tokenIndex,
           noteIndex: localNoteIndex++,
           xUnits,
-          unitStart: unitCursor - spanUnits,
-          unitEnd: unitCursor,
+          unitStart,
+          unitEnd,
           underlineLeftUnits: xUnits - metrics.noteHalfWidthUnits,
           underlineRightUnits: xUnits + metrics.noteHalfWidthUnits
         };
       }).filter((item): item is LayoutNote => Boolean(item));
+
+      const tokenTotalUnits = slotItems.reduce((sum, item) => (
+        sum + (item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder))
+      ), 0);
+      carryUnits = Math.max(0, tokenTotalUnits - TOKEN_CAPACITY_UNITS);
 
       if (tokenNotes.length > 0) {
         for (let level = 1 as const; level <= 2; level += 1) {
@@ -410,6 +423,7 @@ const Jianpu: React.FC<JianpuProps> = ({
     const nextTokenCount = Math.max(1, nextTokenList.length);
     const nextTotalWidthUnits = nextTokenCount * TOKEN_WIDTH_UNITS;
     const nextNotes: Array<LayoutNote & { xRatio: number }> = [];
+    let carryUnits = 0;
 
     nextTokenList.forEach((token, tokenIndex) => {
       const beatStartUnits = tokenIndex * TOKEN_WIDTH_UNITS;
@@ -420,21 +434,19 @@ const Jianpu: React.FC<JianpuProps> = ({
         ...parsedNotes.map((note) => ({ kind: 'note' as const, start: note.start, end: note.end, note })),
         ...parsedPlaceholders.map((placeholder) => ({ kind: 'placeholder' as const, start: placeholder.start, end: placeholder.end, placeholder }))
       ].sort((a, b) => a.start - b.start);
-      if (slotItems.length === 0) return;
-
-      const tokenUnitCount = Math.max(
-        4,
-        slotItems.reduce((sum, item) => (
-          sum + (item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder))
-        ), 0)
-      );
+      if (slotItems.length === 0) {
+        carryUnits = 0;
+        return;
+      }
 
       let localNoteIndex = 0;
       let unitCursor = 0;
 
       slotItems.forEach((item) => {
         const spanUnits = item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder);
-        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitCursor + (spanUnits / 2)) / tokenUnitCount));
+        const unitStart = carryUnits + unitCursor;
+        const unitEnd = unitStart + spanUnits;
+        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + getAnchorOffsetUnits(item.kind === 'note' ? item.note : item.placeholder)) / TOKEN_CAPACITY_UNITS));
         unitCursor += spanUnits;
 
         if (item.kind !== 'note') return;
@@ -445,12 +457,17 @@ const Jianpu: React.FC<JianpuProps> = ({
           noteIndex: localNoteIndex++,
           xUnits,
           xRatio: xUnits / nextTotalWidthUnits,
-          unitStart: unitCursor - spanUnits,
-          unitEnd: unitCursor,
+          unitStart,
+          unitEnd,
           underlineLeftUnits: xUnits - metrics.noteHalfWidthUnits,
           underlineRightUnits: xUnits + metrics.noteHalfWidthUnits
         });
       });
+
+      const tokenTotalUnits = slotItems.reduce((sum, item) => (
+        sum + (item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder))
+      ), 0);
+      carryUnits = Math.max(0, tokenTotalUnits - TOKEN_CAPACITY_UNITS);
     });
 
     return nextNotes;
@@ -699,20 +716,38 @@ const Jianpu: React.FC<JianpuProps> = ({
         const snappedLowDotTop = useDirectOctaveDotPlacement
           ? Math.round(lowDotCenterY - (snappedOctaveDotSize / 2))
           : lowDotCenterY;
+        const accidentalShiftX = renderMode === 'editor'
+          ? 0
+          : compact
+            ? 0.18 * scale
+            : 0.4 * scale;
+        const accidentalTopY = renderMode === 'editor'
+          ? metrics.digitCenterY
+          : metrics.digitCenterY - (
+            compact
+              ? metrics.digitFontSize * 0.44
+              : metrics.digitFontSize * 0.38
+          );
 
         return (
           <React.Fragment key={`${note.tokenIndex}-${note.noteIndex}-${note.start}`}>
             {note.accidental && (
               <span
-                className="absolute text-slate-500 leading-none"
+                className="absolute leading-none"
                 style={{
                   left: centerPx !== null
-                    ? `${centerPx - metrics.accidentalOffsetX}px`
-                    : `calc(${xPercent}% - ${metrics.accidentalOffsetX}px)`,
-                  top: `${metrics.digitCenterY}px`,
+                    ? `${centerPx - metrics.accidentalOffsetX - accidentalShiftX}px`
+                    : `calc(${xPercent}% - ${metrics.accidentalOffsetX + accidentalShiftX}px)`,
+                  top: `${accidentalTopY}px`,
                   transform: 'translate(-50%, -50%)',
-                  fontSize: `${metrics.accidentalFontSize}px`,
-                  fontFamily: JIANPU_SYMBOL_FONT
+                  fontSize: `${renderMode === 'editor'
+                    ? metrics.accidentalFontSize
+                    : note.accidental === '#'
+                      ? metrics.accidentalFontSize * 1.14
+                      : metrics.accidentalFontSize}px`,
+                  fontFamily: JIANPU_SYMBOL_FONT,
+                  color: note.accidental === '#' ? '#1f2937' : '#020617',
+                  fontWeight: note.accidental === '#' ? 600 : 700
                 }}
               >
                 {note.accidental}
@@ -843,11 +878,14 @@ const Jianpu: React.FC<JianpuProps> = ({
               : null;
             const laneWidth = containerWidth ?? totalWidthUnits;
             const crossBarGap = compact ? 18 : 20;
-            const rawStartX = startNote ? getRenderedNoteCenterX(startNote) : -edgeOvershoot;
+            const slurAnchorXBias = compact ? -2.4 : renderMode === 'editor' ? 0 : -1.2;
+            const rawStartX = startNote
+              ? getRenderedNoteCenterX(startNote) + slurAnchorXBias
+              : -edgeOvershoot;
             const rawEndX = crossBarNextEnd
-              ? laneWidth + crossBarGap + (crossBarNextEnd.xRatio * laneWidth)
+              ? laneWidth + crossBarGap + (crossBarNextEnd.xRatio * laneWidth) + slurAnchorXBias
               : endNote
-                ? getRenderedNoteCenterX(endNote)
+                ? getRenderedNoteCenterX(endNote) + slurAnchorXBias
                 : laneWidth + edgeOvershoot;
             const startX = isSelfSlur ? rawStartX - (selfSpan / 2) : rawStartX;
             const endX = isSelfSlur ? rawEndX + (selfSpan / 2) : rawEndX;

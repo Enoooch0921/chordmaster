@@ -4,6 +4,8 @@
  */
 
 export type Key = 'C' | 'C#' | 'Db' | 'D' | 'Eb' | 'E' | 'F' | 'F#' | 'Gb' | 'G' | 'G#' | 'Ab' | 'A' | 'Bb' | 'B';
+export type AppLanguage = 'en' | 'zh';
+export type BarNumberMode = 'none' | 'line-start' | 'all';
 export type NashvilleFontPreset =
   | 'ibm-plex-serif'
   | 'source-serif-4'
@@ -16,6 +18,7 @@ export interface Bar {
   timeSignature?: string; // Per-bar override, e.g., "2/4"
   riff?: string;    // e.g., "3 - 4 - 5 - 7 1"
   rhythm?: string;  // e.g., "q e e qr"
+  label?: string; // Shared lane label, e.g. "Pno", "Dr", "EG"
   riffLabel?: string; // e.g., "Riff", "Pno", "EG"
   rhythmLabel?: string; // e.g., "Dr", "Rhythm", "Clap"
   annotation?: string; // e.g., "Kick In", "8 beat build"
@@ -44,6 +47,7 @@ export interface Song {
   timeSignature: string; // e.g., "4/4"
   useSectionColors?: boolean;
   showNashvilleNumbers?: boolean;
+  barNumberMode?: BarNumberMode;
   nashvilleFontPreset?: NashvilleFontPreset;
   capo?: number;
   sections: Section[];

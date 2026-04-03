@@ -1,10 +1,14 @@
+import { parseTimeSignature } from './rhythmUtils';
+
 export type JianpuDuration = 'quarter' | 'eighth' | 'sixteenth';
 export type JianpuOctave = 'low' | 'mid' | 'high';
+export type JianpuAccidental = '' | '#' | 'b';
 
 export interface JianpuInputMode {
   duration: JianpuDuration;
   octave: JianpuOctave;
   dotted: boolean;
+  accidental: JianpuAccidental;
 }
 
 export interface JianpuNoteRange {
@@ -64,6 +68,41 @@ function buildOctaveMarks(octave: JianpuOctave, pitch: string): string {
   if (octave === 'high') return "'";
   if (octave === 'low') return ',';
   return '';
+}
+
+function buildAccidentalPrefix(accidental: string, pitch: string): string {
+  if (pitch === '0' || pitch === '-') return '';
+  return accidental;
+}
+
+export function getCanonicalJianpuBeatTokens(notation: string | undefined, timeSignature: string): string[] {
+  const { beats } = parseTimeSignature(timeSignature);
+  const normalized = notation?.replace(/\s+/g, ' ').trim() || '';
+  const rawTokens = normalized.includes('|')
+    ? normalized.split('|').map((token) => token.trim())
+    : normalized
+      ? normalized.split(' ').map((token) => token.trim())
+      : [];
+
+  return Array.from({ length: beats }, (_, index) => rawTokens[index] || '');
+}
+
+export function serializeJianpuBeatTokens(tokens: string[], trimTrailingEmpty = false): string {
+  if (!trimTrailingEmpty) {
+    return tokens.join(' | ');
+  }
+
+  const lastNonEmptyIndex = tokens.reduce((last, token, index) => (token.trim() ? index : last), -1);
+  if (lastNonEmptyIndex === -1) return '';
+  return tokens.slice(0, lastNonEmptyIndex + 1).join(' | ');
+}
+
+export function getCanonicalJianpuNotation(
+  notation: string | undefined,
+  timeSignature: string,
+  trimTrailingEmpty = false
+): string {
+  return serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(notation, timeSignature), trimTrailingEmpty);
 }
 
 export function findJianpuNoteRanges(value: string): JianpuNoteRange[] {
@@ -134,7 +173,7 @@ export function replaceJianpuRange(value: string, start: number, end: number, re
 }
 
 export function buildJianpuNoteFromMode(pitch: string, mode: JianpuInputMode): string {
-  return `${pitch}${buildOctaveMarks(mode.octave, pitch)}${DURATION_MARKERS[mode.duration]}${mode.dotted ? '.' : ''}`;
+  return `${buildAccidentalPrefix(mode.accidental, pitch)}${pitch}${buildOctaveMarks(mode.octave, pitch)}${DURATION_MARKERS[mode.duration]}${mode.dotted ? '.' : ''}`;
 }
 
 export function buildJianpuPlaceholder(duration: JianpuDuration, dotted = false): string {
@@ -156,5 +195,5 @@ export function rebuildJianpuNote(note: JianpuNoteRange, overrides: Partial<Pick
   const duration = overrides.duration ?? note.duration;
   const octave = overrides.octave ?? note.octave;
 
-  return `${slurStart ? '(' : ''}${accidental}${pitch}${buildOctaveMarks(octave, pitch)}${DURATION_MARKERS[duration]}${dotted ? '.' : ''}${slurEnd ? ')' : ''}`;
+  return `${slurStart ? '(' : ''}${buildAccidentalPrefix(accidental, pitch)}${pitch}${buildOctaveMarks(octave, pitch)}${DURATION_MARKERS[duration]}${dotted ? '.' : ''}${slurEnd ? ')' : ''}`;
 }

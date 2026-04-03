@@ -6,10 +6,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { Song, Key } from './types';
+import { Song, Key, AppLanguage } from './types';
 import { getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
-import { APP_NAME, APP_VERSION, APP_GITHUB_URL, ABOUT_SECTIONS, HELP_SECTIONS, CHANGELOG_ENTRIES } from './constants/appMeta';
+import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
+import { getUiCopy } from './constants/i18n';
 import ChordSheet from './components/ChordSheet';
 import SongEditor from './components/SongEditor';
 import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink } from 'lucide-react';
@@ -58,7 +59,7 @@ const formatSongLibraryCredits = (song: Song) => {
   return parts;
 };
 
-const getSongLibraryMeta = (song: Song) => {
+const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
   const creditParts = formatSongLibraryCredits(song);
   const primary = `${song.currentKey} · ${song.tempo} BPM · ${song.timeSignature}`;
   const isShuffle = song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle';
@@ -66,8 +67,8 @@ const getSongLibraryMeta = (song: Song) => {
   if (creditParts.length > 0 || isShuffle) {
     return {
       primary,
-      secondary: [isShuffle ? 'Shuffle' : '', ...creditParts].filter(Boolean).join(' · '),
-      tooltip: [primary, isShuffle ? 'Shuffle' : '', ...creditParts].filter(Boolean).join('\n'),
+      secondary: [isShuffle ? shuffleLabel : '', ...creditParts].filter(Boolean).join(' · '),
+      tooltip: [primary, isShuffle ? shuffleLabel : '', ...creditParts].filter(Boolean).join('\n'),
     };
   }
 
@@ -85,6 +86,7 @@ const INITIAL_SONG: Song = {
   currentKey: "E",
   tempo: 74,
   timeSignature: "4/4",
+  barNumberMode: 'none',
   nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
   sections: [
     {
@@ -248,22 +250,22 @@ const createStoredSong = (song: Song, id = createSongId()): StoredSong => ({
   updatedAt: Date.now()
 });
 
-const buildDuplicateSongTitle = (existingSongs: StoredSong[], originalTitle: string) => {
-  const baseTitle = originalTitle.trim() || 'Untitled Song';
+const buildDuplicateSongTitle = (existingSongs: StoredSong[], originalTitle: string, untitledSong: string, copyLabel: string) => {
+  const baseTitle = originalTitle.trim() || untitledSong;
   const existingTitles = new Set(existingSongs.map((song) => song.title.trim().toLowerCase()));
 
   let copyIndex = 1;
-  let nextTitle = `${baseTitle} Copy`;
+  let nextTitle = `${baseTitle} ${copyLabel}`;
 
   while (existingTitles.has(nextTitle.trim().toLowerCase())) {
     copyIndex += 1;
-    nextTitle = `${baseTitle} Copy ${copyIndex}`;
+    nextTitle = `${baseTitle} ${copyLabel} ${copyIndex}`;
   }
 
   return nextTitle;
 };
 
-const createEmptySong = (title = 'Untitled Song'): StoredSong =>
+const createEmptySong = (title: string): StoredSong =>
   createStoredSong({
     title,
     shuffle: false,
@@ -271,6 +273,7 @@ const createEmptySong = (title = 'Untitled Song'): StoredSong =>
     currentKey: 'C',
     tempo: 72,
     timeSignature: '4/4',
+    barNumberMode: 'none',
     nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
     sections: [
       {
@@ -338,12 +341,12 @@ const loadSongLibrary = () => {
   }
 };
 
-const formatSavedAt = (timestamp: number | null) => {
+const formatSavedAt = (timestamp: number | null, language: AppLanguage) => {
   if (!timestamp) {
-    return 'Not saved yet';
+    return language === 'zh' ? '尚未儲存' : 'Not saved yet';
   }
 
-  return `Saved ${new Date(timestamp).toLocaleTimeString([], {
+  return `${language === 'zh' ? '已儲存 ' : 'Saved '}${new Date(timestamp).toLocaleTimeString(language === 'zh' ? 'zh-TW' : 'en-US', {
     hour: '2-digit',
     minute: '2-digit'
   })}`;
@@ -457,6 +460,7 @@ const loadGoogleIdentityScript = async () => {
 
 export default function App() {
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
+  const [language, setLanguage] = useState<AppLanguage>('zh');
   const initialLibraryRef = useRef(loadSongLibrary());
   const [songs, setSongs] = useState<StoredSong[]>(initialLibraryRef.current.songs);
   const [savedSongs, setSavedSongs] = useState<StoredSong[]>(cloneSong(initialLibraryRef.current.songs));
@@ -490,6 +494,8 @@ export default function App() {
   const [scale, setScale] = useState(1);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? '';
   const logoSrc = `${import.meta.env.BASE_URL}logo.svg`;
+  const copy = getUiCopy(language);
+  const { aboutSections, helpSections, changelogEntries } = getLocalizedAppMeta(language);
   const showGoogleAuth = Boolean(googleClientId);
   const song = songs.find((item) => item.id === selectedSongId) ?? songs[0];
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
@@ -497,10 +503,11 @@ export default function App() {
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
   const currentSidebarWidth = isSidebarExpanded ? sidebarWidth : COLLAPSED_SIDEBAR_WIDTH;
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
-  const activeAppViewLabel = activeAppView === 'about' ? 'About' : activeAppView === 'help' ? 'Help' : song.title || 'Untitled Song';
+  const activeAppViewLabel = activeAppView === 'about' ? copy.about : activeAppView === 'help' ? copy.help : song.title || copy.untitledSong;
   const normalizedLibrarySearchQuery = librarySearchQuery.trim().toLowerCase();
   const currentCapo = song.capo || 0;
   const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
+  const duplicateLabel = language === 'zh' ? '副本' : 'Copy';
   const filteredSongs = songs.filter((item) => {
     if (!normalizedLibrarySearchQuery) {
       return true;
@@ -523,6 +530,9 @@ export default function App() {
 
     return librarySearchText.includes(normalizedLibrarySearchQuery);
   });
+
+  const createNewSongTitle = (index: number) => language === 'zh' ? `新歌 ${index}` : `New Song ${index}`;
+  const createDefaultSong = (index = 1) => createEmptySong(createNewSongTitle(index));
 
   useEffect(() => {
     if (!song) {
@@ -678,9 +688,7 @@ export default function App() {
       return;
     }
 
-    const shouldSave = window.confirm(
-      `Save changes before switching songs?\n\nPress OK to save. Press Cancel to discard unsaved changes.`
-    );
+    const shouldSave = window.confirm(copy.confirmSaveBeforeSwitch);
 
     if (shouldSave) {
       persistSongLibrary(songs, nextSongId);
@@ -770,7 +778,7 @@ export default function App() {
     const normalizedOffset = rawOffset > 6 ? rawOffset - 12 : rawOffset < -6 ? rawOffset + 12 : rawOffset;
 
     if (normalizedOffset === 0) {
-      return 'Original';
+      return copy.original;
     }
 
     return normalizedOffset > 0 ? `+${normalizedOffset}` : `${normalizedOffset}`;
@@ -805,7 +813,7 @@ export default function App() {
   };
 
   const handleCreateSong = () => {
-    const newSong = createEmptySong(`New Song ${songs.length + 1}`);
+    const newSong = createDefaultSong(songs.length + 1);
     const nextSongs = [newSong, ...songs];
     setSongs(nextSongs);
     setSelectedSongId(newSong.id);
@@ -852,17 +860,24 @@ export default function App() {
       const importedSongs = Array.isArray(parsedContent) ? parsedContent : parsedContent.songs;
 
       if (!Array.isArray(importedSongs) || importedSongs.length === 0) {
-        window.alert('The selected JSON file does not contain any songs.');
+        window.alert(copy.importEmptyError);
         return;
       }
 
-      const nextSongs = importedSongs.map((item, index) => ({
-        ...cloneSong(item),
-        id: item.id || `song-imported-${Date.now()}-${index + 1}`,
-        updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now()
-      })) as StoredSong[];
+      const nextSongs = importedSongs.map((item, index) => {
+        const storedLikeItem = item as Partial<StoredSong>;
+        return {
+          ...cloneSong(item),
+          id: storedLikeItem.id || `song-imported-${Date.now()}-${index + 1}`,
+          updatedAt: typeof storedLikeItem.updatedAt === 'number' ? storedLikeItem.updatedAt : Date.now()
+        };
+      }) as StoredSong[];
 
-      const confirmed = window.confirm(`Import ${nextSongs.length} songs and replace the current Song Library?`);
+      const confirmed = window.confirm(
+        language === 'zh'
+          ? `要匯入 ${nextSongs.length} 首歌並取代目前的 Song Library 嗎？`
+          : `Import ${nextSongs.length} songs and replace the current Song Library?`
+      );
       if (!confirmed) {
         return;
       }
@@ -875,7 +890,7 @@ export default function App() {
       setIsLibraryEditing(false);
       persistSongLibrary(nextSongs, nextSelectedSongId);
     } catch {
-      window.alert('Unable to import this JSON file. Please check the file format and try again.');
+      window.alert(copy.importInvalidError);
     }
   };
 
@@ -887,7 +902,7 @@ export default function App() {
 
     const duplicatedSong = createStoredSong({
       ...cloneSong(targetSong),
-      title: buildDuplicateSongTitle(songs, targetSong.title)
+      title: buildDuplicateSongTitle(songs, targetSong.title, copy.untitledSong, duplicateLabel)
     });
 
     setSongs((currentSongs) => {
@@ -925,7 +940,11 @@ export default function App() {
       return;
     }
 
-    const confirmed = window.confirm(`Delete "${targetSong.title || 'Untitled Song'}"?`);
+    const confirmed = window.confirm(
+      language === 'zh'
+        ? `要刪除「${targetSong.title || copy.untitledSong}」嗎？`
+        : `Delete "${targetSong.title || copy.untitledSong}"?`
+    );
     if (!confirmed) {
       return;
     }
@@ -933,7 +952,7 @@ export default function App() {
     const remainingSongs = songs.filter((item) => item.id !== songId);
 
     if (remainingSongs.length === 0) {
-      const replacementSong = createEmptySong('New Song 1');
+      const replacementSong = createDefaultSong(1);
       setSongs([replacementSong]);
       setSelectedSongId(replacementSong.id);
       setSongHistories({});
@@ -966,7 +985,11 @@ export default function App() {
       return;
     }
 
-    const confirmed = window.confirm(`Delete ${selectedSongIdsForBulkDelete.length} selected songs?`);
+    const confirmed = window.confirm(
+      language === 'zh'
+        ? `要刪除選取的 ${selectedSongIdsForBulkDelete.length} 首歌曲嗎？`
+        : `Delete ${selectedSongIdsForBulkDelete.length} selected songs?`
+    );
     if (!confirmed) {
       return;
     }
@@ -975,7 +998,7 @@ export default function App() {
     const remainingSongs = songs.filter((item) => !selectedIdSet.has(item.id));
 
     if (remainingSongs.length === 0) {
-      const replacementSong = createEmptySong('New Song 1');
+      const replacementSong = createDefaultSong(1);
       setSongs([replacementSong]);
       setSelectedSongId(replacementSong.id);
       setSongHistories({});
@@ -1130,7 +1153,7 @@ export default function App() {
     } catch (error) {
       console.error('PDF export failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Please try again.';
-      window.alert(`Unable to export PDF. ${errorMessage}`);
+      window.alert(`${copy.pdfExportError} ${errorMessage}`);
     } finally {
       captureHost.remove();
       setIsExportingPdf(false);
@@ -1243,7 +1266,7 @@ export default function App() {
             callback: (response) => {
               const nextSession = response.credential ? parseGoogleCredential(response.credential) : null;
               if (!nextSession) {
-                setGoogleAuthError('Unable to read the Google account response.');
+                setGoogleAuthError(copy.googleCredentialError);
                 return;
               }
 
@@ -1274,7 +1297,7 @@ export default function App() {
         setGoogleAuthError(null);
       } catch {
         if (!isCancelled) {
-          setGoogleAuthError('Failed to load Google sign-in.');
+          setGoogleAuthError(copy.googleLoadError);
         }
       }
     };
@@ -1284,9 +1307,9 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [googleClientId, googleUser, showGoogleAuth]);
+  }, [copy.googleCredentialError, copy.googleLoadError, googleClientId, googleUser, showGoogleAuth]);
 
-  const handleElementClick = (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'riffLabel' | 'rhythmLabel' | 'annotation' | 'rhythm') => {
+  const handleElementClick = (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm') => {
     if (!song) {
       return;
     }
@@ -1379,8 +1402,8 @@ export default function App() {
             type="button"
             onMouseDown={handleSidebarResizeStart}
             className="absolute right-0 top-1/2 z-50 h-14 w-5 -translate-y-1/2 cursor-col-resize bg-transparent"
-            title="Resize song list"
-            aria-label="Resize song list"
+            title={copy.resizeSongList}
+            aria-label={copy.resizeSongList}
           >
             <span className="absolute right-[2px] top-1/2 h-12 w-[8px] -translate-y-1/2 rounded-full border border-indigo-100 bg-white shadow-sm" />
           </button>
@@ -1405,7 +1428,7 @@ export default function App() {
               className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
                 isSidebarExpanded ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
-              title={isSidebarPinned ? 'Collapse Song List' : 'Pin Song List'}
+              title={isSidebarPinned ? copy.collapseSongList : copy.pinSongList}
             >
               {isSidebarExpanded ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
             </button>
@@ -1414,14 +1437,14 @@ export default function App() {
               type="button"
               onClick={handleCreateSong}
               className="w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
-              title="New Song"
+              title={copy.newSong}
             >
               <Plus size={18} />
             </button>
 
             <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
               <div className="flex flex-col items-center gap-1 text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">
-                <span>Songs</span>
+                <span>{copy.songs}</span>
                 <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs text-gray-700">
                   {songs.length}
                 </div>
@@ -1435,8 +1458,8 @@ export default function App() {
                       ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                       : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                   }`}
-                  title={activeAppView === 'about' ? 'Back to Preview' : 'About'}
-                  aria-label={activeAppView === 'about' ? 'Back to Preview' : 'About'}
+                  title={activeAppView === 'about' ? copy.backToPreview : copy.about}
+                  aria-label={activeAppView === 'about' ? copy.backToPreview : copy.about}
                 >
                   <Info size={18} />
                 </button>
@@ -1448,8 +1471,8 @@ export default function App() {
                       ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                       : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                   }`}
-                  title={activeAppView === 'help' ? 'Back to Preview' : 'Help'}
-                  aria-label={activeAppView === 'help' ? 'Back to Preview' : 'Help'}
+                  title={activeAppView === 'help' ? copy.backToPreview : copy.help}
+                  aria-label={activeAppView === 'help' ? copy.backToPreview : copy.help}
                 >
                   <BookOpen size={18} />
                 </button>
@@ -1473,7 +1496,7 @@ export default function App() {
                   <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
                   <div className="text-lg font-bold tracking-tight">ChordMaster</div>
                 </div>
-                <div className="text-xs font-medium text-gray-500">Song Library</div>
+                <div className="text-xs font-medium text-gray-500">{copy.songLibrary}</div>
               </div>
               <div className="mt-4 flex gap-2">
                 <button
@@ -1482,7 +1505,7 @@ export default function App() {
                   className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
                 >
                   <Plus size={16} />
-                  <span>New Song</span>
+                  <span>{copy.newSong}</span>
                 </button>
                 <button
                   type="button"
@@ -1492,7 +1515,7 @@ export default function App() {
               }`}
             >
                   <Edit3 size={16} />
-                  <span>{isLibraryEditing ? 'Done' : 'Manage'}</span>
+                  <span>{isLibraryEditing ? copy.done : copy.manage}</span>
                 </button>
               </div>
               <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
@@ -1501,7 +1524,7 @@ export default function App() {
                   type="text"
                   value={librarySearchQuery}
                   onChange={(event) => setLibrarySearchQuery(event.target.value)}
-                  placeholder="Search songs"
+                  placeholder={copy.searchSongs}
                   className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                 />
               </label>
@@ -1512,7 +1535,7 @@ export default function App() {
                   className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
                 >
                   <Download size={15} />
-                  <span>Export JSON</span>
+                  <span>{copy.exportJson}</span>
                 </button>
                 <button
                   type="button"
@@ -1520,7 +1543,7 @@ export default function App() {
                   className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
                 >
                   <Upload size={15} />
-                  <span>Import JSON</span>
+                  <span>{copy.importJson}</span>
                 </button>
                 <input
                   ref={importLibraryInputRef}
@@ -1538,14 +1561,14 @@ export default function App() {
                   className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <Trash2 size={16} />
-                  <span>Delete Selected ({selectedSongIdsForBulkDelete.length})</span>
+                  <span>{`${copy.deleteSelected} (${selectedSongIdsForBulkDelete.length})`}</span>
                 </button>
               )}
             </div>
 
             <div className="px-3 py-3 border-b border-gray-100">
               <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
-                <span>Songs</span>
+                <span>{copy.songs}</span>
                 <span>{normalizedLibrarySearchQuery ? `${filteredSongs.length}/${songs.length}` : songs.length}</span>
               </div>
             </div>
@@ -1553,12 +1576,12 @@ export default function App() {
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {filteredSongs.length === 0 && (
                 <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-                  No songs match your search.
+                  {copy.noSongsMatch}
                 </div>
               )}
               {filteredSongs.map((item) => {
                 const isActive = item.id === song.id;
-                const libraryMeta = getSongLibraryMeta(item);
+                const libraryMeta = getSongLibraryMeta(item, copy.editor.shuffle);
 
                 return (
                   <div
@@ -1590,7 +1613,7 @@ export default function App() {
                                   ? 'border-indigo-200 bg-white text-indigo-900 focus:border-indigo-400'
                                   : 'border-gray-200 bg-white text-gray-800 focus:border-gray-400'
                               }`}
-                              placeholder="Untitled Song"
+                              placeholder={copy.untitledSong}
                             />
                             <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
                               {libraryMeta.primary}
@@ -1618,7 +1641,7 @@ export default function App() {
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className={`text-sm font-bold leading-snug whitespace-normal break-words ${isActive ? 'text-indigo-900' : 'text-gray-800'}`}>
-                              {item.title || 'Untitled Song'}
+                              {item.title || copy.untitledSong}
                             </div>
                             <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
                               {libraryMeta.primary}
@@ -1641,8 +1664,8 @@ export default function App() {
                           setIsKeyMenuOpen(false);
                         }}
                         className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                        aria-label={`Duplicate ${item.title || 'Untitled Song'}`}
-                        title={`Duplicate ${item.title || 'Untitled Song'}`}
+                        aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                        title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
                       >
                         <Copy size={13} />
                       </button>
@@ -1655,8 +1678,8 @@ export default function App() {
                           setIsKeyMenuOpen(false);
                         }}
                         className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                        aria-label={`Edit ${item.title || 'Untitled Song'}`}
-                        title={`Edit ${item.title || 'Untitled Song'}`}
+                        aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
+                        title={`${copy.edit} ${item.title || copy.untitledSong}`}
                       >
                         <Edit3 size={13} />
                       </button>
@@ -1667,8 +1690,8 @@ export default function App() {
                           handleDeleteSong(item.id);
                         }}
                         className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-rose-600"
-                        aria-label={`Delete ${item.title || 'Untitled Song'}`}
-                        title={`Delete ${item.title || 'Untitled Song'}`}
+                        aria-label={`${copy.delete} ${item.title || copy.untitledSong}`}
+                        title={`${copy.delete} ${item.title || copy.untitledSong}`}
                       >
                         <Trash2 size={13} />
                       </button>
@@ -1680,12 +1703,12 @@ export default function App() {
 
             <div className="border-t border-gray-200 px-5 py-4">
               <div className={`text-xs font-medium ${libraryIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
-                {libraryIsDirty ? 'Unsaved changes' : formatSavedAt(lastSavedAt)}
+                {libraryIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
               </div>
               <div className="mt-1 text-xs text-gray-400">
                 {isAutoSaveEnabled
-                  ? 'Changes are saved automatically in this browser.'
-                  : 'Press Save to keep changes in this browser.'}
+                  ? copy.autoSavedHint
+                  : copy.manualSaveHint}
               </div>
               <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
                 v{APP_VERSION}
@@ -1699,7 +1722,7 @@ export default function App() {
       <main data-main-panel className="flex-1 flex flex-col min-w-0">
         <div className="flex-shrink-0 border-b border-amber-200 bg-amber-50 px-8 py-2.5">
           <p className="text-sm font-medium text-amber-800">
-            Test version: changes may not be preserved permanently. Please export your Song Library as JSON before leaving.
+            {copy.testVersionWarning}
           </p>
         </div>
 
@@ -1718,6 +1741,28 @@ export default function App() {
           </div>
 
           <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setLanguage('zh')}
+                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                    language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  中文
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('en')}
+                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                    language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  EN
+                </button>
+              </div>
+            </div>
             {isSheetView ? (
             <div className="flex items-center gap-3 flex-wrap justify-end">
               {showGoogleAuth && googleUser ? (
@@ -1741,8 +1786,8 @@ export default function App() {
                     type="button"
                     onClick={handleGoogleSignOut}
                     className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-gray-500 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                    title="Sign out"
-                    aria-label="Sign out"
+                    title={copy.signOut}
+                    aria-label={copy.signOut}
                   >
                     <LogOut size={14} />
                   </button>
@@ -1766,7 +1811,7 @@ export default function App() {
                 }`}
               >
                 <Edit3 size={16} />
-                <span>{isEditing ? 'Close Editor' : 'Open Editor'}</span>
+                <span>{isEditing ? copy.closeEditor : copy.openEditor}</span>
               </button>
 
               <button
@@ -1778,11 +1823,11 @@ export default function App() {
                     : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                 }`}
               >
-                <span>Auto Save</span>
+                <span>{copy.autoSave}</span>
                 <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
                   isAutoSaveEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
                 }`}>
-                  {isAutoSaveEnabled ? 'On' : 'Off'}
+                  {isAutoSaveEnabled ? copy.on : copy.off}
                 </span>
               </button>
 
@@ -1800,7 +1845,7 @@ export default function App() {
               >
                 <span className="flex items-center justify-between gap-1.5">
                   <span>{song.currentKey}</span>
-                  <span className={`${getKeyOptionMeta(song.currentKey) === 'Original' ? 'text-[10px] text-indigo-500' : 'text-xs text-gray-500'}`}>
+                  <span className={`${song.currentKey === song.originalKey ? 'text-[10px] text-indigo-500' : 'text-xs text-gray-500'}`}>
                     {getKeyOptionMeta(song.currentKey)}
                   </span>
                 </span>
@@ -1811,11 +1856,11 @@ export default function App() {
               >
                 <ChevronRight size={16} />
               </button>
-              {isKeyMenuOpen && (
-                <div className="absolute top-full left-1/2 z-50 mt-2 w-[184px] -translate-x-1/2 rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl">
-                  <div className="mb-2 flex items-center justify-between px-1">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">Key</div>
-                    <div className={`text-[10px] font-bold ${getKeyOptionMeta(song.currentKey) === 'Original' ? 'text-indigo-500' : 'text-gray-500'}`}>
+                {isKeyMenuOpen && (
+                  <div className="absolute top-full left-1/2 z-50 mt-2 w-[184px] -translate-x-1/2 rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl">
+                    <div className="mb-2 flex items-center justify-between px-1">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">{copy.key}</div>
+                    <div className={`text-[10px] font-bold ${song.currentKey === song.originalKey ? 'text-indigo-500' : 'text-gray-500'}`}>
                       {getKeyOptionMeta(song.currentKey)}
                     </div>
                   </div>
@@ -1938,7 +1983,7 @@ export default function App() {
                 }`}
               >
                 <Save size={16} />
-                <span>{libraryIsDirty ? 'Save Changes' : 'Saved'}</span>
+                <span>{libraryIsDirty ? copy.saveChanges : copy.saved}</span>
               </button>
               
               <button
@@ -1952,21 +1997,23 @@ export default function App() {
                 }`}
               >
                 <Save size={16} />
-                <span>{isExportingPdf ? 'Preparing PDF...' : 'Export PDF'}</span>
+                <span>{isExportingPdf ? copy.preparingPdf : copy.exportPdf}</span>
               </button>
             </div>
             ) : (
             <div className="text-right">
               <div className="text-sm font-bold text-gray-700">
-                {activeAppView === 'about' ? '關於 ChordMaster' : '使用說明'}
+                {activeAppView === 'about'
+                  ? (language === 'zh' ? '關於 ChordMaster' : 'About ChordMaster')
+                  : (language === 'zh' ? '使用說明' : 'Help')}
               </div>
               <div className="text-[11px] font-medium text-gray-400">
-                Version {APP_VERSION}
+                {copy.version} {APP_VERSION}
               </div>
             </div>
             )}
             <p className="text-[11px] font-medium text-gray-400">
-              {isSheetView ? 'Exports The Preview Directly To A PDF File.' : '版本說明與操作方式會集中顯示在這裡。'}
+              {isSheetView ? copy.previewHint : copy.infoHint}
             </p>
           </div>
         </header>
@@ -1990,6 +2037,7 @@ export default function App() {
                     <SongEditor
                       key={song.id}
                       song={song}
+                      language={language}
                       history={currentSongHistory}
                       onUndo={handleUndo}
                       onRedo={handleRedo}
@@ -2006,7 +2054,7 @@ export default function App() {
                     <button
                       onClick={handleScrollEditorToTop}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
-                      title="Back to Top"
+                      title={copy.backToTop}
                     >
                       <ChevronUp size={18} />
                     </button>
@@ -2014,7 +2062,7 @@ export default function App() {
                       onClick={handleUndo}
                       disabled={currentSongHistory.past.length === 0}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
-                      title="Undo (Cmd/Ctrl+Z)"
+                      title={copy.undo}
                     >
                       <Undo2 size={18} />
                     </button>
@@ -2022,7 +2070,7 @@ export default function App() {
                       onClick={handleRedo}
                       disabled={currentSongHistory.future.length === 0}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
-                      title="Redo (Shift+Cmd/Ctrl+Z)"
+                      title={copy.redo}
                     >
                       <Redo2 size={18} />
                     </button>
@@ -2052,6 +2100,7 @@ export default function App() {
             >
               <ChordSheet 
                 song={song} 
+                language={language}
                 currentKey={song.currentKey} 
                 onElementClick={handleElementClick}
                 highlightedSectionIds={highlightedSectionIds}
@@ -2068,25 +2117,31 @@ export default function App() {
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="max-w-2xl">
                   <div className="text-xs font-bold uppercase tracking-[0.24em] text-indigo-500">
-                    {activeAppView === 'about' ? 'About' : 'Help'}
+                    {activeAppView === 'about' ? copy.about : copy.help}
                   </div>
                   <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-gray-900">
-                    {activeAppView === 'about' ? 'ChordMaster 關於頁' : 'ChordMaster 使用說明'}
+                    {activeAppView === 'about'
+                      ? (language === 'zh' ? 'ChordMaster 關於頁' : 'ChordMaster About')
+                      : (language === 'zh' ? 'ChordMaster 使用說明' : 'ChordMaster Help')}
                   </h1>
                   <p className="mt-3 text-sm leading-7 text-gray-600">
                     {activeAppView === 'about'
-                      ? '這裡集中放目前版本、產品定位與近期更新。之後每次加新功能，只要更新專案版本號，介面會同步顯示。'
-                      : '這裡放目前最重要的操作方式，方便你快速回顧編輯流程、快速鍵與備份方法。'}
+                      ? (language === 'zh'
+                        ? '這裡集中放目前版本、產品定位與近期更新。之後每次加新功能，只要更新專案版本號，介面會同步顯示。'
+                        : 'This page centralizes the current version, product framing, and recent changes. Future features only need a version bump to stay reflected in the UI.')
+                      : (language === 'zh'
+                        ? '這裡放目前最重要的操作方式，方便你快速回顧編輯流程、快速鍵與備份方法。'
+                        : 'This page summarizes the most important operating flow so you can quickly review editing, shortcuts, and backup habits.')}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-right">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-indigo-500">Current Version</div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-indigo-500">{copy.currentVersion}</div>
                   <div className="mt-1 text-2xl font-bold text-indigo-900">v{APP_VERSION}</div>
                 </div>
               </div>
             </section>
 
-            {(activeAppView === 'about' ? ABOUT_SECTIONS : HELP_SECTIONS).map((section) => (
+            {(activeAppView === 'about' ? aboutSections : helpSections).map((section) => (
               <section
                 key={section.title}
                 className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7"
@@ -2110,9 +2165,11 @@ export default function App() {
               <section className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="max-w-2xl">
-                    <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">GitHub</h2>
+                    <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">{copy.github}</h2>
                     <p className="mt-2 text-sm leading-7 text-gray-600">
-                      如果你想看原始碼、追蹤更新，或之後要整理 release note，這裡可以直接跳到 GitHub repository。
+                      {language === 'zh'
+                        ? '如果你想看原始碼、追蹤更新，或之後要整理 release note，這裡可以直接跳到 GitHub repository。'
+                        : 'Use this link to inspect the source, track updates, or review release notes in the GitHub repository.'}
                     </p>
                   </div>
                   <a
@@ -2121,7 +2178,7 @@ export default function App() {
                     rel="noreferrer"
                     className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-bold text-gray-800 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
                   >
-                    <span>Open GitHub</span>
+                    <span>{copy.openGithub}</span>
                     <ExternalLink size={16} />
                   </a>
                 </div>
@@ -2134,13 +2191,13 @@ export default function App() {
             {activeAppView === 'about' && (
               <section className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">Changelog</h2>
+                  <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">{copy.changelog}</h2>
                   <div className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-500">
-                    每次新增功能就同步 bump version
+                    {copy.bumpVersionHint}
                   </div>
                 </div>
                 <div className="mt-5 space-y-4">
-                  {CHANGELOG_ENTRIES.map((entry) => (
+                  {changelogEntries.map((entry) => (
                     <div key={`${entry.version}-${entry.title}`} className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-indigo-600 shadow-sm">

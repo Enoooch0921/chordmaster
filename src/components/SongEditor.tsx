@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Song, Section, Bar, Key } from '../types';
+import { Song, Section, Bar, Key, AppLanguage, BarNumberMode } from '../types';
 import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, LayoutGroup } from 'motion/react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
+import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { getSectionColor, normalizeChordEnharmonic } from '../utils/musicUtils';
-import { JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, rebuildJianpuNote, replaceJianpuRange } from '../utils/jianpuUtils';
+import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
 
 interface Props {
   song: Song;
+  language: AppLanguage;
   history: { past: Song[]; future: Song[] };
   onUndo: () => void;
   onRedo: () => void;
@@ -160,14 +162,25 @@ const getAccentHighlight = (accent: string) => {
   }
 };
 
-const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, activeSectionId = null, onActiveSectionChange, activeBar = null, onActiveBarChange }) => {
+const getBarDisplayLabel = (bar?: Bar) => (
+  bar?.label?.trim() || bar?.riffLabel?.trim() || bar?.rhythmLabel?.trim() || ''
+);
+
+const normalizeEditableJianpuAccidental = (accidental: string | undefined): JianpuAccidental => (
+  accidental === '#' ? '#' : accidental === 'b' ? 'b' : ''
+);
+
+const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, onChange, activeSectionId = null, onActiveSectionChange, activeBar = null, onActiveBarChange }) => {
+  const copy = getUiCopy(language);
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [rhythmCursor, setRhythmCursor] = useState<RhythmCursor | null>(null);
   const [jianpuCursor, setJianpuCursor] = useState<JianpuCursor | null>(null);
-  const [jianpuInputMode, setJianpuInputMode] = useState<JianpuInputMode>({ duration: 'quarter', octave: 'mid', dotted: false });
+  const [jianpuInputMode, setJianpuInputMode] = useState<JianpuInputMode>({ duration: 'quarter', octave: 'mid', dotted: false, accidental: '' });
   const [barPanels, setBarPanels] = useState<Record<string, BarPanelState>>({});
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
+  const [isBarDragging, setIsBarDragging] = useState(false);
   const [copiedBarHighlight, setCopiedBarHighlight] = useState<CopiedBarHighlight | null>(null);
+  const [copiedJianpu, setCopiedJianpu] = useState<string | null>(null);
   const [copiedRhythm, setCopiedRhythm] = useState<string | null>(null);
   const [tempoDraft, setTempoDraft] = useState<string>(String(song.tempo));
   const [isOriginalKeyMenuOpen, setIsOriginalKeyMenuOpen] = useState(false);
@@ -181,6 +194,12 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
 
   const notifyChange = (newSong: Song) => {
     onChange(newSong);
+  };
+
+  const clearEditorSelectionState = () => {
+    setSelection(null);
+    setRhythmCursor(null);
+    setJianpuCursor(null);
   };
 
   useEffect(() => {
@@ -226,6 +245,13 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
       return crypto.randomUUID();
     }
     return `bar-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  };
+
+  const createSectionId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `section-${crypto.randomUUID()}`;
+    }
+    return `section-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   };
 
   const createEmptyBar = (): Bar => ({
@@ -311,6 +337,20 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     setCopiedRhythm(song.sections[sIdx]?.bars[bIdx]?.rhythm || '');
   };
 
+  const handleCopyJianpu = (sIdx: number, bIdx: number) => {
+    setCopiedJianpu(getRiffValue(sIdx, bIdx));
+  };
+
+  const handlePasteJianpu = (sIdx: number, bIdx: number) => {
+    if (copiedJianpu === null) {
+      return;
+    }
+
+    const nextRiff = getCanonicalRiffNotationForBar(copiedJianpu, sIdx, bIdx, true);
+    updateBar(sIdx, bIdx, { riff: nextRiff || undefined });
+    setRiffCaretSelection(sIdx, bIdx, nextRiff, nextRiff.length);
+  };
+
   const handlePasteRhythm = (sIdx: number, bIdx: number) => {
     if (copiedRhythm === null) {
       return;
@@ -335,16 +375,19 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   };
 
   const getBarTimeSignature = (bar?: Bar) => getEffectiveTimeSignature(bar?.timeSignature, song.timeSignature);
+  const getCanonicalRiffNotationForBar = (notation: string | undefined, sIdx: number, bIdx: number, trimTrailingEmpty = false) => (
+    getCanonicalJianpuNotation(notation, getBarTimeSignature(song.sections[sIdx]?.bars[bIdx]), trimTrailingEmpty)
+  );
   const getBarPanelKey = (bar: Bar, sIdx: number, bIdx: number) => bar.id || `${sIdx}-${bIdx}`;
   const getBarPanelState = (bar: Bar, sIdx: number, bIdx: number) => {
     const state = barPanels[getBarPanelKey(bar, sIdx, bIdx)];
+    const barLabel = getBarDisplayLabel(bar);
     return {
-      riff: state?.riff ?? Boolean(bar.riff || bar.riffLabel),
+      riff: state?.riff ?? Boolean(bar.riff || barLabel),
       barTime: state?.barTime ?? Boolean(bar.timeSignature),
       rhythm: state?.rhythm ?? Boolean(bar.rhythm),
       more: state?.more ?? Boolean(
-        bar.riffLabel ||
-        bar.rhythmLabel ||
+        barLabel ||
         bar.annotation ||
         bar.repeatStart ||
         bar.repeatEnd ||
@@ -368,6 +411,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   const cloneBar = (bar: Bar): Bar => ({
     ...bar,
     id: createBarId(),
+    riff: bar.riff ? getCanonicalJianpuNotation(bar.riff, getBarTimeSignature(bar), true) || undefined : undefined,
     chords: [...bar.chords]
   });
 
@@ -532,6 +576,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
       sourceSectionIdx: sIdx,
       sourceBarIdx: bIdx
     };
+    setIsBarDragging(true);
     event.dataTransfer.effectAllowed = 'copyMove';
     event.dataTransfer.setData('application/x-chordmaster-bar', JSON.stringify(payload));
     event.dataTransfer.setData('text/plain', `Bar ${bIdx + 1}`);
@@ -547,6 +592,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     event.preventDefault();
     const payload = getDraggedBar(event);
     setDragOverTarget(null);
+    setIsBarDragging(false);
     if (!payload) return;
     if (payload.sourceSectionIdx === sIdx && payload.sourceBarIdx === bIdx) return;
 
@@ -575,6 +621,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
       if (barRects.length > 0) {
         pendingSwapAnimationRef.current = { barRects };
       }
+      clearEditorSelectionState();
       notifyChange({ ...song, sections: newSections });
       setCopiedBarHighlight({ sIdx, bIdx: insertIndex });
       return;
@@ -589,6 +636,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     if (barRects.length > 0) {
       pendingSwapAnimationRef.current = { barRects };
     }
+    clearEditorSelectionState();
     notifyChange({ ...song, sections: newSections });
     setCopiedBarHighlight({ sIdx, bIdx: insertIndex });
   };
@@ -598,6 +646,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     event.stopPropagation();
     const payload = getDraggedBar(event);
     setDragOverTarget(null);
+    setIsBarDragging(false);
     if (!payload) return;
 
     const sourceSection = song.sections[payload.sourceSectionIdx];
@@ -606,6 +655,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
 
     const targetSection = song.sections[sIdx];
     suppressAddBarClickRef.current = `append-${sIdx}`;
+    clearEditorSelectionState();
     updateSection(sIdx, { ...targetSection, bars: [...targetSection.bars, cloneBar(sourceBar)] });
     setCopiedBarHighlight({ sIdx, bIdx: targetSection.bars.length });
     window.setTimeout(() => {
@@ -619,6 +669,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     const targetSection = song.sections[sIdx];
     const newBars = [...targetSection.bars];
     newBars.splice(bIdx + 1, 0, cloneBar(targetSection.bars[bIdx]));
+    clearEditorSelectionState();
     updateSection(sIdx, { ...targetSection, bars: newBars });
     setCopiedBarHighlight({ sIdx, bIdx: bIdx + 1 });
   };
@@ -886,22 +937,22 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     if (!event) {
       if (cursorUnit !== -1) {
         const cursorUnits = getRhythmEditorCursorUnits(selection.sIdx, selection.bIdx);
-        return cursorUnit === (cursorUnits[cursorUnits.length - 1] ?? -1) ? 'End Slot' : 'Slot';
+        return cursorUnit === (cursorUnits[cursorUnits.length - 1] ?? -1) ? copy.editor.endSlot : copy.editor.slot;
       }
-      return 'Insert';
+      return copy.editor.insert;
     }
 
     const baseLabel: Record<RhythmEditorEvent['base'], string> = {
-      w: 'Whole',
-      h: 'Half',
-      q: 'Quarter',
-      e: 'Eighth',
-      s: 'Sixteenth'
+      w: copy.editor.whole,
+      h: copy.editor.half,
+      q: copy.editor.quarter,
+      e: copy.editor.eighth,
+      s: copy.editor.sixteenth
     };
-    const parts = [`${event.isRest ? 'Rest' : baseLabel[event.base]}${event.dotted ? ' dot' : ''}`];
+    const parts = [`${event.isRest ? copy.editor.rest : baseLabel[event.base]}${event.dotted ? ` ${copy.editor.dot.toLowerCase()}` : ''}`];
 
-    if (event.accent) parts.push('accent');
-    if (event.tieAfter) parts.push('tie');
+    if (event.accent) parts.push(copy.editor.accent.toLowerCase());
+    if (event.tieAfter) parts.push(copy.editor.tie.toLowerCase());
 
     return parts.join(' · ');
   };
@@ -1179,7 +1230,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   };
 
   const getRiffValue = (sIdx: number, bIdx: number) => (
-    song.sections[sIdx]?.bars[bIdx]?.riff || ''
+    getCanonicalRiffNotationForBar(song.sections[sIdx]?.bars[bIdx]?.riff, sIdx, bIdx)
   );
 
   const getJianpuBarTiming = (sIdx: number, bIdx: number) => {
@@ -1197,20 +1248,10 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   );
 
   const getCanonicalBeatTokens = (value: string, sIdx: number, bIdx: number) => {
-    const { beats } = getJianpuBarTiming(sIdx, bIdx);
-    const normalized = value.replace(/\s+/g, ' ').trim();
-    const rawTokens = normalized.includes('|')
-      ? normalized.split('|').map((token) => token.trim())
-      : normalized ? normalized.split(' ').map((token) => token.trim()) : [];
-
-    return Array.from({ length: beats }, (_, index) => rawTokens[index] || '');
+    return getCanonicalJianpuBeatTokens(value, getBarTimeSignature(song.sections[sIdx]?.bars[bIdx]));
   };
 
-  const serializeBeatTokens = (tokens: string[]) => {
-    const lastNonEmptyIndex = tokens.reduce((last, token, index) => (token.trim() ? index : last), -1);
-    if (lastNonEmptyIndex === -1) return '';
-    return tokens.slice(0, lastNonEmptyIndex + 1).join(' | ');
-  };
+  const serializeBeatTokens = (tokens: string[]) => serializeJianpuBeatTokens(tokens, true);
 
   const getBeatTokenRanges = (value: string, sIdx: number, bIdx: number) => {
     const tokens = getCanonicalBeatTokens(value, sIdx, bIdx);
@@ -1800,15 +1841,19 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     const replacement = transform(note);
     const replacementNote = findJianpuNoteRanges(replacement)[0];
     if (!replacementNote) return;
-    const nextUsedUnits = beat.usedUnits - getJianpuNoteUnits(note) + getJianpuNoteUnits(replacementNote);
-    const { beatUnits } = getJianpuBarTiming(selection.sIdx, selection.bIdx);
-    if (nextUsedUnits > beatUnits + 0.001) return;
 
     const localStart = note.start - beat.start;
     const localEnd = note.end - beat.start;
     const tokenLayout = getBeatTokenUnitsLayout(beat.token);
-    const currentEntry = tokenLayout.find((entry) => entry.kind === 'note' && entry.start === localStart && entry.end === localEnd);
+    const currentEntryIndex = tokenLayout.findIndex((entry) => entry.kind === 'note' && entry.start === localStart && entry.end === localEnd);
+    const currentEntry = currentEntryIndex >= 0 ? tokenLayout[currentEntryIndex] : null;
     if (!currentEntry) return;
+    const trailingEntries = tokenLayout.slice(currentEntryIndex + 1);
+    const canOverflowPastBeat = trailingEntries.every((entry) => entry.kind === 'placeholder');
+
+    const nextUsedUnits = beat.usedUnits - getJianpuNoteUnits(note) + getJianpuNoteUnits(replacementNote);
+    const { beatUnits } = getJianpuBarTiming(selection.sIdx, selection.bIdx);
+    if (nextUsedUnits > beatUnits + 0.001 && !canOverflowPastBeat) return;
 
     const oldUnits = getJianpuNoteUnits(note);
     const newUnits = getJianpuNoteUnits(replacementNote);
@@ -1829,7 +1874,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
         if (unitsToConsume <= 0.001) break;
       }
 
-      if (unitsToConsume > 0.001) return;
+      if (unitsToConsume > 0.001 && !canOverflowPastBeat) return;
     } else if (newUnits < oldUnits) {
       suffix = 's'.repeat(Math.max(1, Math.round(oldUnits - newUnits)));
     }
@@ -1888,8 +1933,10 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
 
     const riff = getRiffValue(selection.sIdx, selection.bIdx);
     const selectedNote = getSelectedJianpuNote(selection, riff);
+    const selectedAccidental = normalizeEditableJianpuAccidental(selectedNote?.accidental);
     const replacement = selectedNote
       ? rebuildJianpuNote(selectedNote, {
+          accidental: selectedAccidental || jianpuInputMode.accidental,
           pitch,
           duration: jianpuInputMode.duration,
           octave: jianpuInputMode.octave
@@ -2012,6 +2059,9 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   };
 
   const setSelectedJianpuDuration = (duration: JianpuDuration) => {
+    const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
+    const nextDuration = currentDuration === duration ? 'quarter' : duration;
+
     if (!selectedJianpuNote && selection?.type === 'riff') {
       const riff = getRiffValue(selection.sIdx, selection.bIdx);
       const activeBeatIndex = (jianpuCursor && jianpuCursor.sIdx === selection.sIdx && jianpuCursor.bIdx === selection.bIdx)
@@ -2019,18 +2069,15 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
         : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
       const availability = getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
       if (
-        (duration === 'quarter' && !availability.canQuarter) ||
-        (duration === 'eighth' && !availability.canEighth) ||
-        (duration === 'sixteenth' && !availability.canSixteenth)
+        (nextDuration === 'quarter' && !availability.canQuarter) ||
+        (nextDuration === 'eighth' && !availability.canEighth) ||
+        (nextDuration === 'sixteenth' && !availability.canSixteenth)
       ) {
         return;
       }
     }
 
-    setJianpuInputMode((current) => {
-      const nextDuration = current.duration === duration ? 'quarter' : duration;
-      return { ...current, duration: nextDuration };
-    });
+    setJianpuInputMode((current) => ({ ...current, duration: nextDuration }));
     updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
       duration: note.duration === duration ? 'quarter' : duration
     }));
@@ -2044,6 +2091,32 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
       octave: note.octave === octave ? 'mid' : octave
     }));
+  };
+
+  const stepSelectedJianpuOctave = (direction: -1 | 1) => {
+    const octaveOrder: JianpuOctave[] = ['low', 'mid', 'high'];
+    const currentOctave = selectedJianpuNote?.octave ?? jianpuInputMode.octave;
+    const currentIndex = octaveOrder.indexOf(currentOctave);
+    const nextIndex = Math.max(0, Math.min(octaveOrder.length - 1, currentIndex + direction));
+    const nextOctave = octaveOrder[nextIndex];
+
+    if (nextOctave === currentOctave) return;
+
+    setJianpuInputMode((current) => ({ ...current, octave: nextOctave }));
+
+    if (!selectedJianpuNote) return;
+    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, { octave: nextOctave }));
+  };
+
+  const setSelectedJianpuAccidental = (accidental: JianpuAccidental) => {
+    const currentAccidental = normalizeEditableJianpuAccidental(selectedJianpuNote?.accidental ?? jianpuInputMode.accidental);
+    const nextAccidental: JianpuAccidental = currentAccidental === accidental ? '' : accidental;
+
+    setJianpuInputMode((current) => ({ ...current, accidental: nextAccidental }));
+
+    if (!selectedJianpuNote) return;
+    if (selectedJianpuNote.pitch === '0' || selectedJianpuNote.pitch === '-') return;
+    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, { accidental: nextAccidental }));
   };
 
   const toggleSelectedJianpuDot = () => {
@@ -2169,13 +2242,14 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
 
   const clearSelectedJianpuFormatting = () => {
     updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
+      accidental: '',
       duration: 'quarter',
       octave: 'mid',
       dotted: false,
       slurStart: false,
       slurEnd: false
     }));
-    setJianpuInputMode((current) => ({ ...current, duration: 'quarter', octave: 'mid', dotted: false }));
+    setJianpuInputMode((current) => ({ ...current, accidental: '', duration: 'quarter', octave: 'mid', dotted: false }));
   };
 
   const removeSelectedJianpuNote = () => {
@@ -2201,6 +2275,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     const nextCaret = (nextBeatRanges[beat.beatIndex]?.start ?? 0) + localStart;
     setJianpuInputMode((current) => ({
       ...current,
+      accidental: normalizeEditableJianpuAccidental(note.accidental),
       duration: note.duration,
       octave: note.octave,
       dotted: note.dotted
@@ -2237,6 +2312,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     const nextBeatRanges = getBeatTokenRanges(nextRiff, selection.sIdx, selection.bIdx);
     setJianpuInputMode((current) => ({
       ...current,
+      accidental: normalizeEditableJianpuAccidental(targetNote.accidental),
       duration: targetNote.duration,
       octave: targetNote.octave,
       dotted: targetNote.dotted
@@ -2324,7 +2400,22 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
   };
 
   const handleRiffInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, sIdx: number, bIdx: number) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const isMetaKey = e.metaKey || e.ctrlKey;
+    const loweredKey = e.key.toLowerCase();
+
+    if (isMetaKey && loweredKey === 'c') {
+      e.preventDefault();
+      handleCopyJianpu(sIdx, bIdx);
+      return;
+    }
+
+    if (isMetaKey && loweredKey === 'v') {
+      e.preventDefault();
+      handlePasteJianpu(sIdx, bIdx);
+      return;
+    }
+
+    if (isMetaKey || e.altKey) return;
 
     if (e.key === 'Tab') {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-riff-input]'));
@@ -2367,6 +2458,30 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
       return;
     }
 
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepSelectedJianpuOctave(1);
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      stepSelectedJianpuOctave(-1);
+      return;
+    }
+
+    if (e.key === '#') {
+      e.preventDefault();
+      setSelectedJianpuAccidental('#');
+      return;
+    }
+
+    if (loweredKey === 'b') {
+      e.preventDefault();
+      setSelectedJianpuAccidental('b');
+      return;
+    }
+
     if (/^[0-7]$/.test(e.key)) {
       e.preventDefault();
       insertOrReplaceJianpuPitch(e.key);
@@ -2385,33 +2500,31 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
       return;
     }
 
-    const lowerKey = e.key.toLowerCase();
-
-    if (lowerKey === 'l') {
+    if (loweredKey === 'l') {
       e.preventDefault();
       setSelectedJianpuOctave('low');
       return;
     }
 
-    if (lowerKey === 'h') {
+    if (loweredKey === 'h') {
       e.preventDefault();
       setSelectedJianpuOctave('high');
       return;
     }
 
-    if (lowerKey === 'e') {
+    if (loweredKey === 'e') {
       e.preventDefault();
       setSelectedJianpuDuration('eighth');
       return;
     }
 
-    if (lowerKey === 's') {
+    if (loweredKey === 's') {
       e.preventDefault();
       setSelectedJianpuDuration('sixteenth');
       return;
     }
 
-    if (lowerKey === 't') {
+    if (loweredKey === 't') {
       e.preventDefault();
       toggleSelectedJianpuSlur();
       return;
@@ -2453,7 +2566,16 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
         input.setSelectionRange(selection.start, selection.end);
       }
     }
-  }, [selection, song.sections]);
+  }, [
+    selection,
+    selection?.type === 'chord'
+      ? song.sections[selection.sIdx]?.bars[selection.bIdx]?.chords.join(' ') ?? ''
+      : selection?.type === 'rhythm'
+        ? song.sections[selection.sIdx]?.bars[selection.bIdx]?.rhythm ?? ''
+        : selection?.type === 'riff'
+          ? getRiffValue(selection.sIdx, selection.bIdx)
+          : ''
+  ]);
 
   const handleSelection = (sIdx: number, bIdx: number, e: React.SyntheticEvent<HTMLInputElement>, type: 'riff' | 'chord' | 'rhythm' = 'riff') => {
     const input = e.currentTarget;
@@ -2497,7 +2619,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
         clearSelectedJianpuFormatting();
       }
     } else if (selectionType === 'chord') {
-      const chords = bar.chords;
+      const chords = bar.chords.length > 0 ? bar.chords : [''];
       
       let currentPos = 0;
       let targetChordIdx = -1;
@@ -2517,7 +2639,8 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
 
       const newChords = [...chords];
       let c = newChords[targetChordIdx];
-      if (!c || c === '%' || c === '/') return;
+      if (c === '%' || c === '/') return;
+      c = c || '';
       
       let hasPush = c.includes('<');
       let hasPull = c.includes('>');
@@ -2602,12 +2725,15 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
       : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
     return getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
   })();
+  const effectiveJianpuAccidental = normalizeEditableJianpuAccidental(selectedJianpuNote?.accidental ?? jianpuInputMode.accidental);
   const effectiveJianpuOctave = selectedJianpuNote?.octave ?? jianpuInputMode.octave;
   const effectiveJianpuDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
   const effectiveJianpuDotted = selectedJianpuNote?.dotted ?? jianpuInputMode.dotted;
   const effectiveJianpuTied = Boolean(selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd);
   const activeJianpuShortcutBadgeClass = 'border-white/90 bg-white text-indigo-700 shadow-[0_1px_2px_rgba(15,23,42,0.16)]';
   const inactiveJianpuShortcutBadgeClass = 'border-indigo-200 bg-white text-indigo-500 group-hover:border-indigo-200 group-hover:bg-indigo-500 group-hover:text-white';
+  const chordToolbarButtonClass = `flex ${language === 'zh' ? 'w-[72px]' : 'w-[88px]'} shrink-0 flex-col items-center gap-1 rounded-xl p-2 text-center transition-colors group hover:bg-indigo-50`;
+  const chordToolbarLabelClass = 'flex min-h-[28px] items-center justify-center text-center text-[10px] font-bold leading-[1.15] text-gray-500';
   const getActiveJianpuBeatIndex = (sIdx: number, bIdx: number, value: string) => {
     if (jianpuCursor && jianpuCursor.sIdx === sIdx && jianpuCursor.bIdx === bIdx) {
       return jianpuCursor.beatIndex;
@@ -2626,53 +2752,84 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
         sixteenth: '1/16'
       };
       const octaveLabel: Record<JianpuOctave, string> = {
-        low: 'Low',
-        mid: 'Mid',
-        high: 'High'
+        low: copy.editor.low,
+        mid: copy.editor.mid,
+        high: copy.editor.high
       };
       const parts = [`${selectedJianpuNote.pitch} · ${durationLabel[selectedJianpuNote.duration]}`, octaveLabel[selectedJianpuNote.octave]];
-      if (selectedJianpuNote.dotted) parts.push('Dot');
-      if (selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd) parts.push('Tie');
+      if (effectiveJianpuAccidental === '#') parts.push(copy.editor.sharp);
+      if (effectiveJianpuAccidental === 'b') parts.push(copy.editor.flat);
+      if (selectedJianpuNote.dotted) parts.push(copy.editor.dot);
+      if (selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd) parts.push(copy.editor.tie);
       return parts.join(' · ');
     }
 
     const beatLabel = jianpuCursor && selection?.type === 'riff'
-      ? `Beat ${jianpuCursor.beatIndex + 1}`
-      : 'Insert';
-    const durationLabel = jianpuInputMode.duration === 'quarter'
-      ? 'Default'
-      : jianpuInputMode.duration === 'eighth'
+      ? `${copy.editor.beat} ${jianpuCursor.beatIndex + 1}`
+      : copy.editor.insert;
+    const durationLabel = effectiveJianpuDuration === 'quarter'
+      ? copy.editor.defaultDuration
+      : effectiveJianpuDuration === 'eighth'
         ? '1/8'
         : '1/16';
-    return `${beatLabel} · ${durationLabel} · ${jianpuInputMode.octave === 'high' ? 'High' : jianpuInputMode.octave === 'low' ? 'Low' : 'Mid'}${jianpuInputMode.dotted ? ' · Dot' : ''}`;
+    const accidentalLabel = effectiveJianpuAccidental === '#'
+      ? ` · ${copy.editor.sharp}`
+      : effectiveJianpuAccidental === 'b'
+        ? ` · ${copy.editor.flat}`
+        : '';
+    return `${beatLabel} · ${durationLabel} · ${effectiveJianpuOctave === 'high' ? copy.editor.high : effectiveJianpuOctave === 'low' ? copy.editor.low : copy.editor.mid}${accidentalLabel}${effectiveJianpuDotted ? ` · ${copy.editor.dot}` : ''}`;
   };
 
   const duplicateSection = (sIdx: number) => {
     const sectionToCopy = song.sections[sIdx];
     const newSection = {
       ...JSON.parse(JSON.stringify(sectionToCopy)),
-      id: `s-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      id: createSectionId()
     };
     const newSections = [...song.sections];
     newSections.splice(sIdx + 1, 0, newSection);
+    clearEditorSelectionState();
     notifyChange({ ...song, sections: newSections });
   };
 
   const addSection = () => {
-    const newSectionId = `s-${Date.now()}`;
+    const newSectionId = createSectionId();
     notifyChange({
       ...song,
       sections: [...song.sections, { 
         id: newSectionId,
-        title: 'New Section', 
+        title: '',
         bars: [createEmptyBar()] 
       }]
     });
     queueChordInputFocus(song.sections.length, 0, newSectionId);
   };
 
+  const splitSectionAtBar = (sIdx: number, bIdx: number) => {
+    const section = song.sections[sIdx];
+    if (!section || bIdx <= 0 || bIdx >= section.bars.length) return;
+
+    const leadingBars = section.bars.slice(0, bIdx);
+    const trailingBars = section.bars.slice(bIdx);
+    if (leadingBars.length === 0 || trailingBars.length === 0) return;
+
+    const newSectionId = createSectionId();
+    const newSections = [...song.sections];
+    newSections[sIdx] = { ...section, bars: leadingBars };
+    newSections.splice(sIdx + 1, 0, {
+      id: newSectionId,
+      title: '',
+      bars: trailingBars
+    });
+
+    clearEditorSelectionState();
+    notifyChange({ ...song, sections: newSections });
+    queueChordInputFocus(sIdx + 1, 0, newSectionId);
+  };
+
   const removeSection = (sIdx: number) => {
     const newSections = song.sections.filter((_, i) => i !== sIdx);
+    clearEditorSelectionState();
     notifyChange({ ...song, sections: newSections });
   };
 
@@ -2682,19 +2839,27 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
     const temp = newSections[sIdx];
     newSections[sIdx] = newSections[sIdx + direction];
     newSections[sIdx + direction] = temp;
+    clearEditorSelectionState();
     notifyChange({ ...song, sections: newSections });
   };
+
+  const sectionBarOffsets: number[] = [];
+  let accumulatedBarCount = 0;
+  song.sections.forEach((section) => {
+    sectionBarOffsets.push(accumulatedBarCount);
+    accumulatedBarCount += section.bars.length;
+  });
 
   return (
     <div ref={rootRef} className="relative pb-12">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="font-display text-2xl font-bold text-gray-800">Edit Song</h2>
+        <h2 className="font-display text-2xl font-bold text-gray-800">{copy.editor.editSong}</h2>
       </div>
       
       {/* Metadata */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
         <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Title</label>
+          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.editor.title}</label>
           <input 
             type="text" 
             value={song.title} 
@@ -2703,7 +2868,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-bold uppercase text-gray-500">Original Key</label>
+          <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.originalKey}</label>
           <div ref={originalKeyMenuRef} className="relative">
             <button
               type="button"
@@ -2724,8 +2889,8 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
             {isOriginalKeyMenuOpen && (
               <div className="absolute left-0 top-full z-40 mt-2 w-full rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl">
                 <div className="mb-3 flex items-center justify-between px-1">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-400">Key</div>
-                  <div className="text-[11px] font-bold text-indigo-500">Original</div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.key}</div>
+                  <div className="text-[11px] font-bold text-indigo-500">{copy.original}</div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   {ORIGINAL_KEY_MENU_LAYOUT.flatMap((row, rowIndex) =>
@@ -2764,7 +2929,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
           </div>
         </div>
         <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tempo</label>
+          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.editor.tempo}</label>
           <input 
             type="number" 
             min={20}
@@ -2783,7 +2948,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
           />
         </div>
         <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Time Signature</label>
+          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.editor.timeSignature}</label>
           <div className="flex items-center gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <input
@@ -2810,10 +2975,10 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                 checked={song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle'}
                 onChange={e => onChange({ ...song, shuffle: e.target.checked, groove: undefined })}
                 className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                aria-label="Shuffle"
-                title="Shuffle"
+                aria-label={copy.editor.shuffle}
+                title={copy.editor.shuffle}
               />
-              <span className="text-[12px] font-medium text-gray-600 leading-none">Shuffle</span>
+              <span className="text-[12px] font-medium text-gray-600 leading-none">{copy.editor.shuffle}</span>
             </label>
           </div>
         </div>
@@ -2821,7 +2986,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
         <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Version</label>
+          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.version}</label>
           <input 
             type="text" 
             value={getVersionValue(song)} 
@@ -2830,7 +2995,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
           />
         </div>
         <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Translator</label>
+          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.editor.translator}</label>
           <input 
             type="text" 
             value={song.translator || ''} 
@@ -2852,13 +3017,38 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
             onChange={e => updateField('useSectionColors', e.target.checked)}
             className="hidden"
           />
-          <span className="text-sm font-bold text-gray-600 group-hover:text-indigo-600 transition-colors">Use Section Colors</span>
+          <span className="text-sm font-bold text-gray-600 group-hover:text-indigo-600 transition-colors">{copy.editor.useSectionColors}</span>
         </label>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-bold text-gray-600">{copy.editor.barNumbers}</span>
+          {([
+            ['none', copy.editor.barNumbersOff],
+            ['line-start', copy.editor.barNumbersLineStart],
+            ['all', copy.editor.barNumbersAll]
+          ] as Array<[BarNumberMode, string]>).map(([mode, label]) => {
+            const isActive = (song.barNumberMode ?? 'none') === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => updateField('barNumberMode', mode)}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-bold transition-colors ${
+                  isActive
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-200 bg-white text-gray-500 hover:border-indigo-200 hover:text-indigo-600'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Section Navigation Bar */}
       <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200 -mx-6 md:-mx-8 px-6 md:px-8 py-3 mb-6 flex items-center gap-2 overflow-x-auto no-scrollbar">
-        <div className="flex-shrink-0 text-[10px] font-bold text-gray-400 uppercase tracking-widest mr-2">Jump To:</div>
+        <div className="flex-shrink-0 text-[10px] font-bold text-gray-400 uppercase tracking-widest mr-2">{copy.editor.jumpTo}</div>
         <Reorder.Group 
           axis="x" 
           values={song.sections} 
@@ -2881,14 +3071,14 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   <button 
                     onClick={(e) => { e.stopPropagation(); duplicateSection(idx); }}
                     className="p-1 bg-white border border-gray-200 rounded-full shadow-md text-indigo-600 hover:bg-indigo-50 transition-colors"
-                    title="Duplicate"
+                    title={copy.editor.duplicate}
                   >
                     <Copy size={10} />
                   </button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); removeSection(idx); }}
                     className="p-1 bg-white border border-gray-200 rounded-full shadow-md text-red-600 hover:bg-red-50 transition-colors"
-                    title="Delete"
+                    title={copy.editor.delete}
                   >
                     <Trash2 size={10} />
                   </button>
@@ -2908,7 +3098,9 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   style={isActiveSection ? { boxShadow: `0 0 0 2px ${accentHighlight.ring}, 0 10px 20px ${accentHighlight.glow}` } : undefined}
                 >
                   {isActiveSection && <span className="absolute -top-1.5 -right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white" style={{ backgroundColor: accentHighlight.dot }} />}
-                  {section.title ? toTitleCase(section.title) : `Section ${idx + 1}`}
+                  {section.title
+                    ? localizeSectionTitle(toTitleCase(section.title), language)
+                    : '\u00A0'}
                 </button>
               </Reorder.Item>
             );
@@ -2955,7 +3147,9 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                     list="section-title-presets"
                     onChange={e => updateSection(sIdx, { ...section, title: e.target.value })}
                     onBlur={e => updateSection(sIdx, { ...section, title: toTitleCase(e.target.value) })}
-                    placeholder="Section Title"
+                    onMouseDown={e => e.stopPropagation()}
+                    onClick={e => e.stopPropagation()}
+                    placeholder={copy.editor.sectionTitle}
                     className={`font-bold text-lg bg-white border border-gray-300 rounded-lg px-3 py-1.5 flex-1 sm:flex-none sm:w-64 focus:ring-2 focus:ring-${colors.accent}-500 outline-none shadow-sm`}
                   />
                 </div>
@@ -2963,14 +3157,14 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                 <button 
                   onClick={() => duplicateSection(sIdx)}
                   className="text-indigo-500 hover:text-indigo-700 p-2 rounded hover:bg-indigo-50 transition-colors"
-                  title="Duplicate Section"
+                  title={copy.editor.duplicateSection}
                 >
                   <Copy size={18} />
                 </button>
                 <button 
                   onClick={() => removeSection(sIdx)}
                   className="text-red-500 hover:text-red-700 p-2 rounded hover:bg-red-50 transition-colors"
-                  title="Remove Section"
+                  title={copy.editor.removeSection}
                 >
                   <Trash2 size={18} />
                 </button>
@@ -2991,6 +3185,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   const isDragAfterTarget = dragOverTarget === `bar-after-${sIdx}-${bIdx}`;
                   const isDragTarget = isDragBeforeTarget || isDragAfterTarget;
                   const panelState = getBarPanelState(bar, sIdx, bIdx);
+                  const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
 
                   return (
                 <motion.div
@@ -3028,40 +3223,64 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                     <div className="absolute inset-y-2 -right-[3px] w-[4px] rounded-full bg-indigo-500 shadow-[0_0_0_3px_rgba(99,102,241,0.15)] z-30 pointer-events-none" />
                   )}
                   <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={() => duplicateBarAfter(sIdx, bIdx)}
-                      className="text-gray-300 hover:text-indigo-500 transition-colors p-1"
-                      title="Copy bar after this one"
-                    >
-                      <Copy size={14} />
-                    </button>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => duplicateBarAfter(sIdx, bIdx)}
+                        className="text-gray-300 hover:text-indigo-500 transition-colors p-1"
+                        title={copy.editor.copyBarAfter}
+                      >
+                        <Copy size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => splitSectionAtBar(sIdx, bIdx)}
+                        disabled={bIdx === 0}
+                        className="p-1 text-gray-300 transition-colors hover:text-indigo-500 disabled:cursor-not-allowed disabled:opacity-30"
+                        title={copy.editor.splitSectionHere}
+                      >
+                        <svg viewBox="0 0 24 24" className="h-[14px] w-[14px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M8 4v16" />
+                          <path d="M12 8l6 4-6 4" />
+                        </svg>
+                      </button>
+                    </div>
                     <button
                       type="button"
                       draggable
                       onDragStart={e => handleBarDragStart(e, sIdx, bIdx)}
-                      onDragEnd={() => setDragOverTarget(null)}
+                      onDragEnd={() => {
+                        setDragOverTarget(null);
+                        setIsBarDragging(false);
+                      }}
                       className="flex h-5 w-14 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-300 hover:border-indigo-300 hover:text-indigo-500 transition-colors cursor-grab active:cursor-grabbing"
-                      title="Drag to move this bar"
+                      title={copy.editor.dragToMoveBar}
                     >
                       <GripHorizontal size={14} />
                     </button>
                     <button 
                       onClick={() => {
                         const newBars = section.bars.filter((_, i) => i !== bIdx);
+                        clearEditorSelectionState();
                         updateSection(sIdx, { ...section, bars: newBars });
                       }}
                       className="text-gray-300 hover:text-red-500 transition-colors p-1"
-                      title="Delete Bar"
+                      title={copy.editor.deleteBar}
                     >
                       <Trash2 size={14} />
                     </button>
                   </div>
                   
                   <div className="space-y-3 pt-6">
+                    <div className="flex justify-center">
+                      <div className="inline-flex min-w-[2.25rem] items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold tabular-nums text-gray-600">
+                        {globalBarNumber}
+                      </div>
+                    </div>
+
                     {/* Chords */}
                     <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5">Chords</label>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5">{copy.editor.chords}</label>
                       <input 
                         id={`editor-s${sIdx}-b${bIdx}-chords`}
                         type="text" 
@@ -3177,7 +3396,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                       <button
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { riff: !panelState.riff })}
-                        title="Jianpu"
+                        title={copy.editor.jianpu}
                         className={`h-7 min-w-[44px] px-1.5 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
                           panelState.riff
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
@@ -3191,7 +3410,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                       <button
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { barTime: !panelState.barTime })}
-                        title="Bar Time"
+                        title={copy.editor.barTime}
                         className={`h-7 min-w-[38px] px-1.5 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
                           panelState.barTime
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
@@ -3205,7 +3424,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                       <button
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { rhythm: !panelState.rhythm })}
-                        title="Rhythm"
+                        title={copy.editor.rhythm}
                         className={`h-7 min-w-[44px] px-1.5 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
                           panelState.rhythm
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
@@ -3219,7 +3438,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                       <button
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { more: !panelState.more })}
-                        title="More"
+                        title={copy.editor.more}
                         className={`h-7 min-w-[30px] px-1 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
                           panelState.more
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
@@ -3233,11 +3452,36 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                     {/* Riff Section */}
                     {panelState.riff && (
                     <div className="bg-gray-50 rounded p-2 border border-gray-100">
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Jianpu Riff</label>
+                      <div className="mb-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase">{copy.editor.jianpuRiff}</label>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyJianpu(sIdx, bIdx)}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                              title={copy.editor.copyJianpu}
+                            >
+                              <Copy size={12} />
+                              <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePasteJianpu(sIdx, bIdx)}
+                              disabled={copiedJianpu === null}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                              title={copiedJianpu === null ? copy.editor.copyJianpuFirst : copy.editor.pasteJianpu}
+                            >
+                              <ArrowDownRight size={12} />
+                              <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
 
                       {(() => {
                         const riffSelected = selection?.type === 'riff' && selection.sIdx === sIdx && selection.bIdx === bIdx;
-                        const riffValue = bar.riff || '';
+                        const riffValue = getRiffValue(sIdx, bIdx);
                         const beatTokens = getCanonicalBeatTokens(riffValue, sIdx, bIdx);
                         const beatData = getBeatNoteRanges(riffValue, sIdx, bIdx);
                         const activeBeatIndex = getActiveJianpuBeatIndex(sIdx, bIdx, riffValue);
@@ -3278,7 +3522,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                             <input
                               id={`editor-s${sIdx}-b${bIdx}-riff`}
                               type="text"
-                              value={bar.riff || ''}
+                              value={riffValue}
                               readOnly
                               data-riff-input
                               data-sidx={sIdx}
@@ -3290,7 +3534,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                               onPaste={e => e.preventDefault()}
                               onDrop={e => e.preventDefault()}
                               className="absolute inset-0 h-full w-full opacity-0 pointer-events-none"
-                              aria-label={`Jianpu editor for bar ${bIdx + 1}`}
+                              aria-label={`${copy.editor.jianpu} editor for bar ${bIdx + 1}`}
                             />
 
                             <div className="min-h-[62px] px-3 py-2 flex items-center justify-center overflow-visible">
@@ -3324,7 +3568,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                     {panelState.barTime && (
                     <div className="bg-gray-50 rounded p-2 border border-gray-100">
                       <div className="mb-2">
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Bar Time Signature</label>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">{copy.editor.barTimeSignature}</label>
                         {(() => {
                           const barTimeSignatureParts = splitTimeSignatureInput(bar.timeSignature);
 
@@ -3362,7 +3606,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                           );
                         })()}
                         <div className="mt-1 text-[10px] text-gray-400">
-                          Leave blank to use the song default. Fill in values like 2/4 or 6/8 for this bar only.
+                          {copy.editor.barTimeHelp}
                         </div>
                       </div>
                     </div>
@@ -3373,30 +3617,26 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                     <div className="bg-gray-50 rounded p-2 border border-gray-100">
                       <div className="mb-1.5">
                         <div className="flex items-center justify-between gap-2">
-                          <label className="block text-[10px] font-bold text-gray-400 uppercase">Rhythm</label>
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase">{copy.editor.rhythm}</label>
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => handleCopyRhythm(sIdx, bIdx)}
-                              className="group relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-                              title="Copy rhythm from this bar"
+                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                              title={copy.editor.copyRhythm}
                             >
                               <Copy size={12} />
-                              <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0.5 group-hover:opacity-100">
-                                Copy
-                              </span>
+                              <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handlePasteRhythm(sIdx, bIdx)}
                               disabled={copiedRhythm === null}
-                              className="group relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
-                              title={copiedRhythm === null ? 'Copy a rhythm first' : 'Paste copied rhythm into this bar'}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                              title={copiedRhythm === null ? copy.editor.copyFirst : copy.editor.pasteRhythm}
                             >
                               <ArrowDownRight size={12} />
-                              <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0.5 group-hover:opacity-100">
-                                Paste
-                              </span>
+                              <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
                             </button>
                           </div>
                         </div>
@@ -3445,7 +3685,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                               onBlur={clearSelectionIfFocusLeftEditor}
                               onKeyDown={(e) => handleRhythmInputKeyDown(e, sIdx, bIdx)}
                               className="absolute inset-0 h-full w-full opacity-0 pointer-events-none"
-                              aria-label={`Rhythm editor for bar ${bIdx + 1}`}
+                              aria-label={`${copy.editor.rhythm} editor for bar ${bIdx + 1}`}
                             />
 
                             <div className="min-h-[44px] p-1.5 flex items-center justify-center overflow-hidden">
@@ -3460,7 +3700,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                                   onInsertSelect={(cursorUnit) => setRhythmInsertSelection(sIdx, bIdx, bar.rhythm || '', cursorUnit)}
                                 />
                               ) : (
-                                <span className="text-[10px] text-gray-300 italic">Click to start entering rhythm</span>
+                                <span className="text-[10px] text-gray-300 italic">{copy.editor.clickToStartRhythm}</span>
                               )}
                             </div>
                           </div>
@@ -3468,52 +3708,34 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                       })()}
 
                       <div className="mt-1 text-[10px] text-gray-400">
-                        Use the toolbar below to insert notes, rests, dots, accents, and ties directly into the displayed rhythm.
+                        {copy.editor.rhythmHelp}
                       </div>
                     </div>
                     )}
 
                     {/* Labels & Annotations */}
                     {panelState.more && (
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <div className="min-w-0">
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5 truncate">Riff Label</label>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5 truncate">{copy.editor.label}</label>
                         <input 
-                          id={`editor-s${sIdx}-b${bIdx}-riffLabel`}
+                          id={`editor-s${sIdx}-b${bIdx}-label`}
                           type="text" 
-                          value={bar.riffLabel || ''} 
+                          value={getBarDisplayLabel(bar)} 
                           lang="en"
                           spellCheck={false}
                           onChange={e => {
                             const newBars = [...section.bars];
                             let val = cleanInput(e.target.value);
-                            newBars[bIdx] = { ...bar, riffLabel: val || undefined };
+                            newBars[bIdx] = { ...bar, label: val || undefined, riffLabel: undefined, rhythmLabel: undefined };
                             updateSection(sIdx, { ...section, bars: newBars });
                           }}
-                          placeholder="e.g. Pno"
+                          placeholder="e.g. Pno / Dr"
                           className="w-full text-xs p-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
                         />
                       </div>
                       <div className="min-w-0">
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5 truncate">Rhythm Label</label>
-                        <input 
-                          id={`editor-s${sIdx}-b${bIdx}-rhythmLabel`}
-                          type="text" 
-                          value={bar.rhythmLabel || ''} 
-                          lang="en"
-                          spellCheck={false}
-                          onChange={e => {
-                            const newBars = [...section.bars];
-                            let val = cleanInput(e.target.value);
-                            newBars[bIdx] = { ...bar, rhythmLabel: val || undefined };
-                            updateSection(sIdx, { ...section, bars: newBars });
-                          }}
-                          placeholder="e.g. Dr"
-                          className="w-full text-xs p-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5 truncate">Annotation</label>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5 truncate">{copy.editor.annotation}</label>
                         <input 
                           id={`editor-s${sIdx}-b${bIdx}-annotation`}
                           type="text" 
@@ -3544,7 +3766,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                             updateSection(sIdx, { ...section, bars: newBars });
                           }}
                           className={`w-7 h-7 flex items-center justify-center border rounded transition-colors ${bar.repeatStart ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
-                          title="Start Repeat |:"
+                          title={copy.editor.startRepeat}
                         >
                           <span className="font-bold text-[10px]">|:</span>
                         </button>
@@ -3556,7 +3778,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                             updateSection(sIdx, { ...section, bars: newBars });
                           }}
                           className={`w-7 h-7 flex items-center justify-center border rounded transition-colors ${bar.repeatEnd ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
-                          title="End Repeat :|"
+                          title={copy.editor.endRepeat}
                         >
                           <span className="font-bold text-[10px]">:|</span>
                         </button>
@@ -3568,14 +3790,14 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                             updateSection(sIdx, { ...section, bars: newBars });
                           }}
                           className={`w-7 h-7 flex items-center justify-center border rounded transition-colors ${bar.finalBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
-                          title="Final Bar ||"
+                          title={copy.editor.finalBar}
                         >
                           <span className="font-bold text-[10px]">||</span>
                         </button>
                       </div>
                       
                       <div className="flex items-center gap-1 min-w-0 flex-1 justify-end">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase shrink-0">End.</span>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase shrink-0">{copy.editor.endShort}</span>
                         <select 
                           value={bar.ending || ''} 
                           onChange={e => {
@@ -3586,7 +3808,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                           }}
                           className="max-w-[60px] flex-1 text-[10px] p-1 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none bg-white min-w-0"
                         >
-                          <option value="">None</option>
+                          <option value="">{copy.editor.none}</option>
                           <option value="1">1.</option>
                           <option value="2">2.</option>
                           <option value="3">3.</option>
@@ -3624,7 +3846,13 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   setDragOverTarget(current => current === `append-${sIdx}` ? null : current);
                 }}
                 onDrop={e => handleAppendBarDrop(e, sIdx)}
-                className={`border-2 border-dashed rounded min-h-[200px] ${dragOverTarget === `append-${sIdx}` ? 'bg-indigo-50 border-indigo-400' : 'bg-white border-gray-300 hover:border-indigo-300 hover:bg-indigo-50'} transition-colors`}
+                className={`border-2 border-dashed rounded min-h-[200px] transition-all ${
+                  dragOverTarget === `append-${sIdx}`
+                    ? 'bg-amber-50 border-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.16),0_18px_40px_rgba(251,191,36,0.20)]'
+                    : isBarDragging
+                      ? 'bg-amber-50/70 border-amber-300 shadow-[0_0_0_3px_rgba(251,191,36,0.12),0_10px_26px_rgba(251,191,36,0.14)]'
+                      : 'bg-white border-gray-300 hover:border-indigo-300 hover:bg-indigo-50'
+                }`}
               >
                 <button 
                   type="button"
@@ -3635,11 +3863,17 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                     }
                     insertEmptyBarAt(sIdx, section.bars.length);
                   }}
-                  className={`w-full h-full flex flex-col items-center justify-center min-h-[196px] ${dragOverTarget === `append-${sIdx}` ? 'text-indigo-500' : 'text-gray-400 hover:text-indigo-500'} transition-colors`}
+                  className={`w-full h-full flex flex-col items-center justify-center min-h-[196px] transition-colors ${
+                    dragOverTarget === `append-${sIdx}`
+                      ? 'text-amber-700'
+                      : isBarDragging
+                        ? 'text-amber-600'
+                        : 'text-gray-400 hover:text-indigo-500'
+                  }`}
                 >
                   <Plus size={24} className="mb-1" />
                   <span className="text-xs font-bold uppercase tracking-wider">
-                    {dragOverTarget === `append-${sIdx}` ? 'Drop To Copy Bar' : 'Add Bar'}
+                    {dragOverTarget === `append-${sIdx}` || isBarDragging ? copy.editor.dropToCopyBar : copy.editor.addBar}
                   </span>
                 </button>
               </div>
@@ -3656,7 +3890,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
           className="px-8 py-4 bg-white border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center gap-3 text-gray-500 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-all font-bold uppercase tracking-widest text-sm shadow-sm hover:shadow-md"
         >
           <Plus size={24} />
-          Add New Section
+          {copy.editor.addNewSection}
         </button>
       </div>
 
@@ -3672,7 +3906,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
             onMouseDown={e => e.preventDefault()} // Prevent losing focus/selection
           >
             <div className="px-3 py-1 border-r border-gray-100 mr-1">
-              <span className="text-[10px] font-bold text-gray-400 uppercase block">Selection</span>
+              <span className="text-[10px] font-bold text-gray-400 uppercase block">{copy.editor.selection}</span>
               <span className="text-sm font-mono font-bold text-indigo-600 truncate max-w-[100px] block">
                 {selection.type === 'rhythm'
                   ? getRhythmSelectionLabel()
@@ -3685,194 +3919,224 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
             <div className={`flex items-center gap-1 ${selection.type === 'riff' ? 'flex-wrap' : ''}`}>
               {selection.type === 'riff' ? (
                 <>
-                  <button 
-                    onClick={() => insertOrReplaceJianpuPitch('1')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Insert 1"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold">1</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-500">Do</span>
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-start gap-1">
+                      <button 
+                        onClick={() => setSelectedJianpuOctave('low')}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuOctave === 'low' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        title={copy.editor.lowOctave}
+                        aria-keyshortcuts="ArrowDown L"
+                      >
+                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuOctave === 'low' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          <ArrowDownRight size={16} />
+                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuOctave === 'low' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${effectiveJianpuOctave === 'low' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
+                      </button>
 
-                  <button 
-                    onClick={() => insertOrReplaceJianpuPitch('2')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Insert 2"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold">2</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-500">Re</span>
-                  </button>
+                      <button 
+                        onClick={() => setSelectedJianpuOctave('high')}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuOctave === 'high' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        title={copy.editor.highOctave}
+                        aria-keyshortcuts="ArrowUp H"
+                      >
+                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuOctave === 'high' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          <ArrowUpRight size={16} />
+                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuOctave === 'high' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${effectiveJianpuOctave === 'high' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.high}</span>
+                      </button>
 
-                  <button 
-                    onClick={() => insertOrReplaceJianpuPitch('3')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Insert 3"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold">3</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-500">Mi</span>
-                  </button>
+                      <button
+                        onClick={() => setSelectedJianpuAccidental('#')}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuAccidental === '#' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        title={copy.editor.sharpNote}
+                        aria-keyshortcuts="#"
+                      >
+                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuAccidental === '#' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          <span className="text-base font-bold leading-none">#</span>
+                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuAccidental === '#' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>#</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${effectiveJianpuAccidental === '#' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.sharp}</span>
+                      </button>
 
-                  <button 
-                    onClick={() => insertOrReplaceJianpuPitch('4')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Insert 4"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold">4</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-500">Fa</span>
-                  </button>
+                      <button
+                        onClick={() => setSelectedJianpuAccidental('b')}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuAccidental === 'b' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        title={copy.editor.flatNote}
+                        aria-keyshortcuts="B"
+                      >
+                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuAccidental === 'b' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          <span className="text-base font-bold leading-none">♭</span>
+                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuAccidental === 'b' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>b</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${effectiveJianpuAccidental === 'b' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.flat}</span>
+                      </button>
 
-                  <button 
-                    onClick={() => insertOrReplaceJianpuPitch('5')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Insert 5"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold">5</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-500">Sol</span>
-                  </button>
+                      <button 
+                        onClick={() => setSelectedJianpuDuration('eighth')}
+                        disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canEighth && effectiveJianpuDuration !== 'eighth')}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canEighth && effectiveJianpuDuration !== 'eighth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                        title={copy.editor.eighthNote}
+                        aria-keyshortcuts="E"
+                      >
+                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          <Music2 size={16} />
+                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDuration === 'eighth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>E</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${effectiveJianpuDuration === 'eighth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/8</span>
+                      </button>
 
-                  <button 
-                    onClick={() => insertOrReplaceJianpuPitch('6')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Insert 6"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold">6</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-500">La</span>
-                  </button>
+                      <button 
+                        onClick={() => setSelectedJianpuDuration('sixteenth')}
+                        disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canSixteenth && effectiveJianpuDuration !== 'sixteenth')}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canSixteenth && effectiveJianpuDuration !== 'sixteenth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                        title={copy.editor.sixteenthNote}
+                        aria-keyshortcuts="S"
+                      >
+                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          <Hash size={16} />
+                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDuration === 'sixteenth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>S</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${effectiveJianpuDuration === 'sixteenth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/16</span>
+                      </button>
 
-                  <button 
-                    onClick={() => insertOrReplaceJianpuPitch('7')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Insert 7"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold">7</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-500">Ti</span>
-                  </button>
+                      <button 
+                        onClick={toggleSelectedJianpuDot}
+                        disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted)}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                        title={copy.editor.toggleDot}
+                        aria-keyshortcuts="."
+                      >
+                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          <div className="w-1.5 h-1.5 bg-current rounded-full" />
+                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDotted ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>.</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
+                      </button>
 
-                  <button 
-                    onClick={() => insertOrReplaceJianpuPitch('0')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Insert Rest"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold">0</span>
+                      <button 
+                        onClick={toggleSelectedJianpuSlur}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuTied ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        title={copy.editor.toggleTieSlur}
+                        aria-keyshortcuts="T"
+                      >
+                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuTied ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          <Link size={16} />
+                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuTied ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>T</span>
+                        </div>
+                        <span className={`text-[10px] font-bold ${effectiveJianpuTied ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.tie}</span>
+                      </button>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest</span>
-                  </button>
 
-                  <button 
-                    onClick={insertJianpuSustainBeat}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Sustain Next Beat (-)"
-                  >
-                    <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
-                      <span className="font-bold text-lg leading-none">-</span>
+                    <div className="flex items-start gap-1">
+                      <button 
+                        onClick={() => insertOrReplaceJianpuPitch('1')}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title="Insert 1"
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold">1</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">Do</span>
+                      </button>
+
+                      <button 
+                        onClick={() => insertOrReplaceJianpuPitch('2')}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title="Insert 2"
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold">2</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">Re</span>
+                      </button>
+
+                      <button 
+                        onClick={() => insertOrReplaceJianpuPitch('3')}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title="Insert 3"
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold">3</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">Mi</span>
+                      </button>
+
+                      <button 
+                        onClick={() => insertOrReplaceJianpuPitch('4')}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title="Insert 4"
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold">4</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">Fa</span>
+                      </button>
+
+                      <button 
+                        onClick={() => insertOrReplaceJianpuPitch('5')}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title="Insert 5"
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold">5</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">Sol</span>
+                      </button>
+
+                      <button 
+                        onClick={() => insertOrReplaceJianpuPitch('6')}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title="Insert 6"
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold">6</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">La</span>
+                      </button>
+
+                      <button 
+                        onClick={() => insertOrReplaceJianpuPitch('7')}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title="Insert 7"
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold">7</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">Ti</span>
+                      </button>
+
+                      <button 
+                        onClick={() => insertOrReplaceJianpuPitch('0')}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title={copy.editor.insertRest}
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold">0</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">{copy.editor.rest}</span>
+                      </button>
+
+                      <button 
+                        onClick={insertJianpuSustainBeat}
+                        className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                        title={copy.editor.sustainNextBeat}
+                      >
+                        <div className="w-8 h-8 bg-slate-100 text-slate-700 rounded-lg flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition-colors">
+                          <span className="font-bold text-lg leading-none">-</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-500">{copy.editor.hold}</span>
+                      </button>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Hold</span>
-                  </button>
-
-                  <div className="w-px h-8 bg-gray-100 mx-1 self-center" />
-
-                  <button 
-                    onClick={() => setSelectedJianpuOctave('low')}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuOctave === 'low' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
-                    title="Low Octave (L)"
-                    aria-keyshortcuts="L"
-                  >
-                    <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuOctave === 'low' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                      <ArrowDownRight size={16} />
-                      <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuOctave === 'low' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
-                    </div>
-                    <span className={`text-[10px] font-bold ${effectiveJianpuOctave === 'low' ? 'text-indigo-600' : 'text-gray-500'}`}>Low</span>
-                  </button>
-
-                  <button 
-                    onClick={() => setSelectedJianpuOctave('high')}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuOctave === 'high' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
-                    title="High Octave (H)"
-                    aria-keyshortcuts="H"
-                  >
-                    <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuOctave === 'high' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                      <ArrowUpRight size={16} />
-                      <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuOctave === 'high' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
-                    </div>
-                    <span className={`text-[10px] font-bold ${effectiveJianpuOctave === 'high' ? 'text-indigo-600' : 'text-gray-500'}`}>High</span>
-                  </button>
-
-                  <button 
-                    onClick={() => setSelectedJianpuDuration('eighth')}
-                    disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canEighth)}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canEighth ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
-                    title="Eighth Note (E)"
-                    aria-keyshortcuts="E"
-                  >
-                    <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                      <Music2 size={16} />
-                      <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDuration === 'eighth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>E</span>
-                    </div>
-                    <span className={`text-[10px] font-bold ${effectiveJianpuDuration === 'eighth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/8</span>
-                  </button>
-
-                  <button 
-                    onClick={() => setSelectedJianpuDuration('sixteenth')}
-                    disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canSixteenth)}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canSixteenth ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
-                    title="Sixteenth Note (S)"
-                    aria-keyshortcuts="S"
-                  >
-                    <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                      <Hash size={16} />
-                      <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDuration === 'sixteenth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>S</span>
-                    </div>
-                    <span className={`text-[10px] font-bold ${effectiveJianpuDuration === 'sixteenth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/16</span>
-                  </button>
-
-                  <button 
-                    onClick={toggleSelectedJianpuDot}
-                    disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted)}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
-                    title="Toggle Dot (.)"
-                    aria-keyshortcuts="."
-                  >
-                    <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                      <div className="w-1.5 h-1.5 bg-current rounded-full" />
-                      <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDotted ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>.</span>
-                    </div>
-                    <span className={`text-[10px] font-bold ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>Dot</span>
-                  </button>
-
-                  <button 
-                    onClick={toggleSelectedJianpuSlur}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuTied ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
-                    title="Toggle Tie/Slur (T)"
-                    aria-keyshortcuts="T"
-                  >
-                    <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuTied ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                      <Link size={16} />
-                      <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuTied ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>T</span>
-                    </div>
-                    <span className={`text-[10px] font-bold ${effectiveJianpuTied ? 'text-indigo-600' : 'text-gray-500'}`}>Tie</span>
-                  </button>
+                  </div>
                 </>
               ) : selection.type === 'chord' ? (
                 <>
                   <button 
                     onClick={() => applyTransformation('push')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Push / Anticipation (<)"
+                    className={chordToolbarButtonClass}
+                    title={copy.editor.pushTitle}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <svg viewBox="0 0 32 24" className="w-6 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -3880,13 +4144,13 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                         <path d="M25 7l3 3-3 3" />
                       </svg>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Push</span>
+                    <span className={chordToolbarLabelClass}>{copy.editor.push}</span>
                   </button>
 
                   <button 
                     onClick={() => applyTransformation('pull')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Pull / Delay (>)"
+                    className={chordToolbarButtonClass}
+                    title={copy.editor.pullTitle}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <svg viewBox="0 0 32 24" className="w-6 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -3894,72 +4158,72 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                         <path d="M7 7l-3 3 3 3" />
                       </svg>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Pull</span>
+                    <span className={chordToolbarLabelClass}>{copy.editor.pull}</span>
                   </button>
 
                   <button 
                     onClick={() => applyTransformation('accent')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Accent (^)"
+                    className={chordToolbarButtonClass}
+                    title={copy.editor.accentTitle}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M6 8l12 4-12 4" />
                       </svg>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Accent</span>
+                    <span className={chordToolbarLabelClass}>{copy.editor.accent}</span>
                   </button>
 
                   <button 
                     onClick={() => applyTransformation('rest1')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Whole Rest (0w)"
+                    className={chordToolbarButtonClass}
+                    title={copy.editor.wholeRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-[20px] leading-none select-none whitespace-pre -translate-y-[1px]">
                         {getRestGlyph('w')}
                       </span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 1</span>
+                    <span className={chordToolbarLabelClass}>{copy.editor.wholeRestShort}</span>
                   </button>
 
                   <button 
                     onClick={() => applyTransformation('rest2')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Half Rest (0h)"
+                    className={chordToolbarButtonClass}
+                    title={copy.editor.halfRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-[20px] leading-none select-none whitespace-pre translate-y-[1px]">
                         {getRestGlyph('h')}
                       </span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 2</span>
+                    <span className={chordToolbarLabelClass}>{copy.editor.halfRestShort}</span>
                   </button>
 
                   <button 
                     onClick={() => applyTransformation('rest')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Quarter Rest (0)"
+                    className={chordToolbarButtonClass}
+                    title={copy.editor.quarterRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-[20px] leading-none select-none whitespace-pre -translate-y-[1px]">
                         {getRestGlyph('q')}
                       </span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 4</span>
+                    <span className={chordToolbarLabelClass}>{copy.editor.quarterRestShort}</span>
                   </button>
 
                   <button 
                     onClick={() => applyTransformation('rest8')}
-                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="8th Rest (0_)"
+                    className={chordToolbarButtonClass}
+                    title={copy.editor.eighthRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-[20px] leading-none select-none whitespace-pre translate-y-[1px]">
                         {getRestGlyph('e')}
                       </span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 8</span>
+                    <span className={chordToolbarLabelClass}>{copy.editor.eighthRestShort}</span>
                   </button>
                 </>
               ) : (
@@ -3967,7 +4231,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   <button
                     onClick={() => insertRhythmToken('w')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Whole Note"
+                    title={copy.editor.wholeNote}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">𝅝</span>
@@ -3978,7 +4242,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   <button
                     onClick={() => insertRhythmToken('h')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Half Note"
+                    title={copy.editor.halfNote}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">𝅗𝅥</span>
@@ -3989,7 +4253,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   <button
                     onClick={() => insertRhythmToken('q')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Quarter Note"
+                    title={copy.editor.quarterNote}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">♩</span>
@@ -4000,7 +4264,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   <button
                     onClick={() => insertRhythmToken('e')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Eighth Note"
+                    title={copy.editor.eighthNote}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">♪</span>
@@ -4011,7 +4275,7 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   <button
                     onClick={() => insertRhythmToken('s')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Sixteenth Note"
+                    title={copy.editor.sixteenthNote}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">♬</span>
@@ -4022,36 +4286,36 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   <button
                     onClick={toggleRhythmDot}
                     className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.dotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
-                    title="Toggle Dot"
+                    title={copy.editor.toggleDot}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedRhythmEditorEvent?.dotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                       <div className="w-2 h-2 bg-current rounded-full" />
                     </div>
-                    <span className={`text-[10px] font-bold ${selectedRhythmEditorEvent?.dotted ? 'text-indigo-600' : 'text-gray-500'}`}>Dot</span>
+                    <span className={`text-[10px] font-bold ${selectedRhythmEditorEvent?.dotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
                   </button>
 
                   <button
                     onClick={toggleRhythmAccent}
                     className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.accent ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
-                    title="Toggle Accent (^)"
+                    title={copy.editor.toggleAccent}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedRhythmEditorEvent?.accent ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                       <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M6 9l12 3-12 3" />
                       </svg>
                     </div>
-                    <span className={`text-[10px] font-bold ${selectedRhythmEditorEvent?.accent ? 'text-indigo-600' : 'text-gray-500'}`}>Accent</span>
+                    <span className={`text-[10px] font-bold ${selectedRhythmEditorEvent?.accent ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.accent}</span>
                   </button>
 
                   <button
                     onClick={toggleRhythmTie}
                     className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.tieAfter ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
-                    title="Toggle Tie (~)"
+                    title={copy.editor.toggleTie}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedRhythmEditorEvent?.tieAfter ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                       <Link size={16} />
                     </div>
-                    <span className={`text-[10px] font-bold ${selectedRhythmEditorEvent?.tieAfter ? 'text-indigo-600' : 'text-gray-500'}`}>Tie</span>
+                    <span className={`text-[10px] font-bold ${selectedRhythmEditorEvent?.tieAfter ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.tie}</span>
                   </button>
 
                   <div className="w-px h-8 bg-gray-100 mx-1" />
@@ -4059,56 +4323,56 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
                   <button
                     onClick={() => insertRhythmToken('wr')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Whole Rest"
+                    title={copy.editor.wholeRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">𝄻</span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 1</span>
+                    <span className="text-[10px] font-bold text-gray-500">{copy.editor.wholeRestShort}</span>
                   </button>
 
                   <button
                     onClick={() => insertRhythmToken('hr')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Half Rest"
+                    title={copy.editor.halfRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">𝄼</span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 1/2</span>
+                    <span className="text-[10px] font-bold text-gray-500">{copy.editor.halfRestShort}</span>
                   </button>
 
                   <button
                     onClick={() => insertRhythmToken('qr')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Quarter Rest"
+                    title={copy.editor.quarterRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">𝄽</span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 4</span>
+                    <span className="text-[10px] font-bold text-gray-500">{copy.editor.quarterRestShort}</span>
                   </button>
 
                   <button
                     onClick={() => insertRhythmToken('er')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Eighth Rest"
+                    title={copy.editor.eighthRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">𝄾</span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 8</span>
+                    <span className="text-[10px] font-bold text-gray-500">{copy.editor.eighthRestShort}</span>
                   </button>
 
                   <button
                     onClick={() => insertRhythmToken('sr')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
-                    title="Sixteenth Rest"
+                    title={copy.editor.sixteenthRest}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                       <span className="font-rhythm text-lg leading-none">𝄿</span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-500">Rest 16</span>
+                    <span className="text-[10px] font-bold text-gray-500">{copy.editor.sixteenthRestShort}</span>
                   </button>
                 </>
               )}
@@ -4118,12 +4382,12 @@ const SongEditor: React.FC<Props> = ({ song, history, onUndo, onRedo, onChange, 
               <button 
                 onClick={() => selection.type === 'rhythm' ? clearRhythmSelection() : applyTransformation('clear')}
                 className="flex flex-col items-center gap-1 p-2 hover:bg-red-50 rounded-xl transition-colors group"
-                title="Clear Formatting"
+                title={copy.editor.clearFormatting}
               >
                 <div className="w-8 h-8 bg-red-100 text-red-600 rounded-lg flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
                   <Trash2 size={16} />
                 </div>
-                <span className="text-[10px] font-bold text-gray-500">Clear</span>
+                <span className="text-[10px] font-bold text-gray-500">{copy.editor.clear}</span>
               </button>
             </div>
 
