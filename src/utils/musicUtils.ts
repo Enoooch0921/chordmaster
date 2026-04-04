@@ -127,6 +127,10 @@ export function transposeKeyPreferFlats(key: Key, steps: number): Key {
 
 export function transposeChord(chord: string, offset: number, targetKey?: Key): string {
   if (!chord || chord === '%' || chord === '/') return chord;
+  const normalizedOffset = ((offset % 12) + 12) % 12;
+  if (normalizedOffset === 0) {
+    return normalizeChordEnharmonic(chord);
+  }
 
   // Handle slash chords like E/G#
   if (chord.includes('/')) {

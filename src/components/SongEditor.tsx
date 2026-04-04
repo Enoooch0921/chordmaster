@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker } from '../types';
+import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure } from '../types';
 import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, LayoutGroup } from 'motion/react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
-import { getSectionColor, normalizeChordEnharmonic } from '../utils/musicUtils';
+import { getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats } from '../utils/musicUtils';
 import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
 import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
@@ -97,6 +97,9 @@ interface SectionTitleSuggestionState {
 
 type BarInsertPosition = 'before' | 'after';
 
+const PICKUP_SECTION_INDEX = 0;
+const PICKUP_BAR_INDEX = -1;
+
 const ORIGINAL_KEY_MENU_LAYOUT: Array<Array<Key | null>> = [
   ['Ab', 'A', null],
   ['Bb', 'B', null],
@@ -170,6 +173,22 @@ const formatSectionTitleCase = (value: string) => (
     })
     .join('\n')
 );
+
+const getSectionKeyStates = (song: Song) => {
+  const baseKeys: Key[] = [];
+  const activeKeys: Key[] = [];
+  let activeKey = song.originalKey;
+
+  song.sections.forEach((section) => {
+    baseKeys.push(activeKey);
+    if (section.keyChangeTo) {
+      activeKey = section.keyChangeTo;
+    }
+    activeKeys.push(activeKey);
+  });
+
+  return { baseKeys, activeKeys };
+};
 
 interface SectionNavigationLabel {
   main: string;
@@ -377,6 +396,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   const [copiedRhythm, setCopiedRhythm] = useState<string | null>(null);
   const [tempoDraft, setTempoDraft] = useState<string>(formatTempoDraftValue(song.tempo));
   const [isOriginalKeyMenuOpen, setIsOriginalKeyMenuOpen] = useState(false);
+  const [openSectionKeyMenuId, setOpenSectionKeyMenuId] = useState<string | null>(null);
   const [jianpuDurationBlockedHint, setJianpuDurationBlockedHint] = useState<string | null>(null);
   const [sectionTitleSuggestionState, setSectionTitleSuggestionState] = useState<SectionTitleSuggestionState>({
     sectionId: null,
@@ -386,6 +406,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   const rootRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const originalKeyMenuRef = useRef<HTMLDivElement>(null);
+  const sectionKeyMenuRef = useRef<HTMLDivElement>(null);
   const barRefs = useRef(new Map<string, HTMLDivElement>());
   const sectionRefs = useRef(new Map<string, HTMLDivElement>());
   const sectionTitleRefs = useRef(new Map<string, HTMLTextAreaElement>());
@@ -397,6 +418,9 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   const notifyChange = (newSong: Song) => {
     onChange(newSong);
   };
+
+  const { baseKeys: sectionBaseKeys, activeKeys: sectionActiveKeys } = getSectionKeyStates(song);
+  const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
 
   const clearEditorSelectionState = () => {
     setSelection(null);
@@ -484,6 +508,10 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     chords: []
   });
 
+  const createPickupMeasure = (): PickupMeasure => ({
+    id: createBarId()
+  });
+
   useEffect(() => {
     const needsIds = song.sections.some(s => !s.id || s.bars.some(bar => !bar.id));
     if (needsIds) {
@@ -556,6 +584,23 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     return () => window.removeEventListener('mousedown', handlePointerDown);
   }, [isOriginalKeyMenuOpen]);
 
+  useEffect(() => {
+    if (!openSectionKeyMenuId) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (sectionKeyMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setOpenSectionKeyMenuId(null);
+    };
+
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [openSectionKeyMenuId]);
+
   const updateField = (field: keyof Song, value: any) => {
     notifyChange({ ...song, [field]: value });
   };
@@ -579,6 +624,117 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     notifyChange({ ...song, sections: newSections });
   };
 
+  const transposeSectionChordsToKey = (section: Section, fromKey: Key, toKey: Key): Section => {
+    if (fromKey === toKey) {
+      return section;
+    }
+
+    const offset = getTransposeOffset(fromKey, toKey);
+    return {
+      ...section,
+      bars: section.bars.map((bar) => ({
+        ...bar,
+        chords: bar.chords.map((token) => (
+          isNashville(token) ? token : transposeChord(token, offset, toKey)
+        ))
+      }))
+    };
+  };
+
+  const normalizeSectionKeyChanges = (sections: Section[]) => {
+    let inheritedKey = song.originalKey;
+
+    return sections.map((section) => {
+      const nextKeyChangeTo = section.keyChangeTo && section.keyChangeTo !== inheritedKey
+        ? section.keyChangeTo
+        : undefined;
+      inheritedKey = nextKeyChangeTo || inheritedKey;
+
+      return nextKeyChangeTo === section.keyChangeTo
+        ? section
+        : { ...section, keyChangeTo: nextKeyChangeTo };
+    });
+  };
+
+  const getInheritedKeyBeforeSection = (sections: Section[], index: number) => {
+    let inheritedKey = song.originalKey;
+    for (let i = 0; i < index; i += 1) {
+      if (sections[i]?.keyChangeTo) {
+        inheritedKey = sections[i].keyChangeTo as Key;
+      }
+    }
+    return inheritedKey;
+  };
+
+  const adaptSectionForDestination = (section: Section, sourceWrittenKey: Key, destinationBaseKey: Key) => {
+    if (section.keyChangeTo) {
+      return section;
+    }
+    return transposeSectionChordsToKey(section, sourceWrittenKey, destinationBaseKey);
+  };
+
+  const realignSectionsForCurrentOrder = (sections: Section[]) => {
+    const previousWrittenKeys = new Map<string, Key>();
+    let inheritedOldKey = song.originalKey;
+
+    song.sections.forEach((section, index) => {
+      if (section.keyChangeTo) {
+        inheritedOldKey = section.keyChangeTo;
+      }
+      previousWrittenKeys.set(section.id || `section-${index}`, inheritedOldKey);
+    });
+
+    let inheritedNewKey = song.originalKey;
+    const alignedSections = sections.map((section, index) => {
+      const identity = section.id || `section-${index}`;
+      const previousWrittenKey = previousWrittenKeys.get(identity) || inheritedNewKey;
+
+      if (section.keyChangeTo) {
+        inheritedNewKey = section.keyChangeTo;
+        return section;
+      }
+
+      return transposeSectionChordsToKey(section, previousWrittenKey, inheritedNewKey);
+    });
+
+    return normalizeSectionKeyChanges(alignedSections);
+  };
+
+  const applySectionKeyChangeFromIndex = (startIndex: number, nextWrittenKey?: Key) => {
+    const currentWrittenKey = sectionActiveKeys[startIndex] || sectionBaseKeys[startIndex] || song.originalKey;
+    const baseWrittenKey = sectionBaseKeys[startIndex] || song.originalKey;
+    const resolvedWrittenKey = nextWrittenKey || baseWrittenKey;
+    const shift = getTransposeOffset(currentWrittenKey, resolvedWrittenKey);
+
+    const nextSections = song.sections.map((section, index) => {
+      if (index < startIndex) {
+        return section;
+      }
+
+      const nextSection = shift === 0
+        ? section
+        : transposeSectionChordsToKey(section, currentWrittenKey, resolvedWrittenKey);
+
+      if (index === startIndex) {
+        return {
+          ...nextSection,
+          keyChangeTo: resolvedWrittenKey === baseWrittenKey ? undefined : resolvedWrittenKey
+        };
+      }
+
+      if (!section.keyChangeTo) {
+        return nextSection;
+      }
+
+      return {
+        ...nextSection,
+        keyChangeTo: transposeKeyPreferFlats(section.keyChangeTo, shift)
+      };
+    });
+
+    notifyChange({ ...song, sections: normalizeSectionKeyChanges(nextSections) });
+  };
+
   const applySectionTitleSuggestion = (sIdx: number, section: Section, suggestedTitle: string) => {
     const sectionId = section.id || `section-${sIdx}`;
     const formattedTitle = formatSectionTitleCase(suggestedTitle);
@@ -596,6 +752,16 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   };
 
   const updateBar = (sIdx: number, bIdx: number, updates: Partial<Bar>) => {
+    if (sIdx === PICKUP_SECTION_INDEX && bIdx === PICKUP_BAR_INDEX) {
+      const nextPickup: PickupMeasure = {
+        ...(song.pickup ?? createPickupMeasure()),
+        ...(updates.riff !== undefined ? { riff: updates.riff } : {}),
+        ...(updates.rhythm !== undefined ? { rhythm: updates.rhythm } : {})
+      };
+      notifyChange({ ...song, pickup: nextPickup });
+      return;
+    }
+
     const section = song.sections[sIdx];
     const newBars = [...section.bars];
     newBars[bIdx] = { ...section.bars[bIdx], ...updates };
@@ -604,8 +770,51 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     notifyChange({ ...song, sections: newSections });
   };
 
+  const isPickupTarget = (sIdx: number, bIdx: number) => (
+    sIdx === PICKUP_SECTION_INDEX && bIdx === PICKUP_BAR_INDEX
+  );
+
+  const getEditorBar = (sIdx: number, bIdx: number): Bar | undefined => {
+    if (!isPickupTarget(sIdx, bIdx)) {
+      return song.sections[sIdx]?.bars[bIdx];
+    }
+
+    if (!song.pickup) return undefined;
+
+    return {
+      id: song.pickup.id,
+      chords: [],
+      riff: song.pickup.riff,
+      rhythm: song.pickup.rhythm
+    };
+  };
+
+  const addPickupMeasure = () => {
+    if (song.pickup) return;
+    const nextPickup = createPickupMeasure();
+    clearEditorSelectionState();
+    notifyChange({ ...song, pickup: nextPickup });
+    markActiveSection(song.sections[0]?.id ?? null);
+    markActiveBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
+    setJianpuCursor({ sIdx: PICKUP_SECTION_INDEX, bIdx: PICKUP_BAR_INDEX, beatIndex: 0 });
+    setSelection({
+      sIdx: PICKUP_SECTION_INDEX,
+      bIdx: PICKUP_BAR_INDEX,
+      start: 0,
+      end: 0,
+      text: '',
+      type: 'riff'
+    });
+  };
+
+  const removePickupMeasure = () => {
+    if (!song.pickup) return;
+    clearEditorSelectionState();
+    notifyChange({ ...song, pickup: undefined });
+  };
+
   const handleCopyRhythm = (sIdx: number, bIdx: number) => {
-    setCopiedRhythm(song.sections[sIdx]?.bars[bIdx]?.rhythm || '');
+    setCopiedRhythm(getEditorBar(sIdx, bIdx)?.rhythm || '');
   };
 
   const handleCopyJianpu = (sIdx: number, bIdx: number) => {
@@ -618,8 +827,8 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     }
 
     const nextRiff = getCanonicalRiffNotationForBar(copiedJianpu, sIdx, bIdx, true);
-    updateBar(sIdx, bIdx, { riff: nextRiff || undefined });
-    setRiffCaretSelection(sIdx, bIdx, nextRiff, nextRiff.length);
+    const sanitizedRiff = applyRiffValue(sIdx, bIdx, nextRiff);
+    setRiffCaretSelection(sIdx, bIdx, sanitizedRiff, sanitizedRiff.length);
   };
 
   const handlePasteRhythm = (sIdx: number, bIdx: number) => {
@@ -647,7 +856,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
   const getBarTimeSignature = (bar?: Bar) => getEffectiveTimeSignature(bar?.timeSignature, song.timeSignature);
   const getCanonicalRiffNotationForBar = (notation: string | undefined, sIdx: number, bIdx: number, trimTrailingEmpty = false) => (
-    getCanonicalJianpuNotation(notation, getBarTimeSignature(song.sections[sIdx]?.bars[bIdx]), trimTrailingEmpty)
+    getCanonicalJianpuNotation(notation, getBarTimeSignature(getEditorBar(sIdx, bIdx)), trimTrailingEmpty)
   );
   const getBarPanelKey = (bar: Bar, sIdx: number, bIdx: number) => bar.id || `${sIdx}-${bIdx}`;
   const getBarPanelState = (bar: Bar, sIdx: number, bIdx: number) => {
@@ -1005,12 +1214,12 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   };
 
   const getRhythmTokens = (sIdx: number, bIdx: number) => {
-    const value = song.sections[sIdx]?.bars[bIdx]?.rhythm || '';
+    const value = getEditorBar(sIdx, bIdx)?.rhythm || '';
     return normalizeRhythmInput(value).split(/\s+/).filter(Boolean);
   };
 
   const getRhythmEditorEvents = (sIdx: number, bIdx: number, rhythmValue?: string): RhythmEditorEvent[] => {
-    const bar = song.sections[sIdx]?.bars[bIdx];
+    const bar = getEditorBar(sIdx, bIdx);
     const parsed = parseRhythmNotation(rhythmValue ?? (bar?.rhythm || ''), getBarTimeSignature(bar));
     return parsed.events
       .filter((event) => !event.isHidden)
@@ -1026,7 +1235,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   };
 
   const getRhythmEditorCursorUnits = (sIdx: number, bIdx: number, rhythmValue?: string) => {
-    const bar = song.sections[sIdx]?.bars[bIdx];
+    const bar = getEditorBar(sIdx, bIdx);
     const parsed = parseRhythmNotation(rhythmValue ?? (bar?.rhythm || ''), getBarTimeSignature(bar));
     const events = parsed.events.filter((event) => !event.isHidden);
 
@@ -1054,7 +1263,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     const normalized = normalizeRhythmToken(token);
     const match = normalized.match(/^(w|h|q|e|s)(r)?(\.)?(\^)?(~)?$/);
     if (!match) return null;
-    const parsed = parseRhythmNotation(normalized, getBarTimeSignature(song.sections[sIdx]?.bars[bIdx]));
+    const parsed = parseRhythmNotation(normalized, getBarTimeSignature(getEditorBar(sIdx, bIdx)));
     const event = parsed.events[0];
     if (!event) return null;
 
@@ -1102,7 +1311,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     const normalized = normalizeRhythmInput(tokens.join(' '));
     if (!normalized) return '';
 
-    const bar = song.sections[sIdx]?.bars[bIdx];
+    const bar = getEditorBar(sIdx, bIdx);
     const parsedRhythm = parseRhythmNotation(normalized, getBarTimeSignature(bar));
     return parsedRhythm.events.some((event) => !event.isHidden) ? normalized : '';
   };
@@ -1128,7 +1337,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   };
 
   const getRhythmBarUnits = (sIdx: number, bIdx: number, rhythmValue?: string) => {
-    const bar = song.sections[sIdx]?.bars[bIdx];
+    const bar = getEditorBar(sIdx, bIdx);
     return parseRhythmNotation(rhythmValue ?? (bar?.rhythm || ''), getBarTimeSignature(bar)).barUnits;
   };
 
@@ -1214,7 +1423,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   };
 
   const focusRhythmEditor = (sIdx: number, bIdx: number) => {
-    const value = song.sections[sIdx]?.bars[bIdx]?.rhythm || '';
+    const value = getEditorBar(sIdx, bIdx)?.rhythm || '';
     if (selection?.type === 'rhythm' && selection.sIdx === sIdx && selection.bIdx === bIdx && rhythmCursor) {
       return;
     }
@@ -1226,7 +1435,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   const moveRhythmSelection = (direction: -1 | 1) => {
     if (!selection || selection.type !== 'rhythm') return;
 
-    const value = song.sections[selection.sIdx]?.bars[selection.bIdx]?.rhythm || '';
+    const value = getEditorBar(selection.sIdx, selection.bIdx)?.rhythm || '';
     const cursorUnits = getRhythmEditorCursorUnits(selection.sIdx, selection.bIdx);
     const activeCursor = getActiveRhythmCursor(selection);
     const currentUnit = activeCursor?.cursorUnit ?? getSelectedRhythmInsertIndex(selection);
@@ -1334,7 +1543,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
     if (e.key === 'Home') {
       e.preventDefault();
-      setRhythmInsertSelection(sIdx, bIdx, song.sections[sIdx]?.bars[bIdx]?.rhythm || '', 0);
+      setRhythmInsertSelection(sIdx, bIdx, getEditorBar(sIdx, bIdx)?.rhythm || '', 0);
       return;
     }
 
@@ -1546,11 +1755,11 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   };
 
   const getRiffValue = (sIdx: number, bIdx: number) => (
-    getCanonicalRiffNotationForBar(song.sections[sIdx]?.bars[bIdx]?.riff, sIdx, bIdx)
+    getCanonicalRiffNotationForBar(getEditorBar(sIdx, bIdx)?.riff, sIdx, bIdx)
   );
 
   const getJianpuBarTiming = (sIdx: number, bIdx: number) => {
-    const { beats, beatUnits } = parseTimeSignature(getBarTimeSignature(song.sections[sIdx]?.bars[bIdx]));
+    const { beats, beatUnits } = parseTimeSignature(getBarTimeSignature(getEditorBar(sIdx, bIdx)));
     return { beats, beatUnits };
   };
 
@@ -1564,7 +1773,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   );
 
   const getCanonicalBeatTokens = (value: string, sIdx: number, bIdx: number) => {
-    return getCanonicalJianpuBeatTokens(value, getBarTimeSignature(song.sections[sIdx]?.bars[bIdx]));
+    return getCanonicalJianpuBeatTokens(value, getBarTimeSignature(getEditorBar(sIdx, bIdx)));
   };
 
   const serializeBeatTokens = (tokens: string[]) => serializeJianpuBeatTokens(tokens, true);
@@ -1668,9 +1877,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     sIdx: number,
     bIdx: number,
     riff: string,
-    beat: ReturnType<typeof getBeatNoteRanges>[number],
-    desiredUnits: number,
-    beatUnits: number
+    beat: ReturnType<typeof getBeatNoteRanges>[number]
   ) => {
     const noteTargets = beat.notes.map((note) => ({
       sIdx,
@@ -1680,16 +1887,6 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       end: note.end
     }));
     const placeholderTargets = findJianpuPlaceholderRanges(beat.token)
-      .filter((placeholder) => {
-        const capacity = getPlaceholderContinuationCapacity(
-          sIdx,
-          bIdx,
-          riff,
-          beat.beatIndex,
-          placeholder.start
-        );
-        return capacity.totalUnits + 0.001 >= desiredUnits;
-      })
       .map((placeholder) => ({
         sIdx,
         bIdx,
@@ -1698,8 +1895,9 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
         end: beat.start + placeholder.start
       }));
 
+    const { beatUnits } = getJianpuBarTiming(sIdx, bIdx);
     const implicitRemainingUnits = Math.max(0, beatUnits - beat.usedUnits);
-    const appendTarget = placeholderTargets.length === 0 && implicitRemainingUnits + 0.001 >= desiredUnits
+    const appendTarget = placeholderTargets.length === 0 && implicitRemainingUnits > 0.001
       ? [{
           sIdx,
           bIdx,
@@ -1713,28 +1911,16 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       .sort((a, b) => a.start - b.start || a.end - b.end);
   };
 
-  const getRiffNavigationUnits = (targetSelection: SelectionInfo | null = selection, sourceRiff?: string) => {
-    const riff = sourceRiff ?? (targetSelection?.type === 'riff'
-      ? getRiffValue(targetSelection.sIdx, targetSelection.bIdx)
-      : '');
-    const selectedNote = getSelectedJianpuNote(targetSelection, riff);
-    return getJianpuDurationUnits(
-      selectedNote?.duration ?? jianpuInputMode.duration,
-      selectedNote?.dotted ?? jianpuInputMode.dotted
-    );
-  };
-
-  const getRiffNavigationTargetsInBar = (sIdx: number, bIdx: number, desiredUnits: number) => {
+  const getRiffNavigationTargetsInBar = (sIdx: number, bIdx: number) => {
     const riff = getRiffValue(sIdx, bIdx);
     const beatData = getBeatNoteRanges(riff, sIdx, bIdx);
-    const { beatUnits } = getJianpuBarTiming(sIdx, bIdx);
 
     return beatData.flatMap((beat) => (
-      getRiffNavigationTargetsForBeat(sIdx, bIdx, riff, beat, desiredUnits, beatUnits)
+      getRiffNavigationTargetsForBeat(sIdx, bIdx, riff, beat)
     ));
   };
 
-  const getAdjacentRiffNavigationTarget = (sIdx: number, bIdx: number, direction: -1 | 1, desiredUnits: number) => {
+  const getAdjacentRiffNavigationTarget = (sIdx: number, bIdx: number, direction: -1 | 1) => {
     const bars = song.sections[sIdx]?.bars ?? [];
     if (!bars.length) return null;
 
@@ -1746,7 +1932,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       const bar = bars[index];
       if (!getBarPanelState(bar, sIdx, index).riff) continue;
 
-      const targets = getRiffNavigationTargetsInBar(sIdx, index, desiredUnits);
+      const targets = getRiffNavigationTargetsInBar(sIdx, index);
       if (targets.length === 0) continue;
       return direction > 0 ? targets[0] : targets[targets.length - 1];
     }
@@ -1765,6 +1951,34 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
   const setRiffCaretSelection = (sIdx: number, bIdx: number, value: string, caret: number) => {
     setRiffSelectionRange(sIdx, bIdx, value, caret, caret);
+    const beatIndex = getBeatIndexFromCaret(value, sIdx, bIdx, caret);
+    const availability = getJianpuInsertAvailability(sIdx, bIdx, value, beatIndex, caret);
+    if (availability.remainingUnits <= 0.001) return;
+
+    setJianpuInputMode((current) => {
+      const currentUnits = getJianpuDurationUnits(current.duration, current.dotted);
+      if (currentUnits <= availability.remainingUnits + 0.001) {
+        return current;
+      }
+
+      if (current.dotted && getJianpuDurationUnits(current.duration, false) <= availability.remainingUnits + 0.001) {
+        return { ...current, dotted: false };
+      }
+
+      if (availability.remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', false)) {
+        return { ...current, duration: 'quarter', dotted: false };
+      }
+
+      if (availability.remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', false)) {
+        return { ...current, duration: 'eighth', dotted: false };
+      }
+
+      if (availability.remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false)) {
+        return { ...current, duration: 'sixteenth', dotted: false };
+      }
+
+      return current;
+    });
   };
 
   const getSelectedJianpuNote = (targetSelection: SelectionInfo | null = selection, sourceValue?: string): JianpuNoteRange | null => {
@@ -1952,6 +2166,28 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     };
   };
 
+  const applyRiffValue = (sIdx: number, bIdx: number, nextRiff: string) => {
+    if (isPickupTarget(sIdx, bIdx)) {
+      const normalizedPickupRiff = getCanonicalRiffNotationForBar(nextRiff, sIdx, bIdx, true);
+      updateBar(sIdx, bIdx, { riff: normalizedPickupRiff || undefined });
+      return normalizedPickupRiff;
+    }
+
+    const section = song.sections[sIdx];
+    if (!section?.bars[bIdx]) {
+      updateBar(sIdx, bIdx, { riff: nextRiff || undefined });
+      return nextRiff;
+    }
+
+    const nextBars = [...section.bars];
+    nextBars[bIdx] = { ...nextBars[bIdx], riff: nextRiff || undefined };
+    const sanitizedSection = sanitizeSectionJianpuSlurs({ ...section, bars: nextBars }, sIdx);
+    const nextSections = [...song.sections];
+    nextSections[sIdx] = sanitizedSection;
+    notifyChange({ ...song, sections: nextSections });
+    return sanitizedSection.bars[bIdx]?.riff || '';
+  };
+
   const commitJianpuNoteUpdates = (
     updates: Array<{ sIdx: number; bIdx: number; start: number; end: number; replacement: string }>,
     selectedTarget: { sIdx: number; bIdx: number; start: number; end: number }
@@ -1960,12 +2196,14 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
     const nextSections = [...song.sections];
     const updatesByBar = new Map<string, Array<{ start: number; end: number; replacement: string }>>();
+    const affectedSections = new Set<number>();
 
     updates.forEach((update) => {
       const key = `${update.sIdx}:${update.bIdx}`;
       const existing = updatesByBar.get(key) ?? [];
       existing.push({ start: update.start, end: update.end, replacement: update.replacement });
       updatesByBar.set(key, existing);
+      affectedSections.add(update.sIdx);
     });
 
     updatesByBar.forEach((barUpdates, key) => {
@@ -1987,9 +2225,15 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       nextSections[sIdx] = { ...section, bars };
     });
 
+    affectedSections.forEach((sIdx) => {
+      const section = nextSections[sIdx];
+      if (!section) return;
+      nextSections[sIdx] = sanitizeSectionJianpuSlurs(section, sIdx);
+    });
+
     const selectedRiff = nextSections[selectedTarget.sIdx]?.bars[selectedTarget.bIdx]?.riff || '';
     notifyChange({ ...song, sections: nextSections });
-    setRiffSelectionRange(
+    resolveRiffSelection(
       selectedTarget.sIdx,
       selectedTarget.bIdx,
       selectedRiff,
@@ -1998,28 +2242,50 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     );
   };
 
-  const resolveRiffSelection = (sIdx: number, bIdx: number, value: string, start: number, end: number) => {
+  const getResolvedRiffSelectionTarget = (sIdx: number, bIdx: number, value: string, start: number, end: number) => {
     const notes = getBeatNoteRanges(value, sIdx, bIdx).flatMap((beat) => beat.notes);
     const overlappingNote = notes.find((note) => note.start < end && note.end > start);
     const exactNote = notes.find((note) => note.start === start && note.end === end);
     const nextSelection = exactNote || overlappingNote;
 
     if (nextSelection) {
+      return {
+        start: nextSelection.start,
+        end: nextSelection.end
+      };
+    }
+
+    const caret = Math.max(0, Math.min(value.length, start));
+    return {
+      start: caret,
+      end: caret
+    };
+  };
+
+  const resolveRiffSelection = (sIdx: number, bIdx: number, value: string, start: number, end: number) => {
+    const nextSelection = getResolvedRiffSelectionTarget(sIdx, bIdx, value, start, end);
+
+    if (nextSelection.start !== nextSelection.end) {
       setRiffSelectionRange(sIdx, bIdx, value, nextSelection.start, nextSelection.end);
       return;
     }
 
-    setRiffCaretSelection(sIdx, bIdx, value, start);
+    setRiffCaretSelection(sIdx, bIdx, value, nextSelection.start);
   };
 
   const commitRiffValue = (sIdx: number, bIdx: number, nextRiff: string, nextSelection?: { start: number; end: number }) => {
-    updateBar(sIdx, bIdx, { riff: nextRiff || undefined });
+    const sanitizedRiff = applyRiffValue(sIdx, bIdx, nextRiff);
     if (nextSelection) {
-      setRiffSelectionRange(sIdx, bIdx, nextRiff, nextSelection.start, nextSelection.end);
+      resolveRiffSelection(sIdx, bIdx, sanitizedRiff, nextSelection.start, nextSelection.end);
       return;
     }
 
-    setRiffCaretSelection(sIdx, bIdx, nextRiff, Math.min(nextRiff.length, selection?.type === 'riff' ? selection.start : nextRiff.length));
+    setRiffCaretSelection(
+      sIdx,
+      bIdx,
+      sanitizedRiff,
+      Math.min(sanitizedRiff.length, selection?.type === 'riff' ? selection.start : sanitizedRiff.length)
+    );
   };
 
   const getContinuableEmptyNextRiffBarTarget = (sIdx: number, bIdx: number) => {
@@ -2354,23 +2620,34 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     nextRiff: string,
     currentSelection: { start: number; end: number }
   ) => {
-    const nextTargetInBar = getNextRiffTargetInBar(
+    const sanitizedRiff = applyRiffValue(sIdx, bIdx, nextRiff);
+    const resolvedCurrentSelection = getResolvedRiffSelectionTarget(
       sIdx,
       bIdx,
-      nextRiff,
+      sanitizedRiff,
       currentSelection.start,
       currentSelection.end
     );
-
-    const advancedWithinBar = (
-      nextTargetInBar.start !== currentSelection.start ||
-      nextTargetInBar.end !== currentSelection.end
+    const nextTargetInBar = getNextRiffTargetInBar(
+      sIdx,
+      bIdx,
+      sanitizedRiff,
+      resolvedCurrentSelection.start,
+      resolvedCurrentSelection.end
     );
 
-    updateBar(sIdx, bIdx, { riff: nextRiff || undefined });
+    const advancedWithinBar = (
+      nextTargetInBar.start !== resolvedCurrentSelection.start ||
+      nextTargetInBar.end !== resolvedCurrentSelection.end
+    );
 
     if (advancedWithinBar) {
-      setRiffSelectionRange(sIdx, bIdx, nextRiff, nextTargetInBar.start, nextTargetInBar.end);
+      if (nextTargetInBar.start === nextTargetInBar.end) {
+        setRiffCaretSelection(sIdx, bIdx, sanitizedRiff, nextTargetInBar.start);
+        return;
+      }
+
+      setRiffSelectionRange(sIdx, bIdx, sanitizedRiff, nextTargetInBar.start, nextTargetInBar.end);
       return;
     }
 
@@ -2380,7 +2657,12 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       return;
     }
 
-    setRiffSelectionRange(sIdx, bIdx, nextRiff, currentSelection.start, currentSelection.end);
+    if (resolvedCurrentSelection.start === resolvedCurrentSelection.end) {
+      setRiffCaretSelection(sIdx, bIdx, sanitizedRiff, resolvedCurrentSelection.start);
+      return;
+    }
+
+    setRiffSelectionRange(sIdx, bIdx, sanitizedRiff, resolvedCurrentSelection.start, resolvedCurrentSelection.end);
   };
 
   const updateSelectedJianpuNote = (transform: (note: JianpuNoteRange) => string) => {
@@ -2506,10 +2788,9 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   const moveRiffSelection = (direction: -1 | 1) => {
     if (!selection || selection.type !== 'riff') return;
 
-    const desiredUnits = getRiffNavigationUnits(selection);
-    const targets = getRiffNavigationTargetsInBar(selection.sIdx, selection.bIdx, desiredUnits);
+    const targets = getRiffNavigationTargetsInBar(selection.sIdx, selection.bIdx);
     if (targets.length === 0) {
-      const adjacentTarget = getAdjacentRiffNavigationTarget(selection.sIdx, selection.bIdx, direction, desiredUnits);
+      const adjacentTarget = getAdjacentRiffNavigationTarget(selection.sIdx, selection.bIdx, direction);
       if (!adjacentTarget) return;
       applyRiffNavigationTarget(adjacentTarget);
       return;
@@ -2528,7 +2809,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
         return;
       }
 
-      const adjacentTarget = getAdjacentRiffNavigationTarget(selection.sIdx, selection.bIdx, direction, desiredUnits);
+      const adjacentTarget = getAdjacentRiffNavigationTarget(selection.sIdx, selection.bIdx, direction);
       if (!adjacentTarget) return;
       applyRiffNavigationTarget(adjacentTarget);
       return;
@@ -2540,7 +2821,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       return;
     }
 
-    const adjacentTarget = getAdjacentRiffNavigationTarget(selection.sIdx, selection.bIdx, direction, desiredUnits);
+    const adjacentTarget = getAdjacentRiffNavigationTarget(selection.sIdx, selection.bIdx, direction);
     if (!adjacentTarget) return;
     applyRiffNavigationTarget(adjacentTarget);
   };
@@ -2905,17 +3186,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       replaceJianpuRange(beat.token, localStart, localEnd, placeholder)
     );
     const nextRiff = serializeBeatTokens(beatTokens);
-    const section = song.sections[selection.sIdx];
-    const nextBars = [...section.bars];
-    nextBars[selection.bIdx] = { ...section.bars[selection.bIdx], riff: nextRiff || undefined };
-    const nextSection = sanitizeSectionJianpuSlurs({ ...section, bars: nextBars }, selection.sIdx);
-    const nextSections = [...song.sections];
-    nextSections[selection.sIdx] = nextSection;
-    const sanitizedRiff = getCanonicalJianpuNotation(
-      nextSection.bars[selection.bIdx]?.riff,
-      getBarTimeSignature(nextSection.bars[selection.bIdx]),
-      true
-    );
+    const sanitizedRiff = applyRiffValue(selection.sIdx, selection.bIdx, nextRiff);
     const nextCaret = getRiffCaretForBeatSlot(
       selection.sIdx,
       selection.bIdx,
@@ -2930,7 +3201,6 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       octave: note.octave,
       dotted: note.dotted
     }));
-    notifyChange({ ...song, sections: nextSections });
     setRiffCaretSelection(selection.sIdx, selection.bIdx, sanitizedRiff, nextCaret);
   };
 
@@ -2964,17 +3234,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       replaceJianpuRange(beat.token, localStart, localEnd, placeholder)
     );
     const nextRiff = serializeBeatTokens(beatTokens);
-    const section = song.sections[selection.sIdx];
-    const nextBars = [...section.bars];
-    nextBars[selection.bIdx] = { ...section.bars[selection.bIdx], riff: nextRiff || undefined };
-    const nextSection = sanitizeSectionJianpuSlurs({ ...section, bars: nextBars }, selection.sIdx);
-    const nextSections = [...song.sections];
-    nextSections[selection.sIdx] = nextSection;
-    const sanitizedRiff = getCanonicalJianpuNotation(
-      nextSection.bars[selection.bIdx]?.riff,
-      getBarTimeSignature(nextSection.bars[selection.bIdx]),
-      true
-    );
+    const sanitizedRiff = applyRiffValue(selection.sIdx, selection.bIdx, nextRiff);
     setJianpuInputMode((current) => ({
       ...current,
       accidental: normalizeEditableJianpuAccidental(targetNote.accidental),
@@ -2982,7 +3242,6 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       octave: targetNote.octave,
       dotted: targetNote.dotted
     }));
-    notifyChange({ ...song, sections: nextSections });
     setRiffCaretSelection(
       selection.sIdx,
       selection.bIdx,
@@ -3030,14 +3289,14 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     beatTokens[targetIndex] = '';
     const nextRiff = serializeBeatTokens(beatTokens);
     const nextBeatIndex = Math.max(0, Math.min(beatTokens.length - 1, targetIndex));
+    const sanitizedRiff = applyRiffValue(selection.sIdx, selection.bIdx, nextRiff);
 
-    updateBar(selection.sIdx, selection.bIdx, { riff: nextRiff || undefined });
     setJianpuCursor({ sIdx: selection.sIdx, bIdx: selection.bIdx, beatIndex: nextBeatIndex });
     setRiffCaretSelection(
       selection.sIdx,
       selection.bIdx,
-      nextRiff,
-      getBeatTokenRanges(nextRiff, selection.sIdx, selection.bIdx)[nextBeatIndex]?.start ?? nextRiff.length
+      sanitizedRiff,
+      getBeatTokenRanges(sanitizedRiff, selection.sIdx, selection.bIdx)[nextBeatIndex]?.start ?? sanitizedRiff.length
     );
   };
 
@@ -3224,13 +3483,15 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     if (!focusRequest) return;
 
     const { sIdx, bIdx, field, requestId } = focusRequest;
-    const barId = `editor-bar-${sIdx}-b${bIdx}`;
-    const fieldId = `editor-s${sIdx}-b${bIdx}-${field}`;
-    const selectionType = field === 'chords'
+    const isPickupFocusTarget = isPickupTarget(sIdx, bIdx);
+    const targetField = isPickupFocusTarget && field === 'chords' ? 'riff' : field;
+    const barId = isPickupFocusTarget ? 'editor-pickup' : `editor-bar-${sIdx}-b${bIdx}`;
+    const fieldId = isPickupFocusTarget ? `editor-pickup-${targetField}` : `editor-s${sIdx}-b${bIdx}-${targetField}`;
+    const selectionType = targetField === 'chords'
       ? 'chord'
-      : field === 'riff'
+      : targetField === 'riff'
         ? 'riff'
-        : field === 'rhythm'
+        : targetField === 'rhythm'
           ? 'rhythm'
           : null;
 
@@ -3310,7 +3571,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     selection?.type === 'chord'
       ? song.sections[selection.sIdx]?.bars[selection.bIdx]?.chords.join(' ') ?? ''
       : selection?.type === 'rhythm'
-        ? song.sections[selection.sIdx]?.bars[selection.bIdx]?.rhythm ?? ''
+        ? getEditorBar(selection.sIdx, selection.bIdx)?.rhythm ?? ''
         : selection?.type === 'riff'
           ? getRiffValue(selection.sIdx, selection.bIdx)
           : ''
@@ -3493,7 +3754,9 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     if (selection?.type === 'riff' && selection.sIdx === sIdx && selection.bIdx === bIdx) {
       return getBeatIndexFromCaret(value, sIdx, bIdx, selection.start);
     }
-    return 0;
+    const tokens = getCanonicalBeatTokens(value, sIdx, bIdx);
+    const firstOccupiedBeat = tokens.findIndex((token) => token.trim());
+    return firstOccupiedBeat >= 0 ? firstOccupiedBeat : 0;
   };
 
   const getJianpuSelectionLabel = () => {
@@ -3534,14 +3797,18 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
   const duplicateSection = (sIdx: number) => {
     const sectionToCopy = song.sections[sIdx];
-    const newSection = {
+    const sourceWrittenKey = sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
+    let newSection = {
       ...JSON.parse(JSON.stringify(sectionToCopy)),
       id: createSectionId()
     };
     const newSections = [...song.sections];
     newSections.splice(sIdx + 1, 0, newSection);
+    const destinationBaseKey = getInheritedKeyBeforeSection(newSections, sIdx + 1);
+    newSection = adaptSectionForDestination(newSection, sourceWrittenKey, destinationBaseKey);
+    newSections[sIdx + 1] = newSection;
     clearEditorSelectionState();
-    notifyChange({ ...song, sections: newSections });
+    notifyChange({ ...song, sections: normalizeSectionKeyChanges(newSections) });
   };
 
   const addSection = () => {
@@ -3609,12 +3876,16 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
   const moveSection = (sIdx: number, direction: -1 | 1) => {
     if (sIdx + direction < 0 || sIdx + direction >= song.sections.length) return;
-    const newSections = [...song.sections];
-    const temp = newSections[sIdx];
-    newSections[sIdx] = newSections[sIdx + direction];
-    newSections[sIdx + direction] = temp;
+    const sourceSection = song.sections[sIdx];
+    const sourceWrittenKey = sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
+    const sectionsWithoutSource = song.sections.filter((_, index) => index !== sIdx);
+    const destinationIndex = direction === 1 ? sIdx + 1 : sIdx - 1;
+    const destinationBaseKey = getInheritedKeyBeforeSection(sectionsWithoutSource, destinationIndex);
+    const movedSection = adaptSectionForDestination(sourceSection, sourceWrittenKey, destinationBaseKey);
+    const newSections = [...sectionsWithoutSource];
+    newSections.splice(destinationIndex, 0, movedSection);
     clearEditorSelectionState();
-    notifyChange({ ...song, sections: newSections });
+    notifyChange({ ...song, sections: normalizeSectionKeyChanges(newSections) });
   };
 
   const sectionBarOffsets: number[] = [];
@@ -3623,6 +3894,8 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     sectionBarOffsets.push(accumulatedBarCount);
     accumulatedBarCount += section.bars.length;
   });
+  const pickupBar = getEditorBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
+  const isPickupActive = activeBar?.sIdx === PICKUP_SECTION_INDEX && activeBar?.bIdx === PICKUP_BAR_INDEX;
 
   return (
     <div ref={rootRef} className="relative pb-12">
@@ -3826,7 +4099,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
         <Reorder.Group 
           axis="x" 
           values={song.sections} 
-          onReorder={(newSections) => notifyChange({ ...song, sections: newSections })}
+          onReorder={(newSections) => notifyChange({ ...song, sections: realignSectionsForCurrentOrder(newSections) })}
           className="flex items-center gap-2"
         >
           {song.sections.map((section, idx) => {
@@ -3904,12 +4177,247 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
         </Reorder.Group>
       </div>
 
+      <div className="mb-6">
+        {pickupBar ? (
+          <motion.div
+            layout
+            transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
+            className="max-w-[22rem]"
+          >
+            <div
+              id="editor-pickup"
+              ref={node => setBarRef(pickupBar.id, node)}
+              onMouseDownCapture={() => {
+                markActiveSection(song.sections[0]?.id ?? null);
+                markActiveBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
+              }}
+              onFocusCapture={() => {
+                markActiveSection(song.sections[0]?.id ?? null);
+                markActiveBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
+              }}
+              className={`rounded-lg border p-3 shadow-sm transition-all ${
+                isPickupActive
+                  ? 'bg-white border-emerald-300 scale-[1.01]'
+                  : 'bg-emerald-50/35 border-emerald-200 hover:border-emerald-300'
+              }`}
+              style={isPickupActive ? { boxShadow: '0 0 0 2px rgba(16,185,129,0.18), 0 14px 26px rgba(16,185,129,0.14)' } : undefined}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <div className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700">
+                  {copy.editor.pickupBar}
+                </div>
+                <button
+                  type="button"
+                  onClick={removePickupMeasure}
+                  className="p-1 text-gray-300 transition-colors hover:text-red-500"
+                  title={copy.editor.removePickupBar}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {(() => {
+                  const sIdx = PICKUP_SECTION_INDEX;
+                  const bIdx = PICKUP_BAR_INDEX;
+                  const riffSelected = selection?.type === 'riff' && selection.sIdx === sIdx && selection.bIdx === bIdx;
+                  const riffValue = getRiffValue(sIdx, bIdx);
+                  const beatTokens = getCanonicalBeatTokens(riffValue, sIdx, bIdx);
+                  const beatData = getBeatNoteRanges(riffValue, sIdx, bIdx);
+                  const { beatUnits: jianpuBeatUnits } = getJianpuBarTiming(sIdx, bIdx);
+                  const activeBeatIndex = getActiveJianpuBeatIndex(sIdx, bIdx, riffValue);
+                  const beatRanges = getBeatTokenRanges(riffValue, sIdx, bIdx);
+                  const selectedPickupNote = getSelectedJianpuNote(riffSelected ? selection : null, riffValue);
+                  const selectedLayoutNote = (() => {
+                    if (!riffSelected || !selectedPickupNote) return null;
+                    const beat = beatData.find((entry) => entry.notes.some((note) => note.start === selectedPickupNote.start && note.end === selectedPickupNote.end));
+                    if (!beat) return null;
+                    const noteIndex = beat.notes.findIndex((note) => note.start === selectedPickupNote.start && note.end === selectedPickupNote.end);
+                    if (noteIndex === -1) return null;
+                    return { tokenIndex: beat.beatIndex, noteIndex };
+                  })();
+                  const activeInsertBeatIndex = riffSelected && !selectedLayoutNote ? activeBeatIndex : null;
+                  const activeInsertPosition = riffSelected && !selectedLayoutNote
+                    ? getJianpuInsertSlotInfo(sIdx, bIdx, riffValue, activeBeatIndex, selection.start)
+                    : null;
+                  const leadingOccupiedSlots = beatData.map((beat) => Math.max(0, Math.min(jianpuBeatUnits, beat.carryInUnits)));
+
+                  return (
+                    <div>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.jianpuRiff}</label>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyJianpu(sIdx, bIdx)}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                            title={copy.editor.copyJianpu}
+                          >
+                            <Copy size={12} />
+                            <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePasteJianpu(sIdx, bIdx)}
+                            disabled={copiedJianpu === null}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={copiedJianpu === null ? copy.editor.copyJianpuFirst : copy.editor.pasteJianpu}
+                          >
+                            <ArrowDownRight size={12} />
+                            <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                          </button>
+                        </div>
+                      </div>
+                      <div
+                        className={`relative rounded border bg-white transition-all ${riffSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => {
+                          const nextCaret = beatRanges[activeBeatIndex]?.start ?? riffValue.length;
+                          setJianpuCursor({ sIdx, bIdx, beatIndex: activeBeatIndex });
+                          setRiffCaretSelection(sIdx, bIdx, riffValue, nextCaret);
+                        }}
+                      >
+                        <input
+                          id="editor-pickup-riff"
+                          type="text"
+                          value={riffValue}
+                          readOnly
+                          data-riff-input
+                          data-sidx={sIdx}
+                          data-bidx={bIdx}
+                          lang="en"
+                          spellCheck={false}
+                          onBlur={clearSelectionIfFocusLeftEditor}
+                          onKeyDown={e => handleRiffInputKeyDown(e, sIdx, bIdx)}
+                          onPaste={e => e.preventDefault()}
+                          onDrop={e => e.preventDefault()}
+                          className="absolute inset-0 h-full w-full opacity-0 pointer-events-none"
+                          aria-label={`${copy.editor.jianpu} editor for pickup bar`}
+                        />
+                        <div className="min-h-[62px] px-3 py-2 flex items-center justify-center overflow-visible">
+                          <Jianpu
+                            tokens={beatTokens}
+                            renderMode="editor"
+                            activeTokenIndex={activeInsertBeatIndex}
+                            activeInsertPosition={activeInsertPosition}
+                            gridSlotCount={jianpuBeatUnits}
+                            leadingOccupiedSlots={leadingOccupiedSlots}
+                            activeNote={selectedLayoutNote}
+                            onTokenClick={(beatIndex, slotIndex) => {
+                              const nextCaret = getRiffCaretForBeatSlot(sIdx, bIdx, riffValue, beatIndex, slotIndex);
+                              setJianpuCursor({ sIdx, bIdx, beatIndex });
+                              setRiffCaretSelection(sIdx, bIdx, riffValue, nextCaret);
+                            }}
+                            onNoteClick={(beatIndex, noteIndex) => {
+                              const note = beatData[beatIndex]?.notes[noteIndex];
+                              if (!note) return;
+                              setJianpuCursor({ sIdx, bIdx, beatIndex });
+                              setRiffSelectionRange(sIdx, bIdx, riffValue, note.start, note.end);
+                            }}
+                            showPlaceholders
+                            className="w-full"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.rhythm}</label>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyRhythm(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                        title={copy.editor.copyRhythm}
+                      >
+                        <Copy size={12} />
+                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePasteRhythm(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX)}
+                        disabled={copiedRhythm === null}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        title={copiedRhythm === null ? copy.editor.copyFirst : copy.editor.pasteRhythm}
+                      >
+                        <ArrowDownRight size={12} />
+                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    className={`relative mb-2 rounded border bg-white transition-all ${selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => focusRhythmEditor(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX)}
+                  >
+                    <input
+                      id="editor-pickup-rhythm"
+                      type="text"
+                      value={pickupBar.rhythm || ''}
+                      readOnly
+                      data-rhythm-input
+                      data-sidx={PICKUP_SECTION_INDEX}
+                      data-bidx={PICKUP_BAR_INDEX}
+                      lang="en"
+                      spellCheck={false}
+                      onFocus={() => {
+                        if (!(selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX)) {
+                          focusRhythmEditor(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
+                        }
+                      }}
+                      onBlur={clearSelectionIfFocusLeftEditor}
+                      onKeyDown={e => handleRhythmInputKeyDown(e, PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX)}
+                      className="absolute inset-0 h-full w-full opacity-0 pointer-events-none"
+                      aria-label={`${copy.editor.rhythm} editor for pickup bar`}
+                    />
+                    <div className="min-h-[44px] p-1.5 flex items-center justify-center overflow-hidden">
+                      {pickupBar.rhythm || (selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX) ? (
+                        <RhythmNotation
+                          notation={pickupBar.rhythm || ''}
+                          timeSignature={song.timeSignature}
+                          compact
+                          renderMode="editor"
+                          selectionMode="insert"
+                          selectedInsertIndex={selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX ? getSelectedRhythmInsertIndex(selection) : -1}
+                          onInsertSelect={(cursorUnit) => setRhythmInsertSelection(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX, pickupBar.rhythm || '', cursorUnit)}
+                        />
+                      ) : (
+                        <span className="text-[10px] italic text-gray-300">{copy.editor.clickToStartRhythm}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-gray-400">{copy.editor.pickupBarHint}</div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <button
+            type="button"
+            onClick={addPickupMeasure}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100/70"
+          >
+            <Plus size={16} />
+            <span>{copy.editor.addPickupBar}</span>
+          </button>
+        )}
+      </div>
+
       {/* Sections */}
       <LayoutGroup id="song-editor-bars">
       <div className="space-y-6">
         {song.sections.map((section, sIdx) => {
           const colors = getSectionColor(section.title, song.useSectionColors !== false);
           const sectionId = section.id || `section-${sIdx}`;
+          const sectionStartKey = sectionBaseKeys[sIdx] || song.originalKey;
+          const sectionWrittenKey = sectionActiveKeys[sIdx] || sectionStartKey;
+          const sectionDisplayBaseKey = transposeKeyPreferFlats(sectionStartKey, globalKeyShift);
+          const sectionDisplayKey = transposeKeyPreferFlats(sectionWrittenKey, globalKeyShift);
+          const sectionTargetKey = section.keyChangeTo ? transposeKeyPreferFlats(section.keyChangeTo, globalKeyShift) : undefined;
+          const isSectionKeyMenuOpen = openSectionKeyMenuId === sectionId;
           const isActiveSection = activeSectionId === sectionId;
           const accentHighlight = getAccentHighlight(colors.accent);
           const hasSectionTitleLineBreak = section.title.includes('\n');
@@ -4084,6 +4592,96 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                   </div>
                 </div>
               <div className="flex items-center gap-2 self-end sm:self-auto">
+                <div ref={isSectionKeyMenuOpen ? sectionKeyMenuRef : null} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setOpenSectionKeyMenuId((current) => current === sectionId ? null : sectionId)}
+                    className={`flex min-w-[108px] items-center justify-between rounded-lg border bg-white px-2.5 py-1.5 text-left outline-none transition-colors ${
+                      isSectionKeyMenuOpen
+                        ? 'border-indigo-500 ring-2 ring-indigo-500'
+                        : 'border-gray-300 hover:border-gray-400'
+                    }`}
+                    title={copy.editor.changeKeyAfterSection}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400">
+                        {copy.editor.changeKeyAfterSection}
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[13px] font-semibold text-gray-800">
+                        <span>{sectionDisplayBaseKey}</span>
+                        <span className="text-gray-400">→</span>
+                        <span className={sectionTargetKey ? 'text-indigo-700' : 'text-gray-400'}>
+                          {sectionTargetKey || copy.editor.noKeyChange}
+                        </span>
+                      </div>
+                    </div>
+                    <ChevronDown
+                      size={16}
+                      className={`ml-2 shrink-0 text-gray-500 transition-transform ${isSectionKeyMenuOpen ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+
+                  {isSectionKeyMenuOpen && (
+                    <div className="absolute right-0 top-full z-40 mt-2 w-[220px] rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                      <div className="mb-2 flex items-center justify-between px-1">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">{copy.editor.currentSectionKey}</div>
+                        <div className="text-[10px] font-bold text-indigo-500">
+                          {sectionDisplayBaseKey}
+                          {sectionTargetKey ? ` → ${sectionDisplayKey}` : ''}
+                        </div>
+                      </div>
+                      <div className="mb-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            applySectionKeyChangeFromIndex(sIdx);
+                            setOpenSectionKeyMenuId(null);
+                          }}
+                          className={`flex h-[34px] w-full items-center justify-center rounded-xl border text-[12px] font-semibold tracking-tight transition-all ${
+                            !sectionTargetKey
+                              ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
+                              : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {copy.editor.noKeyChange}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {ORIGINAL_KEY_MENU_LAYOUT.flatMap((row, rowIndex) =>
+                          row.map((key, columnIndex) => {
+                            if (!key) {
+                              return <div key={`section-key-empty-${sectionId}-${rowIndex}-${columnIndex}`} className="h-[38px]" />;
+                            }
+
+                            const isSelectedKey = sectionTargetKey === key;
+
+                            return (
+                              <button
+                                key={`${sectionId}-${key}`}
+                                type="button"
+                                onClick={() => {
+                                  const nextWrittenKey = transposeKeyPreferFlats(key, -globalKeyShift);
+                                  applySectionKeyChangeFromIndex(sIdx, nextWrittenKey);
+                                  setOpenSectionKeyMenuId(null);
+                                }}
+                                className={`relative flex h-[38px] items-center justify-center rounded-xl border text-[14px] font-semibold tracking-tight transition-all ${
+                                  isSelectedKey
+                                    ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
+                                    : 'border-gray-200 bg-white text-gray-800 hover:border-indigo-200 hover:bg-gray-50'
+                                }`}
+                              >
+                                {isSelectedKey && (
+                                  <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-fuchsia-400" />
+                                )}
+                                {key}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <button 
                   onClick={() => duplicateSection(sIdx)}
                   className="text-indigo-500 hover:text-indigo-700 p-2 rounded hover:bg-indigo-50 transition-colors"

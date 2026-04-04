@@ -36,7 +36,14 @@ export interface Bar {
 export interface Section {
   id?: string; // Unique ID for reordering
   title: string; // e.g., "Intro", "Verse 1"
+  keyChangeTo?: Key;
   bars: Bar[];
+}
+
+export interface PickupMeasure {
+  id?: string;
+  riff?: string;
+  rhythm?: string;
 }
 
 export interface Song {
@@ -56,5 +63,6 @@ export interface Song {
   barNumberMode?: BarNumberMode;
   nashvilleFontPreset?: NashvilleFontPreset;
   capo?: number;
+  pickup?: PickupMeasure;
   sections: Section[];
 }

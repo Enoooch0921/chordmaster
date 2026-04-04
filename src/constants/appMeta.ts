@@ -30,7 +30,7 @@ const localizedMeta: Record<AppLanguage, {
         bullets: [
           'Built for worship teams, pop rehearsal charts, teaching handouts, and quick transposition work.',
           'The editor and sheet preview stay in sync so layout issues, navigation markers, and section colors are visible while you type.',
-          'Supports regular chord display, Nashville number display, and a fixed-do 1=C jianpu mode.'
+          'Supports regular chord display, Nashville number display, fixed-do 1=C jianpu, and section-based key changes.'
         ]
       },
       {
@@ -38,7 +38,7 @@ const localizedMeta: Record<AppLanguage, {
         description: 'Your Song Library is stored in the current browser by default, which is fast, but backup is still recommended.',
         bullets: [
           'Export Song Library JSON for backup or device-to-device transfer.',
-          'Export PDF directly for rehearsal or live use, with preview zoom and print-oriented layout refinements.',
+          'Export PDF directly for rehearsal or live use, with preview zoom, section key markers, and print-oriented layout refinements.',
           'Older songs are sanitized on load/import so legacy data has a better chance of opening correctly in newer builds.'
         ]
       }
@@ -59,7 +59,8 @@ const localizedMeta: Record<AppLanguage, {
         bullets: [
           'New bars start empty and focus jumps to the new chord field automatically.',
           'Press `Enter` inside a chord field to insert a new bar after the current one.',
-          'Common section names such as Count-In, Verse, Chorus, Turnaround, Breakdown, Bridge, and Interlude are ready to use.'
+          'Common section names such as Count-In, Verse, Chorus, Turnaround, Breakdown, Bridge, and Interlude are ready to use.',
+          'Sections can define their own key changes, and later sections can inherit those changes automatically.'
         ]
       },
       {
@@ -75,12 +76,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-04-03',
-        title: 'Fixed-do mode, navigation markers, preview zoom, and editor reliability update',
+        date: '2026-04-04',
+        title: 'Section key change, pickup workflow, and editor/preview sync update',
         bullets: [
-          'Added fixed-do 1=C display, preview zoom/pan controls, more navigation markers, and chord fermata support.',
-          'Expanded section handling with richer color categories, multiline titles, better suggestions, and merge/split workflows.',
-          'Fixed a large set of jianpu editing, slur/tie cleanup, PDF export, and legacy-song compatibility issues.'
+          'Added section-level key changes that cascade to later sections, plus preview-side Key markers and automatic chord rewriting in the editor.',
+          'Added an editor-only pickup bar workflow with preview pickup rendering before the first bar.',
+          'Improved accidental spacing, section drag/drop key inheritance, and several editor/preview synchronization details.'
         ]
       },
       {
@@ -113,7 +114,7 @@ const localizedMeta: Record<AppLanguage, {
         bullets: [
           '適合敬拜團、流行歌曲排練、教學講義與臨時轉調整理。',
           '編輯器和譜面預覽同步，方便一邊輸入一邊檢查版面、導覽記號與段落色彩。',
-          '支援一般和弦、Nashville 級數譜與固定調 `1=C` 簡譜顯示。'
+          '支援一般和弦、Nashville 級數譜、固定調 `1=C` 簡譜，以及段落轉調。'
         ]
       },
       {
@@ -121,7 +122,7 @@ const localizedMeta: Record<AppLanguage, {
         description: '歌庫預設保存在目前瀏覽器裡，適合快速使用，但仍建議定期備份。',
         bullets: [
           '可匯出 Song Library JSON 作為備份或跨裝置移轉。',
-          '可直接匯出 PDF 給團隊排練或現場使用，並搭配右側預覽縮放檢查版面。',
+          '可直接匯出 PDF 給團隊排練或現場使用，並搭配右側預覽縮放與段落 Key 標示檢查版面。',
           '較早版本的歌譜在載入或匯入時會先做整理，降低舊資料打不開的機率。'
         ]
       }
@@ -142,7 +143,8 @@ const localizedMeta: Record<AppLanguage, {
         bullets: [
           '新增小節時預設為空白，焦點會自動跳到新的 chord 欄位。',
           '在 chord input 內按 `Enter` 可以直接在後方插入新小節。',
-          '段落預設已補齊常見的 Count-In、Verse、Chorus、Turnaround、Breakdown、Bridge、Interlude 等名稱。'
+          '段落預設已補齊常見的 Count-In、Verse、Chorus、Turnaround、Breakdown、Bridge、Interlude 等名稱。',
+          '段落可設定自己的轉調，後面段落也會自動承接新的 key。'
         ]
       },
       {
@@ -158,12 +160,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-04-03',
-        title: '固定調、導覽記號、預覽縮放與編輯穩定性更新',
+        date: '2026-04-04',
+        title: '段落轉調、弱起拍與 editor / preview 聯動更新',
         bullets: [
-          '新增固定調 `1=C` 顯示、右側預覽縮放 / 拖曳、更多導覽記號與和弦 Fermata 功能。',
-          '擴充段落系統，加入更多獨立顏色分類、多行段落名稱、較準確的段落建議與段落合併 / 拆分流程。',
-          '修正大量簡譜編輯、連接線清理、PDF 匯出與舊歌資料相容性問題。'
+          '新增段落轉調，可讓後續段落一起承接新的 key，預覽也會顯示對應的 `Key: X` 標示。',
+          '新增 editor-only 弱起拍 0 小節流程，並可在預覽第一小節前呈現弱起內容。',
+          '改善升降記號距離、段落拖曳後的 key 繼承、以及 editor / preview 的轉調同步。'
         ]
       },
       {

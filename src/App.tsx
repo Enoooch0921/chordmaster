@@ -345,6 +345,9 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
       ...safeSection,
       id: typeof safeSection.id === 'string' && safeSection.id.trim() ? safeSection.id : undefined,
       title: normalizeText(safeSection.title, `Section ${sectionIndex + 1}`),
+      keyChangeTo: typeof safeSection.keyChangeTo === 'string' && VALID_KEYS.has(safeSection.keyChangeTo)
+        ? safeSection.keyChangeTo as Key
+        : undefined,
       bars: rawBars.map((bar) => {
         const safeBar = (bar && typeof bar === 'object' ? bar : {}) as Partial<Song['sections'][number]['bars'][number]> & Record<string, unknown>;
         return {
@@ -371,6 +374,17 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
     };
   });
 
+  const rawPickup = song.pickup && typeof song.pickup === 'object'
+    ? song.pickup as NonNullable<Song['pickup']> & Record<string, unknown>
+    : null;
+  const pickup = rawPickup
+    ? {
+        id: typeof rawPickup.id === 'string' && rawPickup.id.trim() ? rawPickup.id : undefined,
+        riff: normalizeOptionalText(rawPickup.riff),
+        rhythm: normalizeOptionalText(rawPickup.rhythm)
+      }
+    : undefined;
+
   return {
     ...song,
     title: normalizeText(song.title),
@@ -391,6 +405,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
       ? song.nashvilleFontPreset
       : DEFAULT_NASHVILLE_FONT_PRESET,
     capo: normalizeOptionalInteger(song.capo, 0, 12),
+    pickup: pickup && (pickup.id || pickup.riff || pickup.rhythm) ? pickup : undefined,
     sections: sections.length > 0 ? sections : [
       {
         id: undefined,

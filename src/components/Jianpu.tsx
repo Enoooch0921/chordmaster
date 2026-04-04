@@ -178,7 +178,7 @@ const Jianpu: React.FC<JianpuProps> = ({
         underlineGap: 3.8 * scale,
         dottedOffsetX: 3.5 * scale,
         octaveDotOffsetX: 0,
-        accidentalOffsetX: 4.2 * scale,
+        accidentalOffsetX: 5.2 * scale,
         noteHalfWidthUnits: 4.5,
         tokenPaddingUnits: 12,
         octaveDotSize: 2.3 * scale,
@@ -770,8 +770,13 @@ const Jianpu: React.FC<JianpuProps> = ({
         const accidentalShiftX = renderMode === 'editor'
           ? 0
           : compact
-            ? 0.18 * scale
-            : 0.4 * scale;
+            ? 0.08 * scale
+            : 0.2 * scale;
+        const accidentalPreviewPullIn = renderMode === 'editor'
+          ? 0
+          : compact
+            ? 1.8 * scale
+            : 2.2 * scale;
         const accidentalTopY = renderMode === 'editor'
           ? metrics.digitCenterY
           : metrics.digitCenterY - (
@@ -787,8 +792,8 @@ const Jianpu: React.FC<JianpuProps> = ({
                 className="absolute leading-none"
                 style={{
                   left: centerPx !== null
-                    ? `${centerPx - metrics.accidentalOffsetX - accidentalShiftX}px`
-                    : `calc(${xPercent}% - ${metrics.accidentalOffsetX + accidentalShiftX}px)`,
+                    ? `${centerPx - metrics.accidentalOffsetX - accidentalShiftX + accidentalPreviewPullIn}px`
+                    : `calc(${xPercent}% - ${metrics.accidentalOffsetX + accidentalShiftX - accidentalPreviewPullIn}px)`,
                   top: `${accidentalTopY}px`,
                   transform: 'translate(-50%, -50%)',
                   fontSize: `${renderMode === 'editor'

@@ -6,13 +6,13 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker } from '../types';
-import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey } from '../utils/musicUtils';
+import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats } from '../utils/musicUtils';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { Repeat, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
-import { convertRelativeJianpuToAbsoluteNotation, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
+import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
 import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
@@ -64,6 +64,33 @@ const getPreviewRiffNotation = (notation: string | undefined, timeSignature: str
   }
 
   return serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(trimmed, timeSignature));
+};
+
+const getOccupiedTokenSpan = (tokens: string[]) => {
+  const firstIndex = tokens.findIndex((token) => token.trim());
+  if (firstIndex === -1) {
+    return {
+      firstIndex: -1,
+      lastIndex: -1,
+      span: 0,
+      trimmedTokens: [] as string[]
+    };
+  }
+
+  let lastIndex = firstIndex;
+  for (let index = tokens.length - 1; index >= firstIndex; index -= 1) {
+    if (tokens[index]?.trim()) {
+      lastIndex = index;
+      break;
+    }
+  }
+
+  return {
+    firstIndex,
+    lastIndex,
+    span: lastIndex - firstIndex + 1,
+    trimmedTokens: tokens.slice(firstIndex, lastIndex + 1)
+  };
 };
 
 const formatEndingDisplay = (ending: string | undefined) => {
@@ -839,7 +866,15 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   const capo = song.capo || 0;
   const playKey = getPlayKey(currentKey, capo);
-  const offset = getTransposeOffset(song.originalKey, playKey);
+  const globalKeyShift = getTransposeOffset(song.originalKey, currentKey);
+  const sectionStartKeys: Key[] = [];
+  let activeSectionKey = song.originalKey;
+  song.sections.forEach((section) => {
+    if (section.keyChangeTo) {
+      activeSectionKey = section.keyChangeTo;
+    }
+    sectionStartKeys.push(activeSectionKey);
+  });
 
   const getFlashColor = (accent: string) => {
     switch (accent) {
@@ -979,10 +1014,62 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
           <div className="flex-1 flex flex-col gap-y-2 sm:gap-y-3 min-h-0 w-full">
             {pageRows.map((row, rIdx) => {
               const section = song.sections[row.sIdx];
+              const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
+              const previousWrittenKey = row.sIdx > 0 ? (sectionStartKeys[row.sIdx - 1] || song.originalKey) : song.originalKey;
+              const sectionCurrentKey = transposeKeyPreferFlats(sectionWrittenKey, globalKeyShift);
+              const previousSectionKey = row.sIdx > 0 ? transposeKeyPreferFlats(previousWrittenKey, globalKeyShift) : currentKey;
+              const sectionPlayKey = getPlayKey(sectionCurrentKey, capo);
+              const sectionOffset = getTransposeOffset(sectionWrittenKey, sectionPlayKey);
+              const sectionKeyChanged = sectionCurrentKey !== previousSectionKey;
+              const firstBarInRowIndex = row.bars.findIndex(Boolean);
               const colors = getSectionColor(section?.title || '', song.useSectionColors !== false);
               const activeTone = getSectionActiveTone(colors.accent);
               const isHighlighted = highlightedSectionIds.includes(section?.id || '');
               const isActiveSection = Boolean(section?.id) && section.id === activeSectionId;
+              const pickup = row.sIdx === 0 && row.startBIdx === 0 ? song.pickup : undefined;
+              const hasPickupRiff = Boolean(pickup?.riff?.trim());
+              const hasPickupRhythm = Boolean(pickup?.rhythm?.trim());
+              const hasPickupDisplay = hasPickupRiff || hasPickupRhythm;
+              const { beats: pickupBeatCount } = parseTimeSignature(song.timeSignature);
+              const pickupRiffTokens = hasPickupRiff
+                ? getCanonicalJianpuBeatTokens(pickup?.riff, song.timeSignature)
+                : [];
+              const pickupRiffSpan = getOccupiedTokenSpan(pickupRiffTokens);
+              const pickupMaxTokenItems = pickupRiffSpan.trimmedTokens.reduce((maxCount, token) => (
+                Math.max(maxCount, findJianpuNoteRanges(token).length + findJianpuPlaceholderRanges(token).length)
+              ), 0);
+              const pickupPreviewNotation = hasPickupRiff
+                ? (() => {
+                    const canonicalNotation = serializeJianpuBeatTokens(pickupRiffTokens);
+                    return song.showAbsoluteJianpu
+                      ? convertRelativeJianpuToAbsoluteNotation(canonicalNotation, sectionPlayKey)
+                      : canonicalNotation;
+                  })()
+                : '';
+              const pickupRiffHighlightStyle = pickupRiffSpan.firstIndex >= 0
+                ? {
+                    left: `calc(${(pickupRiffSpan.firstIndex / pickupBeatCount) * 100}% - 4px)`,
+                    width: `calc(${(pickupRiffSpan.span / pickupBeatCount) * 100}% + 4px)`
+                  }
+                : null;
+              const pickupRhythmParsed = hasPickupRhythm ? parseRhythmNotation(pickup?.rhythm || '', song.timeSignature) : null;
+              const pickupFirstVisibleRhythmEvent = pickupRhythmParsed?.events.find((event) => !event.isHidden) ?? null;
+              const pickupRhythmSpanBeats = pickupRhythmParsed
+                ? Math.max(
+                    1,
+                    Math.ceil(Math.max(0, pickupRhythmParsed.visibleEndUnit) / pickupRhythmParsed.beatUnits)
+                    - Math.floor((pickupFirstVisibleRhythmEvent?.startUnit ?? 0) / pickupRhythmParsed.beatUnits)
+                  )
+                : 0;
+              const pickupRhythmHighlightStyle = pickupRhythmParsed && pickupFirstVisibleRhythmEvent
+                ? {
+                    left: `calc(${(Math.floor(pickupFirstVisibleRhythmEvent.startUnit / pickupRhythmParsed.beatUnits) / pickupBeatCount) * 100}% - 4px)`,
+                    width: `calc(${(pickupRhythmSpanBeats / pickupBeatCount) * 100}% + 4px)`
+                  }
+                : null;
+              const pickupDisplayBeatSpan = Math.max(1, pickupRiffSpan.span, pickupRhythmSpanBeats);
+              const pickupDisplayWidthPx = Math.min(188, Math.max(96, pickupDisplayBeatSpan * 44, pickupMaxTokenItems * 24));
+              const isPickupActive = activeBar?.sIdx === 0 && activeBar?.bIdx === -1;
               
               return (
                 <motion.div 
@@ -1006,33 +1093,83 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                   className="flex-1 flex w-full min-h-0 rounded-lg transition-all"
                 >
                   {/* Left Column: Section Title */}
-                <div className="w-16 sm:w-20 shrink-0 flex items-start justify-center pr-2 pt-1">
+                <div className="relative w-16 sm:w-20 shrink-0 flex flex-col items-center justify-start pr-2 pt-1 overflow-visible">
                     {row.sectionTitle && (() => {
                       const colors = getSectionColor(row.sectionTitle, song.useSectionColors !== false);
                       const hasManualLineBreak = row.sectionTitle.includes('\n');
                       return (
                         <div className={`w-full flex justify-center transition-all ${isActiveSection ? 'scale-[1.02]' : ''}`}>
-                          <div
-                            className="flex w-full items-center justify-center rounded-sm border px-1 py-1 min-h-[24px] overflow-visible"
-                            style={getSectionBadgeStyle(colors.accent)}
-                          >
-                            {hasManualLineBreak ? (
-                              <div className="w-full whitespace-pre-line break-words px-[1px] text-center text-[10px] font-black tracking-[0.04em] leading-[1.15]">
-                                {localizeSectionTitle(row.sectionTitle, language)}
-                              </div>
-                            ) : (
-                              <div className="w-full px-[1px]">
-                                <AutoShrink align="center" minScale={0.52} className="overflow-visible">
-                                  <div className="text-[11px] font-black tracking-[0.04em] leading-none">
-                                    {localizeSectionTitle(row.sectionTitle, language)}
-                                  </div>
-                                </AutoShrink>
-                              </div>
-                            )}
+                          <div className="relative flex w-full justify-center">
+                            <div
+                              className="flex w-full items-center justify-center rounded-sm border px-1 py-1 min-h-[24px] overflow-visible"
+                              style={getSectionBadgeStyle(colors.accent)}
+                            >
+                              {hasManualLineBreak ? (
+                                <div className="w-full whitespace-pre-line break-words px-[1px] text-center text-[10px] font-black tracking-[0.04em] leading-[1.15]">
+                                  {localizeSectionTitle(row.sectionTitle, language)}
+                                </div>
+                              ) : (
+                                <div className="w-full px-[1px]">
+                                  <AutoShrink align="center" minScale={0.52} className="overflow-visible">
+                                    <div className="text-[11px] font-black tracking-[0.04em] leading-none">
+                                      {localizeSectionTitle(row.sectionTitle, language)}
+                                    </div>
+                                  </AutoShrink>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
                     })()}
+                    {hasPickupDisplay && (
+                      <div
+                        className={`absolute bottom-1 right-2 flex flex-col items-end space-y-0.5 overflow-visible transition-all ${isPickupActive ? 'scale-[1.01]' : ''}`}
+                        style={{
+                          width: `${pickupDisplayWidthPx}px`,
+                          ...(isPickupActive ? { filter: `drop-shadow(0 6px 12px ${activeTone.glow})` } : undefined)
+                        }}
+                      >
+                        {hasPickupRhythm && (
+                          <button
+                            type="button"
+                            onClick={() => onElementClick?.(0, -1, 'rhythm')}
+                            className={`block w-full rounded-sm text-left transition-colors ${isPickupActive ? 'ring-1 ring-indigo-200' : ''}`}
+                            style={{ boxShadow: isPickupActive ? `inset 0 0 0 1px ${activeTone.stroke}` : 'none' }}
+                          >
+                            <div className="relative w-full px-1 py-0">
+                              {pickupRhythmHighlightStyle && (
+                                <span
+                                  className="absolute inset-y-0 rounded-sm bg-gray-300/70 mix-blend-multiply"
+                                  style={pickupRhythmHighlightStyle}
+                                />
+                              )}
+                              <div className="relative z-10 w-full translate-y-[2px]">
+                                <RhythmNotation notation={pickup?.rhythm || ''} timeSignature={song.timeSignature} compact />
+                              </div>
+                            </div>
+                          </button>
+                        )}
+                        {hasPickupRiff && (
+                          <button
+                            type="button"
+                            onClick={() => onElementClick?.(0, -1, 'riff')}
+                            className={`block w-full rounded-sm text-left transition-colors ${isPickupActive ? 'ring-1 ring-indigo-200' : ''}`}
+                            style={{ boxShadow: isPickupActive ? `inset 0 0 0 1px ${activeTone.stroke}` : 'none' }}
+                          >
+                            <div className="relative w-full px-1 py-0">
+                              {pickupRiffHighlightStyle && (
+                                <span
+                                  className="absolute inset-y-0 rounded-sm bg-gray-300/70 mix-blend-multiply"
+                                  style={pickupRiffHighlightStyle}
+                                />
+                              )}
+                              <Jianpu notation={pickupPreviewNotation} compact scale={0.86} className="relative z-10 w-full" />
+                            </div>
+                          </button>
+                        )}
+                      </div>
+                    )}
                 </div>
 
                 {/* Right Column: Bars */}
@@ -1040,24 +1177,25 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                   {Array.from({ length: 4 }).map((_, bIdx) => {
                     const bar = row.bars[bIdx];
                     const previousBar = row.bars[bIdx - 1];
+                    const showKeyChangeTag = sectionKeyChanged && row.startBIdx === 0 && bIdx === (firstBarInRowIndex === -1 ? 0 : firstBarInRowIndex);
                     const effectiveTimeSignature = bar ? getEffectiveTimeSignature(bar.timeSignature, song.timeSignature) : song.timeSignature;
                     const canonicalRiffNotation = getPreviewRiffNotation(bar?.riff, effectiveTimeSignature);
                     const previewRiffNotation = song.showAbsoluteJianpu
-                      ? convertRelativeJianpuToAbsoluteNotation(canonicalRiffNotation, playKey)
+                      ? convertRelativeJianpuToAbsoluteNotation(canonicalRiffNotation, sectionPlayKey)
                       : canonicalRiffNotation;
                     const previousCanonicalRiffNotation = getPreviewRiffNotation(
                       bIdx > 0 ? row.bars[bIdx - 1]?.riff : undefined,
                       getEffectiveTimeSignature(row.bars[bIdx - 1]?.timeSignature, song.timeSignature)
                     );
                     const previewPreviousRiffNotation = song.showAbsoluteJianpu
-                      ? convertRelativeJianpuToAbsoluteNotation(previousCanonicalRiffNotation, playKey)
+                      ? convertRelativeJianpuToAbsoluteNotation(previousCanonicalRiffNotation, sectionPlayKey)
                       : previousCanonicalRiffNotation;
                     const nextCanonicalRiffNotation = getPreviewRiffNotation(
                       bIdx < row.bars.length - 1 ? row.bars[bIdx + 1]?.riff : undefined,
                       getEffectiveTimeSignature(row.bars[bIdx + 1]?.timeSignature, song.timeSignature)
                     );
                     const previewNextRiffNotation = song.showAbsoluteJianpu
-                      ? convertRelativeJianpuToAbsoluteNotation(nextCanonicalRiffNotation, playKey)
+                      ? convertRelativeJianpuToAbsoluteNotation(nextCanonicalRiffNotation, sectionPlayKey)
                       : nextCanonicalRiffNotation;
                     const barLabel = getBarDisplayLabel(bar);
                     const leftNavigationText = bar?.leftText?.trim();
@@ -1151,6 +1289,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                           </div>
                         )}
 
+                        {showKeyChangeTag && (
+                          <div className="pointer-events-none absolute left-1 -top-4 z-10 inline-flex items-center rounded-sm border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black tracking-[0.04em] leading-none text-amber-800 shadow-[0_1px_0_rgba(251,191,36,0.14)]">
+                            {copy.key}: {sectionCurrentKey}
+                          </div>
+                        )}
+
                         {/* Repeat Start |: */}
                         {bar?.repeatStart && (
                           <BarEdgeMarker type="repeat-start" />
@@ -1223,7 +1367,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                             {/* Annotation */}
                             {bar.annotation && (
                               <div 
-                                className={`absolute -top-4 z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap cursor-pointer transition-colors ${isEndingStart ? 'left-7' : 'left-1'}`}
+                                className={`absolute -top-4 z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap cursor-pointer transition-colors ${
+                                  showKeyChangeTag
+                                    ? 'right-1'
+                                    : (isEndingStart ? 'left-7' : 'left-1')
+                                }`}
                                 style={getSectionBadgeStyle(colors.accent)}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1297,11 +1445,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                               {chord && (
                                                 <FormattedChord 
                                                   chordString={(() => {
-                                                    const transposed = transposeChord(chord, offset, playKey);
+                                                    const transposed = transposeChord(chord, sectionOffset, sectionPlayKey);
                                                     if (song.showNashvilleNumbers) {
-                                                      return isNashville(transposed) ? transposed : getNashvilleNumber(transposed, playKey);
+                                                      return isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey);
                                                     } else {
-                                                      return isNashville(transposed) ? parseNashvilleToChord(transposed, playKey) : transposed;
+                                                      return isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;
                                                     }
                                                   })()}
                                                   compactModifier={compactModifier}
