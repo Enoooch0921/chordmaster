@@ -955,6 +955,12 @@ export default function App() {
   const activeSetlistPreviewSong = selectedSetlistSong && selectedSetlistSourceSong
     ? applySetlistSongOverrides(activeSetlistEditableSong ?? selectedSetlistSourceSong, selectedSetlist, selectedSetlistSong)
     : null;
+  const activeEditorSong = isSetlistMode
+    ? (activeSetlistEditableSong ?? selectedSetlistSourceSong ?? null)
+    : song;
+  const activeNavigationPreviewSong = isSetlistMode
+    ? (activeSetlistPreviewSong ?? activeEditorSong)
+    : song;
   const activeAppViewLabel = activeAppView === 'about'
     ? copy.about
     : activeAppView === 'help'
@@ -1056,15 +1062,15 @@ export default function App() {
   const createDefaultSong = (index = 1) => createEmptySong(createNewSongTitle(index));
 
   useEffect(() => {
-    if (!song) {
+    if (!activeEditorSong) {
       setActiveSectionId(null);
       setActiveBar(null);
       return;
     }
 
-    if (activeSectionId && song.sections.some((section) => section.id === activeSectionId)) {
+    if (activeSectionId && activeEditorSong.sections.some((section) => section.id === activeSectionId)) {
       if (activeBar) {
-        const targetSection = song.sections[activeBar.sIdx];
+        const targetSection = activeEditorSong.sections[activeBar.sIdx];
         if (!targetSection?.bars[activeBar.bIdx]) {
           setActiveBar(null);
         }
@@ -1072,9 +1078,9 @@ export default function App() {
       return;
     }
 
-    setActiveSectionId(song.sections[0]?.id ?? null);
+    setActiveSectionId(activeEditorSong.sections[0]?.id ?? null);
     setActiveBar(null);
-  }, [activeBar, activeSectionId, song]);
+  }, [activeBar, activeEditorSong, activeSectionId]);
 
   useEffect(() => {
     setIsLyricsMode(song?.showLyrics ?? false);
@@ -2316,12 +2322,19 @@ export default function App() {
   }, []);
 
   const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: EditorFocusField) => {
-    if (!song) {
+    if (!activeEditorSong || !activeNavigationPreviewSong) {
       return;
     }
 
-    setActiveSectionId(song.sections[sIdx]?.id ?? null);
-    setActiveBar({ sIdx, bIdx });
+    const previewSection = activeNavigationPreviewSong.sections[sIdx] ?? null;
+    const nextSectionId = previewSection?.id ?? null;
+    const mappedSectionIndex = nextSectionId
+      ? activeEditorSong.sections.findIndex((section) => section.id === nextSectionId)
+      : sIdx;
+    const nextSectionIndex = mappedSectionIndex >= 0 ? mappedSectionIndex : sIdx;
+
+    setActiveSectionId(nextSectionId ?? activeEditorSong.sections[nextSectionIndex]?.id ?? null);
+    setActiveBar({ sIdx: nextSectionIndex, bIdx });
 
     if (editorFocusTimeoutRef.current !== null) {
       window.clearTimeout(editorFocusTimeoutRef.current);
@@ -2331,13 +2344,13 @@ export default function App() {
     if (!isEditing) {
       setIsEditing(true);
       editorFocusTimeoutRef.current = window.setTimeout(() => {
-        focusEditorField(sIdx, bIdx, field);
+        focusEditorField(nextSectionIndex, bIdx, field);
         editorFocusTimeoutRef.current = null;
       }, 500);
     } else {
-      focusEditorField(sIdx, bIdx, field);
+      focusEditorField(nextSectionIndex, bIdx, field);
     }
-  }, [focusEditorField, isEditing, song]);
+  }, [activeEditorSong, activeNavigationPreviewSong, focusEditorField, isEditing]);
 
   const previewSheet = React.useMemo(() => (
     <ChordSheet 
