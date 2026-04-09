@@ -504,6 +504,42 @@ const createStoredSetlistSong = (songId: string, setlistId: string, baseSong?: S
   sectionOrder: baseSong ? getDefaultSectionOrder(baseSong) : []
 });
 
+const sanitizeSetlistSectionOrder = (order: string[], song: Song) => {
+  const nextIds = getDefaultSectionOrder(song);
+
+  if (nextIds.length === 0) {
+    return [];
+  }
+
+  const remainingCounts = new Map<string, number>();
+  nextIds.forEach((id) => {
+    remainingCounts.set(id, (remainingCounts.get(id) ?? 0) + 1);
+  });
+
+  const preserved = order.filter((id) => {
+    const remaining = remainingCounts.get(id) ?? 0;
+    if (remaining <= 0) {
+      return false;
+    }
+
+    remainingCounts.set(id, remaining - 1);
+    return true;
+  });
+
+  const missing = nextIds.filter((id) => {
+    const remaining = remainingCounts.get(id) ?? 0;
+    if (remaining <= 0) {
+      return false;
+    }
+
+    remainingCounts.set(id, remaining - 1);
+    return true;
+  });
+
+  const merged = [...preserved, ...missing];
+  return merged.length > 0 ? merged : nextIds;
+};
+
 const normalizeSetlistDisplayMode = (value: unknown): SetlistDisplayMode => (
   typeof value === 'string' && VALID_SETLIST_DISPLAY_MODES.has(value)
     ? value as SetlistDisplayMode
@@ -513,10 +549,14 @@ const normalizeSetlistDisplayMode = (value: unknown): SetlistDisplayMode => (
 const normalizeSetlistSong = (setlistId: string, setlistSong: Partial<SetlistSong> & Record<string, unknown>, songsById: Map<string, StoredSong>, index: number): SetlistSong => {
   const songId = typeof setlistSong.songId === 'string' ? setlistSong.songId : '';
   const sourceSong = songsById.get(songId);
-  const defaultSectionOrder = sourceSong ? getDefaultSectionOrder(sourceSong) : [];
   const rawSongData = setlistSong.songData && typeof setlistSong.songData === 'object'
     ? setlistSong.songData as Song
     : undefined;
+  const normalizedSongData = rawSongData ? normalizeSongBars(rawSongData) : undefined;
+  const sectionOrderSourceSong = normalizedSongData ?? sourceSong;
+  const rawSectionOrder = Array.isArray(setlistSong.sectionOrder)
+    ? setlistSong.sectionOrder.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
 
   return {
     id: typeof setlistSong.id === 'string' && setlistSong.id.trim() ? setlistSong.id : createSetlistSongId(),
@@ -527,10 +567,10 @@ const normalizeSetlistSong = (setlistId: string, setlistSong: Partial<SetlistSon
       ? setlistSong.overrideKey as Key
       : sourceSong?.currentKey,
     capo: normalizeOptionalInteger(setlistSong.capo, 0, 12) ?? sourceSong?.capo ?? 0,
-    sectionOrder: Array.isArray(setlistSong.sectionOrder)
-      ? setlistSong.sectionOrder.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-      : defaultSectionOrder,
-    songData: rawSongData ? normalizeSongBars(rawSongData) : undefined
+    sectionOrder: sectionOrderSourceSong
+      ? sanitizeSetlistSectionOrder(rawSectionOrder, sectionOrderSourceSong)
+      : rawSectionOrder,
+    songData: normalizedSongData
   };
 };
 
@@ -1172,14 +1212,7 @@ export default function App() {
     });
   };
 
-  const syncSetlistSectionOrder = (currentOrder: string[], nextSong: Song) => {
-    const nextIds = nextSong.sections.map((section, index) => getDefaultSectionOrder(nextSong)[index]);
-    const validIdSet = new Set(nextIds);
-    const preserved = currentOrder.filter((id) => validIdSet.has(id));
-    const missing = nextIds.filter((id) => !preserved.includes(id));
-    const merged = [...preserved, ...missing];
-    return merged.length > 0 ? merged : nextIds;
-  };
+  const syncSetlistSectionOrder = (currentOrder: string[], nextSong: Song) => sanitizeSetlistSectionOrder(currentOrder, nextSong);
 
   const handleSetlistSongContentChange = (nextSong: Song) => {
     if (!selectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) {
