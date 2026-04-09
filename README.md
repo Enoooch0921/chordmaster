@@ -2,13 +2,15 @@
 
 ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器，聚焦在和弦譜、節奏譜與簡譜的整合編輯。專案使用 Vite + React 建構，資料預設儲存在瀏覽器 `localStorage`，適合快速整理主歌、副歌、前奏與過門等常見段落。
 
-目前版本：`0.5.0`
+目前版本：`0.6.0`
 
 ## 特色
 
 - Song Library 側欄：建立、搜尋、複製、刪除歌譜
+- Service Setlist：以 Song Library 為來源建立服事歌單，並保留每次服事專屬的臨時設定
 - 雙欄編輯體驗：左側編輯，右側即時預覽
 - 中文預設介面：預設優先顯示中文，英文切換保留
+- 全站統一 Key / Capo 選擇器：Song Library、Service Setlist 與預覽列共用同一套 popup picker
 - 簡譜工具列：支援高音 / 中音 / 低音、八分 / 十六分、附點、升降記號、連接線與時值切換
 - 節奏與簡譜共用標籤：可當作節奏標籤、簡譜標籤，也可單獨顯示
 - 小節編輯操作：支援複製、貼上、拖曳、拆分段落、合併到上一段與小節編號顯示
@@ -22,6 +24,12 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 
 ## 最近更新
 
+- 新增 Service Setlist 工作流，可在同一首歌的基礎上建立服事歌單專屬的 `Key / Capo / section order / song order` 覆蓋設定
+- 新增 setlist 層級的顯示模式與歌詞控制，支援 `級數譜 / 和弦 + 固定調 / 和弦 + 首調`，PDF 匯出會一併套用
+- 新增 setlist song instance 編輯流程：右側編輯與預覽會讀取 base song 後再套用 setlist overrides，不會改動 Song Library 原始資料
+- 重做一般歌曲與服事歌單的編輯資訊帶，整理成更緊湊的 `Title / Key / Capo / Tempo / Time / Display` 工具列
+- 全站統一 KeyPicker 與 CapoPicker，避免不同區塊混用下拉、左右切換或不同 popup 版本
+- 新增 setlist 側邊欄的加入歌曲流程，可直接搜尋 Song Library 並將歌曲加入目前歌單
 - 新增段落轉調功能，支援後續段落 cascade 升降 key、預覽 key 標示，以及 editor 和弦自動跟隨
 - 新增弱起拍 `0` 小節流程，editor 可獨立編輯，預覽會在第一小節前顯示弱起簡譜 / 節奏
 - 改善段落拖曳 / 複製後的 key 繼承規則，搬到升調區的段落會自動改寫為目的地 key
@@ -88,6 +96,14 @@ npm run build
 - 複製現有歌譜
 - 管理與刪除歌曲
 
+### Service Setlist
+
+- 建立多個服事歌單，並自訂名稱
+- 從 Song Library 搜尋歌曲並加入目前歌單
+- 同一首歌可重複加入同一份歌單
+- 每個 SetlistSong 可獨立覆蓋 `Key`、`Capo`、`section order`
+- 整份 setlist 可統一控制 `顯示設定`、`顯示歌詞`，且不影響 Song Library 原始資料
+
 ### 編輯區
 
 - 編輯和弦、段落與小節
@@ -105,6 +121,7 @@ npm run build
 - 顯示段落標題、標籤、備註、導覽記號、小節數與轉調 `Key: X` 標示
 - 支援右側預覽獨立縮放、拖曳與點擊小節回跳左側編輯器
 - 可切換相對簡譜與固定調 `1=C` 絕對簡譜顯示
+- 在 Service Setlist 模式下，預覽會套用當前 `SetlistSong` 覆蓋值與整份歌單的顯示設定
 - 匯出 PDF 前先確認版面
 
 ## 專案結構
@@ -112,17 +129,25 @@ npm run build
 ```text
 src/
   components/
+    CapoPicker.tsx
     ChordSheet.tsx
     Jianpu.tsx
+    KeyPicker.tsx
+    LyricsEditor.tsx
+    SetlistEditor.tsx
+    SongMetadataPanel.tsx
     RhythmNotation.tsx
     SongEditor.tsx
   constants/
     appMeta.ts
+    chordFonts.ts
     i18n.ts
   utils/
     jianpuUtils.ts
+    lyricsUtils.ts
     musicUtils.ts
     rhythmUtils.ts
+    setlistUtils.ts
   App.tsx
   main.tsx
 public/

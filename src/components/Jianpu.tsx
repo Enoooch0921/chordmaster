@@ -139,6 +139,17 @@ const Jianpu: React.FC<JianpuProps> = ({
   );
   const rootRef = React.useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = React.useState<number | null>(null);
+  const updateContainerWidth = React.useCallback(() => {
+    const element = rootRef.current;
+    if (!element) {
+      return;
+    }
+
+    const nextWidth = element.clientWidth || element.offsetWidth || 0;
+    setContainerWidth((current) => (
+      current !== null && Math.abs(current - nextWidth) < 0.5 ? current : nextWidth
+    ));
+  }, []);
 
   const metrics = React.useMemo(() => {
     if (compact) {
@@ -502,21 +513,25 @@ const Jianpu: React.FC<JianpuProps> = ({
     const element = rootRef.current;
     if (!element) return;
 
-    const updateWidth = () => {
-      setContainerWidth(element.getBoundingClientRect().width);
-    };
-
-    updateWidth();
+    updateContainerWidth();
 
     if (typeof ResizeObserver === 'undefined') return;
 
     const observer = new ResizeObserver(() => {
-      updateWidth();
+      updateContainerWidth();
     });
 
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [updateContainerWidth]);
+
+  React.useLayoutEffect(() => {
+    const rafId = window.requestAnimationFrame(() => {
+      updateContainerWidth();
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [compact, notation, renderMode, scale, tokenList, updateContainerWidth]);
 
   if (tokenList.length === 0 && !showPlaceholders && renderMode !== 'editor') {
     return (
@@ -775,7 +790,7 @@ const Jianpu: React.FC<JianpuProps> = ({
         const accidentalPreviewPullIn = renderMode === 'editor'
           ? 0
           : compact
-            ? 1.8 * scale
+            ? 2.6 * scale
             : 2.2 * scale;
         const accidentalTopY = renderMode === 'editor'
           ? metrics.digitCenterY

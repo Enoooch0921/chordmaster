@@ -12,10 +12,18 @@ export type NashvilleFontPreset =
   | 'source-serif-4'
   | 'atkinson-hyperlegible-next'
   | 'source-sans-3';
+export type ChordFontPreset =
+  | 'classic-serif'
+  | 'stage-sans';
+export type SetlistDisplayMode =
+  | 'nashville-number-system'
+  | 'chord-fixed-key'
+  | 'chord-movable-key';
 
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
   chords: string[]; // e.g., ["E", "C#m"]
+  lyrics?: string[]; // Lyric fragments aligned to visible chord changes in this bar
   timeSignature?: string; // Per-bar override, e.g., "2/4"
   riff?: string;    // e.g., "3 - 4 - 5 - 7 1"
   rhythm?: string;  // e.g., "q e e qr"
@@ -60,9 +68,32 @@ export interface Song {
   useSectionColors?: boolean;
   showNashvilleNumbers?: boolean;
   showAbsoluteJianpu?: boolean;
+  showLyrics?: boolean;
   barNumberMode?: BarNumberMode;
   nashvilleFontPreset?: NashvilleFontPreset;
+  chordFontPreset?: ChordFontPreset;
   capo?: number;
   pickup?: PickupMeasure;
   sections: Section[];
+}
+
+export interface SetlistSong {
+  id: string;
+  setlistId: string;
+  songId: string;
+  order: number;
+  overrideKey?: Key;
+  capo?: number;
+  sectionOrder: string[];
+  songData?: Song;
+}
+
+export interface Setlist {
+  id: string;
+  name: string;
+  displayMode: SetlistDisplayMode;
+  showLyrics: boolean;
+  createdAt: number;
+  updatedAt: number;
+  songs: SetlistSong[];
 }

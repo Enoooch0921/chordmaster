@@ -4,21 +4,33 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { Song, Key, AppLanguage } from './types';
+import { Song, Key, AppLanguage, Setlist, SetlistSong, SetlistDisplayMode } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
+import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
 import ChordSheet from './components/ChordSheet';
+import LyricsEditor from './components/LyricsEditor';
 import SongEditor from './components/SongEditor';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink } from 'lucide-react';
+import KeyPicker from './components/KeyPicker';
+import CapoPicker from './components/CapoPicker';
+import SongMetadataPanel from './components/SongMetadataPanel';
+import { applySetlistSongOverrides, getDefaultSectionOrder } from './utils/setlistUtils';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
+const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
 const SELECTED_SONG_STORAGE_KEY = 'chordmaster.selected-song-id.v1';
+const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
+const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.v1';
+const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
 const AUTO_SAVE_STORAGE_KEY = 'chordmaster.auto-save.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
@@ -52,6 +64,15 @@ const VALID_NASHVILLE_FONT_PRESETS = new Set([
   'atkinson-hyperlegible-next',
   'source-sans-3'
 ]);
+const VALID_CHORD_FONT_PRESETS = new Set([
+  'classic-serif',
+  'stage-sans'
+]);
+const VALID_SETLIST_DISPLAY_MODES = new Set([
+  'nashville-number-system',
+  'chord-fixed-key',
+  'chord-movable-key'
+]);
 
 interface GoogleUserSession {
   sub: string;
@@ -66,10 +87,38 @@ interface ExportedSongLibraryPayload {
   songs: Array<Omit<StoredSong, 'updatedAt'> & { updatedAt?: number }>;
 }
 
-const buildPdfFileName = (title: string) => {
-  const normalized = title.trim().replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ');
-  return normalized || 'ChordMaster';
+type WorkspaceMode = 'songs' | 'setlists';
+
+const sanitizeFileNamePart = (value: string) => (
+  value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
+    .replace(/\s+/g, ' ')
+);
+
+const buildPdfFileName = (song: Song) => {
+  const title = sanitizeFileNamePart(song.title) || 'ChordMaster';
+  const keyPart = `Key${song.currentKey}`;
+  const capoValue = song.capo || 0;
+  const chartType = song.showNashvilleNumbers ? 'NUM' : 'CH';
+  const doModePart = song.showAbsoluteJianpu ? '固定調' : '首調';
+  const nameParts = [
+    title,
+    keyPart,
+    ...(capoValue > 0 ? [`Capo${capoValue}`] : []),
+    chartType,
+    doModePart,
+    ...(song.showLyrics ? ['歌詞'] : [])
+  ];
+
+  return nameParts.join('_');
 };
+
+const buildSetlistPdfFileName = (setlist: Setlist) => sanitizeFileNamePart(setlist.name) || 'Service Setlist';
+
+const getSongVersionSummary = (song: Song) => (
+  Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ')
+);
 
 const normalizeTempo = (tempo: unknown): number | undefined => {
   if (tempo === '' || tempo === null || tempo === undefined) return undefined;
@@ -112,6 +161,25 @@ const normalizeChordTokens = (value: unknown) => {
   }
 
   return [];
+};
+
+const normalizeLyricTokens = (value: unknown) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized = value.map((token) => (
+    typeof token === 'string'
+      ? token.replace(/\r\n?/g, '\n')
+      : ''
+  ));
+
+  let lastNonEmptyIndex = normalized.length - 1;
+  while (lastNonEmptyIndex >= 0 && normalized[lastNonEmptyIndex].trim() === '') {
+    lastNonEmptyIndex -= 1;
+  }
+
+  return normalized.slice(0, lastNonEmptyIndex + 1);
 };
 
 const formatSongLibraryCredits = (song: Song) => {
@@ -157,10 +225,12 @@ const INITIAL_SONG: Song = {
   originalKey: "E",
   currentKey: "E",
   showAbsoluteJianpu: false,
+  showLyrics: false,
   tempo: 74,
   timeSignature: "4/4",
   barNumberMode: 'none',
   nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
+  chordFontPreset: DEFAULT_CHORD_FONT_PRESET,
   sections: [
     {
       id: "s1",
@@ -302,7 +372,7 @@ interface SongHistoryState {
 }
 
 type AppView = 'sheet' | 'about' | 'help';
-type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm';
+type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics';
 
 interface EditorFocusRequest {
   sIdx: number;
@@ -319,19 +389,16 @@ interface PreviewDragState {
   moved: boolean;
 }
 
-const KEY_MENU_LAYOUT: Array<Array<Key | null>> = [
-  ['Ab', 'A', null],
-  ['Bb', 'B', null],
-  [null, 'C', 'C#'],
-  ['Db', 'D', null],
-  ['Eb', 'E', null],
-  [null, 'F', 'F#'],
-  ['Gb', 'G', 'G#']
-];
-
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const createSongId = () => `song-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createSetlistId = () => `setlist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createSetlistSongId = () => `setlist-song-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const reindexSetlistSongs = (setlistSongs: SetlistSong[]) => setlistSongs.map((item, index) => ({
+  ...item,
+  order: index
+}));
 
 const normalizeSongBars = <T extends Song>(song: T): T => {
   const originalKey = typeof song.originalKey === 'string' && VALID_KEYS.has(song.originalKey) ? song.originalKey as Key : 'C';
@@ -354,6 +421,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
           ...safeBar,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
           chords: normalizeChordTokens(safeBar.chords),
+          lyrics: normalizeLyricTokens(safeBar.lyrics),
           timeSignature: normalizeOptionalText(safeBar.timeSignature),
           riff: normalizeOptionalText(safeBar.riff),
           rhythm: normalizeOptionalText(safeBar.rhythm),
@@ -400,10 +468,14 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
     useSectionColors: normalizeBoolean(song.useSectionColors),
     showNashvilleNumbers: normalizeBoolean(song.showNashvilleNumbers),
     showAbsoluteJianpu: normalizeBoolean(song.showAbsoluteJianpu) ?? false,
+    showLyrics: normalizeBoolean(song.showLyrics) ?? false,
     barNumberMode: typeof song.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(song.barNumberMode) ? song.barNumberMode : 'none',
     nashvilleFontPreset: typeof song.nashvilleFontPreset === 'string' && VALID_NASHVILLE_FONT_PRESETS.has(song.nashvilleFontPreset)
       ? song.nashvilleFontPreset
       : DEFAULT_NASHVILLE_FONT_PRESET,
+    chordFontPreset: typeof song.chordFontPreset === 'string' && VALID_CHORD_FONT_PRESETS.has(song.chordFontPreset)
+      ? song.chordFontPreset
+      : DEFAULT_CHORD_FONT_PRESET,
     capo: normalizeOptionalInteger(song.capo, 0, 12),
     pickup: pickup && (pickup.id || pickup.riff || pickup.rhythm) ? pickup : undefined,
     sections: sections.length > 0 ? sections : [
@@ -421,6 +493,67 @@ const createStoredSong = (song: Song, id = createSongId()): StoredSong => ({
   id,
   updatedAt: Date.now()
 });
+
+const createStoredSetlistSong = (songId: string, setlistId: string, baseSong?: Song): SetlistSong => ({
+  id: createSetlistSongId(),
+  setlistId,
+  songId,
+  order: 0,
+  overrideKey: baseSong?.currentKey,
+  capo: baseSong?.capo ?? 0,
+  sectionOrder: baseSong ? getDefaultSectionOrder(baseSong) : []
+});
+
+const normalizeSetlistDisplayMode = (value: unknown): SetlistDisplayMode => (
+  typeof value === 'string' && VALID_SETLIST_DISPLAY_MODES.has(value)
+    ? value as SetlistDisplayMode
+    : 'chord-movable-key'
+);
+
+const normalizeSetlistSong = (setlistId: string, setlistSong: Partial<SetlistSong> & Record<string, unknown>, songsById: Map<string, StoredSong>, index: number): SetlistSong => {
+  const songId = typeof setlistSong.songId === 'string' ? setlistSong.songId : '';
+  const sourceSong = songsById.get(songId);
+  const defaultSectionOrder = sourceSong ? getDefaultSectionOrder(sourceSong) : [];
+  const rawSongData = setlistSong.songData && typeof setlistSong.songData === 'object'
+    ? setlistSong.songData as Song
+    : undefined;
+
+  return {
+    id: typeof setlistSong.id === 'string' && setlistSong.id.trim() ? setlistSong.id : createSetlistSongId(),
+    setlistId,
+    songId,
+    order: typeof setlistSong.order === 'number' && Number.isFinite(setlistSong.order) ? setlistSong.order : index,
+    overrideKey: typeof setlistSong.overrideKey === 'string' && VALID_KEYS.has(setlistSong.overrideKey)
+      ? setlistSong.overrideKey as Key
+      : sourceSong?.currentKey,
+    capo: normalizeOptionalInteger(setlistSong.capo, 0, 12) ?? sourceSong?.capo ?? 0,
+    sectionOrder: Array.isArray(setlistSong.sectionOrder)
+      ? setlistSong.sectionOrder.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : defaultSectionOrder,
+    songData: rawSongData ? normalizeSongBars(rawSongData) : undefined
+  };
+};
+
+const normalizeStoredSetlist = (setlist: Partial<Setlist> & Record<string, unknown>, songsById: Map<string, StoredSong>, index: number): Setlist => {
+  const setlistId = typeof setlist.id === 'string' && setlist.id.trim() ? setlist.id : createSetlistId();
+  const rawSongs = Array.isArray(setlist.songs) ? setlist.songs : [];
+  const songs = reindexSetlistSongs(
+    rawSongs
+      .map((item, itemIndex) => normalizeSetlistSong(setlistId, item as Partial<SetlistSong> & Record<string, unknown>, songsById, itemIndex))
+      .filter((item) => songsById.has(item.songId))
+      .sort((a, b) => a.order - b.order)
+  );
+
+  return {
+    id: setlistId,
+    name: normalizeText(setlist.name, `Setlist ${index + 1}`),
+    displayMode: normalizeSetlistDisplayMode(setlist.displayMode),
+    showLyrics: normalizeBoolean(setlist.showLyrics) ?? false,
+    createdAt: typeof setlist.createdAt === 'number' && Number.isFinite(setlist.createdAt) ? setlist.createdAt : Date.now(),
+    updatedAt: typeof setlist.updatedAt === 'number' && Number.isFinite(setlist.updatedAt) ? setlist.updatedAt : Date.now(),
+    songs
+  };
+};
 
 const buildDuplicateSongTitle = (existingSongs: StoredSong[], originalTitle: string, untitledSong: string, copyLabel: string) => {
   const baseTitle = originalTitle.trim() || untitledSong;
@@ -444,10 +577,12 @@ const createEmptySong = (title: string): StoredSong =>
     originalKey: 'C',
     currentKey: 'C',
     showAbsoluteJianpu: false,
+    showLyrics: false,
     tempo: 120,
     timeSignature: '4/4',
     barNumberMode: 'none',
     nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
+    chordFontPreset: DEFAULT_CHORD_FONT_PRESET,
     sections: [
       {
         id: 's1',
@@ -514,6 +649,66 @@ const loadSongLibrary = () => {
   }
 };
 
+const loadSetlists = (songs: StoredSong[]) => {
+  if (typeof window === 'undefined') {
+    return {
+      setlists: [] as Setlist[],
+      selectedSetlistId: null as string | null,
+      selectedSetlistSongId: null as string | null
+    };
+  }
+
+  try {
+    const storedSetlists = window.localStorage.getItem(SETLIST_STORAGE_KEY);
+    const storedSelectedSetlistId = window.localStorage.getItem(SELECTED_SETLIST_STORAGE_KEY);
+    const storedSelectedSetlistSongId = window.localStorage.getItem(SELECTED_SETLIST_SONG_STORAGE_KEY);
+
+    if (!storedSetlists) {
+      return {
+        setlists: [] as Setlist[],
+        selectedSetlistId: null as string | null,
+        selectedSetlistSongId: null as string | null
+      };
+    }
+
+    const parsedSetlists = JSON.parse(storedSetlists) as Array<Partial<Setlist> & Record<string, unknown>>;
+    if (!Array.isArray(parsedSetlists)) {
+      return {
+        setlists: [] as Setlist[],
+        selectedSetlistId: null as string | null,
+        selectedSetlistSongId: null as string | null
+      };
+    }
+
+    const songsById = new Map(songs.map((song) => [song.id, song] as const));
+    const setlists = parsedSetlists.map((setlist, index) => normalizeStoredSetlist(setlist, songsById, index));
+    const selectedSetlist = setlists.find((setlist) => setlist.id === storedSelectedSetlistId) ?? setlists[0] ?? null;
+    const selectedSetlistSongId = selectedSetlist?.songs.some((item) => item.id === storedSelectedSetlistSongId)
+      ? storedSelectedSetlistSongId
+      : selectedSetlist?.songs[0]?.id ?? null;
+
+    return {
+      setlists,
+      selectedSetlistId: selectedSetlist?.id ?? null,
+      selectedSetlistSongId
+    };
+  } catch {
+    return {
+      setlists: [] as Setlist[],
+      selectedSetlistId: null as string | null,
+      selectedSetlistSongId: null as string | null
+    };
+  }
+};
+
+const loadWorkspaceMode = (): WorkspaceMode => {
+  if (typeof window === 'undefined') {
+    return 'songs';
+  }
+
+  return window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY) === 'setlists' ? 'setlists' : 'songs';
+};
+
 const formatSavedAt = (timestamp: number | null, language: AppLanguage) => {
   if (!timestamp) {
     return language === 'zh' ? '尚未儲存' : 'Not saved yet';
@@ -528,6 +723,14 @@ const formatSavedAt = (timestamp: number | null, language: AppLanguage) => {
 const serializeSongLibrary = (library: StoredSong[]) =>
   JSON.stringify(
     library.map(({ updatedAt, ...song }) => song)
+  );
+
+const serializeSetlists = (setlists: Setlist[]) =>
+  JSON.stringify(
+    setlists.map((setlist) => ({
+      ...setlist,
+      songs: reindexSetlistSongs(setlist.songs)
+    }))
   );
 
 const loadAutoSavePreference = () => {
@@ -635,12 +838,20 @@ export default function App() {
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const initialLibraryRef = useRef(loadSongLibrary());
+  const initialSetlistsRef = useRef(loadSetlists(initialLibraryRef.current.songs));
   const [songs, setSongs] = useState<StoredSong[]>(initialLibraryRef.current.songs);
   const [savedSongs, setSavedSongs] = useState<StoredSong[]>(cloneSong(initialLibraryRef.current.songs));
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(loadWorkspaceMode);
   const [selectedSongId, setSelectedSongId] = useState(initialLibraryRef.current.selectedSongId);
+  const [setlists, setSetlists] = useState<Setlist[]>(initialSetlistsRef.current.setlists);
+  const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(cloneSong(initialSetlistsRef.current.setlists));
+  const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistId);
+  const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistSongId);
   const [songHistories, setSongHistories] = useState<Record<string, SongHistoryState>>({});
+  const [setlistSongHistories, setSetlistSongHistories] = useState<Record<string, SongHistoryState>>({});
   const [selectedSongIdsForBulkDelete, setSelectedSongIdsForBulkDelete] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+  const [isLyricsMode, setIsLyricsMode] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isLibraryEditing, setIsLibraryEditing] = useState(false);
   const [activeAppView, setActiveAppView] = useState<AppView>('sheet');
@@ -654,12 +865,17 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
+  const [setlistSearchQuery, setSetlistSearchQuery] = useState('');
+  const [setlistSongSearchQuery, setSetlistSongSearchQuery] = useState('');
+  const [isSetlistAddSongsOpen, setIsSetlistAddSongsOpen] = useState(false);
+  const [isSetlistActionsMenuOpen, setIsSetlistActionsMenuOpen] = useState(false);
+  const [draggingSetlistSongId, setDraggingSetlistSongId] = useState<string | null>(null);
+  const [dragOverSetlistSongId, setDragOverSetlistSongId] = useState<string | null>(null);
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
-  const keyMenuRef = useRef<HTMLDivElement>(null);
-  const capoMenuRef = useRef<HTMLDivElement>(null);
+  const setlistActionsMenuRef = useRef<HTMLDivElement>(null);
   const importLibraryInputRef = useRef<HTMLInputElement>(null);
   const googleSignInRef = useRef<HTMLDivElement>(null);
   const googleIdentityInitializedRef = useRef(false);
@@ -668,8 +884,6 @@ export default function App() {
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
   const suppressPreviewClickRef = useRef(false);
-  const [isKeyMenuOpen, setIsKeyMenuOpen] = useState(false);
-  const [isCapoMenuOpen, setIsCapoMenuOpen] = useState(false);
   const [previewBaseScale, setPreviewBaseScale] = useState(1);
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewViewportWidth, setPreviewViewportWidth] = useState(PREVIEW_TARGET_WIDTH);
@@ -684,14 +898,41 @@ export default function App() {
   const showGoogleAuth = Boolean(googleClientId);
   const song = songs.find((item) => item.id === selectedSongId) ?? songs[0];
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
+  const setlistIsDirty = serializeSetlists(setlists) !== serializeSetlists(savedSetlists);
+  const workspaceIsDirty = libraryIsDirty || setlistIsDirty;
   const isSheetView = activeAppView === 'sheet';
+  const isSetlistMode = workspaceMode === 'setlists';
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
   const currentSidebarWidth = isSidebarExpanded ? sidebarWidth : COLLAPSED_SIDEBAR_WIDTH;
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
-  const activeAppViewLabel = activeAppView === 'about' ? copy.about : activeAppView === 'help' ? copy.help : song.title || copy.untitledSong;
+  const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? null;
+  const selectedSetlistSong = selectedSetlist?.songs.find((item) => item.id === selectedSetlistSongId) ?? selectedSetlist?.songs[0] ?? null;
+  const selectedSetlistSourceSong = selectedSetlistSong ? songs.find((item) => item.id === selectedSetlistSong.songId) ?? null : null;
+  const currentSetlistSongHistory = setlistSongHistories[selectedSetlistSong?.id || ''] ?? { past: [], future: [] };
+  const activeSetlistEditableSong = selectedSetlistSong
+    ? normalizeSongBars(cloneSong(selectedSetlistSong.songData ?? selectedSetlistSourceSong ?? INITIAL_SONG))
+    : null;
+  const activeSetlistPreviewSong = selectedSetlistSong && selectedSetlistSourceSong
+    ? applySetlistSongOverrides(activeSetlistEditableSong ?? selectedSetlistSourceSong, selectedSetlist, selectedSetlistSong)
+    : null;
+  const activeAppViewLabel = activeAppView === 'about'
+    ? copy.about
+    : activeAppView === 'help'
+      ? copy.help
+      : isSetlistMode
+        ? selectedSetlist?.name || copy.untitledSetlist
+        : song.title || copy.untitledSong;
+  const workspaceModeBadge = isSetlistMode ? copy.setlistModeBadge : copy.songModeBadge;
   const normalizedLibrarySearchQuery = librarySearchQuery.trim().toLowerCase();
+  const normalizedSetlistSearchQuery = setlistSearchQuery.trim().toLowerCase();
+  const normalizedSetlistSongSearchQuery = setlistSongSearchQuery.trim().toLowerCase();
   const currentCapo = song.capo || 0;
   const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
+  const currentSetlistKey = activeSetlistPreviewSong?.currentKey ?? selectedSetlistSourceSong?.currentKey ?? 'C';
+  const currentSetlistCapo = typeof selectedSetlistSong?.capo === 'number'
+    ? selectedSetlistSong.capo
+    : (selectedSetlistSourceSong?.capo ?? 0);
+  const currentSetlistPlayKey = getPlayKey(currentSetlistKey, currentSetlistCapo);
   const duplicateLabel = language === 'zh' ? '副本' : 'Copy';
   const previewScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, previewBaseScale * previewZoom));
   const previewSheetWidth = sheetMetrics.width * previewScale;
@@ -728,6 +969,48 @@ export default function App() {
 
     return librarySearchText.includes(normalizedLibrarySearchQuery);
   });
+  const setlistSongsWithSource = (selectedSetlist?.songs ?? []).map((item) => ({
+    item,
+    sourceSong: songs.find((songItem) => songItem.id === item.songId) ?? null
+  })).filter((entry) => Boolean(entry.sourceSong)) as Array<{ item: SetlistSong; sourceSong: StoredSong }>;
+  const filteredSetlists = setlists.filter((item) => {
+    if (!normalizedSetlistSearchQuery) {
+      return true;
+    }
+
+    const searchText = [
+      item.name,
+      ...item.songs.map((setlistSong) => songs.find((songItem) => songItem.id === setlistSong.songId)?.title ?? '')
+    ].join(' ').toLowerCase();
+
+    return searchText.includes(normalizedSetlistSearchQuery);
+  });
+  const filteredSongsForSetlist = filteredSongs.filter((item) => {
+    if (!normalizedSetlistSongSearchQuery) {
+      return true;
+    }
+
+    const searchText = [
+      item.title,
+      item.currentKey,
+      item.originalKey,
+      ...item.sections.map((section) => section.title)
+    ].join(' ').toLowerCase();
+
+    return searchText.includes(normalizedSetlistSongSearchQuery);
+  });
+
+  useEffect(() => {
+    if (!selectedSetlist) {
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+      return;
+    }
+
+    if (selectedSetlist.songs.length === 0) {
+      setIsSetlistAddSongsOpen(true);
+    }
+  }, [selectedSetlist?.id, selectedSetlist?.songs.length]);
 
   const createNewSongTitle = (index: number) => language === 'zh' ? `新歌 ${index}` : `New Song ${index}`;
   const createDefaultSong = (index = 1) => createEmptySong(createNewSongTitle(index));
@@ -752,6 +1035,10 @@ export default function App() {
     setActiveSectionId(song.sections[0]?.id ?? null);
     setActiveBar(null);
   }, [activeBar, activeSectionId, song]);
+
+  useEffect(() => {
+    setIsLyricsMode(song?.showLyrics ?? false);
+  }, [song?.id, song?.showLyrics]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -814,13 +1101,14 @@ export default function App() {
     });
   }, [activeSectionId, isEditing]);
 
-  const persistSongLibrary = (nextSongs: StoredSong[], nextSelectedSongId: string) => {
+  const persistWorkspace = (nextSongs: StoredSong[], nextSetlists: Setlist[]) => {
     try {
       const savedAt = Date.now();
       window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
-      window.localStorage.setItem(SELECTED_SONG_STORAGE_KEY, nextSelectedSongId);
+      window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(nextSetlists));
       window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
       setSavedSongs(cloneSong(nextSongs));
+      setSavedSetlists(cloneSong(nextSetlists));
       setLastSavedAt(savedAt);
     } catch {
       // Ignore storage failures and keep the app usable.
@@ -854,56 +1142,118 @@ export default function App() {
     );
   };
 
-  const handleSaveLibrary = () => {
-    if (!song) {
+  const replaceSetlist = (setlistId: string, updater: (currentSetlist: Setlist) => Setlist) => {
+    setSetlists((currentSetlists) =>
+      currentSetlists.map((item) => {
+        if (item.id !== setlistId) {
+          return item;
+        }
+
+        const nextSetlist = updater(item);
+        return {
+          ...nextSetlist,
+          songs: reindexSetlistSongs(nextSetlist.songs),
+          updatedAt: Date.now()
+        };
+      })
+    );
+  };
+
+  const pushSetlistSongHistory = (setlistSongId: string, previousSong: Song) => {
+    setSetlistSongHistories((currentHistory) => {
+      const entry = currentHistory[setlistSongId] ?? { past: [], future: [] };
+      return {
+        ...currentHistory,
+        [setlistSongId]: {
+          past: [...entry.past.slice(-29), cloneSong(previousSong)],
+          future: []
+        }
+      };
+    });
+  };
+
+  const syncSetlistSectionOrder = (currentOrder: string[], nextSong: Song) => {
+    const nextIds = nextSong.sections.map((section, index) => getDefaultSectionOrder(nextSong)[index]);
+    const validIdSet = new Set(nextIds);
+    const preserved = currentOrder.filter((id) => validIdSet.has(id));
+    const missing = nextIds.filter((id) => !preserved.includes(id));
+    const merged = [...preserved, ...missing];
+    return merged.length > 0 ? merged : nextIds;
+  };
+
+  const handleSetlistSongContentChange = (nextSong: Song) => {
+    if (!selectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) {
       return;
     }
 
-    persistSongLibrary(songs, song.id);
+    pushSetlistSongHistory(selectedSetlistSong.id, activeSetlistEditableSong);
+    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+      ...currentSetlistSong,
+      overrideKey: nextSong.currentKey,
+      capo: nextSong.capo ?? 0,
+      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, nextSong),
+      songData: cloneSong(normalizeSongBars(nextSong))
+    }));
   };
 
-  const handleAppViewChange = (nextView: AppView) => {
-    setActiveAppView((currentView) => currentView === nextView ? 'sheet' : nextView);
-    setIsKeyMenuOpen(false);
-    setIsCapoMenuOpen(false);
+  const restoreSavedWorkspace = () => {
+    const restoredSongs = cloneSong(savedSongs);
+    const restoredSetlists = cloneSong(savedSetlists);
+    setSongs(restoredSongs);
+    setSetlists(restoredSetlists);
+
+    const nextSelectedSongId = restoredSongs.some((item) => item.id === selectedSongId)
+      ? selectedSongId
+      : restoredSongs[0]?.id ?? '';
+    setSelectedSongId(nextSelectedSongId);
+
+    const nextSetlist = restoredSetlists.find((item) => item.id === selectedSetlistId) ?? restoredSetlists[0] ?? null;
+    setSelectedSetlistId(nextSetlist?.id ?? null);
+    setSelectedSetlistSongId(nextSetlist?.songs.find((item) => item.id === selectedSetlistSongId)?.id ?? nextSetlist?.songs[0]?.id ?? null);
   };
 
-  const handleSelectSong = (nextSongId: string) => {
+  const runSelectionChange = (applySelection: () => void) => {
     setActiveAppView('sheet');
 
-    if (nextSongId === selectedSongId) {
+    if (isAutoSaveEnabled && workspaceIsDirty) {
+      persistWorkspace(songs, setlists);
+      applySelection();
       return;
     }
 
-    if (isAutoSaveEnabled && libraryIsDirty) {
-      persistSongLibrary(songs, nextSongId);
-      setSelectedSongId(nextSongId);
-      return;
-    }
-
-    if (!libraryIsDirty) {
-      setSelectedSongId(nextSongId);
+    if (!workspaceIsDirty) {
+      applySelection();
       return;
     }
 
     const shouldSave = window.confirm(copy.confirmSaveBeforeSwitch);
-
     if (shouldSave) {
-      persistSongLibrary(songs, nextSongId);
-      setSelectedSongId(nextSongId);
+      persistWorkspace(songs, setlists);
+      applySelection();
       return;
     }
 
-    const restoredSongs = cloneSong(savedSongs);
-    const restoredSelection = restoredSongs.some((item) => item.id === nextSongId)
-      ? nextSongId
-      : restoredSongs[0]?.id;
+    restoreSavedWorkspace();
+    applySelection();
+  };
 
-    setSongs(restoredSongs);
+  const handleSaveLibrary = () => {
+    persistWorkspace(songs, setlists);
+  };
 
-    if (restoredSelection) {
-      setSelectedSongId(restoredSelection);
+  const handleAppViewChange = (nextView: AppView) => {
+    setActiveAppView((currentView) => currentView === nextView ? 'sheet' : nextView);
+  };
+
+  const handleSelectSong = (nextSongId: string) => {
+    if (nextSongId === selectedSongId && workspaceMode === 'songs') {
+      return;
     }
+
+    runSelectionChange(() => {
+      setWorkspaceMode('songs');
+      setSelectedSongId(nextSongId);
+    });
   };
 
   const handleSongChange = (newSong: Song) => {
@@ -937,6 +1287,34 @@ export default function App() {
 
     pushSongHistory(song.id, song);
     replaceSongInLibrary(song.id, nextSong);
+  };
+
+  const handleToggleLyricsMode = () => {
+    if (isSetlistMode) {
+      const nextLyricsMode = !isLyricsMode;
+      setIsLyricsMode(nextLyricsMode);
+
+      if (nextLyricsMode) {
+        setIsEditing(true);
+      }
+      return;
+    }
+
+    if (!song) {
+      return;
+    }
+
+    const nextLyricsMode = !isLyricsMode;
+    setIsLyricsMode(nextLyricsMode);
+
+    if (nextLyricsMode) {
+      setIsEditing(true);
+    }
+
+    handleSongChange({
+      ...song,
+      showLyrics: nextLyricsMode
+    });
   };
 
   React.useEffect(() => {
@@ -1056,6 +1434,17 @@ export default function App() {
     handleSongChange({ ...song, currentKey: newKey });
   };
 
+  const handleSetlistKeyChange = (newKey: Key) => {
+    if (!selectedSetlistSong) {
+      return;
+    }
+
+    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+      ...currentSetlistSong,
+      overrideKey: newKey
+    }));
+  };
+
   const getKeyOptionMeta = (key: Key) => {
     const rawOffset = getTransposeOffset(song.originalKey, key);
     const normalizedOffset = rawOffset > 6 ? rawOffset - 12 : rawOffset < -6 ? rawOffset + 12 : rawOffset;
@@ -1067,32 +1456,16 @@ export default function App() {
     return normalizedOffset > 0 ? `+${normalizedOffset}` : `${normalizedOffset}`;
   };
 
-  const getCapoPlayKeyTextClass = (key: Key) => {
-    if (['C', 'D', 'E', 'G', 'A'].includes(key)) {
-      return 'text-gray-900';
-    }
-
-    if (key.includes('#') || key.includes('b')) {
-      return 'text-gray-400';
-    }
-
-    return 'text-gray-500';
-  };
-
-  const getCapoOptionTextClass = (key: Key) => {
-    if (['C', 'D', 'E', 'G', 'A'].includes(key)) {
-      return 'text-gray-900';
-    }
-
-    if (key.includes('#') || key.includes('b')) {
-      return 'text-gray-400';
-    }
-
-    return 'text-gray-700';
-  };
-
   const handleTranspose = (steps: number) => {
     handleSongChange({ ...song, currentKey: transposeKeyPreferFlats(song.currentKey, steps) });
+  };
+
+  const handleSetlistTranspose = (steps: number) => {
+    if (!selectedSetlistSong || !activeSetlistPreviewSong) {
+      return;
+    }
+
+    handleSetlistKeyChange(transposeKeyPreferFlats(activeSetlistPreviewSong.currentKey, steps));
   };
 
   const handleCreateSong = () => {
@@ -1102,6 +1475,154 @@ export default function App() {
     setSelectedSongId(newSong.id);
     setActiveAppView('sheet');
     setIsEditing(true);
+    setWorkspaceMode('songs');
+  };
+
+  const handleCreateSetlist = () => {
+    const now = Date.now();
+    const newSetlist: Setlist = {
+      id: createSetlistId(),
+      name: language === 'zh' ? `服事歌單 ${setlists.length + 1}` : `Service Setlist ${setlists.length + 1}`,
+      displayMode: 'chord-movable-key',
+      showLyrics: false,
+      createdAt: now,
+      updatedAt: now,
+      songs: []
+    };
+
+    setSetlists((current) => [newSetlist, ...current]);
+    setSelectedSetlistId(newSetlist.id);
+    setSelectedSetlistSongId(null);
+    setWorkspaceMode('setlists');
+    setActiveAppView('sheet');
+    setIsEditing(true);
+  };
+
+  const handleSelectSetlist = (nextSetlistId: string) => {
+    if (selectedSetlistId === nextSetlistId && workspaceMode === 'setlists') {
+      return;
+    }
+
+    runSelectionChange(() => {
+      setIsSetlistActionsMenuOpen(false);
+      const nextSetlist = setlists.find((item) => item.id === nextSetlistId) ?? null;
+      setWorkspaceMode('setlists');
+      setSelectedSetlistId(nextSetlistId);
+      setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+    });
+  };
+
+  const handleSetlistNameChange = (setlistId: string, name: string) => {
+    replaceSetlist(setlistId, (currentSetlist) => ({
+      ...currentSetlist,
+      name
+    }));
+  };
+
+  const handleSetlistDisplaySettingsChange = (setlistId: string, updates: Partial<Pick<Setlist, 'displayMode' | 'showLyrics'>>) => {
+    replaceSetlist(setlistId, (currentSetlist) => ({
+      ...currentSetlist,
+      ...updates
+    }));
+  };
+
+  const handleDeleteSetlist = (setlistId: string) => {
+    const confirmed = window.confirm(copy.confirmDeleteSetlist);
+    if (!confirmed) {
+      return;
+    }
+
+    setIsSetlistActionsMenuOpen(false);
+
+    const remainingSetlists = setlists.filter((item) => item.id !== setlistId);
+    setSetlists(remainingSetlists);
+
+    const nextSetlist = remainingSetlists[0] ?? null;
+    setSelectedSetlistId(nextSetlist?.id ?? null);
+    setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+    if (remainingSetlists.length === 0) {
+      setWorkspaceMode('songs');
+    }
+  };
+
+  const handleAddSongToSetlist = (songId: string) => {
+    if (!selectedSetlist) {
+      return;
+    }
+
+    const sourceSong = songs.find((item) => item.id === songId);
+    if (!sourceSong) {
+      return;
+    }
+
+    const nextSetlistSong = createStoredSetlistSong(songId, selectedSetlist.id, sourceSong);
+    replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
+      ...currentSetlist,
+      songs: reindexSetlistSongs([...currentSetlist.songs, { ...nextSetlistSong, order: currentSetlist.songs.length }])
+    }));
+    setSelectedSetlistSongId(nextSetlistSong.id);
+    setWorkspaceMode('setlists');
+    setIsSetlistAddSongsOpen(true);
+  };
+
+  const handleSelectSetlistSong = (setlistSongId: string) => {
+    if (!selectedSetlist) {
+      return;
+    }
+
+    runSelectionChange(() => {
+      setWorkspaceMode('setlists');
+      setSelectedSetlistId(selectedSetlist.id);
+      setSelectedSetlistSongId(setlistSongId);
+    });
+  };
+
+  const handleUpdateSetlistSong = (setlistSongId: string, updater: (currentSong: SetlistSong) => SetlistSong) => {
+    if (!selectedSetlist) {
+      return;
+    }
+
+    replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
+      ...currentSetlist,
+      songs: currentSetlist.songs.map((item) => item.id === setlistSongId ? updater(item) : item)
+    }));
+  };
+
+  const handleRemoveSetlistSong = (setlistSongId: string) => {
+    if (!selectedSetlist) {
+      return;
+    }
+
+    replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
+      ...currentSetlist,
+      songs: currentSetlist.songs.filter((item) => item.id !== setlistSongId)
+    }));
+
+    const remainingSongs = selectedSetlist.songs.filter((item) => item.id !== setlistSongId);
+    setSelectedSetlistSongId(remainingSongs[0]?.id ?? null);
+  };
+
+  const moveSetlistSong = (sourceId: string, targetId: string) => {
+    if (!selectedSetlist || sourceId === targetId) {
+      return;
+    }
+
+    replaceSetlist(selectedSetlist.id, (currentSetlist) => {
+      const nextSongs = [...currentSetlist.songs];
+      const sourceIndex = nextSongs.findIndex((item) => item.id === sourceId);
+      const targetIndex = nextSongs.findIndex((item) => item.id === targetId);
+      if (sourceIndex === -1 || targetIndex === -1) {
+        return currentSetlist;
+      }
+
+      const [moved] = nextSongs.splice(sourceIndex, 1);
+      nextSongs.splice(targetIndex, 0, moved);
+
+      return {
+        ...currentSetlist,
+        songs: reindexSetlistSongs(nextSongs)
+      };
+    });
   };
 
   const handleExportSongLibraryJson = () => {
@@ -1171,7 +1692,7 @@ export default function App() {
       setSongHistories({});
       setSelectedSongIdsForBulkDelete([]);
       setIsLibraryEditing(false);
-      persistSongLibrary(nextSongs, nextSelectedSongId);
+      persistWorkspace(nextSongs, setlists);
     } catch {
       window.alert(copy.importInvalidError);
     }
@@ -1237,6 +1758,10 @@ export default function App() {
     if (remainingSongs.length === 0) {
       const replacementSong = createDefaultSong(1);
       setSongs([replacementSong]);
+      setSetlists([]);
+      setSavedSetlists([]);
+      setSelectedSetlistId(null);
+      setSelectedSetlistSongId(null);
       setSelectedSongId(replacementSong.id);
       setSongHistories({});
       setSelectedSongIdsForBulkDelete([]);
@@ -1245,6 +1770,13 @@ export default function App() {
     }
 
     setSongs(remainingSongs);
+    setSetlists((currentSetlists) =>
+      currentSetlists.map((setlist) => ({
+        ...setlist,
+        songs: reindexSetlistSongs(setlist.songs.filter((item) => item.songId !== songId)),
+        updatedAt: Date.now()
+      }))
+    );
     setSongHistories((currentHistory) =>
       Object.fromEntries(Object.entries(currentHistory).filter(([id]) => id !== songId))
     );
@@ -1283,6 +1815,10 @@ export default function App() {
     if (remainingSongs.length === 0) {
       const replacementSong = createDefaultSong(1);
       setSongs([replacementSong]);
+      setSetlists([]);
+      setSavedSetlists([]);
+      setSelectedSetlistId(null);
+      setSelectedSetlistSongId(null);
       setSelectedSongId(replacementSong.id);
       setSongHistories({});
       setSelectedSongIdsForBulkDelete([]);
@@ -1291,6 +1827,13 @@ export default function App() {
     }
 
     setSongs(remainingSongs);
+    setSetlists((currentSetlists) =>
+      currentSetlists.map((setlist) => ({
+        ...setlist,
+        songs: reindexSetlistSongs(setlist.songs.filter((item) => !selectedIdSet.has(item.songId))),
+        updatedAt: Date.now()
+      }))
+    );
     setSongHistories((currentHistory) =>
       Object.fromEntries(Object.entries(currentHistory).filter(([id]) => !selectedIdSet.has(id)))
     );
@@ -1339,23 +1882,120 @@ export default function App() {
     replaceSongInLibrary(song.id, nextSong);
   };
 
+  const handleSetlistUndo = () => {
+    if (!selectedSetlistSong || currentSetlistSongHistory.past.length === 0) {
+      return;
+    }
+
+    const previousSong = currentSetlistSongHistory.past[currentSetlistSongHistory.past.length - 1];
+    const newPast = currentSetlistSongHistory.past.slice(0, currentSetlistSongHistory.past.length - 1);
+
+    setSetlistSongHistories((currentHistory) => ({
+      ...currentHistory,
+      [selectedSetlistSong.id]: {
+        past: newPast,
+        future: [cloneSong(activeSetlistEditableSong ?? previousSong), ...currentSetlistSongHistory.future]
+      }
+    }));
+
+    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+      ...currentSetlistSong,
+      overrideKey: previousSong.currentKey,
+      capo: previousSong.capo ?? 0,
+      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, previousSong),
+      songData: cloneSong(normalizeSongBars(previousSong))
+    }));
+  };
+
+  const handleSetlistRedo = () => {
+    if (!selectedSetlistSong || currentSetlistSongHistory.future.length === 0) {
+      return;
+    }
+
+    const nextSong = currentSetlistSongHistory.future[0];
+    const newFuture = currentSetlistSongHistory.future.slice(1);
+
+    setSetlistSongHistories((currentHistory) => ({
+      ...currentHistory,
+      [selectedSetlistSong.id]: {
+        past: [...currentSetlistSongHistory.past, cloneSong(activeSetlistEditableSong ?? nextSong)],
+        future: newFuture
+      }
+    }));
+
+    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+      ...currentSetlistSong,
+      overrideKey: nextSong.currentKey,
+      capo: nextSong.capo ?? 0,
+      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, nextSong),
+      songData: cloneSong(normalizeSongBars(nextSong))
+    }));
+  };
+
   const handleScrollEditorToTop = () => {
     const editorScrollRoot = document.querySelector<HTMLElement>('[data-editor-scroll-root]');
     if (!editorScrollRoot) return;
     editorScrollRoot.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName: string) => {
+    try {
+      await document.fonts.ready;
+    } catch {
+      // Continue with a best-effort export if font readiness isn't available.
+    }
+
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    });
+
+    const pages = Array.from(captureHost.querySelectorAll('[data-print-page]')) as HTMLElement[];
+    if (pages.length === 0) {
+      throw new Error('No preview pages found for PDF export.');
+    }
+
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'pt',
+      format: 'a4',
+      compress: true,
+    });
+
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+
+    for (let index = 0; index < pages.length; index += 1) {
+      const page = pages[index];
+      const imageData = await toPng(page, {
+        backgroundColor: '#ffffff',
+        cacheBust: true,
+        pixelRatio: PDF_EXPORT_PIXEL_RATIO,
+        skipAutoScale: true,
+        width: page.scrollWidth,
+        height: page.scrollHeight,
+      });
+
+      if (index > 0) {
+        pdf.addPage();
+      }
+      pdf.addImage(imageData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+    }
+
+    pdf.save(`${fileName}.pdf`);
+  };
+
   const handleExportPdf = async () => {
-    if (!song || isExportingPdf || !sheetRef.current) {
+    if (isExportingPdf) {
       return;
     }
 
     setIsExportingPdf(true);
     const captureHost = document.createElement('div');
+    let exportRoot: ReturnType<typeof createRoot> | null = null;
 
     try {
-      const previewClone = sheetRef.current.cloneNode(true) as HTMLDivElement;
-
       captureHost.setAttribute('aria-hidden', 'true');
       captureHost.style.position = 'fixed';
       captureHost.style.top = '0';
@@ -1367,83 +2007,70 @@ export default function App() {
       captureHost.style.overflow = 'visible';
       captureHost.style.pointerEvents = 'none';
       captureHost.style.zIndex = '-1';
-
-      previewClone.style.transform = 'none';
-      previewClone.style.transformOrigin = 'top center';
-      previewClone.style.width = '794px';
-      previewClone.style.minWidth = '794px';
-      previewClone.style.maxWidth = '794px';
-      previewClone.style.margin = '0';
-
-      // Export the clean sheet preview, not the transient editing highlight state.
-      previewClone.querySelectorAll<HTMLElement>('[data-print-page]').forEach((node) => {
-        node.style.boxShadow = 'none';
-        node.style.borderColor = 'transparent';
-        node.style.outline = 'none';
-        node.style.background = '#ffffff';
-      });
-      previewClone.querySelectorAll<HTMLElement>('[data-preview-section-id]').forEach((node) => {
-        node.style.backgroundColor = 'rgba(255, 255, 255, 0)';
-        node.style.boxShadow = 'none';
-      });
-      previewClone.querySelectorAll<HTMLElement>('.sheet-bar').forEach((node) => {
-        node.style.backgroundColor = '';
-        node.style.boxShadow = 'none';
-      });
-
-      captureHost.appendChild(previewClone);
       document.body.appendChild(captureHost);
 
-      try {
-        await document.fonts.ready;
-      } catch {
-        // Continue with a best-effort export if font readiness isn't available.
-      }
-
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => resolve());
-        });
-      });
-
-      const pages = Array.from(captureHost.querySelectorAll('[data-print-page]')) as HTMLElement[];
-      if (pages.length === 0) {
-        throw new Error('No preview pages found for PDF export.');
-      }
-
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'pt',
-        format: 'a4',
-        compress: true,
-      });
-
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-
-      for (let index = 0; index < pages.length; index += 1) {
-        const page = pages[index];
-        const imageData = await toPng(page, {
-          backgroundColor: '#ffffff',
-          cacheBust: true,
-          pixelRatio: PDF_EXPORT_PIXEL_RATIO,
-          skipAutoScale: true,
-          width: page.scrollWidth,
-          height: page.scrollHeight,
-        });
-
-        if (index > 0) {
-          pdf.addPage();
+      if (isSetlistMode) {
+        if (!selectedSetlist || setlistSongsWithSource.length === 0) {
+          window.alert(copy.setlistExportEmptyError);
+          return;
         }
-        pdf.addImage(imageData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-      }
 
-      pdf.save(`${buildPdfFileName(song.title)}.pdf`);
+        exportRoot = createRoot(captureHost);
+        flushSync(() => {
+          exportRoot?.render(
+            <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
+              {setlistSongsWithSource.map(({ item, sourceSong }) => {
+                const derivedSong = applySetlistSongOverrides(sourceSong, selectedSetlist, item);
+                return (
+                  <ChordSheet
+                    key={item.id}
+                    song={derivedSong}
+                    language={language}
+                    currentKey={derivedSong.currentKey}
+                  />
+                );
+              })}
+            </div>
+          );
+        });
+        await exportCaptureHostToPdf(captureHost, buildSetlistPdfFileName(selectedSetlist));
+      } else {
+        if (!song || !sheetRef.current) {
+          return;
+        }
+
+        const previewClone = sheetRef.current.cloneNode(true) as HTMLDivElement;
+        previewClone.style.transform = 'none';
+        previewClone.style.transformOrigin = 'top center';
+        previewClone.style.width = '794px';
+        previewClone.style.minWidth = '794px';
+        previewClone.style.maxWidth = '794px';
+        previewClone.style.margin = '0';
+
+        previewClone.querySelectorAll<HTMLElement>('[data-print-page]').forEach((node) => {
+          node.style.boxShadow = 'none';
+          node.style.borderColor = 'transparent';
+          node.style.outline = 'none';
+          node.style.background = '#ffffff';
+        });
+        previewClone.querySelectorAll<HTMLElement>('[data-preview-section-id]').forEach((node) => {
+          node.style.backgroundColor = 'rgba(255, 255, 255, 0)';
+          node.style.boxShadow = 'none';
+        });
+        previewClone.querySelectorAll<HTMLElement>('.sheet-bar').forEach((node) => {
+          node.style.backgroundColor = '';
+          node.style.boxShadow = 'none';
+        });
+
+        captureHost.appendChild(previewClone);
+        await exportCaptureHostToPdf(captureHost, buildPdfFileName(song));
+      }
     } catch (error) {
       console.error('PDF export failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Please try again.';
       window.alert(`${copy.pdfExportError} ${errorMessage}`);
     } finally {
+      exportRoot?.unmount();
       captureHost.remove();
       setIsExportingPdf(false);
     }
@@ -1464,12 +2091,12 @@ export default function App() {
   }, [isAutoSaveEnabled]);
 
   useEffect(() => {
-    if (!isAutoSaveEnabled || !song || !libraryIsDirty) {
+    if (!isAutoSaveEnabled || !workspaceIsDirty) {
       return;
     }
 
-    persistSongLibrary(songs, selectedSongId);
-  }, [isAutoSaveEnabled, libraryIsDirty, selectedSongId, song, songs]);
+    persistWorkspace(songs, setlists);
+  }, [isAutoSaveEnabled, setlists, songs, workspaceIsDirty]);
 
   useEffect(() => {
     try {
@@ -1480,10 +2107,54 @@ export default function App() {
   }, [selectedSongId]);
 
   useEffect(() => {
+    try {
+      if (selectedSetlistId) {
+        window.localStorage.setItem(SELECTED_SETLIST_STORAGE_KEY, selectedSetlistId);
+      } else {
+        window.localStorage.removeItem(SELECTED_SETLIST_STORAGE_KEY);
+      }
+
+      if (selectedSetlistSongId) {
+        window.localStorage.setItem(SELECTED_SETLIST_SONG_STORAGE_KEY, selectedSetlistSongId);
+      } else {
+        window.localStorage.removeItem(SELECTED_SETLIST_SONG_STORAGE_KEY);
+      }
+
+      window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, workspaceMode);
+    } catch {
+      // Ignore storage failures and keep the app usable.
+    }
+  }, [selectedSetlistId, selectedSetlistSongId, workspaceMode]);
+
+  useEffect(() => {
     setSelectedSongIdsForBulkDelete((currentIds) =>
       currentIds.filter((id) => songs.some((item) => item.id === id))
     );
   }, [songs]);
+
+  useEffect(() => {
+    setSelectedSetlistId((currentId) => {
+      if (!currentId) {
+        return setlists[0]?.id ?? null;
+      }
+
+      return setlists.some((item) => item.id === currentId) ? currentId : setlists[0]?.id ?? null;
+    });
+  }, [setlists]);
+
+  useEffect(() => {
+    const activeSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? null;
+    if (!activeSetlist) {
+      setSelectedSetlistSongId(null);
+      return;
+    }
+
+    setSelectedSetlistSongId((currentId) => (
+      currentId && activeSetlist.songs.some((item) => item.id === currentId)
+        ? currentId
+        : activeSetlist.songs[0]?.id ?? null
+    ));
+  }, [selectedSetlistId, setlists]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1520,12 +2191,8 @@ export default function App() {
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
-      if (keyMenuRef.current && !keyMenuRef.current.contains(event.target as Node)) {
-        setIsKeyMenuOpen(false);
-      }
-
-      if (capoMenuRef.current && !capoMenuRef.current.contains(event.target as Node)) {
-        setIsCapoMenuOpen(false);
+      if (setlistActionsMenuRef.current && !setlistActionsMenuRef.current.contains(event.target as Node)) {
+        setIsSetlistActionsMenuOpen(false);
       }
     };
 
@@ -1650,6 +2317,25 @@ export default function App() {
       activeBar={isEditing ? activeBar : null}
     />
   ), [activeBar, activeSectionId, handleElementClick, highlightedSectionIds, isEditing, language, song]);
+
+  const setlistPreviewSheet = React.useMemo(() => {
+    if (!activeSetlistPreviewSong) {
+      return null;
+    }
+
+    return (
+      <ChordSheet
+        song={activeSetlistPreviewSong}
+        language={language}
+        currentKey={activeSetlistPreviewSong.currentKey}
+        onElementClick={handleElementClick}
+        highlightedSectionIds={highlightedSectionIds}
+        activeSectionId={isEditing ? activeSectionId : null}
+        activeBar={isEditing ? activeBar : null}
+      />
+    );
+  }, [activeBar, activeSectionId, activeSetlistPreviewSong, handleElementClick, highlightedSectionIds, isEditing, language]);
+  const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
 
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
     const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));
@@ -1847,20 +2533,42 @@ export default function App() {
               {isSidebarExpanded ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
             </button>
 
-            <button
-              type="button"
-              onClick={handleCreateSong}
-              className="w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
-              title={copy.newSong}
-            >
-              <Plus size={18} />
-            </button>
+            <div className="flex w-full flex-col items-center gap-2 px-2">
+              <button
+                type="button"
+                onClick={() => setWorkspaceMode('songs')}
+                className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
+                  !isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+                title={copy.songs}
+              >
+                <FileText size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkspaceMode('setlists')}
+                className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
+                  isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+                title={copy.setlists}
+              >
+                <ListMusic size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={isSetlistMode ? handleCreateSetlist : handleCreateSong}
+                className="w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
+                title={isSetlistMode ? copy.newSetlist : copy.newSong}
+              >
+                <Plus size={18} />
+              </button>
+            </div>
 
             <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
               <div className="flex flex-col items-center gap-1 text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">
-                <span>{copy.songs}</span>
+                <span>{isSetlistMode ? copy.setlists : copy.songs}</span>
                 <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs text-gray-700">
-                  {songs.length}
+                  {isSetlistMode ? setlists.length : songs.length}
                 </div>
               </div>
               <div className="flex w-full flex-col items-center gap-2">
@@ -1904,230 +2612,536 @@ export default function App() {
             className="min-w-0 flex-1 flex flex-col"
             style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           >
-            <div className="px-5 py-6 border-b border-gray-200">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
-                  <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+            {isSetlistMode ? (
+              <>
+                <div className="px-5 py-6 border-b border-gray-200">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                      <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+                    </div>
+                    <div className="text-xs font-medium text-gray-500">{copy.serviceSetlist}</div>
+                  </div>
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={handleCreateSetlist}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                    >
+                      <Plus size={16} />
+                      <span>{copy.newSetlist}</span>
+                    </button>
+                  </div>
+                  <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                    <Search size={15} className="text-gray-400" />
+                    <input
+                      type="text"
+                      value={setlistSearchQuery}
+                      onChange={(event) => setSetlistSearchQuery(event.target.value)}
+                      placeholder={copy.searchSetlists}
+                      className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                    />
+                  </label>
                 </div>
-                <div className="text-xs font-medium text-gray-500">{copy.songLibrary}</div>
-              </div>
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleCreateSong}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                >
-                  <Plus size={16} />
-                  <span>{copy.newSong}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsLibraryEditing(!isLibraryEditing)}
-                  className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
-                    isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-                  <Edit3 size={16} />
-                  <span>{isLibraryEditing ? copy.done : copy.manage}</span>
-                </button>
-              </div>
-              <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                <Search size={15} className="text-gray-400" />
-                <input
-                  type="text"
-                  value={librarySearchQuery}
-                  onChange={(event) => setLibrarySearchQuery(event.target.value)}
-                  placeholder={copy.searchSongs}
-                  className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                />
-              </label>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={handleExportSongLibraryJson}
-                  className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
-                >
-                  <Download size={15} />
-                  <span>{copy.exportJson}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleImportSongLibraryClick}
-                  className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
-                >
-                  <Upload size={15} />
-                  <span>{copy.importJson}</span>
-                </button>
-                <input
-                  ref={importLibraryInputRef}
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={handleImportSongLibrary}
-                  className="hidden"
-                />
-              </div>
-              {isLibraryEditing && (
-                <button
-                  type="button"
-                  onClick={handleDeleteSelectedSongs}
-                  disabled={selectedSongIdsForBulkDelete.length === 0}
-                  className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Trash2 size={16} />
-                  <span>{`${copy.deleteSelected} (${selectedSongIdsForBulkDelete.length})`}</span>
-                </button>
-              )}
-            </div>
 
-            <div className="px-3 py-3 border-b border-gray-100">
-              <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
-                <span>{copy.songs}</span>
-                <span>{normalizedLibrarySearchQuery ? `${filteredSongs.length}/${songs.length}` : songs.length}</span>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {filteredSongs.length === 0 && (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-                  {copy.noSongsMatch}
+                <div className="px-3 py-3 border-b border-gray-100">
+                  <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
+                    <span>{copy.setlists}</span>
+                    <span>{normalizedSetlistSearchQuery ? `${filteredSetlists.length}/${setlists.length}` : setlists.length}</span>
+                  </div>
                 </div>
-              )}
-              {filteredSongs.map((item) => {
-                const isActive = item.id === song.id;
-                const libraryMeta = getSongLibraryMeta(item, copy.editor.shuffle);
 
-                return (
-                  <div
-                    key={item.id}
-                    className={`relative rounded-xl border transition-all ${
-                      isActive
-                      ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100'
-                      : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
-                  }`}
-                  >
-                    {isLibraryEditing ? (
-                      <div className="px-3 py-3 pr-14">
-                        <div className="flex items-start gap-3">
+                <div className="flex-1 overflow-y-auto p-3">
+                  <div className="space-y-2">
+                    {filteredSetlists.length === 0 && (
+                      <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+                        {copy.noSetlists}
+                      </div>
+                    )}
+                    {filteredSetlists.map((item) => {
+                      const isActive = item.id === selectedSetlist?.id;
+                      return (
+                        <div
+                          key={item.id}
+                          className={`rounded-2xl border p-3 transition-all ${
+                            isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleSelectSetlist(item.id)}
+                            className="w-full text-left"
+                          >
+                            <div className="text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
+                            <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {selectedSetlist && (
+                    <div className="mt-5 space-y-4 border-t border-gray-200 pt-4">
+                      <div className="space-y-2">
+                        <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistName}</div>
+                        <div className="flex items-center gap-2">
                           <input
-                            type="checkbox"
-                            checked={selectedSongIdsForBulkDelete.includes(item.id)}
-                            onChange={() => handleToggleSongBulkSelection(item.id)}
-                            className="mt-2 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            value={selectedSetlist.name}
+                            onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
+                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-900 outline-none focus:border-indigo-300"
+                            placeholder={copy.untitledSetlist}
                           />
-                          <div className={`mt-0.5 rounded-lg p-2 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                            <FileText size={14} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <input
-                              value={item.title}
-                              onChange={(event) => handleSongListTitleChange(item.id, event.target.value)}
-                              className={`w-full rounded-md border px-2 py-1 text-sm font-bold outline-none transition-colors ${
-                                isActive
-                                  ? 'border-indigo-200 bg-white text-indigo-900 focus:border-indigo-400'
-                                  : 'border-gray-200 bg-white text-gray-800 focus:border-gray-400'
-                              }`}
-                              placeholder={copy.untitledSong}
-                            />
-                            <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
-                              {libraryMeta.primary}
-                            </div>
-                            {libraryMeta.secondary && (
-                              <div className="mt-0.5 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
-                                {libraryMeta.secondary}
+                          <div ref={setlistActionsMenuRef} className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                              title={language === 'zh' ? '歌單操作' : 'Setlist Actions'}
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+                            {isSetlistActionsMenuOpen && (
+                              <div className="absolute right-0 top-full z-20 mt-2 w-40 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSetlist(selectedSetlist.id)}
+                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                                >
+                                  {copy.delete}
+                                </button>
                               </div>
                             )}
                           </div>
                         </div>
                       </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleSelectSong(item.id);
-                          setIsKeyMenuOpen(false);
-                        }}
-                        className="w-full px-3 py-3 pr-14 text-left"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className={`mt-0.5 rounded-lg p-2 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                            <FileText size={14} />
+
+                      <div className="space-y-2">
+                        <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
+                        {setlistSongsWithSource.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
+                            {copy.noSetlistSongs}
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <div className={`text-sm font-bold leading-snug whitespace-normal break-words ${isActive ? 'text-indigo-900' : 'text-gray-800'}`}>
-                              {item.title || copy.untitledSong}
-                            </div>
-                            <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
-                              {libraryMeta.primary}
-                            </div>
-                            {libraryMeta.secondary && (
-                              <div className="mt-0.5 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
-                                {libraryMeta.secondary}
+                        ) : (
+                          <div className="space-y-2">
+                            {setlistSongsWithSource.map(({ item, sourceSong }) => {
+                              const isActive = item.id === selectedSetlistSong?.id;
+                              const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
+                              const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
+                              const displaySong = item.songData ?? sourceSong;
+                              const versionSummary = getSongVersionSummary(displaySong);
+                              const isDropTarget = dragOverSetlistSongId === item.id;
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  draggable
+                                  onDragStart={() => setDraggingSetlistSongId(item.id)}
+                                  onDragOver={(event) => {
+                                    event.preventDefault();
+                                    if (dragOverSetlistSongId !== item.id) {
+                                      setDragOverSetlistSongId(item.id);
+                                    }
+                                  }}
+                                  onDragLeave={() => {
+                                    if (dragOverSetlistSongId === item.id) {
+                                      setDragOverSetlistSongId(null);
+                                    }
+                                  }}
+                                  onDrop={(event) => {
+                                    event.preventDefault();
+                                    if (draggingSetlistSongId) {
+                                      moveSetlistSong(draggingSetlistSongId, item.id);
+                                    }
+                                    setDraggingSetlistSongId(null);
+                                    setDragOverSetlistSongId(null);
+                                  }}
+                                  onDragEnd={() => {
+                                    setDraggingSetlistSongId(null);
+                                    setDragOverSetlistSongId(null);
+                                  }}
+                                  className={`group rounded-xl border px-2.5 py-2 transition-all ${
+                                    isActive
+                                      ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
+                                      : isDropTarget
+                                        ? 'border-indigo-200 bg-indigo-50/70'
+                                        : 'border-gray-200 bg-white hover:bg-gray-50/70'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-2">
+                                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                                      <div className="flex min-w-0 items-center gap-2">
+                                        <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
+                                          <GripVertical size={14} />
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSelectSetlistSong(item.id)}
+                                          className="min-w-0 flex-1 text-left"
+                                        >
+                                          <div className="truncate text-sm font-bold text-gray-900">{sourceSong.title || copy.untitledSong}</div>
+                                          <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
+                                            {typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : 'BPM --'}
+                                            {versionSummary ? ` · ${versionSummary}` : ''}
+                                          </div>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveSetlistSong(item.id)}
+                                          className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
+                                          title={copy.removeFromSetlist}
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      </div>
+                                      <div className="flex min-w-0 items-center gap-1 pl-10">
+                                        <div className="w-[56px] shrink-0">
+                                          <KeyPicker
+                                            value={effectiveKey}
+                                            onChange={(key) => key && handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                              ...currentSetlistSong,
+                                              overrideKey: key
+                                            }))}
+                                            label={copy.key}
+                                            originalKey={sourceSong.currentKey}
+                                            align="left"
+                                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
+                                            valueTextClassName="!text-[10px] !leading-none"
+                                            triggerIconSize={10}
+                                          />
+                                        </div>
+                                        <div className="w-[56px] shrink-0">
+                                          <CapoPicker
+                                            value={effectiveCapo}
+                                            currentKey={effectiveKey}
+                                            onChange={(capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                              ...currentSetlistSong,
+                                              capo
+                                            }))}
+                                            label="Capo"
+                                            align="right"
+                                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
+                                            valueTextClassName="!text-[10px] !leading-none"
+                                            showPlayKey={false}
+                                            triggerIconSize={10}
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {isSetlistAddSongsOpen && (
+                        <div className="space-y-3 border-t border-gray-200 pt-4">
+                          <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.addToSetlist}</div>
+                          <label className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                            <Search size={14} className="text-gray-400" />
+                            <input
+                              type="text"
+                              value={setlistSongSearchQuery}
+                              onChange={(event) => setSetlistSongSearchQuery(event.target.value)}
+                              placeholder={copy.searchSongsToAdd}
+                              className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                            />
+                          </label>
+
+                          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                            {filteredSongsForSetlist.length === 0 ? (
+                              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
+                                {copy.noSongsMatch}
                               </div>
+                            ) : (
+                              filteredSongsForSetlist.map((librarySong) => {
+                                const libraryMeta = getSongLibraryMeta(librarySong, copy.editor.shuffle);
+                                return (
+                                  <div
+                                    key={`setlist-add-${librarySong.id}`}
+                                    className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate text-sm font-bold text-gray-900">
+                                        {librarySong.title || copy.untitledSong}
+                                      </div>
+                                      <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
+                                        {libraryMeta.primary}
+                                      </div>
+                                      {libraryMeta.secondary && (
+                                        <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
+                                          {libraryMeta.secondary}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAddSongToSetlist(librarySong.id)}
+                                      className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+                                    >
+                                      {copy.addToSetlist}
+                                    </button>
+                                  </div>
+                                );
+                              })
                             )}
                           </div>
                         </div>
-                      </button>
-                    )}
-                    <div className="absolute right-2 top-1/2 flex w-6 -translate-y-1/2 flex-col items-center justify-center gap-0">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleDuplicateSong(item.id);
-                          setIsKeyMenuOpen(false);
-                        }}
-                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                        aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                        title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                      >
-                        <Copy size={13} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleSelectSong(item.id);
-                          setIsEditing(true);
-                          setIsKeyMenuOpen(false);
-                        }}
-                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                        aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
-                        title={`${copy.edit} ${item.title || copy.untitledSong}`}
-                      >
-                        <Edit3 size={13} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleDeleteSong(item.id);
-                        }}
-                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-rose-600"
-                        aria-label={`${copy.delete} ${item.title || copy.untitledSong}`}
-                        title={`${copy.delete} ${item.title || copy.untitledSong}`}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                      )}
 
-            <div className="border-t border-gray-200 px-5 py-4">
-              <div className={`text-xs font-medium ${libraryIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
-                {libraryIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
-              </div>
-              <div className="mt-1 text-xs text-gray-400">
-                {isAutoSaveEnabled
-                  ? copy.autoSavedHint
-                  : copy.manualSaveHint}
-              </div>
-              <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
-                v{APP_VERSION}
-              </div>
-            </div>
+                    </div>
+                  )}
+                </div>
+
+                {selectedSetlist && (
+                  <div className="border-t border-gray-200 bg-white px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsSetlistAddSongsOpen((current) => !current)}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                    >
+                      <Plus size={16} />
+                      <span>{isSetlistAddSongsOpen ? copy.done : copy.addToSetlist}</span>
+                    </button>
+                  </div>
+                )}
+
+                <div className="border-t border-gray-200 px-5 py-4">
+                  <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
+                    {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-400">
+                    {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
+                  </div>
+                  <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                    v{APP_VERSION}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="px-5 py-6 border-b border-gray-200">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                      <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+                    </div>
+                    <div className="text-xs font-medium text-gray-500">{copy.songLibrary}</div>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCreateSong}
+                      className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                    >
+                      <Plus size={16} />
+                      <span>{copy.newSong}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsLibraryEditing(!isLibraryEditing)}
+                      className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+                        isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <Edit3 size={16} />
+                      <span>{isLibraryEditing ? copy.done : copy.manage}</span>
+                    </button>
+                  </div>
+                  <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                    <Search size={15} className="text-gray-400" />
+                    <input
+                      type="text"
+                      value={librarySearchQuery}
+                      onChange={(event) => setLibrarySearchQuery(event.target.value)}
+                      placeholder={copy.searchSongs}
+                      className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                    />
+                  </label>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={handleExportSongLibraryJson}
+                      className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
+                    >
+                      <Download size={15} />
+                      <span>{copy.exportJson}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleImportSongLibraryClick}
+                      className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
+                    >
+                      <Upload size={15} />
+                      <span>{copy.importJson}</span>
+                    </button>
+                    <input
+                      ref={importLibraryInputRef}
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={handleImportSongLibrary}
+                      className="hidden"
+                    />
+                  </div>
+                  {isLibraryEditing && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteSelectedSongs}
+                      disabled={selectedSongIdsForBulkDelete.length === 0}
+                      className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Trash2 size={16} />
+                      <span>{`${copy.deleteSelected} (${selectedSongIdsForBulkDelete.length})`}</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="px-3 py-3 border-b border-gray-100">
+                  <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
+                    <span>{copy.songs}</span>
+                    <span>{normalizedLibrarySearchQuery ? `${filteredSongs.length}/${songs.length}` : songs.length}</span>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                  {filteredSongs.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+                      {copy.noSongsMatch}
+                    </div>
+                  )}
+                  {filteredSongs.map((item) => {
+                    const isActive = item.id === song.id;
+                    const libraryMeta = getSongLibraryMeta(item, copy.editor.shuffle);
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`relative rounded-xl border transition-all ${
+                          isActive
+                            ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100'
+                            : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {isLibraryEditing ? (
+                          <div className="px-3 py-3 pr-14">
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                checked={selectedSongIdsForBulkDelete.includes(item.id)}
+                                onChange={() => handleToggleSongBulkSelection(item.id)}
+                                className="mt-2 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <div className={`mt-0.5 rounded-lg p-2 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                                <FileText size={14} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <input
+                                  value={item.title}
+                                  onChange={(event) => handleSongListTitleChange(item.id, event.target.value)}
+                                  className={`w-full rounded-md border px-2 py-1 text-sm font-bold outline-none transition-colors ${
+                                    isActive
+                                      ? 'border-indigo-200 bg-white text-indigo-900 focus:border-indigo-400'
+                                      : 'border-gray-200 bg-white text-gray-800 focus:border-gray-400'
+                                  }`}
+                                  placeholder={copy.untitledSong}
+                                />
+                                <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
+                                  {libraryMeta.primary}
+                                </div>
+                                {libraryMeta.secondary && (
+                                  <div className="mt-0.5 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
+                                    {libraryMeta.secondary}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleSelectSong(item.id);
+                            }}
+                            className="w-full px-3 py-3 pr-14 text-left"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className={`mt-0.5 rounded-lg p-2 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                                <FileText size={14} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className={`text-sm font-bold leading-snug whitespace-normal break-words ${isActive ? 'text-indigo-900' : 'text-gray-800'}`}>
+                                  {item.title || copy.untitledSong}
+                                </div>
+                                <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
+                                  {libraryMeta.primary}
+                                </div>
+                                {libraryMeta.secondary && (
+                                  <div className="mt-0.5 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
+                                    {libraryMeta.secondary}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        )}
+                        <div className="absolute right-2 top-1/2 flex w-6 -translate-y-1/2 flex-col items-center justify-center gap-0">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleDuplicateSong(item.id);
+                            }}
+                            className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                            aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                            title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                          >
+                            <Copy size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleSelectSong(item.id);
+                              setIsEditing(true);
+                            }}
+                            className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                            aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
+                            title={`${copy.edit} ${item.title || copy.untitledSong}`}
+                          >
+                            <Edit3 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleDeleteSong(item.id);
+                            }}
+                            className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-rose-600"
+                            aria-label={`${copy.delete} ${item.title || copy.untitledSong}`}
+                            title={`${copy.delete} ${item.title || copy.untitledSong}`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="border-t border-gray-200 px-5 py-4">
+                  <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
+                    {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-400">
+                    {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
+                  </div>
+                  <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                    v{APP_VERSION}
+                  </div>
+                </div>
+              </>
+            )}
           </motion.div>
         </div>
       </motion.aside>
@@ -2151,7 +3165,18 @@ export default function App() {
               </span>
             </div>
             <div className="h-4 w-px bg-gray-200" />
-            <span className="text-sm font-medium text-gray-500 truncate">{activeAppViewLabel}</span>
+            <div className="flex min-w-0 items-center gap-2">
+              {activeAppView === 'sheet' && (
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold tracking-[0.08em] ${
+                  isSetlistMode
+                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                    : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
+                }`}>
+                  {workspaceModeBadge}
+                </span>
+              )}
+              <span className="text-sm font-medium text-gray-500 truncate">{activeAppViewLabel}</span>
+            </div>
           </div>
 
           <div className="flex flex-col items-end gap-2">
@@ -2230,6 +3255,19 @@ export default function App() {
 
               <button
                 type="button"
+                onClick={handleToggleLyricsMode}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${
+                  isLyricsMode
+                    ? 'bg-amber-500 text-white shadow-md shadow-amber-100'
+                    : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <FileText size={16} />
+                <span>{copy.lyricsMode}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setIsAutoSaveEnabled((current) => !current)}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all shadow-sm border ${
                   isAutoSaveEnabled
@@ -2245,175 +3283,86 @@ export default function App() {
                 </span>
               </button>
 
-              <div ref={keyMenuRef} className="relative flex items-center bg-gray-100 rounded-lg p-1">
-              <button 
-                onClick={() => handleTranspose(-1)}
-                className="p-1.5 hover:bg-white hover:shadow-sm rounded-md transition-all text-gray-600"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsKeyMenuOpen((open) => !open)}
-                className="min-w-[92px] bg-transparent text-sm font-bold px-2 py-1.5 rounded-md hover:bg-white hover:shadow-sm transition-all text-gray-700"
-              >
-                <span className="flex items-center justify-between gap-1.5">
-                  <span>{song.currentKey}</span>
-                  <span className={`${song.currentKey === song.originalKey ? 'text-[10px] text-indigo-500' : 'text-xs text-gray-500'}`}>
-                    {getKeyOptionMeta(song.currentKey)}
-                  </span>
-                </span>
-              </button>
-              <button 
-                onClick={() => handleTranspose(1)}
-                className="p-1.5 hover:bg-white hover:shadow-sm rounded-md transition-all text-gray-600"
-              >
-                <ChevronRight size={16} />
-              </button>
-                {isKeyMenuOpen && (
-                  <div className="absolute top-full left-1/2 z-50 mt-2 w-[184px] -translate-x-1/2 rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl">
-                    <div className="mb-2 flex items-center justify-between px-1">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">{copy.key}</div>
-                    <div className={`text-[10px] font-bold ${song.currentKey === song.originalKey ? 'text-indigo-500' : 'text-gray-500'}`}>
-                      {getKeyOptionMeta(song.currentKey)}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {KEY_MENU_LAYOUT.flatMap((row, rowIndex) =>
-                      row.map((key, columnIndex) => {
-                        if (!key) {
-                          return <div key={`empty-${rowIndex}-${columnIndex}`} className="h-[42px]" />;
-                        }
+              <KeyPicker
+                value={isSetlistMode ? currentSetlistKey : song.currentKey}
+                onChange={(key) => {
+                  if (!key) {
+                    return;
+                  }
 
-                        const isSelectedKey = song.currentKey === key;
-                        const isOriginalKey = song.originalKey === key;
+                  if (isSetlistMode) {
+                    handleSetlistKeyChange(key);
+                  } else {
+                    handleKeyChange(key);
+                  }
+                }}
+                label={copy.key}
+                originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                triggerMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                buttonClassName="min-w-[126px]"
+              />
 
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => {
-                              handleKeyChange(key);
-                              setIsKeyMenuOpen(false);
-                            }}
-                            className={`relative flex h-[42px] items-center justify-center rounded-[12px] border text-[14px] font-semibold tracking-tight transition-all ${
-                              isSelectedKey
-                                ? isOriginalKey
-                                  ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
-                                  : 'border-indigo-300 bg-indigo-50 text-indigo-700 shadow-sm shadow-indigo-100'
-                                : isOriginalKey
-                                  ? 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 hover:border-fuchsia-300 hover:bg-fuchsia-100'
-                                  : 'border-gray-200 bg-white text-gray-800 hover:border-indigo-200 hover:bg-gray-50'
-                            }`}
-                          >
-                            {isOriginalKey && (
-                              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-fuchsia-400" />
-                            )}
-                            {key}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
+              <CapoPicker
+                value={isSetlistMode ? currentSetlistCapo : currentCapo}
+                currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
+                onChange={(capo) => {
+                  if (isSetlistMode && selectedSetlistSong) {
+                    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+                      ...currentSetlistSong,
+                      capo
+                    }));
+                  } else {
+                    handleSongChange({ ...song, capo });
+                  }
+                }}
+                label="Capo"
+                buttonClassName="min-w-[126px]"
+              />
+
+              {!isSetlistMode && (
+                <>
+                  <button
+                    onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                      song.showNashvilleNumbers
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                  >
+                    <Hash size={14} />
+                    <span>123</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                    title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                      song.showAbsoluteJianpu
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                  >
+                    <Music2 size={14} />
+                    <span>1=C</span>
+                  </button>
+                </>
               )}
-              </div>
-
-              <div ref={capoMenuRef} className="relative flex items-center rounded-lg bg-gray-100 p-1">
-                <button
-                  type="button"
-                  onClick={() => setIsCapoMenuOpen((open) => !open)}
-                  className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-bold text-gray-700 transition-all hover:bg-white hover:shadow-sm"
-                >
-                  <span className={getCapoOptionTextClass(currentPlayKey)}>Capo {currentCapo}</span>
-                  <span className={`text-sm font-semibold ${getCapoPlayKeyTextClass(currentPlayKey)}`}>
-                    ({currentPlayKey})
-                  </span>
-                  <ChevronDown size={14} className={`text-gray-400 transition-transform ${isCapoMenuOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {isCapoMenuOpen && (
-                  <div className="absolute top-full right-0 z-50 mt-2 w-[132px] overflow-hidden rounded-[20px] border border-gray-200 bg-white p-2 shadow-xl">
-                    <div className="mb-2 px-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
-                      Capo
-                    </div>
-                    <div className="space-y-0.5">
-                      {Array.from({ length: 12 }).map((_, i) => {
-                        const playKey = getPlayKey(song.currentKey, i);
-                        const isSelected = currentCapo === i;
-                        const optionTextClass = getCapoOptionTextClass(playKey);
-                        const optionPlayKeyClass = getCapoPlayKeyTextClass(playKey);
-
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => {
-                              handleSongChange({ ...song, capo: i });
-                              setIsCapoMenuOpen(false);
-                            }}
-                            className={`flex w-full items-center rounded-xl px-2 py-1.5 text-left transition-colors ${
-                              isSelected
-                                ? playKey.includes('#') || playKey.includes('b')
-                                  ? 'bg-slate-100'
-                                  : ['C', 'D', 'E', 'G', 'A'].includes(playKey)
-                                    ? 'bg-indigo-50'
-                                    : 'bg-gray-100'
-                                : 'hover:bg-gray-50'
-                              }`}
-                          >
-                            <span className={`inline-flex min-w-[1.15em] justify-end text-[13px] font-bold ${isSelected && !(playKey.includes('#') || playKey.includes('b')) && ['C', 'D', 'E', 'G', 'A'].includes(playKey) ? 'text-indigo-700' : optionTextClass}`}>
-                              {i}
-                            </span>
-                            <span className={`ml-1.5 text-[13px] font-semibold ${isSelected && !(playKey.includes('#') || playKey.includes('b')) && ['C', 'D', 'E', 'G', 'A'].includes(playKey) ? 'text-indigo-700' : optionPlayKeyClass}`}>
-                              ({playKey})
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <button 
-                onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                  song.showNashvilleNumbers 
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100' 
-                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                }`}
-              >
-                <Hash size={14} />
-                <span>123</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
-                title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                  song.showAbsoluteJianpu
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
-                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                }`}
-              >
-                <Music2 size={14} />
-                <span>1=C</span>
-              </button>
 
               <button
                 type="button"
                 onClick={handleSaveLibrary}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${
-                  libraryIsDirty
+                  workspaceIsDirty
                     ? 'bg-amber-500 text-white border border-amber-500 hover:bg-amber-400'
                     : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
                 }`}
               >
                 <Save size={16} />
-                <span>{libraryIsDirty ? copy.saveChanges : copy.saved}</span>
+                <span>{workspaceIsDirty ? copy.saveChanges : copy.saved}</span>
               </button>
-              
+
               <button
                 type="button"
                 onClick={handleExportPdf}
@@ -2425,7 +3374,7 @@ export default function App() {
                 }`}
               >
                 <Save size={16} />
-                <span>{isExportingPdf ? copy.preparingPdf : copy.exportPdf}</span>
+                <span>{isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}</span>
               </button>
             </div>
             ) : (
@@ -2441,7 +3390,7 @@ export default function App() {
             </div>
             )}
             <p className="text-[11px] font-medium text-gray-400">
-              {isSheetView ? copy.previewHint : copy.infoHint}
+              {isSheetView ? (isSetlistMode ? copy.previewSetlistHint : copy.previewHint) : copy.infoHint}
             </p>
           </div>
         </header>
@@ -2462,23 +3411,136 @@ export default function App() {
               >
                 <div data-editor-scroll-root className="h-full overflow-y-auto">
                   <div className="p-6 md:p-8 pb-24 min-w-[450px]">
-                    <SongEditor
-                      key={song.id}
-                      song={song}
-                      language={language}
-                      history={currentSongHistory}
-                      onUndo={handleUndo}
-                      onRedo={handleRedo}
-                      onChange={handleSongChange}
-                      activeSectionId={activeSectionId}
-                      onActiveSectionChange={setActiveSectionId}
-                      activeBar={activeBar}
-                      onActiveBarChange={setActiveBar}
-                      focusRequest={editorFocusRequest}
-                      onFocusRequestHandled={(requestId) => {
-                        setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
-                      }}
-                    />
+                    {isSetlistMode && selectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
+                      <div className="space-y-5">
+                        <div>
+                          <SongMetadataPanel
+                            song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
+                            language={language}
+                            onChange={handleSetlistSongContentChange}
+                            keyValue={currentSetlistKey}
+                            capoValue={currentSetlistCapo}
+                            onKeyChange={handleSetlistKeyChange}
+                            onCapoChange={(capo) => handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+                              ...currentSetlistSong,
+                              capo
+                            }))}
+                            displayMode={selectedSetlist.displayMode}
+                            showLyrics={selectedSetlist.showLyrics}
+                            onDisplayModeChange={(mode) => handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode })}
+                            onShowLyricsChange={(nextShowLyrics) => handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextShowLyrics })}
+                          />
+                        </div>
+                        {isLyricsMode ? (
+                          <LyricsEditor
+                            key={`${selectedSetlistSong.id}-lyrics`}
+                            song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
+                            language={language}
+                            onUndo={handleSetlistUndo}
+                            onRedo={handleSetlistRedo}
+                            onChange={handleSetlistSongContentChange}
+                            activeSectionId={activeSectionId}
+                            onActiveSectionChange={setActiveSectionId}
+                            activeBar={activeBar}
+                            onActiveBarChange={setActiveBar}
+                            focusRequest={editorFocusRequest}
+                            onFocusRequestHandled={(requestId) => {
+                              setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
+                            }}
+                          />
+                        ) : (
+                          <SongEditor
+                            key={`${selectedSetlistSong.id}-song`}
+                            song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
+                            language={language}
+                            history={currentSetlistSongHistory}
+                            onUndo={handleSetlistUndo}
+                            onRedo={handleSetlistRedo}
+                            onChange={handleSetlistSongContentChange}
+                            metadataMode="setlist"
+                            hideMetadataPanel
+                            hideBarNumberControls
+                            hideBottomAddSectionButton
+                            showInlineAddSectionButton
+                            activeSectionId={activeSectionId}
+                            onActiveSectionChange={setActiveSectionId}
+                            activeBar={activeBar}
+                            onActiveBarChange={setActiveBar}
+                            focusRequest={editorFocusRequest}
+                            onFocusRequestHandled={(requestId) => {
+                              setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
+                            }}
+                          />
+                        )}
+                      </div>
+                    ) : isSetlistMode ? (
+                      <div className="rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-6 py-8 text-sm text-gray-500">
+                        {selectedSetlist ? copy.selectSetlistSong : copy.noSetlists}
+                      </div>
+                    ) : (
+                      <div className="space-y-5">
+                        <SongMetadataPanel
+                          song={song}
+                          language={language}
+                          title={language === 'zh' ? '編輯歌曲' : 'Edit Song'}
+                          onChange={handleSongChange}
+                          displayMode={
+                            song.showNashvilleNumbers
+                              ? 'nashville-number-system'
+                              : song.showAbsoluteJianpu
+                                ? 'chord-fixed-key'
+                                : 'chord-movable-key'
+                          }
+                          showLyrics={song.showLyrics ?? false}
+                          onDisplayModeChange={(mode) => handleSongChange({
+                            ...song,
+                            showNashvilleNumbers: mode === 'nashville-number-system',
+                            showAbsoluteJianpu: mode === 'chord-fixed-key'
+                          })}
+                          onShowLyricsChange={(nextShowLyrics) => handleSongChange({
+                            ...song,
+                            showLyrics: nextShowLyrics
+                          })}
+                        />
+                        {isLyricsMode ? (
+                          <LyricsEditor
+                            key={`${song.id}-lyrics`}
+                            song={song}
+                            language={language}
+                            onUndo={handleUndo}
+                            onRedo={handleRedo}
+                            onChange={handleSongChange}
+                            activeSectionId={activeSectionId}
+                            onActiveSectionChange={setActiveSectionId}
+                            activeBar={activeBar}
+                            onActiveBarChange={setActiveBar}
+                            focusRequest={editorFocusRequest}
+                            onFocusRequestHandled={(requestId) => {
+                              setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
+                            }}
+                          />
+                        ) : (
+                          <SongEditor
+                            key={song.id}
+                            song={song}
+                            language={language}
+                            history={currentSongHistory}
+                            onUndo={handleUndo}
+                            onRedo={handleRedo}
+                            onChange={handleSongChange}
+                            hideMetadataPanel
+                            activeSectionId={activeSectionId}
+                            onActiveSectionChange={setActiveSectionId}
+                            activeBar={activeBar}
+                            onActiveBarChange={setActiveBar}
+                            focusRequest={editorFocusRequest}
+                            onFocusRequestHandled={(requestId) => {
+                              setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
+                            }}
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="absolute left-6 bottom-6 z-40 pointer-events-none">
@@ -2491,16 +3553,16 @@ export default function App() {
                       <ChevronUp size={18} />
                     </button>
                     <button
-                      onClick={handleUndo}
-                      disabled={currentSongHistory.past.length === 0}
+                      onClick={isSetlistMode ? handleSetlistUndo : handleUndo}
+                      disabled={isSetlistMode ? currentSetlistSongHistory.past.length === 0 : currentSongHistory.past.length === 0}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
                       title={copy.undo}
                     >
                       <Undo2 size={18} />
                     </button>
                     <button
-                      onClick={handleRedo}
-                      disabled={currentSongHistory.future.length === 0}
+                      onClick={isSetlistMode ? handleSetlistRedo : handleRedo}
+                      disabled={isSetlistMode ? currentSetlistSongHistory.future.length === 0 : currentSongHistory.future.length === 0}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
                       title={copy.redo}
                     >
@@ -2519,7 +3581,7 @@ export default function App() {
               data-print-preview-container
               onMouseDown={handlePreviewMouseDown}
               onClickCapture={handlePreviewClickCapture}
-              className={`h-full overflow-auto p-4 md:p-12 ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+              className={`h-full overflow-auto p-4 md:p-12 [scrollbar-gutter:stable_both-edges] ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
             >
               <div
                 className="relative flex min-h-full min-w-full items-start justify-center"
@@ -2543,7 +3605,7 @@ export default function App() {
                   }}
                   className="select-none"
                 >
-                  {previewSheet}
+                  {activePreviewSheet}
                 </div>
               </div>
             </div>

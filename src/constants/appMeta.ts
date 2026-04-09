@@ -76,6 +76,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-04-09',
+        title: 'Service Setlist, unified key/capo controls, and compact editor update',
+        bullets: [
+          'Added Service Setlist with per-entry song overrides, setlist-level display settings, and full-set PDF/export flow.',
+          'Unified Key and Capo selection across the app with shared popup pickers and a tighter metadata toolbar in both song and setlist modes.',
+          'Improved setlist preview synchronization, sidebar add-song flow, and several layout/measurement bugs in the editor and sheet preview.'
+        ]
+      },
+      {
+        version: '0.5.0',
         date: '2026-04-04',
         title: 'Section key change, pickup workflow, and editor/preview sync update',
         bullets: [
@@ -160,6 +170,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-04-09',
+        title: '服事歌單、共用 Key / Capo 控制器與緊湊編輯列更新',
+        bullets: [
+          '新增 Service Setlist，可為每個 SetlistSong 保留獨立覆蓋設定，並支援整份歌單的顯示模式與歌詞控制。',
+          '全站統一 KeyPicker / CapoPicker，並把一般歌曲與服事歌單模式的上方資訊列整理成更緊湊的工具列。',
+          '改善 setlist 預覽聯動、側邊欄加入歌曲流程，以及多處 editor / preview 的量測與版面問題。'
+        ]
+      },
+      {
+        version: '0.5.0',
         date: '2026-04-04',
         title: '段落轉調、弱起拍與 editor / preview 聯動更新',
         bullets: [

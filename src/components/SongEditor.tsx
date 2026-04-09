@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure } from '../types';
+import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure, ChordFontPreset } from '../types';
 import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, LayoutGroup } from 'motion/react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
+import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
+import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
 import { getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats } from '../utils/musicUtils';
 import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
 import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
-type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm';
+type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics';
 
 interface FocusRequest {
   sIdx: number;
@@ -26,6 +28,12 @@ interface Props {
   onUndo: () => void;
   onRedo: () => void;
   onChange: (song: Song) => void;
+  metadataMode?: 'default' | 'setlist';
+  hideMetadataPanel?: boolean;
+  hideSectionStructureActions?: boolean;
+  hideBarNumberControls?: boolean;
+  hideBottomAddSectionButton?: boolean;
+  showInlineAddSectionButton?: boolean;
   activeSectionId?: string | null;
   onActiveSectionChange?: (sectionId: string | null) => void;
   activeBar?: { sIdx: number; bIdx: number } | null;
@@ -100,16 +108,6 @@ type BarInsertPosition = 'before' | 'after';
 const PICKUP_SECTION_INDEX = 0;
 const PICKUP_BAR_INDEX = -1;
 
-const ORIGINAL_KEY_MENU_LAYOUT: Array<Array<Key | null>> = [
-  ['Ab', 'A', null],
-  ['Bb', 'B', null],
-  [null, 'C', 'C#'],
-  ['Db', 'D', null],
-  ['Eb', 'E', null],
-  [null, 'F', 'F#'],
-  ['Gb', 'G', 'G#']
-];
-
 const SECTION_TITLE_PRESETS = [
   'Intro',
   'Count-In',
@@ -138,6 +136,8 @@ const SECTION_TITLE_PRESETS = [
   'Outro',
   'Ending'
 ] as const;
+
+const CHORD_FONT_PRESET_OPTIONS: ChordFontPreset[] = ['classic-serif', 'stage-sans'];
 
 const getVersionValue = (song: Song) =>
   Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ');
@@ -382,7 +382,26 @@ const normalizeEditableJianpuAccidental = (accidental: string | undefined): Jian
   accidental === '#' ? '#' : accidental === 'b' ? 'b' : ''
 );
 
-const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, onChange, activeSectionId = null, onActiveSectionChange, activeBar = null, onActiveBarChange, focusRequest = null, onFocusRequestHandled }) => {
+const SongEditor: React.FC<Props> = ({
+  song,
+  language,
+  history,
+  onUndo,
+  onRedo,
+  onChange,
+  metadataMode = 'default',
+  hideMetadataPanel = false,
+  hideSectionStructureActions = false,
+  hideBarNumberControls = false,
+  hideBottomAddSectionButton = false,
+  showInlineAddSectionButton = false,
+  activeSectionId = null,
+  onActiveSectionChange,
+  activeBar = null,
+  onActiveBarChange,
+  focusRequest = null,
+  onFocusRequestHandled
+}) => {
   const copy = getUiCopy(language);
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [rhythmCursor, setRhythmCursor] = useState<RhythmCursor | null>(null);
@@ -395,8 +414,6 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   const [copiedJianpu, setCopiedJianpu] = useState<string | null>(null);
   const [copiedRhythm, setCopiedRhythm] = useState<string | null>(null);
   const [tempoDraft, setTempoDraft] = useState<string>(formatTempoDraftValue(song.tempo));
-  const [isOriginalKeyMenuOpen, setIsOriginalKeyMenuOpen] = useState(false);
-  const [openSectionKeyMenuId, setOpenSectionKeyMenuId] = useState<string | null>(null);
   const [jianpuDurationBlockedHint, setJianpuDurationBlockedHint] = useState<string | null>(null);
   const [sectionTitleSuggestionState, setSectionTitleSuggestionState] = useState<SectionTitleSuggestionState>({
     sectionId: null,
@@ -405,8 +422,6 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   });
   const rootRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const originalKeyMenuRef = useRef<HTMLDivElement>(null);
-  const sectionKeyMenuRef = useRef<HTMLDivElement>(null);
   const barRefs = useRef(new Map<string, HTMLDivElement>());
   const sectionRefs = useRef(new Map<string, HTMLDivElement>());
   const sectionTitleRefs = useRef(new Map<string, HTMLTextAreaElement>());
@@ -566,40 +581,6 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   useEffect(() => {
     setJianpuDurationBlockedHint(null);
   }, [selection?.sIdx, selection?.bIdx, selection?.start, selection?.end, selection?.type]);
-
-  useEffect(() => {
-    if (!isOriginalKeyMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (originalKeyMenuRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      setIsOriginalKeyMenuOpen(false);
-    };
-
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [isOriginalKeyMenuOpen]);
-
-  useEffect(() => {
-    if (!openSectionKeyMenuId) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (sectionKeyMenuRef.current?.contains(event.target as Node)) {
-        return;
-      }
-
-      setOpenSectionKeyMenuId(null);
-    };
-
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [openSectionKeyMenuId]);
 
   const updateField = (field: keyof Song, value: any) => {
     notifyChange({ ...song, [field]: value });
@@ -992,9 +973,8 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     const updateActiveSectionFromScroll = () => {
       frameId = null;
       const rootRect = scrollRoot.getBoundingClientRect();
-      const anchorY = rootRect.top + Math.min(rootRect.height * 0.25, 180);
-      let nextSectionId: string | null = null;
-      let bestScore = -Infinity;
+      const topFocusY = rootRect.top + Math.min(rootRect.height * 0.12, 88);
+      const candidates: Array<{ sectionId: string; score: number; visibleHeight: number }> = [];
 
       song.sections.forEach((section, idx) => {
         const sectionId = section.id || `section-${idx}`;
@@ -1007,15 +987,37 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
         const visibleHeight = Math.max(0, visibleBottom - visibleTop);
         if (visibleHeight <= 0) return;
 
-        const distancePenalty = Math.abs(rect.top - anchorY) * 0.35;
-        const score = visibleHeight - distancePenalty;
-        if (score > bestScore) {
-          bestScore = score;
-          nextSectionId = sectionId;
-        }
+        const sectionHeight = Math.max(1, rect.height);
+        const visibleRatio = visibleHeight / sectionHeight;
+        const topDistancePenalty = Math.abs(rect.top - topFocusY) * 0.16;
+        const focusBonus = rect.top <= topFocusY && rect.bottom >= topFocusY ? 42 : 0;
+        const score = visibleHeight + (visibleRatio * 180) + focusBonus - topDistancePenalty;
+
+        candidates.push({ sectionId, score, visibleHeight });
       });
 
-      if (nextSectionId) {
+      if (candidates.length === 0) {
+        return;
+      }
+
+      candidates.sort((left, right) => right.score - left.score);
+      const bestCandidate = candidates[0];
+      const currentCandidate = activeSectionId
+        ? candidates.find((candidate) => candidate.sectionId === activeSectionId)
+        : null;
+
+      // Keep the current section while it is still substantially visible to avoid
+      // bouncing between adjacent sections near the viewport boundary.
+      if (
+        currentCandidate &&
+        currentCandidate.visibleHeight > 48 &&
+        currentCandidate.score >= bestCandidate.score - 32
+      ) {
+        return;
+      }
+
+      const nextSectionId = bestCandidate.sectionId;
+      if (nextSectionId !== activeSectionId) {
         markActiveSection(nextSectionId);
       }
     };
@@ -1036,7 +1038,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
       scrollRoot.removeEventListener('scroll', requestUpdate);
       window.removeEventListener('resize', requestUpdate);
     };
-  }, [song.sections, onActiveSectionChange]);
+  }, [activeSectionId, song.sections, onActiveSectionChange]);
 
   useLayoutEffect(() => {
     const pending = pendingSwapAnimationRef.current;
@@ -3484,7 +3486,11 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
     const { sIdx, bIdx, field, requestId } = focusRequest;
     const isPickupFocusTarget = isPickupTarget(sIdx, bIdx);
-    const targetField = isPickupFocusTarget && field === 'chords' ? 'riff' : field;
+    const targetField = isPickupFocusTarget && field === 'chords'
+      ? 'riff'
+      : field === 'lyrics'
+        ? 'chords'
+        : field;
     const barId = isPickupFocusTarget ? 'editor-pickup' : `editor-bar-${sIdx}-b${bIdx}`;
     const fieldId = isPickupFocusTarget ? `editor-pickup-${targetField}` : `editor-s${sIdx}-b${bIdx}-${targetField}`;
     const selectionType = targetField === 'chords'
@@ -3896,205 +3902,224 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
   });
   const pickupBar = getEditorBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
   const isPickupActive = activeBar?.sIdx === PICKUP_SECTION_INDEX && activeBar?.bIdx === PICKUP_BAR_INDEX;
+  const isSetlistMetadataMode = metadataMode === 'setlist';
+
+  const titleField = (
+    <div>
+      <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.title}</label>
+      <input
+        type="text"
+        value={song.title}
+        onChange={e => updateField('title', e.target.value)}
+        className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+      />
+    </div>
+  );
+
+  const originalKeyField = (
+    <div>
+      <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.originalKey}</label>
+      <KeyPicker
+        value={song.originalKey}
+        onChange={(key) => key && updateField('originalKey', key)}
+        label={copy.key}
+        originalKey={song.originalKey}
+        triggerMetaText={copy.original}
+        panelMetaText={copy.original}
+        align="left"
+        buttonClassName="w-full"
+      />
+    </div>
+  );
+
+  const tempoField = (
+    <div>
+      <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.tempo}</label>
+      <input
+        type="number"
+        min={20}
+        max={400}
+        step={1}
+        value={tempoDraft}
+        onChange={e => setTempoDraft(e.target.value.replace(/\D+/g, '').slice(0, 3))}
+        onBlur={commitTempoDraft}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            commitTempoDraft();
+            e.currentTarget.blur();
+          }
+        }}
+        className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+      />
+    </div>
+  );
+
+  const timeSignatureField = (
+    <div>
+      <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.timeSignature}</label>
+      <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center rounded-lg border border-gray-300 bg-white px-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={songTimeSignatureParts.numerator}
+            onChange={e => updateField('timeSignature', buildTimeSignatureInput(e.target.value, songTimeSignatureParts.denominator))}
+            placeholder="4"
+            className="h-8 w-full border-0 bg-transparent px-1 text-center outline-none focus:ring-0"
+          />
+          <span className="px-0.5 text-sm font-semibold text-gray-400">/</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={songTimeSignatureParts.denominator}
+            onChange={e => updateField('timeSignature', buildTimeSignatureInput(songTimeSignatureParts.numerator, e.target.value))}
+            placeholder="4"
+            className="h-8 w-full border-0 bg-transparent px-1 text-center outline-none focus:ring-0"
+          />
+        </div>
+        <label className="flex h-8 shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-gray-300 bg-white px-2.5">
+          <input
+            type="checkbox"
+            checked={song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle'}
+            onChange={e => onChange({ ...song, shuffle: e.target.checked, groove: undefined })}
+            className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            aria-label={copy.editor.shuffle}
+            title={copy.editor.shuffle}
+          />
+          <span className="text-[12px] font-medium leading-none text-gray-600">{copy.editor.shuffle}</span>
+        </label>
+      </div>
+    </div>
+  );
+
+  const chordFontField = (
+    <div>
+      <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.chordFont}</label>
+      <select
+        value={song.chordFontPreset || DEFAULT_CHORD_FONT_PRESET}
+        onChange={e => updateField('chordFontPreset', e.target.value as ChordFontPreset)}
+        className="h-9 w-full rounded-lg border border-gray-300 bg-white px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+      >
+        {CHORD_FONT_PRESET_OPTIONS.map((preset) => (
+          <option key={preset} value={preset}>
+            {preset === 'classic-serif' ? copy.editor.chordFontClassic : copy.editor.chordFontStage}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  const versionField = (
+    <div>
+      <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.version}</label>
+      <input
+        type="text"
+        value={getVersionValue(song)}
+        onChange={e => onChange({ ...song, lyricist: e.target.value, composer: '' })}
+        className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+      />
+    </div>
+  );
+
+  const translatorField = (
+    <div>
+      <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.translator}</label>
+      <input
+        type="text"
+        value={song.translator || ''}
+        onChange={e => updateField('translator', e.target.value)}
+        className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+      />
+    </div>
+  );
+
+  const barNumberControls = (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm font-bold text-gray-600">{copy.editor.barNumbers}</span>
+      {([
+        ['none', copy.editor.barNumbersOff],
+        ['line-start', copy.editor.barNumbersLineStart],
+        ['all', copy.editor.barNumbersAll]
+      ] as Array<[BarNumberMode, string]>).map(([mode, label]) => {
+        const isActive = (song.barNumberMode ?? 'none') === mode;
+        return (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => updateField('barNumberMode', mode)}
+            className={`rounded-lg border px-3 py-1.5 text-sm font-bold transition-colors ${
+              isActive
+                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                : 'border-gray-200 bg-white text-gray-500 hover:border-indigo-200 hover:text-indigo-600'
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div ref={rootRef} className="relative pb-12">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="font-display text-2xl font-bold text-gray-800">{copy.editor.editSong}</h2>
-      </div>
+      {!hideMetadataPanel && (
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="font-display text-2xl font-bold text-gray-800">{copy.editor.editSong}</h2>
+        </div>
+      )}
       
-      {/* Metadata */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
-        <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.editor.title}</label>
-          <input 
-            type="text" 
-            value={song.title} 
-            onChange={e => updateField('title', e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.originalKey}</label>
-          <div ref={originalKeyMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setIsOriginalKeyMenuOpen((open) => !open)}
-              className={`flex w-full items-center justify-between rounded border bg-white p-2 text-left outline-none transition-colors ${
-                isOriginalKeyMenuOpen
-                  ? 'border-indigo-500 ring-2 ring-indigo-500'
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-            >
-              <span className="text-base text-gray-800">{song.originalKey}</span>
-              <ChevronDown
-                size={18}
-                className={`text-gray-500 transition-transform ${isOriginalKeyMenuOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
+      {!hideMetadataPanel && isSetlistMetadataMode ? (
+        <div className="mb-8 rounded-xl border border-gray-200 bg-white px-3.5 py-3.5">
+          <div className="text-base font-bold text-gray-900">{copy.setlistEditor.songData}</div>
+          <p className="mt-1 text-[12px] leading-5 text-gray-500">{copy.setlistEditor.songDataHint}</p>
 
-            {isOriginalKeyMenuOpen && (
-              <div className="absolute left-0 top-full z-40 mt-2 w-full rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl">
-                <div className="mb-3 flex items-center justify-between px-1">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.key}</div>
-                  <div className="text-[11px] font-bold text-indigo-500">{copy.original}</div>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {ORIGINAL_KEY_MENU_LAYOUT.flatMap((row, rowIndex) =>
-                    row.map((key, columnIndex) => {
-                      if (!key) {
-                        return <div key={`original-key-empty-${rowIndex}-${columnIndex}`} className="h-[48px]" />;
-                      }
-
-                      const isSelectedKey = song.originalKey === key;
-
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => {
-                              updateField('originalKey', key);
-                              setIsOriginalKeyMenuOpen(false);
-                            }}
-                            className={`relative flex h-[48px] items-center justify-center rounded-[14px] border text-[16px] font-semibold tracking-tight transition-all ${
-                              isSelectedKey
-                                ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
-                                : 'border-gray-200 bg-white text-gray-800 hover:border-indigo-200 hover:bg-gray-50'
-                            }`}
-                          >
-                            {isSelectedKey && (
-                              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-fuchsia-400" />
-                            )}
-                            {key}
-                          </button>
-                        );
-                    })
-                  )}
-                </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+              <div className="text-xs font-bold uppercase tracking-[0.16em] text-gray-500">{copy.setlistEditor.basicInfo}</div>
+              <div className="mt-2.5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">{titleField}</div>
+                {originalKeyField}
+                {tempoField}
+                <div className="sm:col-span-2">{timeSignatureField}</div>
               </div>
-            )}
+            </section>
+
+            <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+              <div className="text-xs font-bold uppercase tracking-[0.16em] text-gray-500">{copy.setlistEditor.additionalInfo}</div>
+              <div className="mt-2.5 grid grid-cols-1 gap-3">
+                {chordFontField}
+                {versionField}
+                {translatorField}
+                {!hideBarNumberControls && <div className="rounded-lg border border-gray-300 bg-white px-3 py-2">{barNumberControls}</div>}
+              </div>
+            </section>
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.editor.tempo}</label>
-          <input 
-            type="number" 
-            min={20}
-            max={400}
-            step={1}
-            value={tempoDraft}
-            onChange={e => setTempoDraft(e.target.value.replace(/\D+/g, '').slice(0, 3))}
-            onBlur={commitTempoDraft}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                commitTempoDraft();
-                e.currentTarget.blur();
-              }
-            }}
-            className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.editor.timeSignature}</label>
-          <div className="flex items-center gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={songTimeSignatureParts.numerator}
-                onChange={e => updateField('timeSignature', buildTimeSignatureInput(e.target.value, songTimeSignatureParts.denominator))}
-                placeholder="4"
-                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-center"
-              />
-              <span className="text-lg font-bold text-gray-400">/</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={songTimeSignatureParts.denominator}
-                onChange={e => updateField('timeSignature', buildTimeSignatureInput(songTimeSignatureParts.numerator, e.target.value))}
-                placeholder="4"
-                className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-center"
-              />
-            </div>
-            <label className="flex h-[42px] shrink-0 items-center gap-2 rounded border border-gray-300 bg-white px-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle'}
-                onChange={e => onChange({ ...song, shuffle: e.target.checked, groove: undefined })}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                aria-label={copy.editor.shuffle}
-                title={copy.editor.shuffle}
-              />
-              <span className="text-[12px] font-medium text-gray-600 leading-none">{copy.editor.shuffle}</span>
-            </label>
+      ) : !hideMetadataPanel ? (
+        <>
+          {/* Metadata */}
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {titleField}
+            {originalKeyField}
+            {tempoField}
+            {timeSignatureField}
+            {chordFontField}
           </div>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-        <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.version}</label>
-          <input 
-            type="text" 
-            value={getVersionValue(song)} 
-            onChange={e => onChange({ ...song, lyricist: e.target.value, composer: '' })}
-            className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{copy.editor.translator}</label>
-          <input 
-            type="text" 
-            value={song.translator || ''} 
-            onChange={e => updateField('translator', e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-          />
-        </div>
-      </div>
-
-      {/* Display Settings */}
-      <div className="flex flex-wrap gap-4 mb-8 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-        <label className="flex items-center gap-2 cursor-pointer group">
-          <div className={`w-10 h-6 rounded-full p-1 transition-colors ${song.useSectionColors !== false ? 'bg-indigo-600' : 'bg-gray-300'}`}>
-            <div className={`w-4 h-4 bg-white rounded-full transition-transform ${song.useSectionColors !== false ? 'translate-x-4' : 'translate-x-0'}`} />
+          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+            {versionField}
+            {translatorField}
           </div>
-          <input 
-            type="checkbox" 
-            checked={song.useSectionColors !== false}
-            onChange={e => updateField('useSectionColors', e.target.checked)}
-            className="hidden"
-          />
-          <span className="text-sm font-bold text-gray-600 group-hover:text-indigo-600 transition-colors">{copy.editor.useSectionColors}</span>
-        </label>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-bold text-gray-600">{copy.editor.barNumbers}</span>
-          {([
-            ['none', copy.editor.barNumbersOff],
-            ['line-start', copy.editor.barNumbersLineStart],
-            ['all', copy.editor.barNumbersAll]
-          ] as Array<[BarNumberMode, string]>).map(([mode, label]) => {
-            const isActive = (song.barNumberMode ?? 'none') === mode;
-            return (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => updateField('barNumberMode', mode)}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-bold transition-colors ${
-                  isActive
-                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                    : 'border-gray-200 bg-white text-gray-500 hover:border-indigo-200 hover:text-indigo-600'
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+          {/* Display Settings */}
+          <div className="mb-8 flex flex-wrap gap-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            {!hideBarNumberControls && barNumberControls}
+          </div>
+        </>
+      ) : null}
 
       {/* Section Navigation Bar */}
-      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200 -mx-6 md:-mx-8 px-6 md:px-8 py-3 mb-6 flex items-center gap-2 overflow-x-auto no-scrollbar">
+      <div className="sticky top-0 z-10 -mx-6 mb-5 flex items-center gap-2 overflow-x-auto border-b border-gray-200 bg-white/80 px-6 py-2.5 shadow-sm backdrop-blur-md no-scrollbar md:-mx-8 md:px-8">
         <div className="flex-shrink-0 text-[10px] font-bold text-gray-400 uppercase tracking-widest mr-2">{copy.editor.jumpTo}</div>
         <Reorder.Group 
           axis="x" 
@@ -4103,7 +4128,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
           className="flex items-center gap-2"
         >
           {song.sections.map((section, idx) => {
-            const colors = getSectionColor(section.title, song.useSectionColors !== false);
+            const colors = getSectionColor(section.title, true);
             const sectionId = section.id || `section-${idx}`;
             const isActiveSection = activeSectionId === sectionId;
             const accentHighlight = getAccentHighlight(colors.accent);
@@ -4120,23 +4145,24 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                 value={section}
                 className="flex-shrink-0 relative group/nav pt-3 pb-1"
               >
-                {/* Action Buttons Overlay - Appears above on hover */}
-                <div className="absolute -top-1 left-1/2 -translate-x-1/2 flex items-center gap-1 opacity-0 group-hover/nav:opacity-100 transition-all pointer-events-none group-hover/nav:pointer-events-auto z-30">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); duplicateSection(idx); }}
-                    className="p-1 bg-white border border-gray-200 rounded-full shadow-md text-indigo-600 hover:bg-indigo-50 transition-colors"
-                    title={copy.editor.duplicate}
-                  >
-                    <Copy size={10} />
-                  </button>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); removeSection(idx); }}
-                    className="p-1 bg-white border border-gray-200 rounded-full shadow-md text-red-600 hover:bg-red-50 transition-colors"
-                    title={copy.editor.delete}
-                  >
-                    <Trash2 size={10} />
-                  </button>
-                </div>
+                {!hideSectionStructureActions && (
+                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 flex items-center gap-1 opacity-0 group-hover/nav:opacity-100 transition-all pointer-events-none group-hover/nav:pointer-events-auto z-30">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); duplicateSection(idx); }}
+                      className="p-1 bg-white border border-gray-200 rounded-full shadow-md text-indigo-600 hover:bg-indigo-50 transition-colors"
+                      title={copy.editor.duplicate}
+                    >
+                      <Copy size={10} />
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); removeSection(idx); }}
+                      className="p-1 bg-white border border-gray-200 rounded-full shadow-md text-red-600 hover:bg-red-50 transition-colors"
+                      title={copy.editor.delete}
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                )}
 
                 <button
                   onClick={() => {
@@ -4175,6 +4201,16 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
             );
           })}
         </Reorder.Group>
+        {showInlineAddSectionButton && (
+          <button
+            type="button"
+            onClick={addSection}
+            className="flex h-[2.375rem] min-w-[2.45rem] flex-shrink-0 items-center justify-center rounded-[1.4rem] border-2 border-dashed border-gray-300 bg-white px-2 text-gray-400 transition-colors hover:border-indigo-300 hover:text-indigo-600"
+            title={copy.editor.addNewSection}
+          >
+            <Plus size={16} />
+          </button>
+        )}
       </div>
 
       <div className="mb-6">
@@ -4408,16 +4444,15 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
       {/* Sections */}
       <LayoutGroup id="song-editor-bars">
-      <div className="space-y-6">
+      <div className="space-y-5">
         {song.sections.map((section, sIdx) => {
-          const colors = getSectionColor(section.title, song.useSectionColors !== false);
+          const colors = getSectionColor(section.title, true);
           const sectionId = section.id || `section-${sIdx}`;
           const sectionStartKey = sectionBaseKeys[sIdx] || song.originalKey;
           const sectionWrittenKey = sectionActiveKeys[sIdx] || sectionStartKey;
           const sectionDisplayBaseKey = transposeKeyPreferFlats(sectionStartKey, globalKeyShift);
           const sectionDisplayKey = transposeKeyPreferFlats(sectionWrittenKey, globalKeyShift);
           const sectionTargetKey = section.keyChangeTo ? transposeKeyPreferFlats(section.keyChangeTo, globalKeyShift) : undefined;
-          const isSectionKeyMenuOpen = openSectionKeyMenuId === sectionId;
           const isActiveSection = activeSectionId === sectionId;
           const accentHighlight = getAccentHighlight(colors.accent);
           const hasSectionTitleLineBreak = section.title.includes('\n');
@@ -4435,18 +4470,18 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
               onFocusCapture={() => markActiveSection(sectionId)}
               layout
               transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
-              className={`${colors.bg} border ${colors.border} rounded-lg p-4 scroll-mt-20 transition-all ${
+              className={`${colors.bg} border ${colors.border} rounded-xl p-3.5 shadow-sm scroll-mt-20 transition-all ${
                 isActiveSection ? 'scale-[1.002]' : ''
               }`}
               style={isActiveSection ? { boxShadow: `0 0 0 2px ${accentHighlight.ring}, 0 16px 32px ${accentHighlight.glow}` } : undefined}
             >
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
+              <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div className="flex items-start gap-3 flex-1">
-                  <div className="flex flex-col bg-white border border-gray-200 rounded p-0.5">
+                  <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
                     <button onClick={() => moveSection(sIdx, -1)} disabled={sIdx === 0} className={`p-1 text-gray-400 hover:text-${colors.accent}-600 disabled:opacity-30 transition-colors`}><ChevronUp size={14} /></button>
                     <button onClick={() => moveSection(sIdx, 1)} disabled={sIdx === song.sections.length - 1} className={`p-1 text-gray-400 hover:text-${colors.accent}-600 disabled:opacity-30 transition-colors`}><ChevronDown size={14} /></button>
                   </div>
-                  <div className="relative flex-1 sm:flex-none sm:w-64">
+                  <div className="relative flex-1 sm:flex-none sm:w-60">
                     <textarea
                       ref={(node) => setSectionTitleRef(sectionId, node)}
                       value={section.title}
@@ -4530,7 +4565,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                       onMouseDown={e => e.stopPropagation()}
                       onClick={e => e.stopPropagation()}
                       placeholder={copy.editor.sectionTitle}
-                      className={`font-bold text-lg leading-tight bg-white border border-gray-300 rounded-lg px-3 py-2 pr-10 flex-1 w-full focus:ring-2 focus:ring-${colors.accent}-500 outline-none shadow-sm resize-none overflow-hidden`}
+                      className={`flex-1 w-full resize-none overflow-hidden rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-lg font-bold leading-tight outline-none shadow-sm focus:ring-2 focus:ring-${colors.accent}-500`}
                     />
                     <button
                       type="button"
@@ -4592,95 +4627,29 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                   </div>
                 </div>
               <div className="flex items-center gap-2 self-end sm:self-auto">
-                <div ref={isSectionKeyMenuOpen ? sectionKeyMenuRef : null} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setOpenSectionKeyMenuId((current) => current === sectionId ? null : sectionId)}
-                    className={`flex min-w-[108px] items-center justify-between rounded-lg border bg-white px-2.5 py-1.5 text-left outline-none transition-colors ${
-                      isSectionKeyMenuOpen
-                        ? 'border-indigo-500 ring-2 ring-indigo-500'
-                        : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    title={copy.editor.changeKeyAfterSection}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400">
-                        {copy.editor.changeKeyAfterSection}
-                      </div>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-[13px] font-semibold text-gray-800">
-                        <span>{sectionDisplayBaseKey}</span>
-                        <span className="text-gray-400">→</span>
-                        <span className={sectionTargetKey ? 'text-indigo-700' : 'text-gray-400'}>
-                          {sectionTargetKey || copy.editor.noKeyChange}
-                        </span>
-                      </div>
-                    </div>
-                    <ChevronDown
-                      size={16}
-                      className={`ml-2 shrink-0 text-gray-500 transition-transform ${isSectionKeyMenuOpen ? 'rotate-180' : ''}`}
-                    />
-                  </button>
+                <div className="flex min-w-[132px] flex-col gap-1">
+                  <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400">
+                    {copy.editor.changeKeyAfterSection}
+                  </div>
+                  <KeyPicker
+                    value={sectionTargetKey ?? null}
+                    onChange={(key) => {
+                      if (!key) {
+                        applySectionKeyChangeFromIndex(sIdx);
+                        return;
+                      }
 
-                  {isSectionKeyMenuOpen && (
-                    <div className="absolute right-0 top-full z-40 mt-2 w-[220px] rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
-                      <div className="mb-2 flex items-center justify-between px-1">
-                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">{copy.editor.currentSectionKey}</div>
-                        <div className="text-[10px] font-bold text-indigo-500">
-                          {sectionDisplayBaseKey}
-                          {sectionTargetKey ? ` → ${sectionDisplayKey}` : ''}
-                        </div>
-                      </div>
-                      <div className="mb-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            applySectionKeyChangeFromIndex(sIdx);
-                            setOpenSectionKeyMenuId(null);
-                          }}
-                          className={`flex h-[34px] w-full items-center justify-center rounded-xl border text-[12px] font-semibold tracking-tight transition-all ${
-                            !sectionTargetKey
-                              ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
-                              : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
-                          }`}
-                        >
-                          {copy.editor.noKeyChange}
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {ORIGINAL_KEY_MENU_LAYOUT.flatMap((row, rowIndex) =>
-                          row.map((key, columnIndex) => {
-                            if (!key) {
-                              return <div key={`section-key-empty-${sectionId}-${rowIndex}-${columnIndex}`} className="h-[38px]" />;
-                            }
-
-                            const isSelectedKey = sectionTargetKey === key;
-
-                            return (
-                              <button
-                                key={`${sectionId}-${key}`}
-                                type="button"
-                                onClick={() => {
-                                  const nextWrittenKey = transposeKeyPreferFlats(key, -globalKeyShift);
-                                  applySectionKeyChangeFromIndex(sIdx, nextWrittenKey);
-                                  setOpenSectionKeyMenuId(null);
-                                }}
-                                className={`relative flex h-[38px] items-center justify-center rounded-xl border text-[14px] font-semibold tracking-tight transition-all ${
-                                  isSelectedKey
-                                    ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
-                                    : 'border-gray-200 bg-white text-gray-800 hover:border-indigo-200 hover:bg-gray-50'
-                                }`}
-                              >
-                                {isSelectedKey && (
-                                  <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-fuchsia-400" />
-                                )}
-                                {key}
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  )}
+                      const nextWrittenKey = transposeKeyPreferFlats(key, -globalKeyShift);
+                      applySectionKeyChangeFromIndex(sIdx, nextWrittenKey);
+                    }}
+                    label={copy.key}
+                    clearLabel={copy.editor.noKeyChange}
+                    originalKey={sectionDisplayBaseKey}
+                    triggerMetaText={sectionDisplayBaseKey}
+                    panelMetaText={sectionTargetKey ? `${sectionDisplayBaseKey} → ${sectionDisplayKey}` : sectionDisplayBaseKey}
+                    align="right"
+                    buttonClassName="w-full"
+                  />
                 </div>
                 <button 
                   onClick={() => duplicateSection(sIdx)}
@@ -4703,7 +4672,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
             <motion.div
               layout
               transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
-              className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3"
+              className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4"
             >
               {section.bars.map((bar, bIdx) => (
                 (() => {
@@ -4736,12 +4705,12 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                     ) ? null : current);
                   }}
                   onDrop={e => handleBarDrop(e, sIdx, bIdx)}
-                  className={`rounded-lg p-3 relative group shadow-sm transition-all min-w-0 border ${
+                  className={`group relative min-w-0 rounded-xl border bg-white p-2.5 shadow-sm transition-all ${
                     isCopiedHighlight
-                      ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-200 shadow-amber-100/80 scale-[1.01]'
+                      ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-200 shadow-amber-100/80 scale-[1.01]'
                       : isActiveBar
-                          ? `bg-white ${colors.border} scale-[1.01]`
-                          : 'bg-white border-gray-200 hover:border-indigo-300'
+                          ? `${colors.border} scale-[1.01]`
+                          : 'border-gray-200 hover:border-indigo-300'
                   }`}
                   style={isActiveBar && !isCopiedHighlight ? { boxShadow: `0 0 0 2px ${accentHighlight.barRing}, 0 14px 26px ${accentHighlight.barGlow}` } : undefined}
                 >
@@ -4751,7 +4720,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                   {isDragAfterTarget && (
                     <div className="absolute inset-y-2 -right-[3px] w-[4px] rounded-full bg-indigo-500 shadow-[0_0_0_3px_rgba(99,102,241,0.15)] z-30 pointer-events-none" />
                   )}
-                  <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between">
+                  <div className="absolute left-2 right-2 top-2 z-10 flex items-center justify-between">
                     <div className="flex items-center gap-0.5">
                       <button
                         type="button"
@@ -4794,7 +4763,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                         setDragOverTarget(null);
                         setIsBarDragging(false);
                       }}
-                      className="flex h-5 w-14 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-300 hover:border-indigo-300 hover:text-indigo-500 transition-colors cursor-grab active:cursor-grabbing"
+                      className="flex h-5 w-12 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-300 transition-colors hover:border-indigo-300 hover:text-indigo-500 cursor-grab active:cursor-grabbing"
                       title={copy.editor.dragToMoveBar}
                     >
                       <GripHorizontal size={14} />
@@ -4817,10 +4786,13 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                     </div>
                   </div>
                   
-                  <div className="space-y-3 pt-6">
+                  <div className="space-y-2.5 pt-6">
                     {/* Chords */}
                     <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5">{copy.editor.chords}</label>
+                      <div className="mb-1 flex items-center justify-between">
+                        <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.chords}</label>
+                        <span className="text-[10px] font-semibold text-gray-400">{bar.timeSignature || song.timeSignature}</span>
+                      </div>
                       <input 
                         id={`editor-s${sIdx}-b${bIdx}-chords`}
                         type="text" 
@@ -4932,7 +4904,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                           });
                         }}
                         placeholder="e.g. C G/B Am"
-                        className="w-full font-mono text-sm p-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none"
+                        className="h-9 w-full rounded-lg border border-gray-300 px-2.5 font-mono text-sm outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
 
@@ -4955,7 +4927,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { barTime: !panelState.barTime })}
                         title={copy.editor.barTime}
-                        className={`h-7 min-w-[38px] px-1.5 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
+                        className={`h-7 min-w-[38px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
                           panelState.barTime
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                             : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -4995,7 +4967,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
                     {/* Riff Section */}
                     {panelState.riff && (
-                    <div className="bg-gray-50 rounded p-2 border border-gray-100">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                       <div className="mb-1">
                         <div className="flex items-center justify-between gap-2">
                           <label className="block text-[10px] font-bold text-gray-400 uppercase">{copy.editor.jianpuRiff}</label>
@@ -5122,7 +5094,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
                     )}
 
                     {panelState.barTime && (
-                    <div className="bg-gray-50 rounded p-2 border border-gray-100">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                       <div className="mb-2">
                         <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">{copy.editor.barTimeSignature}</label>
                         {(() => {
@@ -5170,7 +5142,7 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
 
                     {/* Rhythm Section */}
                     {panelState.rhythm && (
-                    <div className="bg-gray-50 rounded p-2 border border-gray-100">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                       <div className="mb-1.5">
                         <div className="flex items-center justify-between gap-2">
                           <label className="block text-[10px] font-bold text-gray-400 uppercase">{copy.editor.rhythm}</label>
@@ -5484,15 +5456,17 @@ const SongEditor: React.FC<Props> = ({ song, language, history, onUndo, onRedo, 
     </div>
     </LayoutGroup>
 
-      <div className="flex justify-center mt-12 pb-12">
-        <button 
-          onClick={addSection}
-          className="px-8 py-4 bg-white border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center gap-3 text-gray-500 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-all font-bold uppercase tracking-widest text-sm shadow-sm hover:shadow-md"
-        >
-          <Plus size={24} />
-          {copy.editor.addNewSection}
-        </button>
-      </div>
+      {!hideBottomAddSectionButton && (
+        <div className="flex justify-center mt-12 pb-12">
+          <button 
+            onClick={addSection}
+            className="px-8 py-4 bg-white border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center gap-3 text-gray-500 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-all font-bold uppercase tracking-widest text-sm shadow-sm hover:shadow-md"
+          >
+            <Plus size={24} />
+            {copy.editor.addNewSection}
+          </button>
+        </div>
+      )}
 
       {/* Floating Toolbar for Selection */}
       <AnimatePresence>

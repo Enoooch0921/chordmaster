@@ -81,6 +81,74 @@ function getNoteFromIndex(index: number, preferFlats: boolean = false): string {
   return preferFlats ? NOTES_FLAT[normalizedIndex] : NOTES_SHARP[normalizedIndex];
 }
 
+function getLetterIndex(noteLetter: string): number {
+  return ['C', 'D', 'E', 'F', 'G', 'A', 'B'].indexOf(noteLetter);
+}
+
+function getNashvilleNumberForNote(note: string, key: Key): string {
+  const normalizedNote = NOTE_ALIASES[note] || note;
+  const noteMatch = normalizedNote.match(/^([A-G])([#b]?)/);
+  const keyMatch = key.match(/^([A-G])([#b]?)/);
+  const noteIndex = getNoteIndex(normalizedNote);
+  const keyIndex = getNoteIndex(key);
+
+  if (!noteMatch || !keyMatch || noteIndex === -1 || keyIndex === -1) {
+    return '?';
+  }
+
+  const noteLetterIndex = getLetterIndex(noteMatch[1]);
+  const keyLetterIndex = getLetterIndex(keyMatch[1]);
+  if (noteLetterIndex === -1 || keyLetterIndex === -1) {
+    return '?';
+  }
+
+  const degree = ((noteLetterIndex - keyLetterIndex + 7) % 7) + 1;
+  const majorScaleSemitones: Record<number, number> = {
+    1: 0,
+    2: 2,
+    3: 4,
+    4: 5,
+    5: 7,
+    6: 9,
+    7: 11
+  };
+
+  const actualSemitones = ((noteIndex - keyIndex) % 12 + 12) % 12;
+  const expectedSemitones = majorScaleSemitones[degree] ?? 0;
+  let accidentalOffset = ((actualSemitones - expectedSemitones) % 12 + 12) % 12;
+
+  if (accidentalOffset > 6) {
+    accidentalOffset -= 12;
+  }
+
+  if (accidentalOffset === 0) return String(degree);
+  if (accidentalOffset === 1) return `#${degree}`;
+  if (accidentalOffset === -1) return `b${degree}`;
+
+  const fallbackDegreeMap: Record<number, string> = {
+    0: '1',
+    1: 'b2',
+    2: '2',
+    3: 'b3',
+    4: '3',
+    5: '4',
+    6: 'b5',
+    7: '5',
+    8: 'b6',
+    9: '6',
+    10: 'b7',
+    11: '7'
+  };
+
+  return fallbackDegreeMap[actualSemitones] || '?';
+}
+
+function shouldPreferFlatsForChordRoot(root: string, targetKey?: Key): boolean {
+  if (root.includes('b')) return true;
+  if (root.includes('#')) return false;
+  return targetKey ? shouldPreferFlats(targetKey) && !shouldPreferSharps(targetKey) : false;
+}
+
 export function normalizeChordEnharmonic(chord: string): string {
   if (!chord || chord === '%' || chord === '/') {
     return chord;
@@ -88,6 +156,9 @@ export function normalizeChordEnharmonic(chord: string): string {
 
   if (chord.includes('/')) {
     const [base, bass] = chord.split('/');
+    if (!base && bass) {
+      return `/${normalizeChordEnharmonic(bass)}`;
+    }
     if (base && bass) {
       return `${normalizeChordEnharmonic(base)}/${normalizeChordEnharmonic(bass)}`;
     }
@@ -135,6 +206,9 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key): 
   // Handle slash chords like E/G#
   if (chord.includes('/')) {
     const [base, bass] = chord.split('/');
+    if (!base && bass) {
+      return `/${transposeChord(bass, offset, targetKey)}`;
+    }
     if (base && bass) {
       return `${transposeChord(base, offset, targetKey)}/${transposeChord(bass, offset, targetKey)}`;
     }
@@ -155,7 +229,7 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key): 
   const rootIndex = getNoteIndex(root);
   if (rootIndex === -1) return chord; // Not a valid note, return as is
 
-  const preferFlats = targetKey ? shouldPreferFlats(targetKey) : root.includes('b');
+  const preferFlats = shouldPreferFlatsForChordRoot(root, targetKey);
   const newRoot = getNoteFromIndex(rootIndex + offset, preferFlats);
   return normalizeChordEnharmonic(newRoot + rest);
 }
@@ -321,26 +395,7 @@ export function getNashvilleNumber(chord: string, key: Key): string {
   const keyIndex = getNoteIndex(key);
   if (rootIndex === -1 || keyIndex === -1) return chord;
 
-  // Calculate the degree (1-7)
-  const degree = ((rootIndex - keyIndex + 12) % 12);
-  
-  // Mapping of semitones from key root to Nashville numbers
-  const degreeMap: Record<number, string> = {
-    0: '1',
-    1: 'b2',
-    2: '2',
-    3: 'b3',
-    4: '3',
-    5: '4',
-    6: 'b5',
-    7: '5',
-    8: 'b6',
-    9: '6',
-    10: 'b7',
-    11: '7'
-  };
-
-  const number = degreeMap[degree] || '?';
+  const number = getNashvilleNumberForNote(root, key);
   
   // Nashville numbers often use lowercase 'm' for minor, but we can keep the 'rest' part
   // e.g. Am -> 6m, G7 -> 57

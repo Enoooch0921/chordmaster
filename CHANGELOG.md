@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0 - 2026-04-09
+
+### Added
+
+- 新增 `Service Setlist` 工作流，可從 Song Library 建立服事歌單，並為每個 SetlistSong 保留獨立的 `Key`、`Capo`、`section order` 與編輯內容副本
+- 新增 setlist 層級顯示設定，支援 `Nashville Number System`、`Chord + Fixed Key`、`Chord + Movable Key`，並可統一切換是否顯示歌詞
+- 新增全站共用的 `KeyPicker` 與 `CapoPicker` 元件，Song Library、Service Setlist 與預覽列的調性控制改為同一套 popup UI
+- 新增 setlist 側邊欄加入歌曲流程，可直接搜尋 Song Library 並將歌曲加入目前歌單，空歌單也能直接開始加入
+
+### Changed
+
+- 重做一般歌曲與服事歌單模式的上方編輯資訊列，改為更緊湊的 metadata toolbar，整合 `Title / Key / Capo / Tempo / Time / Display` 控制
+- setlist 模式下的右側編輯與預覽，現在會先讀取 Song Library 原曲，再套用 `SetlistSong` 覆蓋值，不再直接編輯原始 Song Library 資料
+- setlist 預覽與 PDF 匯出現在會統一套用 `displayMode`、`showLyrics`、`overrideKey`、`capo`、`sectionOrder`
+- setlist 側邊欄與編輯畫面改為更緊湊的工具式 UI，並補上一般歌曲模式與 setlist 模式的清楚切換提示
+
+### Fixed
+
+- 修正多處 setlist 模式下 `Key / Capo` 不同步、重複顯示或 UI 不一致的問題
+- 修正 setlist 預覽未沿用一般歌曲模式的 section / bar 高亮導覽問題
+- 修正簡譜在預覽縮放後切換歌詞顯示時可能使用錯誤寬度重排的量測問題
+- 修正多處 setlist 編輯工具列、切換開關與側邊欄卡片的版面溢出與元件重疊問題
+
 ## 0.5.0 - 2026-04-04
 
 ### Added
