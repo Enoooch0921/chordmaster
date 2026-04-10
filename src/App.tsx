@@ -46,7 +46,7 @@ const PREVIEW_MAX_SCALE = 2.4;
 const PREVIEW_ZOOM_STEP = 0.15;
 const PREVIEW_SAFETY_MARGIN = 20;
 const PREVIEW_PAGE_HEIGHT = 1123;
-const PDF_EXPORT_PIXEL_RATIO = 3;
+const PDF_EXPORT_PIXEL_RATIO = 5;
 const VALID_KEYS = new Set<string>(ALL_KEYS);
 const VALID_NAVIGATION_MARKERS = new Set([
   'segno',
@@ -1218,7 +1218,18 @@ export default function App() {
     });
   };
 
-  const syncSetlistSectionOrder = (currentOrder: string[], nextSong: Song) => sanitizeSetlistSectionOrder(currentOrder, nextSong);
+  const syncSetlistSectionOrder = (currentOrder: string[], previousSong: Song, nextSong: Song) => {
+    const normalizedCurrentOrder = sanitizeSetlistSectionOrder(currentOrder, previousSong);
+    const previousDefaultOrder = getDefaultSectionOrder(previousSong);
+    const isFollowingSongSectionOrder = normalizedCurrentOrder.length === previousDefaultOrder.length
+      && normalizedCurrentOrder.every((sectionId, index) => sectionId === previousDefaultOrder[index]);
+
+    if (isFollowingSongSectionOrder) {
+      return getDefaultSectionOrder(nextSong);
+    }
+
+    return sanitizeSetlistSectionOrder(normalizedCurrentOrder, nextSong);
+  };
 
   const handleSetlistSongContentChange = (nextSong: Song) => {
     if (!selectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) {
@@ -1230,7 +1241,7 @@ export default function App() {
       ...currentSetlistSong,
       overrideKey: nextSong.currentKey,
       capo: nextSong.capo ?? 0,
-      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, nextSong),
+      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong, nextSong),
       songData: cloneSong(normalizeSongBars(nextSong))
     }));
   };
@@ -1941,7 +1952,7 @@ export default function App() {
       ...currentSetlistSong,
       overrideKey: previousSong.currentKey,
       capo: previousSong.capo ?? 0,
-      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, previousSong),
+      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong ?? previousSong, previousSong),
       songData: cloneSong(normalizeSongBars(previousSong))
     }));
   };
@@ -1966,7 +1977,7 @@ export default function App() {
       ...currentSetlistSong,
       overrideKey: nextSong.currentKey,
       capo: nextSong.capo ?? 0,
-      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, nextSong),
+      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong ?? nextSong, nextSong),
       songData: cloneSong(normalizeSongBars(nextSong))
     }));
   };
@@ -2361,6 +2372,7 @@ export default function App() {
       highlightedSectionIds={highlightedSectionIds}
       activeSectionId={isEditing ? activeSectionId : null}
       activeBar={isEditing ? activeBar : null}
+      previewIdentity={song.id}
     />
   ), [activeBar, activeSectionId, handleElementClick, highlightedSectionIds, isEditing, language, song]);
 
@@ -2378,10 +2390,20 @@ export default function App() {
         highlightedSectionIds={highlightedSectionIds}
         activeSectionId={isEditing ? activeSectionId : null}
         activeBar={isEditing ? activeBar : null}
+        previewIdentity={selectedSetlistSong?.id ?? null}
       />
     );
-  }, [activeBar, activeSectionId, activeSetlistPreviewSong, handleElementClick, highlightedSectionIds, isEditing, language]);
+  }, [activeBar, activeSectionId, activeSetlistPreviewSong, handleElementClick, highlightedSectionIds, isEditing, language, selectedSetlistSong?.id]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
+  const currentPreviewIdentity = isSetlistMode
+    ? (selectedSetlistSong?.id ?? null)
+    : (song?.id ?? null);
+
+  useEffect(() => {
+    setHighlightedSectionIds([]);
+    setActiveBar(null);
+    setActiveSectionId(activeEditorSong?.sections[0]?.id ?? null);
+  }, [currentPreviewIdentity]);
 
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
     const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));

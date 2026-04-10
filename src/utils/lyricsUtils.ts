@@ -11,6 +11,20 @@ export interface LyricAnchor {
   lyric: string;
 }
 
+export const getTwoChordSplitSlotIndex = (beatsPerBar: number) => {
+  const beatCount = Math.max(1, beatsPerBar);
+
+  if (beatCount <= 1) {
+    return 0;
+  }
+
+  if (beatCount === 3) {
+    return 2;
+  }
+
+  return Math.min(beatCount - 1, Math.ceil(beatCount / 2));
+};
+
 const CJK_CHAR_REGEX = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
 export const normalizeBarLyrics = (lyrics?: string[] | null) => {
@@ -38,8 +52,8 @@ export const getChordAnchorSlotIndexes = (chords: string[], beatsPerBar: number)
     return [] as number[];
   }
 
-  if (visibleChords.length === 2 && beatCount === 4 && !visibleChords.includes('')) {
-    return [0, 2];
+  if (visibleChords.length === 2 && beatCount > 1 && !visibleChords.includes('')) {
+    return [0, getTwoChordSplitSlotIndex(beatCount)];
   }
 
   return visibleChords

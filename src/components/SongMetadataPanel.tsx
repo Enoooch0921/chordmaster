@@ -74,7 +74,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const copy = getUiCopy(language);
   const [tempoDraft, setTempoDraft] = React.useState(typeof song.tempo === 'number' ? String(song.tempo) : '');
   const timeSignatureParts = splitTimeSignatureInput(song.timeSignature);
-  const resolvedKey = keyValue ?? song.currentKey;
+  const resolvedKey = keyValue ?? song.originalKey;
   const resolvedCapo = capoValue ?? (song.capo ?? 0);
 
   React.useEffect(() => {
@@ -166,7 +166,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
                   return;
                 }
 
-                updateField('currentKey', key);
+                updateField('originalKey', key);
               }}
               label={copy.key}
               originalKey={song.originalKey}

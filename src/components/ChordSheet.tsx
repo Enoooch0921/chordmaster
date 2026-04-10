@@ -15,7 +15,7 @@ import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
-import { getChordDisplaySlots, getLyricAnchors, getLyricFitScale, getLyricFontScale, getLyricTrackingEm } from '../utils/lyricsUtils';
+import { getChordDisplaySlots, getLyricAnchors, getLyricFitScale, getLyricFontScale, getLyricTrackingEm, getTwoChordSplitSlotIndex } from '../utils/lyricsUtils';
 import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
 
 interface FormattedChordProps {
@@ -580,10 +580,12 @@ interface ChordSheetProps {
   song: Song;
   language: AppLanguage;
   currentKey: Key;
+  transposeFromOriginal?: boolean;
   onElementClick?: (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics') => void;
   highlightedSectionIds?: string[];
   activeSectionId?: string | null;
   activeBar?: { sIdx: number; bIdx: number } | null;
+  previewIdentity?: string | null;
 }
 
 const ShuffleSymbol: React.FC<{ className?: string }> = ({ className = '' }) => (
@@ -974,15 +976,36 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onElementClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, previewIdentity = null }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   const chordFontFamily = getChordFontFamily(song.chordFontPreset);
+  const previousPreviewIdentityRef = React.useRef(previewIdentity);
+  const [keepTransitionsSuppressed, setKeepTransitionsSuppressed] = React.useState(false);
+  const isPreviewIdentityChanged = previousPreviewIdentityRef.current !== previewIdentity;
+  const suppressSectionTransitions = isPreviewIdentityChanged || keepTransitionsSuppressed;
+
+  React.useEffect(() => {
+    if (previousPreviewIdentityRef.current === previewIdentity) {
+      return;
+    }
+
+    previousPreviewIdentityRef.current = previewIdentity;
+    setKeepTransitionsSuppressed(true);
+
+    const rafId = window.requestAnimationFrame(() => {
+      setKeepTransitionsSuppressed(false);
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [previewIdentity]);
+
   const capo = song.capo || 0;
   const playKey = getPlayKey(currentKey, capo);
-  const globalKeyShift = getTransposeOffset(song.originalKey, currentKey);
+  const baseWrittenKey = transposeFromOriginal ? song.originalKey : currentKey;
+  const globalKeyShift = transposeFromOriginal ? getTransposeOffset(song.originalKey, currentKey) : 0;
   const sectionStartKeys: Key[] = [];
-  let activeSectionKey = song.originalKey;
+  let activeSectionKey = baseWrittenKey;
   song.sections.forEach((section) => {
     if (section.keyChangeTo) {
       activeSectionKey = section.keyChangeTo;
@@ -1230,7 +1253,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                 <motion.div 
                   key={`${section?.id || row.sIdx}-${row.startBIdx}`}
                   data-preview-section-id={section?.id || ''}
-                  layout
+                  layout={!suppressSectionTransitions}
                   initial={false}
                   animate={{ 
                     backgroundColor: isHighlighted
@@ -1241,9 +1264,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                     boxShadow: isActiveSection ? `inset 0 0 0 2px ${activeTone.stroke}` : 'inset 0 0 0 0 rgba(0, 0, 0, 0)'
                   }}
                   transition={{ 
-                    layout: { type: 'spring', stiffness: 300, damping: 30 },
-                    backgroundColor: { duration: isHighlighted ? 0.2 : 0.25 },
-                    boxShadow: { duration: 0.2 }
+                    layout: suppressSectionTransitions
+                      ? { duration: 0 }
+                      : { type: 'spring', stiffness: 300, damping: 30 },
+                    backgroundColor: { duration: suppressSectionTransitions ? 0 : (isHighlighted ? 0.2 : 0.25) },
+                    boxShadow: { duration: suppressSectionTransitions ? 0 : 0.2 }
                   }}
                   className="flex-1 flex w-full min-h-0 rounded-lg transition-all"
                 >
@@ -1588,13 +1613,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                       const trimmed = token.trim();
                                       return Boolean(trimmed && trimmed !== '/');
                                     });
-                                    const meaningfulChordCount = meaningfulChordFlags.filter(Boolean).length;
-                                    const isDefaultTwoChordSpread = meaningfulChordCount === 2
-                                      && beatsPerBar === 4
-                                      && meaningfulChordFlags[0] === true
-                                      && meaningfulChordFlags[2] === true
-                                      && meaningfulChordFlags[1] !== true
-                                      && meaningfulChordFlags[3] !== true;
                                     const occupiedChordAnchors = displayChords.flatMap((displayChord, slotIndex) => {
                                       if (!displayChord) return [];
 
@@ -1611,6 +1629,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                         span: Math.max(1, span)
                                       }];
                                     });
+                                    const halfSplitSlotIndex = getTwoChordSplitSlotIndex(beatsPerBar);
+                                    const isDefaultTwoChordSpread = occupiedChordAnchors.length === 2
+                                      && occupiedChordAnchors[0]?.slotIndex === 0
+                                      && occupiedChordAnchors[1]?.slotIndex === halfSplitSlotIndex;
 
                                     if (!showLyricsLane) {
                                       return (
@@ -1623,20 +1645,20 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                             const singleChordScaleClass = getSingleChordScaleClass(anchor.chord);
                                             const effectiveChordScaleClass = singleChordScaleClass || crowdedChordScaleClass;
                                             const isFirstAnchor = anchor.slotIndex === 0;
-                                            const isTwoChordThirdBeatAnchor = isDefaultTwoChordSpread && anchor.slotIndex === 2;
+                                            const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
                                             const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
                                               && anchor.slotIndex > 0
                                               && !isDefaultTwoChordSpread;
                                             const align: 'left' | 'center' | 'right' = isFirstAnchor
                                               ? 'left'
-                                              : isTwoChordThirdBeatAnchor
+                                              : isTwoChordSecondHalfAnchor
                                                 ? 'left'
                                               : isTerminalAnchor
                                                 ? 'right'
                                                 : 'center';
                                             const anchorPaddingClass = isFirstAnchor
                                               ? 'pl-[2px]'
-                                              : isTwoChordThirdBeatAnchor
+                                              : isTwoChordSecondHalfAnchor
                                                 ? 'pl-[2px] pr-[6px]'
                                               : isTerminalAnchor
                                                 ? 'pl-[14px] pr-[6px]'
@@ -1704,20 +1726,20 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                         >
                                           {lyricAnchors.map((anchor) => {
                                             const isFirstAnchor = anchor.slotIndex === 0;
-                                            const isTwoChordThirdBeatAnchor = isDefaultTwoChordSpread && anchor.slotIndex === 2;
+                                            const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
                                             const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
                                               && anchor.slotIndex > 0
                                               && !isDefaultTwoChordSpread;
                                             const originClass = isFirstAnchor
                                               ? 'origin-top-left'
-                                              : isTwoChordThirdBeatAnchor
+                                              : isTwoChordSecondHalfAnchor
                                                 ? 'origin-top-left'
                                               : isTerminalAnchor
                                                 ? 'origin-top-right'
                                                 : 'origin-top';
                                             const anchorPaddingClass = isFirstAnchor
                                               ? 'pl-[2px]'
-                                              : isTwoChordThirdBeatAnchor
+                                              : isTwoChordSecondHalfAnchor
                                                 ? 'pl-[2px] pr-[6px]'
                                               : isTerminalAnchor
                                                 ? 'pl-[14px] pr-[6px]'
@@ -1725,9 +1747,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                             const shrinkMinScale = isTerminalAnchor ? 0.2 : 0.44;
                                             const align: 'left' | 'center' | 'right' = isFirstAnchor
                                               ? 'left'
-                                              : isTwoChordThirdBeatAnchor
+                                              : isTwoChordSecondHalfAnchor
                                                 ? 'left'
-                                                : isTerminalAnchor
+                                              : isTerminalAnchor
                                                   ? 'right'
                                                   : 'center';
 
@@ -1770,7 +1792,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                         >
                                           {lyricAnchors.map((anchor) => {
                                             const isFirstAnchor = anchor.slotIndex === 0;
-                                            const isTwoChordThirdBeatAnchor = isDefaultTwoChordSpread && anchor.slotIndex === 2;
+                                            const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
                                             const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
                                               && anchor.slotIndex > 0
                                               && !isDefaultTwoChordSpread;
@@ -1779,23 +1801,23 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, onE
                                             const lyricTracking = getLyricTrackingEm(measureText || anchor.lyric, anchor.span);
                                             const anchorPaddingClass = isFirstAnchor
                                               ? 'pl-[2px]'
-                                              : isTwoChordThirdBeatAnchor
+                                              : isTwoChordSecondHalfAnchor
                                                 ? 'pl-[2px] pr-[6px]'
                                               : isTerminalAnchor
                                                 ? 'pl-[14px] pr-[6px]'
                                                 : 'px-[3px]';
                                             const justifyClass = isFirstAnchor
                                               ? 'justify-start'
-                                              : isTwoChordThirdBeatAnchor
+                                              : isTwoChordSecondHalfAnchor
                                                 ? 'justify-start'
-                                                : isTerminalAnchor
+                                              : isTerminalAnchor
                                                   ? 'justify-end'
                                                   : 'justify-center';
                                             const textAlignClass = isFirstAnchor
                                               ? 'text-left'
-                                              : isTwoChordThirdBeatAnchor
+                                              : isTwoChordSecondHalfAnchor
                                                 ? 'text-left'
-                                                : isTerminalAnchor
+                                              : isTerminalAnchor
                                                   ? 'text-right'
                                                   : 'text-center';
 
