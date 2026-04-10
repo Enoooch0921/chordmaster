@@ -917,6 +917,9 @@ export default function App() {
   const [isSetlistActionsMenuOpen, setIsSetlistActionsMenuOpen] = useState(false);
   const [isToolbarOverflowMenuOpen, setIsToolbarOverflowMenuOpen] = useState(false);
   const [isGoogleAccountMenuOpen, setIsGoogleAccountMenuOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isMobileActionsSheetOpen, setIsMobileActionsSheetOpen] = useState(false);
+  const [isMobileMetadataOpen, setIsMobileMetadataOpen] = useState(false);
   const [draggingSetlistSongId, setDraggingSetlistSongId] = useState<string | null>(null);
   const [dragOverSetlistSongId, setDragOverSetlistSongId] = useState<string | null>(null);
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
@@ -952,10 +955,10 @@ export default function App() {
   const workspaceIsDirty = libraryIsDirty || setlistIsDirty;
   const isSheetView = activeAppView === 'sheet';
   const isSetlistMode = workspaceMode === 'setlists';
-  const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
   const isPhoneViewport = viewportWidth < PHONE_VIEWPORT_BREAKPOINT;
+  const isSidebarExpanded = isPhoneViewport ? isMobileNavOpen : (isSidebarPinned || isSidebarHovered);
   const usesOverlaySidebar = viewportWidth < SIDEBAR_OVERLAY_BREAKPOINT;
-  const collapsedSidebarWidth = isPhoneViewport ? 72 : COLLAPSED_SIDEBAR_WIDTH;
+  const collapsedSidebarWidth = isPhoneViewport ? 0 : COLLAPSED_SIDEBAR_WIDTH;
   const responsiveSidebarMinWidth = usesOverlaySidebar
     ? Math.max(collapsedSidebarWidth + 216, 288)
     : MIN_EXPANDED_SIDEBAR_WIDTH;
@@ -972,7 +975,7 @@ export default function App() {
   const shouldUseSplitEditor = mainViewportWidth >= 1360;
   const splitEditorWidth = Math.max(680, Math.min(860, Math.round(mainViewportWidth * 0.5)));
   const overlayEditorWidth = Math.min(
-    Math.max(560, Math.round(mainViewportWidth * 0.52)),
+    isPhoneViewport ? mainViewportWidth : Math.max(560, Math.round(mainViewportWidth * 0.52)),
     Math.max(0, mainViewportWidth - (isPhoneViewport ? 0 : 32))
   );
   const usesDenseDesktopHeader = isSheetView && mainViewportWidth >= 1320;
@@ -1030,6 +1033,7 @@ export default function App() {
   const compactAutoSaveLabel = language === 'zh' ? '自存' : 'Auto';
   const compactSaveLabel = language === 'zh' ? '儲存' : 'Save';
   const compactPdfLabel = language === 'zh' ? 'PDF' : 'PDF';
+  const mobileTopbarActionClassName = 'flex h-10 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
   const normalizedLibrarySearchQuery = librarySearchQuery.trim().toLowerCase();
   const normalizedSetlistSearchQuery = setlistSearchQuery.trim().toLowerCase();
   const normalizedSetlistSongSearchQuery = setlistSongSearchQuery.trim().toLowerCase();
@@ -1040,6 +1044,14 @@ export default function App() {
     ? selectedSetlistSong.capo
     : (selectedSetlistSourceSong?.capo ?? 0);
   const currentSetlistPlayKey = getPlayKey(currentSetlistKey, currentSetlistCapo);
+  const mobileMetadataTitle = isSetlistMode ? copy.setlistEditor.instanceSettings : copy.editor.editSong;
+  const mobileMetadataSong = activeEditorSong;
+  const mobileMetadataKey = isSetlistMode ? currentSetlistKey : song.currentKey;
+  const mobileMetadataCapo = isSetlistMode ? currentSetlistCapo : currentCapo;
+  const mobileMetadataTempo = typeof mobileMetadataSong?.tempo === 'number' ? `${mobileMetadataSong.tempo}` : '—';
+  const mobileMetadataTime = mobileMetadataSong?.timeSignature?.trim() || '—';
+  const mobileMetadataVersion = mobileMetadataSong ? getSongVersionSummary(mobileMetadataSong) : '';
+  const mobileMetadataTranslator = mobileMetadataSong?.translator?.trim() || '';
   const duplicateLabel = language === 'zh' ? '副本' : 'Copy';
   const previewScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, previewBaseScale * previewZoom));
   const previewSheetWidth = sheetMetrics.width * previewScale;
@@ -2342,6 +2354,9 @@ export default function App() {
       setIsSetlistActionsMenuOpen(false);
       setIsToolbarOverflowMenuOpen(false);
       setIsGoogleAccountMenuOpen(false);
+      setIsMobileActionsSheetOpen(false);
+      setIsMobileMetadataOpen(false);
+      setIsMobileNavOpen(false);
     };
 
     window.addEventListener('mousedown', handlePointerDown);
@@ -2363,6 +2378,39 @@ export default function App() {
       setIsGoogleAccountMenuOpen(false);
     }
   }, [usesDenseDesktopHeader]);
+
+  useEffect(() => {
+    if (isPhoneViewport) {
+      setIsToolbarOverflowMenuOpen(false);
+      setIsGoogleAccountMenuOpen(false);
+      return;
+    }
+
+    setIsMobileNavOpen(false);
+    setIsMobileActionsSheetOpen(false);
+    setIsMobileMetadataOpen(false);
+  }, [isPhoneViewport]);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setIsMobileMetadataOpen(false);
+    }
+  }, [isEditing]);
+
+  useEffect(() => {
+    if (!isSheetView) {
+      setIsMobileActionsSheetOpen(false);
+      setIsMobileMetadataOpen(false);
+    }
+  }, [isSheetView]);
+
+  useEffect(() => {
+    if (!isPhoneViewport) {
+      return;
+    }
+
+    setIsMobileNavOpen(false);
+  }, [activeAppView, isPhoneViewport, selectedSetlistId, selectedSetlistSongId, selectedSongId, workspaceMode]);
 
   useEffect(() => {
     return () => {
@@ -2435,7 +2483,7 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [copy.googleCredentialError, copy.googleLoadError, googleClientId, googleUser, showGoogleAuth]);
+  }, [copy.googleCredentialError, copy.googleLoadError, googleClientId, googleUser, isMobileActionsSheetOpen, isPhoneViewport, showGoogleAuth]);
 
   const focusEditorField = React.useCallback((sIdx: number, bIdx: number, field: EditorFocusField) => {
     setEditorFocusRequest({
@@ -2631,6 +2679,10 @@ export default function App() {
   }
 
   const handleSidebarHoverTrigger = (event: React.MouseEvent<HTMLElement>) => {
+    if (isPhoneViewport) {
+      return;
+    }
+
     if (isSidebarPinned || isSidebarHovered) {
       return;
     }
@@ -2660,6 +2712,94 @@ export default function App() {
     setIsSidebarResizing(true);
   };
 
+  const metadataPanelContent = isSetlistMode
+    ? (selectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
+        <SongMetadataPanel
+          song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
+          language={language}
+          title={copy.setlistEditor.instanceSettings}
+          onChange={handleSetlistSongContentChange}
+          keyValue={currentSetlistKey}
+          capoValue={currentSetlistCapo}
+          onKeyChange={handleSetlistKeyChange}
+          onCapoChange={(capo) => handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+            ...currentSetlistSong,
+            capo
+          }))}
+          displayMode={selectedSetlist.displayMode}
+          showLyrics={selectedSetlist.showLyrics}
+          onDisplayModeChange={(mode) => handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode })}
+          onShowLyricsChange={(nextShowLyrics) => handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextShowLyrics })}
+        />
+      ) : null)
+    : (
+        <SongMetadataPanel
+          song={song}
+          language={language}
+          title={language === 'zh' ? '編輯歌曲' : 'Edit Song'}
+          onChange={handleSongChange}
+          displayMode={
+            song.showNashvilleNumbers
+              ? 'nashville-number-system'
+              : song.showAbsoluteJianpu
+                ? 'chord-fixed-key'
+                : 'chord-movable-key'
+          }
+          showLyrics={song.showLyrics ?? false}
+          onDisplayModeChange={(mode) => handleSongChange({
+            ...song,
+            showNashvilleNumbers: mode === 'nashville-number-system',
+            showAbsoluteJianpu: mode === 'chord-fixed-key'
+          })}
+          onShowLyricsChange={(nextShowLyrics) => handleSongChange({
+            ...song,
+            showLyrics: nextShowLyrics
+          })}
+        />
+      );
+
+  const mobileMetadataSummaryCard = isPhoneViewport && isEditing && isSheetView && mobileMetadataSong && metadataPanelContent ? (
+    <button
+      type="button"
+      onClick={() => {
+        setIsMobileMetadataOpen(true);
+        setIsMobileActionsSheetOpen(false);
+      }}
+      className="w-full rounded-2xl border border-gray-200 bg-white p-3 text-left shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-400">{mobileMetadataTitle}</div>
+          <div className="mt-1 truncate text-base font-bold text-gray-900">
+            {mobileMetadataSong.title || copy.untitledSong}
+          </div>
+          {(mobileMetadataVersion || mobileMetadataTranslator) ? (
+            <div className="mt-1 truncate text-xs font-medium text-gray-500">
+              {[mobileMetadataVersion, mobileMetadataTranslator].filter(Boolean).join(' · ')}
+            </div>
+          ) : null}
+        </div>
+        <span className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700">
+          {language === 'zh' ? '編輯' : 'Edit'}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {[
+          { label: copy.key, value: mobileMetadataKey },
+          { label: 'Capo', value: String(mobileMetadataCapo) },
+          { label: copy.editor.tempo, value: mobileMetadataTempo },
+          { label: copy.editor.timeSignature, value: mobileMetadataTime }
+        ].map((item) => (
+          <div key={item.label} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">{item.label}</div>
+            <div className="mt-1 text-sm font-semibold text-gray-800">{item.value}</div>
+          </div>
+        ))}
+      </div>
+    </button>
+  ) : null;
+
   return (
     <div
       data-app-root
@@ -2669,8 +2809,12 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
-            setIsSidebarPinned(false);
-            setIsSidebarHovered(false);
+            if (isPhoneViewport) {
+              setIsMobileNavOpen(false);
+            } else {
+              setIsSidebarPinned(false);
+              setIsSidebarHovered(false);
+            }
           }}
           className="absolute inset-0 z-40 bg-stone-950/10 backdrop-blur-[1px]"
           aria-label={copy.collapseSongList}
@@ -2724,7 +2868,9 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
-                if (isSidebarPinned) {
+                if (isPhoneViewport) {
+                  setIsMobileNavOpen((current) => !current);
+                } else if (isSidebarPinned) {
                   setIsSidebarPinned(false);
                   setIsSidebarHovered(false);
                 } else {
@@ -2819,6 +2965,85 @@ export default function App() {
             className="min-w-0 flex-1 flex flex-col"
             style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           >
+            {isPhoneViewport && (
+              <div className="border-b border-gray-200 px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-gray-900">{APP_NAME}</div>
+                    <div className="mt-0.5 text-xs font-medium text-gray-500">{activeAppViewLabel}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsMobileNavOpen(false)}
+                    className="rounded-lg px-2 py-1 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
+                  >
+                    {copy.done}
+                  </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspaceMode('songs');
+                      setActiveAppView('sheet');
+                      setIsMobileNavOpen(false);
+                    }}
+                    className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                      !isSetlistMode && isSheetView
+                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                        : 'border border-gray-200 bg-white text-gray-700'
+                    }`}
+                  >
+                    {copy.songs}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspaceMode('setlists');
+                      setActiveAppView('sheet');
+                      setIsMobileNavOpen(false);
+                    }}
+                    className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                      isSetlistMode && isSheetView
+                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                        : 'border border-gray-200 bg-white text-gray-700'
+                    }`}
+                  >
+                    {copy.setlists}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleAppViewChange('about');
+                      setIsMobileNavOpen(false);
+                    }}
+                    className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                      activeAppView === 'about'
+                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                        : 'border border-gray-200 bg-white text-gray-700'
+                    }`}
+                  >
+                    {copy.about}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleAppViewChange('help');
+                      setIsMobileNavOpen(false);
+                    }}
+                    className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                      activeAppView === 'help'
+                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                        : 'border border-gray-200 bg-white text-gray-700'
+                    }`}
+                  >
+                    {copy.help}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {isSetlistMode ? (
               <>
                 <div className="px-5 py-6 border-b border-gray-200">
@@ -3355,17 +3580,117 @@ export default function App() {
 
       {/* Main Content */}
       <main data-main-panel className="flex min-w-0 flex-1 flex-col">
-        <div className="flex-shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2.5 sm:px-6 xl:px-8">
-          <p className="text-sm font-medium text-amber-800">
+        <div className={`flex-shrink-0 border-b border-amber-200 bg-amber-50 ${
+          isPhoneViewport ? 'px-3 py-1.5' : 'px-4 py-2.5 sm:px-6 xl:px-8'
+        }`}>
+          <p
+            className={`font-medium text-amber-800 ${
+              isPhoneViewport ? 'truncate text-xs leading-5' : 'text-sm'
+            }`}
+            title={copy.testVersionWarning}
+          >
             {copy.testVersionWarning}
           </p>
         </div>
 
         {/* Top Control Bar */}
         <header data-topbar className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md ${
-          usesDenseDesktopHeader ? 'px-4 py-2.5 sm:px-5 xl:px-6' : 'px-4 py-3 sm:px-6 sm:py-4 xl:px-8'
+          isPhoneViewport
+            ? 'px-3 py-2.5'
+            : usesDenseDesktopHeader
+              ? 'px-4 py-2.5 sm:px-5 xl:px-6'
+              : 'px-4 py-3 sm:px-6 sm:py-4 xl:px-8'
         }`}>
-          {usesDenseDesktopHeader ? (
+          {isPhoneViewport ? (
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileNavOpen((current) => !current);
+                    setIsMobileActionsSheetOpen(false);
+                    setIsMobileMetadataOpen(false);
+                  }}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                  aria-label={isMobileNavOpen ? copy.collapseSongList : copy.pinSongList}
+                  title={isMobileNavOpen ? copy.collapseSongList : copy.pinSongList}
+                >
+                  <ChevronRight size={18} className={`transition-transform ${isMobileNavOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                <img src={logoSrc} alt="ChordMaster" className="h-9 w-9 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-bold tracking-tight text-gray-900">{APP_NAME}</div>
+                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                    {isSheetView ? (
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
+                        isSetlistMode
+                          ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                          : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
+                      }`}>
+                        {workspaceModeBadge}
+                      </span>
+                    ) : null}
+                    <span className="truncate text-[11px] font-medium text-gray-500">{activeAppViewLabel}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileActionsSheetOpen(true);
+                    setIsMobileNavOpen(false);
+                    setIsMobileMetadataOpen(false);
+                  }}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                  aria-label={copy.editor.more}
+                  title={copy.editor.more}
+                >
+                  <MoreHorizontal size={18} />
+                </button>
+              </div>
+
+              {isSheetView ? (
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(!isEditing)}
+                    className={isEditing ? `${mobileTopbarActionClassName} border-gray-900 bg-gray-900 text-white hover:bg-gray-800` : mobileTopbarActionClassName}
+                  >
+                    <Edit3 size={16} />
+                    <span>{compactEditorToggleLabel}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleToggleLyricsMode}
+                    className={`${mobileTopbarActionClassName} ${
+                      isLyricsMode
+                        ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
+                        : 'hover:border-amber-200 hover:bg-amber-50'
+                    }`}
+                  >
+                    <FileText size={16} />
+                    <span>{compactLyricsToggleLabel}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveLibrary}
+                    className={`${mobileTopbarActionClassName} ${
+                      workspaceIsDirty
+                        ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
+                        : ''
+                    }`}
+                  >
+                    <Save size={16} />
+                    <span>{compactSaveLabel}</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : usesDenseDesktopHeader ? (
             <div className="flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex min-w-0 items-center gap-2">
@@ -3923,7 +4248,9 @@ export default function App() {
                 className={`overflow-hidden border-r border-gray-200 bg-white shadow-xl ${
                   shouldUseSplitEditor
                     ? 'relative z-10 flex-shrink-0'
-                    : 'absolute inset-y-0 left-0 z-30 max-w-full rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
+                    : isPhoneViewport
+                      ? 'absolute inset-0 z-30 max-w-full shadow-none'
+                      : 'absolute inset-y-0 left-0 z-30 max-w-full rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
                 }`}
                 style={shouldUseSplitEditor ? undefined : { width: overlayEditorWidth > 0 ? `${overlayEditorWidth}px` : '100%' }}
               >
@@ -3931,24 +4258,7 @@ export default function App() {
                   <div className="min-w-0 p-4 pb-24 sm:p-6 lg:p-8">
                     {isSetlistMode && selectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
                       <div className="space-y-5">
-                        <div>
-                          <SongMetadataPanel
-                            song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
-                            language={language}
-                            onChange={handleSetlistSongContentChange}
-                            keyValue={currentSetlistKey}
-                            capoValue={currentSetlistCapo}
-                            onKeyChange={handleSetlistKeyChange}
-                            onCapoChange={(capo) => handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-                              ...currentSetlistSong,
-                              capo
-                            }))}
-                            displayMode={selectedSetlist.displayMode}
-                            showLyrics={selectedSetlist.showLyrics}
-                            onDisplayModeChange={(mode) => handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode })}
-                            onShowLyricsChange={(nextShowLyrics) => handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextShowLyrics })}
-                          />
-                        </div>
+                        {isPhoneViewport ? mobileMetadataSummaryCard : <div>{metadataPanelContent}</div>}
                         {isLyricsMode ? (
                           <LyricsEditor
                             key={`${selectedSetlistSong.id}-lyrics`}
@@ -3997,29 +4307,7 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="space-y-5">
-                        <SongMetadataPanel
-                          song={song}
-                          language={language}
-                          title={language === 'zh' ? '編輯歌曲' : 'Edit Song'}
-                          onChange={handleSongChange}
-                          displayMode={
-                            song.showNashvilleNumbers
-                              ? 'nashville-number-system'
-                              : song.showAbsoluteJianpu
-                                ? 'chord-fixed-key'
-                                : 'chord-movable-key'
-                          }
-                          showLyrics={song.showLyrics ?? false}
-                          onDisplayModeChange={(mode) => handleSongChange({
-                            ...song,
-                            showNashvilleNumbers: mode === 'nashville-number-system',
-                            showAbsoluteJianpu: mode === 'chord-fixed-key'
-                          })}
-                          onShowLyricsChange={(nextShowLyrics) => handleSongChange({
-                            ...song,
-                            showLyrics: nextShowLyrics
-                          })}
-                        />
+                        {isPhoneViewport ? mobileMetadataSummaryCard : metadataPanelContent}
                         {isLyricsMode ? (
                           <LyricsEditor
                             key={`${song.id}-lyrics`}
@@ -4061,7 +4349,7 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                <div className="absolute left-6 bottom-6 z-40 pointer-events-none">
+                <div className={`absolute z-40 pointer-events-none ${isPhoneViewport ? 'bottom-4 left-4' : 'left-6 bottom-6'}`}>
                   <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-gray-200 bg-white/95 px-2 py-2 shadow-lg backdrop-blur-sm">
                     <button
                       onClick={handleScrollEditorToTop}
@@ -4127,36 +4415,40 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="pointer-events-none absolute right-2 top-2 z-40 sm:right-4 sm:top-4 lg:right-6 lg:top-6">
-              <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
-                <button
-                  type="button"
-                  onClick={handleZoomOutPreview}
-                  disabled={previewScale <= PREVIEW_MIN_SCALE + 0.001}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
-                  title={copy.zoomOutPreview}
-                >
-                  -
-                </button>
-                <button
-                  type="button"
-                  onClick={handleResetPreviewZoom}
-                  className="inline-flex min-w-[4rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 sm:min-w-[4.25rem]"
-                  title={copy.resetPreviewZoom}
-                >
-                  {previewScalePercent}%
-                </button>
-                <button
-                  type="button"
-                  onClick={handleZoomInPreview}
-                  disabled={previewScale >= PREVIEW_MAX_SCALE - 0.001}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
-                  title={copy.zoomInPreview}
-                >
-                  +
-                </button>
+            {!(isPhoneViewport && isEditing) && (
+              <div className={`pointer-events-none absolute z-40 ${
+                isPhoneViewport ? 'bottom-3 right-3' : 'right-2 top-2 sm:right-4 sm:top-4 lg:right-6 lg:top-6'
+              }`}>
+                <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
+                  <button
+                    type="button"
+                    onClick={handleZoomOutPreview}
+                    disabled={previewScale <= PREVIEW_MIN_SCALE + 0.001}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
+                    title={copy.zoomOutPreview}
+                  >
+                    -
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetPreviewZoom}
+                    className="inline-flex min-w-[4rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 sm:min-w-[4.25rem]"
+                    title={copy.resetPreviewZoom}
+                  >
+                    {previewScalePercent}%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleZoomInPreview}
+                    disabled={previewScale >= PREVIEW_MAX_SCALE - 0.001}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
+                    title={copy.zoomInPreview}
+                  >
+                    +
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
         ) : (
@@ -4271,6 +4563,219 @@ export default function App() {
         </div>
         )}
       </main>
+
+      {isPhoneViewport && (
+        <>
+          <AnimatePresence initial={false}>
+            {isMobileActionsSheetOpen && (
+              <>
+                <motion.button
+                  type="button"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsMobileActionsSheetOpen(false)}
+                  className="absolute inset-0 z-[70] bg-stone-950/30 backdrop-blur-[1px]"
+                  aria-label={copy.editor.more}
+                />
+                <motion.div
+                  initial={{ y: '100%' }}
+                  animate={{ y: 0 }}
+                  exit={{ y: '100%' }}
+                  transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
+                  className="absolute inset-x-0 bottom-0 z-[80] max-h-[82dvh] overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-white shadow-[0_-24px_60px_rgba(15,23,42,0.18)]"
+                >
+                  <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-gray-200" />
+                  <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+                    <div className="text-sm font-bold text-gray-900">{copy.editor.more}</div>
+                    <button
+                      type="button"
+                      onClick={() => setIsMobileActionsSheetOpen(false)}
+                      className="rounded-lg px-2 py-1 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
+                    >
+                      {copy.done}
+                    </button>
+                  </div>
+
+                  <div className="max-h-[calc(82dvh-4.5rem)] space-y-4 overflow-y-auto px-4 py-4">
+                    {isSheetView ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsAutoSaveEnabled((current) => !current)}
+                            className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
+                              isAutoSaveEnabled
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                : 'border-gray-200 bg-white text-gray-700'
+                            }`}
+                          >
+                            <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">{copy.autoSave}</div>
+                            <div className="mt-1 text-sm font-bold">{isAutoSaveEnabled ? copy.on : copy.off}</div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleExportPdf();
+                              setIsMobileActionsSheetOpen(false);
+                            }}
+                            disabled={isExportingPdf}
+                            className={`rounded-2xl px-3 py-3 text-left transition-colors ${
+                              isExportingPdf
+                                ? 'bg-gray-400 text-white'
+                                : 'bg-gray-900 text-white'
+                            }`}
+                          >
+                            <div className="text-xs font-bold uppercase tracking-[0.14em] text-white/70">PDF</div>
+                            <div className="mt-1 text-sm font-bold">
+                              {isExportingPdf ? copy.preparingPdf : (isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf)}
+                            </div>
+                          </button>
+                        </div>
+
+                        {!isSetlistMode && (
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                              className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
+                                song.showNashvilleNumbers
+                                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                  : 'border-gray-200 bg-white text-gray-700'
+                              }`}
+                            >
+                              <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">123</div>
+                              <div className="mt-1 text-sm font-bold">{song.showNashvilleNumbers ? copy.on : copy.off}</div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                              className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
+                                song.showAbsoluteJianpu
+                                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                  : 'border-gray-200 bg-white text-gray-700'
+                              }`}
+                            >
+                              <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">1=C</div>
+                              <div className="mt-1 text-sm font-bold">{song.showAbsoluteJianpu ? copy.on : copy.off}</div>
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : null}
+
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                      <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">{language === 'zh' ? '語言' : 'Language'}</div>
+                      <div className="mt-3 inline-flex items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => setLanguage('zh')}
+                          className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
+                            language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          中文
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLanguage('en')}
+                          className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
+                            language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          EN
+                        </button>
+                      </div>
+                    </div>
+
+                    {showGoogleAuth && googleUser ? (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          {googleUser.picture ? (
+                            <img
+                              src={googleUser.picture}
+                              alt={googleUser.name}
+                              className="h-10 w-10 rounded-full border border-gray-200 object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
+                              {googleUser.name.slice(0, 1).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-bold text-gray-900">{googleUser.name}</div>
+                            <div className="truncate text-xs text-gray-500">{googleUser.email}</div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleGoogleSignOut();
+                            setIsMobileActionsSheetOpen(false);
+                          }}
+                          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                        >
+                          <LogOut size={14} />
+                          <span>{copy.signOut}</span>
+                        </button>
+                      </div>
+                    ) : showGoogleAuth ? (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                        <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">Google</div>
+                        <div ref={googleSignInRef} className="mt-3 flex min-h-10 min-w-0 items-center justify-start" />
+                        {googleAuthError ? (
+                          <div className="mt-2 text-xs font-medium text-amber-600">{googleAuthError}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence initial={false}>
+            {isMobileMetadataOpen && metadataPanelContent && (
+              <>
+                <motion.button
+                  type="button"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsMobileMetadataOpen(false)}
+                  className="absolute inset-0 z-[70] bg-stone-950/30 backdrop-blur-[1px]"
+                  aria-label={mobileMetadataTitle}
+                />
+                <motion.div
+                  initial={{ y: '100%' }}
+                  animate={{ y: 0 }}
+                  exit={{ y: '100%' }}
+                  transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
+                  className="absolute inset-x-0 bottom-0 z-[80] max-h-[86dvh] overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-[#F5F5F4] shadow-[0_-24px_60px_rgba(15,23,42,0.18)]"
+                >
+                  <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-gray-300" />
+                  <div className="flex items-center justify-between border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur-sm">
+                    <div className="text-sm font-bold text-gray-900">{mobileMetadataTitle}</div>
+                    <button
+                      type="button"
+                      onClick={() => setIsMobileMetadataOpen(false)}
+                      className="rounded-lg px-2 py-1 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
+                    >
+                      {copy.done}
+                    </button>
+                  </div>
+
+                  <div className="max-h-[calc(86dvh-4.5rem)] overflow-y-auto px-4 py-4">
+                    {metadataPanelContent}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </>
+      )}
     </div>
   );
 }
