@@ -636,7 +636,7 @@ const LyricsEditor: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="sticky top-0 z-20 -mx-6 mb-6 flex items-center gap-2 overflow-x-auto border-b border-gray-200 bg-white/95 px-6 py-3 backdrop-blur-sm md:-mx-8 md:px-8">
+      <div className="sticky top-0 z-20 -mx-4 mb-6 flex items-center gap-2 overflow-x-auto border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         {song.sections.map((section, sIdx) => {
           const sectionId = getSectionId(section, sIdx);
           const colors = getSectionColor(section.title, true);
@@ -876,8 +876,8 @@ const LyricsEditor: React.FC<Props> = ({
                 {anchors.length > 0 && (
                   <div className="mt-4 space-y-3">
                     {rows.map((row, rowIndex) => (
-                      <div key={`${sectionId}-row-${rowIndex}`} className="overflow-x-auto">
-                        <div className="grid min-w-[760px] grid-cols-4 gap-3">
+                      <div key={`${sectionId}-row-${rowIndex}`}>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                           {row.map(({ bar, bIdx }) => {
                             const barKey = buildBarKey(sIdx, bIdx);
                             const barAnchors = anchors.filter((anchor) => anchor.bIdx === bIdx);

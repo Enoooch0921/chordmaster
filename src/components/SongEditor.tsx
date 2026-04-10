@@ -104,9 +104,12 @@ interface SectionTitleSuggestionState {
 }
 
 type BarInsertPosition = 'before' | 'after';
+type BarLayoutMode = 'stacked' | 'compact4' | 'full4';
 
 const PICKUP_SECTION_INDEX = 0;
 const PICKUP_BAR_INDEX = -1;
+const STACKED_BAR_LAYOUT_MAX_WIDTH = 560;
+const FULL_BAR_LAYOUT_MIN_WIDTH = 680;
 
 const SECTION_TITLE_PRESETS = [
   'Intro',
@@ -314,6 +317,12 @@ const buildTimeSignatureInput = (numerator: string, denominator: string) => {
   return `${cleanNumerator}/${cleanDenominator}`;
 };
 
+const getBarLayoutMode = (width: number): BarLayoutMode => {
+  if (width < STACKED_BAR_LAYOUT_MAX_WIDTH) return 'stacked';
+  if (width < FULL_BAR_LAYOUT_MIN_WIDTH) return 'compact4';
+  return 'full4';
+};
+
 const getAccentHighlight = (accent: string) => {
   switch (accent) {
     case 'blue':
@@ -414,6 +423,7 @@ const SongEditor: React.FC<Props> = ({
   const [copiedJianpu, setCopiedJianpu] = useState<string | null>(null);
   const [copiedRhythm, setCopiedRhythm] = useState<string | null>(null);
   const [tempoDraft, setTempoDraft] = useState<string>(formatTempoDraftValue(song.tempo));
+  const [barLayoutMode, setBarLayoutMode] = useState<BarLayoutMode>('full4');
   const [jianpuDurationBlockedHint, setJianpuDurationBlockedHint] = useState<string | null>(null);
   const [sectionTitleSuggestionState, setSectionTitleSuggestionState] = useState<SectionTitleSuggestionState>({
     sectionId: null,
@@ -429,6 +439,7 @@ const SongEditor: React.FC<Props> = ({
   const suppressAddBarClickRef = useRef<string | null>(null);
   const skipSelectionScrollKeyRef = useRef<string | null>(null);
   const jianpuDurationBlockedHintTimerRef = useRef<number | null>(null);
+  const inlineCompactEditorRef = useRef<HTMLDivElement | null>(null);
 
   const notifyChange = (newSong: Song) => {
     onChange(newSong);
@@ -557,6 +568,60 @@ const SongEditor: React.FC<Props> = ({
   useEffect(() => {
     setTempoDraft(formatTempoDraftValue(song.tempo));
   }, [song.tempo]);
+
+  useEffect(() => {
+    const rootNode = rootRef.current;
+    if (!rootNode) return;
+
+    const updateLayoutMode = () => {
+      const nextWidth = rootNode.clientWidth || rootNode.getBoundingClientRect().width || 0;
+      setBarLayoutMode((current) => {
+        const nextMode = getBarLayoutMode(nextWidth);
+        return current === nextMode ? current : nextMode;
+      });
+    };
+
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(updateLayoutMode);
+    });
+
+    observer.observe(rootNode);
+    updateLayoutMode();
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (barLayoutMode === 'full4' || !activeBar || activeBar.bIdx < 0) return;
+
+    const node = inlineCompactEditorRef.current;
+    if (!node) return;
+
+    const scrollRoot = rootRef.current?.closest('[data-editor-scroll-root]') as HTMLElement | null;
+
+    const frameId = window.requestAnimationFrame(() => {
+      if (!node.isConnected) return;
+
+      if (!scrollRoot) {
+        node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return;
+      }
+
+      const nodeRect = node.getBoundingClientRect();
+      const rootRect = scrollRoot.getBoundingClientRect();
+      const isFullyVisible = nodeRect.top >= rootRect.top && nodeRect.bottom <= rootRect.bottom;
+
+      if (!isFullyVisible) {
+        node.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [activeBar, barLayoutMode, song.sections]);
 
   useEffect(() => {
     if (!jianpuDurationBlockedHint) return;
@@ -4060,6 +4125,677 @@ const SongEditor: React.FC<Props> = ({
     </div>
   );
 
+  const isCompactBarLayout = barLayoutMode === 'compact4';
+  const isSpaceConstrainedBarLayout = barLayoutMode !== 'full4';
+  const barGridClassName = `grid gap-2.5 ${barLayoutMode === 'stacked' ? 'grid-cols-1' : 'grid-cols-4'}`;
+
+  const getCompactEditorState = (section: Section, sIdx: number) => {
+    if (!isSpaceConstrainedBarLayout || activeBar?.sIdx !== sIdx || activeBar.bIdx < 0 || section.bars.length === 0) {
+      return null;
+    }
+
+    const primaryBIdx = Math.max(0, Math.min(activeBar.bIdx, section.bars.length - 1));
+    const pairIndices = section.bars.length === 1
+      ? [primaryBIdx]
+      : primaryBIdx === section.bars.length - 1
+        ? [primaryBIdx - 1, primaryBIdx]
+        : [primaryBIdx, primaryBIdx + 1];
+
+    const anchorBarIndex = isCompactBarLayout
+      ? Math.min(section.bars.length - 1, Math.floor(primaryBIdx / 4) * 4 + 3)
+      : primaryBIdx;
+
+    return { primaryBIdx, pairIndices, anchorBarIndex };
+  };
+
+  const openCompactBarInspector = (sectionId: string | null, bar: Bar, sIdx: number, bIdx: number) => {
+    markActiveSection(sectionId);
+    markActiveBar(sIdx, bIdx);
+
+    const panelState = getBarPanelState(bar, sIdx, bIdx);
+    if (!panelState.riff && !panelState.barTime && !panelState.rhythm && !panelState.more) {
+      updateBarPanelState(bar, sIdx, bIdx, { more: true });
+    }
+  };
+
+  const toggleCompactBarInspector = (sectionId: string | null, bar: Bar, sIdx: number, bIdx: number) => {
+    if (activeBar?.sIdx === sIdx && activeBar?.bIdx === bIdx) {
+      onActiveBarChange?.(null);
+      return;
+    }
+
+    openCompactBarInspector(sectionId, bar, sIdx, bIdx);
+  };
+
+  const renderCompactBarEditorPanel = (
+    section: Section,
+    sIdx: number,
+    bIdx: number,
+    options?: {
+      isPrimary?: boolean;
+      onPromote?: () => void;
+    }
+  ) => {
+    const bar = section.bars[bIdx];
+    if (!bar) return null;
+
+    const isPrimary = options?.isPrimary ?? false;
+    const panelState = getBarPanelState(bar, sIdx, bIdx);
+    const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
+    const compactInspectorTitle = language === 'zh' ? `小節 ${globalBarNumber}` : `Bar ${globalBarNumber}`;
+    const compactInspectorSubtitle = [getBarDisplayLabel(bar), bar.annotation].filter(Boolean).join(' · ');
+
+    return (
+      <div
+        className={`rounded-2xl border p-3 shadow-sm transition-colors ${
+          isPrimary
+            ? 'border-indigo-200 bg-white'
+            : 'border-gray-200 bg-white/95'
+        }`}
+      >
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold tracking-[0.08em] ${
+                isPrimary
+                  ? 'border border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : 'border border-gray-200 bg-gray-50 text-gray-600'
+              }`}>
+                {compactInspectorTitle}
+              </div>
+              <div className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-500">
+                {bar.timeSignature || song.timeSignature}
+              </div>
+              {isPrimary ? (
+                <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                  {language === 'zh' ? '目前' : 'Current'}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={options?.onPromote}
+                  className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-700"
+                >
+                  {language === 'zh' ? '切到這格' : 'Make Current'}
+                </button>
+              )}
+            </div>
+            {compactInspectorSubtitle ? (
+              <div className="mt-1 truncate text-xs font-medium text-gray-500">{compactInspectorSubtitle}</div>
+            ) : null}
+          </div>
+        </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => duplicateBarAfter(sIdx, bIdx)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
+            >
+              <Copy size={12} />
+              <span>{language === 'zh' ? '複製到後方' : 'Copy After'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => mergeSectionToPrevious(sIdx)}
+              disabled={sIdx === 0 || bIdx !== 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ArrowUpRight size={12} />
+              <span>{language === 'zh' ? '併到上一段' : 'Merge Prev'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => splitSectionAtBar(sIdx, bIdx)}
+              disabled={bIdx === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ArrowDownRight size={12} />
+              <span>{language === 'zh' ? '從這裡分段' : 'Split Here'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const newBars = section.bars.filter((_, index) => index !== bIdx);
+                clearEditorSelectionState();
+                onActiveBarChange?.(null);
+                updateSection(sIdx, sanitizeSectionJianpuSlurs({ ...section, bars: newBars }, sIdx));
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100"
+            >
+              <Trash2 size={12} />
+              <span>{copy.editor.deleteBar}</span>
+            </button>
+          </div>
+
+          <div className="mt-3 flex items-center gap-1 overflow-x-auto whitespace-nowrap pb-0.5 no-scrollbar">
+            <button
+              type="button"
+              onClick={() => updateBarPanelState(bar, sIdx, bIdx, { riff: !panelState.riff })}
+              title={copy.editor.jianpu}
+              className={`h-7 min-w-[44px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
+                panelState.riff
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                  : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <div className="w-8 scale-[0.9] origin-center">
+                <Jianpu notation="1=2=3=4=" compact className="pointer-events-none" />
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => updateBarPanelState(bar, sIdx, bIdx, { barTime: !panelState.barTime })}
+              title={copy.editor.barTime}
+              className={`h-7 min-w-[38px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
+                panelState.barTime
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                  : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <span className="text-[11px] font-bold leading-none">
+                {bar.timeSignature || song.timeSignature || '4/4'}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => updateBarPanelState(bar, sIdx, bIdx, { rhythm: !panelState.rhythm })}
+              title={copy.editor.rhythm}
+              className={`h-7 min-w-[44px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
+                panelState.rhythm
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                  : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <span className="font-rhythm text-[18px] leading-none select-none whitespace-pre -translate-y-[1px]">
+                ♬
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => updateBarPanelState(bar, sIdx, bIdx, { more: !panelState.more })}
+              title={copy.editor.more}
+              className={`h-7 min-w-[30px] shrink-0 rounded-md border px-1 transition-colors flex items-center justify-center ${
+                panelState.more
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                  : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <span className="text-base leading-none">⋯</span>
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-3">
+            {panelState.riff && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                <div className="mb-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase">{copy.editor.jianpuRiff}</label>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyJianpu(sIdx, bIdx)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                        title={copy.editor.copyJianpu}
+                      >
+                        <Copy size={12} />
+                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePasteJianpu(sIdx, bIdx)}
+                        disabled={copiedJianpu === null}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        title={copiedJianpu === null ? copy.editor.copyJianpuFirst : copy.editor.pasteJianpu}
+                      >
+                        <ArrowDownRight size={12} />
+                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {(() => {
+                  const riffSelected = selection?.type === 'riff' && selection.sIdx === sIdx && selection.bIdx === bIdx;
+                  const riffValue = getRiffValue(sIdx, bIdx);
+                  const beatTokens = getCanonicalBeatTokens(riffValue, sIdx, bIdx);
+                  const beatData = getBeatNoteRanges(riffValue, sIdx, bIdx);
+                  const { beatUnits: jianpuBeatUnits } = getJianpuBarTiming(sIdx, bIdx);
+                  const activeBeatIndex = getActiveJianpuBeatIndex(sIdx, bIdx, riffValue);
+                  const beatRanges = getBeatTokenRanges(riffValue, sIdx, bIdx);
+                  const selectedLayoutNote = (() => {
+                    if (!riffSelected || !selectedJianpuNote) return null;
+
+                    const beat = beatData.find((entry) => entry.notes.some((note) => (
+                      note.start === selectedJianpuNote.start && note.end === selectedJianpuNote.end
+                    )));
+                    if (!beat) return null;
+
+                    const noteIndex = beat.notes.findIndex((note) => (
+                      note.start === selectedJianpuNote.start && note.end === selectedJianpuNote.end
+                    ));
+                    if (noteIndex === -1) return null;
+
+                    return {
+                      tokenIndex: beat.beatIndex,
+                      noteIndex
+                    };
+                  })();
+                  const activeInsertBeatIndex = riffSelected && !selectedLayoutNote ? activeBeatIndex : null;
+                  const activeInsertPosition = riffSelected && !selectedLayoutNote
+                    ? getJianpuInsertSlotInfo(sIdx, bIdx, riffValue, activeBeatIndex, selection.start)
+                    : null;
+                  const leadingOccupiedSlots = beatData.map((beat) => (
+                    Math.max(0, Math.min(jianpuBeatUnits, beat.carryInUnits))
+                  ));
+
+                  return (
+                    <div
+                      className={`relative rounded border bg-white transition-all ${riffSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => {
+                        const nextCaret = beatRanges[activeBeatIndex]?.start ?? riffValue.length;
+                        setJianpuCursor({ sIdx, bIdx, beatIndex: activeBeatIndex });
+                        setRiffCaretSelection(sIdx, bIdx, riffValue, nextCaret);
+                      }}
+                    >
+                      <input
+                        id={`editor-s${sIdx}-b${bIdx}-riff`}
+                        type="text"
+                        value={riffValue}
+                        readOnly
+                        data-riff-input
+                        data-sidx={sIdx}
+                        data-bidx={bIdx}
+                        lang="en"
+                        spellCheck={false}
+                        onBlur={clearSelectionIfFocusLeftEditor}
+                        onKeyDown={e => handleRiffInputKeyDown(e, sIdx, bIdx)}
+                        onPaste={e => e.preventDefault()}
+                        onDrop={e => e.preventDefault()}
+                        className="absolute inset-0 h-full w-full opacity-0 pointer-events-none"
+                        aria-label={`${copy.editor.jianpu} editor for bar ${bIdx + 1}`}
+                      />
+
+                      <div className="min-h-[62px] flex items-center justify-center overflow-visible px-3 py-2">
+                        <Jianpu
+                          tokens={beatTokens}
+                          renderMode="editor"
+                          activeTokenIndex={activeInsertBeatIndex}
+                          activeInsertPosition={activeInsertPosition}
+                          gridSlotCount={jianpuBeatUnits}
+                          leadingOccupiedSlots={leadingOccupiedSlots}
+                          activeNote={selectedLayoutNote}
+                          onTokenClick={(beatIndex, slotIndex) => {
+                            const nextCaret = getRiffCaretForBeatSlot(
+                              sIdx,
+                              bIdx,
+                              riffValue,
+                              beatIndex,
+                              slotIndex
+                            );
+                            setJianpuCursor({ sIdx, bIdx, beatIndex });
+                            setRiffCaretSelection(sIdx, bIdx, riffValue, nextCaret);
+                          }}
+                          onNoteClick={(beatIndex, noteIndex) => {
+                            const note = beatData[beatIndex]?.notes[noteIndex];
+                            if (!note) return;
+                            setJianpuCursor({ sIdx, bIdx, beatIndex });
+                            setRiffSelectionRange(sIdx, bIdx, riffValue, note.start, note.end);
+                          }}
+                          showPlaceholders
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {panelState.barTime && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                <div className="mb-2">
+                  <label className="mb-1 block text-[10px] font-bold uppercase text-gray-400">{copy.editor.barTimeSignature}</label>
+                  {(() => {
+                    const barTimeSignatureParts = splitTimeSignatureInput(bar.timeSignature);
+
+                    const updateBarTimeSignature = (numerator: string, denominator: string) => {
+                      const newBars = [...section.bars];
+                      const value = buildTimeSignatureInput(numerator, denominator);
+                      newBars[bIdx] = { ...bar, timeSignature: value || undefined };
+                      updateSection(sIdx, { ...section, bars: newBars });
+                    };
+
+                    return (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={barTimeSignatureParts.numerator}
+                          lang="en"
+                          spellCheck={false}
+                          onChange={e => updateBarTimeSignature(e.target.value, barTimeSignatureParts.denominator)}
+                          placeholder={splitTimeSignatureInput(song.timeSignature).numerator || '4'}
+                          className="w-full rounded border border-gray-300 bg-white p-1.5 text-center text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                        <span className="text-sm font-bold text-gray-400">/</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={barTimeSignatureParts.denominator}
+                          lang="en"
+                          spellCheck={false}
+                          onChange={e => updateBarTimeSignature(barTimeSignatureParts.numerator, e.target.value)}
+                          placeholder={splitTimeSignatureInput(song.timeSignature).denominator || '4'}
+                          className="w-full rounded border border-gray-300 bg-white p-1.5 text-center text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+                    );
+                  })()}
+                  <div className="mt-1 text-[10px] text-gray-400">
+                    {copy.editor.barTimeHelp}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {panelState.rhythm && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                <div className="mb-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.rhythm}</label>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyRhythm(sIdx, bIdx)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                        title={copy.editor.copyRhythm}
+                      >
+                        <Copy size={12} />
+                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePasteRhythm(sIdx, bIdx)}
+                        disabled={copiedRhythm === null}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        title={copiedRhythm === null ? copy.editor.copyFirst : copy.editor.pasteRhythm}
+                      >
+                        <ArrowDownRight size={12} />
+                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  {(() => {
+                    const effectiveTimeSignature = getBarTimeSignature(bar);
+                    const parsedRhythm = parseRhythmNotation(bar.rhythm || '', effectiveTimeSignature);
+                    const filledBeats = parsedRhythm.visibleEndUnit / parsedRhythm.beatUnits;
+                    const totalBeats = parsedRhythm.barUnits / parsedRhythm.beatUnits;
+
+                    return (
+                      <div className={`mt-1 text-right text-[10px] font-bold tabular-nums ${parsedRhythm.invalidTokens.length > 0 || parsedRhythm.overflow ? 'text-red-500' : 'text-gray-400'}`}>
+                        {effectiveTimeSignature} · {filledBeats.toFixed(filledBeats % 1 === 0 ? 0 : 1)} / {totalBeats.toFixed(totalBeats % 1 === 0 ? 0 : 1)}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {(() => {
+                  const effectiveTimeSignature = getBarTimeSignature(bar);
+                  const parsedRhythm = parseRhythmNotation(bar.rhythm || '', effectiveTimeSignature);
+                  const hasVisibleRhythm = parsedRhythm.events.some((event) => !event.isHidden);
+                  const rhythmSelected = selection?.type === 'rhythm' && selection.sIdx === sIdx && selection.bIdx === bIdx;
+                  const selectedCursorUnit = rhythmSelected ? getSelectedRhythmInsertIndex(selection) : -1;
+
+                  return (
+                    <div
+                      className={`relative mb-2 rounded border bg-white transition-all ${rhythmSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => focusRhythmEditor(sIdx, bIdx)}
+                    >
+                      <input
+                        id={`editor-s${sIdx}-b${bIdx}-rhythm`}
+                        type="text"
+                        value={bar.rhythm || ''}
+                        readOnly
+                        data-rhythm-input
+                        data-sidx={sIdx}
+                        data-bidx={bIdx}
+                        lang="en"
+                        spellCheck={false}
+                        onFocus={() => {
+                          if (!rhythmSelected) {
+                            focusRhythmEditor(sIdx, bIdx);
+                          }
+                        }}
+                        onBlur={clearSelectionIfFocusLeftEditor}
+                        onKeyDown={(e) => handleRhythmInputKeyDown(e, sIdx, bIdx)}
+                        className="absolute inset-0 h-full w-full opacity-0 pointer-events-none"
+                        aria-label={`${copy.editor.rhythm} editor for bar ${bIdx + 1}`}
+                      />
+
+                      <div className="flex min-h-[44px] items-center justify-center overflow-hidden p-1.5">
+                        {hasVisibleRhythm || rhythmSelected ? (
+                          <RhythmNotation
+                            notation={bar.rhythm || ''}
+                            timeSignature={effectiveTimeSignature}
+                            compact
+                            renderMode="editor"
+                            selectionMode="insert"
+                            selectedInsertIndex={selectedCursorUnit}
+                            onInsertSelect={(cursorUnit) => setRhythmInsertSelection(sIdx, bIdx, bar.rhythm || '', cursorUnit)}
+                          />
+                        ) : (
+                          <span className="text-[10px] italic text-gray-300">{copy.editor.clickToStartRhythm}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="mt-1 text-[10px] text-gray-400">
+                  {copy.editor.rhythmHelp}
+                </div>
+              </div>
+            )}
+
+            {panelState.more && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="min-w-0">
+                    <label className="mb-0.5 block truncate text-[10px] font-bold uppercase text-gray-400">{copy.editor.label}</label>
+                    <input
+                      id={`editor-s${sIdx}-b${bIdx}-label`}
+                      type="text"
+                      value={getBarDisplayLabel(bar)}
+                      lang="en"
+                      spellCheck={false}
+                      onChange={e => {
+                        const newBars = [...section.bars];
+                        const val = cleanInput(e.target.value);
+                        newBars[bIdx] = { ...bar, label: val || undefined, riffLabel: undefined, rhythmLabel: undefined };
+                        updateSection(sIdx, { ...section, bars: newBars });
+                      }}
+                      placeholder="e.g. Pno / Dr"
+                      className="w-full rounded border border-gray-300 p-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <label className="mb-0.5 block truncate text-[10px] font-bold uppercase text-gray-400">{copy.editor.annotation}</label>
+                    <input
+                      id={`editor-s${sIdx}-b${bIdx}-annotation`}
+                      type="text"
+                      value={bar.annotation || ''}
+                      lang="en"
+                      spellCheck={false}
+                      onChange={e => {
+                        const newBars = [...section.bars];
+                        const val = cleanInput(e.target.value);
+                        newBars[bIdx] = { ...bar, annotation: val || undefined };
+                        updateSection(sIdx, { ...section, bars: newBars });
+                      }}
+                      placeholder="e.g. Build"
+                      className="w-full rounded border border-gray-300 p-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div className="min-w-0">
+                    <label className="mb-0.5 block truncate text-[10px] font-bold uppercase text-gray-400">{copy.editor.leftMarker}</label>
+                    <select
+                      value={bar.leftMarker || ''}
+                      onChange={e => {
+                        const value = e.target.value as NavigationMarker | '';
+                        const newBars = [...section.bars];
+                        newBars[bIdx] = { ...bar, leftMarker: value || undefined };
+                        updateSection(sIdx, { ...section, bars: newBars });
+                      }}
+                      className="min-w-0 w-full rounded border border-gray-300 bg-white p-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="">{copy.editor.none}</option>
+                      {LEFT_NAVIGATION_MARKER_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{copy.editor[option.label]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="min-w-0">
+                    <label className="mb-0.5 block truncate text-[10px] font-bold uppercase text-gray-400">{copy.editor.rightMarker}</label>
+                    <select
+                      value={bar.rightMarker || ''}
+                      onChange={e => {
+                        const value = e.target.value as NavigationMarker | '';
+                        const newBars = [...section.bars];
+                        newBars[bIdx] = { ...bar, rightMarker: value || undefined };
+                        updateSection(sIdx, { ...section, bars: newBars });
+                      }}
+                      className="min-w-0 w-full rounded border border-gray-300 bg-white p-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="">{copy.editor.none}</option>
+                      {RIGHT_NAVIGATION_MARKER_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{copy.editor[option.label]}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 border-t border-gray-100 pt-2">
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      onClick={() => {
+                        const newBars = [...section.bars];
+                        newBars[bIdx] = { ...bar, repeatStart: !bar.repeatStart };
+                        updateSection(sIdx, { ...section, bars: newBars });
+                      }}
+                      className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.repeatStart ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                      title={copy.editor.startRepeat}
+                    >
+                      <span className="text-[10px] font-bold">|:</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        const newBars = [...section.bars];
+                        const nextRepeatEnd = !bar.repeatEnd;
+                        newBars[bIdx] = { ...bar, repeatEnd: nextRepeatEnd, finalBar: nextRepeatEnd ? false : bar.finalBar };
+                        updateSection(sIdx, { ...section, bars: newBars });
+                      }}
+                      className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.repeatEnd ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                      title={copy.editor.endRepeat}
+                    >
+                      <span className="text-[10px] font-bold">:|</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        const newBars = [...section.bars];
+                        const nextFinalBar = !bar.finalBar;
+                        newBars[bIdx] = { ...bar, finalBar: nextFinalBar, repeatEnd: nextFinalBar ? false : bar.repeatEnd };
+                        updateSection(sIdx, { ...section, bars: newBars });
+                      }}
+                      className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.finalBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                      title={copy.editor.finalBar}
+                    >
+                      <span className="text-[10px] font-bold">||</span>
+                    </button>
+                  </div>
+
+                  <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+                    <span className="shrink-0 text-[10px] font-bold uppercase text-gray-400">{copy.editor.endShort}</span>
+                    <input
+                      list={`compact-ending-options-${sIdx}-${bIdx}`}
+                      value={bar.ending || ''}
+                      onChange={e => {
+                        const val = cleanInput(e.target.value).trim();
+                        const newBars = [...section.bars];
+                        newBars[bIdx] = { ...bar, ending: val || undefined };
+                        updateSection(sIdx, { ...section, bars: newBars });
+                      }}
+                      placeholder="e.g. 1 / 1,2"
+                      className="min-w-0 max-w-[96px] flex-1 rounded border border-gray-300 bg-white p-1 text-[10px] outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <datalist id={`compact-ending-options-${sIdx}-${bIdx}`}>
+                      <option value="1" />
+                      <option value="2" />
+                      <option value="3" />
+                      <option value="4" />
+                      <option value="1,2" />
+                    </datalist>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+      </div>
+    );
+  };
+
+  const renderInlineCompactBarInspector = (section: Section, sIdx: number) => {
+    const compactEditorState = getCompactEditorState(section, sIdx);
+    if (!compactEditorState) return null;
+
+    const pairBarNumbers = compactEditorState.pairIndices.map((index) => (sectionBarOffsets[sIdx] ?? 0) + index + 1);
+    const compactEditorTitle = pairBarNumbers.length > 1
+      ? (language === 'zh' ? `編輯小節 ${pairBarNumbers.join(' · ')}` : `Editing Bars ${pairBarNumbers.join(' · ')}`)
+      : (language === 'zh' ? `編輯小節 ${pairBarNumbers[0]}` : `Editing Bar ${pairBarNumbers[0]}`);
+    const compactEditorHint = pairBarNumbers.length > 1
+      ? (language === 'zh' ? '目前小節與相鄰小節' : 'Current bar and neighboring bar')
+      : (language === 'zh' ? '單一小節編輯' : 'Single bar editor');
+
+    return (
+      <motion.div
+        ref={inlineCompactEditorRef}
+        key={`compact-inline-editor-${section.id || sIdx}-${compactEditorState.primaryBIdx}`}
+        layout
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18, ease: 'easeOut' }}
+        className={`${isCompactBarLayout ? 'col-span-4' : 'col-span-1'} rounded-2xl border border-indigo-200 bg-white/95 p-3 shadow-[0_18px_36px_rgba(99,102,241,0.10)] backdrop-blur-sm`}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-gray-800">{compactEditorTitle}</div>
+            <div className="mt-1 text-xs font-medium text-gray-500">{compactEditorHint}</div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onActiveBarChange?.(null)}
+            className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-500 transition-colors hover:border-gray-300 hover:text-gray-700"
+          >
+            {language === 'zh' ? '收合' : 'Close'}
+          </button>
+        </div>
+
+        <div className={`mt-3 grid gap-3 ${isCompactBarLayout && compactEditorState.pairIndices.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {compactEditorState.pairIndices.map((index) => renderCompactBarEditorPanel(section, sIdx, index, {
+            isPrimary: index === compactEditorState.primaryBIdx,
+            onPromote: () => openCompactBarInspector(section.id ?? null, section.bars[index], sIdx, index)
+          }))}
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <div ref={rootRef} className="relative pb-12">
       {!hideMetadataPanel && (
@@ -4119,7 +4855,7 @@ const SongEditor: React.FC<Props> = ({
       ) : null}
 
       {/* Section Navigation Bar */}
-      <div className="sticky top-0 z-10 -mx-6 mb-5 flex items-center gap-2 overflow-x-auto border-b border-gray-200 bg-white/80 px-6 py-2.5 shadow-sm backdrop-blur-md no-scrollbar md:-mx-8 md:px-8">
+      <div className="sticky top-0 z-10 -mx-4 mb-5 flex items-center gap-2 overflow-x-auto border-b border-gray-200 bg-white/80 px-4 py-2.5 shadow-sm backdrop-blur-md no-scrollbar sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         <div className="flex-shrink-0 text-[10px] font-bold text-gray-400 uppercase tracking-widest mr-2">{copy.editor.jumpTo}</div>
         <Reorder.Group 
           axis="x" 
@@ -4461,6 +5197,7 @@ const SongEditor: React.FC<Props> = ({
           const highlightedSuggestionIndex = isSectionTitleSuggestionsOpen
             ? Math.min(sectionTitleSuggestionState.highlightedIndex, sectionTitleSuggestions.length - 1)
             : -1;
+          const compactEditorState = getCompactEditorState(section, sIdx);
           return (
             <motion.div
               key={section.id || sIdx}
@@ -4626,8 +5363,8 @@ const SongEditor: React.FC<Props> = ({
                     )}
                   </div>
                 </div>
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                <div className="flex min-w-[132px] flex-col gap-1">
+              <div className="flex w-full flex-wrap items-center justify-end gap-2 self-stretch sm:w-auto sm:self-auto">
+                <div className="flex min-w-0 flex-1 flex-col gap-1 sm:min-w-[132px] sm:flex-none">
                   <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400">
                     {copy.editor.changeKeyAfterSection}
                   </div>
@@ -4672,7 +5409,7 @@ const SongEditor: React.FC<Props> = ({
             <motion.div
               layout
               transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
-              className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4"
+              className={barGridClassName}
             >
               {section.bars.map((bar, bIdx) => (
                 (() => {
@@ -4683,6 +5420,199 @@ const SongEditor: React.FC<Props> = ({
                   const isDragTarget = isDragBeforeTarget || isDragAfterTarget;
                   const panelState = getBarPanelState(bar, sIdx, bIdx);
                   const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
+
+                  if (isSpaceConstrainedBarLayout) {
+                    const compactSummary = [getBarDisplayLabel(bar), bar.annotation].filter(Boolean).join(' · ');
+                    const shouldRenderInlineCompactEditor = compactEditorState?.anchorBarIndex === bIdx;
+
+                    return (
+                      <React.Fragment key={`compact-fragment-${bar.id || `${sIdx}-${bIdx}`}`}>
+                        <motion.div
+                          id={`editor-bar-${sIdx}-b${bIdx}`}
+                          ref={node => setBarRef(bar.id, node)}
+                          onMouseDownCapture={() => markActiveBar(sIdx, bIdx)}
+                          onFocusCapture={() => openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx)}
+                          onClick={() => openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx)}
+                          onDragOver={e => {
+                            if (e.dataTransfer.types.includes('application/x-chordmaster-bar')) {
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = 'move';
+                              const insertPosition = getBarInsertPosition(e);
+                              setDragOverTarget(`bar-${insertPosition}-${sIdx}-${bIdx}`);
+                            }
+                          }}
+                          onDragLeave={() => {
+                            setDragOverTarget(current => (
+                              current === `bar-before-${sIdx}-${bIdx}` || current === `bar-after-${sIdx}-${bIdx}`
+                            ) ? null : current);
+                          }}
+                          onDrop={e => handleBarDrop(e, sIdx, bIdx)}
+                          className={`group relative min-w-0 rounded-2xl border bg-white p-2 shadow-sm transition-all ${
+                            isCopiedHighlight
+                              ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-200 shadow-amber-100/80 scale-[1.01]'
+                              : isActiveBar
+                                  ? `${colors.border} scale-[1.01]`
+                                  : isDragTarget
+                                    ? 'border-indigo-300 shadow-[0_0_0_2px_rgba(99,102,241,0.12)]'
+                                    : 'border-gray-200 hover:border-indigo-300'
+                          }`}
+                          style={isActiveBar && !isCopiedHighlight ? { boxShadow: `0 0 0 2px ${accentHighlight.barRing}, 0 14px 26px ${accentHighlight.barGlow}` } : undefined}
+                        >
+                        {isDragBeforeTarget && (
+                          <div className="absolute inset-y-2 -left-[3px] z-30 w-[4px] rounded-full bg-indigo-500 shadow-[0_0_0_3px_rgba(99,102,241,0.15)] pointer-events-none" />
+                        )}
+                        {isDragAfterTarget && (
+                          <div className="absolute inset-y-2 -right-[3px] z-30 w-[4px] rounded-full bg-indigo-500 shadow-[0_0_0_3px_rgba(99,102,241,0.15)] pointer-events-none" />
+                        )}
+
+                        <div className="mb-2 flex items-start justify-between gap-1.5">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1">
+                              <div className="inline-flex min-w-[1.75rem] items-center justify-center rounded-md border border-gray-100 bg-gray-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-gray-400">
+                                {globalBarNumber}
+                              </div>
+                              <div className="inline-flex items-center rounded-md border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-indigo-600">
+                                {bar.timeSignature || song.timeSignature}
+                              </div>
+                            </div>
+                            {compactSummary ? (
+                              <div className="mt-1 truncate text-[10px] font-medium text-gray-400">
+                                {compactSummary}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              draggable
+                              onClick={e => e.stopPropagation()}
+                              onDragStart={e => handleBarDragStart(e, sIdx, bIdx)}
+                              onDragEnd={() => {
+                                setDragOverTarget(null);
+                                setIsBarDragging(false);
+                              }}
+                              className="flex h-7 w-7 cursor-grab items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-300 transition-colors hover:border-indigo-300 hover:text-indigo-500 active:cursor-grabbing"
+                              title={copy.editor.dragToMoveBar}
+                            >
+                              <GripHorizontal size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                toggleCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
+                              }}
+                              className={`flex h-7 w-7 items-center justify-center rounded-full border transition-colors ${
+                                isActiveBar
+                                  ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                                  : 'border-gray-200 bg-white text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+                              }`}
+                              title={copy.editor.more}
+                            >
+                              <ArrowUpRight size={13} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">{copy.editor.chords}</label>
+                          <input
+                            id={`editor-s${sIdx}-b${bIdx}-chords`}
+                            type="text"
+                            value={bar.chords.join(' ')}
+                            data-chord-input
+                            data-sidx={sIdx}
+                            data-bidx={bIdx}
+                            lang="en"
+                            spellCheck={false}
+                            aria-keyshortcuts="Enter"
+                            onClick={e => e.stopPropagation()}
+                            onFocus={e => {
+                              const input = e.currentTarget;
+                              const len = input.value.length;
+                              openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
+                              if (!selection || selection.sIdx !== sIdx || selection.bIdx !== bIdx || selection.type !== 'chord') {
+                                setTimeout(() => {
+                                  input.setSelectionRange(len, len);
+                                }, 0);
+                              }
+                              handleSelection(sIdx, bIdx, e, 'chord');
+                            }}
+                            onMouseUp={e => handleSelection(sIdx, bIdx, e, 'chord')}
+                            onSelect={e => handleSelection(sIdx, bIdx, e, 'chord')}
+                            onKeyUp={e => handleSelection(sIdx, bIdx, e, 'chord')}
+                            onBlur={clearSelectionIfFocusLeftEditor}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+                                if ((e.nativeEvent as KeyboardEvent).isComposing) {
+                                  return;
+                                }
+                                e.preventDefault();
+                                insertEmptyBarAt(sIdx, bIdx + 1);
+                                return;
+                              }
+
+                              if (e.key === 'Tab') {
+                                const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-chord-input]'));
+                                const idx = inputs.indexOf(e.currentTarget);
+                                if (e.shiftKey) {
+                                  if (idx > 0) {
+                                    e.preventDefault();
+                                    inputs[idx - 1].focus();
+                                    inputs[idx - 1].select();
+                                  }
+                                } else if (idx < inputs.length - 1) {
+                                  e.preventDefault();
+                                  inputs[idx + 1].focus();
+                                  inputs[idx + 1].select();
+                                }
+                              }
+                            }}
+                            onChange={e => {
+                              const input = e.currentTarget;
+                              const start = input.selectionStart;
+                              const end = input.selectionEnd;
+
+                              const newBars = [...section.bars];
+                              const val = cleanInput(e.target.value);
+                              const isNashvillePattern = (s: string) => /^([b#]?)([1-7])/.test(s.trim());
+                              const sectionHasNashville = section.bars.some((candidateBar, idx) => (
+                                idx !== bIdx && candidateBar.chords.some(isNashvillePattern)
+                              ));
+                              const currentInputIsNashville = isNashvillePattern(val.split(' ')[0] || '');
+                              const isNashvilleMode = sectionHasNashville || currentInputIsNashville;
+                              const processedVal = isNashvilleMode
+                                ? val.replace(/(^|\s|\/)([ac-g])/g, (m, p1, p2) => p1 + p2.toUpperCase())
+                                : val.replace(/(^|\s|\/)([a-g])/g, (m, p1, p2) => p1 + p2.toUpperCase());
+                              const chordTokens = processedVal.split(' ').map((token) => (
+                                isNashvilleMode ? token : normalizeChordEnharmonic(token)
+                              ));
+
+                              newBars[bIdx] = {
+                                ...bar,
+                                chords: hasVisibleChordTokens(chordTokens) ? chordTokens : []
+                              };
+                              updateSection(sIdx, { ...section, bars: newBars });
+
+                              setSelection({
+                                sIdx,
+                                bIdx,
+                                start: start ?? 0,
+                                end: end ?? 0,
+                                text: input.value.substring(start ?? 0, end ?? 0),
+                                type: 'chord'
+                              });
+                            }}
+                            placeholder="e.g. C G/B Am"
+                            className="h-10 w-full rounded-xl border border-gray-300 px-2.5 font-mono text-sm outline-none transition-colors focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                        </motion.div>
+                        {shouldRenderInlineCompactEditor ? renderInlineCompactBarInspector(section, sIdx) : null}
+                      </React.Fragment>
+                    );
+                  }
 
                   return (
                 <motion.div
@@ -5418,13 +6348,13 @@ const SongEditor: React.FC<Props> = ({
                   setDragOverTarget(current => current === `append-${sIdx}` ? null : current);
                 }}
                 onDrop={e => handleAppendBarDrop(e, sIdx)}
-                className={`border-2 border-dashed rounded min-h-[200px] transition-all ${
+                className={`border-2 border-dashed rounded transition-all ${
                   dragOverTarget === `append-${sIdx}`
                     ? 'bg-amber-50 border-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.16),0_18px_40px_rgba(251,191,36,0.20)]'
                     : isBarDragging
                       ? 'bg-amber-50/70 border-amber-300 shadow-[0_0_0_3px_rgba(251,191,36,0.12),0_10px_26px_rgba(251,191,36,0.14)]'
                       : 'bg-white border-gray-300 hover:border-indigo-300 hover:bg-indigo-50'
-                }`}
+                } ${isSpaceConstrainedBarLayout ? 'min-h-[124px]' : 'min-h-[200px]'}`}
               >
                 <button 
                   type="button"
@@ -5435,13 +6365,13 @@ const SongEditor: React.FC<Props> = ({
                     }
                     insertEmptyBarAt(sIdx, section.bars.length);
                   }}
-                  className={`w-full h-full flex flex-col items-center justify-center min-h-[196px] transition-colors ${
+                  className={`flex h-full w-full flex-col items-center justify-center transition-colors ${
                     dragOverTarget === `append-${sIdx}`
                       ? 'text-amber-700'
                       : isBarDragging
                         ? 'text-amber-600'
                         : 'text-gray-400 hover:text-indigo-500'
-                  }`}
+                  } ${isSpaceConstrainedBarLayout ? 'min-h-[120px]' : 'min-h-[196px]'}`}
                 >
                   <Plus size={24} className="mb-1" />
                   <span className="text-xs font-bold uppercase tracking-wider">
@@ -5476,7 +6406,7 @@ const SongEditor: React.FC<Props> = ({
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-white shadow-2xl border border-gray-200 rounded-2xl p-2 flex items-center gap-2 z-[100] min-w-[300px] max-w-[calc(100vw-2rem)]"
+            className="fixed bottom-4 left-1/2 z-[100] flex max-w-[calc(100vw-1rem)] -translate-x-1/2 flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl sm:bottom-8 sm:max-w-[calc(100vw-2rem)]"
             onMouseDown={e => e.preventDefault()} // Prevent losing focus/selection
           >
             <div className="px-3 py-1 border-r border-gray-100 mr-1">

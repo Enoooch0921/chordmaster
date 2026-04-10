@@ -40,6 +40,9 @@ const COLLAPSED_SIDEBAR_WIDTH = 80;
 const DEFAULT_EXPANDED_SIDEBAR_WIDTH = 420;
 const MIN_EXPANDED_SIDEBAR_WIDTH = 360;
 const MAX_EXPANDED_SIDEBAR_WIDTH = 640;
+const PHONE_VIEWPORT_BREAKPOINT = 640;
+const SIDEBAR_OVERLAY_BREAKPOINT = 1280;
+const SPLIT_EDITOR_BREAKPOINT = 1360;
 const PREVIEW_TARGET_WIDTH = 794;
 const PREVIEW_MIN_SCALE = 0.35;
 const PREVIEW_MAX_SCALE = 2.4;
@@ -900,6 +903,9 @@ export default function App() {
   const [highlightedSectionIds, setHighlightedSectionIds] = useState<string[]>([]);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [editorFocusRequest, setEditorFocusRequest] = useState<EditorFocusRequest | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(() => (
+    typeof window === 'undefined' ? SPLIT_EDITOR_BREAKPOINT : window.innerWidth
+  ));
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
@@ -909,6 +915,8 @@ export default function App() {
   const [setlistSongSearchQuery, setSetlistSongSearchQuery] = useState('');
   const [isSetlistAddSongsOpen, setIsSetlistAddSongsOpen] = useState(false);
   const [isSetlistActionsMenuOpen, setIsSetlistActionsMenuOpen] = useState(false);
+  const [isToolbarOverflowMenuOpen, setIsToolbarOverflowMenuOpen] = useState(false);
+  const [isGoogleAccountMenuOpen, setIsGoogleAccountMenuOpen] = useState(false);
   const [draggingSetlistSongId, setDraggingSetlistSongId] = useState<string | null>(null);
   const [dragOverSetlistSongId, setDragOverSetlistSongId] = useState<string | null>(null);
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
@@ -916,6 +924,8 @@ export default function App() {
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const setlistActionsMenuRef = useRef<HTMLDivElement>(null);
+  const toolbarOverflowMenuRef = useRef<HTMLDivElement>(null);
+  const googleAccountMenuRef = useRef<HTMLDivElement>(null);
   const importLibraryInputRef = useRef<HTMLInputElement>(null);
   const googleSignInRef = useRef<HTMLDivElement>(null);
   const googleIdentityInitializedRef = useRef(false);
@@ -943,7 +953,37 @@ export default function App() {
   const isSheetView = activeAppView === 'sheet';
   const isSetlistMode = workspaceMode === 'setlists';
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
-  const currentSidebarWidth = isSidebarExpanded ? sidebarWidth : COLLAPSED_SIDEBAR_WIDTH;
+  const isPhoneViewport = viewportWidth < PHONE_VIEWPORT_BREAKPOINT;
+  const usesOverlaySidebar = viewportWidth < SIDEBAR_OVERLAY_BREAKPOINT;
+  const collapsedSidebarWidth = isPhoneViewport ? 72 : COLLAPSED_SIDEBAR_WIDTH;
+  const responsiveSidebarMinWidth = usesOverlaySidebar
+    ? Math.max(collapsedSidebarWidth + 216, 288)
+    : MIN_EXPANDED_SIDEBAR_WIDTH;
+  const responsiveSidebarMaxWidth = usesOverlaySidebar
+    ? Math.min(Math.max(Math.floor(viewportWidth * 0.86), responsiveSidebarMinWidth), 420)
+    : MAX_EXPANDED_SIDEBAR_WIDTH;
+  const resolvedSidebarWidth = Math.max(
+    responsiveSidebarMinWidth,
+    Math.min(responsiveSidebarMaxWidth, sidebarWidth)
+  );
+  const currentSidebarWidth = isSidebarExpanded ? resolvedSidebarWidth : collapsedSidebarWidth;
+  const sidebarShellWidth = usesOverlaySidebar ? collapsedSidebarWidth : currentSidebarWidth;
+  const mainViewportWidth = Math.max(0, viewportWidth - sidebarShellWidth);
+  const shouldUseSplitEditor = mainViewportWidth >= 1360;
+  const splitEditorWidth = Math.max(680, Math.min(860, Math.round(mainViewportWidth * 0.5)));
+  const overlayEditorWidth = Math.min(
+    Math.max(560, Math.round(mainViewportWidth * 0.52)),
+    Math.max(0, mainViewportWidth - (isPhoneViewport ? 0 : 32))
+  );
+  const usesDenseDesktopHeader = isSheetView && mainViewportWidth >= 1320;
+  const isToolbarSecondaryCollapsed = mainViewportWidth < 1240;
+  const toolbarPrimaryGridClassName = mainViewportWidth < 720
+    ? 'grid-cols-2'
+    : mainViewportWidth < 1040
+      ? 'grid-cols-3'
+      : mainViewportWidth < 1380
+        ? 'grid-cols-4'
+        : 'grid-cols-7';
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
   const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? null;
   const selectedSetlistSong = selectedSetlist?.songs.find((item) => item.id === selectedSetlistSongId) ?? selectedSetlist?.songs[0] ?? null;
@@ -969,6 +1009,27 @@ export default function App() {
         ? selectedSetlist?.name || copy.untitledSetlist
         : song.title || copy.untitledSong;
   const workspaceModeBadge = isSetlistMode ? copy.setlistModeBadge : copy.songModeBadge;
+  const toolbarPrimaryActionClassName = 'flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
+  const toolbarPrimaryEmphasisActionClassName = 'flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-gray-800';
+  const toolbarSecondaryToggleClassName = (active: boolean) => `inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-bold transition-all ${
+    active
+      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+      : 'border border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-600'
+  }`;
+  const desktopToolbarActionClassName = 'inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
+  const desktopToolbarPrimaryActionClassName = 'inline-flex h-9 items-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-gray-800';
+  const desktopToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => `inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
+    active
+      ? tone === 'accent'
+        ? 'border-amber-200 bg-amber-50 text-amber-700'
+        : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+      : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
+  }`;
+  const compactEditorToggleLabel = language === 'zh' ? '編輯' : 'Editor';
+  const compactLyricsToggleLabel = language === 'zh' ? '歌詞' : 'Lyrics';
+  const compactAutoSaveLabel = language === 'zh' ? '自存' : 'Auto';
+  const compactSaveLabel = language === 'zh' ? '儲存' : 'Save';
+  const compactPdfLabel = language === 'zh' ? 'PDF' : 'PDF';
   const normalizedLibrarySearchQuery = librarySearchQuery.trim().toLowerCase();
   const normalizedSetlistSearchQuery = setlistSearchQuery.trim().toLowerCase();
   const normalizedSetlistSongSearchQuery = setlistSongSearchQuery.trim().toLowerCase();
@@ -1091,6 +1152,23 @@ export default function App() {
       return;
     }
 
+    const handleResize = () => {
+      setViewportWidth(window.innerWidth);
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
 
@@ -1101,8 +1179,8 @@ export default function App() {
 
     const handlePointerMove = (event: MouseEvent) => {
       const nextWidth = Math.max(
-        MIN_EXPANDED_SIDEBAR_WIDTH,
-        Math.min(MAX_EXPANDED_SIDEBAR_WIDTH, event.clientX)
+        responsiveSidebarMinWidth,
+        Math.min(responsiveSidebarMaxWidth, event.clientX)
       );
       setSidebarWidth(nextWidth);
     };
@@ -1122,7 +1200,7 @@ export default function App() {
       window.removeEventListener('mousemove', handlePointerMove);
       window.removeEventListener('mouseup', handlePointerUp);
     };
-  }, [isSidebarResizing]);
+  }, [isSidebarResizing, responsiveSidebarMaxWidth, responsiveSidebarMinWidth]);
 
   useEffect(() => {
     if (!isEditing || !activeSectionId) return;
@@ -1373,10 +1451,12 @@ export default function App() {
         return;
       }
 
-      const isMobile = window.innerWidth < 768;
-      const padding = isMobile ? 32 : 96;
-      const containerWidth = Math.max(220, previewRef.current.offsetWidth - padding - PREVIEW_SAFETY_MARGIN);
-      const containerHeight = Math.max(220, previewRef.current.offsetHeight - padding - PREVIEW_SAFETY_MARGIN);
+      const previewRootWidth = previewRef.current.offsetWidth;
+      const previewRootHeight = previewRef.current.offsetHeight;
+      const horizontalPadding = previewRootWidth < 640 ? 24 : previewRootWidth < 960 ? 48 : 96;
+      const verticalPadding = previewRootWidth < 640 ? 24 : previewRootWidth < 960 ? 40 : 96;
+      const containerWidth = Math.max(220, previewRootWidth - horizontalPadding - PREVIEW_SAFETY_MARGIN);
+      const containerHeight = Math.max(220, previewRootHeight - verticalPadding - PREVIEW_SAFETY_MARGIN);
       setPreviewViewportWidth(containerWidth);
       setPreviewViewportHeight(containerHeight);
 
@@ -2244,11 +2324,45 @@ export default function App() {
       if (setlistActionsMenuRef.current && !setlistActionsMenuRef.current.contains(event.target as Node)) {
         setIsSetlistActionsMenuOpen(false);
       }
+
+      if (toolbarOverflowMenuRef.current && !toolbarOverflowMenuRef.current.contains(event.target as Node)) {
+        setIsToolbarOverflowMenuOpen(false);
+      }
+
+      if (googleAccountMenuRef.current && !googleAccountMenuRef.current.contains(event.target as Node)) {
+        setIsGoogleAccountMenuOpen(false);
+      }
+    };
+
+    const handleEscapeKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      setIsSetlistActionsMenuOpen(false);
+      setIsToolbarOverflowMenuOpen(false);
+      setIsGoogleAccountMenuOpen(false);
     };
 
     window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleEscapeKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleEscapeKeyDown);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!isSheetView || isSetlistMode || !isToolbarSecondaryCollapsed) {
+      setIsToolbarOverflowMenuOpen(false);
+    }
+  }, [isSetlistMode, isSheetView, isToolbarSecondaryCollapsed]);
+
+  useEffect(() => {
+    if (!usesDenseDesktopHeader) {
+      setIsGoogleAccountMenuOpen(false);
+    }
+  }, [usesDenseDesktopHeader]);
 
   useEffect(() => {
     return () => {
@@ -2534,6 +2648,7 @@ export default function App() {
       window.google.accounts.id.disableAutoSelect();
     }
 
+    setIsGoogleAccountMenuOpen(false);
     setGoogleUser(null);
   };
 
@@ -2548,36 +2663,60 @@ export default function App() {
   return (
     <div
       data-app-root
-      className="h-screen flex bg-[#F5F5F4] text-[#1C1917] font-sans selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden"
+      className="relative flex h-[100dvh] min-h-[100dvh] min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900"
     >
+      {usesOverlaySidebar && isSidebarExpanded && (
+        <button
+          type="button"
+          onClick={() => {
+            setIsSidebarPinned(false);
+            setIsSidebarHovered(false);
+          }}
+          className="absolute inset-0 z-40 bg-stone-950/10 backdrop-blur-[1px]"
+          aria-label={copy.collapseSongList}
+        />
+      )}
+
       {/* Navigation Rail / Sidebar */}
       <motion.aside
         data-sidebar
         initial={false}
-        animate={{ width: currentSidebarWidth }}
+        animate={{ width: sidebarShellWidth }}
         transition={isSidebarResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.32 }}
-        onMouseEnter={handleSidebarHoverTrigger}
-        onMouseMove={handleSidebarHoverTrigger}
-        onMouseLeave={() => {
-          if (!isSidebarPinned) {
-            setIsSidebarHovered(false);
-          }
-        }}
-        className="relative flex-shrink-0 bg-white border-r border-gray-200 z-50 overflow-hidden"
+        className="relative z-50 flex-shrink-0 overflow-visible"
       >
-        {isSidebarExpanded && (
-          <button
-            type="button"
-            onMouseDown={handleSidebarResizeStart}
-            className="absolute right-0 top-1/2 z-50 h-14 w-5 -translate-y-1/2 cursor-col-resize bg-transparent"
-            title={copy.resizeSongList}
-            aria-label={copy.resizeSongList}
+        <motion.div
+          initial={false}
+          animate={{ width: currentSidebarWidth }}
+          transition={isSidebarResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.32 }}
+          onMouseEnter={handleSidebarHoverTrigger}
+          onMouseMove={handleSidebarHoverTrigger}
+          onMouseLeave={() => {
+            if (!isSidebarPinned) {
+              setIsSidebarHovered(false);
+            }
+          }}
+          className={`absolute inset-y-0 left-0 flex overflow-hidden border-r border-gray-200 bg-white ${
+            usesOverlaySidebar && isSidebarExpanded
+              ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
+              : ''
+          }`}
+        >
+          {isSidebarExpanded && !usesOverlaySidebar && (
+            <button
+              type="button"
+              onMouseDown={handleSidebarResizeStart}
+              className="absolute right-0 top-1/2 z-50 h-14 w-5 -translate-y-1/2 cursor-col-resize bg-transparent"
+              title={copy.resizeSongList}
+              aria-label={copy.resizeSongList}
+            >
+              <span className="absolute right-[2px] top-1/2 h-12 w-[8px] -translate-y-1/2 rounded-full border border-indigo-100 bg-white shadow-sm" />
+            </button>
+          )}
+          <div
+            className="flex h-full shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white py-4 sm:py-5"
+            style={{ width: `${collapsedSidebarWidth}px` }}
           >
-            <span className="absolute right-[2px] top-1/2 h-12 w-[8px] -translate-y-1/2 rounded-full border border-indigo-100 bg-white shadow-sm" />
-          </button>
-        )}
-        <div className="h-full flex">
-          <div className="w-20 shrink-0 border-r border-gray-200 flex flex-col items-center py-5 gap-3 bg-white">
             <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-indigo-200 ring-1 ring-indigo-100">
               <img src={logoSrc} alt="ChordMaster" className="h-full w-full object-cover" />
             </div>
@@ -3211,274 +3350,585 @@ export default function App() {
               </>
             )}
           </motion.div>
-        </div>
+        </motion.div>
       </motion.aside>
 
       {/* Main Content */}
-      <main data-main-panel className="flex-1 flex flex-col min-w-0">
-        <div className="flex-shrink-0 border-b border-amber-200 bg-amber-50 px-8 py-2.5">
+      <main data-main-panel className="flex min-w-0 flex-1 flex-col">
+        <div className="flex-shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2.5 sm:px-6 xl:px-8">
           <p className="text-sm font-medium text-amber-800">
             {copy.testVersionWarning}
           </p>
         </div>
 
         {/* Top Control Bar */}
-        <header data-topbar className="bg-white/80 backdrop-blur-md border-b border-gray-200 px-8 py-4 flex justify-between items-center z-40 flex-shrink-0">
-            <div className="flex items-center gap-4 min-w-0">
-            <div className="flex items-center gap-2">
-              <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
-              <h2 className="font-display text-lg font-bold tracking-tight">{APP_NAME}</h2>
-              <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-500">
-                v{APP_VERSION}
-              </span>
-            </div>
-            <div className="h-4 w-px bg-gray-200" />
-            <div className="flex min-w-0 items-center gap-2">
-              {activeAppView === 'sheet' && (
-                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold tracking-[0.08em] ${
-                  isSetlistMode
-                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
-                    : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
-                }`}>
-                  {workspaceModeBadge}
-                </span>
-              )}
-              <span className="text-sm font-medium text-gray-500 truncate">{activeAppViewLabel}</span>
-            </div>
-          </div>
+        <header data-topbar className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md ${
+          usesDenseDesktopHeader ? 'px-4 py-2.5 sm:px-5 xl:px-6' : 'px-4 py-3 sm:px-6 sm:py-4 xl:px-8'
+        }`}>
+          {usesDenseDesktopHeader ? (
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                  <h2 className="truncate font-display text-lg font-bold tracking-tight text-gray-900">{APP_NAME}</h2>
+                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">
+                    v{APP_VERSION}
+                  </span>
+                </div>
 
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
-              <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                <div className="h-4 w-px shrink-0 bg-gray-200" />
+
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold tracking-[0.08em] ${
+                    isSetlistMode
+                      ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                      : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
+                  }`}>
+                    {workspaceModeBadge}
+                  </span>
+                  <span className="max-w-[24rem] truncate text-sm font-medium text-gray-500">
+                    {activeAppViewLabel}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex min-w-0 items-center justify-end gap-2 overflow-x-auto pb-1 no-scrollbar">
                 <button
                   type="button"
-                  onClick={() => setLanguage('zh')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
-                    language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-                  }`}
+                  onClick={() => setIsEditing(!isEditing)}
+                  title={isEditing ? copy.closeEditor : copy.openEditor}
+                  className={isEditing ? desktopToolbarPrimaryActionClassName : desktopToolbarActionClassName}
                 >
-                  中文
+                  <Edit3 size={14} />
+                  <span>{compactEditorToggleLabel}</span>
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => setLanguage('en')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
-                    language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                  onClick={handleToggleLyricsMode}
+                  title={copy.lyricsMode}
+                  className={desktopToolbarToggleClassName(isLyricsMode, 'accent')}
+                >
+                  <FileText size={14} />
+                  <span>{compactLyricsToggleLabel}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAutoSaveEnabled((current) => !current)}
+                  title={copy.autoSave}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
+                    isAutoSaveEnabled
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
                   }`}
                 >
-                  EN
+                  <span>{compactAutoSaveLabel}</span>
+                  <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    isAutoSaveEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
+                  }`}>
+                    {isAutoSaveEnabled ? copy.on : copy.off}
+                  </span>
                 </button>
+
+                <KeyPicker
+                  value={isSetlistMode ? currentSetlistKey : song.currentKey}
+                  onChange={(key) => {
+                    if (!key) {
+                      return;
+                    }
+
+                    if (isSetlistMode) {
+                      handleSetlistKeyChange(key);
+                    } else {
+                      handleKeyChange(key);
+                    }
+                  }}
+                  label={copy.key}
+                  originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                  panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                  triggerDensity="compact"
+                  buttonClassName="h-9 min-w-[60px] rounded-lg px-2.5"
+                  metaTextClassName="hidden"
+                  triggerIconSize={14}
+                />
+
+                <CapoPicker
+                  value={isSetlistMode ? currentSetlistCapo : currentCapo}
+                  currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
+                  onChange={(capo) => {
+                    if (isSetlistMode && selectedSetlistSong) {
+                      handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+                        ...currentSetlistSong,
+                        capo
+                      }));
+                    } else {
+                      handleSongChange({ ...song, capo });
+                    }
+                  }}
+                  label="Capo"
+                  triggerDensity="compact"
+                  buttonClassName="h-9 min-w-[70px] rounded-lg px-2.5"
+                  showPlayKey={mainViewportWidth >= 1600}
+                  triggerIconSize={14}
+                />
+
+                {!isSetlistMode && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                      title="123"
+                      className={desktopToolbarToggleClassName(song.showNashvilleNumbers)}
+                    >
+                      <Hash size={13} />
+                      <span>123</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                      title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
+                      className={desktopToolbarToggleClassName(song.showAbsoluteJianpu)}
+                    >
+                      <Music2 size={13} />
+                      <span>1=C</span>
+                    </button>
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleSaveLibrary}
+                  title={workspaceIsDirty ? copy.saveChanges : copy.saved}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
+                    workspaceIsDirty
+                      ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <Save size={14} />
+                  <span>{compactSaveLabel}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportPdf}
+                  disabled={isExportingPdf}
+                  title={isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
+                    isExportingPdf
+                      ? 'cursor-wait bg-gray-400 text-white'
+                      : 'bg-gray-900 text-white hover:bg-gray-800'
+                  }`}
+                >
+                  <Save size={14} />
+                  <span>{compactPdfLabel}</span>
+                </button>
+
+                {showGoogleAuth && googleUser ? (
+                  <div ref={googleAccountMenuRef} className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 text-[12px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
+                      aria-haspopup="menu"
+                      aria-expanded={isGoogleAccountMenuOpen}
+                    >
+                      {googleUser.picture ? (
+                        <img
+                          src={googleUser.picture}
+                          alt={googleUser.name}
+                          className="h-6 w-6 rounded-full border border-gray-200 object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
+                          {googleUser.name.slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                      <span className="max-w-[88px] truncate">{googleUser.name}</span>
+                      <ChevronDown size={13} className={`transition-transform ${isGoogleAccountMenuOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {isGoogleAccountMenuOpen && (
+                      <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                        <div className="rounded-xl bg-gray-50 px-3 py-2">
+                          <div className="truncate text-sm font-semibold text-gray-800">{googleUser.name}</div>
+                          <div className="mt-0.5 truncate text-[11px] text-gray-500">{googleUser.email}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleGoogleSignOut}
+                          className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                        >
+                          <LogOut size={14} />
+                          <span>{copy.signOut}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : showGoogleAuth ? (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <div ref={googleSignInRef} className="flex min-h-9 min-w-0 items-center justify-end" />
+                    {googleAuthError ? (
+                      <span className="text-[10px] font-medium text-amber-600" title={googleAuthError}>!</span>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <div className="inline-flex shrink-0 items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setLanguage('zh')}
+                    className={`rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${
+                      language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    中文
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLanguage('en')}
+                    className={`rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${
+                      language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    EN
+                  </button>
+                </div>
               </div>
             </div>
-            {isSheetView ? (
-            <div className="flex items-center gap-3 flex-wrap justify-end">
-              {showGoogleAuth && googleUser ? (
-                <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-2 py-1.5 shadow-sm">
-                  {googleUser.picture ? (
-                    <img
-                      src={googleUser.picture}
-                      alt={googleUser.name}
-                      className="h-8 w-8 rounded-full border border-gray-200 object-cover"
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                    <h2 className="truncate font-display text-lg font-bold tracking-tight">{APP_NAME}</h2>
+                    <span className="hidden rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-500 sm:inline-flex">
+                      v{APP_VERSION}
+                    </span>
+                  </div>
+                  <div className="hidden h-4 w-px bg-gray-200 sm:block" />
+                  <div className="flex min-w-0 items-center gap-2">
+                    {activeAppView === 'sheet' && (
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold tracking-[0.08em] ${
+                        isSetlistMode
+                          ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                          : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
+                      }`}>
+                        {workspaceModeBadge}
+                      </span>
+                    )}
+                    <span className="max-w-[min(40vw,18rem)] truncate text-sm font-medium text-gray-500 sm:max-w-[22rem]">
+                      {activeAppViewLabel}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-3 self-stretch sm:self-auto">
+                  {showGoogleAuth && googleUser ? (
+                    <div className="flex max-w-full min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 shadow-sm">
+                      {googleUser.picture ? (
+                        <img
+                          src={googleUser.picture}
+                          alt={googleUser.name}
+                          className="h-8 w-8 rounded-full border border-gray-200 object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
+                          {googleUser.name.slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="min-w-0 text-left">
+                        <div className="max-w-[180px] truncate text-sm font-bold text-gray-800">{googleUser.name}</div>
+                        <div className="max-w-[180px] truncate text-[11px] text-gray-500">{googleUser.email}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleGoogleSignOut}
+                        className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-gray-500 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                        title={copy.signOut}
+                        aria-label={copy.signOut}
+                      >
+                        <LogOut size={14} />
+                      </button>
+                    </div>
+                  ) : showGoogleAuth ? (
+                    <div className="flex w-full min-w-0 max-w-full flex-col gap-1 sm:w-auto">
+                      <div ref={googleSignInRef} className="flex min-h-10 min-w-0 items-center justify-end sm:min-w-[220px]" />
+                      {googleAuthError && (
+                        <div className="text-right text-[11px] font-medium text-amber-600">{googleAuthError}</div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setLanguage('zh')}
+                      className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                        language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      中文
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLanguage('en')}
+                      className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${
+                        language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      EN
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {isSheetView ? (
+              <div className="flex min-w-0 flex-col gap-2.5">
+                <div className="flex min-w-0 flex-col gap-2.5">
+                  <div className={`grid min-w-0 gap-2 ${toolbarPrimaryGridClassName}`}>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(!isEditing)}
+                      className={isEditing ? toolbarPrimaryEmphasisActionClassName : toolbarPrimaryActionClassName}
+                    >
+                      <Edit3 size={16} />
+                      <span>{isEditing ? copy.closeEditor : copy.openEditor}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleLyricsMode}
+                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold shadow-sm transition-all ${
+                        isLyricsMode
+                          ? 'bg-amber-500 text-white shadow-amber-100'
+                          : 'border border-gray-200 bg-white text-gray-700 hover:border-amber-200 hover:bg-amber-50'
+                      }`}
+                    >
+                      <FileText size={16} />
+                      <span>{copy.lyricsMode}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsAutoSaveEnabled((current) => !current)}
+                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-all ${
+                        isAutoSaveEnabled
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span>{copy.autoSave}</span>
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        isAutoSaveEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
+                      }`}>
+                        {isAutoSaveEnabled ? copy.on : copy.off}
+                      </span>
+                    </button>
+
+                    <KeyPicker
+                      value={isSetlistMode ? currentSetlistKey : song.currentKey}
+                      onChange={(key) => {
+                        if (!key) {
+                          return;
+                        }
+
+                        if (isSetlistMode) {
+                          handleSetlistKeyChange(key);
+                        } else {
+                          handleKeyChange(key);
+                        }
+                      }}
+                      label={copy.key}
+                      originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                      triggerMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                      panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                      buttonClassName="h-11 w-full min-w-0"
                     />
-                  ) : (
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-                      {googleUser.name.slice(0, 1).toUpperCase()}
+
+                    <CapoPicker
+                      value={isSetlistMode ? currentSetlistCapo : currentCapo}
+                      currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
+                      onChange={(capo) => {
+                        if (isSetlistMode && selectedSetlistSong) {
+                          handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+                            ...currentSetlistSong,
+                            capo
+                          }));
+                        } else {
+                          handleSongChange({ ...song, capo });
+                        }
+                      }}
+                      label="Capo"
+                      buttonClassName="h-11 w-full min-w-0"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={handleSaveLibrary}
+                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-all ${
+                        workspaceIsDirty
+                          ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
+                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Save size={16} />
+                      <span>{workspaceIsDirty ? copy.saveChanges : copy.saved}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleExportPdf}
+                      disabled={isExportingPdf}
+                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold shadow-sm transition-all ${
+                        isExportingPdf
+                          ? 'cursor-wait bg-gray-400 text-white'
+                          : 'bg-gray-900 text-white hover:bg-gray-800'
+                      }`}
+                    >
+                      <Save size={16} />
+                      <span>{isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}</span>
+                    </button>
+                  </div>
+
+                  {!isSetlistMode && (
+                    <div className="flex min-w-0 items-center justify-end gap-2">
+                      {isToolbarSecondaryCollapsed ? (
+                        <div ref={toolbarOverflowMenuRef} className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setIsToolbarOverflowMenuOpen((current) => !current)}
+                            className="inline-flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-600 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                            aria-haspopup="menu"
+                            aria-expanded={isToolbarOverflowMenuOpen}
+                          >
+                            <MoreHorizontal size={16} />
+                            <span>{language === 'zh' ? '更多' : 'More'}</span>
+                          </button>
+                          {isToolbarOverflowMenuOpen && (
+                            <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-48 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers });
+                                  setIsToolbarOverflowMenuOpen(false);
+                                }}
+                                className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                                  song.showNashvilleNumbers
+                                    ? 'bg-indigo-50 text-indigo-700'
+                                    : 'text-gray-600 hover:bg-gray-50 hover:text-indigo-600'
+                                }`}
+                                role="menuitemcheckbox"
+                                aria-checked={song.showNashvilleNumbers}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <Hash size={14} />
+                                  <span>123</span>
+                                </span>
+                                <span className="text-[11px] font-bold">{song.showNashvilleNumbers ? copy.on : copy.off}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu });
+                                  setIsToolbarOverflowMenuOpen(false);
+                                }}
+                                className={`mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                                  song.showAbsoluteJianpu
+                                    ? 'bg-indigo-50 text-indigo-700'
+                                    : 'text-gray-600 hover:bg-gray-50 hover:text-indigo-600'
+                                }`}
+                                role="menuitemcheckbox"
+                                aria-checked={song.showAbsoluteJianpu}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <Music2 size={14} />
+                                  <span>1=C</span>
+                                </span>
+                                <span className="text-[11px] font-bold">{song.showAbsoluteJianpu ? copy.on : copy.off}</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                            className={toolbarSecondaryToggleClassName(song.showNashvilleNumbers)}
+                          >
+                            <Hash size={14} />
+                            <span>123</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                            title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
+                            className={toolbarSecondaryToggleClassName(song.showAbsoluteJianpu)}
+                          >
+                            <Music2 size={14} />
+                            <span>1=C</span>
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
-                  <div className="min-w-0 text-left">
-                    <div className="max-w-[180px] truncate text-sm font-bold text-gray-800">{googleUser.name}</div>
-                    <div className="max-w-[180px] truncate text-[11px] text-gray-500">{googleUser.email}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignOut}
-                    className="rounded-lg border border-gray-200 bg-gray-50 p-2 text-gray-500 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                    title={copy.signOut}
-                    aria-label={copy.signOut}
-                  >
-                    <LogOut size={14} />
-                  </button>
                 </div>
-              ) : showGoogleAuth ? (
-                <div className="flex flex-col items-end gap-1">
-                  <div ref={googleSignInRef} className="flex min-h-10 min-w-[220px] items-center justify-end" />
-                  {googleAuthError && (
-                    <div className="text-[11px] font-medium text-amber-600">{googleAuthError}</div>
-                  )}
+
+                <p className="hidden text-[11px] font-medium text-gray-400 min-[860px]:block min-[1240px]:text-gray-300">
+                  {isSheetView ? (isSetlistMode ? copy.previewSetlistHint : copy.previewHint) : copy.infoHint}
+                </p>
+              </div>
+              ) : (
+              <div className="text-right">
+                <div className="text-sm font-bold text-gray-700">
+                  {activeAppView === 'about'
+                    ? (language === 'zh' ? '關於 ChordMaster' : 'About ChordMaster')
+                    : (language === 'zh' ? '使用說明' : 'Help')}
                 </div>
-              ) : null}
-
-              <button
-                type="button"
-                onClick={() => setIsEditing(!isEditing)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${
-                  isEditing
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                <Edit3 size={16} />
-                <span>{isEditing ? copy.closeEditor : copy.openEditor}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleToggleLyricsMode}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${
-                  isLyricsMode
-                    ? 'bg-amber-500 text-white shadow-md shadow-amber-100'
-                    : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                <FileText size={16} />
-                <span>{copy.lyricsMode}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsAutoSaveEnabled((current) => !current)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all shadow-sm border ${
-                  isAutoSaveEnabled
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                <span>{copy.autoSave}</span>
-                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                  isAutoSaveEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
-                }`}>
-                  {isAutoSaveEnabled ? copy.on : copy.off}
-                </span>
-              </button>
-
-              <KeyPicker
-                value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                onChange={(key) => {
-                  if (!key) {
-                    return;
-                  }
-
-                  if (isSetlistMode) {
-                    handleSetlistKeyChange(key);
-                  } else {
-                    handleKeyChange(key);
-                  }
-                }}
-                label={copy.key}
-                originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
-                triggerMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
-                panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
-                buttonClassName="min-w-[126px]"
-              />
-
-              <CapoPicker
-                value={isSetlistMode ? currentSetlistCapo : currentCapo}
-                currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
-                onChange={(capo) => {
-                  if (isSetlistMode && selectedSetlistSong) {
-                    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-                      ...currentSetlistSong,
-                      capo
-                    }));
-                  } else {
-                    handleSongChange({ ...song, capo });
-                  }
-                }}
-                label="Capo"
-                buttonClassName="min-w-[126px]"
-              />
-
-              {!isSetlistMode && (
-                <>
-                  <button
-                    onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                      song.showNashvilleNumbers
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
-                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Hash size={14} />
-                    <span>123</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
-                    title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                      song.showAbsoluteJianpu
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
-                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Music2 size={14} />
-                    <span>1=C</span>
-                  </button>
-                </>
+                <div className="text-[11px] font-medium text-gray-400">
+                  {copy.version} {APP_VERSION}
+                </div>
+              </div>
               )}
-
-              <button
-                type="button"
-                onClick={handleSaveLibrary}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${
-                  workspaceIsDirty
-                    ? 'bg-amber-500 text-white border border-amber-500 hover:bg-amber-400'
-                    : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                <Save size={16} />
-                <span>{workspaceIsDirty ? copy.saveChanges : copy.saved}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleExportPdf}
-                disabled={isExportingPdf}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-md shadow-gray-200 ${
-                  isExportingPdf
-                    ? 'bg-gray-400 text-white cursor-wait'
-                    : 'bg-gray-900 text-white hover:bg-gray-800'
-                }`}
-              >
-                <Save size={16} />
-                <span>{isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}</span>
-              </button>
             </div>
-            ) : (
-            <div className="text-right">
-              <div className="text-sm font-bold text-gray-700">
-                {activeAppView === 'about'
-                  ? (language === 'zh' ? '關於 ChordMaster' : 'About ChordMaster')
-                  : (language === 'zh' ? '使用說明' : 'Help')}
-              </div>
-              <div className="text-[11px] font-medium text-gray-400">
-                {copy.version} {APP_VERSION}
-              </div>
-            </div>
-            )}
-            <p className="text-[11px] font-medium text-gray-400">
-              {isSheetView ? (isSetlistMode ? copy.previewSetlistHint : copy.previewHint) : copy.infoHint}
-            </p>
-          </div>
+          )}
         </header>
 
         {/* Content Area - Split View */}
         {isSheetView ? (
-        <div data-content-area className="flex-1 flex overflow-hidden relative">
+        <div data-content-area className="relative flex min-h-0 flex-1 overflow-hidden">
+          {!shouldUseSplitEditor && isEditing && (
+            <button
+              type="button"
+              onClick={() => setIsEditing(false)}
+              className="absolute inset-0 z-20 bg-stone-950/10 backdrop-blur-[1px]"
+              aria-label={copy.closeEditor}
+            />
+          )}
+
           {/* Editor Pane */}
           <AnimatePresence initial={false}>
             {isEditing && (
               <motion.div 
                 data-editor-pane
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: '50%', opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
+                initial={shouldUseSplitEditor ? { width: 0, opacity: 0 } : { x: -32, opacity: 0 }}
+                animate={shouldUseSplitEditor ? { width: splitEditorWidth, opacity: 1 } : { x: 0, opacity: 1 }}
+                exit={shouldUseSplitEditor ? { width: 0, opacity: 0 } : { x: -32, opacity: 0 }}
                 transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-                className="relative border-r border-gray-200 bg-white overflow-hidden flex-shrink-0 shadow-xl z-10"
+                className={`overflow-hidden border-r border-gray-200 bg-white shadow-xl ${
+                  shouldUseSplitEditor
+                    ? 'relative z-10 flex-shrink-0'
+                    : 'absolute inset-y-0 left-0 z-30 max-w-full rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
+                }`}
+                style={shouldUseSplitEditor ? undefined : { width: overlayEditorWidth > 0 ? `${overlayEditorWidth}px` : '100%' }}
               >
                 <div data-editor-scroll-root className="h-full overflow-y-auto">
-                  <div className="p-6 md:p-8 pb-24 min-w-[450px]">
+                  <div className="min-w-0 p-4 pb-24 sm:p-6 lg:p-8">
                     {isSetlistMode && selectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
                       <div className="space-y-5">
                         <div>
@@ -3649,7 +4099,7 @@ export default function App() {
               data-print-preview-container
               onMouseDown={handlePreviewMouseDown}
               onClickCapture={handlePreviewClickCapture}
-              className={`h-full overflow-auto p-4 md:p-12 [scrollbar-gutter:stable_both-edges] ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+              className={`h-full overflow-auto p-3 sm:p-4 lg:p-8 xl:p-12 [scrollbar-gutter:stable_both-edges] ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
             >
               <div
                 className="relative flex min-h-full min-w-full items-start justify-center"
@@ -3677,13 +4127,13 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="pointer-events-none absolute right-4 top-4 z-40 md:right-6 md:top-6">
+            <div className="pointer-events-none absolute right-2 top-2 z-40 sm:right-4 sm:top-4 lg:right-6 lg:top-6">
               <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
                 <button
                   type="button"
                   onClick={handleZoomOutPreview}
                   disabled={previewScale <= PREVIEW_MIN_SCALE + 0.001}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
                   title={copy.zoomOutPreview}
                 >
                   -
@@ -3691,7 +4141,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleResetPreviewZoom}
-                  className="inline-flex min-w-[4.25rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                  className="inline-flex min-w-[4rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 sm:min-w-[4.25rem]"
                   title={copy.resetPreviewZoom}
                 >
                   {previewScalePercent}%
@@ -3700,7 +4150,7 @@ export default function App() {
                   type="button"
                   onClick={handleZoomInPreview}
                   disabled={previewScale >= PREVIEW_MAX_SCALE - 0.001}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
                   title={copy.zoomInPreview}
                 >
                   +
@@ -3710,7 +4160,7 @@ export default function App() {
           </div>
         </div>
         ) : (
-        <div data-content-area className="flex-1 overflow-y-auto bg-[#F5F5F4] px-5 py-6 md:px-8 md:py-8">
+        <div data-content-area className="flex-1 overflow-y-auto bg-[#F5F5F4] px-4 py-5 sm:px-5 sm:py-6 lg:px-8 lg:py-8">
           <div className="mx-auto flex max-w-5xl flex-col gap-6">
             <section className="rounded-[28px] border border-gray-200 bg-white px-6 py-7 shadow-sm md:px-8 md:py-8">
               <div className="flex flex-wrap items-start justify-between gap-4">

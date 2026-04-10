@@ -14,6 +14,7 @@ interface CapoPickerProps {
   valueTextClassName?: string;
   showPlayKey?: boolean;
   triggerIconSize?: number;
+  triggerDensity?: 'default' | 'compact';
 }
 
 const CapoPicker: React.FC<CapoPickerProps> = ({
@@ -26,7 +27,8 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   buttonClassName = '',
   valueTextClassName = '',
   showPlayKey = true,
-  triggerIconSize = 16
+  triggerIconSize = 16,
+  triggerDensity = 'default'
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -111,6 +113,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
     : align === 'center'
       ? 'left-1/2 -translate-x-1/2'
       : 'right-0';
+  const isCompactTrigger = triggerDensity === 'compact';
 
   return (
     <div ref={rootRef} className="relative">
@@ -119,7 +122,11 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setIsOpen((open) => !open)}
-        className={`flex h-10 min-w-[104px] items-center justify-between gap-2 rounded-xl border border-gray-300 bg-white px-3 text-left outline-none transition-colors ${
+        className={`flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors ${
+          isCompactTrigger
+            ? 'h-9 min-w-[82px] rounded-lg px-2.5'
+            : 'h-10 min-w-[104px] rounded-xl px-3'
+        } ${
           disabled
             ? 'cursor-not-allowed text-gray-400'
             : isOpen
@@ -129,7 +136,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         aria-haspopup="dialog"
         aria-expanded={isOpen}
       >
-        <span className={`min-w-0 truncate text-sm font-semibold text-gray-800 ${valueTextClassName}`}>
+        <span className={`min-w-0 truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold text-gray-800 ${valueTextClassName}`}>
           {value}{showPlayKey ? <> <span className="text-gray-400">({playKey})</span></> : null}
         </span>
         <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
