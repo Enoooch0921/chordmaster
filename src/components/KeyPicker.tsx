@@ -1,6 +1,8 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { Key } from '../types';
+import { type PanelAlign, useAnchoredPortalPanel } from './useAnchoredPortalPanel';
 
 const KEY_PICKER_LAYOUT: Array<Array<Key | null>> = [
   ['Ab', 'A', null],
@@ -30,7 +32,7 @@ interface KeyPickerProps {
   triggerMetaText?: string;
   panelMetaText?: string;
   clearLabel?: string;
-  align?: 'left' | 'center' | 'right';
+  align?: PanelAlign;
   buttonClassName?: string;
   valueTextClassName?: string;
   metaTextClassName?: string;
@@ -78,6 +80,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const optionRefs = React.useRef<Partial<Record<Key, HTMLButtonElement | null>>>({});
   const clearButtonRef = React.useRef<HTMLButtonElement>(null);
   const [isOpen, setIsOpen] = React.useState(false);
@@ -92,7 +95,9 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
     }
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+
+      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) {
         return;
       }
 
@@ -167,13 +172,15 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
     event.preventDefault();
     optionRefs.current[nextKey]?.focus();
   };
-
-  const panelPositionClassName = align === 'left'
-    ? 'left-0'
-    : align === 'right'
-      ? 'right-0'
-      : 'left-1/2 -translate-x-1/2';
   const isCompactTrigger = triggerDensity === 'compact';
+  const resolvedAlign = align as PanelAlign;
+  const { panelStyle, placement, isPositioned } = useAnchoredPortalPanel({
+    isOpen,
+    align: resolvedAlign,
+    triggerRef,
+    panelRef,
+    onRequestClose: closePanel
+  });
 
   const triggerValueText = value ?? clearLabel ?? label;
   const resolvedPanelMetaText = panelMetaText ?? triggerMetaText;
@@ -210,8 +217,13 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
         <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
-      {isOpen && (
-        <div className={`absolute top-full z-50 mt-2 w-[184px] rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl ${panelPositionClassName}`}>
+      {isOpen && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={panelRef}
+          className="w-[184px] rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl"
+          style={panelStyle}
+          data-placement={placement}
+        >
           <div className="mb-2 flex items-center justify-between px-1">
             <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">{label}</div>
             {resolvedPanelMetaText ? (
@@ -249,7 +261,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
             </div>
           ) : null}
 
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className={`grid grid-cols-3 gap-1.5 transition-opacity ${isPositioned ? 'opacity-100' : 'opacity-0'}`}>
             {KEY_PICKER_LAYOUT.flatMap((row, rowIndex) =>
               row.map((key, columnIndex) => {
                 if (!key) {
@@ -287,7 +299,8 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
               })
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -92,6 +92,38 @@ interface ExportedSongLibraryPayload {
 
 type WorkspaceMode = 'songs' | 'setlists';
 
+interface PdfExportProgressState {
+  totalPages: number;
+  completedPages: number;
+  currentPage: number;
+  songIndex: number;
+  totalSongs: number;
+  songTitle: string;
+  sectionIndex: number | null;
+  sectionTitle: string | null;
+  pageInSong: number;
+  totalPagesInSong: number;
+  cancelRequested: boolean;
+}
+
+interface ExportPageDescriptor {
+  element: HTMLElement;
+  songIndex: number;
+  totalSongs: number;
+  songTitle: string;
+  sectionIndex: number | null;
+  sectionTitle: string | null;
+  pageInSong: number;
+  totalPagesInSong: number;
+}
+
+class PdfExportCancelledError extends Error {
+  constructor() {
+    super('PDF export cancelled.');
+    this.name = 'PdfExportCancelledError';
+  }
+}
+
 const sanitizeFileNamePart = (value: string) => (
   value
     .trim()
@@ -117,7 +149,48 @@ const buildPdfFileName = (song: Song) => {
   return nameParts.join('_');
 };
 
-const buildSetlistPdfFileName = (setlist: Setlist) => sanitizeFileNamePart(setlist.name) || 'Service Setlist';
+const getSetlistPdfDisplayModeLabel = (displayMode: SetlistDisplayMode) => {
+  switch (displayMode) {
+    case 'nashville-number-system':
+      return '級數';
+    case 'chord-fixed-key':
+      return '固定調';
+    case 'chord-movable-key':
+    default:
+      return '首調';
+  }
+};
+
+const buildSetlistPdfFileName = (setlist: Setlist) => {
+  const title = sanitizeFileNamePart(setlist.name) || 'Service Setlist';
+  const displayModeLabel = getSetlistPdfDisplayModeLabel(setlist.displayMode);
+  const nameParts = [
+    title,
+    displayModeLabel,
+    ...(setlist.showLyrics ? ['歌詞'] : [])
+  ];
+
+  return nameParts.join('_');
+};
+
+const waitForPaint = async () => {
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+};
+
+const parsePositiveIntegerAttribute = (value: string | null): number | null => {
+  if (!value) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return null;
+  }
+
+  return Math.round(numericValue);
+};
 
 const getSongVersionSummary = (song: Song) => (
   Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ')
@@ -896,6 +969,7 @@ export default function App() {
   const [isEditing, setIsEditing] = useState(false);
   const [isLyricsMode, setIsLyricsMode] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfExportProgress, setPdfExportProgress] = useState<PdfExportProgressState | null>(null);
   const [isLibraryEditing, setIsLibraryEditing] = useState(false);
   const [activeAppView, setActiveAppView] = useState<AppView>('sheet');
   const [isAutoSaveEnabled, setIsAutoSaveEnabled] = useState(loadAutoSavePreference);
@@ -936,6 +1010,7 @@ export default function App() {
   const editorFocusRequestIdRef = useRef(0);
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
+  const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
   const [previewBaseScale, setPreviewBaseScale] = useState(1);
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -1044,6 +1119,14 @@ export default function App() {
     ? selectedSetlistSong.capo
     : (selectedSetlistSourceSong?.capo ?? 0);
   const currentSetlistPlayKey = getPlayKey(currentSetlistKey, currentSetlistCapo);
+  const exportProgressPercent = pdfExportProgress && pdfExportProgress.totalPages > 0
+    ? Math.max(0, Math.min(100, (pdfExportProgress.completedPages / pdfExportProgress.totalPages) * 100))
+    : 0;
+  const exportSectionLabel = pdfExportProgress?.sectionTitle?.trim()
+    ? pdfExportProgress.sectionTitle
+    : pdfExportProgress?.sectionIndex
+      ? `${copy.exportingPdfSectionLabel} ${pdfExportProgress.sectionIndex}`
+      : '—';
   const mobileMetadataTitle = isSetlistMode ? copy.setlistEditor.instanceSettings : copy.editor.editSong;
   const mobileMetadataSong = activeEditorSong;
   const mobileMetadataKey = isSetlistMode ? currentSetlistKey : song.currentKey;
@@ -2080,6 +2163,32 @@ export default function App() {
     editorScrollRoot.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const collectExportPages = React.useCallback((captureHost: HTMLElement): ExportPageDescriptor[] => {
+    const pages = Array.from(captureHost.querySelectorAll('[data-print-page]')) as HTMLElement[];
+
+    return pages.map((page) => {
+      const songContainer = page.closest<HTMLElement>('[data-export-song-container]');
+      const songIndex = parsePositiveIntegerAttribute(songContainer?.dataset.exportSongIndex ?? null) ?? 1;
+      const totalSongs = parsePositiveIntegerAttribute(songContainer?.dataset.exportTotalSongs ?? null) ?? 1;
+      const pageInSong = parsePositiveIntegerAttribute(page.dataset.exportPageIndex ?? null) ?? 1;
+      const totalPagesInSong = parsePositiveIntegerAttribute(page.dataset.exportPageTotal ?? null) ?? 1;
+      const sectionIndex = parsePositiveIntegerAttribute(page.dataset.exportSectionIndex ?? null);
+      const songTitle = songContainer?.dataset.exportSongTitle?.trim() || page.dataset.exportSongTitle?.trim() || APP_NAME;
+      const sectionTitle = page.dataset.exportSectionTitle?.trim() || null;
+
+      return {
+        element: page,
+        songIndex,
+        totalSongs,
+        songTitle,
+        sectionIndex,
+        sectionTitle,
+        pageInSong,
+        totalPagesInSong
+      };
+    });
+  }, []);
+
   const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName: string) => {
     try {
       await document.fonts.ready;
@@ -2093,7 +2202,7 @@ export default function App() {
       });
     });
 
-    const pages = Array.from(captureHost.querySelectorAll('[data-print-page]')) as HTMLElement[];
+    const pages = collectExportPages(captureHost);
     if (pages.length === 0) {
       throw new Error('No preview pages found for PDF export.');
     }
@@ -2109,20 +2218,56 @@ export default function App() {
     const pdfHeight = pdf.internal.pageSize.getHeight();
 
     for (let index = 0; index < pages.length; index += 1) {
+      if (pdfExportCancelRequestedRef.current) {
+        throw new PdfExportCancelledError();
+      }
+
       const page = pages[index];
-      const imageData = await toPng(page, {
+      flushSync(() => {
+        setPdfExportProgress({
+          totalPages: pages.length,
+          completedPages: index,
+          currentPage: index + 1,
+          songIndex: page.songIndex,
+          totalSongs: page.totalSongs,
+          songTitle: page.songTitle,
+          sectionIndex: page.sectionIndex,
+          sectionTitle: page.sectionTitle,
+          pageInSong: page.pageInSong,
+          totalPagesInSong: page.totalPagesInSong,
+          cancelRequested: pdfExportCancelRequestedRef.current
+        });
+      });
+      await waitForPaint();
+
+      const imageData = await toPng(page.element, {
         backgroundColor: '#ffffff',
         cacheBust: true,
         pixelRatio: PDF_EXPORT_PIXEL_RATIO,
         skipAutoScale: true,
-        width: page.scrollWidth,
-        height: page.scrollHeight,
+        width: page.element.scrollWidth,
+        height: page.element.scrollHeight,
       });
+
+      if (pdfExportCancelRequestedRef.current) {
+        throw new PdfExportCancelledError();
+      }
 
       if (index > 0) {
         pdf.addPage();
       }
       pdf.addImage(imageData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+
+      flushSync(() => {
+        setPdfExportProgress((current) => current ? {
+          ...current,
+          completedPages: index + 1
+        } : current);
+      });
+    }
+
+    if (pdfExportCancelRequestedRef.current) {
+      throw new PdfExportCancelledError();
     }
 
     pdf.save(`${fileName}.pdf`);
@@ -2133,7 +2278,9 @@ export default function App() {
       return;
     }
 
+    pdfExportCancelRequestedRef.current = false;
     setIsExportingPdf(true);
+    setPdfExportProgress(null);
     const captureHost = document.createElement('div');
     let exportRoot: ReturnType<typeof createRoot> | null = null;
 
@@ -2161,15 +2308,22 @@ export default function App() {
         flushSync(() => {
           exportRoot?.render(
             <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
-              {setlistSongsWithSource.map(({ item, sourceSong }) => {
+              {setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
                 const derivedSong = applySetlistSongOverrides(sourceSong, selectedSetlist, item);
                 return (
-                  <ChordSheet
+                  <div
                     key={item.id}
-                    song={derivedSong}
-                    language={language}
-                    currentKey={derivedSong.currentKey}
-                  />
+                    data-export-song-container
+                    data-export-song-index={songIndex + 1}
+                    data-export-total-songs={setlistSongsWithSource.length}
+                    data-export-song-title={derivedSong.title}
+                  >
+                    <ChordSheet
+                      song={derivedSong}
+                      language={language}
+                      currentKey={derivedSong.currentKey}
+                    />
+                  </div>
                 );
               })}
             </div>
@@ -2204,16 +2358,29 @@ export default function App() {
           node.style.boxShadow = 'none';
         });
 
-        captureHost.appendChild(previewClone);
+        const exportSongWrapper = document.createElement('div');
+        exportSongWrapper.dataset.exportSongContainer = 'true';
+        exportSongWrapper.dataset.exportSongIndex = '1';
+        exportSongWrapper.dataset.exportTotalSongs = '1';
+        exportSongWrapper.dataset.exportSongTitle = song.title;
+        exportSongWrapper.appendChild(previewClone);
+
+        captureHost.appendChild(exportSongWrapper);
         await exportCaptureHostToPdf(captureHost, buildPdfFileName(song));
       }
     } catch (error) {
+      if (error instanceof PdfExportCancelledError) {
+        return;
+      }
+
       console.error('PDF export failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Please try again.';
       window.alert(`${copy.pdfExportError} ${errorMessage}`);
     } finally {
       exportRoot?.unmount();
       captureHost.remove();
+      pdfExportCancelRequestedRef.current = false;
+      setPdfExportProgress(null);
       setIsExportingPdf(false);
     }
   };
@@ -2223,6 +2390,28 @@ export default function App() {
       setSelectedSongId(song.id);
     }
   }, [selectedSongId, song]);
+
+  useEffect(() => {
+    if (!isExportingPdf) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      event.preventDefault();
+      pdfExportCancelRequestedRef.current = true;
+      setPdfExportProgress((current) => current ? { ...current, cancelRequested: true } : current);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isExportingPdf]);
 
   useEffect(() => {
     try {
@@ -4776,6 +4965,80 @@ export default function App() {
           </AnimatePresence>
         </>
       )}
+
+      <AnimatePresence initial={false}>
+        {isExportingPdf && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="absolute inset-0 z-[120] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <motion.div
+              initial={{ y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 8, opacity: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="w-full max-w-sm rounded-[28px] border border-gray-200 bg-white/95 px-6 py-6 text-center shadow-[0_24px_60px_rgba(15,23,42,0.22)] backdrop-blur-sm"
+            >
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-50">
+                <div className="h-7 w-7 rounded-full border-[3px] border-indigo-200 border-t-indigo-600 animate-spin" />
+              </div>
+              <div className="mt-4 text-lg font-bold text-gray-900">{copy.exportingPdfTitle}</div>
+              <div className="mt-2 text-sm leading-6 text-gray-500">
+                {pdfExportProgress?.cancelRequested ? copy.exportingPdfCancelling : copy.exportingPdfHint}
+              </div>
+
+              {pdfExportProgress ? (
+                <div className="mt-5 text-left">
+                  <div className="h-2.5 overflow-hidden rounded-full bg-gray-100">
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-200 ${
+                        pdfExportProgress.cancelRequested ? 'bg-amber-500' : 'bg-indigo-600'
+                      }`}
+                      style={{ width: `${exportProgressPercent}%` }}
+                    />
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between text-xs font-semibold text-gray-500">
+                    <span>{copy.exportingPdfPageLabel}</span>
+                    <span>{pdfExportProgress.completedPages} / {pdfExportProgress.totalPages}</span>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="font-semibold text-gray-500">{copy.exportingPdfSongLabel}</span>
+                      <div className="min-w-0 text-right">
+                        <div className="font-bold text-gray-900">
+                          {pdfExportProgress.songIndex} / {pdfExportProgress.totalSongs}
+                        </div>
+                        <div className="truncate text-xs text-gray-500">{pdfExportProgress.songTitle}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="font-semibold text-gray-500">{copy.exportingPdfSectionLabel}</span>
+                      <div className="min-w-0 text-right">
+                        <div className="font-bold text-gray-900">{exportSectionLabel}</div>
+                        <div className="text-xs text-gray-500">
+                          {copy.exportingPdfPageLabel} {pdfExportProgress.pageInSong} / {pdfExportProgress.totalPagesInSong}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-4 text-xs font-semibold tracking-[0.08em] text-gray-400">
+                {pdfExportProgress?.cancelRequested ? copy.exportingPdfCancelling : copy.exportingPdfEscHint}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

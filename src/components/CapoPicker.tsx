@@ -1,7 +1,9 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { Key } from '../types';
 import { getPlayKey } from '../utils/musicUtils';
+import { type PanelAlign, useAnchoredPortalPanel } from './useAnchoredPortalPanel';
 
 interface CapoPickerProps {
   value: number;
@@ -9,7 +11,7 @@ interface CapoPickerProps {
   onChange: (value: number) => void;
   disabled?: boolean;
   label?: string;
-  align?: 'left' | 'center' | 'right';
+  align?: PanelAlign;
   buttonClassName?: string;
   valueTextClassName?: string;
   showPlayKey?: boolean;
@@ -32,6 +34,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   const [isOpen, setIsOpen] = React.useState(false);
   const playKey = getPlayKey(currentKey, value);
@@ -46,7 +49,9 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
     }
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+
+      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) {
         return;
       }
 
@@ -108,12 +113,15 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
     }
   };
 
-  const panelPositionClassName = align === 'left'
-    ? 'left-0'
-    : align === 'center'
-      ? 'left-1/2 -translate-x-1/2'
-      : 'right-0';
   const isCompactTrigger = triggerDensity === 'compact';
+  const resolvedAlign = align as PanelAlign;
+  const { panelStyle, placement, isPositioned } = useAnchoredPortalPanel({
+    isOpen,
+    align: resolvedAlign,
+    triggerRef,
+    panelRef,
+    onRequestClose: closePanel
+  });
 
   return (
     <div ref={rootRef} className="relative">
@@ -142,12 +150,17 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
-      {isOpen && (
-        <div className={`absolute top-full z-50 mt-2 w-[132px] overflow-hidden rounded-[20px] border border-gray-200 bg-white p-2 shadow-xl ${panelPositionClassName}`}>
+      {isOpen && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={panelRef}
+          className="w-[132px] overflow-hidden rounded-[20px] border border-gray-200 bg-white p-2 shadow-xl"
+          style={panelStyle}
+          data-placement={placement}
+        >
           <div className="mb-2 px-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
             {label}
           </div>
-          <div className="space-y-0.5">
+          <div className={`space-y-0.5 transition-opacity ${isPositioned ? 'opacity-100' : 'opacity-0'}`}>
             {Array.from({ length: 12 }).map((_, capo) => {
               const optionPlayKey = getPlayKey(currentKey, capo);
               const isSelected = value === capo;
@@ -183,7 +196,8 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

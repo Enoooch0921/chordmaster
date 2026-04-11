@@ -1116,10 +1116,20 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
   return (
     <div className="flex flex-col gap-8 print:gap-0">
-      {pages.map((pageRows, pIdx) => (
+      {pages.map((pageRows, pIdx) => {
+        const currentSectionRow = pageRows.find((row) => row.sectionTitle) ?? pageRows[0] ?? null;
+        const currentSectionIndex = currentSectionRow ? currentSectionRow.sIdx + 1 : 0;
+        const currentSectionTitle = currentSectionRow?.sectionTitle ?? song.sections[currentSectionRow?.sIdx ?? 0]?.title ?? '';
+
+        return (
         <div 
           key={pIdx} 
           data-print-page
+          data-export-page-index={pIdx + 1}
+          data-export-page-total={pages.length}
+          data-export-song-title={song.title}
+          data-export-section-index={currentSectionIndex}
+          data-export-section-title={currentSectionTitle}
           className="bg-white p-6 sm:p-8 shadow-lg border border-gray-100 mx-auto font-sans text-gray-900 w-full max-w-[794px] h-[1123px] flex flex-col overflow-hidden relative"
         >
           {/* Header - Only on first page */}
@@ -1983,7 +1993,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
             <span>{new Date().toLocaleDateString()}</span>
           </div>
         </div>
-      ))}
+      )})}
     </div>
   );
 };
