@@ -91,6 +91,7 @@ interface ExportedSongLibraryPayload {
 }
 
 type WorkspaceMode = 'songs' | 'setlists';
+type MobileSetlistDrawerView = 'list' | 'detail' | 'addSongs';
 
 interface PdfExportProgressState {
   totalPages: number;
@@ -994,6 +995,8 @@ export default function App() {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isMobileActionsSheetOpen, setIsMobileActionsSheetOpen] = useState(false);
   const [isMobileMetadataOpen, setIsMobileMetadataOpen] = useState(false);
+  const [mobileSetlistDrawerView, setMobileSetlistDrawerView] = useState<MobileSetlistDrawerView>('list');
+  const [mobileSwipeOpenSetlistId, setMobileSwipeOpenSetlistId] = useState<string | null>(null);
   const [draggingSetlistSongId, setDraggingSetlistSongId] = useState<string | null>(null);
   const [dragOverSetlistSongId, setDragOverSetlistSongId] = useState<string | null>(null);
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
@@ -1006,6 +1009,11 @@ export default function App() {
   const importLibraryInputRef = useRef<HTMLInputElement>(null);
   const googleSignInRef = useRef<HTMLDivElement>(null);
   const googleIdentityInitializedRef = useRef(false);
+  const mobileSetlistSwipeRef = useRef<{ id: string; x: number; y: number } | null>(null);
+  const mobileSetlistSwipeHandledRef = useRef(false);
+  const mobileLongPressRef = useRef<{ kind: 'song' | 'setlist'; id: string; x: number; y: number } | null>(null);
+  const mobileLongPressTimerRef = useRef<number | null>(null);
+  const mobileLongPressTriggeredRef = useRef(false);
   const editorFocusTimeoutRef = useRef<number | null>(null);
   const editorFocusRequestIdRef = useRef(0);
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
@@ -1034,18 +1042,31 @@ export default function App() {
   const isSidebarExpanded = isPhoneViewport ? isMobileNavOpen : (isSidebarPinned || isSidebarHovered);
   const usesOverlaySidebar = viewportWidth < SIDEBAR_OVERLAY_BREAKPOINT;
   const collapsedSidebarWidth = isPhoneViewport ? 0 : COLLAPSED_SIDEBAR_WIDTH;
-  const responsiveSidebarMinWidth = usesOverlaySidebar
-    ? Math.max(collapsedSidebarWidth + 216, 288)
-    : MIN_EXPANDED_SIDEBAR_WIDTH;
-  const responsiveSidebarMaxWidth = usesOverlaySidebar
-    ? Math.min(Math.max(Math.floor(viewportWidth * 0.86), responsiveSidebarMinWidth), 420)
-    : MAX_EXPANDED_SIDEBAR_WIDTH;
+  const phoneSidebarMaxWidth = Math.max(240, viewportWidth - 12);
+  const phoneSidebarMinWidth = Math.min(320, phoneSidebarMaxWidth);
+  const phoneSidebarPreferredWidth = Math.max(
+    phoneSidebarMinWidth,
+    Math.min(phoneSidebarMaxWidth, Math.floor(viewportWidth * 0.92))
+  );
+  const responsiveSidebarMinWidth = isPhoneViewport
+    ? phoneSidebarPreferredWidth
+    : usesOverlaySidebar
+      ? Math.max(collapsedSidebarWidth + 216, 288)
+      : MIN_EXPANDED_SIDEBAR_WIDTH;
+  const responsiveSidebarMaxWidth = isPhoneViewport
+    ? phoneSidebarPreferredWidth
+    : usesOverlaySidebar
+      ? Math.min(Math.max(Math.floor(viewportWidth * 0.86), responsiveSidebarMinWidth), 420)
+      : MAX_EXPANDED_SIDEBAR_WIDTH;
   const resolvedSidebarWidth = Math.max(
     responsiveSidebarMinWidth,
     Math.min(responsiveSidebarMaxWidth, sidebarWidth)
   );
   const currentSidebarWidth = isSidebarExpanded ? resolvedSidebarWidth : collapsedSidebarWidth;
+  const phoneSidebarShellWidth = isMobileNavOpen ? resolvedSidebarWidth : 0;
+  const phoneSidebarHiddenOffset = resolvedSidebarWidth + 24;
   const sidebarShellWidth = usesOverlaySidebar ? collapsedSidebarWidth : currentSidebarWidth;
+  const isPhoneSetlistDrawer = isPhoneViewport && isSetlistMode;
   const mainViewportWidth = Math.max(0, viewportWidth - sidebarShellWidth);
   const shouldUseSplitEditor = mainViewportWidth >= 1360;
   const splitEditorWidth = Math.max(680, Math.min(860, Math.round(mainViewportWidth * 0.5)));
@@ -1086,6 +1107,10 @@ export default function App() {
       : isSetlistMode
         ? selectedSetlist?.name || copy.untitledSetlist
         : song.title || copy.untitledSong;
+  const mobileDrawerContextLabel = isSetlistMode ? copy.serviceSetlist : copy.songLibrary;
+  const mobileDrawerContextValue = isSetlistMode
+    ? (mobileSetlistDrawerView === 'detail' ? '' : (selectedSetlist?.name || copy.untitledSetlist))
+    : activeAppViewLabel;
   const workspaceModeBadge = isSetlistMode ? copy.setlistModeBadge : copy.songModeBadge;
   const toolbarPrimaryActionClassName = 'flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
   const toolbarPrimaryEmphasisActionClassName = 'flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-gray-800';
@@ -1108,7 +1133,18 @@ export default function App() {
   const compactAutoSaveLabel = language === 'zh' ? '自存' : 'Auto';
   const compactSaveLabel = language === 'zh' ? '儲存' : 'Save';
   const compactPdfLabel = language === 'zh' ? 'PDF' : 'PDF';
-  const mobileTopbarActionClassName = 'flex h-10 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
+  const mobileTopbarActionBaseClassName = 'flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-colors';
+  const getMobileTopbarActionClassName = (tone: 'default' | 'primary' | 'accent' = 'default') => {
+    if (tone === 'primary') {
+      return `${mobileTopbarActionBaseClassName} border-gray-900 bg-gray-900 text-white hover:bg-gray-800`;
+    }
+
+    if (tone === 'accent') {
+      return `${mobileTopbarActionBaseClassName} border-amber-500 bg-amber-500 text-white hover:bg-amber-400`;
+    }
+
+    return `${mobileTopbarActionBaseClassName} border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50`;
+  };
   const normalizedLibrarySearchQuery = librarySearchQuery.trim().toLowerCase();
   const normalizedSetlistSearchQuery = setlistSearchQuery.trim().toLowerCase();
   const normalizedSetlistSongSearchQuery = setlistSongSearchQuery.trim().toLowerCase();
@@ -1209,10 +1245,43 @@ export default function App() {
       return;
     }
 
-    if (selectedSetlist.songs.length === 0) {
+    if (!isPhoneViewport && selectedSetlist.songs.length === 0) {
       setIsSetlistAddSongsOpen(true);
     }
-  }, [selectedSetlist?.id, selectedSetlist?.songs.length]);
+  }, [isPhoneViewport, selectedSetlist?.id, selectedSetlist?.songs.length]);
+
+  useEffect(() => {
+    if (!isPhoneSetlistDrawer) {
+      setMobileSetlistDrawerView('list');
+      return;
+    }
+
+    if (!selectedSetlist) {
+      setMobileSetlistDrawerView('list');
+      return;
+    }
+
+    if (!isMobileNavOpen) {
+      setMobileSetlistDrawerView('detail');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+    }
+  }, [isMobileNavOpen, isPhoneSetlistDrawer, selectedSetlist?.id]);
+
+  useEffect(() => {
+    if (!isPhoneSetlistDrawer || mobileSetlistDrawerView !== 'list') {
+      setMobileSwipeOpenSetlistId(null);
+      return;
+    }
+
+    if (mobileSwipeOpenSetlistId && !setlists.some((item) => item.id === mobileSwipeOpenSetlistId)) {
+      setMobileSwipeOpenSetlistId(null);
+    }
+  }, [isPhoneSetlistDrawer, mobileSetlistDrawerView, mobileSwipeOpenSetlistId, setlists]);
+
+  useEffect(() => () => {
+    clearMobileLongPressTimer();
+  }, []);
 
   const createNewSongTitle = (index: number) => language === 'zh' ? `新歌 ${index}` : `New Song ${index}`;
   const createDefaultSong = (index = 1) => createEmptySong(createNewSongTitle(index));
@@ -1721,9 +1790,22 @@ export default function App() {
     setWorkspaceMode('setlists');
     setActiveAppView('sheet');
     setIsEditing(true);
+    if (isPhoneViewport) {
+      setMobileSetlistDrawerView('detail');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+    }
   };
 
   const handleSelectSetlist = (nextSetlistId: string) => {
+    setMobileSwipeOpenSetlistId(null);
+
+    if (isPhoneViewport) {
+      setMobileSetlistDrawerView('detail');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+    }
+
     if (selectedSetlistId === nextSetlistId && workspaceMode === 'setlists') {
       return;
     }
@@ -1758,6 +1840,7 @@ export default function App() {
     }
 
     setIsSetlistActionsMenuOpen(false);
+    setMobileSwipeOpenSetlistId(null);
 
     const remainingSetlists = setlists.filter((item) => item.id !== setlistId);
     setSetlists(remainingSetlists);
@@ -1765,8 +1848,122 @@ export default function App() {
     const nextSetlist = remainingSetlists[0] ?? null;
     setSelectedSetlistId(nextSetlist?.id ?? null);
     setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+    if (isPhoneViewport) {
+      setMobileSetlistDrawerView(nextSetlist ? 'detail' : 'list');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+    }
     if (remainingSetlists.length === 0) {
       setWorkspaceMode('songs');
+    }
+  };
+
+  const clearMobileLongPressTimer = () => {
+    if (mobileLongPressTimerRef.current !== null) {
+      window.clearTimeout(mobileLongPressTimerRef.current);
+      mobileLongPressTimerRef.current = null;
+    }
+  };
+
+  const handleMobileSongLongPress = (songId: string) => {
+    setIsLibraryEditing(true);
+    setSelectedSongIdsForBulkDelete([songId]);
+  };
+
+  const handleMobileSetlistLongPress = (setlistId: string) => {
+    setMobileSwipeOpenSetlistId(setlistId);
+  };
+
+  const handleMobileLongPressStart = (
+    kind: 'song' | 'setlist',
+    id: string,
+    event: React.TouchEvent<HTMLElement>
+  ) => {
+    const touch = event.touches[0];
+    if (!touch) {
+      return;
+    }
+
+    clearMobileLongPressTimer();
+    mobileLongPressTriggeredRef.current = false;
+    mobileLongPressRef.current = {
+      kind,
+      id,
+      x: touch.clientX,
+      y: touch.clientY
+    };
+    mobileLongPressTimerRef.current = window.setTimeout(() => {
+      mobileLongPressTriggeredRef.current = true;
+      if (kind === 'song') {
+        handleMobileSongLongPress(id);
+      } else {
+        handleMobileSetlistLongPress(id);
+      }
+    }, 450);
+  };
+
+  const handleMobileLongPressMove = (event: React.TouchEvent<HTMLElement>) => {
+    const start = mobileLongPressRef.current;
+    const touch = event.touches[0];
+    if (!start || !touch) {
+      return;
+    }
+
+    if (Math.abs(touch.clientX - start.x) > 10 || Math.abs(touch.clientY - start.y) > 10) {
+      clearMobileLongPressTimer();
+    }
+  };
+
+  const handleMobileLongPressEnd = () => {
+    clearMobileLongPressTimer();
+    mobileLongPressRef.current = null;
+  };
+
+  const handleMobileSetlistTouchStart = (setlistId: string, event: React.TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    if (!touch) {
+      return;
+    }
+
+    mobileSetlistSwipeRef.current = {
+      id: setlistId,
+      x: touch.clientX,
+      y: touch.clientY
+    };
+    mobileSetlistSwipeHandledRef.current = false;
+  };
+
+  const handleMobileSetlistTouchEnd = (setlistId: string, event: React.TouchEvent<HTMLDivElement>) => {
+    const start = mobileSetlistSwipeRef.current;
+    mobileSetlistSwipeRef.current = null;
+
+    if (!start || start.id !== setlistId) {
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (Math.abs(deltaY) > Math.abs(deltaX) || Math.abs(deltaX) < 44) {
+      mobileSetlistSwipeHandledRef.current = false;
+      return;
+    }
+
+    if (deltaX < 0) {
+      setMobileSwipeOpenSetlistId(setlistId);
+      mobileSetlistSwipeHandledRef.current = true;
+      event.preventDefault();
+      return;
+    }
+
+    if (mobileSwipeOpenSetlistId === setlistId) {
+      setMobileSwipeOpenSetlistId(null);
+      mobileSetlistSwipeHandledRef.current = true;
+      event.preventDefault();
     }
   };
 
@@ -1787,7 +1984,13 @@ export default function App() {
     }));
     setSelectedSetlistSongId(nextSetlistSong.id);
     setWorkspaceMode('setlists');
-    setIsSetlistAddSongsOpen(true);
+    if (isPhoneViewport) {
+      setMobileSetlistDrawerView('detail');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+    } else {
+      setIsSetlistAddSongsOpen(true);
+    }
   };
 
   const handleSelectSetlistSong = (setlistSongId: string) => {
@@ -2598,8 +2801,12 @@ export default function App() {
       return;
     }
 
+    if (activeAppView === 'sheet') {
+      return;
+    }
+
     setIsMobileNavOpen(false);
-  }, [activeAppView, isPhoneViewport, selectedSetlistId, selectedSetlistSongId, selectedSongId, workspaceMode]);
+  }, [activeAppView, isPhoneViewport, selectedSongId, workspaceMode]);
 
   useEffect(() => {
     return () => {
@@ -2973,16 +3180,16 @@ export default function App() {
         </span>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="mt-3 grid grid-cols-4 gap-1.5">
         {[
           { label: copy.key, value: mobileMetadataKey },
           { label: 'Capo', value: String(mobileMetadataCapo) },
           { label: copy.editor.tempo, value: mobileMetadataTempo },
           { label: copy.editor.timeSignature, value: mobileMetadataTime }
         ].map((item) => (
-          <div key={item.label} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">{item.label}</div>
-            <div className="mt-1 text-sm font-semibold text-gray-800">{item.value}</div>
+          <div key={item.label} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-2 py-2">
+            <div className="truncate text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400">{item.label}</div>
+            <div className="mt-1 truncate text-sm font-semibold text-gray-800">{item.value}</div>
           </div>
         ))}
       </div>
@@ -3014,14 +3221,21 @@ export default function App() {
       <motion.aside
         data-sidebar
         initial={false}
-        animate={{ width: sidebarShellWidth }}
+        animate={isPhoneViewport ? { width: phoneSidebarShellWidth } : { width: sidebarShellWidth }}
         transition={isSidebarResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.32 }}
-        className="relative z-50 flex-shrink-0 overflow-visible"
+        className={isPhoneViewport ? 'absolute inset-y-0 left-0 z-50 overflow-hidden' : 'relative z-50 flex-shrink-0 overflow-visible'}
+        style={isPhoneViewport ? { pointerEvents: isMobileNavOpen ? 'auto' : 'none' } : undefined}
       >
         <motion.div
           initial={false}
-          animate={{ width: currentSidebarWidth }}
-          transition={isSidebarResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.32 }}
+          animate={isPhoneViewport
+            ? { x: isMobileNavOpen ? 0 : -phoneSidebarHiddenOffset, opacity: isMobileNavOpen ? 1 : 0.96 }
+            : { width: currentSidebarWidth }}
+          transition={isSidebarResizing
+            ? { duration: 0 }
+            : isPhoneViewport
+              ? { type: 'spring', bounce: 0, duration: 0.28 }
+              : { type: 'spring', bounce: 0, duration: 0.32 }}
           onMouseEnter={handleSidebarHoverTrigger}
           onMouseMove={handleSidebarHoverTrigger}
           onMouseLeave={() => {
@@ -3030,12 +3244,15 @@ export default function App() {
             }
           }}
           className={`absolute inset-y-0 left-0 flex overflow-hidden border-r border-gray-200 bg-white ${
-            usesOverlaySidebar && isSidebarExpanded
+            isPhoneViewport
+              ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
+              : usesOverlaySidebar && isSidebarExpanded
               ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
               : ''
           }`}
+          style={isPhoneViewport ? { width: `${resolvedSidebarWidth}px` } : undefined}
         >
-          {isSidebarExpanded && !usesOverlaySidebar && (
+          {isSidebarExpanded && !usesOverlaySidebar && !isPhoneViewport && (
             <button
               type="button"
               onMouseDown={handleSidebarResizeStart}
@@ -3046,103 +3263,103 @@ export default function App() {
               <span className="absolute right-[2px] top-1/2 h-12 w-[8px] -translate-y-1/2 rounded-full border border-indigo-100 bg-white shadow-sm" />
             </button>
           )}
-          <div
-            className="flex h-full shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white py-4 sm:py-5"
-            style={{ width: `${collapsedSidebarWidth}px` }}
-          >
-            <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-indigo-200 ring-1 ring-indigo-100">
-              <img src={logoSrc} alt="ChordMaster" className="h-full w-full object-cover" />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (isPhoneViewport) {
-                  setIsMobileNavOpen((current) => !current);
-                } else if (isSidebarPinned) {
-                  setIsSidebarPinned(false);
-                  setIsSidebarHovered(false);
-                } else {
-                  setIsSidebarPinned(true);
-                  setIsSidebarHovered(true);
-                }
-              }}
-              className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
-                isSidebarExpanded ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-              title={isSidebarPinned ? copy.collapseSongList : copy.pinSongList}
+          {!isPhoneViewport && (
+            <div
+              className="flex h-full shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white py-4 sm:py-5"
+              style={{ width: `${collapsedSidebarWidth}px` }}
             >
-              {isSidebarExpanded ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
-            </button>
+              <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-indigo-200 ring-1 ring-indigo-100">
+                <img src={logoSrc} alt="ChordMaster" className="h-full w-full object-cover" />
+              </div>
 
-            <div className="flex w-full flex-col items-center gap-2 px-2">
               <button
                 type="button"
-                onClick={() => setWorkspaceMode('songs')}
+                onClick={() => {
+                  if (isSidebarPinned) {
+                    setIsSidebarPinned(false);
+                    setIsSidebarHovered(false);
+                  } else {
+                    setIsSidebarPinned(true);
+                    setIsSidebarHovered(true);
+                  }
+                }}
                 className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
-                  !isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  isSidebarExpanded ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
-                title={copy.songs}
+                title={isSidebarPinned ? copy.collapseSongList : copy.pinSongList}
               >
-                <FileText size={18} />
+                {isSidebarExpanded ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
               </button>
-              <button
-                type="button"
-                onClick={() => setWorkspaceMode('setlists')}
-                className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
-                  isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-                title={copy.setlists}
-              >
-                <ListMusic size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={isSetlistMode ? handleCreateSetlist : handleCreateSong}
-                className="w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
-                title={isSetlistMode ? copy.newSetlist : copy.newSong}
-              >
-                <Plus size={18} />
-              </button>
-            </div>
 
-            <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
-              <div className="flex flex-col items-center gap-1 text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">
-                <span>{isSetlistMode ? copy.setlists : copy.songs}</span>
-                <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs text-gray-700">
-                  {isSetlistMode ? setlists.length : songs.length}
+              <div className="flex w-full flex-col items-center gap-2 px-2">
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceMode('songs')}
+                  className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
+                    !isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                  title={copy.songs}
+                >
+                  <FileText size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceMode('setlists')}
+                  className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
+                    isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                  title={copy.setlists}
+                >
+                  <ListMusic size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={isSetlistMode ? handleCreateSetlist : handleCreateSong}
+                  className="w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
+                  title={isSetlistMode ? copy.newSetlist : copy.newSong}
+                >
+                  <Plus size={18} />
+                </button>
+              </div>
+
+              <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
+                <div className="flex flex-col items-center gap-1 text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">
+                  <span>{isSetlistMode ? copy.setlists : copy.songs}</span>
+                  <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs text-gray-700">
+                    {isSetlistMode ? setlists.length : songs.length}
+                  </div>
+                </div>
+                <div className="flex w-full flex-col items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAppViewChange('about')}
+                    className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
+                      activeAppView === 'about'
+                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                    title={activeAppView === 'about' ? copy.backToPreview : copy.about}
+                    aria-label={activeAppView === 'about' ? copy.backToPreview : copy.about}
+                  >
+                    <Info size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAppViewChange('help')}
+                    className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
+                      activeAppView === 'help'
+                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                    title={activeAppView === 'help' ? copy.backToPreview : copy.help}
+                    aria-label={activeAppView === 'help' ? copy.backToPreview : copy.help}
+                  >
+                    <BookOpen size={18} />
+                  </button>
                 </div>
               </div>
-              <div className="flex w-full flex-col items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleAppViewChange('about')}
-                  className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
-                    activeAppView === 'about'
-                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                  }`}
-                  title={activeAppView === 'about' ? copy.backToPreview : copy.about}
-                  aria-label={activeAppView === 'about' ? copy.backToPreview : copy.about}
-                >
-                  <Info size={18} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleAppViewChange('help')}
-                  className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
-                    activeAppView === 'help'
-                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                  }`}
-                  title={activeAppView === 'help' ? copy.backToPreview : copy.help}
-                  aria-label={activeAppView === 'help' ? copy.backToPreview : copy.help}
-                >
-                  <BookOpen size={18} />
-                </button>
-              </div>
             </div>
-          </div>
+          )}
 
           <motion.div
             initial={false}
@@ -3157,9 +3374,15 @@ export default function App() {
             {isPhoneViewport && (
               <div className="border-b border-gray-200 px-4 py-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-bold text-gray-900">{APP_NAME}</div>
-                    <div className="mt-0.5 text-xs font-medium text-gray-500">{activeAppViewLabel}</div>
+                  <div className="min-w-0 flex items-center gap-3">
+                    <img src={logoSrc} alt="ChordMaster" className="h-10 w-10 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-bold text-gray-900">{APP_NAME}</div>
+                      <div className="mt-0.5 truncate text-xs font-medium text-gray-500">
+                        {mobileDrawerContextLabel}
+                        {mobileDrawerContextValue ? ` · ${mobileDrawerContextValue}` : ''}
+                      </div>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -3170,15 +3393,14 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="mt-3 grid grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() => {
                       setWorkspaceMode('songs');
                       setActiveAppView('sheet');
-                      setIsMobileNavOpen(false);
                     }}
-                    className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                    className={`min-w-0 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
                       !isSetlistMode && isSheetView
                         ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                         : 'border border-gray-200 bg-white text-gray-700'
@@ -3191,9 +3413,8 @@ export default function App() {
                     onClick={() => {
                       setWorkspaceMode('setlists');
                       setActiveAppView('sheet');
-                      setIsMobileNavOpen(false);
                     }}
-                    className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                    className={`min-w-0 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
                       isSetlistMode && isSheetView
                         ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                         : 'border border-gray-200 bg-white text-gray-700'
@@ -3207,7 +3428,7 @@ export default function App() {
                       handleAppViewChange('about');
                       setIsMobileNavOpen(false);
                     }}
-                    className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                    className={`min-w-0 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
                       activeAppView === 'about'
                         ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                         : 'border border-gray-200 bg-white text-gray-700'
@@ -3221,7 +3442,7 @@ export default function App() {
                       handleAppViewChange('help');
                       setIsMobileNavOpen(false);
                     }}
-                    className={`rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
+                    className={`min-w-0 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
                       activeAppView === 'help'
                         ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                         : 'border border-gray-200 bg-white text-gray-700'
@@ -3234,7 +3455,412 @@ export default function App() {
             )}
 
             {isSetlistMode ? (
-              <>
+              isPhoneViewport ? (
+                <>
+                  {mobileSetlistDrawerView === 'detail' && selectedSetlist ? (
+                    <>
+                      <div className="border-b border-gray-200 px-4 py-4">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsSetlistActionsMenuOpen(false);
+                              setIsSetlistAddSongsOpen(false);
+                              setSetlistSongSearchQuery('');
+                              setMobileSetlistDrawerView('list');
+                            }}
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                            title={copy.backToPreview}
+                            aria-label={copy.backToPreview}
+                          >
+                            <ChevronLeft size={18} />
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <input
+                              value={selectedSetlist.name}
+                              onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
+                              className="w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50"
+                              placeholder={copy.untitledSetlist}
+                            />
+                            <div className="mt-0.5 text-xs font-medium text-gray-500">{setlistSongsWithSource.length} {copy.setlistItems}</div>
+                          </div>
+                          <div ref={setlistActionsMenuRef} className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                              title={language === 'zh' ? '歌單操作' : 'Setlist Actions'}
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+                            {isSetlistActionsMenuOpen && (
+                              <div className="absolute right-0 top-full z-20 mt-2 w-40 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSetlist(selectedSetlist.id)}
+                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                                >
+                                  {copy.delete}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-3">
+                        <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
+                        {setlistSongsWithSource.length === 0 ? (
+                          <div className="mt-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+                            {copy.noSetlistSongs}
+                          </div>
+                        ) : (
+                          <div className="mt-3 space-y-2">
+                            {setlistSongsWithSource.map(({ item, sourceSong }) => {
+                              const isActive = item.id === selectedSetlistSong?.id;
+                              const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
+                              const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
+                              const displaySong = item.songData ?? sourceSong;
+                              const versionSummary = getSongVersionSummary(displaySong);
+                              const isDropTarget = dragOverSetlistSongId === item.id;
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  draggable
+                                  onDragStart={() => setDraggingSetlistSongId(item.id)}
+                                  onDragOver={(event) => {
+                                    event.preventDefault();
+                                    if (dragOverSetlistSongId !== item.id) {
+                                      setDragOverSetlistSongId(item.id);
+                                    }
+                                  }}
+                                  onDragLeave={() => {
+                                    if (dragOverSetlistSongId === item.id) {
+                                      setDragOverSetlistSongId(null);
+                                    }
+                                  }}
+                                  onDrop={(event) => {
+                                    event.preventDefault();
+                                    if (draggingSetlistSongId) {
+                                      moveSetlistSong(draggingSetlistSongId, item.id);
+                                    }
+                                    setDraggingSetlistSongId(null);
+                                    setDragOverSetlistSongId(null);
+                                  }}
+                                  onDragEnd={() => {
+                                    setDraggingSetlistSongId(null);
+                                    setDragOverSetlistSongId(null);
+                                  }}
+                                  className={`group rounded-xl border px-2.5 py-2 transition-all ${
+                                    isActive
+                                      ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
+                                      : isDropTarget
+                                        ? 'border-indigo-200 bg-indigo-50/70'
+                                        : 'border-gray-200 bg-white hover:bg-gray-50/70'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-2">
+                                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                                      <div className="flex min-w-0 items-center gap-2">
+                                        <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
+                                          <GripVertical size={14} />
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSelectSetlistSong(item.id)}
+                                          className="min-w-0 flex-1 text-left"
+                                        >
+                                          <div className="truncate text-sm font-bold text-gray-900">{sourceSong.title || copy.untitledSong}</div>
+                                          <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
+                                            {typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : 'BPM --'}
+                                            {versionSummary ? ` · ${versionSummary}` : ''}
+                                          </div>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveSetlistSong(item.id)}
+                                          className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
+                                          title={copy.removeFromSetlist}
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      </div>
+                                      <div className="flex min-w-0 items-center gap-1 pl-10">
+                                        <div className="w-[56px] shrink-0">
+                                          <KeyPicker
+                                            value={effectiveKey}
+                                            onChange={(key) => key && handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                              ...currentSetlistSong,
+                                              overrideKey: key
+                                            }))}
+                                            label={copy.key}
+                                            originalKey={sourceSong.currentKey}
+                                            align="left"
+                                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
+                                            valueTextClassName="!text-[10px] !leading-none"
+                                            triggerIconSize={10}
+                                          />
+                                        </div>
+                                        <div className="w-[56px] shrink-0">
+                                          <CapoPicker
+                                            value={effectiveCapo}
+                                            currentKey={effectiveKey}
+                                            onChange={(capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                              ...currentSetlistSong,
+                                              capo
+                                            }))}
+                                            label="Capo"
+                                            align="right"
+                                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
+                                            valueTextClassName="!text-[10px] !leading-none"
+                                            showPlayKey={false}
+                                            triggerIconSize={10}
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : mobileSetlistDrawerView === 'addSongs' && selectedSetlist ? (
+                    <>
+                      <div className="border-b border-gray-200 px-4 py-4">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsSetlistActionsMenuOpen(false);
+                              setIsSetlistAddSongsOpen(false);
+                              setSetlistSongSearchQuery('');
+                              setMobileSetlistDrawerView('detail');
+                            }}
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                            title={copy.backToPreview}
+                            aria-label={copy.backToPreview}
+                          >
+                            <ChevronLeft size={18} />
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-base font-bold text-gray-900">{copy.addToSetlist}</div>
+                            <div className="mt-0.5 truncate text-xs font-medium text-gray-500">{selectedSetlist.name || copy.untitledSetlist}</div>
+                          </div>
+                        </div>
+
+                        <label className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                          <Search size={14} className="text-gray-400" />
+                          <input
+                            type="text"
+                            value={setlistSongSearchQuery}
+                            onChange={(event) => setSetlistSongSearchQuery(event.target.value)}
+                            placeholder={copy.searchSongsToAdd}
+                            className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-3">
+                        <div className="space-y-2">
+                          {filteredSongsForSetlist.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
+                              {copy.noSongsMatch}
+                            </div>
+                          ) : (
+                            filteredSongsForSetlist.map((librarySong) => {
+                              const libraryMeta = getSongLibraryMeta(librarySong, copy.editor.shuffle);
+                              return (
+                                <div
+                                  key={`setlist-add-${librarySong.id}`}
+                                  className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-bold text-gray-900">
+                                      {librarySong.title || copy.untitledSong}
+                                    </div>
+                                    <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
+                                      {libraryMeta.primary}
+                                    </div>
+                                    {libraryMeta.secondary && (
+                                      <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
+                                        {libraryMeta.secondary}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddSongToSetlist(librarySong.id)}
+                                    className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+                                  >
+                                    {copy.addToSetlist}
+                                  </button>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="px-5 py-6 border-b border-gray-200">
+                        <div className={isPhoneViewport ? '' : 'min-w-0'}>
+                          {!isPhoneViewport && (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                                <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+                              </div>
+                              <div className="text-xs font-medium text-gray-500">{copy.serviceSetlist}</div>
+                            </>
+                          )}
+                        </div>
+                        <div className={isPhoneViewport ? '' : 'mt-4'}>
+                          <button
+                            type="button"
+                            onClick={handleCreateSetlist}
+                            className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                          >
+                            <Plus size={16} />
+                            <span>{copy.newSetlist}</span>
+                          </button>
+                        </div>
+                        <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                          <Search size={15} className="text-gray-400" />
+                          <input
+                            type="text"
+                            value={setlistSearchQuery}
+                            onChange={(event) => setSetlistSearchQuery(event.target.value)}
+                            placeholder={copy.searchSetlists}
+                            className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="px-3 py-3 border-b border-gray-100">
+                        <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
+                          <span>{copy.setlists}</span>
+                          <span>{normalizedSetlistSearchQuery ? `${filteredSetlists.length}/${setlists.length}` : setlists.length}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-3">
+                        <div className="space-y-2">
+                          {filteredSetlists.length === 0 && (
+                            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+                              {copy.noSetlists}
+                            </div>
+                          )}
+                          {filteredSetlists.map((item) => {
+                            const isActive = item.id === selectedSetlist?.id;
+                            const isSwipeOpen = mobileSwipeOpenSetlistId === item.id;
+                            return (
+                              <div key={item.id} className="relative overflow-hidden rounded-2xl">
+                                <div className="absolute inset-y-0 right-0 flex items-stretch">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleDeleteSetlist(item.id);
+                                    }}
+                                    className="flex w-20 items-center justify-center bg-rose-500 px-3 text-sm font-bold text-white"
+                                    aria-label={`${copy.delete} ${item.name || copy.untitledSetlist}`}
+                                    title={copy.delete}
+                                  >
+                                    {copy.delete}
+                                  </button>
+                                </div>
+                                <div
+                                  onTouchStart={(event) => {
+                                    handleMobileSetlistTouchStart(item.id, event);
+                                    handleMobileLongPressStart('setlist', item.id, event);
+                                  }}
+                                  onTouchMove={(event) => handleMobileLongPressMove(event)}
+                                  onTouchEnd={(event) => {
+                                    if (mobileLongPressTriggeredRef.current) {
+                                      mobileLongPressTriggeredRef.current = false;
+                                      mobileSetlistSwipeHandledRef.current = true;
+                                      handleMobileLongPressEnd();
+                                      event.preventDefault();
+                                      return;
+                                    }
+
+                                    handleMobileLongPressEnd();
+                                    handleMobileSetlistTouchEnd(item.id, event);
+                                  }}
+                                  onTouchCancel={() => {
+                                    mobileSetlistSwipeRef.current = null;
+                                    handleMobileLongPressEnd();
+                                    mobileSetlistSwipeHandledRef.current = false;
+                                  }}
+                                  className={`relative rounded-2xl border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${
+                                    isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
+                                  } ${isSwipeOpen ? '-translate-x-20' : 'translate-x-0'}`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (mobileSetlistSwipeHandledRef.current) {
+                                        mobileSetlistSwipeHandledRef.current = false;
+                                        return;
+                                      }
+
+                                      if (isSwipeOpen) {
+                                        setMobileSwipeOpenSetlistId(null);
+                                        return;
+                                      }
+
+                                      handleSelectSetlist(item.id);
+                                    }}
+                                    className="w-full text-left"
+                                  >
+                                    <div className="text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
+                                    <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {mobileSetlistDrawerView === 'detail' && selectedSetlist && (
+                    <div className="border-t border-gray-200 bg-white px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsSetlistActionsMenuOpen(false);
+                          setIsSetlistAddSongsOpen(true);
+                          setMobileSetlistDrawerView('addSongs');
+                        }}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                      >
+                        <Plus size={16} />
+                        <span>{copy.addToSetlist}</span>
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="border-t border-gray-200 px-5 py-4">
+                    <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
+                      {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-400">
+                      {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
+                    </div>
+                    <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                      v{APP_VERSION}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
                 <div className="px-5 py-6 border-b border-gray-200">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -3540,46 +4166,86 @@ export default function App() {
                   </div>
                 </div>
               </>
+              )
             ) : (
               <>
                 <div className="px-5 py-6 border-b border-gray-200">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
-                      <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+                  {!isPhoneViewport && (
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                        <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+                      </div>
+                      <div className="text-xs font-medium text-gray-500">{copy.songLibrary}</div>
                     </div>
-                    <div className="text-xs font-medium text-gray-500">{copy.songLibrary}</div>
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={handleCreateSong}
-                      className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                    >
-                      <Plus size={16} />
-                      <span>{copy.newSong}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsLibraryEditing(!isLibraryEditing)}
-                      className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
-                        isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      <Edit3 size={16} />
-                      <span>{isLibraryEditing ? copy.done : copy.manage}</span>
-                    </button>
-                  </div>
-                  <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                    <Search size={15} className="text-gray-400" />
-                    <input
-                      type="text"
-                      value={librarySearchQuery}
-                      onChange={(event) => setLibrarySearchQuery(event.target.value)}
-                      placeholder={copy.searchSongs}
-                      className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                    />
-                  </label>
+                  )}
+                  {isPhoneViewport ? (
+                    <div className="flex items-center gap-2">
+                      <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                        <Search size={15} className="shrink-0 text-gray-400" />
+                        <input
+                          type="text"
+                          value={librarySearchQuery}
+                          onChange={(event) => setLibrarySearchQuery(event.target.value)}
+                          placeholder={copy.searchSongs}
+                          className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleCreateSong}
+                        aria-label={copy.newSong}
+                        title={copy.newSong}
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                      >
+                        <Plus size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsLibraryEditing(!isLibraryEditing)}
+                        aria-label={isLibraryEditing ? copy.done : copy.manage}
+                        title={isLibraryEditing ? copy.done : copy.manage}
+                        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                          isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        <Edit3 size={18} />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-4 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleCreateSong}
+                          className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                        >
+                          <Plus size={16} />
+                          <span>{copy.newSong}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsLibraryEditing(!isLibraryEditing)}
+                          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+                            isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          <Edit3 size={16} />
+                          <span>{isLibraryEditing ? copy.done : copy.manage}</span>
+                        </button>
+                      </div>
+                      <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                        <Search size={15} className="text-gray-400" />
+                        <input
+                          type="text"
+                          value={librarySearchQuery}
+                          onChange={(event) => setLibrarySearchQuery(event.target.value)}
+                          placeholder={copy.searchSongs}
+                          className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                        />
+                      </label>
+                    </>
+                  )}
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -3682,9 +4348,23 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => {
+                              if (mobileLongPressTriggeredRef.current) {
+                                mobileLongPressTriggeredRef.current = false;
+                                return;
+                              }
+
                               handleSelectSong(item.id);
                             }}
-                            className="w-full px-3 py-3 pr-14 text-left"
+                            onTouchStart={(event) => handleMobileLongPressStart('song', item.id, event)}
+                            onTouchMove={(event) => handleMobileLongPressMove(event)}
+                            onTouchEnd={(event) => {
+                              if (mobileLongPressTriggeredRef.current) {
+                                event.preventDefault();
+                              }
+                              handleMobileLongPressEnd();
+                            }}
+                            onTouchCancel={() => handleMobileLongPressEnd()}
+                            className="w-full px-3 py-3 pr-14 text-left [touch-action:pan-y]"
                           >
                             <div className="flex items-start gap-3">
                               <div className={`mt-0.5 rounded-lg p-2 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
@@ -3845,7 +4525,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setIsEditing(!isEditing)}
-                    className={isEditing ? `${mobileTopbarActionClassName} border-gray-900 bg-gray-900 text-white hover:bg-gray-800` : mobileTopbarActionClassName}
+                    className={getMobileTopbarActionClassName(isEditing ? 'primary' : 'default')}
                   >
                     <Edit3 size={16} />
                     <span>{compactEditorToggleLabel}</span>
@@ -3854,11 +4534,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleToggleLyricsMode}
-                    className={`${mobileTopbarActionClassName} ${
-                      isLyricsMode
-                        ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
-                        : 'hover:border-amber-200 hover:bg-amber-50'
-                    }`}
+                    className={getMobileTopbarActionClassName(isLyricsMode ? 'accent' : 'default')}
                   >
                     <FileText size={16} />
                     <span>{compactLyricsToggleLabel}</span>
@@ -3867,11 +4543,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleSaveLibrary}
-                    className={`${mobileTopbarActionClassName} ${
-                      workspaceIsDirty
-                        ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
-                        : ''
-                    }`}
+                    className={getMobileTopbarActionClassName(workspaceIsDirty ? 'accent' : 'default')}
                   >
                     <Save size={16} />
                     <span>{compactSaveLabel}</span>
@@ -3992,11 +4664,11 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
-                      title="123"
+                      title={copy.nashvilleModeLabel}
                       className={desktopToolbarToggleClassName(song.showNashvilleNumbers)}
                     >
                       <Hash size={13} />
-                      <span>123</span>
+                      <span>{copy.nashvilleModeLabel}</span>
                     </button>
 
                     <button
@@ -4006,7 +4678,7 @@ export default function App() {
                       className={desktopToolbarToggleClassName(song.showAbsoluteJianpu)}
                     >
                       <Music2 size={13} />
-                      <span>1=C</span>
+                      <span>{copy.fixedDoModeLabel}</span>
                     </button>
                   </>
                 )}
@@ -4340,7 +5012,7 @@ export default function App() {
                               >
                                 <span className="flex items-center gap-2">
                                   <Hash size={14} />
-                                  <span>123</span>
+                                  <span>{copy.nashvilleModeLabel}</span>
                                 </span>
                                 <span className="text-[11px] font-bold">{song.showNashvilleNumbers ? copy.on : copy.off}</span>
                               </button>
@@ -4360,7 +5032,7 @@ export default function App() {
                               >
                                 <span className="flex items-center gap-2">
                                   <Music2 size={14} />
-                                  <span>1=C</span>
+                                  <span>{copy.fixedDoModeLabel}</span>
                                 </span>
                                 <span className="text-[11px] font-bold">{song.showAbsoluteJianpu ? copy.on : copy.off}</span>
                               </button>
@@ -4375,7 +5047,7 @@ export default function App() {
                             className={toolbarSecondaryToggleClassName(song.showNashvilleNumbers)}
                           >
                             <Hash size={14} />
-                            <span>123</span>
+                            <span>{copy.nashvilleModeLabel}</span>
                           </button>
 
                           <button
@@ -4385,7 +5057,7 @@ export default function App() {
                             className={toolbarSecondaryToggleClassName(song.showAbsoluteJianpu)}
                           >
                             <Music2 size={14} />
-                            <span>1=C</span>
+                            <span>{copy.fixedDoModeLabel}</span>
                           </button>
                         </>
                       )}
@@ -4470,6 +5142,7 @@ export default function App() {
                             key={`${selectedSetlistSong.id}-song`}
                             song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
                             language={language}
+                            isPhoneViewport={isPhoneViewport}
                             history={currentSetlistSongHistory}
                             onUndo={handleSetlistUndo}
                             onRedo={handleSetlistRedo}
@@ -4519,6 +5192,7 @@ export default function App() {
                             key={song.id}
                             song={song}
                             language={language}
+                            isPhoneViewport={isPhoneViewport}
                             history={currentSongHistory}
                             onUndo={handleUndo}
                             onRedo={handleRedo}
@@ -4834,7 +5508,7 @@ export default function App() {
                                   : 'border-gray-200 bg-white text-gray-700'
                               }`}
                             >
-                              <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">123</div>
+                              <div className="text-xs font-bold tracking-[0.14em] text-gray-400">{copy.nashvilleModeLabel}</div>
                               <div className="mt-1 text-sm font-bold">{song.showNashvilleNumbers ? copy.on : copy.off}</div>
                             </button>
 
@@ -4847,7 +5521,7 @@ export default function App() {
                                   : 'border-gray-200 bg-white text-gray-700'
                               }`}
                             >
-                              <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">1=C</div>
+                              <div className="text-xs font-bold tracking-[0.14em] text-gray-400">{copy.fixedDoModeLabel}</div>
                               <div className="mt-1 text-sm font-bold">{song.showAbsoluteJianpu ? copy.on : copy.off}</div>
                             </button>
                           </div>

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure, ChordFontPreset } from '../types';
-import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
-import { motion, AnimatePresence, Reorder, LayoutGroup } from 'motion/react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpLeft, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
+import { motion, AnimatePresence, Reorder, LayoutGroup, useDragControls } from 'motion/react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import KeyPicker from './KeyPicker';
@@ -24,6 +24,7 @@ interface FocusRequest {
 interface Props {
   song: Song;
   language: AppLanguage;
+  isPhoneViewport?: boolean;
   history: { past: Song[]; future: Song[] };
   onUndo: () => void;
   onRedo: () => void;
@@ -110,6 +111,7 @@ const PICKUP_SECTION_INDEX = 0;
 const PICKUP_BAR_INDEX = -1;
 const STACKED_BAR_LAYOUT_MAX_WIDTH = 560;
 const FULL_BAR_LAYOUT_MIN_WIDTH = 680;
+const MOBILE_SECTION_REORDER_LONG_PRESS_MS = 360;
 
 const SECTION_TITLE_PRESETS = [
   'Intro',
@@ -317,7 +319,8 @@ const buildTimeSignatureInput = (numerator: string, denominator: string) => {
   return `${cleanNumerator}/${cleanDenominator}`;
 };
 
-const getBarLayoutMode = (width: number): BarLayoutMode => {
+const getBarLayoutMode = (width: number, isPhoneViewport: boolean): BarLayoutMode => {
+  if (isPhoneViewport) return 'compact4';
   if (width < STACKED_BAR_LAYOUT_MAX_WIDTH) return 'stacked';
   if (width < FULL_BAR_LAYOUT_MIN_WIDTH) return 'compact4';
   return 'full4';
@@ -391,9 +394,178 @@ const normalizeEditableJianpuAccidental = (accidental: string | undefined): Jian
   accidental === '#' ? '#' : accidental === 'b' ? 'b' : ''
 );
 
+interface SectionNavigationChipProps {
+  section: Section;
+  idx: number;
+  copy: ReturnType<typeof getUiCopy>;
+  sectionId: string;
+  isPhoneViewport: boolean;
+  isActiveSection: boolean;
+  hideSectionStructureActions: boolean;
+  onNavigate: () => void;
+  onDuplicate: () => void;
+  onRemove: () => void;
+}
+
+const SectionNavigationChip: React.FC<SectionNavigationChipProps> = ({
+  section,
+  idx,
+  copy,
+  sectionId,
+  isPhoneViewport,
+  isActiveSection,
+  hideSectionStructureActions,
+  onNavigate,
+  onDuplicate,
+  onRemove
+}) => {
+  const colors = getSectionColor(section.title, true);
+  const accentHighlight = getAccentHighlight(colors.accent);
+  const accentTone = getAccentNavigationTone(colors.accent);
+  const navLabel = getSectionNavigationLabel(section.title, idx);
+  const navLabelText = `${navLabel.main}${navLabel.inlineSuffix || ''}`;
+  const hasStackedNumbers = Boolean(navLabel.topRight || navLabel.bottomRight);
+  const isWideLabel = hasStackedNumbers ? navLabel.main.length >= 2 : navLabelText.length >= 3;
+  const dragControls = useDragControls();
+  const longPressTimerRef = useRef<number | null>(null);
+  const pointerStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const suppressClickRef = useRef(false);
+  const [isLongPressDragging, setIsLongPressDragging] = useState(false);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => {
+    clearLongPressTimer();
+  }, []);
+
+  const handlePointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isPhoneViewport || event.pointerType === 'mouse' || event.button !== 0) {
+      return;
+    }
+
+    const nativeEvent = event.nativeEvent;
+    pointerStartRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY
+    };
+    suppressClickRef.current = false;
+    setIsLongPressDragging(false);
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      suppressClickRef.current = true;
+      setIsLongPressDragging(true);
+      dragControls.start(nativeEvent);
+    }, MOBILE_SECTION_REORDER_LONG_PRESS_MS);
+  };
+
+  const handlePointerMoveCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pointerStart = pointerStartRef.current;
+    if (!pointerStart || pointerStart.pointerId !== event.pointerId || isLongPressDragging) {
+      return;
+    }
+
+    if (Math.abs(event.clientX - pointerStart.x) > 8 || Math.abs(event.clientY - pointerStart.y) > 8) {
+      clearLongPressTimer();
+      pointerStartRef.current = null;
+    }
+  };
+
+  const handlePointerRelease = () => {
+    clearLongPressTimer();
+    pointerStartRef.current = null;
+  };
+
+  return (
+    <Reorder.Item
+      key={sectionId}
+      value={section}
+      dragListener={!isPhoneViewport}
+      dragControls={dragControls}
+      onPointerDownCapture={handlePointerDownCapture}
+      onPointerMoveCapture={handlePointerMoveCapture}
+      onPointerUpCapture={handlePointerRelease}
+      onPointerCancelCapture={handlePointerRelease}
+      onDragEnd={() => {
+        setIsLongPressDragging(false);
+        pointerStartRef.current = null;
+        clearLongPressTimer();
+      }}
+      className="relative flex-shrink-0 group/nav pt-3 pb-1"
+    >
+      {!hideSectionStructureActions && (
+        <div className="absolute -top-1 left-1/2 z-30 flex items-center gap-1 opacity-0 transition-all pointer-events-none group-hover/nav:pointer-events-auto group-hover/nav:opacity-100 -translate-x-1/2">
+          <button
+            onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
+            className="rounded-full border border-gray-200 bg-white p-1 text-indigo-600 shadow-md transition-colors hover:bg-indigo-50"
+            title={copy.editor.duplicate}
+          >
+            <Copy size={10} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            className="rounded-full border border-gray-200 bg-white p-1 text-red-600 shadow-md transition-colors hover:bg-red-50"
+            title={copy.editor.delete}
+          >
+            <Trash2 size={10} />
+          </button>
+        </div>
+      )}
+
+      <button
+        onClick={() => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false;
+            setIsLongPressDragging(false);
+            return;
+          }
+
+          onNavigate();
+        }}
+        title={section.title || `Section ${idx + 1}`}
+        className={`relative inline-flex items-center justify-center rounded-[1.4rem] border-2 text-center font-black leading-none transition-all ${
+          isWideLabel ? 'h-[2.375rem] min-w-[2.8rem] px-2.25 text-[14px]' : 'h-[2.375rem] min-w-[2.45rem] px-2 text-[15px]'
+        } ${isPhoneViewport ? '' : 'cursor-grab active:cursor-grabbing'} ${isActiveSection ? 'scale-[1.02]' : 'hover:-translate-y-[1px] hover:shadow-sm'} ${
+          isLongPressDragging ? 'scale-[1.04]' : ''
+        }`}
+        style={{
+          backgroundColor: isActiveSection ? accentTone.activeBg : accentTone.bg,
+          color: accentTone.text,
+          borderColor: isActiveSection ? accentTone.activeBorder : accentTone.border,
+          boxShadow: isLongPressDragging
+            ? `0 0 0 3px ${accentHighlight.ring}, 0 12px 24px ${accentHighlight.glow}`
+            : isActiveSection
+              ? `0 0 0 2px ${accentHighlight.ring}, 0 10px 18px ${accentHighlight.glow}`
+              : '0 1px 0 rgba(255,255,255,0.82) inset'
+        }}
+      >
+        {hasStackedNumbers ? (
+          <span className="inline-flex items-center gap-[1px]">
+            <span className="text-[14px] tracking-[-0.03em]">{navLabel.main}</span>
+            <span className="inline-flex flex-col items-center justify-center leading-none">
+              <span className="text-[7.5px] font-bold leading-none tracking-normal">{navLabel.topRight}</span>
+              <span className="text-[7.5px] font-bold leading-none tracking-normal">{navLabel.bottomRight}</span>
+            </span>
+          </span>
+        ) : (
+          <span className={`block ${isWideLabel ? 'tracking-[-0.01em]' : 'tracking-[-0.03em]'}`}>
+            {navLabelText}
+          </span>
+        )}
+      </button>
+    </Reorder.Item>
+  );
+};
+
 const SongEditor: React.FC<Props> = ({
   song,
   language,
+  isPhoneViewport = false,
   history,
   onUndo,
   onRedo,
@@ -423,7 +595,8 @@ const SongEditor: React.FC<Props> = ({
   const [copiedJianpu, setCopiedJianpu] = useState<string | null>(null);
   const [copiedRhythm, setCopiedRhythm] = useState<string | null>(null);
   const [tempoDraft, setTempoDraft] = useState<string>(formatTempoDraftValue(song.tempo));
-  const [barLayoutMode, setBarLayoutMode] = useState<BarLayoutMode>('full4');
+  const [barLayoutMode, setBarLayoutMode] = useState<BarLayoutMode>(() => getBarLayoutMode(0, isPhoneViewport));
+  const [compactInspectorBar, setCompactInspectorBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [jianpuDurationBlockedHint, setJianpuDurationBlockedHint] = useState<string | null>(null);
   const [sectionTitleSuggestionState, setSectionTitleSuggestionState] = useState<SectionTitleSuggestionState>({
     sectionId: null,
@@ -440,6 +613,11 @@ const SongEditor: React.FC<Props> = ({
   const skipSelectionScrollKeyRef = useRef<string | null>(null);
   const jianpuDurationBlockedHintTimerRef = useRef<number | null>(null);
   const inlineCompactEditorRef = useRef<HTMLDivElement | null>(null);
+  const isCompactBarLayout = barLayoutMode === 'compact4';
+  const isSpaceConstrainedBarLayout = barLayoutMode !== 'full4';
+  const shouldUseManualCompactInspector = isPhoneViewport && isSpaceConstrainedBarLayout;
+  const compactInspectorTarget = shouldUseManualCompactInspector ? compactInspectorBar : activeBar;
+  const barGridClassName = `grid gap-2.5 ${barLayoutMode === 'stacked' ? 'grid-cols-1' : 'grid-cols-4'}`;
 
   const notifyChange = (newSong: Song) => {
     onChange(newSong);
@@ -576,7 +754,7 @@ const SongEditor: React.FC<Props> = ({
     const updateLayoutMode = () => {
       const nextWidth = rootNode.clientWidth || rootNode.getBoundingClientRect().width || 0;
       setBarLayoutMode((current) => {
-        const nextMode = getBarLayoutMode(nextWidth);
+        const nextMode = getBarLayoutMode(nextWidth, isPhoneViewport);
         return current === nextMode ? current : nextMode;
       });
     };
@@ -591,10 +769,10 @@ const SongEditor: React.FC<Props> = ({
     return () => {
       observer.disconnect();
     };
-  }, []);
+  }, [isPhoneViewport]);
 
   useLayoutEffect(() => {
-    if (barLayoutMode === 'full4' || !activeBar || activeBar.bIdx < 0) return;
+    if (barLayoutMode === 'full4' || !compactInspectorTarget || compactInspectorTarget.bIdx < 0) return;
 
     const node = inlineCompactEditorRef.current;
     if (!node) return;
@@ -621,7 +799,7 @@ const SongEditor: React.FC<Props> = ({
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [activeBar, barLayoutMode, song.sections]);
+  }, [barLayoutMode, compactInspectorTarget, song.sections]);
 
   useEffect(() => {
     if (!jianpuDurationBlockedHint) return;
@@ -900,6 +1078,24 @@ const SongEditor: React.FC<Props> = ({
     }, 0);
   };
 
+  const blurActiveEditableField = () => {
+    const active = document.activeElement;
+    const root = rootRef.current;
+    if (!root || !(active instanceof HTMLElement) || !root.contains(active)) {
+      return;
+    }
+
+    const isEditableInput = active instanceof HTMLInputElement
+      && !active.readOnly
+      && !['button', 'checkbox', 'radio', 'file', 'range'].includes(active.type);
+    const isEditableTextarea = active instanceof HTMLTextAreaElement;
+    const isContentEditable = active.isContentEditable;
+
+    if (isEditableInput || isEditableTextarea || isContentEditable) {
+      active.blur();
+    }
+  };
+
   const getBarTimeSignature = (bar?: Bar) => getEffectiveTimeSignature(bar?.timeSignature, song.timeSignature);
   const getCanonicalRiffNotationForBar = (notation: string | undefined, sIdx: number, bIdx: number, trimTrailingEmpty = false) => (
     getCanonicalJianpuNotation(notation, getBarTimeSignature(getEditorBar(sIdx, bIdx)), trimTrailingEmpty)
@@ -927,6 +1123,10 @@ const SongEditor: React.FC<Props> = ({
     };
   };
   const updateBarPanelState = (bar: Bar, sIdx: number, bIdx: number, patch: BarPanelState) => {
+    if (patch.riff !== undefined || patch.rhythm !== undefined) {
+      blurActiveEditableField();
+    }
+
     const key = getBarPanelKey(bar, sIdx, bIdx);
     setBarPanels(current => ({
       ...current,
@@ -1471,6 +1671,7 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const setRhythmInsertSelection = (sIdx: number, bIdx: number, value: string, insertIndex: number) => {
+    blurActiveEditableField();
     const cursorUnits = getRhythmEditorCursorUnits(sIdx, bIdx, value);
     const safeCursorUnit = cursorUnits.includes(insertIndex)
       ? insertIndex
@@ -1821,6 +2022,14 @@ const SongEditor: React.FC<Props> = ({
     setRhythmInsertSelection(selection.sIdx, selection.bIdx, nextRhythm, nextCursorUnit);
   };
 
+  const clearSelectedJianpuContent = (mode: 'backspace' | 'delete' = 'backspace') => {
+    if (!selection || selection.type !== 'riff') return;
+
+    if (!removeJianpuNoteNearCaret(mode)) {
+      removeJianpuBeatToken(mode);
+    }
+  };
+
   const getRiffValue = (sIdx: number, bIdx: number) => (
     getCanonicalRiffNotationForBar(getEditorBar(sIdx, bIdx)?.riff, sIdx, bIdx)
   );
@@ -1903,6 +2112,7 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const setRiffSelectionRange = (sIdx: number, bIdx: number, value: string, start: number, end: number) => {
+    blurActiveEditableField();
     const beatIndex = getBeatIndexFromCaret(value, sIdx, bIdx, start);
     setJianpuCursor({ sIdx, bIdx, beatIndex });
     markActiveBar(sIdx, bIdx);
@@ -3814,10 +4024,40 @@ const SongEditor: React.FC<Props> = ({
   const canUseSixteenthDuration = canApplyJianpuDurationChoice('sixteenth');
   const showEighthQuarterBlocked = effectiveJianpuDuration === 'eighth' && !canUseEighthDuration;
   const showSixteenthQuarterBlocked = effectiveJianpuDuration === 'sixteenth' && !canUseSixteenthDuration;
-  const activeJianpuShortcutBadgeClass = 'border-white/90 bg-white text-indigo-700 shadow-[0_1px_2px_rgba(15,23,42,0.16)]';
-  const inactiveJianpuShortcutBadgeClass = 'border-indigo-200 bg-white text-indigo-500 group-hover:border-indigo-200 group-hover:bg-indigo-500 group-hover:text-white';
-  const chordToolbarButtonClass = `flex ${language === 'zh' ? 'w-[72px]' : 'w-[88px]'} shrink-0 flex-col items-center gap-1 rounded-xl p-2 text-center transition-colors group hover:bg-indigo-50`;
-  const chordToolbarLabelClass = 'flex min-h-[28px] items-center justify-center text-center text-[10px] font-bold leading-[1.15] text-gray-500';
+  const isCompactSelectionToolbar = isPhoneViewport;
+  const isCompactJianpuSelectionToolbar = isCompactSelectionToolbar && selection?.type === 'riff';
+  const activeJianpuShortcutBadgeClass = `${isCompactSelectionToolbar ? 'min-w-[12px] h-[12px] px-0.5 text-[7px] leading-[10px]' : 'min-w-[14px] h-[14px] px-1 text-[8px] leading-[12px]'} border-white/90 bg-white text-indigo-700 shadow-[0_1px_2px_rgba(15,23,42,0.16)]`;
+  const inactiveJianpuShortcutBadgeClass = `${isCompactSelectionToolbar ? 'min-w-[12px] h-[12px] px-0.5 text-[7px] leading-[10px]' : 'min-w-[14px] h-[14px] px-1 text-[8px] leading-[12px]'} border-indigo-200 bg-white text-indigo-500 group-hover:border-indigo-200 group-hover:bg-indigo-500 group-hover:text-white`;
+  const compactToolButtonClass = `${isCompactSelectionToolbar ? 'min-w-0 gap-0.5 p-1.5' : 'gap-1 p-2'} rounded-xl transition-colors group`;
+  const compactToolIconBoxClass = `${isCompactSelectionToolbar ? 'h-7 w-7' : 'w-8 h-8'} rounded-lg flex items-center justify-center transition-colors`;
+  const compactToolLabelClass = `${isCompactSelectionToolbar ? 'text-[9px] leading-none' : 'text-[10px]'} font-bold text-gray-500`;
+  const compactToolbarRowClass = `flex items-start ${isCompactSelectionToolbar ? 'gap-0.5' : 'gap-1'}`;
+  const compactToolbarColumnClass = `flex flex-col ${isCompactSelectionToolbar ? 'gap-1.5' : 'gap-2'}`;
+  const toolbarDividerClass = `${isCompactSelectionToolbar ? 'mx-0.5 h-7' : 'mx-1 h-8'} w-px bg-gray-100`;
+  const chordToolbarButtonClass = `flex ${language === 'zh' ? 'w-[72px]' : 'w-[88px]'} shrink-0 flex-col items-center ${isCompactSelectionToolbar ? 'gap-0.5 rounded-xl p-1.5' : 'gap-1 rounded-xl p-2'} text-center transition-colors group hover:bg-indigo-50`;
+  const chordToolbarLabelClass = `flex items-center justify-center text-center font-bold leading-[1.15] text-gray-500 ${isCompactSelectionToolbar ? 'min-h-[22px] text-[9px]' : 'min-h-[28px] text-[10px]'}`;
+  const renderJianpuOctaveGlyph = (octave: 'low' | 'high') => (
+    <div className="relative flex h-full w-full items-center justify-center">
+      <span className={`${isCompactSelectionToolbar ? 'text-[15px]' : 'text-[18px]'} font-bold leading-none`}>1</span>
+      <span
+        className={`absolute left-1/2 h-0.5 w-0.5 -translate-x-1/2 rounded-full bg-current ${
+          octave === 'high' ? (isCompactSelectionToolbar ? 'top-[4px]' : 'top-[3px]') : (isCompactSelectionToolbar ? 'bottom-[4px]' : 'bottom-[3px]')
+        }`}
+      />
+    </div>
+  );
+  const renderJianpuDurationGlyph = (duration: 'eighth' | 'sixteenth') => (
+    <div className="flex h-full w-full flex-col items-center justify-center leading-none">
+      <span className={`${isCompactSelectionToolbar ? 'text-[11px]' : 'text-[13px]'} font-bold tracking-[-0.08em]`}>11</span>
+      <span className={`${isCompactSelectionToolbar ? 'mt-[1px] w-4' : 'mt-0.5 w-5'} h-[1.5px] rounded-full bg-current`} />
+      {duration === 'sixteenth' && (
+        <span className={`${isCompactSelectionToolbar ? 'mt-[1px] w-4' : 'mt-0.5 w-5'} h-[1.5px] rounded-full bg-current`} />
+      )}
+    </div>
+  );
+  const renderJianpuTieGlyph = () => (
+    <span className={`${isCompactSelectionToolbar ? 'text-[18px]' : 'text-[21px]'} font-bold leading-none -translate-y-[2px]`}>◠</span>
+  );
   const getActiveJianpuBeatIndex = (sIdx: number, bIdx: number, value: string) => {
     if (jianpuCursor && jianpuCursor.sIdx === sIdx && jianpuCursor.bIdx === bIdx) {
       return jianpuCursor.beatIndex;
@@ -4125,16 +4365,48 @@ const SongEditor: React.FC<Props> = ({
     </div>
   );
 
-  const isCompactBarLayout = barLayoutMode === 'compact4';
-  const isSpaceConstrainedBarLayout = barLayoutMode !== 'full4';
-  const barGridClassName = `grid gap-2.5 ${barLayoutMode === 'stacked' ? 'grid-cols-1' : 'grid-cols-4'}`;
+  useEffect(() => {
+    if (!shouldUseManualCompactInspector) {
+      setCompactInspectorBar(null);
+      return;
+    }
+
+    if (!activeBar) {
+      setCompactInspectorBar(null);
+      return;
+    }
+
+    setCompactInspectorBar((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return current.sIdx === activeBar.sIdx && current.bIdx === activeBar.bIdx
+        ? current
+        : null;
+    });
+  }, [activeBar, shouldUseManualCompactInspector]);
+
+  useEffect(() => {
+    if (!compactInspectorBar) return;
+
+    const targetSection = song.sections[compactInspectorBar.sIdx];
+    if (!targetSection?.bars[compactInspectorBar.bIdx]) {
+      setCompactInspectorBar(null);
+    }
+  }, [compactInspectorBar, song.sections]);
 
   const getCompactEditorState = (section: Section, sIdx: number) => {
-    if (!isSpaceConstrainedBarLayout || activeBar?.sIdx !== sIdx || activeBar.bIdx < 0 || section.bars.length === 0) {
+    if (
+      !isSpaceConstrainedBarLayout
+      || compactInspectorTarget?.sIdx !== sIdx
+      || compactInspectorTarget.bIdx < 0
+      || section.bars.length === 0
+    ) {
       return null;
     }
 
-    const primaryBIdx = Math.max(0, Math.min(activeBar.bIdx, section.bars.length - 1));
+    const primaryBIdx = Math.max(0, Math.min(compactInspectorTarget.bIdx, section.bars.length - 1));
     const pairIndices = section.bars.length === 1
       ? [primaryBIdx]
       : primaryBIdx === section.bars.length - 1
@@ -4149,6 +4421,11 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const openCompactBarInspector = (sectionId: string | null, bar: Bar, sIdx: number, bIdx: number) => {
+    if (shouldUseManualCompactInspector) {
+      blurActiveEditableField();
+      setCompactInspectorBar({ sIdx, bIdx });
+    }
+
     markActiveSection(sectionId);
     markActiveBar(sIdx, bIdx);
 
@@ -4159,8 +4436,13 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const toggleCompactBarInspector = (sectionId: string | null, bar: Bar, sIdx: number, bIdx: number) => {
-    if (activeBar?.sIdx === sIdx && activeBar?.bIdx === bIdx) {
-      onActiveBarChange?.(null);
+    const isAlreadyOpen = compactInspectorTarget?.sIdx === sIdx && compactInspectorTarget?.bIdx === bIdx;
+    if (isAlreadyOpen) {
+      if (shouldUseManualCompactInspector) {
+        setCompactInspectorBar(null);
+      } else {
+        onActiveBarChange?.(null);
+      }
       return;
     }
 
@@ -4180,6 +4462,9 @@ const SongEditor: React.FC<Props> = ({
     if (!bar) return null;
 
     const isPrimary = options?.isPrimary ?? false;
+    const isDenseCompactControls = isPhoneViewport;
+    const canMergeSection = sIdx !== 0 && bIdx === 0;
+    const canSplitSection = bIdx !== 0;
     const panelState = getBarPanelState(bar, sIdx, bIdx);
     const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
     const compactInspectorTitle = language === 'zh' ? `小節 ${globalBarNumber}` : `Bar ${globalBarNumber}`;
@@ -4226,47 +4511,93 @@ const SongEditor: React.FC<Props> = ({
           </div>
         </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => duplicateBarAfter(sIdx, bIdx)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
-            >
-              <Copy size={12} />
-              <span>{language === 'zh' ? '複製到後方' : 'Copy After'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => mergeSectionToPrevious(sIdx)}
-              disabled={sIdx === 0 || bIdx !== 0}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ArrowUpRight size={12} />
-              <span>{language === 'zh' ? '併到上一段' : 'Merge Prev'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => splitSectionAtBar(sIdx, bIdx)}
-              disabled={bIdx === 0}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ArrowDownRight size={12} />
-              <span>{language === 'zh' ? '從這裡分段' : 'Split Here'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const newBars = section.bars.filter((_, index) => index !== bIdx);
-                clearEditorSelectionState();
-                onActiveBarChange?.(null);
-                updateSection(sIdx, sanitizeSectionJianpuSlurs({ ...section, bars: newBars }, sIdx));
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100"
-            >
-              <Trash2 size={12} />
-              <span>{copy.editor.deleteBar}</span>
-            </button>
-          </div>
+          {isDenseCompactControls ? (
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => duplicateBarAfter(sIdx, bIdx)}
+                title={language === 'zh' ? '複製' : 'Copy'}
+                className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
+              >
+                <Copy size={12} />
+              </button>
+              {canMergeSection ? (
+                <button
+                  type="button"
+                  onClick={() => mergeSectionToPrevious(sIdx)}
+                  title={language === 'zh' ? '併段' : 'Merge Prev'}
+                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
+                >
+                  <ArrowUpLeft size={12} />
+                </button>
+              ) : null}
+              {canSplitSection ? (
+                <button
+                  type="button"
+                  onClick={() => splitSectionAtBar(sIdx, bIdx)}
+                  title={language === 'zh' ? '分段' : 'Split Here'}
+                  className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
+                >
+                  <ArrowDownRight size={12} />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  const newBars = section.bars.filter((_, index) => index !== bIdx);
+                  clearEditorSelectionState();
+                  onActiveBarChange?.(null);
+                  updateSection(sIdx, sanitizeSectionJianpuSlurs({ ...section, bars: newBars }, sIdx));
+                }}
+                title={language === 'zh' ? '刪除' : copy.editor.deleteBar}
+                className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2 text-xs font-semibold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => duplicateBarAfter(sIdx, bIdx)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
+              >
+                <Copy size={12} />
+                <span>{language === 'zh' ? '複製到後方' : 'Copy After'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => mergeSectionToPrevious(sIdx)}
+                disabled={!canMergeSection}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ArrowUpRight size={12} />
+                <span>{language === 'zh' ? '併到上一段' : 'Merge Prev'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const newBars = section.bars.filter((_, index) => index !== bIdx);
+                  clearEditorSelectionState();
+                  onActiveBarChange?.(null);
+                  updateSection(sIdx, sanitizeSectionJianpuSlurs({ ...section, bars: newBars }, sIdx));
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:border-rose-300 hover:bg-rose-100"
+              >
+                <Trash2 size={12} />
+                <span>{copy.editor.deleteBar}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => splitSectionAtBar(sIdx, bIdx)}
+                disabled={!canSplitSection}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ArrowDownRight size={12} />
+                <span>{language === 'zh' ? '從這裡分段' : 'Split Here'}</span>
+              </button>
+            </div>
+          )}
 
           <div className="mt-3 flex items-center gap-1 overflow-x-auto whitespace-nowrap pb-0.5 no-scrollbar">
             <button
@@ -4335,21 +4666,29 @@ const SongEditor: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => handleCopyJianpu(sIdx, bIdx)}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                        className={`inline-flex h-8 items-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 ${
+                          isPhoneViewport ? 'w-8 justify-center px-0' : 'gap-1.5 px-2.5'
+                        }`}
                         title={copy.editor.copyJianpu}
                       >
                         <Copy size={12} />
-                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                        {!isPhoneViewport && (
+                          <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                        )}
                       </button>
                       <button
                         type="button"
                         onClick={() => handlePasteJianpu(sIdx, bIdx)}
                         disabled={copiedJianpu === null}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        className={`inline-flex h-8 items-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 ${
+                          isPhoneViewport ? 'w-8 justify-center px-0' : 'gap-1.5 px-2.5'
+                        }`}
                         title={copiedJianpu === null ? copy.editor.copyJianpuFirst : copy.editor.pasteJianpu}
                       >
                         <ArrowDownRight size={12} />
-                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                        {!isPhoneViewport && (
+                          <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -4509,21 +4848,29 @@ const SongEditor: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => handleCopyRhythm(sIdx, bIdx)}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                        className={`inline-flex h-8 items-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 ${
+                          isPhoneViewport ? 'w-8 justify-center px-0' : 'gap-1.5 px-2.5'
+                        }`}
                         title={copy.editor.copyRhythm}
                       >
                         <Copy size={12} />
-                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                        {!isPhoneViewport && (
+                          <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                        )}
                       </button>
                       <button
                         type="button"
                         onClick={() => handlePasteRhythm(sIdx, bIdx)}
                         disabled={copiedRhythm === null}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        className={`inline-flex h-8 items-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 ${
+                          isPhoneViewport ? 'w-8 justify-center px-0' : 'gap-1.5 px-2.5'
+                        }`}
                         title={copiedRhythm === null ? copy.editor.copyFirst : copy.editor.pasteRhythm}
                       >
                         <ArrowDownRight size={12} />
-                        <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                        {!isPhoneViewport && (
+                          <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -4719,8 +5066,10 @@ const SongEditor: React.FC<Props> = ({
                     </button>
                   </div>
 
-                  <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
-                    <span className="shrink-0 text-[10px] font-bold uppercase text-gray-400">{copy.editor.endShort}</span>
+                  <div className={`min-w-0 ${isPhoneViewport ? 'grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-1 pt-1' : 'flex flex-1 items-center justify-end gap-1'}`}>
+                    <span className="shrink-0 text-[10px] font-bold text-gray-400">
+                      {isPhoneViewport && language === 'zh' ? '房記' : copy.editor.endShort}
+                    </span>
                     <input
                       list={`compact-ending-options-${sIdx}-${bIdx}`}
                       value={bar.ending || ''}
@@ -4731,7 +5080,9 @@ const SongEditor: React.FC<Props> = ({
                         updateSection(sIdx, { ...section, bars: newBars });
                       }}
                       placeholder="e.g. 1 / 1,2"
-                      className="min-w-0 max-w-[96px] flex-1 rounded border border-gray-300 bg-white p-1 text-[10px] outline-none focus:ring-1 focus:ring-indigo-500"
+                      className={`min-w-0 flex-1 rounded border border-gray-300 bg-white p-1 text-[10px] outline-none focus:ring-1 focus:ring-indigo-500 ${
+                        isPhoneViewport ? 'w-full max-w-none' : 'max-w-[96px]'
+                      }`}
                     />
                     <datalist id={`compact-ending-options-${sIdx}-${bIdx}`}>
                       <option value="1" />
@@ -4779,7 +5130,14 @@ const SongEditor: React.FC<Props> = ({
 
           <button
             type="button"
-            onClick={() => onActiveBarChange?.(null)}
+            onClick={() => {
+              if (shouldUseManualCompactInspector) {
+                setCompactInspectorBar(null);
+                return;
+              }
+
+              onActiveBarChange?.(null);
+            }}
             className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-500 transition-colors hover:border-gray-300 hover:text-gray-700"
           >
             {language === 'zh' ? '收合' : 'Close'}
@@ -4787,10 +5145,14 @@ const SongEditor: React.FC<Props> = ({
         </div>
 
         <div className={`mt-3 grid gap-3 ${isCompactBarLayout && compactEditorState.pairIndices.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-          {compactEditorState.pairIndices.map((index) => renderCompactBarEditorPanel(section, sIdx, index, {
-            isPrimary: index === compactEditorState.primaryBIdx,
-            onPromote: () => openCompactBarInspector(section.id ?? null, section.bars[index], sIdx, index)
-          }))}
+          {compactEditorState.pairIndices.map((index) => (
+            <React.Fragment key={section.bars[index]?.id || `compact-editor-${section.id || sIdx}-${index}`}>
+              {renderCompactBarEditorPanel(section, sIdx, index, {
+                isPrimary: index === compactEditorState.primaryBIdx,
+                onPromote: () => openCompactBarInspector(section.id ?? null, section.bars[index], sIdx, index)
+              })}
+            </React.Fragment>
+          ))}
         </div>
       </motion.div>
     );
@@ -4864,76 +5226,25 @@ const SongEditor: React.FC<Props> = ({
           className="flex items-center gap-2"
         >
           {song.sections.map((section, idx) => {
-            const colors = getSectionColor(section.title, true);
             const sectionId = section.id || `section-${idx}`;
-            const isActiveSection = activeSectionId === sectionId;
-            const accentHighlight = getAccentHighlight(colors.accent);
-            const accentTone = getAccentNavigationTone(colors.accent);
-            const navLabel = getSectionNavigationLabel(section.title, idx);
-            const navLabelText = `${navLabel.main}${navLabel.inlineSuffix || ''}`;
-            const hasStackedNumbers = Boolean(navLabel.topRight || navLabel.bottomRight);
-            const isWideLabel = hasStackedNumbers
-              ? navLabel.main.length >= 2
-              : navLabelText.length >= 3;
             return (
-              <Reorder.Item 
-                key={section.id || idx} 
-                value={section}
-                className="flex-shrink-0 relative group/nav pt-3 pb-1"
-              >
-                {!hideSectionStructureActions && (
-                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 flex items-center gap-1 opacity-0 group-hover/nav:opacity-100 transition-all pointer-events-none group-hover/nav:pointer-events-auto z-30">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); duplicateSection(idx); }}
-                      className="p-1 bg-white border border-gray-200 rounded-full shadow-md text-indigo-600 hover:bg-indigo-50 transition-colors"
-                      title={copy.editor.duplicate}
-                    >
-                      <Copy size={10} />
-                    </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); removeSection(idx); }}
-                      className="p-1 bg-white border border-gray-200 rounded-full shadow-md text-red-600 hover:bg-red-50 transition-colors"
-                      title={copy.editor.delete}
-                    >
-                      <Trash2 size={10} />
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => {
-                    markActiveSection(sectionId);
-                    const el = document.getElementById(`section-${idx}`);
-                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }}
-                  title={section.title || `Section ${idx + 1}`}
-                  className={`relative inline-flex items-center justify-center rounded-[1.4rem] border-2 text-center font-black leading-none transition-all cursor-grab active:cursor-grabbing ${
-                    isWideLabel ? 'min-w-[2.8rem] px-2.25 h-[2.375rem] text-[14px]' : 'h-[2.375rem] min-w-[2.45rem] px-2 text-[15px]'
-                  } ${isActiveSection ? 'scale-[1.02]' : 'hover:-translate-y-[1px] hover:shadow-sm'}`}
-                  style={{
-                    backgroundColor: isActiveSection ? accentTone.activeBg : accentTone.bg,
-                    color: accentTone.text,
-                    borderColor: isActiveSection ? accentTone.activeBorder : accentTone.border,
-                    boxShadow: isActiveSection
-                      ? `0 0 0 2px ${accentHighlight.ring}, 0 10px 18px ${accentHighlight.glow}`
-                      : '0 1px 0 rgba(255,255,255,0.82) inset'
-                  }}
-                >
-                  {hasStackedNumbers ? (
-                    <span className="inline-flex items-center gap-[1px]">
-                      <span className="text-[14px] tracking-[-0.03em]">{navLabel.main}</span>
-                      <span className="inline-flex flex-col items-center justify-center leading-none">
-                        <span className="text-[7.5px] font-bold leading-none tracking-normal">{navLabel.topRight}</span>
-                        <span className="text-[7.5px] font-bold leading-none tracking-normal">{navLabel.bottomRight}</span>
-                      </span>
-                    </span>
-                  ) : (
-                    <span className={`block ${isWideLabel ? 'tracking-[-0.01em]' : 'tracking-[-0.03em]'}`}>
-                      {navLabelText}
-                    </span>
-                  )}
-                </button>
-              </Reorder.Item>
+              <SectionNavigationChip
+                key={sectionId}
+                section={section}
+                idx={idx}
+                copy={copy}
+                sectionId={sectionId}
+                isPhoneViewport={isPhoneViewport}
+                isActiveSection={activeSectionId === sectionId}
+                hideSectionStructureActions={hideSectionStructureActions}
+                onNavigate={() => {
+                  markActiveSection(sectionId);
+                  const el = document.getElementById(`section-${idx}`);
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                onDuplicate={() => duplicateSection(idx)}
+                onRemove={() => removeSection(idx)}
+              />
             );
           })}
         </Reorder.Group>
@@ -5431,8 +5742,19 @@ const SongEditor: React.FC<Props> = ({
                           id={`editor-bar-${sIdx}-b${bIdx}`}
                           ref={node => setBarRef(bar.id, node)}
                           onMouseDownCapture={() => markActiveBar(sIdx, bIdx)}
-                          onFocusCapture={() => openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx)}
-                          onClick={() => openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx)}
+                          onFocusCapture={() => {
+                            if (shouldUseManualCompactInspector) {
+                              markActiveBar(sIdx, bIdx);
+                              return;
+                            }
+
+                            openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
+                          }}
+                          onClick={() => {
+                            if (!shouldUseManualCompactInspector) {
+                              openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
+                            }
+                          }}
                           onDragOver={e => {
                             if (e.dataTransfer.types.includes('application/x-chordmaster-bar')) {
                               e.preventDefault();
@@ -5531,7 +5853,11 @@ const SongEditor: React.FC<Props> = ({
                             onFocus={e => {
                               const input = e.currentTarget;
                               const len = input.value.length;
-                              openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
+                              if (!shouldUseManualCompactInspector) {
+                                openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
+                              } else {
+                                markActiveBar(sIdx, bIdx);
+                              }
                               if (!selection || selection.sIdx !== sIdx || selection.bIdx !== bIdx || selection.type !== 'chord') {
                                 setTimeout(() => {
                                   input.setSelectionRange(len, len);
@@ -6406,12 +6732,24 @@ const SongEditor: React.FC<Props> = ({
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-4 left-1/2 z-[100] flex max-w-[calc(100vw-1rem)] -translate-x-1/2 flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl sm:bottom-8 sm:max-w-[calc(100vw-2rem)]"
+            className={`fixed left-1/2 z-[100] flex -translate-x-1/2 rounded-2xl border border-gray-200 bg-white shadow-2xl ${
+              isCompactJianpuSelectionToolbar
+                ? 'bottom-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col items-stretch gap-1 p-1.5'
+                : isCompactSelectionToolbar
+                  ? 'max-w-[calc(100vw-0.75rem)] flex-wrap items-center gap-1.5 p-1.5'
+                  : 'bottom-4 max-w-[calc(100vw-0.75rem)] flex-wrap items-center gap-2 p-2 sm:bottom-8 sm:max-w-[calc(100vw-2rem)]'
+            }`}
             onMouseDown={e => e.preventDefault()} // Prevent losing focus/selection
           >
-            <div className="px-3 py-1 border-r border-gray-100 mr-1">
+            <div className={`${
+              isCompactJianpuSelectionToolbar
+                ? 'w-full border-b border-gray-100 px-2 pb-1.5'
+                : isCompactSelectionToolbar
+                  ? 'mr-0.5 border-r border-gray-100 px-2 py-0.5'
+                  : 'mr-1 border-r border-gray-100 px-3 py-1'
+            }`}>
               <span className="text-[10px] font-bold text-gray-400 uppercase block">{copy.editor.selection}</span>
-              <span className="text-sm font-mono font-bold text-indigo-600 truncate max-w-[100px] block">
+              <span className={`${isCompactSelectionToolbar ? 'max-w-[82px] text-[13px]' : 'max-w-[100px] text-sm'} block truncate font-mono font-bold text-indigo-600`}>
                 {selection.type === 'rhythm'
                   ? getRhythmSelectionLabel()
                   : selection.type === 'riff'
@@ -6420,116 +6758,283 @@ const SongEditor: React.FC<Props> = ({
               </span>
             </div>
             
-            <div className={`flex items-center gap-1 ${selection.type === 'riff' ? 'flex-wrap' : ''}`}>
+            <div className={`flex ${
+              isCompactJianpuSelectionToolbar
+                ? 'w-full flex-col items-stretch gap-1'
+                : `items-center ${isCompactSelectionToolbar ? 'gap-0.5' : 'gap-1'} ${selection.type === 'riff' ? 'flex-wrap' : ''}`
+            } ${
+              isCompactSelectionToolbar
+                ? '[&>button]:gap-0.5 [&>button]:p-1.5 [&>button>div:first-child]:h-7 [&>button>div:first-child]:w-7 [&>button>span:last-child]:text-[9px] [&>button>span:last-child]:leading-none'
+                : ''
+            }`}>
               {selection.type === 'riff' ? (
                 <>
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-start gap-1">
+                  <div className={`${compactToolbarColumnClass} ${isCompactSelectionToolbar ? 'w-full' : ''}`}>
+                    {isCompactSelectionToolbar ? (
+                      <>
+                        <div className="grid w-full grid-cols-9 gap-0.5">
+                          <button 
+                            onClick={() => setSelectedJianpuOctave('low')}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave === 'low' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                            title={copy.editor.lowOctave}
+                            aria-keyshortcuts="ArrowDown L"
+                          >
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave === 'low' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                              {renderJianpuOctaveGlyph('low')}
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave === 'low' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
+                            </div>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuOctave === 'low' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
+                          </button>
+                          <button 
+                            onClick={() => setSelectedJianpuOctave('high')}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave === 'high' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                            title={copy.editor.highOctave}
+                            aria-keyshortcuts="ArrowUp H"
+                          >
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave === 'high' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                              {renderJianpuOctaveGlyph('high')}
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave === 'high' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
+                            </div>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuOctave === 'high' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.high}</span>
+                          </button>
+                          <button
+                            onClick={() => setSelectedJianpuAccidental('#')}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuAccidental === '#' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                            title={copy.editor.sharpNote}
+                            aria-keyshortcuts="#"
+                          >
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuAccidental === '#' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                              <span className="text-base font-bold leading-none">#</span>
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuAccidental === '#' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>#</span>
+                            </div>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuAccidental === '#' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.sharp}</span>
+                          </button>
+                          <button
+                            onClick={() => setSelectedJianpuAccidental('b')}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuAccidental === 'b' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                            title={copy.editor.flatNote}
+                            aria-keyshortcuts="B"
+                          >
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuAccidental === 'b' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                              <span className="text-base font-bold leading-none">♭</span>
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuAccidental === 'b' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>b</span>
+                            </div>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuAccidental === 'b' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.flat}</span>
+                          </button>
+                          <button 
+                            onClick={() => setSelectedJianpuDuration('eighth')}
+                            disabled={!canUseEighthDuration && effectiveJianpuDuration !== 'eighth'}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseEighthDuration && effectiveJianpuDuration !== 'eighth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                            title={showEighthQuarterBlocked ? `${copy.editor.eighthNote} · ${copy.editor.cannotChangeToQuarter}` : copy.editor.eighthNote}
+                            aria-keyshortcuts="E"
+                          >
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                              {renderJianpuDurationGlyph('eighth')}
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuDuration === 'eighth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>E</span>
+                            </div>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuDuration === 'eighth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/8</span>
+                          </button>
+                          <button 
+                            onClick={() => setSelectedJianpuDuration('sixteenth')}
+                            disabled={!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth'}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                            title={showSixteenthQuarterBlocked ? `${copy.editor.sixteenthNote} · ${copy.editor.cannotChangeToQuarter}` : copy.editor.sixteenthNote}
+                            aria-keyshortcuts="S"
+                          >
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                              {renderJianpuDurationGlyph('sixteenth')}
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuDuration === 'sixteenth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>S</span>
+                            </div>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuDuration === 'sixteenth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/16</span>
+                          </button>
+                          <button 
+                            onClick={toggleSelectedJianpuDot}
+                            disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted)}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                            title={copy.editor.toggleDot}
+                            aria-keyshortcuts="."
+                          >
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuDotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                              <div className="w-1.5 h-1.5 bg-current rounded-full" />
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuDotted ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>.</span>
+                            </div>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
+                          </button>
+                          <button 
+                            onClick={toggleSelectedJianpuSlur}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuTied ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                            title={copy.editor.toggleTieSlur}
+                            aria-keyshortcuts="T"
+                          >
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuTied ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                              {renderJianpuTieGlyph()}
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuTied ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>T</span>
+                            </div>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuTied ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.tie}</span>
+                          </button>
+                          <button
+                            onClick={() => clearSelectedJianpuContent('backspace')}
+                            className="flex flex-col items-center rounded-xl p-1.5 text-red-600 transition-colors group hover:bg-red-50"
+                            title={copy.editor.clear}
+                          >
+                            <div className={`${compactToolIconBoxClass} bg-red-100 text-red-600 group-hover:bg-red-600 group-hover:text-white`}>
+                              <Trash2 size={16} />
+                            </div>
+                            <span className={compactToolLabelClass}>{copy.editor.clear}</span>
+                          </button>
+                        </div>
+                        <div className="grid w-full grid-cols-9 gap-0.5">
+                          {[
+                            ['1', 'Do'],
+                            ['2', 'Re'],
+                            ['3', 'Mi'],
+                            ['4', 'Fa'],
+                            ['5', 'Sol'],
+                            ['6', 'La'],
+                            ['7', 'Ti']
+                          ].map(([pitch, label]) => (
+                            <button
+                              key={pitch}
+                              onClick={() => insertOrReplaceJianpuPitch(pitch)}
+                              className={`flex flex-col items-center ${compactToolButtonClass} hover:bg-indigo-50`}
+                              title={`Insert ${pitch}`}
+                            >
+                              <div className={`${compactToolIconBoxClass} bg-slate-100 text-slate-700 group-hover:bg-slate-700 group-hover:text-white`}>
+                                <span className="font-bold">{pitch}</span>
+                              </div>
+                              <span className={compactToolLabelClass}>{label}</span>
+                            </button>
+                          ))}
+                          <button 
+                            onClick={() => insertOrReplaceJianpuPitch('0')}
+                            className={`flex flex-col items-center ${compactToolButtonClass} hover:bg-indigo-50`}
+                            title={copy.editor.insertRest}
+                          >
+                            <div className={`${compactToolIconBoxClass} bg-slate-100 text-slate-700 group-hover:bg-slate-700 group-hover:text-white`}>
+                              <span className="font-bold">0</span>
+                            </div>
+                            <span className={compactToolLabelClass}>{copy.editor.rest}</span>
+                          </button>
+                          <button 
+                            onClick={insertJianpuSustainBeat}
+                            className={`flex flex-col items-center ${compactToolButtonClass} hover:bg-indigo-50`}
+                            title={copy.editor.sustainNextBeat}
+                          >
+                            <div className={`${compactToolIconBoxClass} bg-slate-100 text-slate-700 group-hover:bg-slate-700 group-hover:text-white`}>
+                              <span className="font-bold text-lg leading-none">-</span>
+                            </div>
+                            <span className={compactToolLabelClass}>{copy.editor.hold}</span>
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                      <div className={`${isCompactSelectionToolbar ? 'grid w-full grid-cols-5 gap-0.5' : compactToolbarRowClass} ${isCompactSelectionToolbar ? '[&>button]:min-w-0 [&>button]:gap-0.5 [&>button]:p-1.5 [&>button>div:first-child]:h-7 [&>button>div:first-child]:w-7 [&>button>span:last-child]:text-[9px] [&>button>span:last-child]:leading-none' : ''}`}>
                       <button 
                         onClick={() => setSelectedJianpuOctave('low')}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuOctave === 'low' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave === 'low' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.lowOctave}
                         aria-keyshortcuts="ArrowDown L"
                       >
-                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuOctave === 'low' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                          <ArrowDownRight size={16} />
-                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuOctave === 'low' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave === 'low' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          {renderJianpuOctaveGlyph('low')}
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave === 'low' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
                         </div>
-                        <span className={`text-[10px] font-bold ${effectiveJianpuOctave === 'low' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuOctave === 'low' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
                       </button>
 
                       <button 
                         onClick={() => setSelectedJianpuOctave('high')}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuOctave === 'high' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave === 'high' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.highOctave}
                         aria-keyshortcuts="ArrowUp H"
                       >
-                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuOctave === 'high' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                          <ArrowUpRight size={16} />
-                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuOctave === 'high' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave === 'high' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          {renderJianpuOctaveGlyph('high')}
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave === 'high' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
                         </div>
-                        <span className={`text-[10px] font-bold ${effectiveJianpuOctave === 'high' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.high}</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuOctave === 'high' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.high}</span>
                       </button>
 
                       <button
                         onClick={() => setSelectedJianpuAccidental('#')}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuAccidental === '#' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuAccidental === '#' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.sharpNote}
                         aria-keyshortcuts="#"
                       >
-                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuAccidental === '#' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuAccidental === '#' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                           <span className="text-base font-bold leading-none">#</span>
-                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuAccidental === '#' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>#</span>
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuAccidental === '#' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>#</span>
                         </div>
-                        <span className={`text-[10px] font-bold ${effectiveJianpuAccidental === '#' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.sharp}</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuAccidental === '#' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.sharp}</span>
                       </button>
 
                       <button
                         onClick={() => setSelectedJianpuAccidental('b')}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuAccidental === 'b' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuAccidental === 'b' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.flatNote}
                         aria-keyshortcuts="B"
                       >
-                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuAccidental === 'b' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuAccidental === 'b' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                           <span className="text-base font-bold leading-none">♭</span>
-                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuAccidental === 'b' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>b</span>
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuAccidental === 'b' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>b</span>
                         </div>
-                        <span className={`text-[10px] font-bold ${effectiveJianpuAccidental === 'b' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.flat}</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuAccidental === 'b' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.flat}</span>
                       </button>
 
                       <button 
                         onClick={() => setSelectedJianpuDuration('eighth')}
                         disabled={!canUseEighthDuration && effectiveJianpuDuration !== 'eighth'}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseEighthDuration && effectiveJianpuDuration !== 'eighth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseEighthDuration && effectiveJianpuDuration !== 'eighth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
                         title={showEighthQuarterBlocked ? `${copy.editor.eighthNote} · ${copy.editor.cannotChangeToQuarter}` : copy.editor.eighthNote}
                         aria-keyshortcuts="E"
                       >
-                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                          <Music2 size={16} />
-                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDuration === 'eighth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>E</span>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          {renderJianpuDurationGlyph('eighth')}
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuDuration === 'eighth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>E</span>
                         </div>
-                        <span className={`text-[10px] font-bold ${effectiveJianpuDuration === 'eighth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/8</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuDuration === 'eighth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/8</span>
                       </button>
 
                       <button 
                         onClick={() => setSelectedJianpuDuration('sixteenth')}
                         disabled={!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth'}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
                         title={showSixteenthQuarterBlocked ? `${copy.editor.sixteenthNote} · ${copy.editor.cannotChangeToQuarter}` : copy.editor.sixteenthNote}
                         aria-keyshortcuts="S"
                       >
-                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                          <Hash size={16} />
-                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDuration === 'sixteenth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>S</span>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          {renderJianpuDurationGlyph('sixteenth')}
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuDuration === 'sixteenth' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>S</span>
                         </div>
-                        <span className={`text-[10px] font-bold ${effectiveJianpuDuration === 'sixteenth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/16</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuDuration === 'sixteenth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/16</span>
                       </button>
 
                       <button 
                         onClick={toggleSelectedJianpuDot}
                         disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted)}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
                         title={copy.editor.toggleDot}
                         aria-keyshortcuts="."
                       >
-                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuDotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuDotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                           <div className="w-1.5 h-1.5 bg-current rounded-full" />
-                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuDotted ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>.</span>
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuDotted ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>.</span>
                         </div>
-                        <span className={`text-[10px] font-bold ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
                       </button>
 
                       <button 
                         onClick={toggleSelectedJianpuSlur}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${effectiveJianpuTied ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuTied ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.toggleTieSlur}
                         aria-keyshortcuts="T"
                       >
-                        <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${effectiveJianpuTied ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
-                          <Link size={16} />
-                          <span className={`absolute -right-1 -top-1 min-w-[14px] h-[14px] px-1 rounded-md border text-[8px] leading-[12px] font-mono font-bold ${effectiveJianpuTied ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>T</span>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuTied ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                          {renderJianpuTieGlyph()}
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuTied ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>T</span>
                         </div>
-                        <span className={`text-[10px] font-bold ${effectiveJianpuTied ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.tie}</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuTied ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.tie}</span>
                       </button>
                     </div>
 
@@ -6539,7 +7044,7 @@ const SongEditor: React.FC<Props> = ({
                       </div>
                     )}
 
-                    <div className="flex items-start gap-1">
+                    <div className={compactToolbarRowClass}>
                       <button 
                         onClick={() => insertOrReplaceJianpuPitch('1')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
@@ -6639,6 +7144,8 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">{copy.editor.hold}</span>
                       </button>
                     </div>
+                    </>
+                    )}
                   </div>
                 </>
               ) : selection.type === 'chord' ? (
@@ -6898,23 +7405,39 @@ const SongEditor: React.FC<Props> = ({
                 </>
               )}
 
-              <div className="w-px h-8 bg-gray-100 mx-1" />
+              {!isCompactJianpuSelectionToolbar && (
+                <>
+                  <div className={toolbarDividerClass} />
 
-              <button 
-                onClick={() => selection.type === 'rhythm' ? clearRhythmSelection() : applyTransformation('clear')}
-                className="flex flex-col items-center gap-1 p-2 hover:bg-red-50 rounded-xl transition-colors group"
-                title={copy.editor.clearFormatting}
-              >
-                <div className="w-8 h-8 bg-red-100 text-red-600 rounded-lg flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
-                  <Trash2 size={16} />
-                </div>
-                <span className="text-[10px] font-bold text-gray-500">{copy.editor.clear}</span>
-              </button>
+                  <button 
+                    onClick={() => {
+                      if (selection.type === 'rhythm') {
+                        clearRhythmSelection('backspace');
+                        return;
+                      }
+
+                      if (selection.type === 'riff') {
+                        clearSelectedJianpuContent('backspace');
+                        return;
+                      }
+
+                      applyTransformation('clear');
+                    }}
+                    className={`flex flex-col items-center ${compactToolButtonClass} hover:bg-red-50`}
+                    title={copy.editor.clearFormatting}
+                  >
+                    <div className={`${compactToolIconBoxClass} bg-red-100 text-red-600 group-hover:bg-red-600 group-hover:text-white`}>
+                      <Trash2 size={16} />
+                    </div>
+                    <span className={compactToolLabelClass}>{copy.editor.clear}</span>
+                  </button>
+                </>
+              )}
             </div>
 
             <button 
               onClick={() => setSelection(null)}
-              className="ml-2 p-2 text-gray-400 hover:text-gray-600"
+              className={`${isCompactSelectionToolbar ? 'ml-1 p-1.5' : 'ml-2 p-2'} text-gray-400 hover:text-gray-600`}
             >
               <Plus size={20} className="rotate-45" />
             </button>
