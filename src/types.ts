@@ -77,6 +77,11 @@ export interface Song {
   sections: Section[];
 }
 
+export interface StoredSong extends Song {
+  id: string;
+  updatedAt: number;
+}
+
 export interface SetlistSong {
   id: string;
   setlistId: string;
@@ -96,4 +101,43 @@ export interface Setlist {
   createdAt: number;
   updatedAt: number;
   songs: SetlistSong[];
+}
+
+export interface WorkspaceSnapshot {
+  songs: StoredSong[];
+  setlists: Setlist[];
+  lastSavedAt: number | null;
+}
+
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+}
+
+export type ShareResourceType = 'song' | 'setlist';
+
+export interface SharedSongPayload {
+  id: string;
+  title: string;
+  song: Song;
+}
+
+export interface SharedSetlistPayload {
+  id: string;
+  name: string;
+  displayMode: SetlistDisplayMode;
+  showLyrics: boolean;
+  songs: Array<{
+    id: string;
+    title: string;
+    song: Song;
+  }>;
+}
+
+export interface SharedResourcePayload {
+  resourceType: ShareResourceType;
+  song?: SharedSongPayload;
+  setlist?: SharedSetlistPayload;
 }

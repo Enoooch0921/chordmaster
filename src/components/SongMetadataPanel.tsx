@@ -59,8 +59,8 @@ const buildTimeSignatureInput = (numeratorInput: string, denominatorInput: strin
 };
 
 const getMetadataLayoutMode = (width: number): MetadataLayoutMode => {
-  if (width < 720) return 'stacked';
-  if (width < 1180) return 'compact';
+  if (width < 480) return 'stacked';
+  if (width < 880) return 'compact';
   return 'wide';
 };
 
@@ -91,7 +91,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const toggleSize = isStackedLayout ? 'sm' : 'xs';
   const labelClassName = 'mb-1 block text-[9px] font-semibold uppercase tracking-[0.16em] text-gray-400';
   const controlLabelClassName = 'mb-1 block text-[8px] font-semibold uppercase tracking-[0.16em] text-gray-400';
-  const fieldClassName = 'h-8 w-full rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500';
+  const fieldClassName = 'h-7 w-full rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500';
   const controlFieldClassName = 'h-7 w-full rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500';
 
   React.useEffect(() => {
@@ -214,7 +214,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         panelMetaText={song.originalKey === resolvedKey ? copy.original : song.originalKey}
         align="left"
         triggerDensity="compact"
-        buttonClassName="h-8 w-full min-w-0 rounded-lg px-2.5"
+        buttonClassName="h-7 w-full min-w-0 rounded-lg px-2.5"
         valueTextClassName="text-[13px]"
         metaTextClassName={isWideLayout ? '' : 'hidden'}
         triggerIconSize={14}
@@ -239,7 +239,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         label="Capo"
         align="left"
         triggerDensity="compact"
-        buttonClassName="h-8 w-full min-w-0 rounded-lg px-2.5"
+        buttonClassName="h-7 w-full min-w-0 rounded-lg px-2.5"
         valueTextClassName="text-[13px]"
         showPlayKey={isWideLayout}
         triggerIconSize={14}
@@ -279,7 +279,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           value={timeSignatureParts.numerator}
           onChange={(event) => updateField('timeSignature', buildTimeSignatureInput(event.target.value, timeSignatureParts.denominator))}
           placeholder="4"
-          className="h-8 w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
+          className="h-7 w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
         />
         <span className="px-0.5 text-sm font-semibold text-gray-400">/</span>
         <input
@@ -288,7 +288,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           value={timeSignatureParts.denominator}
           onChange={(event) => updateField('timeSignature', buildTimeSignatureInput(timeSignatureParts.numerator, event.target.value))}
           placeholder="4"
-          className="h-8 w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
+          className="h-7 w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
         />
       </div>
     </div>
@@ -297,7 +297,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const shuffleField = (
     <div>
       <label className={labelClassName}>{copy.editor.shuffle}</label>
-      <label className="flex h-8 cursor-pointer items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-2.5">
+      <label className="flex h-7 cursor-pointer items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-2.5">
         <span className="truncate text-[12px] font-medium text-gray-600">{copy.editor.shuffle}</span>
         <input
           type="checkbox"
@@ -411,22 +411,19 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       </div>
 
       {isWideLayout ? (
-        <div className="mt-2 space-y-2">
-          <div className="grid gap-2 [grid-template-columns:minmax(0,3.5fr)_minmax(8.5rem,1.4fr)_minmax(8.5rem,1.35fr)]">
+        <div className="mt-1.5 space-y-1.5">
+          <div className="grid gap-2 [grid-template-columns:minmax(0,3.5fr)_minmax(6rem,1.2fr)_minmax(6rem,1.2fr)_minmax(4.5rem,0.85fr)_minmax(5rem,0.95fr)_minmax(4.5rem,0.85fr)_minmax(5.5rem,1.1fr)]">
             {titleField}
             {versionField}
             {translatorField}
-          </div>
-
-          <div className="grid gap-2 [grid-template-columns:minmax(5.75rem,1fr)_minmax(6.5rem,1.15fr)_minmax(5.25rem,0.9fr)_minmax(6.75rem,1.15fr)_minmax(7.5rem,1.15fr)]">
             {keyField}
             {capoField}
             {tempoField}
             {timeField}
-            {shuffleField}
           </div>
 
-          <div className="grid items-start gap-2 [grid-template-columns:minmax(7rem,1fr)_minmax(0,1.45fr)_minmax(0,0.95fr)_minmax(0,1.15fr)]">
+          <div className="grid items-start gap-2 [grid-template-columns:minmax(5rem,0.8fr)_minmax(6rem,1fr)_minmax(7rem,1.4fr)_minmax(5rem,0.9fr)_minmax(7rem,1.2fr)]">
+            {shuffleField}
             {chordFontField}
             {displayModeField}
             {showLyricsField}

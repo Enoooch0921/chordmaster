@@ -8,7 +8,7 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { Song, Key, AppLanguage, Setlist, SetlistSong, SetlistDisplayMode } from './types';
+import { Song, Key, AppLanguage, Setlist, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
@@ -22,8 +22,13 @@ import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
 import { applySetlistSongOverrides, getDefaultSectionOrder } from './utils/setlistUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useSupabaseAuth } from './lib/auth';
+import { createCloudRepository } from './lib/repository';
+import { loadPendingSync, markMigrationCompleted, hasCompletedMigration, savePendingSync } from './lib/workspace';
+import { syncWorkspaceDiff } from './lib/sync';
+import { hasSupabaseConfig } from './lib/supabase';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -438,11 +443,6 @@ const INITIAL_SONG: Song = {
   ]
 };
 
-interface StoredSong extends Song {
-  id: string;
-  updatedAt: number;
-}
-
 interface SongHistoryState {
   past: Song[];
   future: Song[];
@@ -468,9 +468,9 @@ interface PreviewDragState {
 
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
-const createSongId = () => `song-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const createSetlistId = () => `setlist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const createSetlistSongId = () => `setlist-song-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createSongId = () => crypto.randomUUID();
+const createSetlistId = () => crypto.randomUUID();
+const createSetlistSongId = () => crypto.randomUUID();
 
 const reindexSetlistSongs = (setlistSongs: SetlistSong[]) => setlistSongs.map((item, index) => ({
   ...item,
@@ -710,7 +710,7 @@ const createEmptySong = (title: string): StoredSong =>
   });
 
 const getDefaultLibrary = () => {
-  const defaultSong = createStoredSong(INITIAL_SONG, 'song-default');
+  const defaultSong = createStoredSong(INITIAL_SONG, createSongId());
   return {
     songs: [defaultSong],
     selectedSongId: defaultSong.id
@@ -952,6 +952,14 @@ const loadGoogleIdentityScript = async () => {
 };
 
 export default function App() {
+  const {
+    user: authenticatedUser,
+    session,
+    status: authStatus,
+    isConfigured: isAuthConfigured,
+    signInWithGoogle,
+    signOut
+  } = useSupabaseAuth();
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const initialLibraryRef = useRef(loadSongLibrary());
@@ -1001,6 +1009,12 @@ export default function App() {
   const [dragOverSetlistSongId, setDragOverSetlistSongId] = useState<string | null>(null);
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
+  const [authUiError, setAuthUiError] = useState<string | null>(null);
+  const [authUiMessage, setAuthUiMessage] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'saved' | 'syncing' | 'offline' | 'failed'>('saved');
+  const [isLoadingCloudWorkspace, setIsLoadingCloudWorkspace] = useState(false);
+  const [isImportPromptOpen, setIsImportPromptOpen] = useState(false);
+  const [isImportingLocalWorkspace, setIsImportingLocalWorkspace] = useState(false);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const setlistActionsMenuRef = useRef<HTMLDivElement>(null);
@@ -1020,6 +1034,8 @@ export default function App() {
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
+  const autoSaveTimeoutRef = useRef<number | null>(null);
+  const cloudRepositoryRef = useRef<ReturnType<typeof createCloudRepository> | null>(null);
   const [previewBaseScale, setPreviewBaseScale] = useState(1);
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewViewportWidth, setPreviewViewportWidth] = useState(PREVIEW_TARGET_WIDTH);
@@ -1027,11 +1043,13 @@ export default function App() {
   const [previewPageHeight, setPreviewPageHeight] = useState(PREVIEW_PAGE_HEIGHT);
   const [sheetMetrics, setSheetMetrics] = useState({ width: PREVIEW_TARGET_WIDTH, height: 1123 });
   const [isPreviewDragging, setIsPreviewDragging] = useState(false);
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? '';
   const logoSrc = `${import.meta.env.BASE_URL}logo.svg`;
   const copy = getUiCopy(language);
   const { aboutSections, helpSections, changelogEntries } = getLocalizedAppMeta(language);
-  const showGoogleAuth = Boolean(googleClientId);
+  const googleClientId = '';
+  const showGoogleAuth = false;
+  const isAuthenticated = Boolean(session && authenticatedUser);
+  const isCloudMode = isAuthenticated && Boolean(cloudRepositoryRef.current || authenticatedUser);
   const song = songs.find((item) => item.id === selectedSongId) ?? songs[0];
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
   const setlistIsDirty = serializeSetlists(setlists) !== serializeSetlists(savedSetlists);
@@ -1074,15 +1092,14 @@ export default function App() {
     isPhoneViewport ? mainViewportWidth : Math.max(560, Math.round(mainViewportWidth * 0.52)),
     Math.max(0, mainViewportWidth - (isPhoneViewport ? 0 : 32))
   );
-  const usesDenseDesktopHeader = isSheetView && mainViewportWidth >= 1320;
+  const usesDenseDesktopHeader = isSheetView && mainViewportWidth >= 1200;
+  const usesTabletHeader = isSheetView && !isPhoneViewport && !usesDenseDesktopHeader;
   const isToolbarSecondaryCollapsed = mainViewportWidth < 1240;
-  const toolbarPrimaryGridClassName = mainViewportWidth < 720
-    ? 'grid-cols-2'
-    : mainViewportWidth < 1040
-      ? 'grid-cols-3'
-      : mainViewportWidth < 1380
-        ? 'grid-cols-4'
-        : 'grid-cols-7';
+  const toolbarPrimaryGridClassName = mainViewportWidth < 1040
+    ? 'grid-cols-4'
+    : mainViewportWidth < 1380
+      ? 'grid-cols-4'
+      : 'grid-cols-7';
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
   const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? null;
   const selectedSetlistSong = selectedSetlist?.songs.find((item) => item.id === selectedSetlistSongId) ?? selectedSetlist?.songs[0] ?? null;
@@ -1112,6 +1129,16 @@ export default function App() {
     ? (mobileSetlistDrawerView === 'detail' ? '' : (selectedSetlist?.name || copy.untitledSetlist))
     : activeAppViewLabel;
   const workspaceModeBadge = isSetlistMode ? copy.setlistModeBadge : copy.songModeBadge;
+  const syncStatusLabel = syncStatus === 'saved'
+    ? copy.cloudSyncSaved
+    : syncStatus === 'syncing'
+      ? copy.cloudSyncSyncing
+      : syncStatus === 'offline'
+        ? copy.cloudSyncOffline
+        : copy.cloudSyncFailed;
+  const importSummaryLabel = copy.importLocalStats
+    .replace('{songs}', String(songs.length))
+    .replace('{setlists}', String(setlists.length));
   const toolbarPrimaryActionClassName = 'flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
   const toolbarPrimaryEmphasisActionClassName = 'flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-gray-800';
   const toolbarSecondaryToggleClassName = (active: boolean) => `inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-bold transition-all ${
@@ -1119,21 +1146,52 @@ export default function App() {
       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
       : 'border border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-600'
   }`;
-  const desktopToolbarActionClassName = 'inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
-  const desktopToolbarPrimaryActionClassName = 'inline-flex h-9 items-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-gray-800';
-  const desktopToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => `inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
+  const desktopToolbarActionClassName = 'inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
+  const desktopToolbarPrimaryActionClassName = 'inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-gray-900 px-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-gray-800';
+  const desktopToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => `inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
     active
       ? tone === 'accent'
         ? 'border-amber-200 bg-amber-50 text-amber-700'
         : 'border-indigo-200 bg-indigo-50 text-indigo-700'
       : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
   }`;
+  const denseHeaderShowsContextLabel = mainViewportWidth >= 1500;
+  const denseToolbarShowsLabels = mainViewportWidth >= 1680;
+  const denseToolbarActionClassName = denseToolbarShowsLabels
+    ? desktopToolbarActionClassName
+    : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
+  const denseToolbarPrimaryActionClassName = denseToolbarShowsLabels
+    ? desktopToolbarPrimaryActionClassName
+    : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white shadow-sm transition-colors hover:bg-gray-800';
+  const denseToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => (
+    denseToolbarShowsLabels
+      ? desktopToolbarToggleClassName(active, tone)
+      : `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border shadow-sm transition-colors ${
+          active
+            ? tone === 'accent'
+              ? 'border-amber-200 bg-amber-50 text-amber-700'
+              : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+            : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
+        }`
+  );
+  const denseToolbarMenuButtonClassName = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
   const compactEditorToggleLabel = language === 'zh' ? '編輯' : 'Editor';
   const compactLyricsToggleLabel = language === 'zh' ? '歌詞' : 'Lyrics';
   const compactAutoSaveLabel = language === 'zh' ? '自存' : 'Auto';
   const compactSaveLabel = language === 'zh' ? '儲存' : 'Save';
   const compactPdfLabel = language === 'zh' ? 'PDF' : 'PDF';
   const mobileTopbarActionBaseClassName = 'flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-colors';
+  const mobileTopbarToggleChipClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => {
+    if (active) {
+      return `${mobileTopbarActionBaseClassName} ${
+        tone === 'accent'
+          ? 'border-amber-200 bg-amber-50 text-amber-700'
+          : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+      }`;
+    }
+
+    return `${mobileTopbarActionBaseClassName} border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50`;
+  };
   const getMobileTopbarActionClassName = (tone: 'default' | 'primary' | 'accent' = 'default') => {
     if (tone === 'primary') {
       return `${mobileTopbarActionBaseClassName} border-gray-900 bg-gray-900 text-white hover:bg-gray-800`;
@@ -1145,6 +1203,150 @@ export default function App() {
 
     return `${mobileTopbarActionBaseClassName} border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50`;
   };
+  const inlineModeBadgeClassName = (active: boolean) => `inline-flex min-w-[28px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-black leading-none ${
+    active
+      ? 'border-indigo-200 bg-white/70 text-current'
+      : 'border-gray-200 bg-gray-50 text-gray-600'
+  }`;
+  const toolbarOverflowPanel = isToolbarOverflowMenuOpen ? (
+    <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
+      <button
+        type="button"
+        onClick={() => {
+          setIsAutoSaveEnabled((current) => !current);
+          setIsToolbarOverflowMenuOpen(false);
+        }}
+        className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+          isAutoSaveEnabled
+            ? 'bg-emerald-50 text-emerald-700'
+            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+        }`}
+      >
+        <span>{copy.autoSave}</span>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+          isAutoSaveEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
+        }`}>
+          {isAutoSaveEnabled ? copy.on : copy.off}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          handleSaveLibrary();
+          setIsToolbarOverflowMenuOpen(false);
+        }}
+        className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+          workspaceIsDirty
+            ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+        }`}
+      >
+        <Save size={14} />
+        <span>{workspaceIsDirty ? copy.saveChanges : copy.saved}</span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          handleExportPdf();
+          setIsToolbarOverflowMenuOpen(false);
+        }}
+        disabled={isExportingPdf}
+        className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+          isExportingPdf
+            ? 'cursor-wait bg-gray-100 text-gray-400'
+            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+        }`}
+      >
+        <Save size={14} />
+        <span>{isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}</span>
+      </button>
+
+      {isAuthenticated ? (
+        <>
+          <div className={`mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
+            syncStatus === 'failed'
+              ? 'bg-rose-50 text-rose-700'
+              : syncStatus === 'offline'
+                ? 'bg-amber-50 text-amber-700'
+                : 'bg-emerald-50 text-emerald-700'
+          }`}>
+            {syncStatus === 'offline' ? <CloudOff size={14} /> : <Cloud size={14} />}
+            <span>{syncStatusLabel}</span>
+          </div>
+
+          {activeAppView === 'sheet' && !isSetlistMode && (
+            <button
+              type="button"
+              onClick={() => {
+                void handleCreateShareLink('song');
+                setIsToolbarOverflowMenuOpen(false);
+              }}
+              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+            >
+              <Share2 size={14} />
+              <span>{copy.shareCurrentSong}</span>
+            </button>
+          )}
+
+          {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && (
+            <button
+              type="button"
+              onClick={() => {
+                void handleCreateShareLink('setlist');
+                setIsToolbarOverflowMenuOpen(false);
+              }}
+              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+            >
+              <Share2 size={14} />
+              <span>{copy.shareCurrentSetlist}</span>
+            </button>
+          )}
+        </>
+      ) : !showGoogleAuth ? (
+        <button
+          type="button"
+          onClick={() => {
+            void handleGoogleSignIn();
+            setIsToolbarOverflowMenuOpen(false);
+          }}
+          disabled={!isAuthConfigured}
+          className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ExternalLink size={14} />
+          <span>{copy.continueWithGoogle}</span>
+        </button>
+      ) : null}
+
+      <div className="mt-1 grid grid-cols-2 gap-1 rounded-xl bg-gray-50 p-1">
+        <button
+          type="button"
+          onClick={() => {
+            setLanguage('zh');
+            setIsToolbarOverflowMenuOpen(false);
+          }}
+          className={`rounded-lg px-2.5 py-2 text-xs font-bold transition-colors ${
+            language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-white'
+          }`}
+        >
+          中文
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setLanguage('en');
+            setIsToolbarOverflowMenuOpen(false);
+          }}
+          className={`rounded-lg px-2.5 py-2 text-xs font-bold transition-colors ${
+            language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-white'
+          }`}
+        >
+          EN
+        </button>
+      </div>
+    </div>
+  ) : null;
   const normalizedLibrarySearchQuery = librarySearchQuery.trim().toLowerCase();
   const normalizedSetlistSearchQuery = setlistSearchQuery.trim().toLowerCase();
   const normalizedSetlistSongSearchQuery = setlistSongSearchQuery.trim().toLowerCase();
@@ -1389,17 +1591,57 @@ export default function App() {
     });
   }, [activeSectionId, isEditing]);
 
-  const persistWorkspace = (nextSongs: StoredSong[], nextSetlists: Setlist[]) => {
+  const persistWorkspace = async (nextSongs: StoredSong[], nextSetlists: Setlist[]) => {
+    const savedAt = Date.now();
+
     try {
-      const savedAt = Date.now();
       window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
       window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(nextSetlists));
       window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
+    } catch {
+      // Ignore local cache failures and keep the app usable.
+    }
+
+    if (!authenticatedUser || !cloudRepositoryRef.current) {
       setSavedSongs(cloneSong(nextSongs));
       setSavedSetlists(cloneSong(nextSetlists));
       setLastSavedAt(savedAt);
+      setSyncStatus('saved');
+      return;
+    }
+
+    if (!navigator.onLine) {
+      savePendingSync({
+        songs: cloneSong(nextSongs),
+        setlists: cloneSong(nextSetlists),
+        savedAt
+      });
+      setSyncStatus('offline');
+      return;
+    }
+
+    try {
+      setSyncStatus('syncing');
+      await syncWorkspaceDiff({
+        repository: cloudRepositoryRef.current,
+        songs: nextSongs,
+        setlists: nextSetlists,
+        savedSongs,
+        savedSetlists
+      });
+      savePendingSync(null);
+      setSavedSongs(cloneSong(nextSongs));
+      setSavedSetlists(cloneSong(nextSetlists));
+      setLastSavedAt(savedAt);
+      setSyncStatus('saved');
     } catch {
-      // Ignore storage failures and keep the app usable.
+      savePendingSync({
+        songs: cloneSong(nextSongs),
+        setlists: cloneSong(nextSetlists),
+        savedAt
+      });
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      throw new Error('Unable to sync workspace.');
     }
   };
 
@@ -1504,11 +1746,11 @@ export default function App() {
     setSelectedSetlistSongId(nextSetlist?.songs.find((item) => item.id === selectedSetlistSongId)?.id ?? nextSetlist?.songs[0]?.id ?? null);
   };
 
-  const runSelectionChange = (applySelection: () => void) => {
+  const runSelectionChange = async (applySelection: () => void) => {
     setActiveAppView('sheet');
 
     if (isAutoSaveEnabled && workspaceIsDirty) {
-      persistWorkspace(songs, setlists);
+      await persistWorkspace(songs, setlists);
       applySelection();
       return;
     }
@@ -1520,7 +1762,7 @@ export default function App() {
 
     const shouldSave = window.confirm(copy.confirmSaveBeforeSwitch);
     if (shouldSave) {
-      persistWorkspace(songs, setlists);
+      await persistWorkspace(songs, setlists);
       applySelection();
       return;
     }
@@ -1529,8 +1771,12 @@ export default function App() {
     applySelection();
   };
 
-  const handleSaveLibrary = () => {
-    persistWorkspace(songs, setlists);
+  const handleSaveLibrary = async () => {
+    try {
+      await persistWorkspace(songs, setlists);
+    } catch {
+      window.alert(copy.cloudSyncFailed);
+    }
   };
 
   const handleAppViewChange = (nextView: AppView) => {
@@ -1542,7 +1788,7 @@ export default function App() {
       return;
     }
 
-    runSelectionChange(() => {
+    void runSelectionChange(() => {
       setWorkspaceMode('songs');
       setSelectedSongId(nextSongId);
     });
@@ -1810,7 +2056,7 @@ export default function App() {
       return;
     }
 
-    runSelectionChange(() => {
+    void runSelectionChange(() => {
       setIsSetlistActionsMenuOpen(false);
       const nextSetlist = setlists.find((item) => item.id === nextSetlistId) ?? null;
       setWorkspaceMode('setlists');
@@ -1843,9 +2089,8 @@ export default function App() {
     setMobileSwipeOpenSetlistId(null);
 
     const remainingSetlists = setlists.filter((item) => item.id !== setlistId);
-    setSetlists(remainingSetlists);
-
     const nextSetlist = remainingSetlists[0] ?? null;
+    setSetlists(remainingSetlists);
     setSelectedSetlistId(nextSetlist?.id ?? null);
     setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
     if (isPhoneViewport) {
@@ -1856,6 +2101,10 @@ export default function App() {
     if (remainingSetlists.length === 0) {
       setWorkspaceMode('songs');
     }
+
+    void persistWorkspace(songs, remainingSetlists).catch(() => {
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+    });
   };
 
   const clearMobileLongPressTimer = () => {
@@ -1998,7 +2247,7 @@ export default function App() {
       return;
     }
 
-    runSelectionChange(() => {
+    void runSelectionChange(() => {
       setWorkspaceMode('setlists');
       setSelectedSetlistId(selectedSetlist.id);
       setSelectedSetlistSongId(setlistSongId);
@@ -2182,11 +2431,17 @@ export default function App() {
     }
 
     const remainingSongs = songs.filter((item) => item.id !== songId);
+    const remainingSetlists = setlists.map((setlist) => ({
+      ...setlist,
+      songs: reindexSetlistSongs(setlist.songs.filter((item) => item.songId !== songId)),
+      updatedAt: Date.now()
+    }));
 
     if (remainingSongs.length === 0) {
       const replacementSong = createDefaultSong(1);
       setSongs([replacementSong]);
       setSetlists([]);
+      setSavedSongs([cloneSong(replacementSong)]);
       setSavedSetlists([]);
       setSelectedSetlistId(null);
       setSelectedSetlistSongId(null);
@@ -2194,17 +2449,14 @@ export default function App() {
       setSongHistories({});
       setSelectedSongIdsForBulkDelete([]);
       setIsEditing(true);
+      void persistWorkspace([replacementSong], []).catch(() => {
+        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      });
       return;
     }
 
     setSongs(remainingSongs);
-    setSetlists((currentSetlists) =>
-      currentSetlists.map((setlist) => ({
-        ...setlist,
-        songs: reindexSetlistSongs(setlist.songs.filter((item) => item.songId !== songId)),
-        updatedAt: Date.now()
-      }))
-    );
+    setSetlists(remainingSetlists);
     setSongHistories((currentHistory) =>
       Object.fromEntries(Object.entries(currentHistory).filter(([id]) => id !== songId))
     );
@@ -2213,6 +2465,10 @@ export default function App() {
     if (selectedSongId === songId) {
       setSelectedSongId(remainingSongs[0].id);
     }
+
+    void persistWorkspace(remainingSongs, remainingSetlists).catch(() => {
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+    });
   };
 
   const handleToggleSongBulkSelection = (songId: string) => {
@@ -2239,11 +2495,17 @@ export default function App() {
 
     const selectedIdSet = new Set(selectedSongIdsForBulkDelete);
     const remainingSongs = songs.filter((item) => !selectedIdSet.has(item.id));
+    const remainingSetlists = setlists.map((setlist) => ({
+      ...setlist,
+      songs: reindexSetlistSongs(setlist.songs.filter((item) => !selectedIdSet.has(item.songId))),
+      updatedAt: Date.now()
+    }));
 
     if (remainingSongs.length === 0) {
       const replacementSong = createDefaultSong(1);
       setSongs([replacementSong]);
       setSetlists([]);
+      setSavedSongs([cloneSong(replacementSong)]);
       setSavedSetlists([]);
       setSelectedSetlistId(null);
       setSelectedSetlistSongId(null);
@@ -2251,17 +2513,14 @@ export default function App() {
       setSongHistories({});
       setSelectedSongIdsForBulkDelete([]);
       setIsEditing(true);
+      void persistWorkspace([replacementSong], []).catch(() => {
+        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      });
       return;
     }
 
     setSongs(remainingSongs);
-    setSetlists((currentSetlists) =>
-      currentSetlists.map((setlist) => ({
-        ...setlist,
-        songs: reindexSetlistSongs(setlist.songs.filter((item) => !selectedIdSet.has(item.songId))),
-        updatedAt: Date.now()
-      }))
-    );
+    setSetlists(remainingSetlists);
     setSongHistories((currentHistory) =>
       Object.fromEntries(Object.entries(currentHistory).filter(([id]) => !selectedIdSet.has(id)))
     );
@@ -2270,6 +2529,10 @@ export default function App() {
     if (selectedIdSet.has(selectedSongId)) {
       setSelectedSongId(remainingSongs[0].id);
     }
+
+    void persistWorkspace(remainingSongs, remainingSetlists).catch(() => {
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+    });
   };
 
   const handleUndo = () => {
@@ -2625,11 +2888,130 @@ export default function App() {
   }, [isAutoSaveEnabled]);
 
   useEffect(() => {
+    if (!authenticatedUser) {
+      cloudRepositoryRef.current = null;
+      setIsLoadingCloudWorkspace(false);
+      setIsImportPromptOpen(false);
+      setSyncStatus('saved');
+      return;
+    }
+
+    cloudRepositoryRef.current = createCloudRepository({
+      userId: authenticatedUser.id,
+      email: authenticatedUser.email,
+      name: authenticatedUser.name,
+      picture: authenticatedUser.picture
+    });
+  }, [authenticatedUser]);
+
+  useEffect(() => {
+    if (!authenticatedUser || !cloudRepositoryRef.current) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadCloudWorkspace = async () => {
+      try {
+        setIsLoadingCloudWorkspace(true);
+        const cloudWorkspace = await cloudRepositoryRef.current!.loadWorkspace();
+        if (isCancelled) {
+          return;
+        }
+
+        const hasLocalData = initialLibraryRef.current.songs.length > 0 || initialSetlistsRef.current.setlists.length > 0;
+        const migrationCompleted = hasCompletedMigration(authenticatedUser.id);
+        const shouldUseCloudWorkspace = cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || migrationCompleted || !hasLocalData;
+
+        if (shouldUseCloudWorkspace) {
+          const nextSongs = cloudWorkspace.songs.length > 0 ? cloudWorkspace.songs : initialLibraryRef.current.songs;
+          const nextSetlists = cloudWorkspace.setlists;
+          setSongs(nextSongs);
+          setSavedSongs(cloneSong(nextSongs));
+          setSetlists(nextSetlists);
+          setSavedSetlists(cloneSong(nextSetlists));
+          setLastSavedAt(cloudWorkspace.lastSavedAt);
+          setSelectedSongId((currentId) => nextSongs.some((item) => item.id === currentId) ? currentId : nextSongs[0]?.id ?? '');
+          setSelectedSetlistId((currentId) => nextSetlists.some((item) => item.id === currentId) ? currentId : nextSetlists[0]?.id ?? null);
+        }
+
+        if (hasLocalData && !migrationCompleted) {
+          setIsImportPromptOpen(true);
+        } else {
+          setIsImportPromptOpen(false);
+        }
+
+        setSyncStatus('saved');
+      } catch (error) {
+        if (!isCancelled) {
+          setAuthUiError(error instanceof Error ? error.message : 'Unable to load cloud workspace.');
+          setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingCloudWorkspace(false);
+        }
+      }
+    };
+
+    void loadCloudWorkspace();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authenticatedUser]);
+
+  useEffect(() => {
+    if (!authenticatedUser || !cloudRepositoryRef.current) {
+      return;
+    }
+
+    const flushPending = async () => {
+      const pending = loadPendingSync();
+      if (!pending || !navigator.onLine) {
+        return;
+      }
+
+      try {
+        setSyncStatus('syncing');
+        await persistWorkspace(pending.songs, pending.setlists);
+        savePendingSync(null);
+      } catch {
+        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      }
+    };
+
+    const handleOnline = () => {
+      void flushPending();
+    };
+
+    void flushPending();
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [authenticatedUser, savedSetlists, savedSongs]);
+
+  useEffect(() => {
     if (!isAutoSaveEnabled || !workspaceIsDirty) {
       return;
     }
 
-    persistWorkspace(songs, setlists);
+    if (autoSaveTimeoutRef.current !== null) {
+      window.clearTimeout(autoSaveTimeoutRef.current);
+    }
+
+    autoSaveTimeoutRef.current = window.setTimeout(() => {
+      void persistWorkspace(songs, setlists).catch(() => {
+        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      });
+      autoSaveTimeoutRef.current = null;
+    }, 1000);
+
+    return () => {
+      if (autoSaveTimeoutRef.current !== null) {
+        window.clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+    };
   }, [isAutoSaveEnabled, setlists, songs, workspaceIsDirty]);
 
   useEffect(() => {
@@ -2812,6 +3194,9 @@ export default function App() {
     return () => {
       if (editorFocusTimeoutRef.current !== null) {
         window.clearTimeout(editorFocusTimeoutRef.current);
+      }
+      if (autoSaveTimeoutRef.current !== null) {
+        window.clearTimeout(autoSaveTimeoutRef.current);
       }
     };
   }, []);
@@ -3091,13 +3476,84 @@ export default function App() {
     }
   };
 
-  const handleGoogleSignOut = () => {
-    if (window.google?.accounts?.id) {
-      window.google.accounts.id.disableAutoSelect();
+  const handleGoogleSignOut = async () => {
+    try {
+      setIsGoogleAccountMenuOpen(false);
+      setAuthUiError(null);
+      setAuthUiMessage(null);
+      await signOut();
+      cloudRepositoryRef.current = null;
+      setGoogleUser(null);
+      setSyncStatus('saved');
+      window.location.assign(import.meta.env.BASE_URL);
+    } catch (error) {
+      setAuthUiError(error instanceof Error ? error.message : copy.cloudSyncFailed);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setAuthUiError(null);
+      await signInWithGoogle();
+    } catch (error) {
+      setAuthUiError(error instanceof Error ? error.message : copy.authUnavailable);
+    }
+  };
+
+  const handleCreateShareLink = async (resourceType: 'song' | 'setlist') => {
+    if (!cloudRepositoryRef.current) {
+      window.alert(copy.authUnavailable);
+      return;
     }
 
-    setIsGoogleAccountMenuOpen(false);
-    setGoogleUser(null);
+    const resourceId = resourceType === 'song' ? song?.id : selectedSetlist?.id;
+    if (!resourceId) {
+      return;
+    }
+
+    try {
+      const token = await cloudRepositoryRef.current.createShareLink(resourceType, resourceId);
+      const shareUrl = new URL(`${import.meta.env.BASE_URL}share/${token}`.replace(/\/{2,}/g, '/'), window.location.origin).toString();
+      await navigator.clipboard.writeText(shareUrl);
+      window.alert(copy.shareCopied);
+    } catch {
+      window.alert(copy.shareFailed);
+    }
+  };
+
+  const handleImportLocalWorkspaceToCloud = async () => {
+    if (!authenticatedUser || !cloudRepositoryRef.current) {
+      return;
+    }
+
+    try {
+      setIsImportingLocalWorkspace(true);
+      const nextWorkspace = await cloudRepositoryRef.current.importLocalWorkspace({
+        songs,
+        setlists,
+        lastSavedAt
+      });
+      setSongs(nextWorkspace.songs);
+      setSavedSongs(cloneSong(nextWorkspace.songs));
+      setSetlists(nextWorkspace.setlists);
+      setSavedSetlists(cloneSong(nextWorkspace.setlists));
+      setLastSavedAt(nextWorkspace.lastSavedAt);
+      markMigrationCompleted(authenticatedUser.id);
+      setIsImportPromptOpen(false);
+      setSyncStatus('saved');
+    } catch (error) {
+      setAuthUiError(error instanceof Error ? error.message : copy.cloudSyncFailed);
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+    } finally {
+      setIsImportingLocalWorkspace(false);
+    }
+  };
+
+  const handleDismissImportPrompt = () => {
+    if (authenticatedUser) {
+      markMigrationCompleted(authenticatedUser.id);
+    }
+    setIsImportPromptOpen(false);
   };
 
   const handleSidebarResizeStart = (event: React.MouseEvent<HTMLElement>) => {
@@ -4462,6 +4918,32 @@ export default function App() {
           </p>
         </div>
 
+        {(!isAuthenticated || authUiError || authUiMessage || isLoadingCloudWorkspace) && (
+          <div className={`flex-shrink-0 border-b ${
+            authUiError
+              ? 'border-rose-200 bg-rose-50'
+              : isAuthenticated
+                ? 'border-emerald-200 bg-emerald-50'
+                : 'border-sky-200 bg-sky-50'
+          } ${isPhoneViewport ? 'px-3 py-1.5' : 'px-4 py-2 sm:px-6 xl:px-8'}`}>
+            <p
+              className={`font-medium ${
+                authUiError
+                  ? 'text-rose-700'
+                  : isAuthenticated
+                    ? 'text-emerald-700'
+                    : 'text-sky-800'
+              } ${isPhoneViewport ? 'text-xs leading-5' : 'text-sm'}`}
+            >
+              {authUiError
+                ?? authUiMessage
+                ?? (isLoadingCloudWorkspace
+                  ? copy.cloudSyncSyncing
+                  : (!isAuthenticated ? copy.localModeWarning : syncStatusLabel))}
+            </p>
+          </div>
+        )}
+
         {/* Top Control Bar */}
         <header data-topbar className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md ${
           isPhoneViewport
@@ -4521,33 +5003,92 @@ export default function App() {
               </div>
 
               {isSheetView ? (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                   <button
                     type="button"
                     onClick={() => setIsEditing(!isEditing)}
-                    className={getMobileTopbarActionClassName(isEditing ? 'primary' : 'default')}
+                    className={`${getMobileTopbarActionClassName(isEditing ? 'primary' : 'default')} shrink-0`}
+                    title={isEditing ? copy.closeEditor : copy.openEditor}
+                    aria-label={isEditing ? copy.closeEditor : copy.openEditor}
                   >
                     <Edit3 size={16} />
-                    <span>{compactEditorToggleLabel}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handleToggleLyricsMode}
-                    className={getMobileTopbarActionClassName(isLyricsMode ? 'accent' : 'default')}
+                    className={`${getMobileTopbarActionClassName(isLyricsMode ? 'accent' : 'default')} shrink-0`}
+                    title={copy.lyricsMode}
+                    aria-label={copy.lyricsMode}
                   >
                     <FileText size={16} />
-                    <span>{compactLyricsToggleLabel}</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={handleSaveLibrary}
-                    className={getMobileTopbarActionClassName(workspaceIsDirty ? 'accent' : 'default')}
-                  >
-                    <Save size={16} />
-                    <span>{compactSaveLabel}</span>
-                  </button>
+                  <KeyPicker
+                    value={isSetlistMode ? currentSetlistKey : song.currentKey}
+                    onChange={(key) => {
+                      if (!key) {
+                        return;
+                      }
+
+                      if (isSetlistMode) {
+                        handleSetlistKeyChange(key);
+                      } else {
+                        handleKeyChange(key);
+                      }
+                    }}
+                    label={copy.key}
+                    originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                    panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                    triggerDensity="compact"
+                    buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5"
+                    metaTextClassName="hidden"
+                    triggerIconSize={14}
+                  />
+
+                  <CapoPicker
+                    value={isSetlistMode ? currentSetlistCapo : currentCapo}
+                    currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
+                    onChange={(capo) => {
+                      if (isSetlistMode && selectedSetlistSong) {
+                        handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+                          ...currentSetlistSong,
+                          capo
+                        }));
+                      } else {
+                        handleSongChange({ ...song, capo });
+                      }
+                    }}
+                    label="Capo"
+                    triggerDensity="compact"
+                    buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5"
+                    showPlayKey={false}
+                    triggerIconSize={14}
+                  />
+
+                  {!isSetlistMode && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        className={`${mobileTopbarToggleChipClassName(song.showNashvilleNumbers)} shrink-0`}
+                        title={copy.nashvilleModeLabel}
+                        aria-label={copy.nashvilleModeLabel}
+                      >
+                        <span className={inlineModeBadgeClassName(song.showNashvilleNumbers)}>123</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                        className={`${mobileTopbarToggleChipClassName(song.showAbsoluteJianpu)} shrink-0`}
+                        title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
+                        aria-label={copy.fixedDoModeLabel}
+                      >
+                        <span className={inlineModeBadgeClassName(song.showAbsoluteJianpu)}>1=C</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -4572,175 +5113,167 @@ export default function App() {
                   }`}>
                     {workspaceModeBadge}
                   </span>
-                  <span className="max-w-[24rem] truncate text-sm font-medium text-gray-500">
-                    {activeAppViewLabel}
-                  </span>
+                  {denseHeaderShowsContextLabel ? (
+                    <span className="max-w-[24rem] truncate text-sm font-medium text-gray-500">
+                      {activeAppViewLabel}
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
-              <div className="flex min-w-0 items-center justify-end gap-2 overflow-x-auto pb-1 no-scrollbar">
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(!isEditing)}
-                  title={isEditing ? copy.closeEditor : copy.openEditor}
-                  className={isEditing ? desktopToolbarPrimaryActionClassName : desktopToolbarActionClassName}
-                >
-                  <Edit3 size={14} />
-                  <span>{compactEditorToggleLabel}</span>
-                </button>
+              <div className="flex min-w-0 items-center justify-end gap-2">
+                <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(!isEditing)}
+                    title={isEditing ? copy.closeEditor : copy.openEditor}
+                    aria-label={isEditing ? copy.closeEditor : copy.openEditor}
+                    className={isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName}
+                  >
+                    <Edit3 size={14} />
+                    {denseToolbarShowsLabels ? <span>{compactEditorToggleLabel}</span> : null}
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={handleToggleLyricsMode}
-                  title={copy.lyricsMode}
-                  className={desktopToolbarToggleClassName(isLyricsMode, 'accent')}
-                >
-                  <FileText size={14} />
-                  <span>{compactLyricsToggleLabel}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleToggleLyricsMode}
+                    title={copy.lyricsMode}
+                    aria-label={copy.lyricsMode}
+                    className={denseToolbarToggleClassName(isLyricsMode, 'accent')}
+                  >
+                    <FileText size={14} />
+                    {denseToolbarShowsLabels ? <span>{compactLyricsToggleLabel}</span> : null}
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setIsAutoSaveEnabled((current) => !current)}
-                  title={copy.autoSave}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
-                    isAutoSaveEnabled
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  <span>{compactAutoSaveLabel}</span>
-                  <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                    isAutoSaveEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
-                  }`}>
-                    {isAutoSaveEnabled ? copy.on : copy.off}
-                  </span>
-                </button>
+                  <KeyPicker
+                    value={isSetlistMode ? currentSetlistKey : song.currentKey}
+                    onChange={(key) => {
+                      if (!key) {
+                        return;
+                      }
 
-                <KeyPicker
-                  value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                  onChange={(key) => {
-                    if (!key) {
-                      return;
-                    }
+                      if (isSetlistMode) {
+                        handleSetlistKeyChange(key);
+                      } else {
+                        handleKeyChange(key);
+                      }
+                    }}
+                    label={copy.key}
+                    originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                    panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                    triggerDensity="compact"
+                    buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[60px]' : 'min-w-[56px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5`}
+                    metaTextClassName="hidden"
+                    triggerIconSize={14}
+                  />
 
-                    if (isSetlistMode) {
-                      handleSetlistKeyChange(key);
-                    } else {
-                      handleKeyChange(key);
-                    }
-                  }}
-                  label={copy.key}
-                  originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
-                  panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
-                  triggerDensity="compact"
-                  buttonClassName="h-9 min-w-[60px] rounded-lg px-2.5"
-                  metaTextClassName="hidden"
-                  triggerIconSize={14}
-                />
+                  <CapoPicker
+                    value={isSetlistMode ? currentSetlistCapo : currentCapo}
+                    currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
+                    onChange={(capo) => {
+                      if (isSetlistMode && selectedSetlistSong) {
+                        handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+                          ...currentSetlistSong,
+                          capo
+                        }));
+                      } else {
+                        handleSongChange({ ...song, capo });
+                      }
+                    }}
+                    label="Capo"
+                    triggerDensity="compact"
+                    buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[70px]' : 'min-w-[58px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5`}
+                    showPlayKey={denseToolbarShowsLabels && mainViewportWidth >= 1820}
+                    triggerIconSize={14}
+                  />
 
-                <CapoPicker
-                  value={isSetlistMode ? currentSetlistCapo : currentCapo}
-                  currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
-                  onChange={(capo) => {
-                    if (isSetlistMode && selectedSetlistSong) {
-                      handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-                        ...currentSetlistSong,
-                        capo
-                      }));
-                    } else {
-                      handleSongChange({ ...song, capo });
-                    }
-                  }}
-                  label="Capo"
-                  triggerDensity="compact"
-                  buttonClassName="h-9 min-w-[70px] rounded-lg px-2.5"
-                  showPlayKey={mainViewportWidth >= 1600}
-                  triggerIconSize={14}
-                />
+                  {!isSetlistMode && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        title={copy.nashvilleModeLabel}
+                        aria-label={copy.nashvilleModeLabel}
+                        className={denseToolbarToggleClassName(song.showNashvilleNumbers)}
+                      >
+                        <span className={`inline-flex min-w-[24px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-black leading-none ${
+                          song.showNashvilleNumbers
+                            ? 'border-indigo-200 bg-white/70 text-current'
+                            : 'border-gray-200 bg-gray-50 text-gray-600'
+                        }`}>
+                          123
+                        </span>
+                        {denseToolbarShowsLabels ? <span>{copy.nashvilleModeLabel}</span> : null}
+                      </button>
 
-                {!isSetlistMode && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
-                      title={copy.nashvilleModeLabel}
-                      className={desktopToolbarToggleClassName(song.showNashvilleNumbers)}
-                    >
-                      <Hash size={13} />
-                      <span>{copy.nashvilleModeLabel}</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                        title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
+                        aria-label={copy.fixedDoModeLabel}
+                        className={denseToolbarToggleClassName(song.showAbsoluteJianpu)}
+                      >
+                        <span className={`inline-flex min-w-[28px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-black leading-none ${
+                          song.showAbsoluteJianpu
+                            ? 'border-indigo-200 bg-white/70 text-current'
+                            : 'border-gray-200 bg-gray-50 text-gray-600'
+                        }`}>
+                          1=C
+                        </span>
+                        {denseToolbarShowsLabels ? <span>{copy.fixedDoModeLabel}</span> : null}
+                      </button>
+                    </>
+                  )}
+                </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
-                      title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
-                      className={desktopToolbarToggleClassName(song.showAbsoluteJianpu)}
-                    >
-                      <Music2 size={13} />
-                      <span>{copy.fixedDoModeLabel}</span>
-                    </button>
-                  </>
-                )}
+                <div ref={toolbarOverflowMenuRef} className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsToolbarOverflowMenuOpen((current) => !current)}
+                    className={denseToolbarMenuButtonClassName}
+                    aria-haspopup="menu"
+                    aria-expanded={isToolbarOverflowMenuOpen}
+                    aria-label={copy.editor.more}
+                    title={copy.editor.more}
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+                  {toolbarOverflowPanel}
+                </div>
 
-                <button
-                  type="button"
-                  onClick={handleSaveLibrary}
-                  title={workspaceIsDirty ? copy.saveChanges : copy.saved}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
-                    workspaceIsDirty
-                      ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
-                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  <Save size={14} />
-                  <span>{compactSaveLabel}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleExportPdf}
-                  disabled={isExportingPdf}
-                  title={isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
-                    isExportingPdf
-                      ? 'cursor-wait bg-gray-400 text-white'
-                      : 'bg-gray-900 text-white hover:bg-gray-800'
-                  }`}
-                >
-                  <Save size={14} />
-                  <span>{compactPdfLabel}</span>
-                </button>
-
-                {showGoogleAuth && googleUser ? (
+                {isAuthenticated ? (
                   <div ref={googleAccountMenuRef} className="relative shrink-0">
                     <button
                       type="button"
                       onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 text-[12px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
+                        isGoogleAccountMenuOpen
+                          ? 'border-indigo-300 ring-2 ring-indigo-100'
+                          : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
+                      }`}
                       aria-haspopup="menu"
                       aria-expanded={isGoogleAccountMenuOpen}
+                      aria-label={authenticatedUser.name}
+                      title={authenticatedUser.name}
                     >
-                      {googleUser.picture ? (
+                      {authenticatedUser.picture ? (
                         <img
-                          src={googleUser.picture}
-                          alt={googleUser.name}
-                          className="h-6 w-6 rounded-full border border-gray-200 object-cover"
+                          src={authenticatedUser.picture}
+                          alt={authenticatedUser.name}
+                          className="h-7 w-7 rounded-full border border-gray-200 object-cover"
                         />
                       ) : (
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
-                          {googleUser.name.slice(0, 1).toUpperCase()}
+                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
+                          {authenticatedUser.name.slice(0, 1).toUpperCase()}
                         </div>
                       )}
-                      <span className="max-w-[88px] truncate">{googleUser.name}</span>
-                      <ChevronDown size={13} className={`transition-transform ${isGoogleAccountMenuOpen ? 'rotate-180' : ''}`} />
                     </button>
 
                     {isGoogleAccountMenuOpen && (
                       <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
                         <div className="rounded-xl bg-gray-50 px-3 py-2">
-                          <div className="truncate text-sm font-semibold text-gray-800">{googleUser.name}</div>
-                          <div className="mt-0.5 truncate text-[11px] text-gray-500">{googleUser.email}</div>
+                          <div className="truncate text-sm font-semibold text-gray-800">{authenticatedUser.name}</div>
+                          <div className="mt-0.5 truncate text-[11px] text-gray-500">{authenticatedUser.email}</div>
                         </div>
                         <button
                           type="button"
@@ -4753,35 +5286,290 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                ) : showGoogleAuth ? (
-                  <div className="flex shrink-0 items-center gap-2">
-                    <div ref={googleSignInRef} className="flex min-h-9 min-w-0 items-center justify-end" />
-                    {googleAuthError ? (
-                      <span className="text-[10px] font-medium text-amber-600" title={googleAuthError}>!</span>
+                ) : (
+                  showGoogleAuth && googleUser ? (
+                    <div ref={googleAccountMenuRef} className="relative shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
+                        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
+                          isGoogleAccountMenuOpen
+                            ? 'border-indigo-300 ring-2 ring-indigo-100'
+                            : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
+                        }`}
+                        aria-haspopup="menu"
+                        aria-expanded={isGoogleAccountMenuOpen}
+                        aria-label={googleUser.name}
+                        title={googleUser.name}
+                      >
+                        {googleUser.picture ? (
+                          <img
+                            src={googleUser.picture}
+                            alt={googleUser.name}
+                            className="h-7 w-7 rounded-full border border-gray-200 object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
+                            {googleUser.name.slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
+                      </button>
+
+                      {isGoogleAccountMenuOpen && (
+                        <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                          <div className="rounded-xl bg-gray-50 px-3 py-2">
+                            <div className="truncate text-sm font-semibold text-gray-800">{googleUser.name}</div>
+                            <div className="mt-0.5 truncate text-[11px] text-gray-500">{googleUser.email}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleGoogleSignOut}
+                            className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                          >
+                            <LogOut size={14} />
+                            <span>{copy.signOut}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : showGoogleAuth ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div ref={googleSignInRef} className="flex min-h-9 min-w-0 items-center justify-end" />
+                      {googleAuthError ? (
+                        <span className="text-[10px] font-medium text-amber-600" title={googleAuthError}>!</span>
+                      ) : null}
+                    </div>
+                  ) : null
+                )}
+              </div>
+            </div>
+          ) : usesTabletHeader ? (
+            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                <div className="min-w-0">
+                  <div className="truncate font-display text-lg font-bold tracking-tight text-gray-900">{APP_NAME}</div>
+                  <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
+                      isSetlistMode
+                        ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                        : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200'
+                    }`}>
+                      {workspaceModeBadge}
+                    </span>
+                    {mainViewportWidth >= 840 ? (
+                      <span className="truncate text-[12px] font-medium text-gray-500">{activeAppViewLabel}</span>
                     ) : null}
                   </div>
-                ) : null}
-
-                <div className="inline-flex shrink-0 items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => setLanguage('zh')}
-                    className={`rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${
-                      language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    中文
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLanguage('en')}
-                    className={`rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${
-                      language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    EN
-                  </button>
                 </div>
+              </div>
+
+              <div className="flex min-w-0 items-center justify-end">
+                <div className="flex min-w-0 items-center justify-end gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(!isEditing)}
+                    title={isEditing ? copy.closeEditor : copy.openEditor}
+                    aria-label={isEditing ? copy.closeEditor : copy.openEditor}
+                    className={isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName}
+                  >
+                    <Edit3 size={14} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleToggleLyricsMode}
+                    title={copy.lyricsMode}
+                    aria-label={copy.lyricsMode}
+                    className={denseToolbarToggleClassName(isLyricsMode, 'accent')}
+                  >
+                    <FileText size={14} />
+                  </button>
+
+                  <KeyPicker
+                    value={isSetlistMode ? currentSetlistKey : song.currentKey}
+                    onChange={(key) => {
+                      if (!key) {
+                        return;
+                      }
+
+                      if (isSetlistMode) {
+                        handleSetlistKeyChange(key);
+                      } else {
+                        handleKeyChange(key);
+                      }
+                    }}
+                    label={copy.key}
+                    originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                    panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                    triggerDensity="compact"
+                    buttonClassName="h-9 min-w-[60px] shrink-0 rounded-lg px-2.5"
+                    metaTextClassName="hidden"
+                    triggerIconSize={14}
+                  />
+
+                  <CapoPicker
+                    value={isSetlistMode ? currentSetlistCapo : currentCapo}
+                    currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
+                    onChange={(capo) => {
+                      if (isSetlistMode && selectedSetlistSong) {
+                        handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+                          ...currentSetlistSong,
+                          capo
+                        }));
+                      } else {
+                        handleSongChange({ ...song, capo });
+                      }
+                    }}
+                    label="Capo"
+                    triggerDensity="compact"
+                    buttonClassName="h-9 min-w-[62px] shrink-0 rounded-lg px-2.5"
+                    showPlayKey={mainViewportWidth >= 1080}
+                    triggerIconSize={14}
+                  />
+
+                  {!isSetlistMode && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        title={copy.nashvilleModeLabel}
+                        aria-label={copy.nashvilleModeLabel}
+                        className={denseToolbarToggleClassName(song.showNashvilleNumbers)}
+                      >
+                        <span className={inlineModeBadgeClassName(song.showNashvilleNumbers)}>123</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                        title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
+                        aria-label={copy.fixedDoModeLabel}
+                        className={denseToolbarToggleClassName(song.showAbsoluteJianpu)}
+                      >
+                        <span className={inlineModeBadgeClassName(song.showAbsoluteJianpu)}>1=C</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                <div ref={toolbarOverflowMenuRef} className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsToolbarOverflowMenuOpen((current) => !current)}
+                    className={denseToolbarMenuButtonClassName}
+                    aria-haspopup="menu"
+                    aria-expanded={isToolbarOverflowMenuOpen}
+                    aria-label={copy.editor.more}
+                    title={copy.editor.more}
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+                  {toolbarOverflowPanel}
+                </div>
+
+                {isAuthenticated ? (
+                  <div ref={googleAccountMenuRef} className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
+                        isGoogleAccountMenuOpen
+                          ? 'border-indigo-300 ring-2 ring-indigo-100'
+                          : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
+                      }`}
+                      aria-haspopup="menu"
+                      aria-expanded={isGoogleAccountMenuOpen}
+                      aria-label={authenticatedUser.name}
+                      title={authenticatedUser.name}
+                    >
+                      {authenticatedUser.picture ? (
+                        <img
+                          src={authenticatedUser.picture}
+                          alt={authenticatedUser.name}
+                          className="h-7 w-7 rounded-full border border-gray-200 object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
+                          {authenticatedUser.name.slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                    </button>
+
+                    {isGoogleAccountMenuOpen && (
+                      <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                        <div className="rounded-xl bg-gray-50 px-3 py-2">
+                          <div className="truncate text-sm font-semibold text-gray-800">{authenticatedUser.name}</div>
+                          <div className="mt-0.5 truncate text-[11px] text-gray-500">{authenticatedUser.email}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleGoogleSignOut}
+                          className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                        >
+                          <LogOut size={14} />
+                          <span>{copy.signOut}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  showGoogleAuth && googleUser ? (
+                    <div ref={googleAccountMenuRef} className="relative shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsGoogleAccountMenuOpen((current) => !current)}
+                        className={`inline-flex h-9 w-9 items-center justify-center rounded-full border bg-white text-gray-700 shadow-sm transition-colors ${
+                          isGoogleAccountMenuOpen
+                            ? 'border-indigo-300 ring-2 ring-indigo-100'
+                            : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
+                        }`}
+                        aria-haspopup="menu"
+                        aria-expanded={isGoogleAccountMenuOpen}
+                        aria-label={googleUser.name}
+                        title={googleUser.name}
+                      >
+                        {googleUser.picture ? (
+                          <img
+                            src={googleUser.picture}
+                            alt={googleUser.name}
+                            className="h-7 w-7 rounded-full border border-gray-200 object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
+                            {googleUser.name.slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
+                      </button>
+
+                      {isGoogleAccountMenuOpen && (
+                        <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                          <div className="rounded-xl bg-gray-50 px-3 py-2">
+                            <div className="truncate text-sm font-semibold text-gray-800">{googleUser.name}</div>
+                            <div className="mt-0.5 truncate text-[11px] text-gray-500">{googleUser.email}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleGoogleSignOut}
+                            className="mt-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                          >
+                            <LogOut size={14} />
+                            <span>{copy.signOut}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : showGoogleAuth ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div ref={googleSignInRef} className="flex min-h-9 min-w-0 items-center justify-end" />
+                      {googleAuthError ? (
+                        <span className="text-[10px] font-medium text-amber-600" title={googleAuthError}>!</span>
+                      ) : null}
+                    </div>
+                  ) : null
+                )}
               </div>
             </div>
           ) : (
@@ -4813,6 +5601,53 @@ export default function App() {
                 </div>
 
                 <div className="flex min-w-0 flex-wrap items-center justify-end gap-3 self-stretch sm:self-auto">
+                  {isAuthenticated ? (
+                    <>
+                      <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${
+                        syncStatus === 'failed'
+                          ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
+                          : syncStatus === 'offline'
+                            ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
+                            : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                      }`}>
+                        {syncStatus === 'offline' ? <CloudOff size={15} /> : <Cloud size={15} />}
+                        <span>{syncStatusLabel}</span>
+                      </div>
+                      {activeAppView === 'sheet' && !isSetlistMode && (
+                        <button
+                          type="button"
+                          onClick={() => void handleCreateShareLink('song')}
+                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
+                        >
+                          <Share2 size={15} />
+                          <span>{copy.shareCurrentSong}</span>
+                        </button>
+                      )}
+                      {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && (
+                        <button
+                          type="button"
+                          onClick={() => void handleCreateShareLink('setlist')}
+                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
+                        >
+                          <Share2 size={15} />
+                          <span>{copy.shareCurrentSetlist}</span>
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleGoogleSignIn()}
+                        disabled={!isAuthConfigured}
+                        className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <ExternalLink size={15} />
+                        <span>{copy.continueWithGoogle}</span>
+                      </button>
+                    </div>
+                  )}
+
                   {showGoogleAuth && googleUser ? (
                     <div className="flex max-w-full min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 shadow-sm">
                       {googleUser.picture ? (
@@ -5280,7 +6115,7 @@ export default function App() {
             </div>
             {!(isPhoneViewport && isEditing) && (
               <div className={`pointer-events-none absolute z-40 ${
-                isPhoneViewport ? 'bottom-3 right-3' : 'right-2 top-2 sm:right-4 sm:top-4 lg:right-6 lg:top-6'
+                isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
                 <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
                   <button
@@ -5553,6 +6388,81 @@ export default function App() {
                       </div>
                     </div>
 
+                    {isAuthenticated ? (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                        <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
+                          syncStatus === 'failed'
+                            ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
+                            : syncStatus === 'offline'
+                              ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
+                              : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                        }`}>
+                          {syncStatus === 'offline' ? <CloudOff size={14} /> : <Cloud size={14} />}
+                          <span>{syncStatusLabel}</span>
+                        </div>
+                        <div className="mt-3 flex items-center gap-3">
+                          {authenticatedUser?.picture ? (
+                            <img
+                              src={authenticatedUser.picture}
+                              alt={authenticatedUser.name}
+                              className="h-10 w-10 rounded-full border border-gray-200 object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
+                              {authenticatedUser?.name.slice(0, 1).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-bold text-gray-900">{authenticatedUser?.name}</div>
+                            <div className="truncate text-xs text-gray-500">{authenticatedUser?.email}</div>
+                          </div>
+                        </div>
+                        {activeAppView === 'sheet' && !isSetlistMode && (
+                          <button
+                            type="button"
+                            onClick={() => void handleCreateShareLink('song')}
+                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                          >
+                            <Share2 size={14} />
+                            <span>{copy.shareCurrentSong}</span>
+                          </button>
+                        )}
+                        {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && (
+                          <button
+                            type="button"
+                            onClick={() => void handleCreateShareLink('setlist')}
+                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                          >
+                            <Share2 size={14} />
+                            <span>{copy.shareCurrentSetlist}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleGoogleSignOut();
+                            setIsMobileActionsSheetOpen(false);
+                          }}
+                          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                        >
+                          <LogOut size={14} />
+                          <span>{copy.signOut}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => void handleGoogleSignIn()}
+                          disabled={!isAuthConfigured}
+                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <ExternalLink size={14} />
+                          <span>{copy.continueWithGoogle}</span>
+                        </button>
+                      </div>
+                    )}
+
                     {showGoogleAuth && googleUser ? (
                       <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
                         <div className="flex items-center gap-3">
@@ -5639,6 +6549,50 @@ export default function App() {
           </AnimatePresence>
         </>
       )}
+
+      <AnimatePresence initial={false}>
+        {isImportPromptOpen && authenticatedUser && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[110] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+          >
+            <motion.div
+              initial={{ y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 8, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="w-full max-w-lg rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+            >
+              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{APP_NAME}</div>
+              <h2 className="mt-2 text-2xl font-bold tracking-tight text-gray-900">{copy.importLocalTitle}</h2>
+              <p className="mt-3 text-sm leading-6 text-gray-600">{copy.importLocalDescription}</p>
+              <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
+                {importSummaryLabel}
+              </div>
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={handleDismissImportPrompt}
+                  disabled={isImportingLocalWorkspace}
+                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {copy.importLater}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleImportLocalWorkspaceToCloud()}
+                  disabled={isImportingLocalWorkspace}
+                  className="inline-flex items-center justify-center rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isImportingLocalWorkspace ? copy.cloudSyncSyncing : copy.importNow}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence initial={false}>
         {isExportingPdf && (

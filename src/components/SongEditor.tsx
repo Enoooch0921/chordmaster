@@ -321,7 +321,7 @@ const buildTimeSignatureInput = (numerator: string, denominator: string) => {
 
 const getBarLayoutMode = (width: number, isPhoneViewport: boolean): BarLayoutMode => {
   if (isPhoneViewport) return 'compact4';
-  if (width < STACKED_BAR_LAYOUT_MAX_WIDTH) return 'stacked';
+  if (width < STACKED_BAR_LAYOUT_MAX_WIDTH) return 'compact4';
   if (width < FULL_BAR_LAYOUT_MIN_WIDTH) return 'compact4';
   return 'full4';
 };
@@ -1226,6 +1226,41 @@ const SongEditor: React.FC<Props> = ({
     newBars.splice(insertIndex, 0, createEmptyBar());
     updateSection(sIdx, { ...section, bars: newBars });
     queueChordInputFocus(sIdx, insertIndex, section.id ?? null);
+  };
+
+  const getNextChordBarTarget = (sIdx: number, bIdx: number) => {
+    const currentSection = song.sections[sIdx];
+    if (!currentSection) return null;
+
+    if (bIdx + 1 < currentSection.bars.length) {
+      return {
+        sIdx,
+        bIdx: bIdx + 1,
+        sectionId: currentSection.id ?? null
+      };
+    }
+
+    for (let nextSectionIndex = sIdx + 1; nextSectionIndex < song.sections.length; nextSectionIndex += 1) {
+      const nextSection = song.sections[nextSectionIndex];
+      if (!nextSection || nextSection.bars.length === 0) continue;
+      return {
+        sIdx: nextSectionIndex,
+        bIdx: 0,
+        sectionId: nextSection.id ?? null
+      };
+    }
+
+    return null;
+  };
+
+  const focusNextChordBarOrInsert = (sIdx: number, bIdx: number) => {
+    const nextTarget = getNextChordBarTarget(sIdx, bIdx);
+    if (nextTarget) {
+      queueChordInputFocus(nextTarget.sIdx, nextTarget.bIdx, nextTarget.sectionId);
+      return;
+    }
+
+    insertEmptyBarAt(sIdx, bIdx + 1);
   };
 
   useEffect(() => {
@@ -5875,7 +5910,7 @@ const SongEditor: React.FC<Props> = ({
                                   return;
                                 }
                                 e.preventDefault();
-                                insertEmptyBarAt(sIdx, bIdx + 1);
+                                focusNextChordBarOrInsert(sIdx, bIdx);
                                 return;
                               }
 
@@ -6081,7 +6116,7 @@ const SongEditor: React.FC<Props> = ({
                               return;
                             }
                             e.preventDefault();
-                            insertEmptyBarAt(sIdx, bIdx + 1);
+                            focusNextChordBarOrInsert(sIdx, bIdx);
                             return;
                           }
 

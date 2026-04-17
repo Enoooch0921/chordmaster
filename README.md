@@ -1,6 +1,6 @@
 # ChordMaster
 
-ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器，聚焦在和弦譜、節奏譜與簡譜的整合編輯。專案使用 Vite + React 建構，資料預設儲存在瀏覽器 `localStorage`，適合快速整理主歌、副歌、前奏與過門等常見段落。
+ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器，聚焦在和弦譜、節奏譜與簡譜的整合編輯。專案使用 Vite + React 建構；未登入時資料預設儲存在瀏覽器 `localStorage`，登入後可切換到 Supabase 雲端同步。
 
 目前版本：`0.6.0`
 
@@ -21,6 +21,9 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 - 導覽記號：支援 Segno、Coda、D.S.、D.C.、Fine、D.S. al Fine、D.S. al Coda
 - 預覽與 PDF 匯出：支援右側預覽縮放、拖曳、PDF 匯出與列印優化
 - 舊資料相容：匯入或載入較早版本歌譜時會先自動整理資料格式
+- 帳號系統：支援 Google OAuth 與 Email Magic Link
+- 雲端同步：登入後可同步個人歌曲庫與歌單
+- 公開唯讀分享：可產生歌曲 / 歌單分享連結
 
 ## 最近更新
 
@@ -49,6 +52,7 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 - React 19
 - TypeScript
 - Vite
+- Supabase Auth / Postgres / Edge Functions
 - Tailwind CSS 4
 - Motion
 - jsPDF
@@ -60,6 +64,7 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 
 - Node.js 18+ 建議
 - npm
+- Supabase CLI（部署 migration / functions 時需要）
 
 ### 安裝
 
@@ -170,30 +175,48 @@ public/
 
 ## 環境變數
 
-目前專案預留 Google Sign-In 的 client id 設定：
+目前專案前端需要：
 
 ```bash
-VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 ```
 
 可參考：
 
 - [.env.example](./.env.example)
+- [docs/supabase-setup.md](./docs/supabase-setup.md)
 
-如果尚未使用 Google 登入，可以先不設定。
+如果尚未設定 Supabase，app 仍可使用本地模式。
+
+## Supabase 設定
+
+第一次接通雲端功能時，請依序完成：
+
+1. 建立 Supabase project
+2. 設定 Google OAuth 與 Email Magic Link
+3. 設定 `.env`
+4. 執行 migration
+5. 部署 Edge Functions
+
+完整步驟請看：
+
+- [docs/supabase-setup.md](./docs/supabase-setup.md)
 
 ## 目前限制
 
-- 歌曲資料預設只保存在本機瀏覽器
-- Google 登入目前僅為前端整合，尚未串接雲端同步
+- 未登入模式下，歌曲資料仍只保存在本機瀏覽器
+- Apple Sign-In 尚未實作
+- 團隊共享庫與多人協作尚未實作
 - PDF 目前仍是圖片式輸出，不是向量文字 PDF
 - 簡譜與節奏連接線仍會依不同版型持續微調
 
 ## Roadmap
 
-- Google 帳號登入與雲端同步
+- Apple Sign-In
+- 團隊共享庫與協作權限
 - 更完整的簡譜 / 節奏排版邏輯
-- 歌譜分享與多人協作
+- 更完整的分享控制與協作
 - 更完整的快捷鍵與編輯模式
 
 ## License
