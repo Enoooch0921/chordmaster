@@ -3,12 +3,29 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Content-Type': 'application/json'
+};
+
+const jsonResponse = (body: unknown, status = 200) => (
+  new Response(JSON.stringify(body), {
+    status,
+    headers: corsHeaders
+  })
+);
 
 Deno.serve(async (request) => {
+  if (request.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
   try {
     const { token } = await request.json();
     if (!token) {
-      return new Response(JSON.stringify({ error: 'Missing token.' }), { status: 400 });
+      return jsonResponse({ error: 'Missing token.' }, 400);
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
@@ -24,15 +41,15 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     if (shareError || !shareLink) {
-      return new Response(JSON.stringify({ error: 'Share link not found.' }), { status: 404 });
+      return jsonResponse({ error: 'Share link not found.' }, 404);
     }
 
     if (shareLink.revoked_at) {
-      return new Response(JSON.stringify({ error: 'Share link has been revoked.' }), { status: 410 });
+      return jsonResponse({ error: 'Share link has been revoked.' }, 410);
     }
 
     if (shareLink.expires_at && new Date(shareLink.expires_at).getTime() < Date.now()) {
-      return new Response(JSON.stringify({ error: 'Share link has expired.' }), { status: 410 });
+      return jsonResponse({ error: 'Share link has expired.' }, 410);
     }
 
     if (shareLink.resource_type === 'song') {
@@ -43,18 +60,16 @@ Deno.serve(async (request) => {
         .maybeSingle();
 
       if (songError || !song) {
-        return new Response(JSON.stringify({ error: 'Song not found.' }), { status: 404 });
+        return jsonResponse({ error: 'Song not found.' }, 404);
       }
 
-      return new Response(JSON.stringify({
+      return jsonResponse({
         resourceType: 'song',
         song: {
           id: song.id,
           title: song.title,
           song: song.content_json
         }
-      }), {
-        headers: { 'Content-Type': 'application/json' }
       });
     }
 
@@ -65,7 +80,7 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     if (setlistError || !setlist) {
-      return new Response(JSON.stringify({ error: 'Setlist not found.' }), { status: 404 });
+      return jsonResponse({ error: 'Setlist not found.' }, 404);
     }
 
     const { data: setlistSongs, error: setlistSongsError } = await supabase
@@ -75,7 +90,7 @@ Deno.serve(async (request) => {
       .order('order_index', { ascending: true });
 
     if (setlistSongsError) {
-      return new Response(JSON.stringify({ error: setlistSongsError.message }), { status: 500 });
+      return jsonResponse({ error: setlistSongsError.message }, 500);
     }
 
     const songIds = (setlistSongs ?? []).map((item) => item.song_id);
@@ -87,7 +102,7 @@ Deno.serve(async (request) => {
       : { data: [], error: null };
 
     if (songsError) {
-      return new Response(JSON.stringify({ error: songsError.message }), { status: 500 });
+      return jsonResponse({ error: songsError.message }, 500);
     }
 
     const songsById = new Map((songs ?? []).map((song) => [song.id, song] as const));
@@ -106,7 +121,7 @@ Deno.serve(async (request) => {
       })
       .filter(Boolean);
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       resourceType: 'setlist',
       setlist: {
         id: setlist.id,
@@ -115,15 +130,10 @@ Deno.serve(async (request) => {
         showLyrics: setlist.show_lyrics,
         songs: payloadSongs
       }
-    }), {
-      headers: { 'Content-Type': 'application/json' }
     });
   } catch (error) {
-    return new Response(JSON.stringify({
+    return jsonResponse({
       error: error instanceof Error ? error.message : 'Unexpected error.'
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    }, 500);
   }
 });

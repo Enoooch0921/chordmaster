@@ -3,12 +3,29 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Content-Type': 'application/json'
+};
+
+const jsonResponse = (body: unknown, status = 200) => (
+  new Response(JSON.stringify(body), {
+    status,
+    headers: corsHeaders
+  })
+);
 
 Deno.serve(async (request) => {
+  if (request.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
   try {
     const authorization = request.headers.get('Authorization');
     if (!authorization) {
-      return new Response(JSON.stringify({ error: 'Missing Authorization header.' }), { status: 401 });
+      return jsonResponse({ error: 'Missing Authorization header.' }, 401);
     }
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -21,12 +38,12 @@ Deno.serve(async (request) => {
 
     const { data: authData, error: authError } = await supabase.auth.getUser();
     if (authError || !authData.user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized.' }), { status: 401 });
+      return jsonResponse({ error: 'Unauthorized.' }, 401);
     }
 
     const { resourceType, resourceId } = await request.json();
     if (!resourceType || !resourceId || !['song', 'setlist'].includes(resourceType)) {
-      return new Response(JSON.stringify({ error: 'Invalid resource payload.' }), { status: 400 });
+      return jsonResponse({ error: 'Invalid resource payload.' }, 400);
     }
 
     const tableName = resourceType === 'song' ? 'songs' : 'setlists';
@@ -37,7 +54,7 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     if (resourceError || !resource?.id) {
-      return new Response(JSON.stringify({ error: 'Resource not found or access denied.' }), { status: 404 });
+      return jsonResponse({ error: 'Resource not found or access denied.' }, 404);
     }
 
     const { data: existing } = await supabase
@@ -51,9 +68,7 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     if (existing?.token) {
-      return new Response(JSON.stringify({ token: existing.token }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return jsonResponse({ token: existing.token });
     }
 
     const token = crypto.randomUUID().replaceAll('-', '');
@@ -67,18 +82,13 @@ Deno.serve(async (request) => {
       });
 
     if (insertError) {
-      return new Response(JSON.stringify({ error: insertError.message }), { status: 400 });
+      return jsonResponse({ error: insertError.message }, 400);
     }
 
-    return new Response(JSON.stringify({ token }), {
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return jsonResponse({ token });
   } catch (error) {
-    return new Response(JSON.stringify({
+    return jsonResponse({
       error: error instanceof Error ? error.message : 'Unexpected error.'
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    }, 500);
   }
 });
