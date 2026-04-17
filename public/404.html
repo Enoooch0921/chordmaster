@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>ChordMaster</title>
+    <script>
+      (function redirectToSpa(location) {
+        var pathSegmentsToKeep = 1;
+        var basePath = location.pathname
+          .split('/')
+          .slice(0, 1 + pathSegmentsToKeep)
+          .join('/');
+        var routePath = location.pathname
+          .slice(1)
+          .split('/')
+          .slice(pathSegmentsToKeep)
+          .join('/')
+          .replace(/&/g, '~and~');
+        var query = location.search ? '&' + location.search.slice(1).replace(/&/g, '~and~') : '';
+
+        location.replace(
+          location.protocol +
+            '//' +
+            location.hostname +
+            (location.port ? ':' + location.port : '') +
+            basePath +
+            '/?/' +
+            routePath +
+            query +
+            location.hash
+        );
+      })(window.location);
+    </script>
+  </head>
+  <body></body>
+</html>

@@ -5,6 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="./logo.svg" />
     <title>ChordMaster | 智能和弦與簡譜編輯器</title>
+    <script>
+      (function (location) {
+        if (!location.search || location.search[1] !== '/') {
+          return;
+        }
+
+        var decodedPath = location.search
+          .slice(1)
+          .split('&')
+          .map(function (segment) { return segment.replace(/~and~/g, '&'); })
+          .join('?');
+
+        window.history.replaceState(
+          null,
+          '',
+          location.pathname.replace(/\/$/, '') + decodedPath + location.hash
+        );
+      })(window.location);
+    </script>
   </head>
   <body>
     <div id="root"></div>
