@@ -4,6 +4,7 @@ import { AuthenticatedUser } from '../types';
 import { hasSupabaseConfig, supabase } from './supabase';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unconfigured';
+const SESSION_EXPIRY_SAFETY_WINDOW_SECONDS = 30;
 
 const mapSessionUser = (session: Session | null): AuthenticatedUser | null => {
   const user = session?.user;
@@ -31,6 +32,40 @@ const buildAppUrl = (path: string) => (
   new URL(`${import.meta.env.BASE_URL}${path}`.replace(/\/{2,}/g, '/'), window.location.origin).toString()
 );
 
+const isSessionUsable = (session: Session | null) => {
+  if (!session?.access_token?.trim()) {
+    return false;
+  }
+
+  if (!session.expires_at) {
+    return true;
+  }
+
+  return session.expires_at > (Date.now() / 1000) + SESSION_EXPIRY_SAFETY_WINDOW_SECONDS;
+};
+
+export const resolveActiveSession = async (): Promise<Session | null> => {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    throw sessionError;
+  }
+
+  if (isSessionUsable(sessionData.session)) {
+    return sessionData.session;
+  }
+
+  const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError) {
+    return null;
+  }
+
+  return isSessionUsable(refreshedData.session) ? refreshedData.session : null;
+};
+
 export const useSupabaseAuth = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [status, setStatus] = useState<AuthStatus>(hasSupabaseConfig ? 'loading' : 'unconfigured');
@@ -43,22 +78,32 @@ export const useSupabaseAuth = () => {
 
     let isMounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) {
-        return;
-      }
+    const syncSession = async (nextSession?: Session | null) => {
+      try {
+        const resolvedSession = isSessionUsable(nextSession ?? null)
+          ? nextSession ?? null
+          : await resolveActiveSession();
 
-      setSession(data.session);
-      setStatus(data.session ? 'authenticated' : 'unauthenticated');
-    });
+        if (!isMounted) {
+          return;
+        }
+
+        setSession(resolvedSession);
+        setStatus(resolvedSession ? 'authenticated' : 'unauthenticated');
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setSession(null);
+        setStatus('unauthenticated');
+      }
+    };
+
+    void syncSession();
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!isMounted) {
-        return;
-      }
-
-      setSession(nextSession);
-      setStatus(nextSession ? 'authenticated' : 'unauthenticated');
+      void syncSession(nextSession);
     });
 
     return () => {

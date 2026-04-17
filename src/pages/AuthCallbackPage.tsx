@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { resolveActiveSession } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
 export default function AuthCallbackPage() {
@@ -24,16 +25,34 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      const { data, error } = await supabase.auth.getSession();
-      if (error) {
+      const authCode = url.searchParams.get('code');
+      if (authCode) {
+        const { error } = await supabase.auth.exchangeCodeForSession(authCode);
+        if (error) {
+          if (!isCancelled) {
+            setErrorMessage(error.message);
+          }
+          return;
+        }
+      }
+
+      let session = null;
+      try {
+        session = await resolveActiveSession();
+      } catch (error) {
         if (!isCancelled) {
-          setErrorMessage(error.message);
+          setErrorMessage(error instanceof Error ? error.message : 'Unable to verify your sign-in session.');
         }
         return;
       }
 
-      if (!isCancelled && data.session) {
+      if (!isCancelled && session) {
         navigate('/', { replace: true });
+        return;
+      }
+
+      if (!isCancelled) {
+        setErrorMessage('Unable to finish sign-in. Please try again.');
       }
     };
 
