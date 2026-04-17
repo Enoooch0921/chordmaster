@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -28,6 +29,11 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: 'Missing Authorization header.' }, 401);
     }
 
+    const accessToken = authorization.replace(/^Bearer\s+/i, '').trim();
+    if (!accessToken) {
+      return jsonResponse({ error: 'Missing bearer token.' }, 401);
+    }
+
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -35,8 +41,13 @@ Deno.serve(async (request) => {
         }
       }
     });
+    const adminSupabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: {
+        persistSession: false
+      }
+    });
 
-    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const { data: authData, error: authError } = await adminSupabase.auth.getUser(accessToken);
     if (authError || !authData.user) {
       return jsonResponse({ error: 'Unauthorized.' }, 401);
     }
