@@ -121,7 +121,7 @@ supabase db push
 
 ```bash
 supabase functions deploy create-share-link
-supabase functions deploy resolve-share-link
+supabase functions deploy resolve-share-link --no-verify-jwt
 ```
 
 `resolve-share-link` 需要 `SUPABASE_SERVICE_ROLE_KEY`。通常在 Supabase project secrets 裡設定：
@@ -136,6 +136,8 @@ supabase secrets set SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
 supabase secrets set SUPABASE_URL=YOUR_PROJECT_URL
 supabase secrets set SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 ```
+
+`resolve-share-link` 是公開分享頁會直接呼叫的 function，部署時必須關閉 JWT 驗證，否則未登入開啟 `/share/:token` 會被 Edge Gateway 擋下來。
 
 ## 7. 本機驗證
 
