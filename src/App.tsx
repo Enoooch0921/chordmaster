@@ -179,6 +179,27 @@ const buildSetlistPdfFileName = (setlist: Setlist) => {
   return nameParts.join('_');
 };
 
+const buildShareUrl = (token: string) => (
+  new URL(`${import.meta.env.BASE_URL}share/${token}`.replace(/\/{2,}/g, '/'), window.location.origin).toString()
+);
+
+const isShareAuthErrorMessage = (message: string) => (
+  /sign in again|unauthorized|jwt|auth/i.test(message)
+);
+
+const copyShareUrlToClipboard = async (shareUrl: string) => {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+    return false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(shareUrl);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const waitForPaint = async () => {
   await new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => resolve());
@@ -3513,11 +3534,27 @@ export default function App() {
 
     try {
       const token = await cloudRepositoryRef.current.createShareLink(resourceType, resourceId);
-      const shareUrl = new URL(`${import.meta.env.BASE_URL}share/${token}`.replace(/\/{2,}/g, '/'), window.location.origin).toString();
-      await navigator.clipboard.writeText(shareUrl);
-      window.alert(copy.shareCopied);
-    } catch {
-      window.alert(copy.shareFailed);
+      const shareUrl = buildShareUrl(token);
+      const didCopy = await copyShareUrlToClipboard(shareUrl);
+
+      if (didCopy) {
+        window.alert(copy.shareCopied);
+        return;
+      }
+
+      window.prompt(copy.shareManualCopyPrompt, shareUrl);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      if (!reason) {
+        window.alert(copy.shareFailed);
+        return;
+      }
+
+      const localizedReason = isShareAuthErrorMessage(reason)
+        ? copy.shareAuthRequired
+        : reason;
+
+      window.alert(copy.shareFailedWithReason.replace('{reason}', localizedReason));
     }
   };
 
