@@ -71,19 +71,40 @@ const normalizeFunctionError = async (error: unknown, fallbackMessage: string) =
   return new Error(fallbackMessage);
 };
 
-export const createShareLink = async (resourceType: ShareResourceType, resourceId: string) => {
+const getShareAccessToken = async (forceRefresh = false) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
 
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError || !sessionData.session?.access_token) {
+  const sessionResult = forceRefresh
+    ? await supabase.auth.refreshSession()
+    : await supabase.auth.getSession();
+  const sessionError = sessionResult.error;
+  const accessToken = sessionResult.data.session?.access_token?.trim();
+
+  if (sessionError) {
     throw new Error(SHARE_AUTH_REQUIRED_MESSAGE);
+  }
+
+  if (accessToken) {
+    return accessToken;
+  }
+
+  if (!forceRefresh) {
+    return getShareAccessToken(true);
+  }
+
+  throw new Error(SHARE_AUTH_REQUIRED_MESSAGE);
+};
+
+const invokeCreateShareLink = async (resourceType: ShareResourceType, resourceId: string, accessToken: string) => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
   }
 
   const { data, error } = await supabase.functions.invoke<{ token: string }>('create-share-link', {
     headers: {
-      Authorization: `Bearer ${sessionData.session.access_token}`
+      Authorization: `Bearer ${accessToken}`
     },
     body: {
       resourceType,
@@ -100,6 +121,33 @@ export const createShareLink = async (resourceType: ShareResourceType, resourceI
   }
 
   return data.token;
+};
+
+export const createShareLink = async (resourceType: ShareResourceType, resourceId: string) => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const accessToken = await getShareAccessToken();
+
+  try {
+    return await invokeCreateShareLink(resourceType, resourceId, accessToken);
+  } catch (error) {
+    const normalizedError = error instanceof Error
+      ? error
+      : await normalizeFunctionError(error, SHARE_CREATE_FAILED_MESSAGE);
+
+    if (normalizedError.message !== SHARE_AUTH_REQUIRED_MESSAGE) {
+      throw normalizedError;
+    }
+
+    const refreshedAccessToken = await getShareAccessToken(true);
+    if (refreshedAccessToken === accessToken) {
+      throw normalizedError;
+    }
+
+    return invokeCreateShareLink(resourceType, resourceId, refreshedAccessToken);
+  }
 };
 
 export const resolveShareLink = async (token: string) => {
