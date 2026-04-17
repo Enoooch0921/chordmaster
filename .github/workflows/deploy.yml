@@ -83,8 +83,8 @@ jobs:
         with:
           version: latest
 
-      - name: Deploy authenticated share creation function
-        run: supabase functions deploy create-share-link --project-ref "$PROJECT_REF"
+      - name: Deploy share creation function
+        run: supabase functions deploy create-share-link --project-ref "$PROJECT_REF" --no-verify-jwt
 
       - name: Deploy public share resolve function
         run: supabase functions deploy resolve-share-link --project-ref "$PROJECT_REF" --no-verify-jwt

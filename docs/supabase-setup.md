@@ -120,7 +120,7 @@ supabase db push
 部署：
 
 ```bash
-supabase functions deploy create-share-link
+supabase functions deploy create-share-link --no-verify-jwt
 supabase functions deploy resolve-share-link --no-verify-jwt
 ```
 
@@ -137,7 +137,7 @@ supabase secrets set SUPABASE_URL=YOUR_PROJECT_URL
 supabase secrets set SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 ```
 
-`resolve-share-link` 是公開分享頁會直接呼叫的 function，部署時必須關閉 JWT 驗證，否則未登入開啟 `/share/:token` 會被 Edge Gateway 擋下來。
+`create-share-link` 與 `resolve-share-link` 都建議用 `--no-verify-jwt` 部署。這兩個 function 會在程式內自行驗證 Bearer token；如果讓 Edge Gateway 先驗 JWT，當專案使用不被 Gateway 支援的簽章演算法時，請求會在進入 function 前就被擋下來。
 
 ## 7. 本機驗證
 
