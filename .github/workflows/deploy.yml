@@ -83,14 +83,6 @@ jobs:
         with:
           version: latest
 
-      - name: Sync Supabase function secrets
-        run: |
-          supabase secrets set \
-            --project-ref "$PROJECT_REF" \
-            SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
-            SUPABASE_URL="$VITE_SUPABASE_URL" \
-            SUPABASE_ANON_KEY="$VITE_SUPABASE_ANON_KEY"
-
       - name: Deploy authenticated share creation function
         run: supabase functions deploy create-share-link --project-ref "$PROJECT_REF"
 
