@@ -1010,9 +1010,6 @@ export default function App() {
   const [viewportWidth, setViewportWidth] = useState(() => (
     typeof window === 'undefined' ? SPLIT_EDITOR_BREAKPOINT : window.innerWidth
   ));
-  const [viewportHeight, setViewportHeight] = useState(() => (
-    typeof window === 'undefined' ? 800 : window.innerHeight
-  ));
   const [isPerformanceMode, setIsPerformanceMode] = useState(false);
   const [performancePageIndex, setPerformancePageIndex] = useState(0);
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
@@ -1062,6 +1059,8 @@ export default function App() {
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
   const performanceSheetRef = useRef<HTMLDivElement>(null);
+  const performanceTranslatorRef = useRef<HTMLDivElement>(null);
+  const performancePageIndexRef = useRef(0);
   const performanceTouchRef = useRef<{ x: number; y: number } | null>(null);
   const autoSaveTimeoutRef = useRef<number | null>(null);
   const cloudRepositoryRef = useRef<ReturnType<typeof createCloudRepository> | null>(null);
@@ -1085,7 +1084,10 @@ export default function App() {
   const workspaceIsDirty = libraryIsDirty || setlistIsDirty;
   const isSheetView = activeAppView === 'sheet';
   const isSetlistMode = workspaceMode === 'setlists';
-  const performanceScale = Math.min(viewportWidth / PREVIEW_TARGET_WIDTH, viewportHeight / PREVIEW_PAGE_HEIGHT);
+  const performanceScale = Math.min(
+    viewportWidth / PREVIEW_TARGET_WIDTH,
+    (typeof window !== 'undefined' ? window.innerHeight : PREVIEW_PAGE_HEIGHT) / PREVIEW_PAGE_HEIGHT
+  );
   const isPhoneViewport = viewportWidth < PHONE_VIEWPORT_BREAKPOINT;
   const isSidebarExpanded = isPhoneViewport ? isMobileNavOpen : (isSidebarPinned || isSidebarHovered);
   const usesOverlaySidebar = viewportWidth < SIDEBAR_OVERLAY_BREAKPOINT;
@@ -1550,7 +1552,6 @@ export default function App() {
 
     const handleResize = () => {
       setViewportWidth(window.innerWidth);
-      setViewportHeight(window.innerHeight);
     };
 
     handleResize();
@@ -2890,7 +2891,15 @@ export default function App() {
     }
   };
 
+  // Apply the page translation directly to the DOM, bypassing React re-renders for smoothness.
+  const applyPerformanceTranslation = (index: number, scale: number) => {
+    if (!performanceTranslatorRef.current) return;
+    performanceTranslatorRef.current.style.transform =
+      `scale(${scale}) translateY(-${index * PREVIEW_PAGE_HEIGHT}px)`;
+  };
+
   const handleEnterPerformanceMode = () => {
+    performancePageIndexRef.current = 0;
     setPerformancePageIndex(0);
     setIsPerformanceMode(true);
   };
@@ -2900,33 +2909,43 @@ export default function App() {
   };
 
   const handlePerformanceNextPage = () => {
-    if (performancePageIndex < performanceTotalPages - 1) {
-      setPerformancePageIndex((p) => p + 1);
+    const current = performancePageIndexRef.current;
+    if (current < performanceTotalPages - 1) {
+      const next = current + 1;
+      performancePageIndexRef.current = next;
+      applyPerformanceTranslation(next, performanceScale);
+      setPerformancePageIndex(next); // update indicator only
       return;
     }
     if (isSetlistMode) {
       const items = setlistSongsWithSource.map(({ item }) => item);
       const idx = items.findIndex((s) => s.id === selectedSetlistSongId);
-      const next = items[idx + 1];
-      if (next) {
-        setSelectedSetlistSongId(next.id);
+      const nextSong = items[idx + 1];
+      if (nextSong) {
+        performancePageIndexRef.current = 0;
+        setSelectedSetlistSongId(nextSong.id);
         setPerformancePageIndex(0);
       }
     }
   };
 
   const handlePerformancePrevPage = () => {
-    if (performancePageIndex > 0) {
-      setPerformancePageIndex((p) => p - 1);
+    const current = performancePageIndexRef.current;
+    if (current > 0) {
+      const prev = current - 1;
+      performancePageIndexRef.current = prev;
+      applyPerformanceTranslation(prev, performanceScale);
+      setPerformancePageIndex(prev); // update indicator only
       return;
     }
     if (isSetlistMode) {
       const items = setlistSongsWithSource.map(({ item }) => item);
       const idx = items.findIndex((s) => s.id === selectedSetlistSongId);
-      const prev = items[idx - 1];
-      if (prev) {
-        setSelectedSetlistSongId(prev.id);
-        setPerformancePageIndex(Infinity); // clamped to last page by useEffect after render
+      const prevSong = items[idx - 1];
+      if (prevSong) {
+        performancePageIndexRef.current = Infinity;
+        setSelectedSetlistSongId(prevSong.id);
+        setPerformancePageIndex(Infinity); // clamped after render
       }
     }
   };
@@ -2978,28 +2997,40 @@ export default function App() {
     };
   }, [isExportingPdf]);
 
-  // Sync performanceTotalPages and clamp performancePageIndex after song/mode changes
+  // Sync performanceTotalPages and clamp page index after song/mode changes.
+  // Uses RAF to wait for ChordSheet to render, then reads page count from DOM.
   useEffect(() => {
     if (!isPerformanceMode) return;
     const rAF = window.requestAnimationFrame(() => {
       const total = Math.max(1, performanceSheetRef.current?.querySelectorAll('[data-print-page]').length ?? 1);
       setPerformanceTotalPages(total);
-      setPerformancePageIndex((idx) => (idx >= total ? total - 1 : idx));
+      const clampedIndex = Math.min(performancePageIndexRef.current, total - 1);
+      performancePageIndexRef.current = clampedIndex;
+      setPerformancePageIndex(clampedIndex);
+      applyPerformanceTranslation(clampedIndex, performanceScale);
     });
     return () => window.cancelAnimationFrame(rAF);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPerformanceMode, selectedSetlistSongId, selectedSongId]);
+
+  // Keep refs to latest handlers so the keyboard effect never has stale closures.
+  const handlePerformanceNextPageRef = useRef(handlePerformanceNextPage);
+  const handlePerformancePrevPageRef = useRef(handlePerformancePrevPage);
+  handlePerformanceNextPageRef.current = handlePerformanceNextPage;
+  handlePerformancePrevPageRef.current = handlePerformancePrevPage;
 
   // Keyboard navigation in performance mode
   useEffect(() => {
     if (!isPerformanceMode) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') { e.preventDefault(); handlePerformanceNextPage(); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); handlePerformancePrevPage(); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); handlePerformanceNextPageRef.current(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); handlePerformancePrevPageRef.current(); }
       else if (e.key === 'Escape') { e.preventDefault(); handleExitPerformanceMode(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isPerformanceMode, handlePerformanceNextPage, handlePerformancePrevPage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPerformanceMode]);
 
   // Prevent background scroll on iOS when performance mode is active
   useEffect(() => {
@@ -6862,28 +6893,31 @@ export default function App() {
             position: 'relative',
           }}>
             <div
-              ref={performanceSheetRef}
+              ref={performanceTranslatorRef}
               style={{
-                transform: `scale(${performanceScale}) translateY(-${performancePageIndex * PREVIEW_PAGE_HEIGHT}px)`,
+                transform: `scale(${performanceScale}) translateY(-${performancePageIndexRef.current * PREVIEW_PAGE_HEIGHT}px)`,
                 transformOrigin: 'top left',
                 width: PREVIEW_TARGET_WIDTH,
+                willChange: 'transform',
               }}
             >
-              {isSetlistMode ? (
-                activeSetlistPreviewSong && (
+              <div ref={performanceSheetRef}>
+                {isSetlistMode ? (
+                  activeSetlistPreviewSong && (
+                    <ChordSheet
+                      song={activeSetlistPreviewSong}
+                      language={language}
+                      currentKey={activeSetlistPreviewSong.currentKey}
+                    />
+                  )
+                ) : (
                   <ChordSheet
-                    song={activeSetlistPreviewSong}
+                    song={song}
                     language={language}
-                    currentKey={activeSetlistPreviewSong.currentKey}
+                    currentKey={song.currentKey}
                   />
-                )
-              ) : (
-                <ChordSheet
-                  song={song}
-                  language={language}
-                  currentKey={song.currentKey}
-                />
-              )}
+                )}
+              </div>
             </div>
           </div>
 
