@@ -3013,12 +3013,18 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPerformanceMode, selectedSetlistSongId, selectedSongId]);
 
+  // Keep refs to latest handlers so the keyboard effect never has stale closures.
+  const handlePerformanceNextPageRef = useRef(handlePerformanceNextPage);
+  const handlePerformancePrevPageRef = useRef(handlePerformancePrevPage);
+  handlePerformanceNextPageRef.current = handlePerformanceNextPage;
+  handlePerformancePrevPageRef.current = handlePerformancePrevPage;
+
   // Keyboard navigation in performance mode
   useEffect(() => {
     if (!isPerformanceMode) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') { e.preventDefault(); handlePerformanceNextPage(); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); handlePerformancePrevPage(); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); handlePerformanceNextPageRef.current(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); handlePerformancePrevPageRef.current(); }
       else if (e.key === 'Escape') { e.preventDefault(); handleExitPerformanceMode(); }
     };
     window.addEventListener('keydown', handler);
@@ -6889,7 +6895,7 @@ export default function App() {
             <div
               ref={performanceTranslatorRef}
               style={{
-                transform: `scale(${performanceScale}) translateY(0px)`,
+                transform: `scale(${performanceScale}) translateY(-${performancePageIndexRef.current * PREVIEW_PAGE_HEIGHT}px)`,
                 transformOrigin: 'top left',
                 width: PREVIEW_TARGET_WIDTH,
                 willChange: 'transform',
