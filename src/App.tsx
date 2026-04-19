@@ -6908,6 +6908,7 @@ export default function App() {
                       song={activeSetlistPreviewSong}
                       language={language}
                       currentKey={activeSetlistPreviewSong.currentKey}
+                      previewIdentity={selectedSetlistSong?.id ?? null}
                     />
                   )
                 ) : (
@@ -6915,6 +6916,7 @@ export default function App() {
                     song={song}
                     language={language}
                     currentKey={song.currentKey}
+                    previewIdentity={song.id}
                   />
                 )}
               </div>
