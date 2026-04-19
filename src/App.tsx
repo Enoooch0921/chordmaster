@@ -6697,8 +6697,21 @@ export default function App() {
                 </div>
               ) : null}
 
-              <div className="mt-4 text-xs font-semibold tracking-[0.08em] text-gray-400">
-                {pdfExportProgress?.cancelRequested ? copy.exportingPdfCancelling : copy.exportingPdfEscHint}
+              <div className="mt-4">
+                {pdfExportProgress?.cancelRequested ? (
+                  <div className="text-xs font-semibold tracking-[0.08em] text-gray-400">{copy.exportingPdfCancelling}</div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pdfExportCancelRequestedRef.current = true;
+                      setPdfExportProgress((current) => current ? { ...current, cancelRequested: true } : current);
+                    }}
+                    className="rounded-full bg-gray-100 px-5 py-2 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-200 active:bg-gray-300"
+                  >
+                    {copy.exportingPdfCancelButton}
+                  </button>
+                )}
               </div>
             </motion.div>
           </motion.div>
