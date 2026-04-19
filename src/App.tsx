@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { toPng } from 'html-to-image';
+import { toPng, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Song, Key, AppLanguage, Setlist, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
@@ -2694,6 +2694,13 @@ export default function App() {
       throw new Error('No preview pages found for PDF export.');
     }
 
+    let fontEmbedCSS: string | undefined;
+    try {
+      fontEmbedCSS = await getFontEmbedCSS(captureHost);
+    } catch {
+      // Fall back to per-page font embedding if pre-fetch fails.
+    }
+
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'pt',
@@ -2729,11 +2736,12 @@ export default function App() {
 
       const imageData = await toPng(page.element, {
         backgroundColor: '#ffffff',
-        cacheBust: true,
+        cacheBust: false,
         pixelRatio: PDF_EXPORT_PIXEL_RATIO,
         skipAutoScale: true,
         width: page.element.scrollWidth,
         height: page.element.scrollHeight,
+        fontEmbedCSS,
       });
 
       if (pdfExportCancelRequestedRef.current) {
