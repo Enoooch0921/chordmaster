@@ -22,7 +22,7 @@ import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
 import { applySetlistSongOverrides, getDefaultSectionOrder } from './utils/setlistUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -1010,6 +1010,12 @@ export default function App() {
   const [viewportWidth, setViewportWidth] = useState(() => (
     typeof window === 'undefined' ? SPLIT_EDITOR_BREAKPOINT : window.innerWidth
   ));
+  const [viewportHeight, setViewportHeight] = useState(() => (
+    typeof window === 'undefined' ? 800 : window.innerHeight
+  ));
+  const [isPerformanceMode, setIsPerformanceMode] = useState(false);
+  const [performancePageIndex, setPerformancePageIndex] = useState(0);
+  const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
@@ -1055,6 +1061,8 @@ export default function App() {
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
+  const performanceSheetRef = useRef<HTMLDivElement>(null);
+  const performanceTouchRef = useRef<{ x: number; y: number } | null>(null);
   const autoSaveTimeoutRef = useRef<number | null>(null);
   const cloudRepositoryRef = useRef<ReturnType<typeof createCloudRepository> | null>(null);
   const [previewBaseScale, setPreviewBaseScale] = useState(1);
@@ -1077,6 +1085,7 @@ export default function App() {
   const workspaceIsDirty = libraryIsDirty || setlistIsDirty;
   const isSheetView = activeAppView === 'sheet';
   const isSetlistMode = workspaceMode === 'setlists';
+  const performanceScale = Math.min(viewportWidth / PREVIEW_TARGET_WIDTH, viewportHeight / PREVIEW_PAGE_HEIGHT);
   const isPhoneViewport = viewportWidth < PHONE_VIEWPORT_BREAKPOINT;
   const isSidebarExpanded = isPhoneViewport ? isMobileNavOpen : (isSidebarPinned || isSidebarHovered);
   const usesOverlaySidebar = viewportWidth < SIDEBAR_OVERLAY_BREAKPOINT;
@@ -1541,6 +1550,7 @@ export default function App() {
 
     const handleResize = () => {
       setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
     };
 
     handleResize();
@@ -2880,6 +2890,66 @@ export default function App() {
     }
   };
 
+  const handleEnterPerformanceMode = () => {
+    setPerformancePageIndex(0);
+    setIsPerformanceMode(true);
+  };
+
+  const handleExitPerformanceMode = () => {
+    setIsPerformanceMode(false);
+  };
+
+  const handlePerformanceNextPage = () => {
+    if (performancePageIndex < performanceTotalPages - 1) {
+      setPerformancePageIndex((p) => p + 1);
+      return;
+    }
+    if (isSetlistMode) {
+      const items = setlistSongsWithSource.map(({ item }) => item);
+      const idx = items.findIndex((s) => s.id === selectedSetlistSongId);
+      const next = items[idx + 1];
+      if (next) {
+        setSelectedSetlistSongId(next.id);
+        setPerformancePageIndex(0);
+      }
+    }
+  };
+
+  const handlePerformancePrevPage = () => {
+    if (performancePageIndex > 0) {
+      setPerformancePageIndex((p) => p - 1);
+      return;
+    }
+    if (isSetlistMode) {
+      const items = setlistSongsWithSource.map(({ item }) => item);
+      const idx = items.findIndex((s) => s.id === selectedSetlistSongId);
+      const prev = items[idx - 1];
+      if (prev) {
+        setSelectedSetlistSongId(prev.id);
+        setPerformancePageIndex(Infinity); // clamped to last page by useEffect after render
+      }
+    }
+  };
+
+  const handlePerformanceTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const t = e.touches[0];
+    if (!t) return;
+    performanceTouchRef.current = { x: t.clientX, y: t.clientY };
+  };
+
+  const handlePerformanceTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = performanceTouchRef.current;
+    performanceTouchRef.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < 44 || Math.abs(dy) >= Math.abs(dx)) return;
+    if (dx < 0) handlePerformanceNextPage();
+    else handlePerformancePrevPage();
+  };
+
   useEffect(() => {
     if (song && song.id !== selectedSongId) {
       setSelectedSongId(song.id);
@@ -2907,6 +2977,37 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isExportingPdf]);
+
+  // Sync performanceTotalPages and clamp performancePageIndex after song/mode changes
+  useEffect(() => {
+    if (!isPerformanceMode) return;
+    const rAF = window.requestAnimationFrame(() => {
+      const total = Math.max(1, performanceSheetRef.current?.querySelectorAll('[data-print-page]').length ?? 1);
+      setPerformanceTotalPages(total);
+      setPerformancePageIndex((idx) => (idx >= total ? total - 1 : idx));
+    });
+    return () => window.cancelAnimationFrame(rAF);
+  }, [isPerformanceMode, selectedSetlistSongId, selectedSongId]);
+
+  // Keyboard navigation in performance mode
+  useEffect(() => {
+    if (!isPerformanceMode) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); handlePerformanceNextPage(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); handlePerformancePrevPage(); }
+      else if (e.key === 'Escape') { e.preventDefault(); handleExitPerformanceMode(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isPerformanceMode, handlePerformanceNextPage, handlePerformancePrevPage]);
+
+  // Prevent background scroll on iOS when performance mode is active
+  useEffect(() => {
+    if (!isPerformanceMode) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [isPerformanceMode]);
 
   useEffect(() => {
     try {
@@ -5858,6 +5959,15 @@ export default function App() {
                       <Save size={16} />
                       <span>{isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}</span>
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={handleEnterPerformanceMode}
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                    >
+                      <Play size={16} />
+                      <span>{copy.performanceMode}</span>
+                    </button>
                   </div>
 
                   {!isSetlistMode && (
@@ -6725,6 +6835,93 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isPerformanceMode && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-950 select-none"
+          onTouchStart={handlePerformanceTouchStart}
+          onTouchEnd={handlePerformanceTouchEnd}
+        >
+          {/* Clip container: shows exactly one A4 page at performanceScale */}
+          <div style={{
+            width: PREVIEW_TARGET_WIDTH * performanceScale,
+            height: PREVIEW_PAGE_HEIGHT * performanceScale,
+            overflow: 'hidden',
+            position: 'relative',
+          }}>
+            <div
+              ref={performanceSheetRef}
+              style={{
+                transform: `scale(${performanceScale}) translateY(-${performancePageIndex * PREVIEW_PAGE_HEIGHT}px)`,
+                transformOrigin: 'top left',
+                width: PREVIEW_TARGET_WIDTH,
+              }}
+            >
+              {isSetlistMode ? (
+                activeSetlistPreviewSong && (
+                  <ChordSheet
+                    song={activeSetlistPreviewSong}
+                    language={language}
+                    currentKey={activeSetlistPreviewSong.currentKey}
+                  />
+                )
+              ) : (
+                <ChordSheet
+                  song={song}
+                  language={language}
+                  currentKey={song.currentKey}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Exit button — top right */}
+          <button
+            type="button"
+            onClick={handleExitPerformanceMode}
+            className="absolute top-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-4 py-2 text-sm font-bold text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+          >
+            {copy.exitPerformanceMode}
+          </button>
+
+          {/* Page / song indicator — bottom center */}
+          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none">
+            {isSetlistMode && activeSetlistPreviewSong && (
+              <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-white/60">
+                {copy.performanceModeSongIndicator}{' '}
+                {setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSongId) + 1}
+                {' / '}
+                {setlistSongsWithSource.length}
+                {'  ·  '}
+                {activeSetlistPreviewSong.title}
+              </div>
+            )}
+            <div className="text-sm font-bold text-white/80">
+              {copy.performanceModePageIndicator}{' '}{performancePageIndex + 1} / {performanceTotalPages}
+            </div>
+          </div>
+
+          {/* Left tap area */}
+          <button
+            type="button"
+            onClick={handlePerformancePrevPage}
+            className="absolute left-0 top-0 bottom-0 w-16 flex items-center justify-start pl-3 text-white/25 transition-colors hover:text-white/60"
+            aria-label="Previous page"
+          >
+            <ChevronLeft size={32} />
+          </button>
+
+          {/* Right tap area */}
+          <button
+            type="button"
+            onClick={handlePerformanceNextPage}
+            className="absolute right-0 top-0 bottom-0 w-16 flex items-center justify-end pr-3 text-white/25 transition-colors hover:text-white/60"
+            aria-label="Next page"
+          >
+            <ChevronRight size={32} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
