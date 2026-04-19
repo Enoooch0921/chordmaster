@@ -1010,6 +1010,9 @@ export default function App() {
   const [viewportWidth, setViewportWidth] = useState(() => (
     typeof window === 'undefined' ? SPLIT_EDITOR_BREAKPOINT : window.innerWidth
   ));
+  const [viewportHeight, setViewportHeight] = useState(() => (
+    typeof window === 'undefined' ? 800 : window.innerHeight
+  ));
   const [isPerformanceMode, setIsPerformanceMode] = useState(false);
   const [performancePageIndex, setPerformancePageIndex] = useState(0);
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
@@ -1086,7 +1089,7 @@ export default function App() {
   const isSetlistMode = workspaceMode === 'setlists';
   const performanceScale = Math.min(
     viewportWidth / PREVIEW_TARGET_WIDTH,
-    (typeof window !== 'undefined' ? window.innerHeight : PREVIEW_PAGE_HEIGHT) / PREVIEW_PAGE_HEIGHT
+    viewportHeight / PREVIEW_PAGE_HEIGHT
   );
   const isPhoneViewport = viewportWidth < PHONE_VIEWPORT_BREAKPOINT;
   const isSidebarExpanded = isPhoneViewport ? isMobileNavOpen : (isSidebarPinned || isSidebarHovered);
@@ -1552,6 +1555,7 @@ export default function App() {
 
     const handleResize = () => {
       setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
     };
 
     handleResize();
@@ -2722,9 +2726,31 @@ export default function App() {
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
 
+    const EXPORT_PREFETCH = 2;
+    const toPngOptions = {
+      backgroundColor: '#ffffff',
+      cacheBust: false,
+      pixelRatio: PDF_EXPORT_PIXEL_RATIO,
+      skipAutoScale: true,
+      fontEmbedCSS,
+    };
+    const startRender = (p: (typeof pages)[number]) =>
+      toPng(p.element, { ...toPngOptions, width: p.element.scrollWidth, height: p.element.scrollHeight });
+
+    // Pre-start renders for the first PREFETCH pages
+    const renderQueue: Promise<string>[] = [];
+    for (let i = 0; i < Math.min(EXPORT_PREFETCH, pages.length); i += 1) {
+      renderQueue.push(startRender(pages[i]));
+    }
+
     for (let index = 0; index < pages.length; index += 1) {
       if (pdfExportCancelRequestedRef.current) {
         throw new PdfExportCancelledError();
+      }
+
+      // Kick off the next page render while we update UI and wait for paint
+      if (index + EXPORT_PREFETCH < pages.length) {
+        renderQueue.push(startRender(pages[index + EXPORT_PREFETCH]));
       }
 
       const page = pages[index];
@@ -2745,15 +2771,12 @@ export default function App() {
       });
       await waitForPaint();
 
-      const imageData = await toPng(page.element, {
-        backgroundColor: '#ffffff',
-        cacheBust: false,
-        pixelRatio: PDF_EXPORT_PIXEL_RATIO,
-        skipAutoScale: true,
-        width: page.element.scrollWidth,
-        height: page.element.scrollHeight,
-        fontEmbedCSS,
-      });
+      if (pdfExportCancelRequestedRef.current) {
+        throw new PdfExportCancelledError();
+      }
+
+      // By now the prefetched render may already be done
+      const imageData = await renderQueue[index];
 
       if (pdfExportCancelRequestedRef.current) {
         throw new PdfExportCancelledError();
