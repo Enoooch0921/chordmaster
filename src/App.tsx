@@ -6926,7 +6926,7 @@ export default function App() {
             <div
               ref={performanceTranslatorRef}
               style={{
-                transform: `scale(${performanceScale}) translateY(-${performancePageIndexRef.current * PREVIEW_PAGE_HEIGHT}px)`,
+                transform: `scale(${performanceScale}) translateY(-${(performancePageOffsetsRef.current[performancePageIndexRef.current] ?? performancePageIndexRef.current * PREVIEW_PAGE_HEIGHT)}px)`,
                 transformOrigin: 'top left',
                 width: PREVIEW_TARGET_WIDTH,
                 willChange: 'transform',
