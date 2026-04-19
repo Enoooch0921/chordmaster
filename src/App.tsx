@@ -6485,6 +6485,18 @@ export default function App() {
                               {isExportingPdf ? copy.preparingPdf : (isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf)}
                             </div>
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsMobileActionsSheetOpen(false);
+                              handleEnterPerformanceMode();
+                            }}
+                            className="rounded-2xl border border-gray-200 bg-white px-3 py-3 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
+                          >
+                            <div className="flex items-center gap-1 text-xs font-bold uppercase tracking-[0.14em] text-gray-400"><Play size={11} /><span>Live</span></div>
+                            <div className="mt-1 text-sm font-bold text-gray-900">{copy.performanceMode}</div>
+                          </button>
                         </div>
 
                         {!isSetlistMode && (
