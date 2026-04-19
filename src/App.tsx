@@ -1064,6 +1064,7 @@ export default function App() {
   const performanceSheetRef = useRef<HTMLDivElement>(null);
   const performanceTranslatorRef = useRef<HTMLDivElement>(null);
   const performancePageIndexRef = useRef(0);
+  const performancePageOffsetsRef = useRef<number[]>([]);
   const performanceTouchRef = useRef<{ x: number; y: number } | null>(null);
   const autoSaveTimeoutRef = useRef<number | null>(null);
   const cloudRepositoryRef = useRef<ReturnType<typeof createCloudRepository> | null>(null);
@@ -2915,10 +2916,12 @@ export default function App() {
   };
 
   // Apply the page translation directly to the DOM, bypassing React re-renders for smoothness.
+  // Uses DOM-measured offsetTop values so inter-page gaps are handled correctly.
   const applyPerformanceTranslation = (index: number, scale: number) => {
     if (!performanceTranslatorRef.current) return;
+    const offset = performancePageOffsetsRef.current[index] ?? index * PREVIEW_PAGE_HEIGHT;
     performanceTranslatorRef.current.style.transform =
-      `scale(${scale}) translateY(-${index * PREVIEW_PAGE_HEIGHT}px)`;
+      `scale(${scale}) translateY(-${offset}px)`;
   };
 
   const handleEnterPerformanceMode = () => {
@@ -3025,8 +3028,13 @@ export default function App() {
   useEffect(() => {
     if (!isPerformanceMode) return;
     const rAF = window.requestAnimationFrame(() => {
-      const total = Math.max(1, performanceSheetRef.current?.querySelectorAll('[data-print-page]').length ?? 1);
+      const container = performanceSheetRef.current;
+      const pageEls = container ? Array.from(container.querySelectorAll<HTMLElement>('[data-print-page]')) : [];
+      const total = Math.max(1, pageEls.length);
       setPerformanceTotalPages(total);
+      // Store the layout offsetTop of each page (relative to the clip container, pre-transform).
+      // This accounts for any inter-page gap in the ChordSheet flex wrapper.
+      performancePageOffsetsRef.current = pageEls.map((el) => el.offsetTop);
       const clampedIndex = Math.min(performancePageIndexRef.current, total - 1);
       performancePageIndexRef.current = clampedIndex;
       setPerformancePageIndex(clampedIndex);
@@ -6955,8 +6963,8 @@ export default function App() {
             {copy.exitPerformanceMode}
           </button>
 
-          {/* Page / song indicator — bottom center */}
-          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none">
+          {/* Page / song indicator — bottom center, above safe-area */}
+          <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none" style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
             {isSetlistMode && activeSetlistPreviewSong && (
               <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-white/60">
                 {copy.performanceModeSongIndicator}{' '}
