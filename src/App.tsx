@@ -3029,7 +3029,9 @@ export default function App() {
     if (!isPerformanceMode) return;
     const rAF = window.requestAnimationFrame(() => {
       const container = performanceSheetRef.current;
-      const pageEls = container ? Array.from(container.querySelectorAll<HTMLElement>('[data-print-page]')) : [];
+      const pageEls: HTMLElement[] = container
+        ? Array.from(container.querySelectorAll('[data-print-page]'))
+        : [];
       const total = Math.max(1, pageEls.length);
       setPerformanceTotalPages(total);
       // Store the layout offsetTop of each page (relative to the clip container, pre-transform).
