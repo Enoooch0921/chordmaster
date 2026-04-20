@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { toPng, getFontEmbedCSS } from 'html-to-image';
+import { toPng, toJpeg, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Song, Key, AppLanguage, Setlist, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
@@ -2728,15 +2728,22 @@ export default function App() {
     const pdfHeight = pdf.internal.pageSize.getHeight();
 
     const EXPORT_PREFETCH = 2;
-    const toPngOptions = {
+    // On mobile, drastically lower the canvas resolution and use JPEG:
+    // pixelRatio 5 → ~3970×5615px PNG takes ~60s/page on mobile CPU.
+    // pixelRatio 2 + JPEG gives ~144 DPI output which is plenty for chord sheets.
+    const isMobileExport = viewportWidth < 1024;
+    const exportPixelRatio = isMobileExport ? 2 : PDF_EXPORT_PIXEL_RATIO;
+    const renderOptions = {
       backgroundColor: '#ffffff',
       cacheBust: false,
-      pixelRatio: PDF_EXPORT_PIXEL_RATIO,
+      pixelRatio: exportPixelRatio,
       skipAutoScale: true,
       fontEmbedCSS,
     };
     const startRender = (p: (typeof pages)[number]) =>
-      toPng(p.element, { ...toPngOptions, width: p.element.scrollWidth, height: p.element.scrollHeight });
+      isMobileExport
+        ? toJpeg(p.element, { ...renderOptions, quality: 0.90, width: p.element.scrollWidth, height: p.element.scrollHeight })
+        : toPng(p.element, { ...renderOptions, width: p.element.scrollWidth, height: p.element.scrollHeight });
 
     // Pre-start renders for the first PREFETCH pages
     const renderQueue: Promise<string>[] = [];
@@ -2786,7 +2793,7 @@ export default function App() {
       if (index > 0) {
         pdf.addPage();
       }
-      pdf.addImage(imageData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      pdf.addImage(imageData, isMobileExport ? 'JPEG' : 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
 
       flushSync(() => {
         setPdfExportProgress((current) => current ? {
