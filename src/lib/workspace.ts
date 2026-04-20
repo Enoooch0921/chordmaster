@@ -330,6 +330,7 @@ export const loadLocalWorkspaceSnapshot = (): WorkspaceSnapshot => {
     return {
       songs: [],
       setlists: [],
+      joinedSetlists: [],
       lastSavedAt: null
     };
   }
@@ -364,6 +365,7 @@ export const loadLocalWorkspaceSnapshot = (): WorkspaceSnapshot => {
   return {
     songs,
     setlists,
+    joinedSetlists: [],
     lastSavedAt
   };
 };

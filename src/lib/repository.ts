@@ -1,4 +1,4 @@
-import { Setlist, SetlistSong, SharedResourcePayload, ShareResourceType, Song, StoredSong, WorkspaceSnapshot } from '../types';
+import { JoinedSetlist, Setlist, SetlistSong, SharedResourcePayload, ShareResourceType, Song, StoredSong, WorkspaceSnapshot } from '../types';
 import {
   cloneValue,
   loadLocalWorkspaceSnapshot,
@@ -81,6 +81,9 @@ export interface WorkspaceRepository {
   importLocalWorkspace(localWorkspace: WorkspaceSnapshot): Promise<WorkspaceSnapshot>;
   createShareLink(resourceType: ShareResourceType, resourceId: string): Promise<string>;
   resolveShareLink(token: string): Promise<SharedResourcePayload>;
+  joinSharedSetlist(token: string): Promise<string>;
+  leaveSharedSetlist(setlistId: string): Promise<void>;
+  saveCapoOverride(setlistSongId: string, capo: number | null): Promise<void>;
 }
 
 const mapSongRow = (row: SongRow): StoredSong => ({
@@ -144,6 +147,15 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async resolveShareLink(token) {
     return resolveEdgeShareLink(token);
+  },
+  async joinSharedSetlist() {
+    throw new Error('Please sign in to join a shared setlist.');
+  },
+  async leaveSharedSetlist() {
+    throw new Error('Please sign in to leave a setlist.');
+  },
+  async saveCapoOverride() {
+    throw new Error('Please sign in to save capo overrides.');
   }
 });
 
@@ -265,8 +277,97 @@ const getLibraryWorkspace = async (libraryId: string): Promise<WorkspaceSnapshot
   return {
     songs,
     setlists,
+    joinedSetlists: [],
     lastSavedAt
   };
+};
+
+const getJoinedSetlists = async (userId: string): Promise<JoinedSetlist[]> => {
+  if (!supabase) return [];
+
+  const { data: memberships, error: membershipError } = await supabase
+    .from('user_setlist_memberships')
+    .select('setlist_id')
+    .eq('user_id', userId);
+
+  if (membershipError) throw membershipError;
+
+  const joinedSetlistIds = (memberships ?? []).map((m: { setlist_id: string }) => m.setlist_id);
+  if (joinedSetlistIds.length === 0) return [];
+
+  const [
+    { data: setlistRows, error: slError },
+    { data: ssRows, error: ssError }
+  ] = await Promise.all([
+    supabase
+      .from('setlists')
+      .select('id, library_id, name, display_mode, show_lyrics, created_at, updated_at')
+      .in('id', joinedSetlistIds)
+      .returns<SetlistRow[]>(),
+    supabase
+      .from('setlist_songs')
+      .select('id, setlist_id, song_id, order_index, override_json')
+      .in('setlist_id', joinedSetlistIds)
+      .returns<SetlistSongRow[]>()
+  ]);
+
+  if (slError) throw slError;
+  if (ssError) throw ssError;
+
+  const songIds = [...new Set((ssRows ?? []).map((r) => r.song_id))];
+  const { data: songRows, error: songError } = songIds.length > 0
+    ? await supabase
+      .from('songs')
+      .select('id, title, content_json, updated_at')
+      .in('id', songIds)
+    : { data: [] as { id: string; title: string; content_json: Song; updated_at: string }[], error: null };
+
+  if (songError) throw songError;
+
+  const songItemIds = (ssRows ?? []).map((r) => r.id);
+  const { data: capoRows, error: capoError } = songItemIds.length > 0
+    ? await supabase
+      .from('user_setlist_capo_overrides')
+      .select('setlist_song_id, capo')
+      .in('setlist_song_id', songItemIds)
+      .eq('user_id', userId)
+    : { data: [] as { setlist_song_id: string; capo: number }[], error: null };
+
+  if (capoError) throw capoError;
+
+  const capoByItemId = new Map((capoRows ?? []).map((r) => [r.setlist_song_id, r.capo]));
+  const songRowById = new Map((songRows ?? []).map((r) => [r.id, r]));
+
+  return (setlistRows ?? []).map((row): JoinedSetlist => {
+    const songs = (ssRows ?? [])
+      .filter((s) => s.setlist_id === row.id)
+      .sort((a, b) => a.order_index - b.order_index)
+      .map((s, i): SetlistSong => {
+        const songRow = songRowById.get(s.song_id);
+        const userCapo = capoByItemId.get(s.id);
+        return {
+          id: s.id,
+          setlistId: row.id,
+          songId: s.song_id,
+          order: i,
+          overrideKey: s.override_json?.overrideKey,
+          capo: userCapo ?? s.override_json?.capo,
+          sectionOrder: Array.isArray(s.override_json?.sectionOrder) ? s.override_json.sectionOrder : [],
+          songData: songRow ? normalizeSongBars(cloneValue(songRow.content_json)) : undefined
+        };
+      });
+
+    return {
+      id: row.id,
+      name: row.name,
+      displayMode: row.display_mode,
+      showLyrics: row.show_lyrics,
+      createdAt: new Date(row.created_at).getTime(),
+      updatedAt: new Date(row.updated_at).getTime(),
+      songs,
+      isJoined: true
+    };
+  });
 };
 
 const persistSetlistSongs = async (setlist: Setlist) => {
@@ -326,9 +427,12 @@ export const createCloudRepository = (params: {
   return {
     async loadWorkspace() {
       const libraryId = await ensureLibraryId();
-      const workspace = await getLibraryWorkspace(libraryId);
+      const [workspace, joinedSetlists] = await Promise.all([
+        getLibraryWorkspace(libraryId),
+        getJoinedSetlists(params.userId)
+      ]);
       persistLocalWorkspaceSnapshot(workspace.songs, workspace.setlists);
-      return workspace;
+      return { ...workspace, joinedSetlists };
     },
 
     async saveSong(song) {
@@ -534,6 +638,43 @@ export const createCloudRepository = (params: {
 
     async resolveShareLink(token) {
       return resolveEdgeShareLink(token);
+    },
+
+    async joinSharedSetlist(token) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('join_shared_setlist', { p_token: token });
+      if (error) throw error;
+      return data as string;
+    },
+
+    async leaveSharedSetlist(setlistId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase
+        .from('user_setlist_memberships')
+        .delete()
+        .eq('setlist_id', setlistId)
+        .eq('user_id', params.userId);
+      if (error) throw error;
+    },
+
+    async saveCapoOverride(setlistSongId, capo) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      if (capo === null) {
+        const { error } = await supabase
+          .from('user_setlist_capo_overrides')
+          .delete()
+          .eq('setlist_song_id', setlistSongId)
+          .eq('user_id', params.userId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('user_setlist_capo_overrides')
+          .upsert(
+            { user_id: params.userId, setlist_song_id: setlistSongId, capo, updated_at: new Date().toISOString() },
+            { onConflict: 'user_id,setlist_song_id' }
+          );
+        if (error) throw error;
+      }
     }
   };
 };

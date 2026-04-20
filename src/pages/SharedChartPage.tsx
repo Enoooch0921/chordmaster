@@ -4,6 +4,7 @@ import ChordSheet from '../components/ChordSheet';
 import { APP_NAME } from '../constants/appMeta';
 import { AppLanguage, SharedResourcePayload } from '../types';
 import { resolveShareLink } from '../lib/sharing';
+import { supabase } from '../lib/supabase';
 import { applySetlistSongOverrides } from '../utils/setlistUtils';
 
 export default function SharedChartPage() {
@@ -12,6 +13,17 @@ export default function SharedChartPage() {
   const [payload, setPayload] = useState<SharedResourcePayload | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [isMember, setIsMember] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
+  const [joinMessage, setJoinMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthUserId(data.session?.user.id ?? null);
+    });
+  }, []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -47,6 +59,37 @@ export default function SharedChartPage() {
       isCancelled = true;
     };
   }, [token]);
+
+  // Check membership after payload + auth are both known
+  useEffect(() => {
+    if (!supabase || !authUserId || !payload?.setlist) return;
+
+    supabase
+      .from('user_setlist_memberships')
+      .select('setlist_id')
+      .eq('user_id', authUserId)
+      .eq('setlist_id', payload.setlist.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setIsMember(Boolean(data));
+      });
+  }, [authUserId, payload?.setlist?.id]);
+
+  const handleJoin = async () => {
+    if (!supabase || !token) return;
+    setIsJoining(true);
+    setJoinMessage(null);
+    try {
+      const { error } = await supabase.rpc('join_shared_setlist', { p_token: token });
+      if (error) throw error;
+      setIsMember(true);
+      setJoinMessage(language === 'zh' ? '歌單已加入你的工作區。' : 'Setlist added to your workspace.');
+    } catch {
+      setJoinMessage(language === 'zh' ? '無法加入歌單。' : 'Unable to join setlist.');
+    } finally {
+      setIsJoining(false);
+    }
+  };
 
   const sharedSetlistSongs = useMemo(() => {
     if (!payload?.setlist) {
@@ -85,21 +128,53 @@ export default function SharedChartPage() {
                 {payload?.song?.title ?? payload?.setlist?.name ?? 'Shared chart'}
               </h1>
             </div>
-            <div className="inline-flex items-center rounded-full border border-stone-200 bg-stone-50 p-1 text-xs font-bold text-stone-500">
-              <button
-                type="button"
-                onClick={() => setLanguage('zh')}
-                className={`rounded-full px-3 py-1 transition-colors ${language === 'zh' ? 'bg-stone-900 text-white' : ''}`}
-              >
-                中文
-              </button>
-              <button
-                type="button"
-                onClick={() => setLanguage('en')}
-                className={`rounded-full px-3 py-1 transition-colors ${language === 'en' ? 'bg-stone-900 text-white' : ''}`}
-              >
-                EN
-              </button>
+            <div className="flex flex-wrap items-center gap-3">
+              {payload?.setlist && (
+                <div className="flex items-center gap-2">
+                  {isMember ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      {language === 'zh' ? '已加入' : 'Joined'}
+                    </span>
+                  ) : authUserId ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleJoin()}
+                      disabled={isJoining}
+                      className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      {isJoining
+                        ? (language === 'zh' ? '加入中...' : 'Joining...')
+                        : (language === 'zh' ? '加入歌單' : 'Join Setlist')}
+                    </button>
+                  ) : (
+                    <span className="text-xs font-medium text-stone-500">
+                      {language === 'zh' ? '請登入後加入此歌單' : 'Sign in to join this setlist'}
+                    </span>
+                  )}
+                  {joinMessage && (
+                    <span className={`text-xs font-medium ${isMember ? 'text-green-600' : 'text-rose-600'}`}>
+                      {joinMessage}
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="inline-flex items-center rounded-full border border-stone-200 bg-stone-50 p-1 text-xs font-bold text-stone-500">
+                <button
+                  type="button"
+                  onClick={() => setLanguage('zh')}
+                  className={`rounded-full px-3 py-1 transition-colors ${language === 'zh' ? 'bg-stone-900 text-white' : ''}`}
+                >
+                  中文
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('en')}
+                  className={`rounded-full px-3 py-1 transition-colors ${language === 'en' ? 'bg-stone-900 text-white' : ''}`}
+                >
+                  EN
+                </button>
+              </div>
             </div>
           </div>
 

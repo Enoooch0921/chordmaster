@@ -103,9 +103,14 @@ export interface Setlist {
   songs: SetlistSong[];
 }
 
+export interface JoinedSetlist extends Setlist {
+  isJoined: true;
+}
+
 export interface WorkspaceSnapshot {
   songs: StoredSong[];
   setlists: Setlist[];
+  joinedSetlists: JoinedSetlist[];
   lastSavedAt: number | null;
 }
 
