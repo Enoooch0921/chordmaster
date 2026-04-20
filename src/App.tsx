@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { toPng, toJpeg, getFontEmbedCSS } from 'html-to-image';
+import { toPng, toCanvas, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { Song, Key, AppLanguage, Setlist, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
@@ -2727,80 +2727,118 @@ export default function App() {
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
 
-    const EXPORT_PREFETCH = 2;
-    // On mobile, drastically lower the canvas resolution and use JPEG:
-    // pixelRatio 5 → ~3970×5615px PNG takes ~60s/page on mobile CPU.
-    // pixelRatio 2 + JPEG gives ~144 DPI output which is plenty for chord sheets.
-    const isMobileExport = viewportWidth < 1024;
-    const exportPixelRatio = isMobileExport ? 2 : PDF_EXPORT_PIXEL_RATIO;
     const renderOptions = {
       backgroundColor: '#ffffff',
       cacheBust: false,
-      pixelRatio: exportPixelRatio,
+      pixelRatio: PDF_EXPORT_PIXEL_RATIO,
       skipAutoScale: true,
       fontEmbedCSS,
     };
-    const startRender = (p: (typeof pages)[number]) =>
-      isMobileExport
-        ? toJpeg(p.element, { ...renderOptions, quality: 0.90, width: p.element.scrollWidth, height: p.element.scrollHeight })
-        : toPng(p.element, { ...renderOptions, width: p.element.scrollWidth, height: p.element.scrollHeight });
 
-    // Pre-start renders for the first PREFETCH pages
-    const renderQueue: Promise<string>[] = [];
-    for (let i = 0; i < Math.min(EXPORT_PREFETCH, pages.length); i += 1) {
-      renderQueue.push(startRender(pages[i]));
+    // Group pages by their [data-export-song-container] so we can render each
+    // song's pages in a single toCanvas() call instead of one per page.
+    // DOM serialisation (clone + style-inline + SVG generation) is the main
+    // mobile bottleneck — doing it once per song instead of once per page gives
+    // an N-fold reduction for multi-page songs.
+    const songContainerGroups: { container: HTMLElement; pageIndices: number[] }[] = [];
+    for (let i = 0; i < pages.length; i += 1) {
+      const container =
+        pages[i].element.closest<HTMLElement>('[data-export-song-container]') ??
+        captureHost;
+      const group = songContainerGroups.find((g) => g.container === container);
+      if (group) {
+        group.pageIndices.push(i);
+      } else {
+        songContainerGroups.push({ container, pageIndices: [i] });
+      }
     }
 
-    for (let index = 0; index < pages.length; index += 1) {
+    let globalPageCount = 0;
+    for (const { container, pageIndices } of songContainerGroups) {
       if (pdfExportCancelRequestedRef.current) {
         throw new PdfExportCancelledError();
       }
 
-      // Kick off the next page render while we update UI and wait for paint
-      if (index + EXPORT_PREFETCH < pages.length) {
-        renderQueue.push(startRender(pages[index + EXPORT_PREFETCH]));
-      }
-
-      const page = pages[index];
-      flushSync(() => {
-        setPdfExportProgress({
-          totalPages: pages.length,
-          completedPages: index,
-          currentPage: index + 1,
-          songIndex: page.songIndex,
-          totalSongs: page.totalSongs,
-          songTitle: page.songTitle,
-          sectionIndex: page.sectionIndex,
-          sectionTitle: page.sectionTitle,
-          pageInSong: page.pageInSong,
-          totalPagesInSong: page.totalPagesInSong,
-          cancelRequested: pdfExportCancelRequestedRef.current
+      // Render the entire song container once; fall back to per-page if the
+      // canvas would exceed device limits (toCanvas throws on OOM).
+      let songCanvas: HTMLCanvasElement | null = null;
+      try {
+        songCanvas = await toCanvas(container, {
+          ...renderOptions,
+          width: container.scrollWidth,
+          height: container.scrollHeight,
         });
-      });
-      await waitForPaint();
-
-      if (pdfExportCancelRequestedRef.current) {
-        throw new PdfExportCancelledError();
+      } catch {
+        songCanvas = null;
       }
 
-      // By now the prefetched render may already be done
-      const imageData = await renderQueue[index];
+      for (const pageIndex of pageIndices) {
+        if (pdfExportCancelRequestedRef.current) {
+          throw new PdfExportCancelledError();
+        }
 
-      if (pdfExportCancelRequestedRef.current) {
-        throw new PdfExportCancelledError();
+        const page = pages[pageIndex];
+        flushSync(() => {
+          setPdfExportProgress({
+            totalPages: pages.length,
+            completedPages: globalPageCount,
+            currentPage: pageIndex + 1,
+            songIndex: page.songIndex,
+            totalSongs: page.totalSongs,
+            songTitle: page.songTitle,
+            sectionIndex: page.sectionIndex,
+            sectionTitle: page.sectionTitle,
+            pageInSong: page.pageInSong,
+            totalPagesInSong: page.totalPagesInSong,
+            cancelRequested: pdfExportCancelRequestedRef.current,
+          });
+        });
+        await waitForPaint();
+
+        if (pdfExportCancelRequestedRef.current) {
+          throw new PdfExportCancelledError();
+        }
+
+        let imageData: string;
+        if (songCanvas) {
+          // Slice this page out of the full-song canvas.
+          // getBoundingClientRect() differences give the correct in-container
+          // offset even for off-screen fixed elements.
+          const containerRect = container.getBoundingClientRect();
+          const pageRect = page.element.getBoundingClientRect();
+          const offsetY = Math.round((pageRect.top - containerRect.top) * PDF_EXPORT_PIXEL_RATIO);
+          const sliceW = Math.round(page.element.scrollWidth * PDF_EXPORT_PIXEL_RATIO);
+          const sliceH = Math.round(page.element.scrollHeight * PDF_EXPORT_PIXEL_RATIO);
+          const sliceCanvas = document.createElement('canvas');
+          sliceCanvas.width = sliceW;
+          sliceCanvas.height = sliceH;
+          sliceCanvas.getContext('2d')!.drawImage(songCanvas, 0, offsetY, sliceW, sliceH, 0, 0, sliceW, sliceH);
+          imageData = sliceCanvas.toDataURL('image/jpeg', 0.92);
+        } else {
+          // Fallback: render this page individually (original approach).
+          imageData = await toPng(page.element, {
+            ...renderOptions,
+            width: page.element.scrollWidth,
+            height: page.element.scrollHeight,
+          });
+        }
+
+        if (pdfExportCancelRequestedRef.current) {
+          throw new PdfExportCancelledError();
+        }
+
+        if (globalPageCount > 0) {
+          pdf.addPage();
+        }
+        pdf.addImage(imageData, songCanvas ? 'JPEG' : 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+        globalPageCount += 1;
+
+        flushSync(() => {
+          setPdfExportProgress((current) =>
+            current ? { ...current, completedPages: globalPageCount } : current
+          );
+        });
       }
-
-      if (index > 0) {
-        pdf.addPage();
-      }
-      pdf.addImage(imageData, isMobileExport ? 'JPEG' : 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-
-      flushSync(() => {
-        setPdfExportProgress((current) => current ? {
-          ...current,
-          completedPages: index + 1
-        } : current);
-      });
     }
 
     if (pdfExportCancelRequestedRef.current) {
