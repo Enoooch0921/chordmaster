@@ -8,7 +8,7 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { toPng, toCanvas, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { Song, Key, AppLanguage, Setlist, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
+import { Song, Key, AppLanguage, JoinedSetlist, Setlist, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
@@ -991,6 +991,7 @@ export default function App() {
   const [selectedSongId, setSelectedSongId] = useState(initialLibraryRef.current.selectedSongId);
   const [setlists, setSetlists] = useState<Setlist[]>(initialSetlistsRef.current.setlists);
   const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(cloneSong(initialSetlistsRef.current.setlists));
+  const [joinedSetlists, setJoinedSetlists] = useState<JoinedSetlist[]>([]);
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistId);
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistSongId);
   const [songHistories, setSongHistories] = useState<Record<string, SongHistoryState>>({});
@@ -1137,9 +1138,13 @@ export default function App() {
       ? 'grid-cols-4'
       : 'grid-cols-7';
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
-  const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? null;
+  const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? null;
+  const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
   const selectedSetlistSong = selectedSetlist?.songs.find((item) => item.id === selectedSetlistSongId) ?? selectedSetlist?.songs[0] ?? null;
-  const selectedSetlistSourceSong = selectedSetlistSong ? songs.find((item) => item.id === selectedSetlistSong.songId) ?? null : null;
+  const selectedSetlistSourceSong = selectedSetlistSong
+    ? songs.find((item) => item.id === selectedSetlistSong.songId)
+      ?? (selectedSetlistSong.songData ? { ...selectedSetlistSong.songData, id: selectedSetlistSong.songId, updatedAt: 0 } as StoredSong : null)
+    : null;
   const currentSetlistSongHistory = setlistSongHistories[selectedSetlistSong?.id || ''] ?? { past: [], future: [] };
   const activeSetlistEditableSong = selectedSetlistSong
     ? normalizeSongBars(cloneSong(selectedSetlistSong.songData ?? selectedSetlistSourceSong ?? INITIAL_SONG))
@@ -1445,10 +1450,12 @@ export default function App() {
 
     return librarySearchText.includes(normalizedLibrarySearchQuery);
   });
-  const setlistSongsWithSource = (selectedSetlist?.songs ?? []).map((item) => ({
-    item,
-    sourceSong: songs.find((songItem) => songItem.id === item.songId) ?? null
-  })).filter((entry) => Boolean(entry.sourceSong)) as Array<{ item: SetlistSong; sourceSong: StoredSong }>;
+  const setlistSongsWithSource = (selectedSetlist?.songs ?? []).map((item) => {
+    const libSong = songs.find((songItem) => songItem.id === item.songId);
+    const sourceSong: StoredSong | null = libSong
+      ?? (item.songData ? { ...item.songData, id: item.songId, updatedAt: 0 } as StoredSong : null);
+    return { item, sourceSong };
+  }).filter((entry): entry is { item: SetlistSong; sourceSong: StoredSong } => entry.sourceSong !== null);
   const filteredSetlists = setlists.filter((item) => {
     if (!normalizedSetlistSearchQuery) {
       return true;
@@ -2100,6 +2107,49 @@ export default function App() {
       setSelectedSetlistId(nextSetlistId);
       setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
     });
+  };
+
+  const handleSelectJoinedSetlist = (nextSetlistId: string) => {
+    setMobileSwipeOpenSetlistId(null);
+    if (isPhoneViewport) {
+      setMobileSetlistDrawerView('detail');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+    }
+    if (selectedSetlistId === nextSetlistId && workspaceMode === 'setlists') return;
+    void runSelectionChange(() => {
+      setIsSetlistActionsMenuOpen(false);
+      const nextSetlist = joinedSetlists.find((item) => item.id === nextSetlistId) ?? null;
+      setWorkspaceMode('setlists');
+      setSelectedSetlistId(nextSetlistId);
+      setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+    });
+  };
+
+  const handleJoinedSetlistCapoChange = (setlistSongId: string, capo: number) => {
+    setJoinedSetlists((current) => current.map((sl) =>
+      sl.id !== selectedSetlistId ? sl : {
+        ...sl,
+        songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, capo } : s)
+      }
+    ));
+    if (cloudRepositoryRef.current) {
+      void cloudRepositoryRef.current.saveCapoOverride(setlistSongId, capo);
+    }
+  };
+
+  const handleLeaveSharedSetlist = async (setlistId: string) => {
+    if (!cloudRepositoryRef.current) return;
+    try {
+      await cloudRepositoryRef.current.leaveSharedSetlist(setlistId);
+      setJoinedSetlists((current) => current.filter((sl) => sl.id !== setlistId));
+      if (selectedSetlistId === setlistId) {
+        setSelectedSetlistId(setlists[0]?.id ?? null);
+        setSelectedSetlistSongId(setlists[0]?.songs[0]?.id ?? null);
+      }
+    } catch {
+      // Silently ignore leave errors
+    }
   };
 
   const handleSetlistNameChange = (setlistId: string, name: string) => {
@@ -3165,13 +3215,19 @@ export default function App() {
         if (shouldUseCloudWorkspace) {
           const nextSongs = cloudWorkspace.songs.length > 0 ? cloudWorkspace.songs : initialLibraryRef.current.songs;
           const nextSetlists = cloudWorkspace.setlists;
+          const nextJoinedSetlists = cloudWorkspace.joinedSetlists;
           setSongs(nextSongs);
           setSavedSongs(cloneSong(nextSongs));
           setSetlists(nextSetlists);
           setSavedSetlists(cloneSong(nextSetlists));
+          setJoinedSetlists(nextJoinedSetlists);
           setLastSavedAt(cloudWorkspace.lastSavedAt);
           setSelectedSongId((currentId) => nextSongs.some((item) => item.id === currentId) ? currentId : nextSongs[0]?.id ?? '');
-          setSelectedSetlistId((currentId) => nextSetlists.some((item) => item.id === currentId) ? currentId : nextSetlists[0]?.id ?? null);
+          setSelectedSetlistId((currentId) => {
+            if (nextSetlists.some((item) => item.id === currentId)) return currentId;
+            if (nextJoinedSetlists.some((item) => item.id === currentId)) return currentId;
+            return nextSetlists[0]?.id ?? null;
+          });
         }
 
         if (hasLocalData && !migrationCompleted) {
@@ -3786,12 +3842,14 @@ export default function App() {
       const nextWorkspace = await cloudRepositoryRef.current.importLocalWorkspace({
         songs,
         setlists,
+        joinedSetlists: [],
         lastSavedAt
       });
       setSongs(nextWorkspace.songs);
       setSavedSongs(cloneSong(nextWorkspace.songs));
       setSetlists(nextWorkspace.setlists);
       setSavedSetlists(cloneSong(nextWorkspace.setlists));
+      setJoinedSetlists(nextWorkspace.joinedSetlists);
       setLastSavedAt(nextWorkspace.lastSavedAt);
       markMigrationCompleted(authenticatedUser.id);
       setIsImportPromptOpen(false);
@@ -4187,14 +4245,27 @@ export default function App() {
                             <ChevronLeft size={18} />
                           </button>
                           <div className="min-w-0 flex-1">
-                            <input
-                              value={selectedSetlist.name}
-                              onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
-                              className="w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50"
-                              placeholder={copy.untitledSetlist}
-                            />
+                            {isJoinedSetlist ? (
+                              <div className="text-base font-bold text-gray-900 truncate">{selectedSetlist.name}</div>
+                            ) : (
+                              <input
+                                value={selectedSetlist.name}
+                                onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
+                                className="w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50"
+                                placeholder={copy.untitledSetlist}
+                              />
+                            )}
                             <div className="mt-0.5 text-xs font-medium text-gray-500">{setlistSongsWithSource.length} {copy.setlistItems}</div>
                           </div>
+                          {isJoinedSetlist ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleLeaveSharedSetlist(selectedSetlist.id)}
+                              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50"
+                            >
+                              {copy.leaveSetlist}
+                            </button>
+                          ) : (
                           <div ref={setlistActionsMenuRef} className="relative">
                             <button
                               type="button"
@@ -4216,6 +4287,7 @@ export default function App() {
                               </div>
                             )}
                           </div>
+                          )}
                         </div>
                       </div>
 
@@ -4238,31 +4310,22 @@ export default function App() {
                               return (
                                 <div
                                   key={item.id}
-                                  draggable
-                                  onDragStart={() => setDraggingSetlistSongId(item.id)}
-                                  onDragOver={(event) => {
-                                    event.preventDefault();
-                                    if (dragOverSetlistSongId !== item.id) {
-                                      setDragOverSetlistSongId(item.id);
-                                    }
-                                  }}
-                                  onDragLeave={() => {
-                                    if (dragOverSetlistSongId === item.id) {
+                                  {...(!isJoinedSetlist && {
+                                    draggable: true,
+                                    onDragStart: () => setDraggingSetlistSongId(item.id),
+                                    onDragOver: (event: React.DragEvent) => {
+                                      event.preventDefault();
+                                      if (dragOverSetlistSongId !== item.id) setDragOverSetlistSongId(item.id);
+                                    },
+                                    onDragLeave: () => { if (dragOverSetlistSongId === item.id) setDragOverSetlistSongId(null); },
+                                    onDrop: (event: React.DragEvent) => {
+                                      event.preventDefault();
+                                      if (draggingSetlistSongId) moveSetlistSong(draggingSetlistSongId, item.id);
+                                      setDraggingSetlistSongId(null);
                                       setDragOverSetlistSongId(null);
-                                    }
-                                  }}
-                                  onDrop={(event) => {
-                                    event.preventDefault();
-                                    if (draggingSetlistSongId) {
-                                      moveSetlistSong(draggingSetlistSongId, item.id);
-                                    }
-                                    setDraggingSetlistSongId(null);
-                                    setDragOverSetlistSongId(null);
-                                  }}
-                                  onDragEnd={() => {
-                                    setDraggingSetlistSongId(null);
-                                    setDragOverSetlistSongId(null);
-                                  }}
+                                    },
+                                    onDragEnd: () => { setDraggingSetlistSongId(null); setDragOverSetlistSongId(null); }
+                                  })}
                                   className={`group rounded-xl border px-2.5 py-2 transition-all ${
                                     isActive
                                       ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
@@ -4274,53 +4337,60 @@ export default function App() {
                                   <div className="flex items-start gap-2">
                                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center gap-2">
-                                        <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
-                                          <GripVertical size={14} />
-                                        </div>
+                                        {!isJoinedSetlist && (
+                                          <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
+                                            <GripVertical size={14} />
+                                          </div>
+                                        )}
                                         <button
                                           type="button"
                                           onClick={() => handleSelectSetlistSong(item.id)}
                                           className="min-w-0 flex-1 text-left"
                                         >
                                           <div className="truncate text-sm font-bold text-gray-900">{sourceSong.title || copy.untitledSong}</div>
-                                          <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
-                                            {typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : 'BPM --'}
-                                            {versionSummary ? ` · ${versionSummary}` : ''}
-                                          </div>
+                                          {!isJoinedSetlist && (
+                                            <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
+                                              {typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : 'BPM --'}
+                                              {versionSummary ? ` · ${versionSummary}` : ''}
+                                            </div>
+                                          )}
                                         </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRemoveSetlistSong(item.id)}
-                                          className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
-                                          title={copy.removeFromSetlist}
-                                        >
-                                          <Trash2 size={13} />
-                                        </button>
+                                        {!isJoinedSetlist && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveSetlistSong(item.id)}
+                                            className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
+                                            title={copy.removeFromSetlist}
+                                          >
+                                            <Trash2 size={13} />
+                                          </button>
+                                        )}
                                       </div>
-                                      <div className="flex min-w-0 items-center gap-1 pl-10">
-                                        <div className="w-[56px] shrink-0">
-                                          <KeyPicker
-                                            value={effectiveKey}
-                                            onChange={(key) => key && handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
-                                              ...currentSetlistSong,
-                                              overrideKey: key
-                                            }))}
-                                            label={copy.key}
-                                            originalKey={sourceSong.currentKey}
-                                            align="left"
-                                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
-                                            valueTextClassName="!text-[10px] !leading-none"
-                                            triggerIconSize={10}
-                                          />
-                                        </div>
+                                      <div className={`flex min-w-0 items-center gap-1 ${!isJoinedSetlist ? 'pl-10' : ''}`}>
+                                        {!isJoinedSetlist && (
+                                          <div className="w-[56px] shrink-0">
+                                            <KeyPicker
+                                              value={effectiveKey}
+                                              onChange={(key) => key && handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                                ...currentSetlistSong,
+                                                overrideKey: key
+                                              }))}
+                                              label={copy.key}
+                                              originalKey={sourceSong.currentKey}
+                                              align="left"
+                                              buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
+                                              valueTextClassName="!text-[10px] !leading-none"
+                                              triggerIconSize={10}
+                                            />
+                                          </div>
+                                        )}
                                         <div className="w-[56px] shrink-0">
                                           <CapoPicker
                                             value={effectiveCapo}
                                             currentKey={effectiveKey}
-                                            onChange={(capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
-                                              ...currentSetlistSong,
-                                              capo
-                                            }))}
+                                            onChange={isJoinedSetlist
+                                              ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
+                                              : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
                                             label="Capo"
                                             align="right"
                                             buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
@@ -4537,11 +4607,40 @@ export default function App() {
                             );
                           })}
                         </div>
+
+                        {joinedSetlists.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.sharedWithMe}</div>
+                            {joinedSetlists.map((joinedItem) => {
+                              const isJoinedActive = joinedItem.id === selectedSetlist?.id;
+                              return (
+                                <div
+                                  key={joinedItem.id}
+                                  className={`rounded-2xl border p-3 transition-all ${
+                                    isJoinedActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectJoinedSetlist(joinedItem.id)}
+                                    className="w-full text-left"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{joinedItem.name || copy.untitledSetlist}</div>
+                                      <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
+                                    </div>
+                                    <div className="mt-1 text-xs text-gray-500">{joinedItem.songs.length} {copy.setlistItems}</div>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
 
-                  {mobileSetlistDrawerView === 'detail' && selectedSetlist && (
+                  {mobileSetlistDrawerView === 'detail' && selectedSetlist && !isJoinedSetlist && (
                     <div className="border-t border-gray-200 bg-white px-4 py-3">
                       <button
                         type="button"
@@ -4638,8 +4737,52 @@ export default function App() {
                     })}
                   </div>
 
+                  {joinedSetlists.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.sharedWithMe}</div>
+                      {joinedSetlists.map((item) => {
+                        const isActive = item.id === selectedSetlist?.id;
+                        return (
+                          <div
+                            key={item.id}
+                            className={`rounded-2xl border p-3 transition-all ${
+                              isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleSelectJoinedSetlist(item.id)}
+                              className="w-full text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
+                                <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
+                              </div>
+                              <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {selectedSetlist && (
                     <div className="mt-5 space-y-4 border-t border-gray-200 pt-4">
+                      {isJoinedSetlist ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
+                            <div className="mt-1 truncate text-sm font-bold text-gray-900">{selectedSetlist.name}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleLeaveSharedSetlist(selectedSetlist.id)}
+                            className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50"
+                          >
+                            {copy.leaveSetlist}
+                          </button>
+                        </div>
+                      ) : (
                       <div className="space-y-2">
                         <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistName}</div>
                         <div className="flex items-center gap-2">
@@ -4672,6 +4815,7 @@ export default function App() {
                           </div>
                         </div>
                       </div>
+                      )}
 
                       <div className="space-y-2">
                         <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
@@ -4692,31 +4836,22 @@ export default function App() {
                               return (
                                 <div
                                   key={item.id}
-                                  draggable
-                                  onDragStart={() => setDraggingSetlistSongId(item.id)}
-                                  onDragOver={(event) => {
-                                    event.preventDefault();
-                                    if (dragOverSetlistSongId !== item.id) {
-                                      setDragOverSetlistSongId(item.id);
-                                    }
-                                  }}
-                                  onDragLeave={() => {
-                                    if (dragOverSetlistSongId === item.id) {
+                                  {...(!isJoinedSetlist && {
+                                    draggable: true,
+                                    onDragStart: () => setDraggingSetlistSongId(item.id),
+                                    onDragOver: (event: React.DragEvent) => {
+                                      event.preventDefault();
+                                      if (dragOverSetlistSongId !== item.id) setDragOverSetlistSongId(item.id);
+                                    },
+                                    onDragLeave: () => { if (dragOverSetlistSongId === item.id) setDragOverSetlistSongId(null); },
+                                    onDrop: (event: React.DragEvent) => {
+                                      event.preventDefault();
+                                      if (draggingSetlistSongId) moveSetlistSong(draggingSetlistSongId, item.id);
+                                      setDraggingSetlistSongId(null);
                                       setDragOverSetlistSongId(null);
-                                    }
-                                  }}
-                                  onDrop={(event) => {
-                                    event.preventDefault();
-                                    if (draggingSetlistSongId) {
-                                      moveSetlistSong(draggingSetlistSongId, item.id);
-                                    }
-                                    setDraggingSetlistSongId(null);
-                                    setDragOverSetlistSongId(null);
-                                  }}
-                                  onDragEnd={() => {
-                                    setDraggingSetlistSongId(null);
-                                    setDragOverSetlistSongId(null);
-                                  }}
+                                    },
+                                    onDragEnd: () => { setDraggingSetlistSongId(null); setDragOverSetlistSongId(null); }
+                                  })}
                                   className={`group rounded-xl border px-2.5 py-2 transition-all ${
                                     isActive
                                       ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
@@ -4728,53 +4863,60 @@ export default function App() {
                                   <div className="flex items-start gap-2">
                                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center gap-2">
-                                        <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
-                                          <GripVertical size={14} />
-                                        </div>
+                                        {!isJoinedSetlist && (
+                                          <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
+                                            <GripVertical size={14} />
+                                          </div>
+                                        )}
                                         <button
                                           type="button"
                                           onClick={() => handleSelectSetlistSong(item.id)}
                                           className="min-w-0 flex-1 text-left"
                                         >
                                           <div className="truncate text-sm font-bold text-gray-900">{sourceSong.title || copy.untitledSong}</div>
-                                          <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
-                                            {typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : 'BPM --'}
-                                            {versionSummary ? ` · ${versionSummary}` : ''}
-                                          </div>
+                                          {!isJoinedSetlist && (
+                                            <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
+                                              {typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : 'BPM --'}
+                                              {versionSummary ? ` · ${versionSummary}` : ''}
+                                            </div>
+                                          )}
                                         </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRemoveSetlistSong(item.id)}
-                                          className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
-                                          title={copy.removeFromSetlist}
-                                        >
-                                          <Trash2 size={13} />
-                                        </button>
+                                        {!isJoinedSetlist && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveSetlistSong(item.id)}
+                                            className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
+                                            title={copy.removeFromSetlist}
+                                          >
+                                            <Trash2 size={13} />
+                                          </button>
+                                        )}
                                       </div>
-                                      <div className="flex min-w-0 items-center gap-1 pl-10">
-                                        <div className="w-[56px] shrink-0">
-                                          <KeyPicker
-                                            value={effectiveKey}
-                                            onChange={(key) => key && handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
-                                              ...currentSetlistSong,
-                                              overrideKey: key
-                                            }))}
-                                            label={copy.key}
-                                            originalKey={sourceSong.currentKey}
-                                            align="left"
-                                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
-                                            valueTextClassName="!text-[10px] !leading-none"
-                                            triggerIconSize={10}
-                                          />
-                                        </div>
+                                      <div className={`flex min-w-0 items-center gap-1 ${!isJoinedSetlist ? 'pl-10' : ''}`}>
+                                        {!isJoinedSetlist && (
+                                          <div className="w-[56px] shrink-0">
+                                            <KeyPicker
+                                              value={effectiveKey}
+                                              onChange={(key) => key && handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                                ...currentSetlistSong,
+                                                overrideKey: key
+                                              }))}
+                                              label={copy.key}
+                                              originalKey={sourceSong.currentKey}
+                                              align="left"
+                                              buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
+                                              valueTextClassName="!text-[10px] !leading-none"
+                                              triggerIconSize={10}
+                                            />
+                                          </div>
+                                        )}
                                         <div className="w-[56px] shrink-0">
                                           <CapoPicker
                                             value={effectiveCapo}
                                             currentKey={effectiveKey}
-                                            onChange={(capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
-                                              ...currentSetlistSong,
-                                              capo
-                                            }))}
+                                            onChange={isJoinedSetlist
+                                              ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
+                                              : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
                                             label="Capo"
                                             align="right"
                                             buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
@@ -4793,7 +4935,7 @@ export default function App() {
                         )}
                       </div>
 
-                      {isSetlistAddSongsOpen && (
+                      {!isJoinedSetlist && isSetlistAddSongsOpen && (
                         <div className="space-y-3 border-t border-gray-200 pt-4">
                           <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.addToSetlist}</div>
                           <label className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
@@ -4852,7 +4994,7 @@ export default function App() {
                   )}
                 </div>
 
-                {selectedSetlist && (
+                {selectedSetlist && !isJoinedSetlist && (
                   <div className="border-t border-gray-200 bg-white px-4 py-3">
                     <button
                       type="button"
