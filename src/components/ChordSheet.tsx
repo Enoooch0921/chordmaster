@@ -814,7 +814,8 @@ const getCrowdedChordScaleClass = (displayChords: string[]) => {
   return '';
 };
 
-const getLyricMeasureText = (text: string) => text.replace(/[ \t]+/g, '');
+const getLyricDisplayText = (text: string) => text.replace(/\s+/g, ' ').trim();
+const getLyricMeasureText = (text: string) => getLyricDisplayText(text).replace(/[ \t]+/g, '');
 
 const getSingleChordScaleClass = (chord: string) => {
   const trimmed = chord.trim();
@@ -1728,7 +1729,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                     }
 
                                     return (
-                                      <div className={`flex flex-1 flex-col justify-start gap-[2px] w-full cursor-pointer rounded px-0.5 pt-0 hover:bg-amber-50/60 transition-colors ${contentLeftInsetClass}`}>
+                                      <div className={`flex flex-1 min-h-0 flex-col justify-start gap-[2px] w-full cursor-pointer rounded px-0.5 pt-0 hover:bg-amber-50/60 transition-colors ${contentLeftInsetClass}`}>
                                         <div
                                           className="grid w-full content-start items-start"
                                           style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
@@ -1796,7 +1797,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         </div>
 
                                         <div
-                                          className="grid w-full min-h-[14px] content-start items-start"
+                                          className="grid h-[14px] min-h-0 w-full shrink-0 content-start items-start overflow-hidden"
                                           style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
                                           onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'lyrics')}
                                         >
@@ -1806,9 +1807,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
                                               && anchor.slotIndex > 0
                                               && !isDefaultTwoChordSpread;
-                                            const measureText = getLyricMeasureText(anchor.lyric);
-                                            const lyricScale = getLyricFontScale(measureText || anchor.lyric, anchor.span);
-                                            const lyricTracking = getLyricTrackingEm(measureText || anchor.lyric, anchor.span);
+                                            const lyricText = getLyricDisplayText(anchor.lyric);
+                                            const measureText = getLyricMeasureText(lyricText);
+                                            const lyricScale = getLyricFontScale(measureText || lyricText, anchor.span);
+                                            const lyricTracking = getLyricTrackingEm(measureText || lyricText, anchor.span);
                                             const anchorPaddingClass = isFirstAnchor
                                               ? 'pl-[2px]'
                                               : isTwoChordSecondHalfAnchor
@@ -1844,10 +1846,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                   }}
                                                 >
                                                   <span
-                                                    className={`block max-w-full whitespace-pre font-display font-semibold leading-none tracking-[0.002em] text-gray-900 ${textAlignClass}`}
+                                                    className={`block max-w-full whitespace-nowrap font-display font-semibold leading-none tracking-[0.002em] text-gray-900 ${textAlignClass}`}
                                                     style={{ letterSpacing: lyricTracking > 0 ? `${lyricTracking}em` : undefined }}
                                                   >
-                                                    {anchor.lyric || ' '}
+                                                    {lyricText || ' '}
                                                   </span>
                                                 </div>
                                               </div>
