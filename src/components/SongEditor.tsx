@@ -1205,6 +1205,31 @@ const SongEditor: React.FC<Props> = ({
     onActiveBarChange?.({ sIdx, bIdx });
   };
 
+  const focusChordInputWithRetry = (sIdx: number, bIdx: number, attempt = 0) => {
+    const input = document.getElementById(`editor-s${sIdx}-b${bIdx}-chords`) as HTMLInputElement | null;
+    const barElement = document.getElementById(`editor-bar-${sIdx}-b${bIdx}`);
+
+    if (!input) {
+      if (attempt < 10) {
+        window.setTimeout(() => focusChordInputWithRetry(sIdx, bIdx, attempt + 1), 50);
+      }
+      return;
+    }
+
+    if (barElement) {
+      scrollBarElementToCenter(barElement, attempt === 0 ? 'smooth' : 'auto');
+    }
+
+    try {
+      input.focus({ preventScroll: true });
+    } catch {
+      input.focus();
+    }
+
+    const caretPosition = Math.min(input.value.length, Math.max(0, input.selectionStart ?? input.value.length));
+    input.setSelectionRange(caretPosition, caretPosition);
+  };
+
   const queueChordInputFocus = (sIdx: number, bIdx: number, sectionId: string | null) => {
     markActiveSection(sectionId);
     markActiveBar(sIdx, bIdx);
@@ -1216,6 +1241,7 @@ const SongEditor: React.FC<Props> = ({
       text: '',
       type: 'chord'
     });
+    window.requestAnimationFrame(() => focusChordInputWithRetry(sIdx, bIdx));
   };
 
   const insertEmptyBarAt = (sIdx: number, insertIndex: number) => {
@@ -1237,16 +1263,6 @@ const SongEditor: React.FC<Props> = ({
         sIdx,
         bIdx: bIdx + 1,
         sectionId: currentSection.id ?? null
-      };
-    }
-
-    for (let nextSectionIndex = sIdx + 1; nextSectionIndex < song.sections.length; nextSectionIndex += 1) {
-      const nextSection = song.sections[nextSectionIndex];
-      if (!nextSection || nextSection.bars.length === 0) continue;
-      return {
-        sIdx: nextSectionIndex,
-        bIdx: 0,
-        sectionId: nextSection.id ?? null
       };
     }
 
