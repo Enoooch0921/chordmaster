@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
 import { APP_NAME } from '../constants/appMeta';
 import { AppLanguage, SharedResourcePayload } from '../types';
 import { resolveShareLink } from '../lib/sharing';
 import { supabase } from '../lib/supabase';
-import { applySetlistSongOverrides } from '../utils/setlistUtils';
 
 export default function SharedChartPage() {
   const { token = '' } = useParams();
+  const navigate = useNavigate();
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const [payload, setPayload] = useState<SharedResourcePayload | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -16,7 +16,7 @@ export default function SharedChartPage() {
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isMember, setIsMember] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
-  const [joinMessage, setJoinMessage] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -60,7 +60,6 @@ export default function SharedChartPage() {
     };
   }, [token]);
 
-  // Check membership after payload + auth are both known
   useEffect(() => {
     if (!supabase || !authUserId || !payload?.setlist) return;
 
@@ -75,141 +74,126 @@ export default function SharedChartPage() {
       });
   }, [authUserId, payload?.setlist?.id]);
 
-  const handleJoin = async () => {
+  const handleImport = async () => {
     if (!supabase || !token) return;
     setIsJoining(true);
-    setJoinMessage(null);
+    setJoinError(null);
     try {
       const { error } = await supabase.rpc('join_shared_setlist', { p_token: token });
       if (error) throw error;
-      setIsMember(true);
-      setJoinMessage(language === 'zh' ? '歌單已加入你的工作區。' : 'Setlist added to your workspace.');
+      navigate('/');
     } catch {
-      setJoinMessage(language === 'zh' ? '無法加入歌單。' : 'Unable to join setlist.');
-    } finally {
+      setJoinError(language === 'zh' ? '無法導入歌單，請稍後再試。' : 'Unable to import setlist. Please try again.');
       setIsJoining(false);
     }
   };
 
-  const sharedSetlistSongs = useMemo(() => {
-    if (!payload?.setlist) {
-      return [];
-    }
-
-    return payload.setlist.songs.map((item) => ({
-      ...item,
-      song: applySetlistSongOverrides(item.song, {
-        id: payload.setlist!.id,
-        name: payload.setlist!.name,
-        displayMode: payload.setlist!.displayMode,
-        showLyrics: payload.setlist!.showLyrics,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        songs: []
-      }, {
-        id: item.id,
-        setlistId: payload.setlist!.id,
-        songId: item.id,
-        order: 0,
-        sectionOrder: item.song.sections.map((section) => section.id || ''),
-        songData: item.song
-      })
-    }));
-  }, [payload]);
+  const isSongShare = !isLoading && !errorMessage && Boolean(payload?.song);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(191,219,254,0.45),_transparent_36%),linear-gradient(180deg,_#fafaf9_0%,_#f5f5f4_100%)] px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-6xl">
+      <div className={`mx-auto ${isSongShare ? 'max-w-6xl' : 'max-w-md'}`}>
         <div className="rounded-[2rem] border border-stone-200/80 bg-white/90 p-6 shadow-[0_25px_80px_rgba(28,25,23,0.08)] backdrop-blur">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-stone-400">{APP_NAME}</div>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight text-stone-900">
-                {payload?.song?.title ?? payload?.setlist?.name ?? 'Shared chart'}
-              </h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              {payload?.setlist && (
-                <div className="flex items-center gap-2">
-                  {isMember ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                      {language === 'zh' ? '已加入' : 'Joined'}
-                    </span>
-                  ) : authUserId ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleJoin()}
-                      disabled={isJoining}
-                      className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
-                    >
-                      {isJoining
-                        ? (language === 'zh' ? '加入中...' : 'Joining...')
-                        : (language === 'zh' ? '加入歌單' : 'Join Setlist')}
-                    </button>
-                  ) : (
-                    <span className="text-xs font-medium text-stone-500">
-                      {language === 'zh' ? '請登入後加入此歌單' : 'Sign in to join this setlist'}
-                    </span>
-                  )}
-                  {joinMessage && (
-                    <span className={`text-xs font-medium ${isMember ? 'text-green-600' : 'text-rose-600'}`}>
-                      {joinMessage}
-                    </span>
-                  )}
-                </div>
-              )}
-              <div className="inline-flex items-center rounded-full border border-stone-200 bg-stone-50 p-1 text-xs font-bold text-stone-500">
-                <button
-                  type="button"
-                  onClick={() => setLanguage('zh')}
-                  className={`rounded-full px-3 py-1 transition-colors ${language === 'zh' ? 'bg-stone-900 text-white' : ''}`}
-                >
-                  中文
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLanguage('en')}
-                  className={`rounded-full px-3 py-1 transition-colors ${language === 'en' ? 'bg-stone-900 text-white' : ''}`}
-                >
-                  EN
-                </button>
-              </div>
+
+          {/* Header bar */}
+          <div className="mb-6 flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-400">{APP_NAME}</div>
+            <div className="inline-flex items-center rounded-full border border-stone-200 bg-stone-50 p-0.5 text-xs font-bold text-stone-500">
+              <button
+                type="button"
+                onClick={() => setLanguage('zh')}
+                className={`rounded-full px-2.5 py-1 transition-colors ${language === 'zh' ? 'bg-stone-900 text-white' : ''}`}
+              >
+                中文
+              </button>
+              <button
+                type="button"
+                onClick={() => setLanguage('en')}
+                className={`rounded-full px-2.5 py-1 transition-colors ${language === 'en' ? 'bg-stone-900 text-white' : ''}`}
+              >
+                EN
+              </button>
             </div>
           </div>
 
           {isLoading ? (
-            <div className="mt-8 rounded-3xl border border-dashed border-stone-300 bg-stone-50 px-6 py-16 text-center text-sm font-medium text-stone-500">
-              Loading shared chart...
+            <div className="py-12 text-center text-sm text-stone-400">
+              {language === 'zh' ? '載入中...' : 'Loading...'}
             </div>
           ) : errorMessage ? (
-            <div className="mt-8 rounded-3xl border border-rose-200 bg-rose-50 px-6 py-16 text-center text-sm font-medium text-rose-700">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-12 text-center text-sm font-medium text-rose-700">
               {errorMessage}
             </div>
-          ) : payload?.song ? (
-            <div className="mt-8 overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
-              <ChordSheet
-                song={payload.song.song}
-                language={language}
-                currentKey={payload.song.song.currentKey}
-                previewIdentity={payload.song.id}
-              />
-            </div>
           ) : payload?.setlist ? (
-            <div className="mt-8 space-y-6">
-              {sharedSetlistSongs.map((item) => (
-                <section key={item.id} className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
-                  <div className="mb-4 text-lg font-bold text-stone-900">{item.title}</div>
-                  <ChordSheet
-                    song={item.song}
-                    language={language}
-                    currentKey={item.song.currentKey}
-                    previewIdentity={item.id}
-                  />
-                </section>
-              ))}
-            </div>
+            <>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                {language === 'zh' ? '歌單' : 'Setlist'}
+              </div>
+              <h1 className="mb-5 text-2xl font-bold tracking-tight text-stone-900">
+                {payload.setlist.name}
+              </h1>
+
+              <div className="mb-6 overflow-hidden rounded-xl border border-stone-100 bg-stone-50 divide-y divide-stone-100">
+                {payload.setlist.songs.map((item, index) => (
+                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className="w-5 shrink-0 text-right text-xs font-bold text-stone-400">{index + 1}</span>
+                    <span className="text-sm font-semibold text-stone-800">{item.title}</span>
+                  </div>
+                ))}
+              </div>
+
+              {authUserId ? (
+                isMember ? (
+                  <div className="rounded-xl bg-green-50 px-4 py-3 text-center text-sm font-semibold text-green-700">
+                    {language === 'zh' ? '✓ 已在你的帳號中' : '✓ Already in your account'}
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleImport()}
+                      disabled={isJoining}
+                      className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      {isJoining
+                        ? (language === 'zh' ? '導入中...' : 'Importing...')
+                        : (language === 'zh' ? '導入到我的帳號' : 'Import to My Account')}
+                    </button>
+                    {joinError && (
+                      <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
+                    )}
+                  </>
+                )
+              ) : (
+                <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-4 text-center">
+                  <p className="mb-3 text-sm text-stone-500">
+                    {language === 'zh' ? '登入後即可導入此歌單' : 'Sign in to import this setlist'}
+                  </p>
+                  <a
+                    href="/"
+                    className="inline-block rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-stone-700"
+                  >
+                    {language === 'zh' ? '前往登入' : 'Sign In'}
+                  </a>
+                </div>
+              )}
+            </>
+          ) : payload?.song ? (
+            <>
+              <h1 className="mb-6 text-3xl font-bold tracking-tight text-stone-900">
+                {payload.song.title}
+              </h1>
+              <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
+                <ChordSheet
+                  song={payload.song.song}
+                  language={language}
+                  currentKey={payload.song.song.currentKey}
+                  previewIdentity={payload.song.id}
+                />
+              </div>
+            </>
           ) : null}
+
         </div>
       </div>
     </div>
