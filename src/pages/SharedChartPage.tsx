@@ -94,9 +94,10 @@ export default function SharedChartPage() {
         throw new Error('Please sign in first.');
       }
 
-      const { error } = await supabase.rpc('join_shared_setlist', { p_token: token });
+      const { data, error } = await supabase.rpc('join_shared_setlist', { p_token: token });
       if (error) throw error;
-      navigate('/');
+      const setlistId = typeof data === 'string' ? data : payload?.setlist?.id;
+      navigate(setlistId ? `/?setlist=${encodeURIComponent(setlistId)}` : '/');
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
       setJoinError(
@@ -180,8 +181,17 @@ export default function SharedChartPage() {
 
               {authUserId ? (
                 isMember ? (
-                  <div className="rounded-xl bg-green-50 px-4 py-3 text-center text-sm font-semibold text-green-700">
-                    {language === 'zh' ? '✓ 已在你的帳號中' : '✓ Already in your account'}
+                  <div className="rounded-xl border border-green-100 bg-green-50 px-4 py-4 text-center">
+                    <div className="text-sm font-semibold text-green-700">
+                      {language === 'zh' ? '✓ 已在你的帳號中' : '✓ Already in your account'}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/?setlist=${encodeURIComponent(payload.setlist.id)}`)}
+                      className="mt-3 inline-flex items-center justify-center rounded-xl bg-green-700 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-green-800"
+                    >
+                      {language === 'zh' ? '打開歌單' : 'Open Setlist'}
+                    </button>
                   </div>
                 ) : (
                   <>

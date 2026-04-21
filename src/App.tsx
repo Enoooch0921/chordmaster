@@ -1186,7 +1186,7 @@ export default function App() {
       ? 'grid-cols-4'
       : 'grid-cols-7';
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
-  const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? null;
+  const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? joinedSetlists[0] ?? null;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
   const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
     ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId) ?? null
@@ -3314,12 +3314,19 @@ export default function App() {
 
         const hasLocalData = initialLibraryRef.current.songs.length > 0 || initialSetlistsRef.current.setlists.length > 0;
         const migrationCompleted = hasCompletedMigration(authenticatedUser.id);
-        const shouldUseCloudWorkspace = cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || migrationCompleted || !hasLocalData;
+        const shouldUseCloudWorkspace = cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || cloudWorkspace.joinedSetlists.length > 0 || migrationCompleted || !hasLocalData;
+        let openedSharedSetlistFromLink = false;
 
         if (shouldUseCloudWorkspace) {
           const nextSongs = cloudWorkspace.songs.length > 0 ? cloudWorkspace.songs : initialLibraryRef.current.songs;
           const nextSetlists = cloudWorkspace.setlists;
           const nextJoinedSetlists = cloudWorkspace.joinedSetlists;
+          const requestedSetlistId = typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).get('setlist')
+            : null;
+          const requestedSetlist = requestedSetlistId
+            ? nextSetlists.find((item) => item.id === requestedSetlistId) ?? nextJoinedSetlists.find((item) => item.id === requestedSetlistId) ?? null
+            : null;
           setSongs(nextSongs);
           setSavedSongs(cloneSong(nextSongs));
           setSetlists(nextSetlists);
@@ -3328,13 +3335,22 @@ export default function App() {
           setLastSavedAt(cloudWorkspace.lastSavedAt);
           setSelectedSongId((currentId) => nextSongs.some((item) => item.id === currentId) ? currentId : nextSongs[0]?.id ?? '');
           setSelectedSetlistId((currentId) => {
+            if (requestedSetlist) return requestedSetlist.id;
             if (nextSetlists.some((item) => item.id === currentId)) return currentId;
             if (nextJoinedSetlists.some((item) => item.id === currentId)) return currentId;
-            return nextSetlists[0]?.id ?? null;
+            return nextSetlists[0]?.id ?? nextJoinedSetlists[0]?.id ?? null;
           });
+          if (requestedSetlist) {
+            openedSharedSetlistFromLink = true;
+            setWorkspaceMode('setlists');
+            setSelectedSetlistSongId(requestedSetlist.songs[0]?.id ?? null);
+            window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
+          } else if (nextSetlists.length === 0 && nextJoinedSetlists.length > 0) {
+            setWorkspaceMode('setlists');
+          }
         }
 
-        if (hasLocalData && !migrationCompleted) {
+        if (hasLocalData && !migrationCompleted && !openedSharedSetlistFromLink) {
           setIsImportPromptOpen(true);
         } else {
           setIsImportPromptOpen(false);
@@ -3450,15 +3466,17 @@ export default function App() {
   useEffect(() => {
     setSelectedSetlistId((currentId) => {
       if (!currentId) {
-        return setlists[0]?.id ?? null;
+        return setlists[0]?.id ?? joinedSetlists[0]?.id ?? null;
       }
 
-      return setlists.some((item) => item.id === currentId) ? currentId : setlists[0]?.id ?? null;
+      return setlists.some((item) => item.id === currentId) || joinedSetlists.some((item) => item.id === currentId)
+        ? currentId
+        : setlists[0]?.id ?? joinedSetlists[0]?.id ?? null;
     });
-  }, [setlists]);
+  }, [joinedSetlists, setlists]);
 
   useEffect(() => {
-    const activeSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? null;
+    const activeSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? null;
     if (!activeSetlist) {
       setSelectedSetlistSongId(null);
       return;
@@ -3469,7 +3487,7 @@ export default function App() {
         ? currentId
         : activeSetlist.songs[0]?.id ?? null
     ));
-  }, [selectedSetlistId, setlists]);
+  }, [joinedSetlists, selectedSetlistId, setlists]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
