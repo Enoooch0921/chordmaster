@@ -58,6 +58,13 @@ const hasChordTopModifier = (chordString?: string) => {
   return /[<>^~]+$/.test(trimmed);
 };
 
+const isWholeRestChord = (chordString?: string) => {
+  const trimmed = chordString?.trim();
+  if (!trimmed) return false;
+  const normalized = trimmed.toLowerCase();
+  return trimmed === '0w' || trimmed.toUpperCase() === 'RW' || normalized === 'restw' || normalized === 'whole_rest';
+};
+
 const getPreviewRiffNotation = (notation: string | undefined, timeSignature: string) => {
   const trimmed = notation?.trim();
   if (!trimmed) return undefined;
@@ -292,7 +299,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
   );
 
   const normalizedRest = cleanChord.toLowerCase();
-  const isWholeRest = cleanChord === '0w' || cleanChord.toUpperCase() === 'RW' || normalizedRest === 'restw' || normalizedRest === 'whole_rest';
+  const isWholeRest = isWholeRestChord(cleanChord);
   const isHalfRest = cleanChord === '0h' || cleanChord.toUpperCase() === 'RH' || normalizedRest === 'resth' || normalizedRest === 'half_rest';
   const isQuarterRest = cleanChord === '0' || cleanChord.toUpperCase() === 'R' || normalizedRest === 'rest' || normalizedRest === 'quarter_rest';
   const isEighthRest = cleanChord === '0_' || cleanChord.toUpperCase() === 'R_' || normalizedRest === 'rest_' || normalizedRest === 'eighth_rest' || normalizedRest === '8th_rest';
@@ -1644,8 +1651,34 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                     const isDefaultTwoChordSpread = occupiedChordAnchors.length === 2
                                       && occupiedChordAnchors[0]?.slotIndex === 0
                                       && occupiedChordAnchors[1]?.slotIndex === halfSplitSlotIndex;
+                                    const centeredWholeRestAnchor = occupiedChordAnchors.length === 1 && isWholeRestChord(occupiedChordAnchors[0]?.chord)
+                                      ? occupiedChordAnchors[0]
+                                      : null;
 
                                     if (!showLyricsLane) {
+                                      if (centeredWholeRestAnchor) {
+                                        return (
+                                          <div
+                                            className={`flex flex-1 h-full w-full items-center justify-center cursor-pointer rounded transition-colors hover:bg-indigo-50/50 ${contentLeftInsetClass}`}
+                                            onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                          >
+                                            <FormattedChord
+                                              chordString={(() => {
+                                                const transposed = transposeChord(centeredWholeRestAnchor.chord, sectionOffset, sectionPlayKey);
+                                                if (song.showNashvilleNumbers) {
+                                                  return isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey);
+                                                }
+
+                                                return isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;
+                                              })()}
+                                              compactModifier={compactModifier}
+                                              nashvilleFontFamily={nashvilleFontFamily}
+                                              chordFontFamily={chordFontFamily}
+                                            />
+                                          </div>
+                                        );
+                                      }
+
                                       return (
                                         <div
                                           className={`flex-1 grid w-full content-start items-start pt-[3px] cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${contentLeftInsetClass}`}
