@@ -201,15 +201,43 @@ const isShareAuthErrorMessage = (message: string) => (
 );
 
 const copyShareUrlToClipboard = async (shareUrl: string) => {
-  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      return true;
+    } catch {
+      // Fall back for in-app browsers that expose Clipboard API but block writes.
+    }
+  }
+
+  if (typeof document === 'undefined') {
     return false;
   }
 
+  const textArea = document.createElement('textarea');
+  textArea.value = shareUrl;
+  textArea.setAttribute('readonly', 'true');
+  textArea.style.position = 'fixed';
+  textArea.style.left = '-9999px';
+  textArea.style.top = '0';
+  textArea.style.opacity = '0';
+  textArea.style.pointerEvents = 'none';
+
+  const previousActiveElement = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
   try {
-    await navigator.clipboard.writeText(shareUrl);
-    return true;
+    document.body.appendChild(textArea);
+    textArea.focus({ preventScroll: true });
+    textArea.select();
+    textArea.setSelectionRange(0, shareUrl.length);
+    return document.execCommand('copy');
   } catch {
     return false;
+  } finally {
+    textArea.remove();
+    previousActiveElement?.focus({ preventScroll: true });
   }
 };
 
