@@ -52,6 +52,27 @@ interface LibraryRow {
   owner_user_id: string;
 }
 
+interface JoinedSetlistRpcSong {
+  id?: unknown;
+  setlistId?: unknown;
+  songId?: unknown;
+  order?: unknown;
+  overrideKey?: unknown;
+  capo?: unknown;
+  sectionOrder?: unknown;
+  songData?: unknown;
+}
+
+interface JoinedSetlistRpcRow {
+  id?: unknown;
+  name?: unknown;
+  displayMode?: unknown;
+  showLyrics?: unknown;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  songs?: unknown;
+}
+
 const ensureLibraryMembership = async (libraryId: string, userId: string) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
@@ -124,6 +145,78 @@ const mapSetlistRows = (rows: SetlistRow[], setlistSongs: SetlistSongRow[], song
     }, songsById, index);
   })
 );
+
+const VALID_SETLIST_DISPLAY_MODES = new Set<Setlist['displayMode']>([
+  'nashville-number-system',
+  'chord-fixed-key',
+  'chord-movable-key'
+]);
+
+const normalizeSetlistDisplayMode = (value: unknown): Setlist['displayMode'] => (
+  typeof value === 'string' && VALID_SETLIST_DISPLAY_MODES.has(value as Setlist['displayMode'])
+    ? value as Setlist['displayMode']
+    : 'chord-fixed-key'
+);
+
+const parseRemoteTimestamp = (value: unknown, fallback = Date.now()) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = new Date(value).getTime();
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+};
+
+const normalizeJoinedSetlistRpcPayload = (payload: unknown): JoinedSetlist[] => {
+  if (!Array.isArray(payload)) return [];
+
+  return payload
+    .map((row, index): JoinedSetlist | null => {
+      const setlistRow = row as JoinedSetlistRpcRow;
+      const id = typeof setlistRow.id === 'string' ? setlistRow.id : '';
+      if (!id) return null;
+
+      const rawSongs = Array.isArray(setlistRow.songs) ? setlistRow.songs as JoinedSetlistRpcSong[] : [];
+      const songs = reindexSetlistSongs(rawSongs
+        .map((song, songIndex): SetlistSong | null => {
+          const setlistSongId = typeof song.id === 'string' ? song.id : '';
+          const songId = typeof song.songId === 'string' ? song.songId : '';
+          const rawSongData = song.songData && typeof song.songData === 'object'
+            ? normalizeSongBars(cloneValue(song.songData as Song))
+            : undefined;
+
+          if (!setlistSongId || !songId || !rawSongData) {
+            return null;
+          }
+
+          return {
+            id: setlistSongId,
+            setlistId: typeof song.setlistId === 'string' ? song.setlistId : id,
+            songId,
+            order: typeof song.order === 'number' && Number.isFinite(song.order) ? song.order : songIndex,
+            overrideKey: typeof song.overrideKey === 'string' ? song.overrideKey as SetlistSong['overrideKey'] : undefined,
+            capo: typeof song.capo === 'number' && Number.isFinite(song.capo) ? song.capo : rawSongData.capo ?? 0,
+            sectionOrder: Array.isArray(song.sectionOrder)
+              ? song.sectionOrder.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+              : [],
+            songData: rawSongData
+          };
+        })
+        .filter((song): song is SetlistSong => Boolean(song)));
+
+      return {
+        id,
+        name: typeof setlistRow.name === 'string' && setlistRow.name.trim() ? setlistRow.name : `Shared Setlist ${index + 1}`,
+        displayMode: normalizeSetlistDisplayMode(setlistRow.displayMode),
+        showLyrics: Boolean(setlistRow.showLyrics),
+        createdAt: parseRemoteTimestamp(setlistRow.createdAt),
+        updatedAt: parseRemoteTimestamp(setlistRow.updatedAt),
+        songs,
+        isJoined: true
+      };
+    })
+    .filter((setlist): setlist is JoinedSetlist => Boolean(setlist));
+};
 
 export const createLocalRepository = (): WorkspaceRepository => ({
   async loadWorkspace() {
@@ -294,9 +387,17 @@ const getJoinedSetlists = async (userId: string): Promise<JoinedSetlist[]> => {
   if (!supabase) return [];
 
   try {
-    return await getJoinedSetlistsUnsafe(userId);
-  } catch {
-    return [];
+    const { data, error } = await supabase.rpc('get_joined_setlists');
+    if (error) throw error;
+    return normalizeJoinedSetlistRpcPayload(data);
+  } catch (error) {
+    console.warn('Unable to load joined setlists via RPC; falling back to direct reads.', error);
+    try {
+      return await getJoinedSetlistsUnsafe(userId);
+    } catch (fallbackError) {
+      console.error('Unable to load joined setlists.', fallbackError);
+      throw fallbackError;
+    }
   }
 };
 
