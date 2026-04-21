@@ -1056,6 +1056,8 @@ export default function App() {
   const [isLoadingCloudWorkspace, setIsLoadingCloudWorkspace] = useState(false);
   const [isImportPromptOpen, setIsImportPromptOpen] = useState(false);
   const [isImportingLocalWorkspace, setIsImportingLocalWorkspace] = useState(false);
+  const [leavingSharedSetlistId, setLeavingSharedSetlistId] = useState<string | null>(null);
+  const [pendingLeaveSharedSetlistId, setPendingLeaveSharedSetlistId] = useState<string | null>(null);
   const [pendingShareUrl, setPendingShareUrl] = useState<string | null>(null);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -1154,6 +1156,9 @@ export default function App() {
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
   const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? null;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
+  const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
+    ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId) ?? null
+    : null;
   const selectedSetlistSong = selectedSetlist?.songs.find((item) => item.id === selectedSetlistSongId) ?? selectedSetlist?.songs[0] ?? null;
   const selectedSetlistSourceSong = selectedSetlistSong
     ? songs.find((item) => item.id === selectedSetlistSong.songId)
@@ -2153,17 +2158,36 @@ export default function App() {
   };
 
   const handleLeaveSharedSetlist = async (setlistId: string) => {
-    if (!cloudRepositoryRef.current) return;
+    if (!cloudRepositoryRef.current || leavingSharedSetlistId) return;
+
+    setLeavingSharedSetlistId(setlistId);
     try {
       await cloudRepositoryRef.current.leaveSharedSetlist(setlistId);
-      setJoinedSetlists((current) => current.filter((sl) => sl.id !== setlistId));
-      if (selectedSetlistId === setlistId) {
-        setSelectedSetlistId(setlists[0]?.id ?? null);
-        setSelectedSetlistSongId(setlists[0]?.songs[0]?.id ?? null);
+      const nextJoinedSetlists = joinedSetlists.filter((sl) => sl.id !== setlistId);
+      setJoinedSetlists(nextJoinedSetlists);
+      if (selectedSetlistId === setlistId || selectedSetlist?.id === setlistId) {
+        const nextSetlist = setlists[0] ?? nextJoinedSetlists[0] ?? null;
+        setSelectedSetlistId(nextSetlist?.id ?? null);
+        setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+        if (!nextSetlist) {
+          setWorkspaceMode('songs');
+        }
       }
-    } catch {
-      // Silently ignore leave errors
+      setAuthUiError(null);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      const message = reason ? `${copy.leaveSetlistError}\n\n${reason}` : copy.leaveSetlistError;
+      setAuthUiError(message);
+      window.alert(message);
+    } finally {
+      setLeavingSharedSetlistId(null);
+      setPendingLeaveSharedSetlistId(null);
     }
+  };
+
+  const requestLeaveSharedSetlist = (setlistId: string) => {
+    if (leavingSharedSetlistId) return;
+    setPendingLeaveSharedSetlistId(setlistId);
   };
 
   const handleSetlistNameChange = (setlistId: string, name: string) => {
@@ -4336,15 +4360,16 @@ export default function App() {
                             )}
                             <div className="mt-0.5 text-xs font-medium text-gray-500">{setlistSongsWithSource.length} {copy.setlistItems}</div>
                           </div>
-                          {isJoinedSetlist ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleLeaveSharedSetlist(selectedSetlist.id)}
-                              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50"
-                            >
-                              {copy.leaveSetlist}
-                            </button>
-                          ) : (
+	                          {isJoinedSetlist ? (
+	                            <button
+	                              type="button"
+	                              onClick={() => requestLeaveSharedSetlist(selectedSetlist.id)}
+	                              disabled={leavingSharedSetlistId === selectedSetlist.id}
+	                              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+	                            >
+	                              {leavingSharedSetlistId === selectedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
+	                            </button>
+	                          ) : (
                           <div ref={setlistActionsMenuRef} className="relative">
                             <button
                               type="button"
@@ -4699,20 +4724,30 @@ export default function App() {
                                     isJoinedActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
                                   }`}
                                 >
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSelectJoinedSetlist(joinedItem.id)}
-                                    className="w-full text-left"
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{joinedItem.name || copy.untitledSetlist}</div>
-                                      <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
-                                    </div>
-                                    <div className="mt-1 text-xs text-gray-500">{joinedItem.songs.length} {copy.setlistItems}</div>
-                                  </button>
-                                </div>
-                              );
-                            })}
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => handleSelectJoinedSetlist(joinedItem.id)}
+	                                    className="w-full text-left"
+	                                  >
+	                                    <div className="flex items-center gap-2">
+	                                      <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{joinedItem.name || copy.untitledSetlist}</div>
+	                                      <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
+	                                    </div>
+	                                    <div className="mt-1 text-xs text-gray-500">{joinedItem.songs.length} {copy.setlistItems}</div>
+	                                  </button>
+	                                  <div className="mt-2 flex justify-end">
+	                                    <button
+	                                      type="button"
+	                                      onClick={() => requestLeaveSharedSetlist(joinedItem.id)}
+	                                      disabled={leavingSharedSetlistId === joinedItem.id}
+	                                      className="rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+	                                    >
+	                                      {leavingSharedSetlistId === joinedItem.id ? copy.leavingSetlist : copy.leaveSetlist}
+	                                    </button>
+	                                  </div>
+	                                </div>
+	                              );
+	                            })}
                           </div>
                         )}
                       </div>
@@ -4828,20 +4863,30 @@ export default function App() {
                               isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
                             }`}
                           >
-                            <button
-                              type="button"
-                              onClick={() => handleSelectJoinedSetlist(item.id)}
-                              className="w-full text-left"
-                            >
-                              <div className="flex items-center gap-2">
-                                <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
-                                <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
-                              </div>
-                              <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
-                            </button>
-                          </div>
-                        );
-                      })}
+	                            <button
+	                              type="button"
+	                              onClick={() => handleSelectJoinedSetlist(item.id)}
+	                              className="w-full text-left"
+	                            >
+	                              <div className="flex items-center gap-2">
+	                                <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
+	                                <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
+	                              </div>
+	                              <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
+	                            </button>
+	                            <div className="mt-2 flex justify-end">
+	                              <button
+	                                type="button"
+	                                onClick={() => requestLeaveSharedSetlist(item.id)}
+	                                disabled={leavingSharedSetlistId === item.id}
+	                                className="rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+	                              >
+	                                {leavingSharedSetlistId === item.id ? copy.leavingSetlist : copy.leaveSetlist}
+	                              </button>
+	                            </div>
+	                          </div>
+	                        );
+	                      })}
                     </div>
                   )}
 
@@ -4853,13 +4898,14 @@ export default function App() {
                             <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
                             <div className="mt-1 truncate text-sm font-bold text-gray-900">{selectedSetlist.name}</div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => void handleLeaveSharedSetlist(selectedSetlist.id)}
-                            className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50"
-                          >
-                            {copy.leaveSetlist}
-                          </button>
+	                          <button
+	                            type="button"
+	                            onClick={() => requestLeaveSharedSetlist(selectedSetlist.id)}
+	                            disabled={leavingSharedSetlistId === selectedSetlist.id}
+	                            className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+	                          >
+	                            {leavingSharedSetlistId === selectedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
+	                          </button>
                         </div>
                       ) : (
                       <div className="space-y-2">
@@ -7193,6 +7239,48 @@ export default function App() {
                     {copy.exportingPdfCancelButton}
                   </button>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence initial={false}>
+        {pendingLeaveSharedSetlist && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+          >
+            <motion.div
+              initial={{ y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 8, opacity: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+            >
+              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.sharedWithMe}</div>
+              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{copy.leaveSetlistConfirm}</h2>
+              <p className="mt-3 text-sm font-semibold text-gray-600">{pendingLeaveSharedSetlist.name || copy.untitledSetlist}</p>
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setPendingLeaveSharedSetlistId(null)}
+                  disabled={Boolean(leavingSharedSetlistId)}
+                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {copy.cancel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleLeaveSharedSetlist(pendingLeaveSharedSetlist.id)}
+                  disabled={leavingSharedSetlistId === pendingLeaveSharedSetlist.id}
+                  className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {leavingSharedSetlistId === pendingLeaveSharedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
+                </button>
               </div>
             </motion.div>
           </motion.div>
