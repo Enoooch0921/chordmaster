@@ -3951,19 +3951,19 @@ export default function App() {
       const shareUrl = buildShareUrl(token);
       const didCopy = await copyShareUrlToClipboard(shareUrl);
 
-	      if (didCopy) {
-	        window.alert(copy.shareCopied);
-	        if (resourceType === 'setlist') {
-	          void loadSetlistShareStatus(resourceId);
-	        }
-	        return;
-	      }
+      if (resourceType === 'setlist') {
+        void loadSetlistShareStatus(resourceId);
+        window.alert(didCopy ? copy.shareCopied : copy.shareCopyFailed);
+        return;
+      }
 
-	      setPendingShareUrl(shareUrl);
-	      if (resourceType === 'setlist') {
-	        void loadSetlistShareStatus(resourceId);
-	      }
-	    } catch (error) {
+      if (didCopy) {
+        window.alert(copy.shareCopied);
+        return;
+      }
+
+      setPendingShareUrl(shareUrl);
+    } catch (error) {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       const reason = error instanceof Error ? error.message.trim() : '';
       if (!reason) {
@@ -3989,7 +3989,7 @@ export default function App() {
       return;
     }
 
-    setPendingShareUrl(shareUrl);
+    window.alert(copy.shareCopyFailed);
   };
 
   const handleRevokeSetlistSharing = async (setlistId: string) => {
