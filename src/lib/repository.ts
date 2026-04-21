@@ -285,6 +285,16 @@ const getLibraryWorkspace = async (libraryId: string): Promise<WorkspaceSnapshot
 const getJoinedSetlists = async (userId: string): Promise<JoinedSetlist[]> => {
   if (!supabase) return [];
 
+  try {
+    return await getJoinedSetlistsUnsafe(userId);
+  } catch {
+    return [];
+  }
+};
+
+const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]> => {
+  if (!supabase) return [];
+
   const { data: memberships, error: membershipError } = await supabase
     .from('user_setlist_memberships')
     .select('setlist_id')
