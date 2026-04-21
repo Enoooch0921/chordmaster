@@ -1087,9 +1087,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     ? 'h-[16px] flex items-center overflow-visible'
     : 'h-[18px] flex items-center overflow-visible';
 
-  // Keep pagination stable even when lyrics are shown. Lyrics should shrink to fit the existing page density.
+  // Lyrics mode needs a little more vertical room on continuation pages because bars can include chord, lyric, and riff/rhythm lanes.
   const ROWS_PER_PAGE_FIRST = 12;
-  const ROWS_PER_PAGE_OTHER = 14;
+  const ROWS_PER_PAGE_OTHER = song.showLyrics ? 13 : 14;
 
   const pages: { sectionTitle: string | null; bars: Bar[]; sIdx: number; startBIdx: number }[][] = [];
   let currentRow = 0;
