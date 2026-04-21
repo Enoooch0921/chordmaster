@@ -179,8 +179,21 @@ const buildSetlistPdfFileName = (setlist: Setlist) => {
   return nameParts.join('_');
 };
 
+const ensureTrailingSlash = (value: string) => (
+  value.endsWith('/') ? value : `${value}/`
+);
+
+const getAppBaseUrl = () => {
+  const configuredPublicUrl = import.meta.env.VITE_PUBLIC_APP_URL?.trim();
+  if (configuredPublicUrl) {
+    return ensureTrailingSlash(configuredPublicUrl);
+  }
+
+  return new URL(import.meta.env.BASE_URL, window.location.origin).toString();
+};
+
 const buildShareUrl = (token: string) => (
-  new URL(`${import.meta.env.BASE_URL}share/${token}`.replace(/\/{2,}/g, '/'), window.location.origin).toString()
+  new URL(`share/${token}`, getAppBaseUrl()).toString()
 );
 
 const isShareAuthErrorMessage = (message: string) => (
@@ -1043,6 +1056,7 @@ export default function App() {
   const [isLoadingCloudWorkspace, setIsLoadingCloudWorkspace] = useState(false);
   const [isImportPromptOpen, setIsImportPromptOpen] = useState(false);
   const [isImportingLocalWorkspace, setIsImportingLocalWorkspace] = useState(false);
+  const [pendingShareUrl, setPendingShareUrl] = useState<string | null>(null);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const setlistActionsMenuRef = useRef<HTMLDivElement>(null);
@@ -3795,6 +3809,69 @@ export default function App() {
     }
   };
 
+  const ensureShareResourceIsSynced = async (resourceType: 'song' | 'setlist') => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) {
+      throw new Error(copy.authUnavailable);
+    }
+
+    if (!navigator.onLine) {
+      throw new Error(language === 'zh' ? '目前離線，無法建立分享連結。' : 'You are offline. Share links cannot be created right now.');
+    }
+
+    setSyncStatus('syncing');
+
+    if (resourceType === 'song') {
+      if (!song) {
+        throw new Error(language === 'zh' ? '找不到目前歌曲。' : 'Current song was not found.');
+      }
+
+      await repository.saveSong(song);
+      setSavedSongs((current) => {
+        const nextSong = cloneSong(song);
+        return current.some((item) => item.id === song.id)
+          ? current.map((item) => item.id === song.id ? nextSong : item)
+          : [...current, nextSong];
+      });
+      setSyncStatus('saved');
+      return;
+    }
+
+    if (!selectedSetlist) {
+      throw new Error(language === 'zh' ? '找不到目前歌單。' : 'Current setlist was not found.');
+    }
+
+    if ((selectedSetlist as JoinedSetlist).isJoined) {
+      throw new Error(language === 'zh' ? '目前不能重新分享別人分享給你的歌單。' : 'Setlists shared with you cannot be reshared yet.');
+    }
+
+    const requiredSongs = selectedSetlist.songs
+      .map((setlistSong) => songs.find((item) => item.id === setlistSong.songId))
+      .filter((item): item is StoredSong => Boolean(item));
+
+    for (const requiredSong of requiredSongs) {
+      await repository.saveSong(requiredSong);
+    }
+
+    await repository.saveSetlist(selectedSetlist);
+    setSavedSongs((current) => {
+      const syncedById = new Map(requiredSongs.map((item) => [item.id, cloneSong(item)] as const));
+      const merged = current.map((item) => syncedById.get(item.id) ?? item);
+      const existingIds = new Set(merged.map((item) => item.id));
+      return [
+        ...merged,
+        ...requiredSongs.filter((item) => !existingIds.has(item.id)).map((item) => cloneSong(item))
+      ];
+    });
+    setSavedSetlists((current) => {
+      const nextSetlist = cloneSong(selectedSetlist);
+      return current.some((item) => item.id === selectedSetlist.id)
+        ? current.map((item) => item.id === selectedSetlist.id ? nextSetlist : item)
+        : [...current, nextSetlist];
+    });
+    setSyncStatus('saved');
+  };
+
   const handleCreateShareLink = async (resourceType: 'song' | 'setlist') => {
     if (!cloudRepositoryRef.current) {
       window.alert(copy.authUnavailable);
@@ -3807,6 +3884,7 @@ export default function App() {
     }
 
     try {
+      await ensureShareResourceIsSynced(resourceType);
       const token = await cloudRepositoryRef.current.createShareLink(resourceType, resourceId);
       const shareUrl = buildShareUrl(token);
       const didCopy = await copyShareUrlToClipboard(shareUrl);
@@ -3816,8 +3894,9 @@ export default function App() {
         return;
       }
 
-      window.prompt(copy.shareManualCopyPrompt, shareUrl);
+      setPendingShareUrl(shareUrl);
     } catch (error) {
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       const reason = error instanceof Error ? error.message.trim() : '';
       if (!reason) {
         window.alert(copy.shareFailed);
@@ -5542,6 +5621,17 @@ export default function App() {
                     {denseToolbarShowsLabels ? <span>{compactLyricsToggleLabel}</span> : null}
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={handleEnterPerformanceMode}
+                    title={copy.performanceMode}
+                    aria-label={copy.performanceMode}
+                    className={denseToolbarActionClassName}
+                  >
+                    <Play size={14} />
+                    {denseToolbarShowsLabels ? <span>{copy.performanceMode}</span> : null}
+                  </button>
+
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(key) => {
@@ -5781,6 +5871,16 @@ export default function App() {
                     className={denseToolbarToggleClassName(isLyricsMode, 'accent')}
                   >
                     <FileText size={14} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleEnterPerformanceMode}
+                    title={copy.performanceMode}
+                    aria-label={copy.performanceMode}
+                    className={denseToolbarActionClassName}
+                  >
+                    <Play size={14} />
                   </button>
 
                   <KeyPicker
@@ -7093,6 +7193,59 @@ export default function App() {
                     {copy.exportingPdfCancelButton}
                   </button>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence initial={false}>
+        {pendingShareUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+          >
+            <motion.div
+              initial={{ y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 8, opacity: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="w-full max-w-lg rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+            >
+              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{APP_NAME}</div>
+              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{copy.shareManualCopyPrompt}</h2>
+              <input
+                type="text"
+                readOnly
+                value={pendingShareUrl}
+                onFocus={(event) => event.currentTarget.select()}
+                className="mt-4 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-800 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+              />
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setPendingShareUrl(null)}
+                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  {copy.done}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const didCopy = await copyShareUrlToClipboard(pendingShareUrl);
+                    if (didCopy) {
+                      setPendingShareUrl(null);
+                      window.alert(copy.shareCopied);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800"
+                >
+                  <Copy size={14} />
+                  <span>{copy.duplicate}</span>
+                </button>
               </div>
             </motion.div>
           </motion.div>

@@ -28,9 +28,28 @@ const mapSessionUser = (session: Session | null): AuthenticatedUser | null => {
   };
 };
 
-const buildAppUrl = (path: string) => (
-  new URL(`${import.meta.env.BASE_URL}${path}`.replace(/\/{2,}/g, '/'), window.location.origin).toString()
+export const buildAppUrl = (path: string) => (
+  new URL(path.replace(/^\//, ''), new URL(import.meta.env.BASE_URL, window.location.origin)).toString()
 );
+
+export const signInWithGoogleRedirect = async (nextPath = '/') => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const callbackUrl = new URL(buildAppUrl('auth/callback'));
+  callbackUrl.searchParams.set('next', nextPath.startsWith('/') ? nextPath : `/${nextPath}`);
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: callbackUrl.toString()
+    }
+  });
+
+  if (error) {
+    throw error;
+  }
+};
 
 const isSessionUsable = (session: Session | null) => {
   if (!session?.access_token?.trim()) {
@@ -115,21 +134,7 @@ export const useSupabaseAuth = () => {
   const user = useMemo(() => mapSessionUser(session), [session]);
 
   const signInWithGoogle = async () => {
-    if (!supabase) {
-      throw new Error('Supabase is not configured.');
-    }
-
-    const redirectTo = buildAppUrl('auth/callback');
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo
-      }
-    });
-
-    if (error) {
-      throw error;
-    }
+    await signInWithGoogleRedirect('/');
   };
 
   const signOut = async () => {

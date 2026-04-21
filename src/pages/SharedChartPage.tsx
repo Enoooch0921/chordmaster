@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
 import { APP_NAME } from '../constants/appMeta';
 import { AppLanguage, SharedResourcePayload } from '../types';
+import { signInWithGoogleRedirect } from '../lib/auth';
 import { resolveShareLink } from '../lib/sharing';
 import { supabase } from '../lib/supabase';
 
@@ -16,6 +17,7 @@ export default function SharedChartPage() {
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isMember, setIsMember] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,6 +25,14 @@ export default function SharedChartPage() {
     supabase.auth.getSession().then(({ data }) => {
       setAuthUserId(data.session?.user.id ?? null);
     });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUserId(session?.user.id ?? null);
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -79,12 +89,38 @@ export default function SharedChartPage() {
     setIsJoining(true);
     setJoinError(null);
     try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        throw new Error('Please sign in first.');
+      }
+
       const { error } = await supabase.rpc('join_shared_setlist', { p_token: token });
       if (error) throw error;
       navigate('/');
-    } catch {
-      setJoinError(language === 'zh' ? '無法導入歌單，請稍後再試。' : 'Unable to import setlist. Please try again.');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      setJoinError(
+        reason
+          ? (language === 'zh' ? `無法導入歌單：${reason}` : `Unable to import setlist: ${reason}`)
+          : (language === 'zh' ? '無法導入歌單，請稍後再試。' : 'Unable to import setlist. Please try again.')
+      );
       setIsJoining(false);
+    }
+  };
+
+  const handleSignIn = async () => {
+    setIsSigningIn(true);
+    setJoinError(null);
+    try {
+      await signInWithGoogleRedirect(`/share/${token}`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      setJoinError(
+        reason
+          ? (language === 'zh' ? `無法登入：${reason}` : `Unable to sign in: ${reason}`)
+          : (language === 'zh' ? '無法登入，請稍後再試。' : 'Unable to sign in. Please try again.')
+      );
+      setIsSigningIn(false);
     }
   };
 
@@ -169,12 +205,19 @@ export default function SharedChartPage() {
                   <p className="mb-3 text-sm text-stone-500">
                     {language === 'zh' ? '登入後即可導入此歌單' : 'Sign in to import this setlist'}
                   </p>
-                  <a
-                    href="/"
-                    className="inline-block rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-stone-700"
+                  <button
+                    type="button"
+                    onClick={() => void handleSignIn()}
+                    disabled={isSigningIn}
+                    className="inline-block rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-stone-700 disabled:opacity-60"
                   >
-                    {language === 'zh' ? '前往登入' : 'Sign In'}
-                  </a>
+                    {isSigningIn
+                      ? (language === 'zh' ? '登入中...' : 'Signing in...')
+                      : (language === 'zh' ? '前往登入' : 'Sign In')}
+                  </button>
+                  {joinError && (
+                    <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
+                  )}
                 </div>
               )}
             </>

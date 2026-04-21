@@ -18,6 +18,7 @@ export default function AuthCallbackPage() {
 
       const url = new URL(window.location.href);
       const authError = url.searchParams.get('error_description') || url.searchParams.get('error');
+      const nextPath = url.searchParams.get('next') || '/';
       if (authError) {
         if (!isCancelled) {
           setErrorMessage(authError);
@@ -47,7 +48,7 @@ export default function AuthCallbackPage() {
       }
 
       if (!isCancelled && session) {
-        navigate('/', { replace: true });
+        navigate(nextPath.startsWith('/') ? nextPath : '/', { replace: true });
         return;
       }
 
@@ -62,7 +63,8 @@ export default function AuthCallbackPage() {
       }
 
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-        navigate('/', { replace: true });
+        const nextPath = new URL(window.location.href).searchParams.get('next') || '/';
+        navigate(nextPath.startsWith('/') ? nextPath : '/', { replace: true });
       }
     });
 

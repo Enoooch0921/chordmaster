@@ -180,7 +180,10 @@ public/
 ```bash
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+VITE_PUBLIC_APP_URL=https://your-domain.example/chordmaster/
 ```
+
+`VITE_PUBLIC_APP_URL` 是公開 app 網址，用來產生可分享的 `/share/:token` 連結。若沒有設定，本機開發會產生 `localhost` 分享網址，只能在同一台電腦上開啟。
 
 可參考：
 
