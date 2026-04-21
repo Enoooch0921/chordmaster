@@ -146,3 +146,18 @@ export interface SharedResourcePayload {
   song?: SharedSongPayload;
   setlist?: SharedSetlistPayload;
 }
+
+export interface ShareParticipant {
+  userId: string;
+  email: string;
+  name: string;
+  picture?: string;
+  joinedAt: string;
+}
+
+export interface SetlistShareStatus {
+  activeToken: string | null;
+  activeCreatedAt: string | null;
+  participantCount: number;
+  participants: ShareParticipant[];
+}

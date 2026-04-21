@@ -8,7 +8,7 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { toPng, toCanvas, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { Song, Key, AppLanguage, JoinedSetlist, Setlist, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
+import { Song, Key, AppLanguage, JoinedSetlist, Setlist, SetlistShareStatus, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
@@ -1058,6 +1058,10 @@ export default function App() {
   const [isImportingLocalWorkspace, setIsImportingLocalWorkspace] = useState(false);
   const [leavingSharedSetlistId, setLeavingSharedSetlistId] = useState<string | null>(null);
   const [pendingLeaveSharedSetlistId, setPendingLeaveSharedSetlistId] = useState<string | null>(null);
+  const [selectedSetlistShareStatus, setSelectedSetlistShareStatus] = useState<SetlistShareStatus | null>(null);
+  const [isLoadingSetlistShareStatus, setIsLoadingSetlistShareStatus] = useState(false);
+  const [pendingRevokeShareSetlistId, setPendingRevokeShareSetlistId] = useState<string | null>(null);
+  const [isRevokingSetlistShare, setIsRevokingSetlistShare] = useState(false);
   const [pendingShareUrl, setPendingShareUrl] = useState<string | null>(null);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -1158,6 +1162,9 @@ export default function App() {
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
   const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
     ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId) ?? null
+    : null;
+  const pendingRevokeShareSetlist = pendingRevokeShareSetlistId
+    ? setlists.find((item) => item.id === pendingRevokeShareSetlistId) ?? null
     : null;
   const selectedSetlistSong = selectedSetlist?.songs.find((item) => item.id === selectedSetlistSongId) ?? selectedSetlist?.songs[0] ?? null;
   const selectedSetlistSourceSong = selectedSetlistSong
@@ -2189,6 +2196,37 @@ export default function App() {
     if (leavingSharedSetlistId) return;
     setPendingLeaveSharedSetlistId(setlistId);
   };
+
+  const loadSetlistShareStatus = async (setlistId: string) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) {
+      setSelectedSetlistShareStatus(null);
+      return;
+    }
+
+    try {
+      setIsLoadingSetlistShareStatus(true);
+      const status = await repository.getSetlistShareStatus(setlistId);
+      setSelectedSetlistShareStatus(status);
+      setAuthUiError(null);
+    } catch (error) {
+      setSelectedSetlistShareStatus(null);
+      const reason = error instanceof Error ? error.message.trim() : '';
+      setAuthUiError(reason ? `${copy.setlistSharingLoadError}\n\n${reason}` : copy.setlistSharingLoadError);
+    } finally {
+      setIsLoadingSetlistShareStatus(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!authenticatedUser || !cloudRepositoryRef.current || !selectedSetlist || isJoinedSetlist || !isSetlistMode) {
+      setSelectedSetlistShareStatus(null);
+      setIsLoadingSetlistShareStatus(false);
+      return;
+    }
+
+    void loadSetlistShareStatus(selectedSetlist.id);
+  }, [authenticatedUser, isJoinedSetlist, isSetlistMode, selectedSetlist?.id]);
 
   const handleSetlistNameChange = (setlistId: string, name: string) => {
     replaceSetlist(setlistId, (currentSetlist) => ({
@@ -3913,13 +3951,19 @@ export default function App() {
       const shareUrl = buildShareUrl(token);
       const didCopy = await copyShareUrlToClipboard(shareUrl);
 
-      if (didCopy) {
-        window.alert(copy.shareCopied);
-        return;
-      }
+	      if (didCopy) {
+	        window.alert(copy.shareCopied);
+	        if (resourceType === 'setlist') {
+	          void loadSetlistShareStatus(resourceId);
+	        }
+	        return;
+	      }
 
-      setPendingShareUrl(shareUrl);
-    } catch (error) {
+	      setPendingShareUrl(shareUrl);
+	      if (resourceType === 'setlist') {
+	        void loadSetlistShareStatus(resourceId);
+	      }
+	    } catch (error) {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       const reason = error instanceof Error ? error.message.trim() : '';
       if (!reason) {
@@ -3932,6 +3976,44 @@ export default function App() {
         : reason;
 
       window.alert(copy.shareFailedWithReason.replace('{reason}', localizedReason));
+    }
+	  };
+
+  const handleCopyActiveSetlistShareLink = async () => {
+    if (!selectedSetlistShareStatus?.activeToken) return;
+
+    const shareUrl = buildShareUrl(selectedSetlistShareStatus.activeToken);
+    const didCopy = await copyShareUrlToClipboard(shareUrl);
+    if (didCopy) {
+      window.alert(copy.shareCopied);
+      return;
+    }
+
+    setPendingShareUrl(shareUrl);
+  };
+
+  const handleRevokeSetlistSharing = async (setlistId: string) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) return;
+
+    try {
+      setIsRevokingSetlistShare(true);
+      await repository.revokeSetlistSharing(setlistId);
+      setSelectedSetlistShareStatus({
+        activeToken: null,
+        activeCreatedAt: null,
+        participantCount: 0,
+        participants: []
+      });
+      setPendingRevokeShareSetlistId(null);
+      window.alert(copy.setlistSharingCancelled);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      const message = reason ? `${copy.setlistSharingCancelError}\n\n${reason}` : copy.setlistSharingCancelError;
+      setAuthUiError(message);
+      window.alert(message);
+    } finally {
+      setIsRevokingSetlistShare(false);
     }
   };
 
@@ -4066,6 +4148,84 @@ export default function App() {
         ))}
       </div>
     </button>
+  ) : null;
+
+  const setlistSharingPanel = selectedSetlist && !isJoinedSetlist ? (
+    <div className="rounded-2xl border border-gray-200 bg-white px-3 py-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSharingTitle}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+              selectedSetlistShareStatus?.activeToken
+                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
+            }`}>
+              {isLoadingSetlistShareStatus
+                ? copy.cloudSyncSyncing
+                : selectedSetlistShareStatus?.activeToken
+                  ? copy.setlistSharingActive
+                  : copy.setlistSharingInactive}
+            </span>
+            <span className="text-xs font-semibold text-gray-500">
+              {copy.setlistSharingParticipants}: {selectedSetlistShareStatus?.participantCount ?? 0}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadSetlistShareStatus(selectedSetlist.id)}
+          disabled={isLoadingSetlistShareStatus}
+          className="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
+        >
+          {isLoadingSetlistShareStatus ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
+        </button>
+      </div>
+
+      {selectedSetlistShareStatus?.participants.length ? (
+        <div className="mt-3 space-y-2">
+          {selectedSetlistShareStatus.participants.map((participant) => (
+            <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
+              {participant.picture ? (
+                <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
+              ) : (
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
+                  {(participant.name || participant.email || '?').slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
+                <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+          {copy.setlistSharingNoParticipants}
+        </div>
+      )}
+
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => selectedSetlistShareStatus?.activeToken ? void handleCopyActiveSetlistShareLink() : void handleCreateShareLink('setlist')}
+          disabled={isExportingPdf || isRevokingSetlistShare}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
+        >
+          <Share2 size={13} />
+          <span>{selectedSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setPendingRevokeShareSetlistId(selectedSetlist.id)}
+          disabled={!selectedSetlistShareStatus?.activeToken || isRevokingSetlistShare}
+          className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {copy.setlistSharingCancel}
+        </button>
+      </div>
+    </div>
   ) : null;
 
   return (
@@ -4393,9 +4553,15 @@ export default function App() {
                           </div>
                           )}
                         </div>
-                      </div>
+	                      </div>
 
-                      <div className="flex-1 overflow-y-auto p-3">
+	                      {!isJoinedSetlist && setlistSharingPanel ? (
+	                        <div className="border-b border-gray-200 px-4 py-3">
+	                          {setlistSharingPanel}
+	                        </div>
+	                      ) : null}
+
+	                      <div className="flex-1 overflow-y-auto p-3">
                         <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
                         {setlistSongsWithSource.length === 0 ? (
                           <div className="mt-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -4940,9 +5106,11 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      )}
+	                      )}
 
-                      <div className="space-y-2">
+	                      {!isJoinedSetlist && setlistSharingPanel}
+
+	                      <div className="space-y-2">
                         <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
                         {setlistSongsWithSource.length === 0 ? (
                           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
@@ -7333,6 +7501,48 @@ export default function App() {
                 >
                   <Copy size={14} />
                   <span>{copy.duplicate}</span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence initial={false}>
+        {pendingRevokeShareSetlist && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+          >
+            <motion.div
+              initial={{ y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 8, opacity: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+            >
+              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSharingTitle}</div>
+              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{copy.setlistSharingCancelConfirm}</h2>
+              <p className="mt-3 text-sm font-semibold text-gray-600">{pendingRevokeShareSetlist.name || copy.untitledSetlist}</p>
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setPendingRevokeShareSetlistId(null)}
+                  disabled={isRevokingSetlistShare}
+                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {copy.cancel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRevokeSetlistSharing(pendingRevokeShareSetlist.id)}
+                  disabled={isRevokingSetlistShare}
+                  className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isRevokingSetlistShare ? copy.cloudSyncSyncing : copy.setlistSharingCancel}
                 </button>
               </div>
             </motion.div>

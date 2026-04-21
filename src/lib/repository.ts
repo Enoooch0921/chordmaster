@@ -1,4 +1,4 @@
-import { JoinedSetlist, Setlist, SetlistSong, SharedResourcePayload, ShareResourceType, Song, StoredSong, WorkspaceSnapshot } from '../types';
+import { JoinedSetlist, Setlist, SetlistShareStatus, SetlistSong, SharedResourcePayload, ShareResourceType, Song, StoredSong, WorkspaceSnapshot } from '../types';
 import {
   cloneValue,
   loadLocalWorkspaceSnapshot,
@@ -83,6 +83,8 @@ export interface WorkspaceRepository {
   resolveShareLink(token: string): Promise<SharedResourcePayload>;
   joinSharedSetlist(token: string): Promise<string>;
   leaveSharedSetlist(setlistId: string): Promise<void>;
+  getSetlistShareStatus(setlistId: string): Promise<SetlistShareStatus>;
+  revokeSetlistSharing(setlistId: string): Promise<void>;
   saveCapoOverride(setlistSongId: string, capo: number | null): Promise<void>;
 }
 
@@ -153,6 +155,12 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async leaveSharedSetlist() {
     throw new Error('Please sign in to leave a setlist.');
+  },
+  async getSetlistShareStatus() {
+    throw new Error('Please sign in to view sharing status.');
+  },
+  async revokeSetlistSharing() {
+    throw new Error('Please sign in to manage sharing.');
   },
   async saveCapoOverride() {
     throw new Error('Please sign in to save capo overrides.');
@@ -664,6 +672,19 @@ export const createCloudRepository = (params: {
         .delete()
         .eq('setlist_id', setlistId)
         .eq('user_id', params.userId);
+      if (error) throw error;
+    },
+
+    async getSetlistShareStatus(setlistId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('get_setlist_share_status', { p_setlist_id: setlistId });
+      if (error) throw error;
+      return data as SetlistShareStatus;
+    },
+
+    async revokeSetlistSharing(setlistId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('revoke_setlist_sharing', { p_setlist_id: setlistId });
       if (error) throw error;
     },
 
