@@ -52,12 +52,6 @@ const getBarDisplayLabel = (bar?: Bar) => (
   bar?.label?.trim() || bar?.riffLabel?.trim() || bar?.rhythmLabel?.trim() || ''
 );
 
-const hasChordTopModifier = (chordString?: string) => {
-  const trimmed = chordString?.trim();
-  if (!trimmed) return false;
-  return /[<>^~]+$/.test(trimmed);
-};
-
 const isWholeRestChord = (chordString?: string) => {
   const trimmed = chordString?.trim();
   if (!trimmed) return false;
@@ -1437,12 +1431,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const showBarNumber = Boolean(
                       bar && barNumberMode !== 'none' && (barNumberMode === 'all' || bIdx === 0)
                     );
-                    const firstChordHasTopModifier = hasChordTopModifier(bar?.chords?.[0]);
-                    const barNumberLeftPx = hasInlineTimeSignature
-                      ? 24
-                      : firstChordHasTopModifier
-                        ? -6
-                        : 6;
+                    const barNumberTopClass = bar?.ending
+                      ? 'top-[8px]'
+                      : bar?.repeatStart
+                        ? '-top-[8px]'
+                        : '-top-[2px]';
                     const isActiveBar = activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
                     const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
                     const suppressRightBarline = bIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
@@ -1485,10 +1478,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       >
                         {showBarNumber && (
                           <div
-                            className="pointer-events-none absolute top-1 z-10 text-[8px] font-bold leading-none text-gray-400"
-                            style={{ left: `${barNumberLeftPx}px` }}
+                            className={`pointer-events-none absolute left-0 z-[1200] -translate-x-1/2 text-[8px] font-bold leading-none text-gray-400 ${barNumberTopClass}`}
                           >
-                            <span className="inline-flex rounded-sm bg-white px-0.5 leading-none isolate">
+                            <span className="inline-flex rounded-[1px] bg-white px-[0.5px] py-[0.5px] leading-none shadow-[0_0_0_0.5px_rgba(255,255,255,0.65)] isolate">
                               {globalBarNumber}
                             </span>
                           </div>
@@ -1517,7 +1509,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
                         {/* Ending 1. to 4. */}
                         {bar?.ending && (
-                          <div className={`sheet-ending-bracket absolute -top-[1px] h-4 border-t-2 border-gray-900 z-10 pointer-events-none ${isEndingStart ? getEndingLeftOffsetClass(endingLeftBarlineType) : 'left-0'} ${isEndingEnd ? getEndingRightOffsetClass(endingRightBarlineType) : 'right-0'} ${isEndingStart ? 'border-l-2' : ''}`}>
+                          <div className={`sheet-ending-bracket absolute -top-[1px] h-4 border-t-2 border-gray-900 z-10 pointer-events-none ${isEndingStart ? getEndingLeftOffsetClass(endingLeftBarlineType) : 'left-0'} ${isEndingEnd ? getEndingRightOffsetClass(endingRightBarlineType) : 'right-0'}`}>
                              {(!row.bars[bIdx - 1] || row.bars[bIdx - 1].ending !== bar.ending) && (
                                <span className="sheet-ending-number absolute -top-4 left-0 text-[10px] font-bold font-serif">{formatEndingDisplay(bar.ending)}</span>
                              )}
