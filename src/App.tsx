@@ -8,7 +8,7 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { toPng, toCanvas, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { Song, Key, AppLanguage, JoinedSetlist, Setlist, SetlistShareStatus, SetlistSong, SetlistDisplayMode, StoredSong } from './types';
+import { Song, Key, AppLanguage, JoinedSetlist, Setlist, SetlistShareStatus, SetlistSong, SetlistDisplayMode, StoredSong, BarNumberMode } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
@@ -21,6 +21,7 @@ import SongEditor from './components/SongEditor';
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
+import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { applySetlistSongOverrides, getDefaultSectionOrder } from './utils/setlistUtils';
 import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -38,6 +39,7 @@ const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
 const AUTO_SAVE_STORAGE_KEY = 'chordmaster.auto-save.v1';
+const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'chordmaster.sidebar-width.v1';
 const GOOGLE_IDENTITY_SCRIPT_ID = 'google-identity-services-script';
@@ -101,6 +103,11 @@ interface ExportedSongLibraryPayload {
 
 type WorkspaceMode = 'songs' | 'setlists';
 type MobileSetlistDrawerView = 'list' | 'detail' | 'addSongs';
+interface JoinedSetlistDisplayPreference {
+  displayMode?: SetlistDisplayMode;
+  showLyrics?: boolean;
+  barNumberMode?: BarNumberMode;
+}
 
 interface PdfExportProgressState {
   totalPages: number;
@@ -924,6 +931,51 @@ const loadAutoSavePreference = () => {
   return window.localStorage.getItem(AUTO_SAVE_STORAGE_KEY) === 'true';
 };
 
+const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisplayPreference> => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw) as Record<string, Partial<JoinedSetlistDisplayPreference>>;
+    if (!parsed || typeof parsed !== 'object') return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([setlistId, preference]) => {
+          if (!setlistId || !preference || typeof preference !== 'object') return null;
+
+          const normalized: JoinedSetlistDisplayPreference = {};
+          if (typeof preference.displayMode === 'string' && VALID_SETLIST_DISPLAY_MODES.has(preference.displayMode)) {
+            normalized.displayMode = preference.displayMode as SetlistDisplayMode;
+          }
+          if (typeof preference.showLyrics === 'boolean') {
+            normalized.showLyrics = preference.showLyrics;
+          }
+          if (typeof preference.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(preference.barNumberMode)) {
+            normalized.barNumberMode = preference.barNumberMode as BarNumberMode;
+          }
+
+          return [setlistId, normalized] as const;
+        })
+        .filter((entry): entry is readonly [string, JoinedSetlistDisplayPreference] => Boolean(entry))
+    );
+  } catch {
+    return {};
+  }
+};
+
+const saveJoinedSetlistDisplayPreferences = (preferences: Record<string, JoinedSetlistDisplayPreference>) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+};
+
 const loadGoogleSession = (): GoogleUserSession | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -1037,6 +1089,7 @@ export default function App() {
   const [setlists, setSetlists] = useState<Setlist[]>(initialSetlistsRef.current.setlists);
   const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(cloneSong(initialSetlistsRef.current.setlists));
   const [joinedSetlists, setJoinedSetlists] = useState<JoinedSetlist[]>([]);
+  const [joinedSetlistDisplayPreferences, setJoinedSetlistDisplayPreferences] = useState<Record<string, JoinedSetlistDisplayPreference>>(loadJoinedSetlistDisplayPreferences);
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistId);
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistSongId);
   const [songHistories, setSongHistories] = useState<Record<string, SongHistoryState>>({});
@@ -1192,6 +1245,20 @@ export default function App() {
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
   const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? joinedSetlists[0] ?? null;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
+  const joinedSetlistDisplayPreference = isJoinedSetlist && selectedSetlist
+    ? joinedSetlistDisplayPreferences[selectedSetlist.id] ?? {}
+    : {};
+  const effectiveSelectedSetlist = selectedSetlist
+    ? {
+        ...selectedSetlist,
+        displayMode: isJoinedSetlist
+          ? joinedSetlistDisplayPreference.displayMode ?? selectedSetlist.displayMode
+          : selectedSetlist.displayMode,
+        showLyrics: isJoinedSetlist
+          ? joinedSetlistDisplayPreference.showLyrics ?? selectedSetlist.showLyrics
+          : selectedSetlist.showLyrics
+      }
+    : null;
   const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
     ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId) ?? null
     : null;
@@ -1207,8 +1274,13 @@ export default function App() {
   const activeSetlistEditableSong = selectedSetlistSong
     ? normalizeSongBars(cloneSong(selectedSetlistSong.songData ?? selectedSetlistSourceSong ?? INITIAL_SONG))
     : null;
-  const activeSetlistPreviewSong = selectedSetlistSong && selectedSetlistSourceSong
-    ? applySetlistSongOverrides(activeSetlistEditableSong ?? selectedSetlistSourceSong, selectedSetlist, selectedSetlistSong)
+  const activeSetlistPreviewSong = selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
+    ? {
+        ...applySetlistSongOverrides(activeSetlistEditableSong ?? selectedSetlistSourceSong, effectiveSelectedSetlist, selectedSetlistSong),
+        ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
+          ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+          : {})
+      }
     : null;
   const activeEditorSong = isSetlistMode
     ? (activeSetlistEditableSong ?? selectedSetlistSourceSong ?? null)
@@ -1307,6 +1379,32 @@ export default function App() {
       ? 'border-indigo-200 bg-white/70 text-current'
       : 'border-gray-200 bg-gray-50 text-gray-600'
   }`;
+  const setlistDisplayModeOptions: Array<{ value: SetlistDisplayMode; label: string }> = [
+    { value: 'chord-movable-key', label: language === 'zh' ? '首調' : 'Movable' },
+    { value: 'nashville-number-system', label: language === 'zh' ? '級數' : 'Numbers' },
+    { value: 'chord-fixed-key', label: language === 'zh' ? '固定調' : 'Fixed' }
+  ];
+  const barNumberModeOptions: Array<{ value: BarNumberMode; label: string }> = [
+    { value: 'none', label: copy.editor.barNumbersOff },
+    { value: 'line-start', label: copy.editor.barNumbersLineStart },
+    { value: 'all', label: copy.editor.barNumbersAll }
+  ];
+  const currentSetlistDisplayMode = effectiveSelectedSetlist?.displayMode ?? 'chord-movable-key';
+  const currentSetlistBarNumberMode = joinedSetlistDisplayPreference.barNumberMode
+    ?? activeSetlistPreviewSong?.barNumberMode
+    ?? 'none';
+  const renderSetlistDisplayModeControl = (className = '', size: 'xs' | 'sm' = 'xs') => (
+    isSetlistMode && effectiveSelectedSetlist ? (
+      <CompactSegmentedControl
+        value={currentSetlistDisplayMode}
+        options={setlistDisplayModeOptions}
+        onChange={handleSetlistDisplayModeChange}
+        size={size}
+        className={`shrink-0 ${size === 'xs' ? '!h-9 rounded-lg bg-white shadow-sm' : ''} ${className}`}
+        buttonClassName={size === 'xs' ? 'min-w-[42px]' : 'min-w-[54px]'}
+      />
+    ) : null
+  );
   const toolbarOverflowPanel = isToolbarOverflowMenuOpen ? (
     <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
       <button
@@ -1611,8 +1709,13 @@ export default function App() {
   }, [activeBar, activeEditorSong, activeSectionId]);
 
   useEffect(() => {
+    if (isSetlistMode && effectiveSelectedSetlist) {
+      setIsLyricsMode(effectiveSelectedSetlist.showLyrics);
+      return;
+    }
+
     setIsLyricsMode(song?.showLyrics ?? false);
-  }, [song?.id, song?.showLyrics]);
+  }, [effectiveSelectedSetlist?.id, effectiveSelectedSetlist?.showLyrics, isSetlistMode, song?.id, song?.showLyrics]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1934,9 +2037,14 @@ export default function App() {
       const nextLyricsMode = !isLyricsMode;
       setIsLyricsMode(nextLyricsMode);
 
-      if (nextLyricsMode) {
-        setIsEditing(true);
+      if (selectedSetlist) {
+        if (isJoinedSetlist) {
+          handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { showLyrics: nextLyricsMode });
+        } else {
+          handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextLyricsMode });
+        }
       }
+
       return;
     }
 
@@ -1946,10 +2054,6 @@ export default function App() {
 
     const nextLyricsMode = !isLyricsMode;
     setIsLyricsMode(nextLyricsMode);
-
-    if (nextLyricsMode) {
-      setIsEditing(true);
-    }
 
     handleSongChange({
       ...song,
@@ -2077,7 +2181,7 @@ export default function App() {
   };
 
   const handleSetlistKeyChange = (newKey: Key) => {
-    if (!selectedSetlistSong) {
+    if (!selectedSetlistSong || isJoinedSetlist) {
       return;
     }
 
@@ -2196,6 +2300,22 @@ export default function App() {
     }
   };
 
+  const handleSelectedSetlistCapoChange = (capo: number) => {
+    if (!selectedSetlistSong) {
+      return;
+    }
+
+    if (isJoinedSetlist) {
+      handleJoinedSetlistCapoChange(selectedSetlistSong.id, capo);
+      return;
+    }
+
+    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+      ...currentSetlistSong,
+      capo
+    }));
+  };
+
   const handleLeaveSharedSetlist = async (setlistId: string) => {
     if (!cloudRepositoryRef.current || leavingSharedSetlistId) return;
 
@@ -2272,6 +2392,33 @@ export default function App() {
       ...currentSetlist,
       ...updates
     }));
+  };
+
+  const handleJoinedSetlistDisplayPreferenceChange = (setlistId: string, updates: JoinedSetlistDisplayPreference) => {
+    setJoinedSetlistDisplayPreferences((current) => {
+      const next = {
+        ...current,
+        [setlistId]: {
+          ...(current[setlistId] ?? {}),
+          ...updates
+        }
+      };
+      saveJoinedSetlistDisplayPreferences(next);
+      return next;
+    });
+  };
+
+  const handleSetlistDisplayModeChange = (mode: SetlistDisplayMode) => {
+    if (!selectedSetlist) {
+      return;
+    }
+
+    if (isJoinedSetlist) {
+      handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { displayMode: mode });
+      return;
+    }
+
+    handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode });
   };
 
   const handleDeleteSetlist = (setlistId: string) => {
@@ -4120,23 +4267,56 @@ export default function App() {
   };
 
   const metadataPanelContent = isSetlistMode
-    ? (selectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
+    ? (selectedSetlist && effectiveSelectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
         <SongMetadataPanel
-          song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
+          song={isJoinedSetlist
+            ? {
+                ...(activeSetlistEditableSong ?? selectedSetlistSourceSong),
+                barNumberMode: joinedSetlistDisplayPreference.barNumberMode
+                  ?? activeSetlistPreviewSong?.barNumberMode
+                  ?? (activeSetlistEditableSong ?? selectedSetlistSourceSong).barNumberMode
+                  ?? 'none'
+              }
+            : activeSetlistEditableSong ?? selectedSetlistSourceSong}
           language={language}
           title={copy.setlistEditor.instanceSettings}
-          onChange={handleSetlistSongContentChange}
+          onChange={(nextSong) => {
+            if (isJoinedSetlist) {
+              handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, {
+                barNumberMode: nextSong.barNumberMode ?? 'none'
+              });
+              return;
+            }
+
+            handleSetlistSongContentChange(nextSong);
+          }}
           keyValue={currentSetlistKey}
           capoValue={currentSetlistCapo}
-          onKeyChange={handleSetlistKeyChange}
-          onCapoChange={(capo) => handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-            ...currentSetlistSong,
-            capo
-          }))}
-          displayMode={selectedSetlist.displayMode}
-          showLyrics={selectedSetlist.showLyrics}
-          onDisplayModeChange={(mode) => handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode })}
-          onShowLyricsChange={(nextShowLyrics) => handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextShowLyrics })}
+          onKeyChange={isJoinedSetlist ? undefined : handleSetlistKeyChange}
+          onCapoChange={isJoinedSetlist
+            ? (capo) => handleJoinedSetlistCapoChange(selectedSetlistSong.id, capo)
+            : (capo) => handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+              ...currentSetlistSong,
+              capo
+            }))}
+          displayMode={effectiveSelectedSetlist.displayMode}
+          showLyrics={effectiveSelectedSetlist.showLyrics}
+          onDisplayModeChange={(mode) => {
+            if (isJoinedSetlist) {
+              handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { displayMode: mode });
+              return;
+            }
+
+            handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode });
+          }}
+          onShowLyricsChange={(nextShowLyrics) => {
+            if (isJoinedSetlist) {
+              handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { showLyrics: nextShowLyrics });
+              return;
+            }
+
+            handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextShowLyrics });
+          }}
         />
       ) : null)
     : (
@@ -4283,6 +4463,56 @@ export default function App() {
         </button>
       </div>
     </div>
+  ) : null;
+
+  const joinedSetlistDisplayPreferencePanel = isJoinedSetlist && selectedSetlist && effectiveSelectedSetlist ? (
+    <section className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-500">
+          {language === 'zh' ? '個人顯示' : 'Personal View'}
+        </div>
+        <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-100">
+          {language === 'zh' ? '只影響你' : 'Local'}
+        </span>
+      </div>
+
+      <div className="mt-2.5 space-y-2">
+        <CompactSegmentedControl
+          value={currentSetlistDisplayMode}
+          options={setlistDisplayModeOptions}
+          onChange={handleSetlistDisplayModeChange}
+          size="xs"
+          stretch
+          className="bg-white"
+          buttonClassName="min-w-0"
+        />
+
+        <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-[96px_minmax(0,1fr)]">
+          <button
+            type="button"
+            onClick={() => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { showLyrics: !effectiveSelectedSetlist.showLyrics })}
+            className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border px-2 text-[11px] font-bold transition-colors ${
+              effectiveSelectedSetlist.showLyrics
+                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-gray-200 bg-white text-gray-600 hover:border-amber-200 hover:bg-amber-50'
+            }`}
+          >
+            <FileText size={13} />
+            <span>{language === 'zh' ? '歌詞' : 'Lyrics'}</span>
+          </button>
+
+          <CompactSegmentedControl
+            value={currentSetlistBarNumberMode}
+            options={barNumberModeOptions}
+            onChange={(mode) => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { barNumberMode: mode })}
+            size="xs"
+            stretch
+            className="bg-white"
+            buttonClassName="min-w-0"
+          />
+        </div>
+      </div>
+    </section>
   ) : null;
 
   return (
@@ -4618,6 +4848,12 @@ export default function App() {
 	                        </div>
 	                      ) : null}
 
+	                      {joinedSetlistDisplayPreferencePanel ? (
+	                        <div className="border-b border-gray-200 px-4 py-3">
+	                          {joinedSetlistDisplayPreferencePanel}
+	                        </div>
+	                      ) : null}
+
 	                      <div className="flex-1 overflow-y-auto p-3">
                         <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
                         {setlistSongsWithSource.length === 0 ? (
@@ -4632,6 +4868,12 @@ export default function App() {
                               const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
                               const displaySong = item.songData ?? sourceSong;
                               const versionSummary = getSongVersionSummary(displaySong);
+                              const songInfoSummary = [
+                                `${copy.key} ${effectiveKey}`,
+                                typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
+                                displaySong.timeSignature,
+                                versionSummary
+                              ].filter(Boolean).join(' · ');
                               const isDropTarget = dragOverSetlistSongId === item.id;
 
                               return (
@@ -4675,12 +4917,11 @@ export default function App() {
                                           className="min-w-0 flex-1 text-left"
                                         >
                                           <div className="truncate text-sm font-bold text-gray-900">{sourceSong.title || copy.untitledSong}</div>
-                                          {!isJoinedSetlist && (
+                                          {songInfoSummary ? (
                                             <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
-                                              {typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : 'BPM --'}
-                                              {versionSummary ? ` · ${versionSummary}` : ''}
+                                              {songInfoSummary}
                                             </div>
-                                          )}
+                                          ) : null}
                                         </button>
                                         {!isJoinedSetlist && (
                                           <button
@@ -5169,6 +5410,8 @@ export default function App() {
 
 	                      {!isJoinedSetlist && setlistSharingPanel}
 
+	                      {joinedSetlistDisplayPreferencePanel}
+
 	                      <div className="space-y-2">
                         <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
                         {setlistSongsWithSource.length === 0 ? (
@@ -5183,6 +5426,12 @@ export default function App() {
                               const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
                               const displaySong = item.songData ?? sourceSong;
                               const versionSummary = getSongVersionSummary(displaySong);
+                              const songInfoSummary = [
+                                `${copy.key} ${effectiveKey}`,
+                                typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
+                                displaySong.timeSignature,
+                                versionSummary
+                              ].filter(Boolean).join(' · ');
                               const isDropTarget = dragOverSetlistSongId === item.id;
 
                               return (
@@ -5226,12 +5475,11 @@ export default function App() {
                                           className="min-w-0 flex-1 text-left"
                                         >
                                           <div className="truncate text-sm font-bold text-gray-900">{sourceSong.title || copy.untitledSong}</div>
-                                          {!isJoinedSetlist && (
+                                          {songInfoSummary ? (
                                             <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
-                                              {typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : 'BPM --'}
-                                              {versionSummary ? ` · ${versionSummary}` : ''}
+                                              {songInfoSummary}
                                             </div>
-                                          )}
+                                          ) : null}
                                         </button>
                                         {!isJoinedSetlist && (
                                           <button
@@ -5245,23 +5493,25 @@ export default function App() {
                                         )}
                                       </div>
                                       <div className={`flex min-w-0 items-center gap-1 ${!isJoinedSetlist ? 'pl-10' : ''}`}>
-                                        {!isJoinedSetlist && (
-                                          <div className="w-[56px] shrink-0">
-                                            <KeyPicker
-                                              value={effectiveKey}
-                                              onChange={(key) => key && handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                        <div className="w-[56px] shrink-0">
+                                          <KeyPicker
+                                            value={effectiveKey}
+                                            onChange={(key) => {
+                                              if (!key || isJoinedSetlist) return;
+                                              handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
                                                 ...currentSetlistSong,
                                                 overrideKey: key
-                                              }))}
-                                              label={copy.key}
-                                              originalKey={sourceSong.currentKey}
-                                              align="left"
-                                              buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
-                                              valueTextClassName="!text-[10px] !leading-none"
-                                              triggerIconSize={10}
-                                            />
-                                          </div>
-                                        )}
+                                              }));
+                                            }}
+                                            label={copy.key}
+                                            originalKey={sourceSong.currentKey}
+                                            align="left"
+                                            disabled={isJoinedSetlist}
+                                            buttonClassName={`!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5 ${isJoinedSetlist ? '!cursor-default !opacity-100' : ''}`}
+                                            valueTextClassName="!text-[10px] !leading-none"
+                                            triggerIconSize={10}
+                                          />
+                                        </div>
                                         <div className="w-[56px] shrink-0">
                                           <CapoPicker
                                             value={effectiveCapo}
@@ -5790,7 +6040,8 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5"
+                    disabled={isSetlistMode && isJoinedSetlist}
+                    buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
                   />
@@ -5799,11 +6050,8 @@ export default function App() {
                     value={isSetlistMode ? currentSetlistCapo : currentCapo}
                     currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(capo) => {
-                      if (isSetlistMode && selectedSetlistSong) {
-                        handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-                          ...currentSetlistSong,
-                          capo
-                        }));
+                      if (isSetlistMode) {
+                        handleSelectedSetlistCapoChange(capo);
                       } else {
                         handleSongChange({ ...song, capo });
                       }
@@ -5814,6 +6062,8 @@ export default function App() {
                     showPlayKey={false}
                     triggerIconSize={14}
                   />
+
+                  {renderSetlistDisplayModeControl()}
 
                   {!isSetlistMode && (
                     <>
@@ -5922,7 +6172,8 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[60px]' : 'min-w-[56px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5`}
+                    disabled={isSetlistMode && isJoinedSetlist}
+                    buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[60px]' : 'min-w-[56px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100`}
                     metaTextClassName="hidden"
                     triggerIconSize={14}
                   />
@@ -5931,11 +6182,8 @@ export default function App() {
                     value={isSetlistMode ? currentSetlistCapo : currentCapo}
                     currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(capo) => {
-                      if (isSetlistMode && selectedSetlistSong) {
-                        handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-                          ...currentSetlistSong,
-                          capo
-                        }));
+                      if (isSetlistMode) {
+                        handleSelectedSetlistCapoChange(capo);
                       } else {
                         handleSongChange({ ...song, capo });
                       }
@@ -5946,6 +6194,8 @@ export default function App() {
                     showPlayKey={denseToolbarShowsLabels && mainViewportWidth >= 1820}
                     triggerIconSize={14}
                   />
+
+                  {renderSetlistDisplayModeControl()}
 
                   {!isSetlistMode && (
                     <>
@@ -6173,7 +6423,8 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    buttonClassName="h-9 min-w-[60px] shrink-0 rounded-lg px-2.5"
+                    disabled={isSetlistMode && isJoinedSetlist}
+                    buttonClassName="h-9 min-w-[60px] shrink-0 rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
                   />
@@ -6182,11 +6433,8 @@ export default function App() {
                     value={isSetlistMode ? currentSetlistCapo : currentCapo}
                     currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(capo) => {
-                      if (isSetlistMode && selectedSetlistSong) {
-                        handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-                          ...currentSetlistSong,
-                          capo
-                        }));
+                      if (isSetlistMode) {
+                        handleSelectedSetlistCapoChange(capo);
                       } else {
                         handleSongChange({ ...song, capo });
                       }
@@ -6197,6 +6445,8 @@ export default function App() {
                     showPlayKey={mainViewportWidth >= 1080}
                     triggerIconSize={14}
                   />
+
+                  {renderSetlistDisplayModeControl()}
 
                   {!isSetlistMode && (
                     <>
@@ -6533,29 +6783,29 @@ export default function App() {
                           handleKeyChange(key);
                         }
                       }}
-                      label={copy.key}
-                      originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
-                      triggerMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
-                      panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
-                      buttonClassName="h-11 w-full min-w-0"
-                    />
+                    label={copy.key}
+                    originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                    triggerMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                    panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
+                    disabled={isSetlistMode && isJoinedSetlist}
+                    buttonClassName="h-11 w-full min-w-0 disabled:!cursor-default disabled:!opacity-100"
+                  />
 
                     <CapoPicker
-                      value={isSetlistMode ? currentSetlistCapo : currentCapo}
-                      currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
-                      onChange={(capo) => {
-                        if (isSetlistMode && selectedSetlistSong) {
-                          handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-                            ...currentSetlistSong,
-                            capo
-                          }));
-                        } else {
-                          handleSongChange({ ...song, capo });
-                        }
+                    value={isSetlistMode ? currentSetlistCapo : currentCapo}
+                    currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
+                    onChange={(capo) => {
+                      if (isSetlistMode) {
+                        handleSelectedSetlistCapoChange(capo);
+                      } else {
+                        handleSongChange({ ...song, capo });
+                      }
                       }}
                       label="Capo"
                       buttonClassName="h-11 w-full min-w-0"
                     />
+
+                    {renderSetlistDisplayModeControl('w-full', 'sm')}
 
                     <button
                       type="button"

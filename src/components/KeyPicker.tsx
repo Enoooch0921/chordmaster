@@ -214,7 +214,9 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
             <span className={`truncate ${isCompactTrigger ? 'text-[10px]' : 'text-[11px]'} font-semibold text-gray-500 ${metaTextClassName}`}>{triggerMetaText}</span>
           ) : null}
         </span>
-        <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        {!disabled ? (
+          <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        ) : null}
       </button>
 
       {isOpen && typeof document !== 'undefined' && createPortal(
