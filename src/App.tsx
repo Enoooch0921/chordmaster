@@ -5948,19 +5948,6 @@ export default function App() {
 
       {/* Main Content */}
       <main data-main-panel className="flex min-w-0 flex-1 flex-col">
-        <div className={`flex-shrink-0 border-b border-amber-200 bg-amber-50 ${
-          isPhoneViewport ? 'px-3 py-1.5' : 'px-4 py-2.5 sm:px-6 xl:px-8'
-        }`}>
-          <p
-            className={`font-medium text-amber-800 ${
-              isPhoneViewport ? 'truncate text-xs leading-5' : 'text-sm'
-            }`}
-            title={copy.testVersionWarning}
-          >
-            {copy.testVersionWarning}
-          </p>
-        </div>
-
         {(!isAuthenticated || authUiError || authUiMessage || isLoadingCloudWorkspace) && (
           <div className={`flex-shrink-0 border-b ${
             authUiError
