@@ -1606,10 +1606,44 @@ export default function App() {
 
     return librarySearchText.includes(normalizedLibrarySearchQuery);
   });
-  const setlistSongsWithSource = (selectedSetlist?.songs ?? []).map((item) => {
+  const getSetlistSongSource = (item: SetlistSong): StoredSong | null => {
     const libSong = songs.find((songItem) => songItem.id === item.songId);
-    const sourceSong: StoredSong | null = libSong
-      ?? (item.songData ? { ...item.songData, id: item.songId, updatedAt: 0 } as StoredSong : null);
+    return libSong ?? (item.songData ? { ...item.songData, id: item.songId, updatedAt: 0 } as StoredSong : null);
+  };
+  const getSetlistSongInfoSummary = (item: SetlistSong, sourceSong: Song) => {
+    const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
+    const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
+    const displaySong = item.songData ?? sourceSong;
+    const versionSummary = getSongVersionSummary(displaySong);
+    const translator = displaySong.translator?.trim();
+
+    return [
+      `${copy.editor.originalKey} ${displaySong.originalKey}`,
+      `${copy.key} ${effectiveKey}`,
+      `Capo ${effectiveCapo}`,
+      typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
+      displaySong.timeSignature,
+      versionSummary,
+      translator
+    ].filter(Boolean).join(' · ');
+  };
+  const getSetlistCardSongSummaries = (setlist: Pick<Setlist, 'songs'>) => (
+    setlist.songs
+      .map((item) => {
+        const sourceSong = getSetlistSongSource(item);
+        if (!sourceSong) return null;
+
+        const displaySong = item.songData ?? sourceSong;
+        return {
+          id: item.id,
+          title: displaySong.title || sourceSong.title || copy.untitledSong,
+          summary: getSetlistSongInfoSummary(item, sourceSong)
+        };
+      })
+      .filter((item): item is { id: string; title: string; summary: string } => Boolean(item))
+  );
+  const setlistSongsWithSource = (selectedSetlist?.songs ?? []).map((item) => {
+    const sourceSong = getSetlistSongSource(item);
     return { item, sourceSong };
   }).filter((entry): entry is { item: SetlistSong; sourceSong: StoredSong } => entry.sourceSong !== null);
   const filteredSetlists = setlists.filter((item) => {
@@ -4867,13 +4901,7 @@ export default function App() {
                               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
                               const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
                               const displaySong = item.songData ?? sourceSong;
-                              const versionSummary = getSongVersionSummary(displaySong);
-                              const songInfoSummary = [
-                                `${copy.key} ${effectiveKey}`,
-                                typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
-                                displaySong.timeSignature,
-                                versionSummary
-                              ].filter(Boolean).join(' · ');
+                              const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
                               const isDropTarget = dragOverSetlistSongId === item.id;
 
                               return (
@@ -4916,9 +4944,9 @@ export default function App() {
                                           onClick={() => handleSelectSetlistSong(item.id)}
                                           className="min-w-0 flex-1 text-left"
                                         >
-                                          <div className="truncate text-sm font-bold text-gray-900">{sourceSong.title || copy.untitledSong}</div>
+                                          <div className="text-sm font-bold text-gray-900">{displaySong.title || sourceSong.title || copy.untitledSong}</div>
                                           {songInfoSummary ? (
-                                            <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
+                                            <div className="mt-0.5 break-words text-[11px] font-medium leading-4 text-gray-400">
                                               {songInfoSummary}
                                             </div>
                                           ) : null}
@@ -5183,6 +5211,7 @@ export default function App() {
                             <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.sharedWithMe}</div>
                             {joinedSetlists.map((joinedItem) => {
                               const isJoinedActive = joinedItem.id === selectedSetlist?.id;
+                              const joinedSongSummaries = getSetlistCardSongSummaries(joinedItem);
                               return (
                                 <div
                                   key={joinedItem.id}
@@ -5200,6 +5229,16 @@ export default function App() {
 	                                      <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
 	                                    </div>
 	                                    <div className="mt-1 text-xs text-gray-500">{joinedItem.songs.length} {copy.setlistItems}</div>
+                                      {joinedSongSummaries.length > 0 ? (
+                                        <div className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-xl border border-indigo-100 bg-white/70 p-2">
+                                          {joinedSongSummaries.map((summary, index) => (
+                                            <div key={summary.id} className="min-w-0">
+                                              <div className="truncate text-[11px] font-bold text-gray-800">{index + 1}. {summary.title}</div>
+                                              <div className="break-words text-[10px] font-medium leading-4 text-gray-500">{summary.summary}</div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : null}
 	                                  </button>
 	                                  <div className="mt-2 flex justify-end">
 	                                    <button
@@ -5322,6 +5361,7 @@ export default function App() {
                       <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.sharedWithMe}</div>
                       {joinedSetlists.map((item) => {
                         const isActive = item.id === selectedSetlist?.id;
+                        const joinedSongSummaries = getSetlistCardSongSummaries(item);
                         return (
                           <div
                             key={item.id}
@@ -5339,6 +5379,16 @@ export default function App() {
 	                                <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
 	                              </div>
 	                              <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
+                                {joinedSongSummaries.length > 0 ? (
+                                  <div className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-xl border border-indigo-100 bg-white/70 p-2">
+                                    {joinedSongSummaries.map((summary, index) => (
+                                      <div key={summary.id} className="min-w-0">
+                                        <div className="truncate text-[11px] font-bold text-gray-800">{index + 1}. {summary.title}</div>
+                                        <div className="break-words text-[10px] font-medium leading-4 text-gray-500">{summary.summary}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
 	                            </button>
 	                            <div className="mt-2 flex justify-end">
 	                              <button
@@ -5425,13 +5475,7 @@ export default function App() {
                               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
                               const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
                               const displaySong = item.songData ?? sourceSong;
-                              const versionSummary = getSongVersionSummary(displaySong);
-                              const songInfoSummary = [
-                                `${copy.key} ${effectiveKey}`,
-                                typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
-                                displaySong.timeSignature,
-                                versionSummary
-                              ].filter(Boolean).join(' · ');
+                              const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
                               const isDropTarget = dragOverSetlistSongId === item.id;
 
                               return (
@@ -5474,9 +5518,9 @@ export default function App() {
                                           onClick={() => handleSelectSetlistSong(item.id)}
                                           className="min-w-0 flex-1 text-left"
                                         >
-                                          <div className="truncate text-sm font-bold text-gray-900">{sourceSong.title || copy.untitledSong}</div>
+                                          <div className="text-sm font-bold text-gray-900">{displaySong.title || sourceSong.title || copy.untitledSong}</div>
                                           {songInfoSummary ? (
-                                            <div className="mt-0.5 truncate text-[11px] font-medium text-gray-400">
+                                            <div className="mt-0.5 break-words text-[11px] font-medium leading-4 text-gray-400">
                                               {songInfoSummary}
                                             </div>
                                           ) : null}
