@@ -1076,21 +1076,23 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         : 'scale-[0.8]';
   const previewJianpuScale = song.showLyrics
     ? globalLyricsScale < 0.42
-      ? 0.68
+      ? 0.62
       : globalLyricsScale < 0.58
-        ? 0.72
+        ? 0.66
         : globalLyricsScale < 0.76
-          ? 0.76
-          : 0.8
+          ? 0.7
+          : 0.74
     : 0.86;
-  const riffLanePaddingXClass = song.showLyrics ? 'px-1.5' : 'px-1';
+  const riffLanePaddingXClass = song.showLyrics ? 'px-1' : 'px-1';
   const previewBottomLaneClass = song.showLyrics
-    ? 'h-[16px] flex items-center overflow-visible'
+    ? 'h-[14px] flex items-center overflow-visible'
     : 'h-[18px] flex items-center overflow-visible';
+  const lyricsLaneHeightClass = song.showLyrics ? 'h-[12px]' : 'h-[14px]';
+  const lyricsContainerGapClass = song.showLyrics ? 'gap-[1px]' : 'gap-[2px]';
 
-  // Lyrics mode needs a little more vertical room on continuation pages because bars can include chord, lyric, and riff/rhythm lanes.
+  // Keep row counts stable between chord and lyrics modes so barline heights do not jump when toggling lyrics.
   const ROWS_PER_PAGE_FIRST = 12;
-  const ROWS_PER_PAGE_OTHER = song.showLyrics ? 13 : 14;
+  const ROWS_PER_PAGE_OTHER = 14;
 
   const pages: { sectionTitle: string | null; bars: Bar[]; sIdx: number; startBIdx: number }[][] = [];
   let currentRow = 0;
@@ -1201,7 +1203,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
           )}
 
           {/* Content Area */}
-          <div className={`flex-1 flex flex-col min-h-0 w-full ${song.showLyrics ? 'gap-y-1 sm:gap-y-1.5' : 'gap-y-2 sm:gap-y-3'}`}>
+          <div className="flex-1 flex flex-col min-h-0 w-full gap-y-2 sm:gap-y-3">
             {pageRows.map((row, rIdx) => {
               const section = song.sections[row.sIdx];
               const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
@@ -1365,7 +1367,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 </div>
 
                 {/* Right Column: Bars */}
-                <div className="flex-1 grid grid-cols-4 w-full">
+                <div className="flex-1 grid min-h-0 grid-cols-4 w-full">
                   {Array.from({ length: 4 }).map((_, bIdx) => {
                     const bar = row.bars[bIdx];
                     const previousBar = row.bars[bIdx - 1];
@@ -1469,7 +1471,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     return (
                       <div
                         key={bIdx}
-                        className={`sheet-bar relative px-1 pt-1.5 flex flex-col min-w-0 ${leftBorderClass} ${rightBorderClass} ${bar?.repeatStart ? 'sheet-has-repeat-start' : ''} ${
+                        className={`sheet-bar relative min-h-0 px-1 pt-1.5 flex flex-col min-w-0 ${leftBorderClass} ${rightBorderClass} ${bar?.repeatStart ? 'sheet-has-repeat-start' : ''} ${
                           previousBar?.repeatEnd ? 'sheet-after-repeat-end' : ''
                         } ${previousBar?.finalBar ? 'sheet-after-final-bar' : ''} ${
                           suppressRightBarline ? 'sheet-has-terminal-right' : ''
@@ -1589,18 +1591,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             )}
                             {/* Chords */}
                                   {(() => {
-                                    // Special case for full bar repeat symbol when lyrics are hidden.
-                                    if (!showLyricsLane && hasVisibleChordTokens(bar.chords) && bar.chords.length === 1 && bar.chords[0] === '%') {
-                                      return (
-                                        <div
-                                          className={`flex-1 flex items-center justify-center w-full h-full cursor-pointer ${contentLeftInsetClass}`}
-                                          onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
-                                        >
-                                          <FormattedChord chordString="%" nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />
-                                        </div>
-                                      );
-                                    }
-
                                     const renderRhythmInChordLane = showRhythmInChordLane;
 
                                     if (renderRhythmInChordLane) {
@@ -1646,6 +1636,95 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                     const centeredWholeRestAnchor = occupiedChordAnchors.length === 1 && isWholeRestChord(occupiedChordAnchors[0]?.chord)
                                       ? occupiedChordAnchors[0]
                                       : null;
+                                    const renderLyricsLane = () => (
+                                      <div
+                                        className={`grid ${lyricsLaneHeightClass} min-h-0 w-full shrink-0 content-start items-start overflow-hidden`}
+                                        style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
+                                        onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'lyrics')}
+                                      >
+                                        {lyricAnchors.map((anchor) => {
+                                          const isFirstAnchor = anchor.slotIndex === 0;
+                                          const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
+                                          const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
+                                            && anchor.slotIndex > 0
+                                            && !isDefaultTwoChordSpread;
+                                          const lyricText = getLyricDisplayText(anchor.lyric);
+                                          const measureText = getLyricMeasureText(lyricText);
+                                          const lyricScale = getLyricFontScale(measureText || lyricText, anchor.span);
+                                          const lyricTracking = getLyricTrackingEm(measureText || lyricText, anchor.span);
+                                          const anchorPaddingClass = isFirstAnchor
+                                            ? 'pl-[2px]'
+                                            : isTwoChordSecondHalfAnchor
+                                              ? 'pl-[2px] pr-[6px]'
+                                              : isTerminalAnchor
+                                                ? 'pl-[14px] pr-[6px]'
+                                                : 'px-[3px]';
+                                          const justifyClass = isFirstAnchor
+                                            ? 'justify-start'
+                                            : isTwoChordSecondHalfAnchor
+                                              ? 'justify-start'
+                                              : isTerminalAnchor
+                                                  ? 'justify-end'
+                                                  : 'justify-center';
+                                          const textAlignClass = isFirstAnchor
+                                            ? 'text-left'
+                                            : isTwoChordSecondHalfAnchor
+                                              ? 'text-left'
+                                              : isTerminalAnchor
+                                                  ? 'text-right'
+                                                  : 'text-center';
+
+                                          return (
+                                            <div
+                                              key={`${row.sIdx}-${row.startBIdx + bIdx}-lyric-${anchor.rawIndex}`}
+                                              className={`min-w-0 overflow-hidden ${anchorPaddingClass}`}
+                                              style={{ gridColumn: `${anchor.slotIndex + 1} / span ${Math.max(1, anchor.span)}` }}
+                                            >
+                                              <div
+                                                className={`flex min-w-0 py-0 ${justifyClass}`}
+                                                style={{
+                                                  fontSize: `${Math.max(4.5, 10.25 * Math.min(globalLyricsScale, lyricScale))}px`
+                                                }}
+                                              >
+                                                <span
+                                                  className={`block max-w-full whitespace-nowrap font-display font-semibold leading-none tracking-[0.002em] text-gray-900 ${textAlignClass}`}
+                                                  style={{ letterSpacing: lyricTracking > 0 ? `${lyricTracking}em` : undefined }}
+                                                >
+                                                  {lyricText || ' '}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                    const hasCenteredPercentRepeat = hasVisibleChordTokens(bar.chords) && bar.chords.length === 1 && bar.chords[0] === '%';
+
+                                    if (hasCenteredPercentRepeat) {
+                                      if (showLyricsLane) {
+                                        return (
+                                          <div className={`flex flex-1 min-h-0 flex-col justify-center ${lyricsContainerGapClass} w-full cursor-pointer rounded px-0.5 pt-0 hover:bg-amber-50/60 transition-colors ${contentLeftInsetClass}`}>
+                                            <div
+                                              className="flex flex-1 min-h-0 w-full items-center justify-center"
+                                              onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                            >
+                                              <FormattedChord chordString="%" nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />
+                                            </div>
+
+                                            {renderLyricsLane()}
+                                          </div>
+                                        );
+                                      }
+
+                                      return (
+                                        <div
+                                          className={`flex-1 flex items-center justify-center w-full h-full cursor-pointer ${contentLeftInsetClass}`}
+                                          onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                        >
+                                          <FormattedChord chordString="%" nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />
+                                        </div>
+                                      );
+                                    }
 
                                     if (!showLyricsLane) {
                                       if (centeredWholeRestAnchor) {
@@ -1753,8 +1832,37 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       );
                                     }
 
+                                    if (centeredWholeRestAnchor) {
+                                      const wholeRestChordString = (() => {
+                                        const transposed = transposeChord(centeredWholeRestAnchor.chord, sectionOffset, sectionPlayKey);
+                                        if (song.showNashvilleNumbers) {
+                                          return isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey);
+                                        }
+
+                                        return isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;
+                                      })();
+
+                                      return (
+                                        <div className={`flex flex-1 min-h-0 flex-col justify-center ${lyricsContainerGapClass} w-full cursor-pointer rounded px-0.5 pt-0 hover:bg-amber-50/60 transition-colors ${contentLeftInsetClass}`}>
+                                          <div
+                                            className="flex flex-1 min-h-0 w-full items-center justify-center"
+                                            onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                          >
+                                            <FormattedChord
+                                              chordString={wholeRestChordString}
+                                              compactModifier={compactModifier}
+                                              nashvilleFontFamily={nashvilleFontFamily}
+                                              chordFontFamily={chordFontFamily}
+                                            />
+                                          </div>
+
+                                          {song.showLyrics && renderLyricsLane()}
+                                        </div>
+                                      );
+                                    }
+
                                     return (
-                                      <div className={`flex flex-1 min-h-0 flex-col justify-start gap-[2px] w-full cursor-pointer rounded px-0.5 pt-0 hover:bg-amber-50/60 transition-colors ${contentLeftInsetClass}`}>
+                                      <div className={`flex flex-1 min-h-0 flex-col justify-start ${lyricsContainerGapClass} w-full cursor-pointer rounded px-0.5 pt-0 hover:bg-amber-50/60 transition-colors ${contentLeftInsetClass}`}>
                                         <div
                                           className="grid w-full content-start items-start"
                                           style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
@@ -1821,66 +1929,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           )})}
                                         </div>
 
-                                        <div
-                                          className="grid h-[14px] min-h-0 w-full shrink-0 content-start items-start overflow-hidden"
-                                          style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
-                                          onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'lyrics')}
-                                        >
-                                          {lyricAnchors.map((anchor) => {
-                                            const isFirstAnchor = anchor.slotIndex === 0;
-                                            const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
-                                            const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
-                                              && anchor.slotIndex > 0
-                                              && !isDefaultTwoChordSpread;
-                                            const lyricText = getLyricDisplayText(anchor.lyric);
-                                            const measureText = getLyricMeasureText(lyricText);
-                                            const lyricScale = getLyricFontScale(measureText || lyricText, anchor.span);
-                                            const lyricTracking = getLyricTrackingEm(measureText || lyricText, anchor.span);
-                                            const anchorPaddingClass = isFirstAnchor
-                                              ? 'pl-[2px]'
-                                              : isTwoChordSecondHalfAnchor
-                                                ? 'pl-[2px] pr-[6px]'
-                                              : isTerminalAnchor
-                                                ? 'pl-[14px] pr-[6px]'
-                                                : 'px-[3px]';
-                                            const justifyClass = isFirstAnchor
-                                              ? 'justify-start'
-                                              : isTwoChordSecondHalfAnchor
-                                                ? 'justify-start'
-                                              : isTerminalAnchor
-                                                  ? 'justify-end'
-                                                  : 'justify-center';
-                                            const textAlignClass = isFirstAnchor
-                                              ? 'text-left'
-                                              : isTwoChordSecondHalfAnchor
-                                                ? 'text-left'
-                                              : isTerminalAnchor
-                                                  ? 'text-right'
-                                                  : 'text-center';
-
-                                            return (
-                                              <div
-                                                key={`${row.sIdx}-${row.startBIdx + bIdx}-lyric-${anchor.rawIndex}`}
-                                                className={`min-w-0 overflow-hidden ${anchorPaddingClass}`}
-                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span ${Math.max(1, anchor.span)}` }}
-                                              >
-                                                <div
-                                                  className={`flex min-w-0 py-0 ${justifyClass}`}
-                                                  style={{
-                                                    fontSize: `${Math.max(4.75, 11.75 * Math.min(globalLyricsScale, lyricScale))}px`
-                                                  }}
-                                                >
-                                                  <span
-                                                    className={`block max-w-full whitespace-nowrap font-display font-semibold leading-none tracking-[0.002em] text-gray-900 ${textAlignClass}`}
-                                                    style={{ letterSpacing: lyricTracking > 0 ? `${lyricTracking}em` : undefined }}
-                                                  >
-                                                    {lyricText || ' '}
-                                                  </span>
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
+                                        {renderLyricsLane()}
                                       </div>
                                     );
                                   })()}
@@ -2003,9 +2052,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
             {pIdx === pages.length - 1 && Array.from({ length: Math.max(0, (pIdx === 0 ? ROWS_PER_PAGE_FIRST : ROWS_PER_PAGE_OTHER) - pageRows.length) }).map((_, i) => (
               <div key={`empty-${i}`} className="flex-1 flex w-full min-h-0">
                 <div className="w-16 sm:w-20 shrink-0" />
-                <div className="flex-1 grid grid-cols-4 w-full">
+                <div className="flex-1 grid min-h-0 grid-cols-4 w-full">
                   {Array.from({ length: 4 }).map((_, bIdx) => (
-                    <div key={bIdx} className={`sheet-bar relative border-l border-gray-900 px-1 pt-1.5 pb-6 flex flex-col min-w-0 ${bIdx === 3 ? 'border-r border-r-gray-900 sheet-bar-right-edge' : ''} ${bIdx === 0 ? 'border-l-2 sheet-bar-left-edge' : ''} ${bIdx === 3 ? 'border-r-2' : ''}`}>
+                    <div key={bIdx} className={`sheet-bar relative min-h-0 border-l border-gray-900 px-1 pt-1.5 pb-6 flex flex-col min-w-0 ${bIdx === 3 ? 'border-r border-r-gray-900 sheet-bar-right-edge' : ''} ${bIdx === 0 ? 'border-l-2 sheet-bar-left-edge' : ''} ${bIdx === 3 ? 'border-r-2' : ''}`}>
                     </div>
                   ))}
                 </div>

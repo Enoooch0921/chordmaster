@@ -82,6 +82,10 @@ const VALID_SETLIST_DISPLAY_MODES = new Set([
   'chord-movable-key'
 ]);
 
+const isLineInAppBrowser = () => (
+  typeof navigator !== 'undefined' && /Line\//i.test(navigator.userAgent)
+);
+
 interface GoogleUserSession {
   sub: string;
   name: string;
@@ -3911,6 +3915,13 @@ export default function App() {
   const handleGoogleSignIn = async () => {
     try {
       setAuthUiError(null);
+      setAuthUiMessage(null);
+
+      if (isLineInAppBrowser()) {
+        setAuthUiError(copy.lineInAppBrowserAuthBlocked);
+        return;
+      }
+
       await signInWithGoogle();
     } catch (error) {
       setAuthUiError(error instanceof Error ? error.message : copy.authUnavailable);
@@ -4683,23 +4694,25 @@ export default function App() {
                                         )}
                                       </div>
                                       <div className={`flex min-w-0 items-center gap-1 ${!isJoinedSetlist ? 'pl-10' : ''}`}>
-                                        {!isJoinedSetlist && (
-                                          <div className="w-[56px] shrink-0">
-                                            <KeyPicker
-                                              value={effectiveKey}
-                                              onChange={(key) => key && handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                        <div className="w-[56px] shrink-0">
+                                          <KeyPicker
+                                            value={effectiveKey}
+                                            onChange={(key) => {
+                                              if (!key || isJoinedSetlist) return;
+                                              handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
                                                 ...currentSetlistSong,
                                                 overrideKey: key
-                                              }))}
-                                              label={copy.key}
-                                              originalKey={sourceSong.currentKey}
-                                              align="left"
-                                              buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
-                                              valueTextClassName="!text-[10px] !leading-none"
-                                              triggerIconSize={10}
-                                            />
-                                          </div>
-                                        )}
+                                              }));
+                                            }}
+                                            disabled={isJoinedSetlist}
+                                            label={copy.key}
+                                            originalKey={sourceSong.currentKey}
+                                            align="left"
+                                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5 disabled:!cursor-default disabled:!opacity-100"
+                                            valueTextClassName="!text-[10px] !leading-none"
+                                            triggerIconSize={10}
+                                          />
+                                        </div>
                                         <div className="w-[56px] shrink-0">
                                           <CapoPicker
                                             value={effectiveCapo}
