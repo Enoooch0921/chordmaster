@@ -56,7 +56,12 @@ const PREVIEW_MAX_SCALE = 2.4;
 const PREVIEW_ZOOM_STEP = 0.15;
 const PREVIEW_SAFETY_MARGIN = 20;
 const PREVIEW_PAGE_HEIGHT = 1123;
-const PDF_EXPORT_PIXEL_RATIO = 5;
+const PDF_EXPORT_PREFERRED_PIXEL_RATIO = 5;
+const PDF_EXPORT_MOBILE_MAX_PIXEL_RATIO = 3;
+const PDF_EXPORT_MOBILE_MAX_CANVAS_SIDE = 4096;
+const PDF_EXPORT_MOBILE_MAX_CANVAS_AREA = 12_000_000;
+const PDF_EXPORT_DESKTOP_MAX_CANVAS_SIDE = 16384;
+const PDF_EXPORT_DESKTOP_MAX_CANVAS_AREA = 64_000_000;
 const VALID_KEYS = new Set<string>(ALL_KEYS);
 const VALID_NAVIGATION_MARKERS = new Set([
   'segno',
@@ -132,6 +137,17 @@ interface ExportPageDescriptor {
   sectionTitle: string | null;
   pageInSong: number;
   totalPagesInSong: number;
+}
+
+interface PdfCanvasLimits {
+  maxSide: number;
+  maxArea: number;
+  maxPixelRatio: number;
+}
+
+interface PdfRenderedImage {
+  data: string;
+  format: 'JPEG' | 'PNG';
 }
 
 class PdfExportCancelledError extends Error {
@@ -269,6 +285,92 @@ const parsePositiveIntegerAttribute = (value: string | null): number | null => {
   }
 
   return Math.round(numericValue);
+};
+
+const isMobileLikePdfExportDevice = () => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent || '';
+  const hasCoarsePointer = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(pointer: coarse)').matches
+    : false;
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
+
+  return (
+    /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent) ||
+    (maxTouchPoints > 1 && hasCoarsePointer) ||
+    window.innerWidth < 1024
+  );
+};
+
+const getPdfCanvasLimits = (): PdfCanvasLimits => (
+  isMobileLikePdfExportDevice()
+    ? {
+        maxSide: PDF_EXPORT_MOBILE_MAX_CANVAS_SIDE,
+        maxArea: PDF_EXPORT_MOBILE_MAX_CANVAS_AREA,
+        maxPixelRatio: PDF_EXPORT_MOBILE_MAX_PIXEL_RATIO,
+      }
+    : {
+        maxSide: PDF_EXPORT_DESKTOP_MAX_CANVAS_SIDE,
+        maxArea: PDF_EXPORT_DESKTOP_MAX_CANVAS_AREA,
+        maxPixelRatio: PDF_EXPORT_PREFERRED_PIXEL_RATIO,
+      }
+);
+
+const getElementExportSize = (element: HTMLElement) => ({
+  width: Math.max(1, Math.ceil(element.scrollWidth || element.offsetWidth || element.getBoundingClientRect().width)),
+  height: Math.max(1, Math.ceil(element.scrollHeight || element.offsetHeight || element.getBoundingClientRect().height)),
+});
+
+const getSafePdfPixelRatio = (width: number, height: number, preferredRatio = PDF_EXPORT_PREFERRED_PIXEL_RATIO) => {
+  const limits = getPdfCanvasLimits();
+  const safeWidth = Math.max(1, width);
+  const safeHeight = Math.max(1, height);
+  const sideLimitedRatio = Math.min(limits.maxSide / safeWidth, limits.maxSide / safeHeight);
+  const areaLimitedRatio = Math.sqrt(limits.maxArea / (safeWidth * safeHeight));
+  const ratio = Math.min(preferredRatio, limits.maxPixelRatio, sideLimitedRatio, areaLimitedRatio);
+
+  return Math.max(1, Math.floor(ratio * 100) / 100);
+};
+
+const canvasHasVisibleContent = (canvas: HTMLCanvasElement) => {
+  if (canvas.width <= 0 || canvas.height <= 0) {
+    return false;
+  }
+
+  const probeCanvas = document.createElement('canvas');
+  const probeSize = 64;
+  probeCanvas.width = probeSize;
+  probeCanvas.height = probeSize;
+
+  const probeContext = probeCanvas.getContext('2d', { willReadFrequently: true });
+  if (!probeContext) {
+    return true;
+  }
+
+  probeContext.fillStyle = '#ffffff';
+  probeContext.fillRect(0, 0, probeSize, probeSize);
+  probeContext.drawImage(canvas, 0, 0, probeSize, probeSize);
+
+  try {
+    const imageData = probeContext.getImageData(0, 0, probeSize, probeSize).data;
+    for (let index = 0; index < imageData.length; index += 4) {
+      const alpha = imageData[index + 3];
+      const red = imageData[index];
+      const green = imageData[index + 1];
+      const blue = imageData[index + 2];
+
+      if (alpha > 8 && (red < 245 || green < 245 || blue < 245)) {
+        return true;
+      }
+    }
+  } catch {
+    return true;
+  }
+
+  return false;
 };
 
 const getSongVersionSummary = (song: Song) => (
@@ -3066,12 +3168,50 @@ export default function App() {
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
 
-    const renderOptions = {
+    const createRenderOptions = (pixelRatio: number) => ({
       backgroundColor: '#ffffff',
       cacheBust: false,
-      pixelRatio: PDF_EXPORT_PIXEL_RATIO,
+      pixelRatio,
       skipAutoScale: true,
       fontEmbedCSS,
+    });
+
+    const renderPageElement = async (pageElement: HTMLElement): Promise<PdfRenderedImage> => {
+      const pageSize = getElementExportSize(pageElement);
+      const primaryPixelRatio = getSafePdfPixelRatio(pageSize.width, pageSize.height);
+      const fallbackPixelRatios = Array.from(new Set([
+        primaryPixelRatio,
+        Math.min(primaryPixelRatio, 2),
+        1,
+      ])).filter((pixelRatio) => pixelRatio > 0);
+
+      for (const pixelRatio of fallbackPixelRatios) {
+        try {
+          const canvas = await toCanvas(pageElement, {
+            ...createRenderOptions(pixelRatio),
+            width: pageSize.width,
+            height: pageSize.height,
+          });
+
+          if (canvasHasVisibleContent(canvas)) {
+            return {
+              data: canvas.toDataURL('image/jpeg', 0.92),
+              format: 'JPEG',
+            };
+          }
+        } catch {
+          // Try the next smaller, safer canvas size.
+        }
+      }
+
+      return {
+        data: await toPng(pageElement, {
+          ...createRenderOptions(1),
+          width: pageSize.width,
+          height: pageSize.height,
+        }),
+        format: 'PNG',
+      };
     };
 
     // Group pages by their [data-export-song-container] so we can render each
@@ -3098,17 +3238,32 @@ export default function App() {
         throw new PdfExportCancelledError();
       }
 
-      // Render the entire song container once; fall back to per-page if the
-      // canvas would exceed device limits (toCanvas throws on OOM).
+      // Render the entire song container once when it fits the current
+      // device's canvas limits; otherwise render each page individually.
       let songCanvas: HTMLCanvasElement | null = null;
-      try {
-        songCanvas = await toCanvas(container, {
-          ...renderOptions,
-          width: container.scrollWidth,
-          height: container.scrollHeight,
-        });
-      } catch {
-        songCanvas = null;
+      let songCanvasPixelRatio = PDF_EXPORT_PREFERRED_PIXEL_RATIO;
+      const containerSize = getElementExportSize(container);
+      const containerPixelRatio = getSafePdfPixelRatio(containerSize.width, containerSize.height);
+      const firstPageSize = getElementExportSize(pages[pageIndices[0]].element);
+      const firstPagePixelRatio = getSafePdfPixelRatio(firstPageSize.width, firstPageSize.height);
+      const canRenderWholeSong =
+        containerPixelRatio >= Math.min(firstPagePixelRatio, PDF_EXPORT_MOBILE_MAX_PIXEL_RATIO);
+
+      if (canRenderWholeSong) {
+        try {
+          songCanvas = await toCanvas(container, {
+            ...createRenderOptions(containerPixelRatio),
+            width: containerSize.width,
+            height: containerSize.height,
+          });
+          songCanvasPixelRatio = containerPixelRatio;
+
+          if (!canvasHasVisibleContent(songCanvas)) {
+            songCanvas = null;
+          }
+        } catch {
+          songCanvas = null;
+        }
       }
 
       for (const pageIndex of pageIndices) {
@@ -3138,35 +3293,31 @@ export default function App() {
           throw new PdfExportCancelledError();
         }
 
-        let imageData: string;
+        let renderedImage: PdfRenderedImage;
         if (songCanvas) {
           // Slice this page out of the full-song canvas.
-          // Use offsetTop (layout-relative) instead of getBoundingClientRect()
-          // (viewport-relative) so that elements positioned below the viewport
-          // — common for multi-song setlists — return correct offsets.
-          // getBoundingClientRect().top can be wrong for elements outside the
-          // viewport in some browsers, causing offsetY >> canvas height and a
-          // fully-black JPEG page (JPEG encodes transparent pixels as black).
-          const offsetY = Math.round((page.element.offsetTop - container.offsetTop) * PDF_EXPORT_PIXEL_RATIO);
-          const sliceW = Math.round(page.element.scrollWidth * PDF_EXPORT_PIXEL_RATIO);
-          const sliceH = Math.round(page.element.scrollHeight * PDF_EXPORT_PIXEL_RATIO);
+          // Use layout-relative offsets so off-screen setlist pages keep the
+          // correct slice position in browsers with viewport-relative quirks.
+          const pageSize = getElementExportSize(page.element);
+          const offsetY = Math.round((page.element.offsetTop - container.offsetTop) * songCanvasPixelRatio);
+          const sliceW = Math.round(pageSize.width * songCanvasPixelRatio);
+          const sliceH = Math.round(pageSize.height * songCanvasPixelRatio);
           const sliceCanvas = document.createElement('canvas');
           sliceCanvas.width = sliceW;
           sliceCanvas.height = sliceH;
-          const sliceCtx = sliceCanvas.getContext('2d')!;
-          // Fill with white so any out-of-bounds area is white, not black
-          // (JPEG has no alpha channel; transparent pixels become black).
-          sliceCtx.fillStyle = '#ffffff';
-          sliceCtx.fillRect(0, 0, sliceW, sliceH);
-          sliceCtx.drawImage(songCanvas, 0, offsetY, sliceW, sliceH, 0, 0, sliceW, sliceH);
-          imageData = sliceCanvas.toDataURL('image/jpeg', 0.92);
+          const sliceContext = sliceCanvas.getContext('2d')!;
+          sliceContext.fillStyle = '#ffffff';
+          sliceContext.fillRect(0, 0, sliceW, sliceH);
+          sliceContext.drawImage(songCanvas, 0, offsetY, sliceW, sliceH, 0, 0, sliceW, sliceH);
+
+          renderedImage = canvasHasVisibleContent(sliceCanvas)
+            ? {
+                data: sliceCanvas.toDataURL('image/jpeg', 0.92),
+                format: 'JPEG',
+              }
+            : await renderPageElement(page.element);
         } else {
-          // Fallback: render this page individually (original approach).
-          imageData = await toPng(page.element, {
-            ...renderOptions,
-            width: page.element.scrollWidth,
-            height: page.element.scrollHeight,
-          });
+          renderedImage = await renderPageElement(page.element);
         }
 
         if (pdfExportCancelRequestedRef.current) {
@@ -3176,7 +3327,7 @@ export default function App() {
         if (globalPageCount > 0) {
           pdf.addPage();
         }
-        pdf.addImage(imageData, songCanvas ? 'JPEG' : 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+        pdf.addImage(renderedImage.data, renderedImage.format, 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
         globalPageCount += 1;
 
         flushSync(() => {
