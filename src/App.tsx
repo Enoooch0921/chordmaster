@@ -4461,7 +4461,7 @@ export default function App() {
       </div>
 
       {selectedSetlistShareStatus?.participants.length ? (
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
           {selectedSetlistShareStatus.participants.map((participant) => (
             <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
               {participant.picture ? (
