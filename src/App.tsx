@@ -3141,17 +3141,24 @@ export default function App() {
         let imageData: string;
         if (songCanvas) {
           // Slice this page out of the full-song canvas.
-          // getBoundingClientRect() differences give the correct in-container
-          // offset even for off-screen fixed elements.
-          const containerRect = container.getBoundingClientRect();
-          const pageRect = page.element.getBoundingClientRect();
-          const offsetY = Math.round((pageRect.top - containerRect.top) * PDF_EXPORT_PIXEL_RATIO);
+          // Use offsetTop (layout-relative) instead of getBoundingClientRect()
+          // (viewport-relative) so that elements positioned below the viewport
+          // — common for multi-song setlists — return correct offsets.
+          // getBoundingClientRect().top can be wrong for elements outside the
+          // viewport in some browsers, causing offsetY >> canvas height and a
+          // fully-black JPEG page (JPEG encodes transparent pixels as black).
+          const offsetY = Math.round((page.element.offsetTop - container.offsetTop) * PDF_EXPORT_PIXEL_RATIO);
           const sliceW = Math.round(page.element.scrollWidth * PDF_EXPORT_PIXEL_RATIO);
           const sliceH = Math.round(page.element.scrollHeight * PDF_EXPORT_PIXEL_RATIO);
           const sliceCanvas = document.createElement('canvas');
           sliceCanvas.width = sliceW;
           sliceCanvas.height = sliceH;
-          sliceCanvas.getContext('2d')!.drawImage(songCanvas, 0, offsetY, sliceW, sliceH, 0, 0, sliceW, sliceH);
+          const sliceCtx = sliceCanvas.getContext('2d')!;
+          // Fill with white so any out-of-bounds area is white, not black
+          // (JPEG has no alpha channel; transparent pixels become black).
+          sliceCtx.fillStyle = '#ffffff';
+          sliceCtx.fillRect(0, 0, sliceW, sliceH);
+          sliceCtx.drawImage(songCanvas, 0, offsetY, sliceW, sliceH, 0, 0, sliceW, sliceH);
           imageData = sliceCanvas.toDataURL('image/jpeg', 0.92);
         } else {
           // Fallback: render this page individually (original approach).
@@ -4454,7 +4461,7 @@ export default function App() {
       </div>
 
       {selectedSetlistShareStatus?.participants.length ? (
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
           {selectedSetlistShareStatus.participants.map((participant) => (
             <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
               {participant.picture ? (
