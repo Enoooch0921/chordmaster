@@ -1,5 +1,5 @@
 import React from 'react';
-import { getHeadCenterUnit, getRhythmEventGlyph, rationalizeRhythmDisplay } from '../utils/rhythmUtils';
+import { getHeadCenterUnit, getRhythmEventGlyph, rationalizeRhythmDisplay, rhythmUnitsEqual } from '../utils/rhythmUtils';
 
 interface RhythmNotationProps {
   notation: string;
@@ -81,6 +81,42 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const effectiveBeamTop = (renderMode === 'preview' ? editorBeamTop + (compact ? 0.5 : 1.2) : editorBeamTop) + beamVerticalOffset;
   const editorBeamStroke = { primary: compact ? 1.15 : 1.55, secondary: compact ? 1.05 : 1.45 };
   const visibleEvents = parsed.events.filter((event) => !event.isHidden);
+  const tripletGroups = React.useMemo(() => {
+    const groups: Array<{
+      key: string;
+      base: 'q' | 'e';
+      bracketStartUnit: number;
+      bracketEndUnit: number;
+      centerUnit: number;
+    }> = [];
+
+    for (let index = 0; index <= visibleEvents.length - 3; index += 1) {
+      const run = visibleEvents.slice(index, index + 3);
+      const [first, second, third] = run;
+      if (!first.triplet || !second.triplet || !third.triplet) continue;
+      if (first.base !== second.base || first.base !== third.base) continue;
+      if (first.base !== 'q' && first.base !== 'e') continue;
+      if (!rhythmUnitsEqual(first.endUnit, second.startUnit) || !rhythmUnitsEqual(second.endUnit, third.startUnit)) continue;
+
+      const getTripletAnchorUnit = (event: typeof visibleEvents[number]) => (
+        event.isRest ? event.startUnit + (event.durationUnits / 2) : getHeadCenterUnit(event) + 0.18
+      );
+      const firstAnchor = getTripletAnchorUnit(first);
+      const secondAnchor = getTripletAnchorUnit(second);
+      const thirdAnchor = getTripletAnchorUnit(third);
+      const bracketExtension = first.base === 'q' ? 0.18 : 0;
+      groups.push({
+        key: `${first.index}-${second.index}-${third.index}`,
+        base: first.base,
+        bracketStartUnit: firstAnchor - bracketExtension,
+        bracketEndUnit: thirdAnchor + bracketExtension,
+        centerUnit: secondAnchor
+      });
+      index += 2;
+    }
+
+    return groups;
+  }, [visibleEvents]);
   const cursorUnits = React.useMemo(() => {
     if (visibleEvents.length === 0) {
       return [0];
@@ -90,7 +126,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     let cursor = 0;
 
     visibleEvents.forEach((event) => {
-      while (cursor < event.startUnit) {
+      while (cursor + 1 < event.startUnit) {
         units.push(cursor);
         cursor += 1;
       }
@@ -143,6 +179,21 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const unitToPercent = (unit: number) => `${(unit * 100) / Math.max(1, barUnits)}%`;
   const unitToPercentNumber = (unit: number) => (unit * 100) / Math.max(1, barUnits);
   const getEditorBeamAnchorUnit = (event: typeof visibleEvents[number]) => getHeadCenterUnit(event) + 0.18;
+  const getTripletLayout = (base: 'q' | 'e') => {
+    const tripletVerticalLift = (compact ? 6.0 : 5.0) * scale;
+    const rawBracketY = compact
+      ? Math.max(1.2 * scale, base === 'e' ? effectiveBeamTop + (4.8 * scale) : 2.4 * scale)
+      : Math.max(3.8 * scale, base === 'e' ? effectiveBeamTop - (2.6 * scale) : 5.2 * scale);
+    const bracketY = rawBracketY - tripletVerticalLift;
+    const numberY = bracketY - ((compact ? 1.8 : 3.1) * scale);
+
+    return {
+      bracketY,
+      bracketDrop: compact ? 2.2 : 3,
+      numberY,
+      numberGap: compact ? 1.25 : 1.7
+    };
+  };
   const visibleSelectableEvents = React.useMemo(
     () => visibleEvents,
     [visibleEvents]
@@ -189,8 +240,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         if (event.base === 's') {
           sixteenthRun.push(event);
 
-          const previousIsSixteenth = previous?.base === 's' && Math.abs(previous.endUnit - event.startUnit) < 0.001;
-          const nextIsSixteenth = next?.base === 's' && Math.abs(event.endUnit - next.startUnit) < 0.001;
+          const previousIsSixteenth = previous?.base === 's' && rhythmUnitsEqual(previous.endUnit, event.startUnit);
+          const nextIsSixteenth = next?.base === 's' && rhythmUnitsEqual(event.endUnit, next.startUnit);
 
           if (!previousIsSixteenth && !nextIsSixteenth) {
             const center = getEditorBeamAnchorUnit(event);
@@ -208,7 +259,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
           flushSixteenthRun();
         }
 
-        if (!next || next.base !== 's' || Math.abs(next.startUnit - event.endUnit) > 0.001) {
+        if (!next || next.base !== 's' || !rhythmUnitsEqual(next.startUnit, event.endUnit)) {
           flushSixteenthRun();
         }
       });
@@ -227,10 +278,10 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     visibleEvents.forEach((event, index) => {
       const previous = current[current.length - 1];
       const sameBeatAsPrevious = previous
-        ? Math.floor(previous.startUnit / beatUnits) === Math.floor(event.startUnit / beatUnits)
+        ? Math.floor((previous.startUnit + 0.001) / beatUnits) === Math.floor((event.startUnit + 0.001) / beatUnits)
         : true;
       const contiguousWithPrevious = previous
-        ? Math.abs(previous.endUnit - event.startUnit) < 0.001
+        ? rhythmUnitsEqual(previous.endUnit, event.startUnit)
         : true;
 
       if (
@@ -474,6 +525,56 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             </g>
           ))}
         </svg>
+      )}
+
+      {tripletGroups.length > 0 && (
+        <>
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
+            viewBox={`0 0 100 ${minHeight}`}
+            preserveAspectRatio="none"
+          >
+            {tripletGroups.map((group) => {
+              const centerX = unitToPercentNumber(group.centerUnit);
+              const { bracketY, bracketDrop, numberGap } = getTripletLayout(group.base);
+              const bracketStartX = unitToPercentNumber(group.bracketStartUnit);
+              const bracketEndX = unitToPercentNumber(group.bracketEndUnit);
+
+              return (
+                <g key={`triplet-bracket-${group.key}`}>
+                  <path
+                    d={`M ${bracketStartX} ${bracketY + bracketDrop} L ${bracketStartX} ${bracketY} L ${centerX - numberGap} ${bracketY} M ${centerX + numberGap} ${bracketY} L ${bracketEndX} ${bracketY} L ${bracketEndX} ${bracketY + bracketDrop}`}
+                    fill="none"
+                    stroke={stroke}
+                    strokeWidth={group.base === 'e' ? (compact ? 0.58 : 0.8) : (compact ? 0.8 : 1)}
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              );
+            })}
+          </svg>
+          {tripletGroups.map((group) => {
+            const { numberY } = getTripletLayout(group.base);
+
+            return (
+              <span
+                key={`triplet-number-${group.key}`}
+                className="absolute z-[3] pointer-events-none select-none font-bold leading-none"
+                style={{
+                  left: unitToPercent(group.centerUnit),
+                  top: `${numberY}px`,
+                  color: stroke,
+                  transform: 'translate(-50%, -50%)',
+                  fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+                  fontSize: `${compact ? 6.2 : 9}px`
+                }}
+              >
+                3
+              </span>
+            );
+          })}
+        </>
       )}
 
       {selectionMode === 'insert' && selectedSlotVisual && (

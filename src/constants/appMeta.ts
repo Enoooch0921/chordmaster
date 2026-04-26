@@ -76,6 +76,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-04-23',
+        title: 'Cloud sync, shared setlists, performance mode, and PDF export update',
+        bullets: [
+          'Added Supabase sign-in and sync foundations, public read-only song/setlist sharing, share-link functions, and joined shared setlist loading.',
+          'Added shared setlist membership management, personal Key/Capo/display overrides, fuller shared setlist song details, and improved share/import auth flows.',
+          'Added Performance Mode entry points, mobile performance controls, PDF export cancellation, and a faster single-canvas PDF export path for large or mobile setlists.',
+          'Improved responsive editor/sidebar layouts, picker overlays, lyrics pagination, sheet bar-number placement, and several performance-mode stability issues.'
+        ]
+      },
+      {
+        version: '0.6.0',
         date: '2026-04-09',
         title: 'Service Setlist, unified key/capo controls, and compact editor update',
         bullets: [
@@ -170,6 +181,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-04-23',
+        title: '雲端同步、共同歌單、演出模式與 PDF 匯出更新',
+        bullets: [
+          '新增 Supabase 登入與同步基礎、歌曲 / 歌單公開唯讀分享、分享連結 Edge Functions，以及已加入 shared setlist 載入流程。',
+          '新增 shared setlist 成員管理、個人 Key / Capo / 顯示覆蓋、完整共享歌單歌曲細節，並改善分享匯入與登入導向流程。',
+          '新增 Performance Mode 入口、行動版演出控制、PDF 匯出取消按鈕，以及更適合大型或行動裝置歌單的 single-canvas PDF 匯出流程。',
+          '改善 responsive editor / sidebar、picker overlays、歌詞分頁密度、譜面小節編號位置，以及多個 performance mode 穩定性問題。'
+        ]
+      },
+      {
+        version: '0.6.0',
         date: '2026-04-09',
         title: '服事歌單、共用 Key / Capo 控制器與緊湊編輯列更新',
         bullets: [

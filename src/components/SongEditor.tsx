@@ -87,6 +87,7 @@ interface RhythmEditorEvent {
   base: 'w' | 'h' | 'q' | 'e' | 's';
   isRest: boolean;
   dotted: boolean;
+  triplet: boolean;
   accent: boolean;
   tieAfter: boolean;
 }
@@ -1547,6 +1548,7 @@ const SongEditor: React.FC<Props> = ({
         base: event.base,
         isRest: event.isRest,
         dotted: event.dotted,
+        triplet: event.triplet,
         accent: event.accent,
         tieAfter: event.tieAfter
       }));
@@ -1565,7 +1567,7 @@ const SongEditor: React.FC<Props> = ({
     let cursor = 0;
 
     events.forEach((event) => {
-      while (cursor < event.startUnit) {
+      while (cursor + 1 < event.startUnit) {
         cursorUnits.push(cursor);
         cursor += 1;
       }
@@ -1579,7 +1581,7 @@ const SongEditor: React.FC<Props> = ({
 
   const parseToolbarRhythmToken = (sIdx: number, bIdx: number, token: string): RhythmEditorEvent | null => {
     const normalized = normalizeRhythmToken(token);
-    const match = normalized.match(/^(w|h|q|e|s)(r)?(\.)?(\^)?(~)?$/);
+    const match = normalized.match(/^(w|h|q|e|s)(3)?(r)?(\.)?(\^)?(~)?$/);
     if (!match) return null;
     const parsed = parseRhythmNotation(normalized, getBarTimeSignature(getEditorBar(sIdx, bIdx)));
     const event = parsed.events[0];
@@ -1591,6 +1593,7 @@ const SongEditor: React.FC<Props> = ({
       base: event.base,
       isRest: event.isRest,
       dotted: event.dotted,
+      triplet: event.triplet,
       accent: event.accent,
       tieAfter: event.tieAfter
     };
@@ -1598,7 +1601,7 @@ const SongEditor: React.FC<Props> = ({
 
   const buildRhythmEditorToken = (event: RhythmEditorEvent) => (
     normalizeRhythmToken(
-      `${event.base}${event.isRest ? 'r' : ''}${event.dotted ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
+      `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
     )
   );
 
@@ -1610,8 +1613,17 @@ const SongEditor: React.FC<Props> = ({
 
   const preserveRhythmEventModifiers = (existingEvent: RhythmEditorEvent, nextEvent: RhythmEditorEvent): RhythmEditorEvent => {
     if (nextEvent.isRest) {
+      const shouldKeepTripletRest = existingEvent.triplet && existingEvent.base === nextEvent.base && !nextEvent.triplet;
+      const tripletRest = shouldKeepTripletRest
+        ? parseToolbarRhythmToken(
+            selection?.sIdx ?? 0,
+            selection?.bIdx ?? 0,
+            `${nextEvent.base}3r`
+          )
+        : null;
+
       return {
-        ...nextEvent,
+        ...(tripletRest ? { ...tripletRest, startUnit: nextEvent.startUnit } : nextEvent),
         accent: false,
         tieAfter: false
       };
@@ -1619,7 +1631,7 @@ const SongEditor: React.FC<Props> = ({
 
     return {
       ...nextEvent,
-      dotted: existingEvent.dotted,
+      dotted: nextEvent.triplet ? false : existingEvent.dotted,
       accent: existingEvent.accent,
       tieAfter: existingEvent.tieAfter
     };
@@ -1793,7 +1805,7 @@ const SongEditor: React.FC<Props> = ({
       e: copy.editor.eighth,
       s: copy.editor.sixteenth
     };
-    const parts = [`${event.isRest ? copy.editor.rest : baseLabel[event.base]}${event.dotted ? ` ${copy.editor.dot.toLowerCase()}` : ''}`];
+    const parts = [`${event.isRest ? copy.editor.rest : baseLabel[event.base]}${event.triplet ? ' 3' : ''}${event.dotted ? ` ${copy.editor.dot.toLowerCase()}` : ''}`];
 
     if (event.accent) parts.push(copy.editor.accent.toLowerCase());
     if (event.tieAfter) parts.push(copy.editor.tie.toLowerCase());
@@ -1889,36 +1901,38 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const HIDDEN_GAP_TOKEN_CANDIDATES = [
-    { halfUnits: 48, token: 'wx.' },
-    { halfUnits: 32, token: 'wx' },
-    { halfUnits: 24, token: 'hx.' },
-    { halfUnits: 16, token: 'hx' },
-    { halfUnits: 12, token: 'qx.' },
-    { halfUnits: 8, token: 'qx' },
-    { halfUnits: 6, token: 'ex.' },
-    { halfUnits: 4, token: 'ex' },
-    { halfUnits: 3, token: 'sx.' },
-    { halfUnits: 2, token: 'sx' }
+    { sixthUnits: 144, token: 'wx.' },
+    { sixthUnits: 96, token: 'wx' },
+    { sixthUnits: 72, token: 'hx.' },
+    { sixthUnits: 48, token: 'hx' },
+    { sixthUnits: 36, token: 'qx.' },
+    { sixthUnits: 24, token: 'qx' },
+    { sixthUnits: 18, token: 'ex.' },
+    { sixthUnits: 16, token: 'q3x' },
+    { sixthUnits: 12, token: 'ex' },
+    { sixthUnits: 9, token: 'sx.' },
+    { sixthUnits: 8, token: 'e3x' },
+    { sixthUnits: 6, token: 'sx' }
   ] as const;
 
   const buildHiddenGapTokens = (durationUnits: number): string[] => {
-    const targetHalfUnits = Math.max(0, Math.round(durationUnits * 2));
+    const targetSixthUnits = Math.max(0, Math.round(durationUnits * 6));
     const memo = new Map<string, string[] | null>();
 
-    const solve = (remainingHalfUnits: number, startIndex: number): string[] | null => {
-      if (remainingHalfUnits === 0) return [];
-      if (remainingHalfUnits < 0 || startIndex >= HIDDEN_GAP_TOKEN_CANDIDATES.length) return null;
+    const solve = (remainingSixthUnits: number, startIndex: number): string[] | null => {
+      if (remainingSixthUnits === 0) return [];
+      if (remainingSixthUnits < 0 || startIndex >= HIDDEN_GAP_TOKEN_CANDIDATES.length) return null;
 
-      const key = `${remainingHalfUnits}:${startIndex}`;
+      const key = `${remainingSixthUnits}:${startIndex}`;
       if (memo.has(key)) {
         return memo.get(key) || null;
       }
 
       for (let index = startIndex; index < HIDDEN_GAP_TOKEN_CANDIDATES.length; index += 1) {
         const candidate = HIDDEN_GAP_TOKEN_CANDIDATES[index];
-        if (candidate.halfUnits > remainingHalfUnits) continue;
+        if (candidate.sixthUnits > remainingSixthUnits) continue;
 
-        const next = solve(remainingHalfUnits - candidate.halfUnits, index);
+        const next = solve(remainingSixthUnits - candidate.sixthUnits, index);
         if (next) {
           const result = [candidate.token, ...next];
           memo.set(key, result);
@@ -1930,7 +1944,7 @@ const SongEditor: React.FC<Props> = ({
       return null;
     };
 
-    return solve(targetHalfUnits, 0) || [];
+    return solve(targetSixthUnits, 0) || [];
   };
 
 
@@ -1992,6 +2006,7 @@ const SongEditor: React.FC<Props> = ({
     const { tokenIndex: targetIndex } = getEditableRhythmTokenContext(selection);
     if (targetIndex === -1) return;
     const event = events[targetIndex];
+    if (event.triplet) return;
     const nextEvent = createRhythmEditorEvent(
       selection.sIdx,
       selection.bIdx,
@@ -7341,6 +7356,18 @@ const SongEditor: React.FC<Props> = ({
                   </button>
 
                   <button
+                    onClick={() => insertRhythmToken('q3')}
+                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                    title={`${copy.editor.quarterNote} triplet`}
+                  >
+                    <div className="relative w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      <span className="font-rhythm text-lg leading-none">♩</span>
+                      <span className="absolute right-1 top-0.5 text-[9px] font-black leading-none">3</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-gray-500">1/4 3</span>
+                  </button>
+
+                  <button
                     onClick={() => insertRhythmToken('e')}
                     className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                     title={copy.editor.eighthNote}
@@ -7349,6 +7376,18 @@ const SongEditor: React.FC<Props> = ({
                       <span className="font-rhythm text-lg leading-none">♪</span>
                     </div>
                     <span className="text-[10px] font-bold text-gray-500">1/8</span>
+                  </button>
+
+                  <button
+                    onClick={() => insertRhythmToken('e3')}
+                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                    title={`${copy.editor.eighthNote} triplet`}
+                  >
+                    <div className="relative w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      <span className="font-rhythm text-lg leading-none">♪</span>
+                      <span className="absolute right-1 top-0.5 text-[9px] font-black leading-none">3</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-gray-500">1/8 3</span>
                   </button>
 
                   <button
@@ -7364,7 +7403,8 @@ const SongEditor: React.FC<Props> = ({
 
                   <button
                     onClick={toggleRhythmDot}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.dotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                    disabled={Boolean(selectedRhythmEditorEvent?.triplet)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.dotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${selectedRhythmEditorEvent?.triplet ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
                     title={copy.editor.toggleDot}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedRhythmEditorEvent?.dotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>

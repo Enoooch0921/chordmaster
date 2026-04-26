@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.0 - 2026-04-23
+
+### Added
+
+- 新增 Supabase 帳號與同步基礎，支援 Google OAuth、Email Magic Link、個人歌曲庫與歌單同步
+- 新增歌曲 / 歌單公開唯讀分享連結，包含 SPA fallback、Edge Functions、分享連結複製與剪貼簿 fallback
+- 新增 shared setlist 加入流程，可在登入後開啟受邀歌單，並透過 RPC 載入已加入的 shared setlists
+- 新增 shared setlist 管理能力，支援成員關係、離開 shared setlist，以及個人 Key / Capo / 顯示控制覆蓋
+- 新增 Performance Mode 入口與行動版底部操作，並加入 PDF 匯出取消按鈕
+
+### Changed
+
+- 大幅改善行動版 editor、側邊欄、picker overlay 與 responsive toolbar 的互動版面
+- 重整 PDF 匯出流程，改為 single-canvas render、行動裝置 adaptive pixel ratio 與 JPEG 輸出，降低記憶體壓力
+- 改善 shared setlist 與歌詞模式 UI，shared page 現在可顯示完整歌單歌曲細節
+- 調整 lyrics pagination density、lyrics mode bar layout 與譜面小節編號位置
+- 移除測試版本警告 banner，正式介面不再顯示資料可能不保留的提示
+
+### Fixed
+
+- 修正 Supabase PKCE session recovery、分享匯入、auth redirects 與 create share link 前 session refresh 的問題
+- 修正 share functions 的 CORS、JWT gateway 與 service-role 驗證相關部署/執行問題
+- 修正 performance mode 的 page clipping、viewport height、pagination offset、切歌 layout jitter 與 keyboard stale closure
+- 修正 setlist 預覽 section order / active section 同步、preview key behavior 與 chord anchor default
+- 修正 chord bar 按 Enter 的焦點跳轉，以及全休止符在小節中的置中顯示
+
 ## 0.6.0 - 2026-04-09
 
 ### Added

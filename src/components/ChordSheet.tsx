@@ -440,6 +440,12 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
       ? 'text-[10px] leading-none'
       : 'text-[10px] leading-none';
   const numericQualityStyle = numericFigureStyle;
+  const singleExtensionPositionClass = /^dim/i.test(qualityText)
+    ? 'left-full top-[-0.72em] ml-[-1.24em]'
+    : 'left-full top-[-0.08em] ml-[-1.24em]';
+  const singleChordExtensionPositionClass = /^dim/i.test(qualityText)
+    ? 'left-full top-[-0.74em] ml-[-1.32em]'
+    : 'left-full top-[-0.08em] ml-[-1.32em]';
   if (isNumericRoot) {
     const numericTextStyle = {
       ...(numericSuffixReserveEm > 0 ? { paddingRight: `${numericSuffixReserveEm}em` } : {}),
@@ -464,13 +470,13 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
                 <span className={`relative inline-flex items-end -translate-y-[0.6em] ${numericQualityTextClass}`} style={numericQualityStyle}>
                   <span>{qualityText}</span>
                   {hasExtensionTokens && (
-                    <span
-                      className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.06em] text-[7px] leading-none tracking-[-0.02em] whitespace-nowrap ${
-                        isSingleExtensionToken
-                          ? 'left-full top-[-0.08em] ml-[-1.24em]'
-                          : 'left-[0.18em] top-[-0.86em]'
-                      }`}
-                    >
+	                    <span
+	                      className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.06em] text-[7px] leading-none tracking-[-0.02em] whitespace-nowrap ${
+	                        isSingleExtensionToken
+	                          ? singleExtensionPositionClass
+	                          : 'left-[0.18em] top-[-0.86em]'
+	                      }`}
+	                    >
                       <span className={isSingleExtensionToken ? 'inline-flex h-[1em] items-center leading-none' : ''}>(</span>
                       {extensionTokens.map((token, index) => {
                         const accidentalGlyph = token[0];
@@ -527,13 +533,13 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
           <span className="relative inline-block ml-[0.5px]">
             <span className="text-[10px] -translate-y-[0.55em]">{qualityText}</span>
             {hasExtensionTokens && (
-              <span
-                className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.08em] text-[8px] leading-none tracking-[-0.02em] whitespace-nowrap ${
-                  isSingleExtensionToken
-                    ? 'left-full top-[-0.08em] ml-[-1.32em]'
-                    : 'left-[0.18em] top-[-0.86em]'
-                }`}
-              >
+	              <span
+	                className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.08em] text-[8px] leading-none tracking-[-0.02em] whitespace-nowrap ${
+	                  isSingleExtensionToken
+	                    ? singleChordExtensionPositionClass
+	                    : 'left-[0.18em] top-[-0.86em]'
+	                }`}
+	              >
                 <span className={isSingleExtensionToken ? 'inline-flex h-[1em] items-center leading-none' : ''}>(</span>
                 {extensionTokens.map((token, index) => {
                   const accidentalGlyph = token[0];

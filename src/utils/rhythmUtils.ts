@@ -7,6 +7,7 @@ export interface RhythmEvent {
   isRest: boolean;
   isHidden: boolean;
   dotted: boolean;
+  triplet: boolean;
   accent: boolean;
   tieAfter: boolean;
   durationUnits: number;
@@ -64,6 +65,20 @@ const BASE_UNITS: Record<RhythmBase, number> = {
   s: 1
 };
 
+export const RHYTHM_EPSILON = 0.001;
+
+export function rhythmUnitsEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) < RHYTHM_EPSILON;
+}
+
+export function rhythmUnitsLessOrEqual(left: number, right: number): boolean {
+  return left < right || rhythmUnitsEqual(left, right);
+}
+
+export function rhythmUnitsGreater(left: number, right: number): boolean {
+  return left > right && !rhythmUnitsEqual(left, right);
+}
+
 const TOKEN_ALIASES: Record<string, string> = {
   whole: 'w',
   half: 'h',
@@ -103,20 +118,26 @@ interface RhythmTokenParts {
   isRest: boolean;
   isHidden: boolean;
   dotted: boolean;
+  triplet: boolean;
   accent: boolean;
   tieAfter: boolean;
 }
 
 function parseNormalizedRhythmTokenParts(token: string): RhythmTokenParts | null {
-  const match = token.match(/^(w|h|q|e|s)(r|x)?(\.)?(\^)?(~)?$/);
+  const match = token.match(/^(w|h|q|e|s)(3)?(r|x)?(\.)?(\^)?(~)?$/);
   if (!match) return null;
 
-  const [, baseToken, markerFlag, dotFlag, accentFlag, tieFlag] = match;
+  const [, baseToken, tripletFlag, markerFlag, dotFlag, accentFlag, tieFlag] = match;
+  const triplet = Boolean(tripletFlag);
+  if (triplet && baseToken !== 'q' && baseToken !== 'e') return null;
+  if (triplet && dotFlag) return null;
+
   return {
     base: baseToken as RhythmBase,
     isRest: markerFlag === 'r',
     isHidden: markerFlag === 'x',
     dotted: Boolean(dotFlag),
+    triplet,
     accent: Boolean(accentFlag),
     tieAfter: Boolean(tieFlag)
   };
@@ -131,18 +152,23 @@ export function normalizeRhythmToken(token: string): string {
   const tieAfter = trimmed.includes('~');
   const raw = sanitizeToken(trimmed.replace(/[.^~]/g, ''));
   const alias = TOKEN_ALIASES[raw] || raw;
-  const hidden = raw.endsWith('x');
-  const normalizedRaw = hidden ? raw.slice(0, -1) : raw;
-  const match = normalizedRaw.match(/^(w|h|q|e|s)(r)?$/);
+  const hidden = alias.endsWith('x');
+  const normalizedRaw = hidden ? alias.slice(0, -1) : alias;
+  const match = normalizedRaw.match(/^(w|h|q|e|s)(3)?(r)?$/);
 
   if (!match) {
     return sanitizeToken(trimmed);
   }
 
-  const [, base, restFlag] = match;
+  const [, base, tripletFlag, restFlag] = match;
+  const triplet = Boolean(tripletFlag);
+  if (triplet && base !== 'q' && base !== 'e') {
+    return sanitizeToken(trimmed);
+  }
+
   const isRest = Boolean(restFlag);
   const marker = hidden ? 'x' : isRest ? 'r' : '';
-  return `${base}${marker}${dotted ? '.' : ''}${!isRest && !hidden && accent ? '^' : ''}${!isRest && !hidden && tieAfter ? '~' : ''}`;
+  return `${base}${triplet ? '3' : ''}${marker}${dotted && !triplet ? '.' : ''}${!isRest && !hidden && accent ? '^' : ''}${!isRest && !hidden && tieAfter ? '~' : ''}`;
 }
 
 export function normalizeRhythmInput(input: string): string {
@@ -198,8 +224,10 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
       return;
     }
 
-    const { base, isRest, isHidden, dotted, accent, tieAfter } = parsedToken;
-    const durationUnits = BASE_UNITS[base] + (dotted ? BASE_UNITS[base] / 2 : 0);
+    const { base, isRest, isHidden, dotted, triplet, accent, tieAfter } = parsedToken;
+    const durationUnits = triplet
+      ? (base === 'q' ? 8 / 3 : 4 / 3)
+      : BASE_UNITS[base] + (dotted ? BASE_UNITS[base] / 2 : 0);
 
     events.push({
       index,
@@ -208,6 +236,7 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
       isRest,
       isHidden,
       dotted,
+      triplet,
       accent,
       tieAfter,
       durationUnits,
@@ -228,8 +257,8 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
     beatValue,
     beatUnits,
     barUnits,
-    overflow: cursor > barUnits,
-    underfilled: cursor < barUnits
+    overflow: rhythmUnitsGreater(cursor, barUnits),
+    underfilled: rhythmUnitsGreater(barUnits, cursor)
   };
 }
 
@@ -431,8 +460,8 @@ export function rationalizeRhythmDisplay(
         const endHeadUnit = getHeadCenterUnit(next);
         const startUnit = getTieAnchorUnit(event, 'right');
         const endUnit = getTieAnchorUnit(next, 'left');
-        const beatBoundary = Math.floor(event.endUnit / parsed.beatUnits) * parsed.beatUnits;
-        const crossesBeat = beatBoundary > event.startUnit && beatBoundary < next.endUnit;
+        const beatBoundary = Math.floor((event.endUnit + RHYTHM_EPSILON) / parsed.beatUnits) * parsed.beatUnits;
+        const crossesBeat = rhythmUnitsGreater(beatBoundary, event.startUnit) && rhythmUnitsGreater(next.endUnit, beatBoundary);
 
         if (endUnit - startUnit > 0.12) {
           ties.push({
@@ -464,8 +493,8 @@ export function rationalizeRhythmDisplay(
         const previous = run[run.length - 1];
 
         if (!canBeamByRule(event)) break;
-        if (event.startUnit < beatStart || event.endUnit > beatEnd) break;
-        if (previous && previous.endUnit !== event.startUnit) break;
+        if (!rhythmUnitsLessOrEqual(beatStart, event.startUnit) || !rhythmUnitsLessOrEqual(event.endUnit, beatEnd)) break;
+        if (previous && !rhythmUnitsEqual(previous.endUnit, event.startUnit)) break;
 
         run.push(event);
         runIndex += 1;

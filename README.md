@@ -2,7 +2,7 @@
 
 ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器，聚焦在和弦譜、節奏譜與簡譜的整合編輯。專案使用 Vite + React 建構；未登入時資料預設儲存在瀏覽器 `localStorage`，登入後可切換到 Supabase 雲端同步。
 
-目前版本：`0.6.0`
+目前版本：`0.7.0`
 
 ## 特色
 
@@ -19,14 +19,21 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 - 段落轉調：可為某段設定轉調，後續段落會一起跟隨，預覽同步標示 `Key: X`
 - 弱起拍：可加入 editor-only `0` 小節，支援簡譜與節奏輸入，並在預覽開頭顯示弱起內容
 - 導覽記號：支援 Segno、Coda、D.S.、D.C.、Fine、D.S. al Fine、D.S. al Coda
-- 預覽與 PDF 匯出：支援右側預覽縮放、拖曳、PDF 匯出與列印優化
+- 預覽、演出與 PDF 匯出：支援右側預覽縮放、拖曳、Performance Mode、PDF 匯出與列印優化
 - 舊資料相容：匯入或載入較早版本歌譜時會先自動整理資料格式
 - 帳號系統：支援 Google OAuth 與 Email Magic Link
 - 雲端同步：登入後可同步個人歌曲庫與歌單
-- 公開唯讀分享：可產生歌曲 / 歌單分享連結
+- 公開唯讀分享：可產生歌曲 / 歌單分享連結，並支援受邀者加入 shared setlist
 
 ## 最近更新
 
+- 升級到 `0.7.0`，補齊 Supabase 登入 / 同步、分享連結、shared setlist 加入與成員管理的 release note
+- 新增 Google OAuth、Email Magic Link、個人歌曲庫與歌單雲端同步基礎
+- 新增歌曲 / 歌單公開唯讀分享連結，包含 Edge Functions、SPA fallback、剪貼簿 fallback 與登入後開啟受邀歌單流程
+- 新增 shared setlist 管理能力，支援個人 `Key / Capo / display` 覆蓋、離開 shared setlist，以及完整共享歌單歌曲細節
+- 新增 Performance Mode 入口與行動版操作，並改善 performance pagination、page clipping、viewport height 與切歌穩定性
+- 重整 PDF 匯出流程，加入取消按鈕、single-canvas render、行動裝置 adaptive pixel ratio 與 JPEG 輸出
+- 改善行動版 editor、側邊欄、picker overlay、歌詞模式、歌詞分頁密度與譜面小節編號位置
 - 新增 Service Setlist 工作流，可在同一首歌的基礎上建立服事歌單專屬的 `Key / Capo / section order / song order` 覆蓋設定
 - 新增 setlist 層級的顯示模式與歌詞控制，支援 `級數譜 / 和弦 + 固定調 / 和弦 + 首調`，PDF 匯出會一併套用
 - 新增 setlist song instance 編輯流程：右側編輯與預覽會讀取 base song 後再套用 setlist overrides，不會改動 Song Library 原始資料
