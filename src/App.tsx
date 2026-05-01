@@ -3319,11 +3319,18 @@ export default function App() {
         return;
       }
 
+      const existingSongIds = new Set(songs.map((item) => item.id));
       const nextSongs = importedSongs.map((item, index) => {
         const storedLikeItem = item as Partial<StoredSong>;
+        const normalizedSong = cloneSong(normalizeSongBars(item as Song));
+        const shouldImportAsCopy = isCloudMode && (!storedLikeItem.id || !existingSongIds.has(storedLikeItem.id));
+        const importedId = shouldImportAsCopy
+          ? crypto.randomUUID()
+          : storedLikeItem.id || `song-imported-${Date.now()}-${index + 1}`;
+        const { teamSource: _teamSource, ...songWithoutWorkspaceLink } = normalizedSong as StoredSong;
         return {
-          ...cloneSong(normalizeSongBars(item as Song)),
-          id: storedLikeItem.id || `song-imported-${Date.now()}-${index + 1}`,
+          ...songWithoutWorkspaceLink,
+          id: importedId,
           updatedAt: typeof storedLikeItem.updatedAt === 'number' ? storedLikeItem.updatedAt : Date.now()
         };
       }) as StoredSong[];
@@ -3338,14 +3345,32 @@ export default function App() {
       }
 
       const nextSelectedSongId = nextSongs[0].id;
+      const nextSongIds = new Set(nextSongs.map((item) => item.id));
+      const nextSetlists = setlists.map((setlist) => {
+        const songsInLibrary = setlist.songs.filter((item) => nextSongIds.has(item.songId));
+        if (songsInLibrary.length === setlist.songs.length) {
+          return setlist;
+        }
+
+        return {
+          ...setlist,
+          songs: reindexSetlistSongs(songsInLibrary),
+          updatedAt: Date.now()
+        };
+      });
       setSongs(nextSongs);
+      setSetlists(nextSetlists);
       setSelectedSongId(nextSelectedSongId);
+      setSelectedSetlistSongId((currentId) => nextSetlists.some((setlist) => setlist.songs.some((item) => item.id === currentId))
+        ? currentId
+        : null);
       setSongHistories({});
       setSelectedSongIdsForBulkDelete([]);
       setIsLibraryEditing(false);
-      persistWorkspace(nextSongs, setlists);
-    } catch {
-      window.alert(copy.importInvalidError);
+      await persistWorkspace(nextSongs, nextSetlists);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      window.alert(reason ? `${copy.importInvalidError}\n\n${reason}` : copy.importInvalidError);
     }
   };
 

@@ -35,6 +35,11 @@ interface SongRow {
   updated_at: string;
 }
 
+interface SongIdentityRow {
+  id: string;
+  library_id: string;
+}
+
 interface SetlistRow {
   id: string;
   library_id: string;
@@ -153,6 +158,26 @@ const mapSongRow = (row: SongRow): StoredSong => ({
   id: row.id,
   updatedAt: new Date(row.updated_at).getTime()
 });
+
+const assertSongIdIsWritableInLibrary = async (songId: string, libraryId: string) => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('songs')
+    .select('id, library_id')
+    .eq('id', songId)
+    .maybeSingle<SongIdentityRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  if (data && data.library_id !== libraryId) {
+    throw new Error('This song belongs to another workspace. Import it as a copy before saving.');
+  }
+};
 
 const mapSetlistRows = (
   rows: SetlistRow[],
@@ -922,6 +947,7 @@ export const createCloudRepository = (params: {
       }
 
       const personalLibraryId = await ensurePersonalLibraryId();
+      await assertSongIdIsWritableInLibrary(song.id, personalLibraryId);
       const now = new Date(song.updatedAt || Date.now()).toISOString();
       const payload = {
         id: song.id,
@@ -948,6 +974,7 @@ export const createCloudRepository = (params: {
       }
 
       const libraryId = await ensureLibraryId();
+      await assertSongIdIsWritableInLibrary(song.id, libraryId);
       const now = new Date(song.updatedAt || Date.now()).toISOString();
       const payload = {
         id: song.id,
@@ -1002,10 +1029,12 @@ export const createCloudRepository = (params: {
         throw new Error('Supabase is not configured.');
       }
 
+      const libraryId = await ensureLibraryId();
       const { error } = await supabase
         .from('songs')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('library_id', libraryId);
 
       if (error) {
         throw error;
@@ -1017,6 +1046,7 @@ export const createCloudRepository = (params: {
         throw new Error('Supabase is not configured.');
       }
 
+      const libraryId = await ensureLibraryId();
       await supabase
         .from('setlist_songs')
         .delete()
@@ -1025,7 +1055,8 @@ export const createCloudRepository = (params: {
       const { error } = await supabase
         .from('setlists')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('library_id', libraryId);
 
       if (error) {
         throw error;
