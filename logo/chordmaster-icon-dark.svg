@@ -1,0 +1,15 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>ChordMaster</title>
+  <rect width="64" height="64" fill="#0D1F17"></rect>
+  
+  
+  <line x1="10" y1="9" x2="10" y2="55" stroke="#F0FAF5" stroke-width="4.5" stroke-linecap="round"></line>
+  
+  <path d="M10 9 Q3 9 5 17" stroke="#F0FAF5" stroke-width="3" stroke-linecap="round" fill="none"></path>
+  
+  <path d="M10 55 Q3 55 5 47" stroke="#F0FAF5" stroke-width="3" stroke-linecap="round" fill="none"></path>
+  
+  <line x1="18" y1="9" x2="18" y2="55" stroke="#3DAA78" stroke-width="1.8" stroke-linecap="round" opacity="0.45"></line>
+  
+  <path d="M24 11 L24 53 M24 11 L38.5 34 L53 11 L53 53" stroke="#F0FAF5" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"></path>
+</svg>

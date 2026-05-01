@@ -8,7 +8,21 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { toPng, toCanvas, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { Song, Key, AppLanguage, JoinedSetlist, Setlist, SetlistShareStatus, SetlistSong, SetlistDisplayMode, StoredSong, BarNumberMode } from './types';
+import {
+  CloudLibrarySummary,
+  LibraryRole,
+  Song,
+  Key,
+  AppLanguage,
+  JoinedSetlist,
+  Setlist,
+  SetlistShareStatus,
+  SetlistSong,
+  SetlistDisplayMode,
+  StoredSong,
+  BarNumberMode,
+  TeamManagementSnapshot
+} from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
@@ -22,8 +36,8 @@ import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
-import { applySetlistSongOverrides, getDefaultSectionOrder } from './utils/setlistUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play } from 'lucide-react';
+import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -99,6 +113,67 @@ interface GoogleUserSession {
   email: string;
   picture?: string;
 }
+
+const TEAM_EDIT_ROLES = new Set<LibraryRole>(['owner', 'editor']);
+const TEAM_SETLIST_CREATE_ROLES = new Set<LibraryRole>(['owner', 'editor', 'setlist_manager']);
+
+const getRoleLabel = (role: LibraryRole, language: AppLanguage) => {
+  if (language === 'zh') {
+    switch (role) {
+      case 'owner': return '擁有者';
+      case 'editor': return '完全編輯';
+      case 'setlist_manager': return '查看與建立歌單';
+      case 'viewer': return '只能查看';
+      default: return role;
+    }
+  }
+
+  switch (role) {
+    case 'owner': return 'Owner';
+    case 'editor': return 'Full Editor';
+    case 'setlist_manager': return 'Setlist Creator';
+    case 'viewer': return 'Viewer';
+    default: return role;
+  }
+};
+
+const getUnknownErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as {
+      code?: unknown;
+      message?: unknown;
+      details?: unknown;
+      hint?: unknown;
+    };
+    const parts = [record.code, record.message, record.details, record.hint]
+      .filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
+    if (parts.length > 0) {
+      return parts.join('\n');
+    }
+  }
+
+  return typeof error === 'string' && error.trim() ? error.trim() : '';
+};
+
+const isTeamFeatureSchemaError = (message: string) => (
+  /get_user_libraries|create_team|get_team_management|create_team_invite|team_invites|library_members|schema cache|PGRST202|PGRST204|Could not find the function|function public\./i.test(message)
+);
+
+const getTeamFeatureErrorMessage = (error: unknown, language: AppLanguage) => {
+  const reason = getUnknownErrorMessage(error);
+  if (isTeamFeatureSchemaError(reason)) {
+    const message = language === 'zh'
+      ? '團隊功能的 Supabase migration 尚未套用。請先執行最新 migration，之後就可以建立團隊與邀請成員。'
+      : 'The Supabase migration for team workspaces has not been applied yet. Apply the latest migration before creating teams or invites.';
+    return reason ? `${message}\n\n${reason}` : message;
+  }
+
+  return reason || (language === 'zh' ? '無法載入雲端工作區。' : 'Unable to load cloud workspace.');
+};
 
 interface ExportedSongLibraryPayload {
   version: 1;
@@ -618,6 +693,18 @@ const INITIAL_SONG: Song = {
   ]
 };
 
+const EMPTY_LIBRARY_PREVIEW_SONG: StoredSong = {
+  id: 'empty-library-preview',
+  title: 'No songs yet',
+  originalKey: 'C',
+  currentKey: 'C',
+  timeSignature: '4/4',
+  showAbsoluteJianpu: false,
+  showLyrics: false,
+  sections: [],
+  updatedAt: 0
+};
+
 interface SongHistoryState {
   past: Song[];
   future: Song[];
@@ -862,6 +949,24 @@ const buildDuplicateSongTitle = (existingSongs: StoredSong[], originalTitle: str
   return nextTitle;
 };
 
+const buildImportedTeamSongTitle = (existingSongs: StoredSong[], originalTitle: string, untitledSong: string, importLabel: string) => {
+  const baseTitle = originalTitle.trim() || untitledSong;
+  const existingTitles = new Set(existingSongs.map((song) => song.title.trim().toLowerCase()));
+  if (!existingTitles.has(baseTitle.trim().toLowerCase())) {
+    return baseTitle;
+  }
+
+  let copyIndex = 1;
+  let nextTitle = `${baseTitle} ${importLabel}`;
+
+  while (existingTitles.has(nextTitle.trim().toLowerCase())) {
+    copyIndex += 1;
+    nextTitle = `${baseTitle} ${importLabel} ${copyIndex}`;
+  }
+
+  return nextTitle;
+};
+
 const createEmptySong = (title: string): StoredSong =>
   createStoredSong({
     title,
@@ -1021,7 +1126,7 @@ const serializeSetlists = (setlists: Setlist[]) =>
   JSON.stringify(
     setlists.map((setlist) => ({
       ...setlist,
-      songs: reindexSetlistSongs(setlist.songs)
+      songs: reindexSetlistSongs(setlist.songs).map(({ personalCapoOverride, ...setlistSong }) => setlistSong)
     }))
   );
 
@@ -1250,6 +1355,27 @@ export default function App() {
   const [pendingRevokeShareSetlistId, setPendingRevokeShareSetlistId] = useState<string | null>(null);
   const [isRevokingSetlistShare, setIsRevokingSetlistShare] = useState(false);
   const [pendingShareUrl, setPendingShareUrl] = useState<string | null>(null);
+  const [cloudLibraries, setCloudLibraries] = useState<CloudLibrarySummary[]>([]);
+  const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
+  const [isSwitchingLibrary, setIsSwitchingLibrary] = useState(false);
+  const [teamManagement, setTeamManagement] = useState<TeamManagementSnapshot | null>(null);
+  const [isTeamManagementOpen, setIsTeamManagementOpen] = useState(false);
+  const [isLoadingTeamManagement, setIsLoadingTeamManagement] = useState(false);
+  const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
+  const [newTeamName, setNewTeamName] = useState('');
+  const [isCreatingTeam, setIsCreatingTeam] = useState(false);
+  const [isImportingPersonalSongs, setIsImportingPersonalSongs] = useState(false);
+  const [teamInviteEmail, setTeamInviteEmail] = useState('');
+  const [teamInviteRole, setTeamInviteRole] = useState<Exclude<LibraryRole, 'owner'>>('viewer');
+  const [isCreatingTeamInvite, setIsCreatingTeamInvite] = useState(false);
+  const [teamInviteShareUrl, setTeamInviteShareUrl] = useState<string | null>(null);
+  const [teamFeatureError, setTeamFeatureError] = useState<string | null>(null);
+  const [teamSourceStatuses, setTeamSourceStatuses] = useState<Record<string, {
+    latestUpdatedAt?: number;
+    missing?: boolean;
+    error?: string;
+    isLoading?: boolean;
+  }>>({});
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const setlistActionsMenuRef = useRef<HTMLDivElement>(null);
@@ -1290,7 +1416,38 @@ export default function App() {
   const showGoogleAuth = false;
   const isAuthenticated = Boolean(session && authenticatedUser);
   const isCloudMode = isAuthenticated && Boolean(cloudRepositoryRef.current || authenticatedUser);
-  const song = songs.find((item) => item.id === selectedSongId) ?? songs[0];
+  const activeCloudLibrary = cloudLibraries.find((library) => library.id === activeLibraryId)
+    ?? cloudLibraries.find((library) => library.kind === 'personal')
+    ?? null;
+  const personalCloudLibrary = cloudLibraries.find((library) => library.kind === 'personal') ?? null;
+  const workspaceLibraryButtons = cloudLibraries.length > 0
+    ? cloudLibraries
+    : isAuthenticated
+      ? [{
+          id: activeLibraryId ?? 'personal-placeholder',
+          name: language === 'zh' ? '個人區' : 'Personal',
+          kind: 'personal' as const,
+          ownerUserId: authenticatedUser?.id ?? '',
+          role: 'owner' as const,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString()
+        }]
+      : [];
+  const isTeamWorkspace = activeCloudLibrary?.kind === 'team';
+  const activeLibraryRole = activeCloudLibrary?.role ?? 'owner';
+  const hasSongs = songs.length > 0;
+  const linkedTeamSourceSignature = React.useMemo(
+    () => songs
+      .filter((item) => item.teamSource)
+      .map((item) => `${item.id}:${item.teamSource?.libraryId}:${item.teamSource?.songId}:${item.teamSource?.updatedAt}`)
+      .join('|'),
+    [songs]
+  );
+  const canEditTeamSongs = !isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole);
+  const canCreateTeamSetlists = !isTeamWorkspace || TEAM_SETLIST_CREATE_ROLES.has(activeLibraryRole);
+  const canManageActiveTeam = isTeamWorkspace && activeLibraryRole === 'owner';
+  const shouldShowCreateTeamForm = isCreateTeamOpen || !cloudLibraries.some((library) => library.kind === 'team');
+  const song = songs.find((item) => item.id === selectedSongId) ?? songs[0] ?? EMPTY_LIBRARY_PREVIEW_SONG;
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
   const setlistIsDirty = serializeSetlists(setlists) !== serializeSetlists(savedSetlists);
   const workspaceIsDirty = libraryIsDirty || setlistIsDirty;
@@ -1347,6 +1504,14 @@ export default function App() {
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
   const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? joinedSetlists[0] ?? null;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
+  const canEditSelectedSetlist = !isTeamWorkspace
+    ? !isJoinedSetlist
+    : !isJoinedSetlist && (
+      TEAM_EDIT_ROLES.has(activeLibraryRole)
+      || (activeLibraryRole === 'setlist_manager' && selectedSetlist?.createdBy === authenticatedUser?.id)
+    );
+  const canShareSelectedSetlist = canEditSelectedSetlist;
+  const canOpenEditor = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs && hasSongs;
   const joinedSetlistDisplayPreference = isJoinedSetlist && selectedSetlist
     ? joinedSetlistDisplayPreferences[selectedSetlist.id] ?? {}
     : {};
@@ -1396,7 +1561,7 @@ export default function App() {
       ? copy.help
       : isSetlistMode
         ? selectedSetlist?.name || copy.untitledSetlist
-        : song.title || copy.untitledSong;
+        : hasSongs ? song.title || copy.untitledSong : (activeCloudLibrary?.name ?? copy.songLibrary);
   const mobileDrawerContextLabel = isSetlistMode ? copy.serviceSetlist : copy.songLibrary;
   const mobileDrawerContextValue = isSetlistMode
     ? (mobileSetlistDrawerView === 'detail' ? '' : (selectedSetlist?.name || copy.untitledSetlist))
@@ -1575,7 +1740,7 @@ export default function App() {
             <span>{syncStatusLabel}</span>
           </div>
 
-          {activeAppView === 'sheet' && !isSetlistMode && (
+          {activeAppView === 'sheet' && !isSetlistMode && hasSongs && (!isTeamWorkspace || canEditTeamSongs) && (
             <button
               type="button"
               onClick={() => {
@@ -1589,7 +1754,7 @@ export default function App() {
             </button>
           )}
 
-          {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && (
+          {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && canShareSelectedSetlist && (
             <button
               type="button"
               onClick={() => {
@@ -1652,8 +1817,8 @@ export default function App() {
   const currentCapo = song.capo || 0;
   const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
   const currentSetlistKey = activeSetlistPreviewSong?.currentKey ?? selectedSetlistSourceSong?.currentKey ?? 'C';
-  const currentSetlistCapo = typeof selectedSetlistSong?.capo === 'number'
-    ? selectedSetlistSong.capo
+  const currentSetlistCapo = selectedSetlistSong
+    ? getEffectiveSetlistSongCapo(selectedSetlistSong, selectedSetlistSourceSong?.capo ?? 0) ?? 0
     : (selectedSetlistSourceSong?.capo ?? 0);
   const currentSetlistPlayKey = getPlayKey(currentSetlistKey, currentSetlistCapo);
   const exportProgressPercent = pdfExportProgress && pdfExportProgress.totalPages > 0
@@ -1714,7 +1879,7 @@ export default function App() {
   };
   const getSetlistSongInfoSummary = (item: SetlistSong, sourceSong: Song) => {
     const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-    const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
+    const effectiveCapo = getEffectiveSetlistSongCapo(item, sourceSong.capo ?? 0) ?? 0;
     const displaySong = item.songData ?? sourceSong;
     const versionSummary = getSongVersionSummary(displaySong);
     const translator = displaySong.translator?.trim();
@@ -1910,6 +2075,56 @@ export default function App() {
   }, [isSidebarResizing, responsiveSidebarMaxWidth, responsiveSidebarMinWidth]);
 
   useEffect(() => {
+    const repository = cloudRepositoryRef.current;
+    const linkedSongs = songs.filter((item) => item.teamSource);
+
+    if (!authenticatedUser || isTeamWorkspace || !repository || linkedSongs.length === 0) {
+      setTeamSourceStatuses({});
+      return;
+    }
+
+    let isCancelled = false;
+    setTeamSourceStatuses((current) => {
+      const next: typeof current = {};
+      linkedSongs.forEach((linkedSong) => {
+        next[linkedSong.id] = { ...current[linkedSong.id], isLoading: true };
+      });
+      return next;
+    });
+
+    const loadStatuses = async () => {
+      const results = await Promise.all(linkedSongs.map(async (linkedSong) => {
+        try {
+          const sourceSong = await repository.loadTeamSourceSong(linkedSong);
+          return {
+            songId: linkedSong.id,
+            status: sourceSong
+              ? { latestUpdatedAt: sourceSong.updatedAt, isLoading: false }
+              : { missing: true, isLoading: false }
+          };
+        } catch (error) {
+          return {
+            songId: linkedSong.id,
+            status: {
+              error: error instanceof Error ? error.message : 'Unable to load linked team song.',
+              isLoading: false
+            }
+          };
+        }
+      }));
+
+      if (isCancelled) return;
+      setTeamSourceStatuses(Object.fromEntries(results.map((result) => [result.songId, result.status])));
+    };
+
+    void loadStatuses();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authenticatedUser, isTeamWorkspace, linkedTeamSourceSignature, songs]);
+
+  useEffect(() => {
     if (!isEditing || !activeSectionId) return;
 
     const scrollRoot = previewRef.current;
@@ -1935,12 +2150,14 @@ export default function App() {
   const persistWorkspace = async (nextSongs: StoredSong[], nextSetlists: Setlist[]) => {
     const savedAt = Date.now();
 
-    try {
-      window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
-      window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(nextSetlists));
-      window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
-    } catch {
-      // Ignore local cache failures and keep the app usable.
+    if (!isTeamWorkspace) {
+      try {
+        window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
+        window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(nextSetlists));
+        window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
+      } catch {
+        // Ignore local cache failures and keep the app usable.
+      }
     }
 
     if (!authenticatedUser || !cloudRepositoryRef.current) {
@@ -1952,6 +2169,10 @@ export default function App() {
     }
 
     if (!navigator.onLine) {
+      if (isTeamWorkspace) {
+        setSyncStatus('offline');
+        throw new Error(language === 'zh' ? '團隊區需要連線才能儲存。' : 'Team workspaces require an internet connection to save.');
+      }
       savePendingSync({
         songs: cloneSong(nextSongs),
         setlists: cloneSong(nextSetlists),
@@ -1976,11 +2197,13 @@ export default function App() {
       setLastSavedAt(savedAt);
       setSyncStatus('saved');
     } catch {
-      savePendingSync({
-        songs: cloneSong(nextSongs),
-        setlists: cloneSong(nextSetlists),
-        savedAt
-      });
+      if (!isTeamWorkspace) {
+        savePendingSync({
+          songs: cloneSong(nextSongs),
+          setlists: cloneSong(nextSetlists),
+          savedAt
+        });
+      }
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       throw new Error('Unable to sync workspace.');
     }
@@ -2060,6 +2283,9 @@ export default function App() {
     if (!selectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) {
       return;
     }
+    if (!canEditSelectedSetlist) {
+      return;
+    }
 
     pushSetlistSongHistory(selectedSetlistSong.id, activeSetlistEditableSong);
     handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
@@ -2124,6 +2350,208 @@ export default function App() {
     setActiveAppView((currentView) => currentView === nextView ? 'sheet' : nextView);
   };
 
+  const handleToggleEditor = () => {
+    if (!isEditing && !canOpenEditor) {
+      window.alert(language === 'zh' ? '你目前只有查看權限，不能編輯內容。' : 'Your current role can view this workspace but cannot edit it.');
+      return;
+    }
+
+    setIsEditing((current) => !current);
+  };
+
+  const handleToggleLibraryEditing = () => {
+    if (!isLibraryEditing && !canEditTeamSongs) {
+      window.alert(language === 'zh' ? '你沒有管理這個團隊歌曲庫的權限。' : 'You do not have permission to manage this team song library.');
+      return;
+    }
+
+    setIsLibraryEditing((current) => !current);
+  };
+
+  const applyWorkspaceSnapshot = (workspace: { songs: StoredSong[]; setlists: Setlist[]; joinedSetlists: JoinedSetlist[]; lastSavedAt: number | null }) => {
+    setSongs(workspace.songs);
+    setSavedSongs(cloneSong(workspace.songs));
+    setSetlists(workspace.setlists);
+    setSavedSetlists(cloneSong(workspace.setlists));
+    setJoinedSetlists(workspace.joinedSetlists);
+    setLastSavedAt(workspace.lastSavedAt);
+    setSongHistories({});
+    setSetlistSongHistories({});
+    setSelectedSongIdsForBulkDelete([]);
+    setIsLibraryEditing(false);
+    setIsSetlistAddSongsOpen(false);
+    setSelectedSongId(workspace.songs[0]?.id ?? '');
+    const nextSetlist = workspace.setlists[0] ?? workspace.joinedSetlists[0] ?? null;
+    setSelectedSetlistId(nextSetlist?.id ?? null);
+    setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+    setWorkspaceMode(workspace.setlists.length > 0 || workspace.joinedSetlists.length > 0 ? 'setlists' : 'songs');
+  };
+
+  const handleSwitchCloudLibrary = async (libraryId: string) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || libraryId === activeLibraryId || isSwitchingLibrary) {
+      return;
+    }
+
+    try {
+      if (workspaceIsDirty) {
+        if (isAutoSaveEnabled) {
+          await persistWorkspace(songs, setlists);
+        } else {
+          const shouldSave = window.confirm(copy.confirmSaveBeforeSwitch);
+          if (shouldSave) {
+            await persistWorkspace(songs, setlists);
+          } else {
+            restoreSavedWorkspace();
+          }
+        }
+      }
+
+      setIsSwitchingLibrary(true);
+      setAuthUiError(null);
+      repository.setActiveLibrary(libraryId);
+      const workspace = await repository.loadLibraryWorkspace(libraryId);
+      applyWorkspaceSnapshot(workspace);
+      setActiveLibraryId(libraryId);
+      setSelectedSetlistShareStatus(null);
+      setTeamManagement(null);
+      setIsTeamManagementOpen(false);
+      setSyncStatus('saved');
+    } catch (error) {
+      setAuthUiError(getTeamFeatureErrorMessage(error, language));
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+    } finally {
+      setIsSwitchingLibrary(false);
+    }
+  };
+
+  const refreshCloudLibraries = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) return;
+    try {
+      const libraries = await repository.listLibraries();
+      setCloudLibraries(libraries);
+      setTeamFeatureError(null);
+      if (!activeLibraryId) {
+        setActiveLibraryId(libraries.find((library) => library.kind === 'personal')?.id ?? libraries[0]?.id ?? null);
+      }
+    } catch (error) {
+      setTeamFeatureError(getTeamFeatureErrorMessage(error, language));
+    }
+  };
+
+  const handleCreateTeam = async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    const repository = cloudRepositoryRef.current;
+    if (!repository) {
+      setAuthUiError(copy.authUnavailable);
+      return;
+    }
+
+    if (teamFeatureError && isTeamFeatureSchemaError(teamFeatureError)) {
+      setAuthUiError(teamFeatureError);
+      return;
+    }
+
+    const name = newTeamName.trim();
+    if (!name) return;
+
+    try {
+      setIsCreatingTeam(true);
+      setSyncStatus('syncing');
+      const library = await repository.createTeam(name);
+      const libraries = await repository.listLibraries();
+      setCloudLibraries(libraries);
+      setTeamFeatureError(null);
+      setNewTeamName('');
+      setIsCreateTeamOpen(false);
+      await handleSwitchCloudLibrary(library.id);
+      setSyncStatus('saved');
+    } catch (error) {
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      const message = getTeamFeatureErrorMessage(error, language);
+      setTeamFeatureError(message);
+      setAuthUiError(message);
+    } finally {
+      setIsCreatingTeam(false);
+    }
+  };
+
+  const loadTeamManagement = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !activeCloudLibrary || !canManageActiveTeam) {
+      setTeamManagement(null);
+      return;
+    }
+
+    try {
+      setIsLoadingTeamManagement(true);
+      const snapshot = await repository.getTeamManagement(activeCloudLibrary.id);
+      setTeamManagement(snapshot);
+      setAuthUiError(null);
+    } catch (error) {
+      setTeamManagement(null);
+      setAuthUiError(getTeamFeatureErrorMessage(error, language));
+    } finally {
+      setIsLoadingTeamManagement(false);
+    }
+  };
+
+  const handleCreateTeamInvite = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !activeCloudLibrary || !teamInviteEmail.trim()) return;
+
+    try {
+      setIsCreatingTeamInvite(true);
+      const invite = await repository.createTeamInvite(activeCloudLibrary.id, teamInviteEmail.trim(), teamInviteRole);
+      const inviteUrl = new URL(`team-invite/${invite.token}`, getAppBaseUrl()).toString();
+      setTeamInviteShareUrl(inviteUrl);
+      await copyShareUrlToClipboard(inviteUrl);
+      setTeamInviteEmail('');
+      await loadTeamManagement();
+    } catch (error) {
+      window.alert(getTeamFeatureErrorMessage(error, language));
+    } finally {
+      setIsCreatingTeamInvite(false);
+    }
+  };
+
+  const handleRevokeTeamInvite = async (inviteId: string) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) return;
+    try {
+      await repository.revokeTeamInvite(inviteId);
+      await loadTeamManagement();
+    } catch (error) {
+      window.alert(getTeamFeatureErrorMessage(error, language));
+    }
+  };
+
+  const handleUpdateTeamMemberRole = async (userId: string, role: Exclude<LibraryRole, 'owner'>) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !activeCloudLibrary) return;
+    try {
+      await repository.updateTeamMemberRole(activeCloudLibrary.id, userId, role);
+      await loadTeamManagement();
+      await refreshCloudLibraries();
+    } catch (error) {
+      window.alert(getTeamFeatureErrorMessage(error, language));
+    }
+  };
+
+  const handleRemoveTeamMember = async (userId: string) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !activeCloudLibrary) return;
+    const confirmed = window.confirm(language === 'zh' ? '要移除此團隊成員嗎？' : 'Remove this team member?');
+    if (!confirmed) return;
+    try {
+      await repository.removeTeamMember(activeCloudLibrary.id, userId);
+      await loadTeamManagement();
+    } catch (error) {
+      window.alert(getTeamFeatureErrorMessage(error, language));
+    }
+  };
+
   const handleSelectSong = (nextSongId: string) => {
     if (nextSongId === selectedSongId && workspaceMode === 'songs') {
       return;
@@ -2137,6 +2565,12 @@ export default function App() {
 
   const handleSongChange = (newSong: Song) => {
     if (!song) {
+      return;
+    }
+    if (!hasSongs) {
+      return;
+    }
+    if (!canEditTeamSongs) {
       return;
     }
 
@@ -2317,7 +2751,7 @@ export default function App() {
   };
 
   const handleSetlistKeyChange = (newKey: Key) => {
-    if (!selectedSetlistSong || isJoinedSetlist) {
+    if (!selectedSetlistSong || isJoinedSetlist || !canEditSelectedSetlist) {
       return;
     }
 
@@ -2351,6 +2785,10 @@ export default function App() {
   };
 
   const handleCreateSong = () => {
+    if (!canEditTeamSongs) {
+      window.alert(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this team song library.');
+      return;
+    }
     const newSong = createDefaultSong(songs.length + 1);
     const nextSongs = [newSong, ...songs];
     setSongs(nextSongs);
@@ -2361,12 +2799,18 @@ export default function App() {
   };
 
   const handleCreateSetlist = () => {
+    if (!canCreateTeamSetlists) {
+      window.alert(language === 'zh' ? '你沒有在這個團隊建立歌單的權限。' : 'You do not have permission to create setlists in this team.');
+      return;
+    }
     const now = Date.now();
     const newSetlist: Setlist = {
       id: createSetlistId(),
       name: language === 'zh' ? `服事歌單 ${setlists.length + 1}` : `Service Setlist ${setlists.length + 1}`,
       displayMode: 'chord-movable-key',
       showLyrics: false,
+      createdBy: authenticatedUser?.id,
+      updatedBy: authenticatedUser?.id,
       createdAt: now,
       updatedAt: now,
       songs: []
@@ -2436,6 +2880,20 @@ export default function App() {
     }
   };
 
+  const handleTeamPersonalSetlistCapoChange = (setlistSongId: string, capo: number) => {
+    setSetlists((currentSetlists) => currentSetlists.map((setlist) =>
+      setlist.id !== selectedSetlistId
+        ? setlist
+        : {
+            ...setlist,
+            songs: setlist.songs.map((item) => item.id === setlistSongId ? { ...item, personalCapoOverride: capo } : item)
+          }
+    ));
+    if (cloudRepositoryRef.current) {
+      void cloudRepositoryRef.current.saveCapoOverride(setlistSongId, capo);
+    }
+  };
+
   const handleSelectedSetlistCapoChange = (capo: number) => {
     if (!selectedSetlistSong) {
       return;
@@ -2443,6 +2901,11 @@ export default function App() {
 
     if (isJoinedSetlist) {
       handleJoinedSetlistCapoChange(selectedSetlistSong.id, capo);
+      return;
+    }
+
+    if (isTeamWorkspace && !canEditSelectedSetlist) {
+      handleTeamPersonalSetlistCapoChange(selectedSetlistSong.id, capo);
       return;
     }
 
@@ -2507,14 +2970,22 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!authenticatedUser || !cloudRepositoryRef.current || !selectedSetlist || isJoinedSetlist || !isSetlistMode) {
+    if (!authenticatedUser || !cloudRepositoryRef.current || !selectedSetlist || !canShareSelectedSetlist || !isSetlistMode) {
       setSelectedSetlistShareStatus(null);
       setIsLoadingSetlistShareStatus(false);
       return;
     }
 
     void loadSetlistShareStatus(selectedSetlist.id);
-  }, [authenticatedUser, isJoinedSetlist, isSetlistMode, selectedSetlist?.id]);
+  }, [authenticatedUser, canShareSelectedSetlist, isSetlistMode, selectedSetlist?.id]);
+
+  useEffect(() => {
+    if (!isTeamManagementOpen || !canManageActiveTeam) {
+      return;
+    }
+
+    void loadTeamManagement();
+  }, [activeLibraryId, canManageActiveTeam, isTeamManagementOpen]);
 
   const handleSetlistNameChange = (setlistId: string, name: string) => {
     replaceSetlist(setlistId, (currentSetlist) => ({
@@ -2524,6 +2995,9 @@ export default function App() {
   };
 
   const handleSetlistDisplaySettingsChange = (setlistId: string, updates: Partial<Pick<Setlist, 'displayMode' | 'showLyrics'>>) => {
+    if (!canEditSelectedSetlist) {
+      return;
+    }
     replaceSetlist(setlistId, (currentSetlist) => ({
       ...currentSetlist,
       ...updates
@@ -2558,6 +3032,14 @@ export default function App() {
   };
 
   const handleDeleteSetlist = (setlistId: string) => {
+    const targetSetlist = setlists.find((item) => item.id === setlistId);
+    const canDeleteTarget = !isTeamWorkspace
+      || TEAM_EDIT_ROLES.has(activeLibraryRole)
+      || (activeLibraryRole === 'setlist_manager' && targetSetlist?.createdBy === authenticatedUser?.id);
+    if (!canDeleteTarget) {
+      window.alert(language === 'zh' ? '你沒有刪除這份團隊歌單的權限。' : 'You do not have permission to delete this team setlist.');
+      return;
+    }
     const confirmed = window.confirm(copy.confirmDeleteSetlist);
     if (!confirmed) {
       return;
@@ -2698,6 +3180,10 @@ export default function App() {
     if (!selectedSetlist) {
       return;
     }
+    if (!canEditSelectedSetlist) {
+      window.alert(language === 'zh' ? '你沒有編輯這份團隊歌單的權限。' : 'You do not have permission to edit this team setlist.');
+      return;
+    }
 
     const sourceSong = songs.find((item) => item.id === songId);
     if (!sourceSong) {
@@ -2736,6 +3222,9 @@ export default function App() {
     if (!selectedSetlist) {
       return;
     }
+    if (!canEditSelectedSetlist) {
+      return;
+    }
 
     replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
       ...currentSetlist,
@@ -2745,6 +3234,9 @@ export default function App() {
 
   const handleRemoveSetlistSong = (setlistSongId: string) => {
     if (!selectedSetlist) {
+      return;
+    }
+    if (!canEditSelectedSetlist) {
       return;
     }
 
@@ -2758,7 +3250,7 @@ export default function App() {
   };
 
   const moveSetlistSong = (sourceId: string, targetId: string) => {
-    if (!selectedSetlist || sourceId === targetId) {
+    if (!selectedSetlist || sourceId === targetId || !canEditSelectedSetlist) {
       return;
     }
 
@@ -2802,6 +3294,10 @@ export default function App() {
   };
 
   const handleImportSongLibraryClick = () => {
+    if (!canEditTeamSongs) {
+      window.alert(language === 'zh' ? '你沒有匯入覆蓋這個團隊歌曲庫的權限。' : 'You do not have permission to import into this team song library.');
+      return;
+    }
     importLibraryInputRef.current?.click();
   };
 
@@ -2853,7 +3349,91 @@ export default function App() {
     }
   };
 
+  const handleImportPersonalSongsToTeam = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !isTeamWorkspace || !canEditTeamSongs) {
+      window.alert(language === 'zh' ? '你沒有匯入到這個團隊歌曲庫的權限。' : 'You do not have permission to import into this team song library.');
+      return;
+    }
+
+    const teamName = activeCloudLibrary?.name ?? (language === 'zh' ? '目前團隊' : 'this team');
+    const confirmed = window.confirm(
+      language === 'zh'
+        ? `要把個人區所有歌曲複製到「${teamName}」嗎？\n\n這會建立獨立副本，團隊成員會依權限看到這些歌曲；個人區原本的歌曲不會被修改。同名歌曲會自動加上「(個人匯入)」。`
+        : `Copy all personal songs into "${teamName}"?\n\nThis creates independent copies that team members can see according to their roles. Your personal songs will not be changed. Duplicate titles will be renamed with "(Personal import)".`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsImportingPersonalSongs(true);
+      setSyncStatus('syncing');
+      const personalWorkspace = await repository.loadPersonalWorkspace();
+      if (personalWorkspace.songs.length === 0) {
+        window.alert(language === 'zh' ? '個人區目前沒有可匯入的歌曲。' : 'Your personal workspace has no songs to import.');
+        return;
+      }
+
+      const importedSongs: StoredSong[] = [];
+      const linkedPersonalSongs: StoredSong[] = [];
+      const nextSongs = [...songs];
+      personalWorkspace.songs.forEach((sourceSong, index) => {
+        const importLabel = language === 'zh' ? '(個人匯入)' : '(Personal import)';
+        const copiedSong: StoredSong = {
+          ...cloneSong(normalizeSongBars(sourceSong)),
+          id: crypto.randomUUID(),
+          title: buildImportedTeamSongTitle(nextSongs, sourceSong.title, copy.untitledSong, importLabel),
+          updatedAt: Date.now() + index
+        };
+        nextSongs.push(copiedSong);
+        importedSongs.push(copiedSong);
+        if (activeLibraryId) {
+          linkedPersonalSongs.push({
+            ...sourceSong,
+            updatedAt: Date.now() + index,
+            teamSource: {
+              libraryId: activeLibraryId,
+              libraryName: activeCloudLibrary?.name,
+              songId: copiedSong.id,
+              updatedAt: copiedSong.updatedAt,
+              copiedAt: Date.now()
+            }
+          });
+        }
+      });
+
+      setSongs(nextSongs);
+      if (!selectedSongId && importedSongs[0]) {
+        setSelectedSongId(importedSongs[0].id);
+      }
+      setSongHistories({});
+      setSelectedSongIdsForBulkDelete([]);
+      setIsLibraryEditing(false);
+      await persistWorkspace(nextSongs, setlists);
+      await Promise.all(linkedPersonalSongs.map((linkedSong) => repository.savePersonalSong(linkedSong)));
+      window.alert(
+        language === 'zh'
+          ? `已匯入 ${importedSongs.length} 首個人歌曲到「${teamName}」，並在個人區建立團隊來源連結。`
+          : `Imported ${importedSongs.length} personal songs into "${teamName}" and linked the personal copies to their team sources.`
+      );
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      window.alert(
+        language === 'zh'
+          ? `無法從個人區匯入歌曲。${reason ? `\n\n${reason}` : ''}`
+          : `Unable to import songs from your personal workspace.${reason ? `\n\n${reason}` : ''}`
+      );
+    } finally {
+      setIsImportingPersonalSongs(false);
+    }
+  };
+
   const handleDuplicateSong = (songId: string) => {
+    if (!canEditTeamSongs) {
+      window.alert(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this team song library.');
+      return;
+    }
     const targetSong = songs.find((item) => item.id === songId);
     if (!targetSong) {
       return;
@@ -2883,7 +3463,79 @@ export default function App() {
     setIsEditing(true);
   };
 
+  const handleCopyTeamSongToPersonal = async (songId: string) => {
+    const repository = cloudRepositoryRef.current;
+    const targetSong = songs.find((item) => item.id === songId);
+    if (!repository || !targetSong || !isTeamWorkspace) {
+      return;
+    }
+
+    try {
+      setSyncStatus('syncing');
+      const copiedSong = await repository.copySongToPersonal(targetSong);
+      setSyncStatus('saved');
+      window.alert(language === 'zh'
+        ? `已轉存到個人區：「${copiedSong.title}」。之後團隊版更新時，個人區會提示可同步。`
+        : `Copied to your personal library: "${copiedSong.title}". Your personal copy will show a sync prompt when the team version changes.`);
+    } catch (error) {
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      window.alert(error instanceof Error ? error.message : copy.cloudSyncFailed);
+    }
+  };
+
+  const handleSyncPersonalSongFromTeam = async (songId: string) => {
+    const repository = cloudRepositoryRef.current;
+    const targetSong = songs.find((item) => item.id === songId);
+    if (!repository || !targetSong?.teamSource || isTeamWorkspace) {
+      return;
+    }
+
+    const sourceName = targetSong.teamSource.libraryName ?? (language === 'zh' ? '團隊來源' : 'team source');
+    const confirmed = window.confirm(
+      language === 'zh'
+        ? `要把「${targetSong.title || copy.untitledSong}」同步到「${sourceName}」的最新版嗎？\n\n會保留個人副本的歌名與 capo，但譜面內容會更新成團隊版。`
+        : `Sync "${targetSong.title || copy.untitledSong}" to the latest version from "${sourceName}"?\n\nThe personal title and capo will be kept, but chart content will be replaced by the team version.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setSyncStatus('syncing');
+      const syncedSong = await repository.syncPersonalSongFromTeam(targetSong);
+      const nextSongs = songs.map((item) => item.id === syncedSong.id ? syncedSong : item);
+      try {
+        window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
+        window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(Date.now()));
+      } catch {
+        // Ignore local cache failures and keep the app usable.
+      }
+      setSongs(nextSongs);
+      setSavedSongs(cloneSong(nextSongs));
+      setLastSavedAt(Date.now());
+      setSongHistories((currentHistory) => ({
+        ...currentHistory,
+        [syncedSong.id]: { past: [], future: [] }
+      }));
+      setTeamSourceStatuses((current) => ({
+        ...current,
+        [syncedSong.id]: {
+          latestUpdatedAt: syncedSong.teamSource?.updatedAt,
+          isLoading: false
+        }
+      }));
+      setSyncStatus('saved');
+      window.alert(language === 'zh' ? '已同步到團隊最新版。' : 'Synced to the latest team version.');
+    } catch (error) {
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      window.alert(error instanceof Error ? error.message : copy.cloudSyncFailed);
+    }
+  };
+
   const handleSongListTitleChange = (songId: string, title: string) => {
+    if (!canEditTeamSongs) {
+      return;
+    }
     const targetSong = songs.find((item) => item.id === songId);
     if (!targetSong || targetSong.title === title) {
       return;
@@ -2894,6 +3546,10 @@ export default function App() {
   };
 
   const handleDeleteSong = (songId: string) => {
+    if (!canEditTeamSongs) {
+      window.alert(language === 'zh' ? '你沒有刪除這個團隊歌曲的權限。' : 'You do not have permission to delete this team song.');
+      return;
+    }
     const targetSong = songs.find((item) => item.id === songId);
     if (!targetSong) {
       return;
@@ -2958,6 +3614,10 @@ export default function App() {
   };
 
   const handleDeleteSelectedSongs = () => {
+    if (!canEditTeamSongs) {
+      window.alert(language === 'zh' ? '你沒有刪除這些團隊歌曲的權限。' : 'You do not have permission to delete these team songs.');
+      return;
+    }
     if (selectedSongIdsForBulkDelete.length === 0) {
       return;
     }
@@ -3014,7 +3674,7 @@ export default function App() {
   };
 
   const handleUndo = () => {
-    if (!song || currentSongHistory.past.length === 0) {
+    if (!song || currentSongHistory.past.length === 0 || !canEditTeamSongs) {
       return;
     }
 
@@ -3033,7 +3693,7 @@ export default function App() {
   };
 
   const handleRedo = () => {
-    if (!song || currentSongHistory.future.length === 0) {
+    if (!song || currentSongHistory.future.length === 0 || !canEditTeamSongs) {
       return;
     }
 
@@ -3052,7 +3712,7 @@ export default function App() {
   };
 
   const handleSetlistUndo = () => {
-    if (!selectedSetlistSong || currentSetlistSongHistory.past.length === 0) {
+    if (!selectedSetlistSong || currentSetlistSongHistory.past.length === 0 || !canEditSelectedSetlist) {
       return;
     }
 
@@ -3077,7 +3737,7 @@ export default function App() {
   };
 
   const handleSetlistRedo = () => {
-    if (!selectedSetlistSong || currentSetlistSongHistory.future.length === 0) {
+    if (!selectedSetlistSong || currentSetlistSongHistory.future.length === 0 || !canEditSelectedSetlist) {
       return;
     }
 
@@ -3538,7 +4198,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (song && song.id !== selectedSongId) {
+    if (songs.length > 0 && song.id !== selectedSongId) {
       setSelectedSongId(song.id);
     }
   }, [selectedSongId, song]);
@@ -3626,6 +4286,13 @@ export default function App() {
   useEffect(() => {
     if (!authenticatedUser) {
       cloudRepositoryRef.current = null;
+      setCloudLibraries([]);
+      setActiveLibraryId(null);
+      setTeamManagement(null);
+      setIsTeamManagementOpen(false);
+      setIsCreateTeamOpen(false);
+      setNewTeamName('');
+      setTeamFeatureError(null);
       setIsLoadingCloudWorkspace(false);
       setIsImportPromptOpen(false);
       setSyncStatus('saved');
@@ -3650,18 +4317,54 @@ export default function App() {
     const loadCloudWorkspace = async () => {
       try {
         setIsLoadingCloudWorkspace(true);
-        const cloudWorkspace = await cloudRepositoryRef.current!.loadWorkspace();
+        const repository = cloudRepositoryRef.current!;
+        let libraries: CloudLibrarySummary[] = [];
+        let libraryListError: string | null = null;
+        try {
+          libraries = await repository.listLibraries();
+        } catch (error) {
+          libraryListError = getTeamFeatureErrorMessage(error, language);
+          const personalLibraryId = await repository.getPersonalLibraryId();
+          libraries = [{
+            id: personalLibraryId,
+            name: language === 'zh' ? '個人區' : 'Personal',
+            kind: 'personal',
+            ownerUserId: authenticatedUser.id,
+            role: 'owner',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }];
+        }
+        const requestedTeamId = typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('team')
+          : null;
+        const personalLibrary = libraries.find((library) => library.kind === 'personal') ?? null;
+        const requestedTeam = requestedTeamId
+          ? libraries.find((library) => library.id === requestedTeamId && library.kind === 'team') ?? null
+          : null;
+        const targetLibrary = requestedTeam ?? personalLibrary ?? libraries[0] ?? null;
+        if (targetLibrary) {
+          repository.setActiveLibrary(targetLibrary.id);
+        }
+        const cloudWorkspace = targetLibrary
+          ? await repository.loadLibraryWorkspace(targetLibrary.id)
+          : await repository.loadWorkspace();
         if (isCancelled) {
           return;
         }
 
         const hasLocalData = initialLibraryRef.current.songs.length > 0 || initialSetlistsRef.current.setlists.length > 0;
         const migrationCompleted = hasCompletedMigration(authenticatedUser.id);
-        const shouldUseCloudWorkspace = cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || cloudWorkspace.joinedSetlists.length > 0 || migrationCompleted || !hasLocalData;
+        const loadingTeamWorkspace = targetLibrary?.kind === 'team';
+        const shouldUseCloudWorkspace = loadingTeamWorkspace || cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || cloudWorkspace.joinedSetlists.length > 0 || migrationCompleted || !hasLocalData;
         let openedSharedSetlistFromLink = false;
+        setCloudLibraries(libraries);
+        setTeamFeatureError(libraryListError);
+        setAuthUiError(null);
+        setActiveLibraryId(targetLibrary?.id ?? null);
 
         if (shouldUseCloudWorkspace) {
-          const nextSongs = cloudWorkspace.songs.length > 0 ? cloudWorkspace.songs : initialLibraryRef.current.songs;
+          const nextSongs = cloudWorkspace.songs.length > 0 || loadingTeamWorkspace ? cloudWorkspace.songs : initialLibraryRef.current.songs;
           const nextSetlists = cloudWorkspace.setlists;
           const nextJoinedSetlists = cloudWorkspace.joinedSetlists;
           const requestedSetlistId = typeof window !== 'undefined'
@@ -3688,12 +4391,15 @@ export default function App() {
             setWorkspaceMode('setlists');
             setSelectedSetlistSongId(requestedSetlist.songs[0]?.id ?? null);
             window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
+          } else if (requestedTeam) {
+            setWorkspaceMode(nextSetlists.length > 0 ? 'setlists' : 'songs');
+            window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
           } else if (nextSetlists.length === 0 && nextJoinedSetlists.length > 0) {
             setWorkspaceMode('setlists');
           }
         }
 
-        if (hasLocalData && !migrationCompleted && !openedSharedSetlistFromLink) {
+        if (!loadingTeamWorkspace && hasLocalData && !migrationCompleted && !openedSharedSetlistFromLink) {
           setIsImportPromptOpen(true);
         } else {
           setIsImportPromptOpen(false);
@@ -3702,7 +4408,9 @@ export default function App() {
         setSyncStatus('saved');
       } catch (error) {
         if (!isCancelled) {
-          setAuthUiError(error instanceof Error ? error.message : 'Unable to load cloud workspace.');
+          const message = getTeamFeatureErrorMessage(error, language);
+          setAuthUiError(message);
+          setTeamFeatureError(message);
           setSyncStatus(navigator.onLine ? 'failed' : 'offline');
         }
       } finally {
@@ -3717,7 +4425,7 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [authenticatedUser]);
+  }, [authenticatedUser, language]);
 
   useEffect(() => {
     if (!authenticatedUser || !cloudRepositoryRef.current) {
@@ -3850,6 +4558,12 @@ export default function App() {
       setSelectedSongIdsForBulkDelete([]);
     }
   }, [isLibraryEditing, selectedSongIdsForBulkDelete.length]);
+
+  useEffect(() => {
+    if (isEditing && !canOpenEditor) {
+      setIsEditing(false);
+    }
+  }, [canOpenEditor, isEditing]);
 
   useEffect(() => {
     const handleSaveKeyDown = (event: KeyboardEvent) => {
@@ -4066,18 +4780,50 @@ export default function App() {
     }
   }, [activeEditorSong, activeNavigationPreviewSong, focusEditorField, isEditing]);
 
-  const previewSheet = React.useMemo(() => (
-    <ChordSheet 
-      song={song} 
-      language={language}
-      currentKey={song.currentKey} 
-      onElementClick={handleElementClick}
-      highlightedSectionIds={highlightedSectionIds}
-      activeSectionId={isEditing ? activeSectionId : null}
-      activeBar={isEditing ? activeBar : null}
-      previewIdentity={song.id}
-    />
-  ), [activeBar, activeSectionId, handleElementClick, highlightedSectionIds, isEditing, language, song]);
+  const previewSheet = React.useMemo(() => {
+    if (!hasSongs) {
+      return (
+        <div className="flex h-[720px] w-[794px] max-w-full items-center justify-center bg-white px-8 text-center shadow-sm">
+          <div className="max-w-sm">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+              <Music2 size={24} />
+            </div>
+            <h2 className="mt-5 text-xl font-bold text-gray-900">
+              {language === 'zh' ? '這個團隊還沒有歌曲' : 'This team has no songs yet'}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-gray-500">
+              {language === 'zh'
+                ? '從左側歌曲庫新增第一首歌，或切回個人區整理後再轉存到團隊。'
+                : 'Add the first song from the library sidebar, or switch back to your personal workspace and copy songs into the team.'}
+            </p>
+            {canEditTeamSongs ? (
+              <button
+                type="button"
+                onClick={handleCreateSong}
+                className="mt-5 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-indigo-500"
+              >
+                <Plus size={16} />
+                <span>{copy.newSong}</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <ChordSheet
+        song={song}
+        language={language}
+        currentKey={song.currentKey}
+        onElementClick={handleElementClick}
+        highlightedSectionIds={highlightedSectionIds}
+        activeSectionId={isEditing ? activeSectionId : null}
+        activeBar={isEditing ? activeBar : null}
+        previewIdentity={song.id}
+      />
+    );
+  }, [activeBar, activeSectionId, canEditTeamSongs, copy.newSong, handleCreateSong, handleElementClick, hasSongs, highlightedSectionIds, isEditing, language, song]);
 
   const setlistPreviewSheet = React.useMemo(() => {
     if (!activeSetlistPreviewSong) {
@@ -4303,6 +5049,10 @@ export default function App() {
       throw new Error(language === 'zh' ? '目前不能重新分享別人分享給你的歌單。' : 'Setlists shared with you cannot be reshared yet.');
     }
 
+    if (!canShareSelectedSetlist) {
+      throw new Error(language === 'zh' ? '你沒有分享這份團隊歌單的權限。' : 'You do not have permission to share this team setlist.');
+    }
+
     const requiredSongs = selectedSetlist.songs
       .map((setlistSong) => songs.find((item) => item.id === setlistSong.songId))
       .filter((item): item is StoredSong => Boolean(item));
@@ -4338,6 +5088,11 @@ export default function App() {
 
     const resourceId = resourceType === 'song' ? song?.id : selectedSetlist?.id;
     if (!resourceId) {
+      return;
+    }
+
+    if (resourceType === 'song' && isTeamWorkspace && !canEditTeamSongs) {
+      window.alert(language === 'zh' ? '你沒有分享團隊歌曲的權限。' : 'You do not have permission to share team songs.');
       return;
     }
 
@@ -4511,7 +5266,7 @@ export default function App() {
           }}
         />
       ) : null)
-    : (
+    : hasSongs ? (
         <SongMetadataPanel
           song={song}
           language={language}
@@ -4535,7 +5290,7 @@ export default function App() {
             showLyrics: nextShowLyrics
           })}
         />
-      );
+      ) : null;
 
   const mobileMetadataSummaryCard = isPhoneViewport && isEditing && isSheetView && mobileMetadataSong && metadataPanelContent ? (
     <button
@@ -4579,7 +5334,7 @@ export default function App() {
     </button>
   ) : null;
 
-  const setlistSharingPanel = selectedSetlist && !isJoinedSetlist ? (
+  const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist ? (
     <div className="rounded-2xl border border-gray-200 bg-white px-3 py-3 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -4707,6 +5462,235 @@ export default function App() {
     </section>
   ) : null;
 
+  const librarySwitcherPanel = isAuthenticated ? (
+    <div className="border-b border-gray-200 bg-white px-3 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
+            {language === 'zh' ? '工作區' : 'Workspace'}
+          </div>
+          <div className="mt-0.5 truncate text-xs font-semibold text-gray-600">
+            {activeCloudLibrary?.name ?? (language === 'zh' ? '個人區' : 'Personal')}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsCreateTeamOpen((current) => !current)}
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 text-[11px] font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+          title={language === 'zh' ? '建立團隊' : 'Create team'}
+          aria-label={language === 'zh' ? '建立團隊' : 'Create team'}
+        >
+          <UserPlus size={14} />
+          <span>{language === 'zh' ? '建立團隊' : 'Create team'}</span>
+        </button>
+      </div>
+
+      {shouldShowCreateTeamForm ? (
+        <form onSubmit={handleCreateTeam} className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/70 p-2">
+          <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-500">
+            {language === 'zh' ? '團隊名稱' : 'Team name'}
+          </label>
+          <input
+            type="text"
+            value={newTeamName}
+            onChange={(event) => setNewTeamName(event.target.value)}
+            placeholder={language === 'zh' ? '例如：主日敬拜團' : 'e.g. Sunday Worship Team'}
+            className="mt-1 h-9 w-full rounded-lg border border-indigo-100 bg-white px-2.5 text-sm font-semibold text-gray-800 outline-none transition-colors placeholder:text-gray-400 focus:border-indigo-300"
+          />
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setIsCreateTeamOpen(false);
+                setNewTeamName('');
+              }}
+              disabled={isCreatingTeam}
+              className="inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+            >
+              {language === 'zh' ? '取消' : 'Cancel'}
+            </button>
+            <button
+              type="submit"
+              disabled={isCreatingTeam || !newTeamName.trim()}
+              className="inline-flex h-8 items-center justify-center rounded-lg bg-indigo-600 px-2 text-xs font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
+            >
+              {isCreatingTeam ? copy.cloudSyncSyncing : (language === 'zh' ? '建立' : 'Create')}
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      <div className="mt-2 flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+        {workspaceLibraryButtons.map((library) => {
+          const isPlaceholder = cloudLibraries.length === 0;
+          const isActive = isPlaceholder || library.id === activeCloudLibrary?.id;
+          return (
+            <button
+              key={library.id}
+              type="button"
+              onClick={() => {
+                if (!isPlaceholder) {
+                  void handleSwitchCloudLibrary(library.id);
+                }
+              }}
+              disabled={isPlaceholder || isSwitchingLibrary || isActive}
+              className={`inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors disabled:cursor-default ${
+                isActive
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-700'
+              }`}
+              title={library.name}
+            >
+              <Users size={12} />
+              <span className="max-w-[120px] truncate">{library.kind === 'personal' ? (language === 'zh' ? '個人區' : 'Personal') : library.name}</span>
+              {library.kind === 'team' ? (
+                <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] text-gray-500">
+                  {getRoleLabel(library.role, language)}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {teamFeatureError ? (
+        <div className="mt-2 whitespace-pre-line rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-800">
+          {teamFeatureError}
+        </div>
+      ) : null}
+
+      {canManageActiveTeam ? (
+        <button
+          type="button"
+          onClick={() => setIsTeamManagementOpen((current) => !current)}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
+        >
+          <Users size={14} />
+          <span>{language === 'zh' ? '成員與邀請' : 'Members & Invites'}</span>
+        </button>
+      ) : isTeamWorkspace ? (
+        <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-500">
+          {language === 'zh' ? `目前權限：${getRoleLabel(activeLibraryRole, language)}` : `Role: ${getRoleLabel(activeLibraryRole, language)}`}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
+  const teamManagementPanel = isTeamManagementOpen && canManageActiveTeam ? (
+    <div className="border-b border-gray-200 bg-white px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
+            {language === 'zh' ? '團隊管理' : 'Team Management'}
+          </div>
+          <div className="mt-0.5 text-xs font-semibold text-gray-600">
+            {activeCloudLibrary?.name}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadTeamManagement()}
+          disabled={isLoadingTeamManagement}
+          className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 disabled:cursor-wait disabled:opacity-60"
+        >
+          {isLoadingTeamManagement ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
+        </button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-2">
+        <input
+          value={teamInviteEmail}
+          onChange={(event) => setTeamInviteEmail(event.target.value)}
+          placeholder={language === 'zh' ? '受邀 Gmail / Email' : 'Invitee Gmail / Email'}
+          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-indigo-300 focus:bg-white"
+        />
+        <div className="flex gap-2">
+          <select
+            value={teamInviteRole}
+            onChange={(event) => setTeamInviteRole(event.target.value as Exclude<LibraryRole, 'owner'>)}
+            className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"
+          >
+            <option value="editor">{getRoleLabel('editor', language)}</option>
+            <option value="setlist_manager">{getRoleLabel('setlist_manager', language)}</option>
+            <option value="viewer">{getRoleLabel('viewer', language)}</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => void handleCreateTeamInvite()}
+            disabled={isCreatingTeamInvite || !teamInviteEmail.trim()}
+            className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {language === 'zh' ? '邀請' : 'Invite'}
+          </button>
+        </div>
+        {teamInviteShareUrl ? (
+          <div className="break-all rounded-xl bg-indigo-50 px-3 py-2 text-[11px] font-medium text-indigo-700">
+            {teamInviteShareUrl}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
+          {language === 'zh' ? '成員' : 'Members'}
+        </div>
+        {(teamManagement?.members ?? []).map((member) => (
+          <div key={member.userId} className="flex min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-2.5 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs font-bold text-gray-900">{member.name || member.email}</div>
+              <div className="truncate text-[11px] text-gray-500">{member.email}</div>
+            </div>
+            {member.role === 'owner' ? (
+              <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-gray-600">{getRoleLabel(member.role, language)}</span>
+            ) : (
+              <>
+                <select
+                  value={member.role}
+                  onChange={(event) => void handleUpdateTeamMemberRole(member.userId, event.target.value as Exclude<LibraryRole, 'owner'>)}
+                  className="max-w-[130px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700"
+                >
+                  <option value="editor">{getRoleLabel('editor', language)}</option>
+                  <option value="setlist_manager">{getRoleLabel('setlist_manager', language)}</option>
+                  <option value="viewer">{getRoleLabel('viewer', language)}</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void handleRemoveTeamMember(member.userId)}
+                  className="rounded-lg px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50"
+                >
+                  {copy.delete}
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {(teamManagement?.invites ?? []).length > 0 ? (
+        <div className="mt-3 space-y-2">
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
+            {language === 'zh' ? '待接受邀請' : 'Pending Invites'}
+          </div>
+          {teamManagement!.invites.map((invite) => (
+            <div key={invite.id} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-bold text-gray-900">{invite.email}</div>
+                <div className="truncate text-[11px] text-gray-500">{getRoleLabel(invite.role, language)}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleRevokeTeamInvite(invite.id)}
+                className="rounded-lg px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50"
+              >
+                {copy.cancel}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
   return (
     <div
       data-app-root
@@ -4779,7 +5763,7 @@ export default function App() {
               className="flex h-full shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white py-4 sm:py-5"
               style={{ width: `${collapsedSidebarWidth}px` }}
             >
-              <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-indigo-200 ring-1 ring-indigo-100">
+              <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-emerald-900/10 ring-1 ring-gray-200">
                 <img src={logoSrc} alt="ChordMaster" className="h-full w-full object-cover" />
               </div>
 
@@ -4823,14 +5807,16 @@ export default function App() {
                 >
                   <ListMusic size={18} />
                 </button>
-                <button
-                  type="button"
-                  onClick={isSetlistMode ? handleCreateSetlist : handleCreateSong}
-                  className="w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
-                  title={isSetlistMode ? copy.newSetlist : copy.newSong}
-                >
-                  <Plus size={18} />
-                </button>
+                {(isSetlistMode ? canCreateTeamSetlists : canEditTeamSongs) && (
+                  <button
+                    type="button"
+                    onClick={isSetlistMode ? handleCreateSetlist : handleCreateSong}
+                    className="w-11 h-11 rounded-2xl flex items-center justify-center bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
+                    title={isSetlistMode ? copy.newSetlist : copy.newSong}
+                  >
+                    <Plus size={18} />
+                  </button>
+                )}
               </div>
 
               <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
@@ -4886,7 +5872,7 @@ export default function App() {
               <div className="border-b border-gray-200 px-4 py-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex items-center gap-3">
-                    <img src={logoSrc} alt="ChordMaster" className="h-10 w-10 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                    <img src={logoSrc} alt="ChordMaster" className="h-10 w-10 rounded-xl shadow-sm ring-1 ring-gray-200" />
                     <div className="min-w-0">
                       <div className="truncate text-sm font-bold text-gray-900">{APP_NAME}</div>
                       <div className="mt-0.5 truncate text-xs font-medium text-gray-500">
@@ -4965,6 +5951,9 @@ export default function App() {
               </div>
             )}
 
+            {librarySwitcherPanel}
+            {teamManagementPanel}
+
             {isSetlistMode ? (
               isPhoneViewport ? (
                 <>
@@ -4987,7 +5976,7 @@ export default function App() {
                             <ChevronLeft size={18} />
                           </button>
                           <div className="min-w-0 flex-1">
-                            {isJoinedSetlist ? (
+                            {isJoinedSetlist || !canEditSelectedSetlist ? (
                               <div className="text-base font-bold text-gray-900 truncate">{selectedSetlist.name}</div>
                             ) : (
                               <input
@@ -5008,7 +5997,7 @@ export default function App() {
 	                            >
 	                              {leavingSharedSetlistId === selectedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
 	                            </button>
-	                          ) : (
+	                          ) : canEditSelectedSetlist ? (
                           <div ref={setlistActionsMenuRef} className="relative">
                             <button
                               type="button"
@@ -5030,11 +6019,15 @@ export default function App() {
                               </div>
                             )}
                           </div>
+                          ) : (
+                            <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600">
+                              {getRoleLabel(activeLibraryRole, language)}
+                            </span>
                           )}
                         </div>
 	                      </div>
 
-	                      {!isJoinedSetlist && setlistSharingPanel ? (
+	                      {canShareSelectedSetlist && setlistSharingPanel ? (
 	                        <div className="border-b border-gray-200 px-4 py-3">
 	                          {setlistSharingPanel}
 	                        </div>
@@ -5057,7 +6050,7 @@ export default function App() {
                             {setlistSongsWithSource.map(({ item, sourceSong }) => {
                               const isActive = item.id === selectedSetlistSong?.id;
                               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-                              const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
+                              const effectiveCapo = getEffectiveSetlistSongCapo(item, sourceSong.capo ?? 0) ?? 0;
                               const displaySong = item.songData ?? sourceSong;
                               const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
                               const isDropTarget = dragOverSetlistSongId === item.id;
@@ -5065,7 +6058,7 @@ export default function App() {
                               return (
                                 <div
                                   key={item.id}
-                                  {...(!isJoinedSetlist && {
+                                  {...(canEditSelectedSetlist && {
                                     draggable: true,
                                     onDragStart: () => setDraggingSetlistSongId(item.id),
                                     onDragOver: (event: React.DragEvent) => {
@@ -5092,7 +6085,7 @@ export default function App() {
                                   <div className="flex items-start gap-2">
                                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center gap-2">
-                                        {!isJoinedSetlist && (
+                                        {canEditSelectedSetlist && (
                                           <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
                                             <GripVertical size={14} />
                                           </div>
@@ -5109,7 +6102,7 @@ export default function App() {
                                             </div>
                                           ) : null}
                                         </button>
-                                        {!isJoinedSetlist && (
+                                        {canEditSelectedSetlist && (
                                           <button
                                             type="button"
                                             onClick={() => handleRemoveSetlistSong(item.id)}
@@ -5120,18 +6113,18 @@ export default function App() {
                                           </button>
                                         )}
                                       </div>
-                                      <div className={`flex min-w-0 items-center gap-1 ${!isJoinedSetlist ? 'pl-10' : ''}`}>
+                                      <div className={`flex min-w-0 items-center gap-1 ${canEditSelectedSetlist ? 'pl-10' : ''}`}>
                                         <div className="w-[56px] shrink-0">
                                           <KeyPicker
                                             value={effectiveKey}
                                             onChange={(key) => {
-                                              if (!key || isJoinedSetlist) return;
+                                              if (!key || isJoinedSetlist || !canEditSelectedSetlist) return;
                                               handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
                                                 ...currentSetlistSong,
                                                 overrideKey: key
                                               }));
                                             }}
-                                            disabled={isJoinedSetlist}
+                                            disabled={isJoinedSetlist || !canEditSelectedSetlist}
                                             label={copy.key}
                                             originalKey={sourceSong.currentKey}
                                             align="left"
@@ -5146,6 +6139,8 @@ export default function App() {
                                             currentKey={effectiveKey}
                                             onChange={isJoinedSetlist
                                               ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
+                                              : isTeamWorkspace && !canEditSelectedSetlist
+                                                ? (capo) => handleTeamPersonalSetlistCapoChange(item.id, capo)
                                               : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
                                             label="Capo"
                                             align="right"
@@ -5249,23 +6244,25 @@ export default function App() {
                           {!isPhoneViewport && (
                             <>
                               <div className="flex items-center gap-2">
-                                <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                                <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
                                 <div className="text-lg font-bold tracking-tight">ChordMaster</div>
                               </div>
                               <div className="text-xs font-medium text-gray-500">{copy.serviceSetlist}</div>
                             </>
                           )}
                         </div>
-                        <div className={isPhoneViewport ? '' : 'mt-4'}>
-                          <button
-                            type="button"
-                            onClick={handleCreateSetlist}
-                            className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                          >
-                            <Plus size={16} />
-                            <span>{copy.newSetlist}</span>
-                          </button>
-                        </div>
+                        {canCreateTeamSetlists && (
+                          <div className={isPhoneViewport ? '' : 'mt-4'}>
+                            <button
+                              type="button"
+                              onClick={handleCreateSetlist}
+                              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                            >
+                              <Plus size={16} />
+                              <span>{copy.newSetlist}</span>
+                            </button>
+                          </div>
+                        )}
                         <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
                           <Search size={15} className="text-gray-400" />
                           <input
@@ -5417,7 +6414,7 @@ export default function App() {
                     </>
                   )}
 
-                  {mobileSetlistDrawerView === 'detail' && selectedSetlist && !isJoinedSetlist && (
+                  {mobileSetlistDrawerView === 'detail' && selectedSetlist && canEditSelectedSetlist && (
                     <div className="border-t border-gray-200 bg-white px-4 py-3">
                       <button
                         type="button"
@@ -5451,21 +6448,23 @@ export default function App() {
                 <div className="px-5 py-6 border-b border-gray-200">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                      <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
                       <div className="text-lg font-bold tracking-tight">ChordMaster</div>
                     </div>
                     <div className="text-xs font-medium text-gray-500">{copy.serviceSetlist}</div>
                   </div>
-                  <div className="mt-4">
-                    <button
-                      type="button"
-                      onClick={handleCreateSetlist}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                    >
-                      <Plus size={16} />
-                      <span>{copy.newSetlist}</span>
-                    </button>
-                  </div>
+                  {canCreateTeamSetlists && (
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={handleCreateSetlist}
+                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                      >
+                        <Plus size={16} />
+                        <span>{copy.newSetlist}</span>
+                      </button>
+                    </div>
+                  )}
                   <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
                     <Search size={15} className="text-gray-400" />
                     <input
@@ -5588,10 +6587,11 @@ export default function App() {
                           <input
                             value={selectedSetlist.name}
                             onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
-                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-900 outline-none focus:border-indigo-300"
+                            disabled={!canEditSelectedSetlist}
+                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-900 outline-none focus:border-indigo-300 disabled:bg-gray-50 disabled:text-gray-500"
                             placeholder={copy.untitledSetlist}
                           />
-                          <div ref={setlistActionsMenuRef} className="relative">
+                          {canEditSelectedSetlist && <div ref={setlistActionsMenuRef} className="relative">
                             <button
                               type="button"
                               onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
@@ -5611,12 +6611,12 @@ export default function App() {
                                 </button>
                               </div>
                             )}
-                          </div>
+                          </div>}
                         </div>
                       </div>
 	                      )}
 
-	                      {!isJoinedSetlist && setlistSharingPanel}
+	                      {canShareSelectedSetlist && setlistSharingPanel}
 
 	                      {joinedSetlistDisplayPreferencePanel}
 
@@ -5631,7 +6631,7 @@ export default function App() {
                             {setlistSongsWithSource.map(({ item, sourceSong }) => {
                               const isActive = item.id === selectedSetlistSong?.id;
                               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-                              const effectiveCapo = typeof item.capo === 'number' ? item.capo : (sourceSong.capo ?? 0);
+                              const effectiveCapo = getEffectiveSetlistSongCapo(item, sourceSong.capo ?? 0) ?? 0;
                               const displaySong = item.songData ?? sourceSong;
                               const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
                               const isDropTarget = dragOverSetlistSongId === item.id;
@@ -5639,7 +6639,7 @@ export default function App() {
                               return (
                                 <div
                                   key={item.id}
-                                  {...(!isJoinedSetlist && {
+                                  {...(canEditSelectedSetlist && {
                                     draggable: true,
                                     onDragStart: () => setDraggingSetlistSongId(item.id),
                                     onDragOver: (event: React.DragEvent) => {
@@ -5666,7 +6666,7 @@ export default function App() {
                                   <div className="flex items-start gap-2">
                                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center gap-2">
-                                        {!isJoinedSetlist && (
+                                        {canEditSelectedSetlist && (
                                           <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
                                             <GripVertical size={14} />
                                           </div>
@@ -5683,7 +6683,7 @@ export default function App() {
                                             </div>
                                           ) : null}
                                         </button>
-                                        {!isJoinedSetlist && (
+                                        {canEditSelectedSetlist && (
                                           <button
                                             type="button"
                                             onClick={() => handleRemoveSetlistSong(item.id)}
@@ -5694,12 +6694,12 @@ export default function App() {
                                           </button>
                                         )}
                                       </div>
-                                      <div className={`flex min-w-0 items-center gap-1 ${!isJoinedSetlist ? 'pl-10' : ''}`}>
+                                      <div className={`flex min-w-0 items-center gap-1 ${canEditSelectedSetlist ? 'pl-10' : ''}`}>
                                         <div className="w-[56px] shrink-0">
                                           <KeyPicker
                                             value={effectiveKey}
                                             onChange={(key) => {
-                                              if (!key || isJoinedSetlist) return;
+                                              if (!key || isJoinedSetlist || !canEditSelectedSetlist) return;
                                               handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
                                                 ...currentSetlistSong,
                                                 overrideKey: key
@@ -5708,8 +6708,8 @@ export default function App() {
                                             label={copy.key}
                                             originalKey={sourceSong.currentKey}
                                             align="left"
-                                            disabled={isJoinedSetlist}
-                                            buttonClassName={`!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5 ${isJoinedSetlist ? '!cursor-default !opacity-100' : ''}`}
+                                            disabled={isJoinedSetlist || !canEditSelectedSetlist}
+                                            buttonClassName={`!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5 ${isJoinedSetlist || !canEditSelectedSetlist ? '!cursor-default !opacity-100' : ''}`}
                                             valueTextClassName="!text-[10px] !leading-none"
                                             triggerIconSize={10}
                                           />
@@ -5720,6 +6720,8 @@ export default function App() {
                                             currentKey={effectiveKey}
                                             onChange={isJoinedSetlist
                                               ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
+                                              : isTeamWorkspace && !canEditSelectedSetlist
+                                                ? (capo) => handleTeamPersonalSetlistCapoChange(item.id, capo)
                                               : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
                                             label="Capo"
                                             align="right"
@@ -5739,7 +6741,7 @@ export default function App() {
                         )}
                       </div>
 
-                      {!isJoinedSetlist && isSetlistAddSongsOpen && (
+                      {canEditSelectedSetlist && isSetlistAddSongsOpen && (
                         <div className="space-y-3 border-t border-gray-200 pt-4">
                           <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.addToSetlist}</div>
                           <label className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
@@ -5798,7 +6800,7 @@ export default function App() {
                   )}
                 </div>
 
-                {selectedSetlist && !isJoinedSetlist && (
+                {selectedSetlist && canEditSelectedSetlist && (
                   <div className="border-t border-gray-200 bg-white px-4 py-3">
                     <button
                       type="button"
@@ -5830,7 +6832,7 @@ export default function App() {
                   {!isPhoneViewport && (
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-indigo-100" />
+                        <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
                         <div className="text-lg font-bold tracking-tight">ChordMaster</div>
                       </div>
                       <div className="text-xs font-medium text-gray-500">{copy.songLibrary}</div>
@@ -5848,30 +6850,34 @@ export default function App() {
                           className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                         />
                       </label>
-                      <button
-                        type="button"
-                        onClick={handleCreateSong}
-                        aria-label={copy.newSong}
-                        title={copy.newSong}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                      >
-                        <Plus size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsLibraryEditing(!isLibraryEditing)}
-                        aria-label={isLibraryEditing ? copy.done : copy.manage}
-                        title={isLibraryEditing ? copy.done : copy.manage}
-                        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                          isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        }`}
-                      >
-                        <Edit3 size={18} />
-                      </button>
+                      {canEditTeamSongs && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleCreateSong}
+                            aria-label={copy.newSong}
+                            title={copy.newSong}
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                          >
+                            <Plus size={18} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleToggleLibraryEditing}
+                            aria-label={isLibraryEditing ? copy.done : copy.manage}
+                            title={isLibraryEditing ? copy.done : copy.manage}
+                            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                              isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                          >
+                            <Edit3 size={18} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   ) : (
                     <>
-                      <div className="mt-4 flex gap-2">
+                      {canEditTeamSongs && <div className="mt-4 flex gap-2">
                         <button
                           type="button"
                           onClick={handleCreateSong}
@@ -5882,7 +6888,7 @@ export default function App() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setIsLibraryEditing(!isLibraryEditing)}
+                          onClick={handleToggleLibraryEditing}
                           className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
                             isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                           }`}
@@ -5890,7 +6896,7 @@ export default function App() {
                           <Edit3 size={16} />
                           <span>{isLibraryEditing ? copy.done : copy.manage}</span>
                         </button>
-                      </div>
+                      </div>}
                       <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
                         <Search size={15} className="text-gray-400" />
                         <input
@@ -5912,14 +6918,16 @@ export default function App() {
                       <Download size={15} />
                       <span>{copy.exportJson}</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleImportSongLibraryClick}
-                      className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
-                    >
-                      <Upload size={15} />
-                      <span>{copy.importJson}</span>
-                    </button>
+                    {canEditTeamSongs && (
+                      <button
+                        type="button"
+                        onClick={handleImportSongLibraryClick}
+                        className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
+                      >
+                        <Upload size={15} />
+                        <span>{copy.importJson}</span>
+                      </button>
+                    )}
                     <input
                       ref={importLibraryInputRef}
                       type="file"
@@ -5928,6 +6936,21 @@ export default function App() {
                       className="hidden"
                     />
                   </div>
+                  {isTeamWorkspace && canEditTeamSongs && personalCloudLibrary && personalCloudLibrary.id !== activeLibraryId ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleImportPersonalSongsToTeam()}
+                      disabled={isImportingPersonalSongs}
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <Copy size={15} />
+                      <span>
+                        {isImportingPersonalSongs
+                          ? copy.cloudSyncSyncing
+                          : (language === 'zh' ? '從個人區批量匯入' : 'Import personal songs')}
+                      </span>
+                    </button>
+                  ) : null}
                   {isLibraryEditing && (
                     <button
                       type="button"
@@ -5957,6 +6980,20 @@ export default function App() {
                   {filteredSongs.map((item) => {
                     const isActive = item.id === song.id;
                     const libraryMeta = getSongLibraryMeta(item, copy.editor.shuffle);
+                    const teamSourceStatus = teamSourceStatuses[item.id];
+                    const hasLinkedTeamUpdate = !isTeamWorkspace
+                      && Boolean(item.teamSource)
+                      && typeof teamSourceStatus?.latestUpdatedAt === 'number'
+                      && teamSourceStatus.latestUpdatedAt > (item.teamSource?.updatedAt ?? 0);
+                    const teamSourceLabel = item.teamSource
+                      ? hasLinkedTeamUpdate
+                        ? (language === 'zh' ? '團隊版有更新' : 'Team version updated')
+                        : teamSourceStatus?.missing
+                          ? (language === 'zh' ? '團隊來源找不到' : 'Team source missing')
+                          : teamSourceStatus?.error
+                            ? (language === 'zh' ? '無法檢查團隊來源' : 'Unable to check team source')
+                            : `${language === 'zh' ? '連結' : 'Linked'}: ${item.teamSource.libraryName ?? (language === 'zh' ? '團隊歌曲' : 'Team song')}`
+                      : null;
 
                     return (
                       <div
@@ -5998,6 +7035,17 @@ export default function App() {
                                     {libraryMeta.secondary}
                                   </div>
                                 )}
+                                {teamSourceLabel ? (
+                                  <div className={`mt-1 inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                    hasLinkedTeamUpdate
+                                      ? 'bg-amber-100 text-amber-700'
+                                      : teamSourceStatus?.missing || teamSourceStatus?.error
+                                        ? 'bg-rose-50 text-rose-600'
+                                        : 'bg-emerald-50 text-emerald-700'
+                                  }`}>
+                                    <span className="truncate">{teamSourceLabel}</span>
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
                           </div>
@@ -6039,48 +7087,90 @@ export default function App() {
                                     {libraryMeta.secondary}
                                   </div>
                                 )}
+                                {teamSourceLabel ? (
+                                  <div className={`mt-1 inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                    hasLinkedTeamUpdate
+                                      ? 'bg-amber-100 text-amber-700'
+                                      : teamSourceStatus?.missing || teamSourceStatus?.error
+                                        ? 'bg-rose-50 text-rose-600'
+                                        : 'bg-emerald-50 text-emerald-700'
+                                  }`}>
+                                    <span className="truncate">{teamSourceLabel}</span>
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
                           </button>
                         )}
                         <div className="absolute right-2 top-1/2 flex w-6 -translate-y-1/2 flex-col items-center justify-center gap-0">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleDuplicateSong(item.id);
-                            }}
-                            className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                            aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                            title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                          >
-                            <Copy size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleSelectSong(item.id);
-                              setIsEditing(true);
-                            }}
-                            className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                            aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
-                            title={`${copy.edit} ${item.title || copy.untitledSong}`}
-                          >
-                            <Edit3 size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleDeleteSong(item.id);
-                            }}
-                            className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-rose-600"
-                            aria-label={`${copy.delete} ${item.title || copy.untitledSong}`}
-                            title={`${copy.delete} ${item.title || copy.untitledSong}`}
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          {canEditTeamSongs ? (
+                            <>
+                              {hasLinkedTeamUpdate ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handleSyncPersonalSongFromTeam(item.id);
+                                  }}
+                                  className="rounded-md p-0.5 text-amber-600 transition-colors hover:bg-white hover:text-amber-700"
+                                  aria-label={language === 'zh' ? `同步 ${item.title || copy.untitledSong} 到團隊最新版` : `Sync ${item.title || copy.untitledSong} to latest team version`}
+                                  title={language === 'zh' ? '同步團隊最新版' : 'Sync latest team version'}
+                                >
+                                  <Download size={13} />
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleDuplicateSong(item.id);
+                                }}
+                                className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                                aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                                title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                              >
+                                <Copy size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleSelectSong(item.id);
+                                  setIsEditing(true);
+                                }}
+                                className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                                aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
+                                title={`${copy.edit} ${item.title || copy.untitledSong}`}
+                              >
+                                <Edit3 size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleDeleteSong(item.id);
+                                }}
+                                className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-rose-600"
+                                aria-label={`${copy.delete} ${item.title || copy.untitledSong}`}
+                                title={`${copy.delete} ${item.title || copy.untitledSong}`}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </>
+                          ) : isTeamWorkspace ? (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleCopyTeamSongToPersonal(item.id);
+                              }}
+                              className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                              aria-label={language === 'zh' ? `轉存 ${item.title || copy.untitledSong}` : `Copy ${item.title || copy.untitledSong} to personal library`}
+                              title={language === 'zh' ? '轉存到個人區' : 'Copy to personal'}
+                            >
+                              <Copy size={13} />
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -6157,7 +7247,7 @@ export default function App() {
                   <ChevronRight size={18} className={`transition-transform ${isMobileNavOpen ? 'rotate-180' : ''}`} />
                 </button>
 
-                <img src={logoSrc} alt="ChordMaster" className="h-9 w-9 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                <img src={logoSrc} alt="ChordMaster" className="h-9 w-9 rounded-xl shadow-sm ring-1 ring-gray-200" />
 
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-bold tracking-tight text-gray-900">{APP_NAME}</div>
@@ -6194,7 +7284,7 @@ export default function App() {
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                   <button
                     type="button"
-                    onClick={() => setIsEditing(!isEditing)}
+                    onClick={handleToggleEditor}
                     className={`${getMobileTopbarActionClassName(isEditing ? 'primary' : 'default')} shrink-0`}
                     title={isEditing ? copy.closeEditor : copy.openEditor}
                     aria-label={isEditing ? copy.closeEditor : copy.openEditor}
@@ -6229,7 +7319,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && isJoinedSetlist}
+                    disabled={isSetlistMode && (isJoinedSetlist || !canEditSelectedSetlist)}
                     buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -6284,7 +7374,7 @@ export default function App() {
             <div className="flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                  <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
                   <h2 className="truncate font-display text-lg font-bold tracking-tight text-gray-900">{APP_NAME}</h2>
                   <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">
                     v{APP_VERSION}
@@ -6313,7 +7403,7 @@ export default function App() {
                 <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                   <button
                     type="button"
-                    onClick={() => setIsEditing(!isEditing)}
+                    onClick={handleToggleEditor}
                     title={isEditing ? copy.closeEditor : copy.openEditor}
                     aria-label={isEditing ? copy.closeEditor : copy.openEditor}
                     className={isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName}
@@ -6361,7 +7451,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && isJoinedSetlist}
+                    disabled={isSetlistMode && (isJoinedSetlist || !canEditSelectedSetlist)}
                     buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[60px]' : 'min-w-[56px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100`}
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -6545,7 +7635,7 @@ export default function App() {
           ) : usesTabletHeader ? (
             <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
               <div className="flex min-w-0 items-center gap-2">
-                <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
                 <div className="min-w-0">
                   <div className="truncate font-display text-lg font-bold tracking-tight text-gray-900">{APP_NAME}</div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-2">
@@ -6567,7 +7657,7 @@ export default function App() {
                 <div className="flex min-w-0 items-center justify-end gap-2 overflow-x-auto pb-1 no-scrollbar">
                   <button
                     type="button"
-                    onClick={() => setIsEditing(!isEditing)}
+                    onClick={handleToggleEditor}
                     title={isEditing ? copy.closeEditor : copy.openEditor}
                     aria-label={isEditing ? copy.closeEditor : copy.openEditor}
                     className={isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName}
@@ -6612,7 +7702,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && isJoinedSetlist}
+                    disabled={isSetlistMode && (isJoinedSetlist || !canEditSelectedSetlist)}
                     buttonClassName="h-9 min-w-[60px] shrink-0 rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -6786,7 +7876,7 @@ export default function App() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
                   <div className="flex min-w-0 items-center gap-2">
-                    <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-indigo-100" />
+                    <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
                     <h2 className="truncate font-display text-lg font-bold tracking-tight">{APP_NAME}</h2>
                     <span className="hidden rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-500 sm:inline-flex">
                       v{APP_VERSION}
@@ -6822,7 +7912,7 @@ export default function App() {
                         {syncStatus === 'offline' ? <CloudOff size={15} /> : <Cloud size={15} />}
                         <span>{syncStatusLabel}</span>
                       </div>
-                      {activeAppView === 'sheet' && !isSetlistMode && (
+                      {activeAppView === 'sheet' && !isSetlistMode && hasSongs && (!isTeamWorkspace || canEditTeamSongs) && (
                         <button
                           type="button"
                           onClick={() => void handleCreateShareLink('song')}
@@ -6832,7 +7922,7 @@ export default function App() {
                           <span>{copy.shareCurrentSong}</span>
                         </button>
                       )}
-                      {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && (
+                      {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && canShareSelectedSetlist && (
                         <button
                           type="button"
                           onClick={() => void handleCreateShareLink('setlist')}
@@ -6922,7 +8012,7 @@ export default function App() {
                   <div className={`grid min-w-0 gap-2 ${toolbarPrimaryGridClassName}`}>
                     <button
                       type="button"
-                      onClick={() => setIsEditing(!isEditing)}
+                      onClick={handleToggleEditor}
                       className={isEditing ? toolbarPrimaryEmphasisActionClassName : toolbarPrimaryActionClassName}
                     >
                       <Edit3 size={16} />
@@ -6976,7 +8066,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     triggerMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
-                    disabled={isSetlistMode && isJoinedSetlist}
+                    disabled={isSetlistMode && (isJoinedSetlist || !canEditSelectedSetlist)}
                     buttonClassName="h-11 w-full min-w-0 disabled:!cursor-default disabled:!opacity-100"
                   />
 
@@ -7219,6 +8309,10 @@ export default function App() {
                     ) : isSetlistMode ? (
                       <div className="rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-6 py-8 text-sm text-gray-500">
                         {selectedSetlist ? copy.selectSetlistSong : copy.noSetlists}
+                      </div>
+                    ) : !hasSongs ? (
+                      <div className="rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-6 py-8 text-sm leading-6 text-gray-500">
+                        {language === 'zh' ? '這個團隊還沒有歌曲。請先新增第一首歌。' : 'This team has no songs yet. Add the first song before editing.'}
                       </div>
                     ) : (
                       <div className="space-y-5">
@@ -7647,7 +8741,7 @@ export default function App() {
                             <div className="truncate text-xs text-gray-500">{authenticatedUser?.email}</div>
                           </div>
                         </div>
-                        {activeAppView === 'sheet' && !isSetlistMode && (
+                        {activeAppView === 'sheet' && !isSetlistMode && hasSongs && (!isTeamWorkspace || canEditTeamSongs) && (
                           <button
                             type="button"
                             onClick={() => void handleCreateShareLink('song')}
@@ -7657,7 +8751,7 @@ export default function App() {
                             <span>{copy.shareCurrentSong}</span>
                           </button>
                         )}
-                        {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && (
+                        {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && canShareSelectedSetlist && (
                           <button
                             type="button"
                             onClick={() => void handleCreateShareLink('setlist')}

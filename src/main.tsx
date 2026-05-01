@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import App from './App.tsx';
 import AuthCallbackPage from './pages/AuthCallbackPage.tsx';
 import SharedChartPage from './pages/SharedChartPage.tsx';
+import TeamInvitePage from './pages/TeamInvitePage.tsx';
 import './index.css';
 
 const restoreGitHubPagesSpaRedirect = () => {
@@ -42,6 +43,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/" element={<App />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route path="/share/:token" element={<SharedChartPage />} />
+        <Route path="/team-invite/:token" element={<TeamInvitePage />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

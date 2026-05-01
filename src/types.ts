@@ -19,6 +19,8 @@ export type SetlistDisplayMode =
   | 'nashville-number-system'
   | 'chord-fixed-key'
   | 'chord-movable-key';
+export type LibraryKind = 'personal' | 'team';
+export type LibraryRole = 'owner' | 'editor' | 'setlist_manager' | 'viewer';
 
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
@@ -80,6 +82,13 @@ export interface Song {
 export interface StoredSong extends Song {
   id: string;
   updatedAt: number;
+  teamSource?: {
+    libraryId: string;
+    libraryName?: string;
+    songId: string;
+    updatedAt: number;
+    copiedAt: number;
+  };
 }
 
 export interface SetlistSong {
@@ -89,6 +98,7 @@ export interface SetlistSong {
   order: number;
   overrideKey?: Key;
   capo?: number;
+  personalCapoOverride?: number;
   sectionOrder: string[];
   songData?: Song;
 }
@@ -98,6 +108,8 @@ export interface Setlist {
   name: string;
   displayMode: SetlistDisplayMode;
   showLyrics: boolean;
+  createdBy?: string;
+  updatedBy?: string;
   createdAt: number;
   updatedAt: number;
   songs: SetlistSong[];
@@ -160,4 +172,40 @@ export interface SetlistShareStatus {
   activeCreatedAt: string | null;
   participantCount: number;
   participants: ShareParticipant[];
+}
+
+export interface CloudLibrarySummary {
+  id: string;
+  name: string;
+  kind: LibraryKind;
+  ownerUserId: string;
+  role: LibraryRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamMember {
+  userId: string;
+  email: string;
+  name: string;
+  picture?: string;
+  role: LibraryRole;
+  joinedAt: string;
+}
+
+export interface TeamInvite {
+  id: string;
+  email: string;
+  role: LibraryRole;
+  token: string;
+  invitedBy: string;
+  invitedAt: string;
+  expiresAt: string | null;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface TeamManagementSnapshot {
+  members: TeamMember[];
+  invites: TeamInvite[];
 }

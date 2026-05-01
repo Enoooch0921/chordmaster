@@ -1,4 +1,18 @@
-import { JoinedSetlist, Setlist, SetlistShareStatus, SetlistSong, SharedResourcePayload, ShareResourceType, Song, StoredSong, WorkspaceSnapshot } from '../types';
+import {
+  CloudLibrarySummary,
+  JoinedSetlist,
+  LibraryRole,
+  Setlist,
+  SetlistShareStatus,
+  SetlistSong,
+  SharedResourcePayload,
+  ShareResourceType,
+  Song,
+  StoredSong,
+  TeamInvite,
+  TeamManagementSnapshot,
+  WorkspaceSnapshot
+} from '../types';
 import {
   cloneValue,
   loadLocalWorkspaceSnapshot,
@@ -28,6 +42,8 @@ interface SetlistRow {
   display_mode: Setlist['displayMode'];
   show_lyrics: boolean;
   client_legacy_id: string | null;
+  created_by: string;
+  updated_by: string;
   created_at: string;
   updated_at: string;
 }
@@ -45,11 +61,18 @@ interface SetlistSongRow {
   } | null;
 }
 
+interface UserSetlistCapoOverrideRow {
+  setlist_song_id: string;
+  capo: number;
+}
+
 interface LibraryRow {
   id: string;
   name: string;
   kind: 'personal' | 'team';
   owner_user_id: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface JoinedSetlistRpcSong {
@@ -95,6 +118,22 @@ const ensureLibraryMembership = async (libraryId: string, userId: string) => {
 
 export interface WorkspaceRepository {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
+  loadLibraryWorkspace(libraryId: string): Promise<WorkspaceSnapshot>;
+  loadPersonalWorkspace(): Promise<WorkspaceSnapshot>;
+  listLibraries(): Promise<CloudLibrarySummary[]>;
+  setActiveLibrary(libraryId: string | null): void;
+  getPersonalLibraryId(): Promise<string>;
+  createTeam(name: string): Promise<CloudLibrarySummary>;
+  getTeamManagement(libraryId: string): Promise<TeamManagementSnapshot>;
+  createTeamInvite(libraryId: string, email: string, role: Exclude<LibraryRole, 'owner'>): Promise<TeamInvite>;
+  revokeTeamInvite(inviteId: string): Promise<void>;
+  updateTeamMemberRole(libraryId: string, userId: string, role: Exclude<LibraryRole, 'owner'>): Promise<void>;
+  removeTeamMember(libraryId: string, userId: string): Promise<void>;
+  acceptTeamInvite(token: string): Promise<string>;
+  copySongToPersonal(song: StoredSong): Promise<StoredSong>;
+  loadTeamSourceSong(song: StoredSong): Promise<StoredSong | null>;
+  syncPersonalSongFromTeam(song: StoredSong): Promise<StoredSong>;
+  savePersonalSong(song: StoredSong): Promise<void>;
   saveSong(song: StoredSong): Promise<void>;
   saveSetlist(setlist: Setlist): Promise<void>;
   deleteSong(id: string): Promise<void>;
@@ -115,7 +154,12 @@ const mapSongRow = (row: SongRow): StoredSong => ({
   updatedAt: new Date(row.updated_at).getTime()
 });
 
-const mapSetlistRows = (rows: SetlistRow[], setlistSongs: SetlistSongRow[], songsById: Map<string, StoredSong>) => (
+const mapSetlistRows = (
+  rows: SetlistRow[],
+  setlistSongs: SetlistSongRow[],
+  songsById: Map<string, StoredSong>,
+  personalCapoBySetlistSongId = new Map<string, number>()
+) => (
   rows.map((row, index) => {
     const songs = reindexSetlistSongs(
       setlistSongs
@@ -128,6 +172,7 @@ const mapSetlistRows = (rows: SetlistRow[], setlistSongs: SetlistSongRow[], song
           order: orderIndex,
           overrideKey: item.override_json?.overrideKey,
           capo: item.override_json?.capo,
+          personalCapoOverride: personalCapoBySetlistSongId.get(item.id),
           sectionOrder: Array.isArray(item.override_json?.sectionOrder) ? item.override_json.sectionOrder : [],
           songData: item.override_json?.songData ? normalizeSongBars(item.override_json.songData) : undefined
         }))
@@ -139,6 +184,8 @@ const mapSetlistRows = (rows: SetlistRow[], setlistSongs: SetlistSongRow[], song
       name: row.name,
       displayMode: row.display_mode,
       showLyrics: row.show_lyrics,
+      createdBy: row.created_by,
+      updatedBy: row.updated_by,
       createdAt: new Date(row.created_at).getTime(),
       updatedAt: new Date(row.updated_at).getTime(),
       songs
@@ -218,9 +265,139 @@ const normalizeJoinedSetlistRpcPayload = (payload: unknown): JoinedSetlist[] => 
     .filter((setlist): setlist is JoinedSetlist => Boolean(setlist));
 };
 
+const VALID_LIBRARY_ROLES = new Set<LibraryRole>(['owner', 'editor', 'setlist_manager', 'viewer']);
+const VALID_LIBRARY_KINDS = new Set(['personal', 'team']);
+
+const normalizeLibrarySummary = (value: unknown): CloudLibrarySummary | null => {
+  const row = value as Partial<CloudLibrarySummary> & Record<string, unknown>;
+  if (!row || typeof row.id !== 'string' || typeof row.name !== 'string') return null;
+  const kind = typeof row.kind === 'string' && VALID_LIBRARY_KINDS.has(row.kind) ? row.kind as CloudLibrarySummary['kind'] : 'personal';
+  const role = typeof row.role === 'string' && VALID_LIBRARY_ROLES.has(row.role as LibraryRole) ? row.role as LibraryRole : 'viewer';
+  return {
+    id: row.id,
+    name: row.name,
+    kind,
+    ownerUserId: typeof row.ownerUserId === 'string' ? row.ownerUserId : '',
+    role,
+    createdAt: typeof row.createdAt === 'string' ? row.createdAt : new Date().toISOString(),
+    updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : new Date().toISOString()
+  };
+};
+
+const normalizeLibrarySummaries = (payload: unknown): CloudLibrarySummary[] => (
+  Array.isArray(payload)
+    ? payload.map(normalizeLibrarySummary).filter((item): item is CloudLibrarySummary => Boolean(item))
+    : []
+);
+
+const normalizeTeamInvite = (value: unknown): TeamInvite | null => {
+  const row = value as Partial<TeamInvite> & Record<string, unknown>;
+  if (!row || typeof row.id !== 'string' || typeof row.email !== 'string') return null;
+  const role = typeof row.role === 'string' && VALID_LIBRARY_ROLES.has(row.role as LibraryRole) && row.role !== 'owner'
+    ? row.role as Exclude<LibraryRole, 'owner'>
+    : 'viewer';
+  return {
+    id: row.id,
+    email: row.email,
+    role,
+    token: typeof row.token === 'string' ? row.token : '',
+    invitedBy: typeof row.invitedBy === 'string' ? row.invitedBy : '',
+    invitedAt: typeof row.invitedAt === 'string' ? row.invitedAt : new Date().toISOString(),
+    expiresAt: typeof row.expiresAt === 'string' ? row.expiresAt : null,
+    acceptedAt: typeof row.acceptedAt === 'string' ? row.acceptedAt : null,
+    revokedAt: typeof row.revokedAt === 'string' ? row.revokedAt : null
+  };
+};
+
+const normalizeTeamManagementSnapshot = (payload: unknown): TeamManagementSnapshot => {
+  const row = payload as Partial<TeamManagementSnapshot> & Record<string, unknown>;
+  const rawMembers = Array.isArray(row?.members) ? row.members : [];
+  const rawInvites = Array.isArray(row?.invites) ? row.invites : [];
+  return {
+    members: rawMembers.map((member) => {
+      const item = member as Partial<TeamManagementSnapshot['members'][number]> & Record<string, unknown>;
+      const role = typeof item.role === 'string' && VALID_LIBRARY_ROLES.has(item.role as LibraryRole) ? item.role as LibraryRole : 'viewer';
+      return {
+        userId: typeof item.userId === 'string' ? item.userId : '',
+        email: typeof item.email === 'string' ? item.email : '',
+        name: typeof item.name === 'string' ? item.name : '',
+        picture: typeof item.picture === 'string' ? item.picture : undefined,
+        role,
+        joinedAt: typeof item.joinedAt === 'string' ? item.joinedAt : new Date().toISOString()
+      };
+    }).filter((member) => member.userId),
+    invites: rawInvites.map(normalizeTeamInvite).filter((invite): invite is TeamInvite => Boolean(invite))
+  };
+};
+
+const buildPersonalCopyTitle = (personalSongs: StoredSong[], sourceTitle: string) => {
+  const baseTitle = `${sourceTitle.trim() || 'Untitled Song'} (團隊轉存)`;
+  const existingTitles = new Set(personalSongs.map((song) => normalizeMatchingTitle(song.title)));
+  if (!existingTitles.has(normalizeMatchingTitle(baseTitle))) {
+    return baseTitle;
+  }
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseTitle} ${index}`;
+    if (!existingTitles.has(normalizeMatchingTitle(candidate))) {
+      return candidate;
+    }
+  }
+
+  return `${baseTitle} ${Date.now()}`;
+};
+
 export const createLocalRepository = (): WorkspaceRepository => ({
   async loadWorkspace() {
     return loadLocalWorkspaceSnapshot();
+  },
+  async loadLibraryWorkspace() {
+    return loadLocalWorkspaceSnapshot();
+  },
+  async loadPersonalWorkspace() {
+    return loadLocalWorkspaceSnapshot();
+  },
+  async listLibraries() {
+    return [];
+  },
+  setActiveLibrary() {
+    // Local mode only has one browser-local workspace.
+  },
+  async getPersonalLibraryId() {
+    throw new Error('Please sign in before using cloud libraries.');
+  },
+  async createTeam() {
+    throw new Error('Please sign in before creating a team.');
+  },
+  async getTeamManagement() {
+    throw new Error('Please sign in before managing a team.');
+  },
+  async createTeamInvite() {
+    throw new Error('Please sign in before inviting team members.');
+  },
+  async revokeTeamInvite() {
+    throw new Error('Please sign in before managing team invites.');
+  },
+  async updateTeamMemberRole() {
+    throw new Error('Please sign in before managing team members.');
+  },
+  async removeTeamMember() {
+    throw new Error('Please sign in before managing team members.');
+  },
+  async acceptTeamInvite() {
+    throw new Error('Please sign in before accepting a team invite.');
+  },
+  async copySongToPersonal(song) {
+    return song;
+  },
+  async loadTeamSourceSong() {
+    return null;
+  },
+  async syncPersonalSongFromTeam(song) {
+    return song;
+  },
+  async savePersonalSong() {
+    throw new Error('Local repository savePersonalSong is not used directly.');
   },
   async saveSong() {
     throw new Error('Local repository saveSong is not used directly.');
@@ -328,7 +505,7 @@ const ensureProfileAndLibrary = async (userId: string, email: string, name: stri
   };
 };
 
-const getLibraryWorkspace = async (libraryId: string): Promise<WorkspaceSnapshot> => {
+const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<WorkspaceSnapshot> => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
@@ -341,7 +518,7 @@ const getLibraryWorkspace = async (libraryId: string): Promise<WorkspaceSnapshot
       .returns<SongRow[]>(),
     supabase
       .from('setlists')
-      .select('id, library_id, name, display_mode, show_lyrics, client_legacy_id, created_at, updated_at')
+      .select('id, library_id, name, display_mode, show_lyrics, client_legacy_id, created_by, updated_by, created_at, updated_at')
       .eq('library_id', libraryId)
       .returns<SetlistRow[]>()
   ]);
@@ -366,9 +543,24 @@ const getLibraryWorkspace = async (libraryId: string): Promise<WorkspaceSnapshot
     throw setlistSongError;
   }
 
+  const setlistSongIds = (setlistSongRows ?? []).map((row) => row.id);
+  const { data: personalCapoRows, error: personalCapoError } = userId && setlistSongIds.length > 0
+    ? await supabase
+      .from('user_setlist_capo_overrides')
+      .select('setlist_song_id, capo')
+      .in('setlist_song_id', setlistSongIds)
+      .eq('user_id', userId)
+      .returns<UserSetlistCapoOverrideRow[]>()
+    : { data: [] as UserSetlistCapoOverrideRow[], error: null };
+
+  if (personalCapoError) {
+    throw personalCapoError;
+  }
+
+  const personalCapoBySetlistSongId = new Map((personalCapoRows ?? []).map((row) => [row.setlist_song_id, row.capo] as const));
   const songs = (songRows ?? []).map(mapSongRow);
   const songsById = new Map(songs.map((song) => [song.id, song] as const));
-  const setlists = mapSetlistRows(setlistRows ?? [], setlistSongRows ?? [], songsById);
+  const setlists = mapSetlistRows(setlistRows ?? [], setlistSongRows ?? [], songsById, personalCapoBySetlistSongId);
   const lastSavedAt = Math.max(
     0,
     ...songs.map((song) => song.updatedAt),
@@ -420,7 +612,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
   ] = await Promise.all([
     supabase
       .from('setlists')
-      .select('id, library_id, name, display_mode, show_lyrics, created_at, updated_at')
+      .select('id, library_id, name, display_mode, show_lyrics, created_by, updated_by, created_at, updated_at')
       .in('id', joinedSetlistIds)
       .returns<SetlistRow[]>(),
     supabase
@@ -481,6 +673,8 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
       name: row.name,
       displayMode: row.display_mode,
       showLyrics: row.show_lyrics,
+      createdBy: row.created_by,
+      updatedBy: row.updated_by,
       createdAt: new Date(row.created_at).getTime(),
       updatedAt: new Date(row.updated_at).getTime(),
       songs,
@@ -532,8 +726,9 @@ export const createCloudRepository = (params: {
   picture?: string;
 }): WorkspaceRepository => {
   let cachedLibraryId: string | null = null;
+  let activeLibraryId: string | null = null;
 
-  const ensureLibraryId = async () => {
+  const ensurePersonalLibraryId = async () => {
     if (cachedLibraryId) {
       return cachedLibraryId;
     }
@@ -543,15 +738,208 @@ export const createCloudRepository = (params: {
     return library.id;
   };
 
+  const ensureLibraryId = async () => activeLibraryId ?? await ensurePersonalLibraryId();
+
   return {
     async loadWorkspace() {
       const libraryId = await ensureLibraryId();
       const [workspace, joinedSetlists] = await Promise.all([
-        getLibraryWorkspace(libraryId),
+        getLibraryWorkspace(libraryId, params.userId),
         getJoinedSetlists(params.userId)
       ]);
-      persistLocalWorkspaceSnapshot(workspace.songs, workspace.setlists);
+      if (libraryId === cachedLibraryId || !activeLibraryId) {
+        persistLocalWorkspaceSnapshot(workspace.songs, workspace.setlists);
+      }
       return { ...workspace, joinedSetlists };
+    },
+
+    async loadLibraryWorkspace(libraryId) {
+      activeLibraryId = libraryId;
+      const workspace = await getLibraryWorkspace(libraryId, params.userId);
+      const joinedSetlists = libraryId === await ensurePersonalLibraryId()
+        ? await getJoinedSetlists(params.userId)
+        : [];
+      return { ...workspace, joinedSetlists };
+    },
+
+    async loadPersonalWorkspace() {
+      const personalLibraryId = await ensurePersonalLibraryId();
+      const workspace = await getLibraryWorkspace(personalLibraryId, params.userId);
+      return { ...workspace, joinedSetlists: [] };
+    },
+
+    async listLibraries() {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      await ensurePersonalLibraryId();
+      const { data, error } = await supabase.rpc('get_user_libraries');
+      if (error) throw error;
+      return normalizeLibrarySummaries(data);
+    },
+
+    setActiveLibrary(libraryId) {
+      activeLibraryId = libraryId;
+    },
+
+    async getPersonalLibraryId() {
+      return ensurePersonalLibraryId();
+    },
+
+    async createTeam(name) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('create_team', { p_name: name });
+      if (error) throw error;
+      const library = normalizeLibrarySummary(data);
+      if (!library) throw new Error('Unable to create team.');
+      return library;
+    },
+
+    async getTeamManagement(libraryId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('get_team_management', { p_library_id: libraryId });
+      if (error) throw error;
+      return normalizeTeamManagementSnapshot(data);
+    },
+
+    async createTeamInvite(libraryId, email, role) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('create_team_invite', {
+        p_library_id: libraryId,
+        p_email: email,
+        p_role: role
+      });
+      if (error) throw error;
+      const invite = normalizeTeamInvite(data);
+      if (!invite) throw new Error('Unable to create invite.');
+      return invite;
+    },
+
+    async revokeTeamInvite(inviteId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('revoke_team_invite', { p_invite_id: inviteId });
+      if (error) throw error;
+    },
+
+    async updateTeamMemberRole(libraryId, userId, role) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('update_team_member_role', {
+        p_library_id: libraryId,
+        p_user_id: userId,
+        p_role: role
+      });
+      if (error) throw error;
+    },
+
+    async removeTeamMember(libraryId, userId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('remove_team_member', {
+        p_library_id: libraryId,
+        p_user_id: userId
+      });
+      if (error) throw error;
+    },
+
+    async acceptTeamInvite(token) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('accept_team_invite', { p_token: token });
+      if (error) throw error;
+      return data as string;
+    },
+
+    async copySongToPersonal(sourceSong) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const sourceLibraryId = activeLibraryId;
+      const personalLibraryId = await ensurePersonalLibraryId();
+      const personalWorkspace = await getLibraryWorkspace(personalLibraryId, params.userId);
+      const sourceLibrary = sourceLibraryId
+        ? (await this.listLibraries()).find((library) => library.id === sourceLibraryId)
+        : null;
+      const copiedSong: StoredSong = {
+        ...cloneValue(normalizeSongBars(sourceSong)),
+        id: crypto.randomUUID(),
+        title: buildPersonalCopyTitle(personalWorkspace.songs, sourceSong.title),
+        updatedAt: Date.now(),
+        teamSource: sourceLibraryId ? {
+          libraryId: sourceLibraryId,
+          libraryName: sourceLibrary?.name,
+          songId: sourceSong.id,
+          updatedAt: sourceSong.updatedAt,
+          copiedAt: Date.now()
+        } : undefined
+      };
+      const payload = {
+        id: copiedSong.id,
+        library_id: personalLibraryId,
+        title: copiedSong.title,
+        content_json: normalizeSongBars(cloneValue(copiedSong)),
+        client_legacy_id: sourceSong.id,
+        created_by: params.userId,
+        updated_by: params.userId,
+        updated_at: new Date(copiedSong.updatedAt).toISOString()
+      };
+      const { error } = await supabase
+        .from('songs')
+        .upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      return copiedSong;
+    },
+
+    async loadTeamSourceSong(song) {
+      if (!supabase || !song.teamSource) return null;
+      const { data, error } = await supabase
+        .from('songs')
+        .select('id, library_id, title, content_json, client_legacy_id, created_at, updated_at')
+        .eq('library_id', song.teamSource.libraryId)
+        .eq('id', song.teamSource.songId)
+        .maybeSingle<SongRow>();
+      if (error) throw error;
+      return data ? mapSongRow(data) : null;
+    },
+
+    async syncPersonalSongFromTeam(song) {
+      if (!song.teamSource) return song;
+      const sourceSong = await this.loadTeamSourceSong(song);
+      if (!sourceSong) {
+        throw new Error('The linked team song could not be found.');
+      }
+      const syncedSong: StoredSong = {
+        ...cloneValue(normalizeSongBars(sourceSong)),
+        id: song.id,
+        title: song.title,
+        capo: song.capo,
+        updatedAt: Date.now(),
+        teamSource: {
+          ...song.teamSource,
+          updatedAt: sourceSong.updatedAt
+        }
+      };
+      await this.saveSong(syncedSong);
+      return syncedSong;
+    },
+
+    async savePersonalSong(song) {
+      if (!supabase) {
+        throw new Error('Supabase is not configured.');
+      }
+
+      const personalLibraryId = await ensurePersonalLibraryId();
+      const now = new Date(song.updatedAt || Date.now()).toISOString();
+      const payload = {
+        id: song.id,
+        library_id: personalLibraryId,
+        title: song.title,
+        content_json: normalizeSongBars(cloneValue(song)),
+        created_by: params.userId,
+        updated_by: params.userId,
+        updated_at: now
+      };
+
+      const { error } = await supabase
+        .from('songs')
+        .upsert(payload, { onConflict: 'id' });
+
+      if (error) {
+        throw error;
+      }
     },
 
     async saveSong(song) {
@@ -593,7 +981,7 @@ export const createCloudRepository = (params: {
         name: setlist.name,
         display_mode: setlist.displayMode,
         show_lyrics: setlist.showLyrics,
-        created_by: params.userId,
+        created_by: setlist.createdBy ?? params.userId,
         updated_by: params.userId,
         updated_at: updatedAtIso
       };

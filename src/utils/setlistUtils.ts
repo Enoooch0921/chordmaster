@@ -24,6 +24,14 @@ export const getSectionShortLabel = (title: string, fallbackIndex: number) => {
   return trimmedTitle.slice(0, 2).toUpperCase();
 };
 
+export const getEffectiveSetlistSongCapo = (setlistSong: SetlistSong, fallbackCapo?: number) => (
+  typeof setlistSong.personalCapoOverride === 'number'
+    ? setlistSong.personalCapoOverride
+    : typeof setlistSong.capo === 'number'
+      ? setlistSong.capo
+      : fallbackCapo
+);
+
 export const applySetlistSongOverrides = (song: Song, setlist: Setlist, setlistSong: SetlistSong): Song => {
   const sectionMap = new Map<string, Section>();
   song.sections.forEach((section, index) => {
@@ -41,7 +49,7 @@ export const applySetlistSongOverrides = (song: Song, setlist: Setlist, setlistS
   return {
     ...JSON.parse(JSON.stringify(song)) as Song,
     currentKey: (setlistSong.overrideKey ?? song.currentKey) as Key,
-    capo: typeof setlistSong.capo === 'number' ? setlistSong.capo : song.capo,
+    capo: getEffectiveSetlistSongCapo(setlistSong, song.capo),
     showNashvilleNumbers: setlist.displayMode === 'nashville-number-system',
     showAbsoluteJianpu: setlist.displayMode === 'chord-fixed-key',
     showLyrics: setlist.showLyrics,

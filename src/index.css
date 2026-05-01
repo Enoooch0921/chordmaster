@@ -45,6 +45,20 @@
   --font-music: "NotoMusic", serif;
   --font-rhythm: "Bach", "NotoMusic", serif;
   --font-rhythm-slur: "BachSlurs", "Bach", "NotoMusic", serif;
+
+  /* Brand palette — remaps Tailwind's indigo scale to the new ChordMaster green
+     so every existing *-indigo-* utility renders in brand colors automatically. */
+  --color-indigo-50:  #F0FAF5;
+  --color-indigo-100: #DAF1E5;
+  --color-indigo-200: #B6E3CA;
+  --color-indigo-300: #8AD0AC;
+  --color-indigo-400: #5EBD8F;
+  --color-indigo-500: #3DAA78;
+  --color-indigo-600: #2E8C5E;
+  --color-indigo-700: #236E48;
+  --color-indigo-800: #1A5234;
+  --color-indigo-900: #1A3A2A;
+  --color-indigo-950: #0D1F17;
 }
 
 @layer base {

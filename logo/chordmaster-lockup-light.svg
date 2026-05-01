@@ -1,0 +1,18 @@
+<svg width="280" height="64" viewBox="0 0 280 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>ChordMaster</title>
+  
+  
+  <line x1="10" y1="9" x2="10" y2="55" stroke="#1A3A2A" stroke-width="4.5" stroke-linecap="round"></line>
+  
+  <path d="M10 9 Q3 9 5 17" stroke="#1A3A2A" stroke-width="3" stroke-linecap="round" fill="none"></path>
+  
+  <path d="M10 55 Q3 55 5 47" stroke="#1A3A2A" stroke-width="3" stroke-linecap="round" fill="none"></path>
+  
+  <line x1="18" y1="9" x2="18" y2="55" stroke="#3DAA78" stroke-width="1.8" stroke-linecap="round" opacity="0.55"></line>
+  
+  <path d="M24 11 L24 53 M24 11 L38.5 34 L53 11 L53 53" stroke="#1A3A2A" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"></path>
+  
+  
+  <text x="70" y="42" font-family="&#39;Sora&#39;, &#39;DM Sans&#39;, system-ui, sans-serif" font-size="28" font-weight="600" letter-spacing="-0.5" fill="#1A3A2A">Chord</text>
+  <text x="163" y="42" font-family="&#39;Sora&#39;, &#39;DM Sans&#39;, system-ui, sans-serif" font-size="28" font-weight="600" letter-spacing="-0.5" fill="#3DAA78">Master</text>
+</svg>

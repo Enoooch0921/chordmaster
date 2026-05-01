@@ -8,3 +8,5 @@ coverage/
 !.env.example
 .playwright-cli/
 supabase/.temp/
+.claude/
+*.zip
