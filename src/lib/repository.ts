@@ -121,6 +121,49 @@ const ensureLibraryMembership = async (libraryId: string, userId: string) => {
   }
 };
 
+const getExistingPersonalLibrary = async (userId: string) => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data: existingLibrary, error: libraryError } = await supabase
+    .from('libraries')
+    .select('id, name, kind, owner_user_id')
+    .eq('owner_user_id', userId)
+    .eq('kind', 'personal')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle<LibraryRow>();
+
+  if (libraryError) {
+    throw libraryError;
+  }
+
+  return existingLibrary;
+};
+
+const upsertProfile = async (userId: string, email: string, name: string, picture?: string) => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const profilePayload = {
+    id: userId,
+    email,
+    display_name: name,
+    avatar_url: picture ?? null,
+    updated_at: new Date().toISOString()
+  };
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .upsert(profilePayload, { onConflict: 'id' });
+
+  if (profileError) {
+    throw profileError;
+  }
+};
+
 export interface WorkspaceRepository {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   loadLibraryWorkspace(libraryId: string): Promise<WorkspaceSnapshot>;
@@ -467,39 +510,22 @@ const ensureProfileAndLibrary = async (userId: string, email: string, name: stri
     throw new Error('Supabase is not configured.');
   }
 
-  const profilePayload = {
-    id: userId,
-    email,
-    display_name: name,
-    avatar_url: picture ?? null,
-    updated_at: new Date().toISOString()
-  };
-
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .upsert(profilePayload, { onConflict: 'id' });
-
-  if (profileError) {
-    throw profileError;
-  }
-
-  const { data: existingLibrary, error: libraryError } = await supabase
-    .from('libraries')
-    .select('id, name, kind, owner_user_id')
-    .eq('owner_user_id', userId)
-    .eq('kind', 'personal')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle<LibraryRow>();
-
-  if (libraryError) {
-    throw libraryError;
-  }
+  const existingLibrary = await getExistingPersonalLibrary(userId);
 
   if (existingLibrary?.id) {
-    await ensureLibraryMembership(existingLibrary.id, userId);
+    const maintenanceResults = await Promise.allSettled([
+      upsertProfile(userId, email, name, picture),
+      ensureLibraryMembership(existingLibrary.id, userId)
+    ]);
+    maintenanceResults.forEach((result) => {
+      if (result.status === 'rejected') {
+        console.warn('Unable to refresh account metadata while opening an existing library.', result.reason);
+      }
+    });
     return existingLibrary;
   }
+
+  await upsertProfile(userId, email, name, picture);
 
   const libraryId = crypto.randomUUID();
   const now = new Date().toISOString();
