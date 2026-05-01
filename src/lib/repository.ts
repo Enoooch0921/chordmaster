@@ -872,24 +872,13 @@ export const createCloudRepository = (params: {
 
     async copySongToPersonal(sourceSong) {
       if (!supabase) throw new Error('Supabase is not configured.');
-      const sourceLibraryId = activeLibraryId;
       const personalLibraryId = await ensurePersonalLibraryId();
       const personalWorkspace = await getLibraryWorkspace(personalLibraryId, params.userId);
-      const sourceLibrary = sourceLibraryId
-        ? (await this.listLibraries()).find((library) => library.id === sourceLibraryId)
-        : null;
       const copiedSong: StoredSong = {
         ...cloneValue(normalizeSongBars(sourceSong)),
         id: crypto.randomUUID(),
         title: buildPersonalCopyTitle(personalWorkspace.songs, sourceSong.title),
-        updatedAt: Date.now(),
-        teamSource: sourceLibraryId ? {
-          libraryId: sourceLibraryId,
-          libraryName: sourceLibrary?.name,
-          songId: sourceSong.id,
-          updatedAt: sourceSong.updatedAt,
-          copiedAt: Date.now()
-        } : undefined
+        updatedAt: Date.now()
       };
       const payload = {
         id: copiedSong.id,

@@ -3401,7 +3401,6 @@ export default function App() {
       }
 
       const importedSongs: StoredSong[] = [];
-      const linkedPersonalSongs: StoredSong[] = [];
       const nextSongs = [...songs];
       personalWorkspace.songs.forEach((sourceSong, index) => {
         const importLabel = language === 'zh' ? '(個人匯入)' : '(Personal import)';
@@ -3413,19 +3412,6 @@ export default function App() {
         };
         nextSongs.push(copiedSong);
         importedSongs.push(copiedSong);
-        if (activeLibraryId) {
-          linkedPersonalSongs.push({
-            ...sourceSong,
-            updatedAt: Date.now() + index,
-            teamSource: {
-              libraryId: activeLibraryId,
-              libraryName: activeCloudLibrary?.name,
-              songId: copiedSong.id,
-              updatedAt: copiedSong.updatedAt,
-              copiedAt: Date.now()
-            }
-          });
-        }
       });
 
       setSongs(nextSongs);
@@ -3436,11 +3422,10 @@ export default function App() {
       setSelectedSongIdsForBulkDelete([]);
       setIsLibraryEditing(false);
       await persistWorkspace(nextSongs, setlists);
-      await Promise.all(linkedPersonalSongs.map((linkedSong) => repository.savePersonalSong(linkedSong)));
       window.alert(
         language === 'zh'
-          ? `已匯入 ${importedSongs.length} 首個人歌曲到「${teamName}」，並在個人區建立團隊來源連結。`
-          : `Imported ${importedSongs.length} personal songs into "${teamName}" and linked the personal copies to their team sources.`
+          ? `已匯入 ${importedSongs.length} 首個人歌曲到「${teamName}」。個人區歌曲不會被修改。`
+          : `Imported ${importedSongs.length} personal songs into "${teamName}". Your personal songs were not modified.`
       );
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
@@ -3500,8 +3485,8 @@ export default function App() {
       const copiedSong = await repository.copySongToPersonal(targetSong);
       setSyncStatus('saved');
       window.alert(language === 'zh'
-        ? `已轉存到個人區：「${copiedSong.title}」。之後團隊版更新時，個人區會提示可同步。`
-        : `Copied to your personal library: "${copiedSong.title}". Your personal copy will show a sync prompt when the team version changes.`);
+        ? `已轉存到個人區：「${copiedSong.title}」。這是獨立副本，不會連動團隊版。`
+        : `Copied to your personal library: "${copiedSong.title}". This is an independent copy and will not sync with the team version.`);
     } catch (error) {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       window.alert(error instanceof Error ? error.message : copy.cloudSyncFailed);
