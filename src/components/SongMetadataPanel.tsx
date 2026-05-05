@@ -111,7 +111,7 @@ const TapTempoButton: React.FC<TapTempoButtonProps> = ({ language, onApply }) =>
       className="inline-flex h-7 w-full min-w-[4.5rem] items-center justify-center rounded-lg border border-gray-300 bg-white px-2 text-[11px] font-bold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
       title={language === 'zh' ? '跟著音樂按下節拍，自動套用 BPM' : 'Press with the music to apply BPM'}
     >
-      {detectedBpm ? `${detectedBpm}` : language === 'zh' ? '測速' : 'Tap'}
+      {detectedBpm ? `${detectedBpm}` : 'TAP'}
     </button>
   );
 };
@@ -228,30 +228,30 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       : kind === 'band' ? 'Band Version' : 'Vocal Version';
 
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-        <div className="mb-1.5 flex items-center justify-between gap-2">
-          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">{label}</div>
+      <div className="grid grid-cols-12 items-center gap-1.5">
+        <div className="col-span-12 flex min-w-0 items-center gap-1.5 sm:col-span-12 lg:col-span-2">
+          <div className="min-w-0 truncate text-[11px] font-bold text-gray-600">{label}</div>
           {hasInvalidUrl ? (
-            <span className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600 ring-1 ring-rose-100">
-              {language === 'zh' ? '無效 YouTube' : 'Invalid YouTube'}
+            <span className="shrink-0 rounded-full bg-rose-50 px-1.5 py-0.5 text-[9px] font-semibold text-rose-600 ring-1 ring-rose-100">
+              {language === 'zh' ? '無效' : 'Invalid'}
             </span>
           ) : videoId ? (
-            <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100">
+            <span className="shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 ring-1 ring-emerald-100">
               YouTube
             </span>
           ) : null}
         </div>
 
-        <div className="grid grid-cols-12 gap-1.5">
+        <div className="col-span-12 grid grid-cols-12 gap-1.5 lg:col-span-10">
           <input
             type="url"
             value={url}
             onChange={(event) => updateReference(kind, { url: event.target.value })}
             placeholder={language === 'zh' ? '貼上 YouTube 連結' : 'Paste YouTube URL'}
-            className="col-span-12 h-7 min-w-0 rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 sm:col-span-6"
+            className="col-span-12 h-7 min-w-0 rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 sm:col-span-6 xl:col-span-7"
           />
 
-          <div className="col-span-5 sm:col-span-2">
+          <div className="col-span-4 sm:col-span-2">
             <KeyPicker
               value={reference.key ?? null}
               onChange={(key) => updateReference(kind, { key: key ?? undefined })}
@@ -278,10 +278,10 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               updateReference(kind, { bpm: digitsOnly ? Number(digitsOnly) : undefined });
             }}
             placeholder="BPM"
-            className="col-span-4 h-7 min-w-0 rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 sm:col-span-2"
+            className="col-span-4 h-7 min-w-[4.75rem] rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 sm:col-span-2 xl:col-span-1"
           />
 
-          <div className="col-span-3 sm:col-span-2">
+          <div className="col-span-4 sm:col-span-2">
             <TapTempoButton language={language} onApply={(bpm) => updateReference(kind, { bpm })} />
           </div>
         </div>
@@ -552,12 +552,12 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   );
 
   const referencesField = (
-    <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-2.5">
-      <div className="flex items-center gap-2">
+    <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-2.5 py-2">
+      <div className="flex items-center gap-2 px-0.5">
         <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-500">{language === 'zh' ? '參考音源' : 'Reference'}</div>
         <div className="h-px flex-1 bg-gray-200" />
       </div>
-      <div className={`mt-2 ${isWideLayout ? 'grid grid-cols-2 gap-2' : 'space-y-1.5'}`}>
+      <div className="mt-1.5 space-y-1.5">
         {renderReferenceEditor('band')}
         {renderReferenceEditor('vocal')}
       </div>

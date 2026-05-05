@@ -58,7 +58,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
   const videoId = parseYouTubeVideoId(activeReference?.url);
   const isFrameLoaded = videoId !== null && loadedVideoId === videoId;
   const isFrameTimedOut = videoId !== null && timedOutVideoId === videoId && !isFrameLoaded;
-  const referenceBpm = activeReference?.bpm;
+  const referenceBpm = activeReference?.bpm ?? song.tempo;
   const effectiveBpm = typeof referenceBpm === 'number' ? Math.round(referenceBpm * playbackRate) : null;
   const practiceBpm = typeof referenceBpm === 'number'
     ? Math.max(20, Math.min(400, Math.round(referenceBpm * playbackRate)))
@@ -236,7 +236,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
                 {activeKind === 'band' ? <Music2 size={13} /> : <Mic2 size={13} />}
@@ -247,14 +247,34 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50"
-              aria-label={language === 'zh' ? '關閉 Reference' : 'Close Reference'}
-            >
-              <X size={16} />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <div className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm">
+                {availableReferenceKinds.map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => onKindChange(kind)}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors ${
+                      kind === activeKind
+                        ? 'border border-indigo-200 bg-indigo-50 text-indigo-700'
+                        : 'border border-transparent text-gray-600 hover:bg-gray-50 hover:text-indigo-700'
+                    }`}
+                  >
+                    {kind === 'band' ? <Music2 size={13} /> : <Mic2 size={13} />}
+                    <span>{getKindLabel(kind, language)}</span>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50"
+                aria-label={language === 'zh' ? '關閉 Reference' : 'Close Reference'}
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -299,23 +319,9 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
                 ))}
               </div>
             </div>
+          </div>
 
-            {availableReferenceKinds.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                onClick={() => onKindChange(kind)}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-bold transition-colors ${
-                  kind === activeKind
-                    ? 'border border-indigo-200 bg-indigo-50 text-indigo-700'
-                    : 'border border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-700'
-                }`}
-              >
-                {kind === 'band' ? <Music2 size={13} /> : <Mic2 size={13} />}
-                <span>{getKindLabel(kind, language)}</span>
-              </button>
-            ))}
-
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {typeof referenceBpm === 'number' ? (
               <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
                 {[-10, -5, -1].map((delta) => (
@@ -375,29 +381,29 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
             <div className="leading-relaxed">
               {language === 'zh' ? (
                 <>
-                  💡 進階小撇步：在 Chrome / Edge 安裝{' '}
+                  💡 已安裝 Transpose？先點右側「在 YouTube 開啟」，再從瀏覽器工具列啟用插件；還沒安裝可{' '}
                   <a
                     href={TRANSPOSE_EXTENSION_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-bold text-indigo-600 underline-offset-2 hover:underline"
                   >
-                    Transpose 插件
-                  </a>{' '}
-                  後，搭配右側「在 YouTube 開啟」就能升降調，超實用。
+                    安裝 Transpose
+                  </a>
+                  。
                 </>
               ) : (
                 <>
-                  💡 Pro tip: install the{' '}
+                  💡 Already have Transpose? Open this video on YouTube, then enable it from the browser toolbar. If not,{' '}
                   <a
                     href={TRANSPOSE_EXTENSION_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-bold text-indigo-600 underline-offset-2 hover:underline"
                   >
-                    Transpose extension
-                  </a>{' '}
-                  on Chrome / Edge, then use "Open on YouTube" to shift pitch — works great.
+                    install Transpose
+                  </a>
+                  .
                 </>
               )}
             </div>
