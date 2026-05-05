@@ -1,6 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @font-face {
   font-family: 'JianpuASCII';
   src: url('https://cdn.jsdelivr.net/gh/RobertWinslow/jianpu-ascii-font@main/JianpuASCII.ttf') format('truetype');
@@ -59,9 +61,50 @@
   --color-indigo-800: #1A5234;
   --color-indigo-900: #1A3A2A;
   --color-indigo-950: #0D1F17;
+
+  /* Semantic neutrals — light mode defaults.
+     Overridden in `.dark` below. Surfaces stack from sunken (deepest)
+     → muted (page) → DEFAULT (cards) → raised (popovers, tooltips). */
+  --color-surface: #ffffff;
+  --color-surface-muted: #f9fafb;
+  --color-surface-sunken: #f3f4f6;
+  --color-surface-raised: #ffffff;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+  --color-text: #111827;
+  --color-text-muted: #4b5563;
+  --color-text-faint: #9ca3af;
+  --color-text-inverse: #ffffff;
+
+  /* Toast / feedback semantic colors */
+  --color-success: #2E8C5E;
+  --color-success-soft: #DAF1E5;
+  --color-danger: #e11d48;
+  --color-danger-soft: #ffe4e6;
 }
 
 @layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --color-surface: #161b22;
+    --color-surface-muted: #0d1117;
+    --color-surface-sunken: #0a0d12;
+    --color-surface-raised: #1c2128;
+    --color-border: #30363d;
+    --color-border-strong: #484f58;
+    --color-text: #e6edf3;
+    --color-text-muted: #9ba1a8;
+    --color-text-faint: #6e7681;
+    --color-text-inverse: #0d1117;
+    --color-success-soft: #1A5234;
+    --color-danger: #f43f5e;
+    --color-danger-soft: #4c1024;
+  }
+
   html,
   body,
   #root {
@@ -70,7 +113,9 @@
   }
 
   body {
-    @apply antialiased text-gray-900 bg-gray-50;
+    @apply antialiased;
+    background-color: var(--color-surface-muted);
+    color: var(--color-text);
   }
 }
 
@@ -90,6 +135,23 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+}
+
+/* Force light tokens during PDF export, regardless of UI theme.
+   PDF output must always look like the printable light version. */
+.dark body.exporting-pdf,
+body.exporting-pdf {
+  --color-surface: #ffffff;
+  --color-surface-muted: #ffffff;
+  --color-surface-sunken: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+  --color-text: #111827;
+  --color-text-muted: #4b5563;
+  --color-text-faint: #9ca3af;
+  background: white !important;
+  color-scheme: light;
 }
 
 @media print {

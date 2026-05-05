@@ -27,6 +27,8 @@ import {
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
+import { useThemeMode } from './hooks/useThemeMode';
+import { useToast } from './components/Toast';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
@@ -40,7 +42,7 @@ import SongMetadataPanel from './components/SongMetadataPanel';
 import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -1291,6 +1293,8 @@ export default function App() {
   } = useSupabaseAuth();
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('zh');
+  const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
+  const toast = useToast();
   const initialLibraryRef = useRef(loadSongLibrary());
   const initialSetlistsRef = useRef(loadSetlists(initialLibraryRef.current.songs));
   const [songs, setSongs] = useState<StoredSong[]>(initialLibraryRef.current.songs);
@@ -1583,42 +1587,46 @@ export default function App() {
   const importSummaryLabel = copy.importLocalStats
     .replace('{songs}', String(songs.length))
     .replace('{setlists}', String(setlists.length));
-  const toolbarPrimaryActionClassName = 'flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
-  const toolbarPrimaryEmphasisActionClassName = 'flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-gray-800';
+  const toolbarSurfaceDark = 'dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)] dark:text-[color:var(--color-text)] dark:hover:border-[color:var(--color-indigo-700)] dark:hover:bg-[color:var(--color-surface-raised)]';
+  const toolbarEmphasisDark = 'dark:bg-[color:var(--color-indigo-700)] dark:text-[color:var(--color-text-inverse)] dark:hover:bg-[color:var(--color-indigo-600)]';
+  const toolbarToggleActiveAccentDark = 'dark:border-amber-700/50 dark:bg-amber-900/30 dark:text-amber-200';
+  const toolbarToggleActiveAccentDarkLight = 'dark:border-[color:var(--color-indigo-700)] dark:bg-[color:var(--color-indigo-900)] dark:text-[color:var(--color-indigo-100)]';
+  const toolbarPrimaryActionClassName = `flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
+  const toolbarPrimaryEmphasisActionClassName = `flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
   const toolbarSecondaryToggleClassName = (active: boolean) => `inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-bold transition-all ${
     active
-      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
-      : 'border border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-600'
+      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-indigo-950/40'
+      : `border border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-600 ${toolbarSurfaceDark}`
   }`;
-  const desktopToolbarActionClassName = 'inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
-  const desktopToolbarPrimaryActionClassName = 'inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-gray-900 px-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-gray-800';
+  const desktopToolbarActionClassName = `inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-[13px] font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
+  const desktopToolbarPrimaryActionClassName = `inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-gray-900 px-2.5 text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
   const desktopToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => `inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-[13px] font-semibold shadow-sm transition-colors ${
     active
       ? tone === 'accent'
-        ? 'border-amber-200 bg-amber-50 text-amber-700'
-        : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-      : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
+        ? `border-amber-200 bg-amber-50 text-amber-700 ${toolbarToggleActiveAccentDark}`
+        : `border-indigo-200 bg-indigo-50 text-indigo-700 ${toolbarToggleActiveAccentDarkLight}`
+      : `border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`
   }`;
   const denseHeaderShowsContextLabel = mainViewportWidth >= 1500;
   const denseToolbarShowsLabels = mainViewportWidth >= 1680;
   const denseToolbarActionClassName = denseToolbarShowsLabels
     ? desktopToolbarActionClassName
-    : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
+    : `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
   const denseToolbarPrimaryActionClassName = denseToolbarShowsLabels
     ? desktopToolbarPrimaryActionClassName
-    : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white shadow-sm transition-colors hover:bg-gray-800';
+    : `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
   const denseToolbarToggleClassName = (active: boolean, tone: 'neutral' | 'accent' = 'neutral') => (
     denseToolbarShowsLabels
       ? desktopToolbarToggleClassName(active, tone)
       : `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border shadow-sm transition-colors ${
           active
             ? tone === 'accent'
-              ? 'border-amber-200 bg-amber-50 text-amber-700'
-              : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
+              ? `border-amber-200 bg-amber-50 text-amber-700 ${toolbarToggleActiveAccentDark}`
+              : `border-indigo-200 bg-indigo-50 text-indigo-700 ${toolbarToggleActiveAccentDarkLight}`
+            : `border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`
         }`
   );
-  const denseToolbarMenuButtonClassName = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50';
+  const denseToolbarMenuButtonClassName = `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
   const compactEditorToggleLabel = language === 'zh' ? '編輯' : 'Editor';
   const compactLyricsToggleLabel = language === 'zh' ? '歌詞' : 'Lyrics';
   const compactAutoSaveLabel = language === 'zh' ? '自存' : 'Auto';
@@ -1629,23 +1637,23 @@ export default function App() {
     if (active) {
       return `${mobileTopbarActionBaseClassName} ${
         tone === 'accent'
-          ? 'border-amber-200 bg-amber-50 text-amber-700'
-          : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+          ? `border-amber-200 bg-amber-50 text-amber-700 ${toolbarToggleActiveAccentDark}`
+          : `border-indigo-200 bg-indigo-50 text-indigo-700 ${toolbarToggleActiveAccentDarkLight}`
       }`;
     }
 
-    return `${mobileTopbarActionBaseClassName} border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50`;
+    return `${mobileTopbarActionBaseClassName} border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
   };
   const getMobileTopbarActionClassName = (tone: 'default' | 'primary' | 'accent' = 'default') => {
     if (tone === 'primary') {
-      return `${mobileTopbarActionBaseClassName} border-gray-900 bg-gray-900 text-white hover:bg-gray-800`;
+      return `${mobileTopbarActionBaseClassName} border-gray-900 bg-gray-900 text-white hover:bg-gray-800 dark:border-[color:var(--color-indigo-700)] ${toolbarEmphasisDark}`;
     }
 
     if (tone === 'accent') {
       return `${mobileTopbarActionBaseClassName} border-amber-500 bg-amber-500 text-white hover:bg-amber-400`;
     }
 
-    return `${mobileTopbarActionBaseClassName} border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50`;
+    return `${mobileTopbarActionBaseClassName} border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
   };
   const inlineModeBadgeClassName = (active: boolean) => `inline-flex min-w-[28px] items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-black leading-none ${
     active
@@ -1679,7 +1687,7 @@ export default function App() {
     ) : null
   );
   const toolbarOverflowPanel = isToolbarOverflowMenuOpen ? (
-    <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
+    <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
       <button
         type="button"
         onClick={() => {
@@ -1789,7 +1797,34 @@ export default function App() {
         </button>
       ) : null}
 
-      <div className="mt-1 grid grid-cols-2 gap-1 rounded-xl bg-gray-50 p-1">
+      <div className="mt-1 grid grid-cols-3 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
+        {([
+          { value: 'light', icon: Sun, label: language === 'zh' ? '淺色' : 'Light' },
+          { value: 'dark', icon: Moon, label: language === 'zh' ? '深色' : 'Dark' },
+          { value: 'auto', icon: MonitorSmartphone, label: language === 'zh' ? '系統' : 'Auto' }
+        ] as const).map(({ value, icon: Icon, label }) => {
+          const isActive = themeMode === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setThemeMode(value)}
+              aria-pressed={isActive}
+              aria-label={label}
+              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-bold transition-colors ${
+                isActive
+                  ? 'bg-gray-900 text-white dark:bg-[color:var(--color-surface-raised)] dark:text-[color:var(--color-text)]'
+                  : 'text-gray-600 hover:bg-white dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'
+              }`}
+            >
+              <Icon size={14} />
+              <span>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-1 grid grid-cols-2 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
         <button
           type="button"
           onClick={() => {
@@ -1797,7 +1832,9 @@ export default function App() {
             setIsToolbarOverflowMenuOpen(false);
           }}
           className={`rounded-lg px-2.5 py-2 text-xs font-bold transition-colors ${
-            language === 'zh' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-white'
+            language === 'zh'
+              ? 'bg-gray-900 text-white dark:bg-[color:var(--color-surface-raised)] dark:text-[color:var(--color-text)]'
+              : 'text-gray-600 hover:bg-white dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'
           }`}
         >
           中文
@@ -1809,7 +1846,9 @@ export default function App() {
             setIsToolbarOverflowMenuOpen(false);
           }}
           className={`rounded-lg px-2.5 py-2 text-xs font-bold transition-colors ${
-            language === 'en' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-white'
+            language === 'en'
+              ? 'bg-gray-900 text-white dark:bg-[color:var(--color-surface-raised)] dark:text-[color:var(--color-text)]'
+              : 'text-gray-600 hover:bg-white dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'
           }`}
         >
           EN
@@ -2401,7 +2440,7 @@ export default function App() {
     try {
       await persistWorkspace(songs, setlists);
     } catch {
-      window.alert(copy.cloudSyncFailed);
+      toast.error(copy.cloudSyncFailed);
     }
   };
 
@@ -2411,7 +2450,7 @@ export default function App() {
 
   const handleToggleEditor = () => {
     if (!isEditing && !canOpenEditor) {
-      window.alert(language === 'zh' ? '你目前只有查看權限，不能編輯內容。' : 'Your current role can view this workspace but cannot edit it.');
+      toast.error(language === 'zh' ? '你目前只有查看權限，不能編輯內容。' : 'Your current role can view this workspace but cannot edit it.');
       return;
     }
 
@@ -2420,7 +2459,7 @@ export default function App() {
 
   const handleToggleLibraryEditing = () => {
     if (!isLibraryEditing && !canEditTeamSongs) {
-      window.alert(language === 'zh' ? '你沒有管理這個團隊歌曲庫的權限。' : 'You do not have permission to manage this team song library.');
+      toast.error(language === 'zh' ? '你沒有管理這個團隊歌曲庫的權限。' : 'You do not have permission to manage this team song library.');
       return;
     }
 
@@ -2569,7 +2608,7 @@ export default function App() {
       setTeamInviteEmail('');
       await loadTeamManagement();
     } catch (error) {
-      window.alert(getTeamFeatureErrorMessage(error, language));
+      toast.error(getTeamFeatureErrorMessage(error, language));
     } finally {
       setIsCreatingTeamInvite(false);
     }
@@ -2582,7 +2621,7 @@ export default function App() {
       await repository.revokeTeamInvite(inviteId);
       await loadTeamManagement();
     } catch (error) {
-      window.alert(getTeamFeatureErrorMessage(error, language));
+      toast.error(getTeamFeatureErrorMessage(error, language));
     }
   };
 
@@ -2594,7 +2633,7 @@ export default function App() {
       await loadTeamManagement();
       await refreshCloudLibraries();
     } catch (error) {
-      window.alert(getTeamFeatureErrorMessage(error, language));
+      toast.error(getTeamFeatureErrorMessage(error, language));
     }
   };
 
@@ -2607,7 +2646,7 @@ export default function App() {
       await repository.removeTeamMember(activeCloudLibrary.id, userId);
       await loadTeamManagement();
     } catch (error) {
-      window.alert(getTeamFeatureErrorMessage(error, language));
+      toast.error(getTeamFeatureErrorMessage(error, language));
     }
   };
 
@@ -2845,7 +2884,7 @@ export default function App() {
 
   const handleCreateSong = () => {
     if (!canEditTeamSongs) {
-      window.alert(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this team song library.');
+      toast.error(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this team song library.');
       return;
     }
     const newSong = createDefaultSong(songs.length + 1);
@@ -2859,7 +2898,7 @@ export default function App() {
 
   const handleCreateSetlist = () => {
     if (!canCreateTeamSetlists) {
-      window.alert(language === 'zh' ? '你沒有在這個團隊建立歌單的權限。' : 'You do not have permission to create setlists in this team.');
+      toast.error(language === 'zh' ? '你沒有在這個團隊建立歌單的權限。' : 'You do not have permission to create setlists in this team.');
       return;
     }
     const now = Date.now();
@@ -2995,7 +3034,7 @@ export default function App() {
       const reason = error instanceof Error ? error.message.trim() : '';
       const message = reason ? `${copy.leaveSetlistError}\n\n${reason}` : copy.leaveSetlistError;
       setAuthUiError(message);
-      window.alert(message);
+      toast.error(message);
     } finally {
       setLeavingSharedSetlistId(null);
       setPendingLeaveSharedSetlistId(null);
@@ -3096,7 +3135,7 @@ export default function App() {
       || TEAM_EDIT_ROLES.has(activeLibraryRole)
       || (activeLibraryRole === 'setlist_manager' && targetSetlist?.createdBy === authenticatedUser?.id);
     if (!canDeleteTarget) {
-      window.alert(language === 'zh' ? '你沒有刪除這份團隊歌單的權限。' : 'You do not have permission to delete this team setlist.');
+      toast.error(language === 'zh' ? '你沒有刪除這份團隊歌單的權限。' : 'You do not have permission to delete this team setlist.');
       return;
     }
     const confirmed = window.confirm(copy.confirmDeleteSetlist);
@@ -3240,7 +3279,7 @@ export default function App() {
       return;
     }
     if (!canEditSelectedSetlist) {
-      window.alert(language === 'zh' ? '你沒有編輯這份團隊歌單的權限。' : 'You do not have permission to edit this team setlist.');
+      toast.error(language === 'zh' ? '你沒有編輯這份團隊歌單的權限。' : 'You do not have permission to edit this team setlist.');
       return;
     }
 
@@ -3354,7 +3393,7 @@ export default function App() {
 
   const handleImportSongLibraryClick = () => {
     if (!canEditTeamSongs) {
-      window.alert(language === 'zh' ? '你沒有匯入覆蓋這個團隊歌曲庫的權限。' : 'You do not have permission to import into this team song library.');
+      toast.error(language === 'zh' ? '你沒有匯入覆蓋這個團隊歌曲庫的權限。' : 'You do not have permission to import into this team song library.');
       return;
     }
     importLibraryInputRef.current?.click();
@@ -3374,7 +3413,7 @@ export default function App() {
       const importedSongs = Array.isArray(parsedContent) ? parsedContent : parsedContent.songs;
 
       if (!Array.isArray(importedSongs) || importedSongs.length === 0) {
-        window.alert(copy.importEmptyError);
+        toast.error(copy.importEmptyError);
         return;
       }
 
@@ -3429,14 +3468,14 @@ export default function App() {
       await persistWorkspace(nextSongs, nextSetlists);
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
-      window.alert(reason ? `${copy.importInvalidError}\n\n${reason}` : copy.importInvalidError);
+      toast.error(reason ? `${copy.importInvalidError}\n\n${reason}` : copy.importInvalidError);
     }
   };
 
   const handleImportPersonalSongsToTeam = async () => {
     const repository = cloudRepositoryRef.current;
     if (!repository || !isTeamWorkspace || !canEditTeamSongs) {
-      window.alert(language === 'zh' ? '你沒有匯入到這個團隊歌曲庫的權限。' : 'You do not have permission to import into this team song library.');
+      toast.error(language === 'zh' ? '你沒有匯入到這個團隊歌曲庫的權限。' : 'You do not have permission to import into this team song library.');
       return;
     }
 
@@ -3455,7 +3494,7 @@ export default function App() {
       setSyncStatus('syncing');
       const personalWorkspace = await repository.loadPersonalWorkspace();
       if (personalWorkspace.songs.length === 0) {
-        window.alert(language === 'zh' ? '個人區目前沒有可匯入的歌曲。' : 'Your personal workspace has no songs to import.');
+        toast.error(language === 'zh' ? '個人區目前沒有可匯入的歌曲。' : 'Your personal workspace has no songs to import.');
         return;
       }
 
@@ -3481,14 +3520,14 @@ export default function App() {
       setSelectedSongIdsForBulkDelete([]);
       setIsLibraryEditing(false);
       await persistWorkspace(nextSongs, setlists);
-      window.alert(
+      toast.error(
         language === 'zh'
           ? `已匯入 ${importedSongs.length} 首個人歌曲到「${teamName}」。個人區歌曲不會被修改。`
           : `Imported ${importedSongs.length} personal songs into "${teamName}". Your personal songs were not modified.`
       );
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
-      window.alert(
+      toast.error(
         language === 'zh'
           ? `無法從個人區匯入歌曲。${reason ? `\n\n${reason}` : ''}`
           : `Unable to import songs from your personal workspace.${reason ? `\n\n${reason}` : ''}`
@@ -3500,7 +3539,7 @@ export default function App() {
 
   const handleDuplicateSong = (songId: string) => {
     if (!canEditTeamSongs) {
-      window.alert(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this team song library.');
+      toast.error(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this team song library.');
       return;
     }
     const targetSong = songs.find((item) => item.id === songId);
@@ -3543,12 +3582,16 @@ export default function App() {
       setSyncStatus('syncing');
       const copiedSong = await repository.copySongToPersonal(targetSong);
       setSyncStatus('saved');
-      window.alert(language === 'zh'
-        ? `已轉存到個人區：「${copiedSong.title}」。這是獨立副本，不會連動團隊版。`
-        : `Copied to your personal library: "${copiedSong.title}". This is an independent copy and will not sync with the team version.`);
+      toast.success(language === 'zh'
+        ? `已轉存到個人區：「${copiedSong.title}」`
+        : `Copied to your personal library: "${copiedSong.title}"`, {
+        description: language === 'zh'
+          ? '這是獨立副本，不會連動團隊版。'
+          : 'This is an independent copy and will not sync with the team version.'
+      });
     } catch (error) {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-      window.alert(error instanceof Error ? error.message : copy.cloudSyncFailed);
+      toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
     }
   };
 
@@ -3594,10 +3637,10 @@ export default function App() {
         }
       }));
       setSyncStatus('saved');
-      window.alert(language === 'zh' ? '已同步到團隊最新版。' : 'Synced to the latest team version.');
+      toast.success(language === 'zh' ? '已同步到團隊最新版' : 'Synced to the latest team version');
     } catch (error) {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-      window.alert(error instanceof Error ? error.message : copy.cloudSyncFailed);
+      toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
     }
   };
 
@@ -3616,7 +3659,7 @@ export default function App() {
 
   const handleDeleteSong = (songId: string) => {
     if (!canEditTeamSongs) {
-      window.alert(language === 'zh' ? '你沒有刪除這個團隊歌曲的權限。' : 'You do not have permission to delete this team song.');
+      toast.error(language === 'zh' ? '你沒有刪除這個團隊歌曲的權限。' : 'You do not have permission to delete this team song.');
       return;
     }
     const targetSong = songs.find((item) => item.id === songId);
@@ -3684,7 +3727,7 @@ export default function App() {
 
   const handleDeleteSelectedSongs = () => {
     if (!canEditTeamSongs) {
-      window.alert(language === 'zh' ? '你沒有刪除這些團隊歌曲的權限。' : 'You do not have permission to delete these team songs.');
+      toast.error(language === 'zh' ? '你沒有刪除這些團隊歌曲的權限。' : 'You do not have permission to delete these team songs.');
       return;
     }
     if (selectedSongIdsForBulkDelete.length === 0) {
@@ -4101,7 +4144,7 @@ export default function App() {
 
       if (isSetlistMode) {
         if (!selectedSetlist || setlistSongsWithSource.length === 0) {
-          window.alert(copy.setlistExportEmptyError);
+          toast.error(copy.setlistExportEmptyError);
           return;
         }
 
@@ -4169,6 +4212,7 @@ export default function App() {
         captureHost.appendChild(exportSongWrapper);
         await exportCaptureHostToPdf(captureHost, buildPdfFileName(song));
       }
+      toast.success(language === 'zh' ? 'PDF 已匯出' : 'PDF exported');
     } catch (error) {
       if (error instanceof PdfExportCancelledError) {
         return;
@@ -4176,7 +4220,7 @@ export default function App() {
 
       console.error('PDF export failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Please try again.';
-      window.alert(`${copy.pdfExportError} ${errorMessage}`);
+      toast.error(`${copy.pdfExportError} ${errorMessage}`);
     } finally {
       exportRoot?.unmount();
       captureHost.remove();
@@ -5151,7 +5195,7 @@ export default function App() {
 
   const handleCreateShareLink = async (resourceType: 'song' | 'setlist') => {
     if (!cloudRepositoryRef.current) {
-      window.alert(copy.authUnavailable);
+      toast.error(copy.authUnavailable);
       return;
     }
 
@@ -5161,7 +5205,7 @@ export default function App() {
     }
 
     if (resourceType === 'song' && isTeamWorkspace && !canEditTeamSongs) {
-      window.alert(language === 'zh' ? '你沒有分享團隊歌曲的權限。' : 'You do not have permission to share team songs.');
+      toast.error(language === 'zh' ? '你沒有分享團隊歌曲的權限。' : 'You do not have permission to share team songs.');
       return;
     }
 
@@ -5173,12 +5217,16 @@ export default function App() {
 
       if (resourceType === 'setlist') {
         void loadSetlistShareStatus(resourceId);
-        window.alert(didCopy ? copy.shareCopied : copy.shareCopyFailed);
+        if (didCopy) {
+          toast.success(copy.shareCopied);
+        } else {
+          toast.error(copy.shareCopyFailed);
+        }
         return;
       }
 
       if (didCopy) {
-        window.alert(copy.shareCopied);
+        toast.success(copy.shareCopied);
         return;
       }
 
@@ -5187,7 +5235,7 @@ export default function App() {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       const reason = error instanceof Error ? error.message.trim() : '';
       if (!reason) {
-        window.alert(copy.shareFailed);
+        toast.error(copy.shareFailed);
         return;
       }
 
@@ -5195,7 +5243,7 @@ export default function App() {
         ? copy.shareAuthRequired
         : reason;
 
-      window.alert(copy.shareFailedWithReason.replace('{reason}', localizedReason));
+      toast.error(copy.shareFailedWithReason.replace('{reason}', localizedReason));
     }
 	  };
 
@@ -5205,11 +5253,11 @@ export default function App() {
     const shareUrl = buildShareUrl(selectedSetlistShareStatus.activeToken);
     const didCopy = await copyShareUrlToClipboard(shareUrl);
     if (didCopy) {
-      window.alert(copy.shareCopied);
+      toast.success(copy.shareCopied);
       return;
     }
 
-    window.alert(copy.shareCopyFailed);
+    toast.error(copy.shareCopyFailed);
   };
 
   const handleRevokeSetlistSharing = async (setlistId: string) => {
@@ -5226,12 +5274,12 @@ export default function App() {
         participants: []
       });
       setPendingRevokeShareSetlistId(null);
-      window.alert(copy.setlistSharingCancelled);
+      toast.success(copy.setlistSharingCancelled);
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
       const message = reason ? `${copy.setlistSharingCancelError}\n\n${reason}` : copy.setlistSharingCancelError;
       setAuthUiError(message);
-      window.alert(message);
+      toast.error(message);
     } finally {
       setIsRevokingSetlistShare(false);
     }
@@ -5764,7 +5812,7 @@ export default function App() {
   return (
     <div
       data-app-root
-      className="relative flex h-[100dvh] min-h-[100dvh] min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900"
+      className="relative flex h-[100dvh] min-h-[100dvh] min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900 dark:bg-[color:var(--color-surface-muted)] dark:text-[color:var(--color-text)] dark:selection:bg-[color:var(--color-indigo-800)] dark:selection:text-[color:var(--color-indigo-100)]"
     >
       {usesOverlaySidebar && isSidebarExpanded && (
         <button
@@ -5808,7 +5856,7 @@ export default function App() {
               setIsSidebarHovered(false);
             }
           }}
-          className={`absolute inset-y-0 left-0 flex overflow-hidden border-r border-gray-200 bg-white ${
+          className={`absolute inset-y-0 left-0 flex overflow-hidden border-r border-gray-200 bg-white dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)] ${
             isPhoneViewport
               ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
               : usesOverlaySidebar && isSidebarExpanded
@@ -5830,7 +5878,7 @@ export default function App() {
           )}
           {!isPhoneViewport && (
             <div
-              className="flex h-full shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white py-4 sm:py-5"
+              className="flex h-full shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white py-4 sm:py-5 dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
               style={{ width: `${collapsedSidebarWidth}px` }}
             >
               <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-emerald-900/10 ring-1 ring-gray-200">
@@ -7293,7 +7341,7 @@ export default function App() {
         )}
 
         {/* Top Control Bar */}
-        <header data-topbar className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md ${
+        <header data-topbar className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]/85 ${
           isPhoneViewport
             ? 'px-3 py-2.5'
             : usesDenseDesktopHeader
@@ -8481,7 +8529,7 @@ export default function App() {
           </AnimatePresence>
 
           {/* Sheet Preview Pane */}
-          <div className="relative flex-1 min-w-0 bg-[#F5F5F4]">
+          <div className="relative flex-1 min-w-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
             <div
               ref={previewRef}
               data-print-preview-container
@@ -8552,7 +8600,7 @@ export default function App() {
           </div>
         </div>
         ) : (
-        <div data-content-area className="flex-1 overflow-y-auto bg-[#F5F5F4] px-4 py-5 sm:px-5 sm:py-6 lg:px-8 lg:py-8">
+        <div data-content-area className="flex-1 overflow-y-auto bg-[#F5F5F4] px-4 py-5 sm:px-5 sm:py-6 lg:px-8 lg:py-8 dark:bg-[color:var(--color-surface-muted)]">
           <div className="mx-auto flex max-w-5xl flex-col gap-6">
             <section className="rounded-[28px] border border-gray-200 bg-white px-6 py-7 shadow-sm md:px-8 md:py-8">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -8940,7 +8988,7 @@ export default function App() {
                   animate={{ y: 0 }}
                   exit={{ y: '100%' }}
                   transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
-                  className="absolute inset-x-0 bottom-0 z-[80] max-h-[86dvh] overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-[#F5F5F4] shadow-[0_-24px_60px_rgba(15,23,42,0.18)]"
+                  className="absolute inset-x-0 bottom-0 z-[80] max-h-[86dvh] overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-[#F5F5F4] shadow-[0_-24px_60px_rgba(15,23,42,0.18)] dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
                 >
                   <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-gray-300" />
                   <div className="flex items-center justify-between border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur-sm">
@@ -9176,7 +9224,7 @@ export default function App() {
                     const didCopy = await copyShareUrlToClipboard(pendingShareUrl);
                     if (didCopy) {
                       setPendingShareUrl(null);
-                      window.alert(copy.shareCopied);
+                      toast.success(copy.shareCopied);
                     }
                   }}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800"

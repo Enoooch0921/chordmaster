@@ -5,6 +5,7 @@ import App from './App.tsx';
 import AuthCallbackPage from './pages/AuthCallbackPage.tsx';
 import SharedChartPage from './pages/SharedChartPage.tsx';
 import TeamInvitePage from './pages/TeamInvitePage.tsx';
+import { ToastProvider } from './components/Toast.tsx';
 import './index.css';
 
 const restoreGitHubPagesSpaRedirect = () => {
@@ -39,12 +40,14 @@ restoreGitHubPagesSpaRedirect();
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter basename={import.meta.env.BASE_URL}>
-      <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/auth/callback" element={<AuthCallbackPage />} />
-        <Route path="/share/:token" element={<SharedChartPage />} />
-        <Route path="/team-invite/:token" element={<TeamInvitePage />} />
-      </Routes>
+      <ToastProvider>
+        <Routes>
+          <Route path="/" element={<App />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/share/:token" element={<SharedChartPage />} />
+          <Route path="/team-invite/:token" element={<TeamInvitePage />} />
+        </Routes>
+      </ToastProvider>
     </BrowserRouter>
   </StrictMode>,
 );

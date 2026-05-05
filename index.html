@@ -10,6 +10,22 @@
     <link rel="preconnect" href="https://s.ytimg.com" />
     <title>ChordMaster | 智能和弦與簡譜編輯器</title>
     <script>
+      // Apply theme before React mounts to avoid a flash of light theme.
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('chordmaster.theme-mode.v1');
+          var mode = stored === 'light' || stored === 'dark' || stored === 'auto' ? stored : 'auto';
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var isDark = mode === 'dark' || (mode === 'auto' && prefersDark);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (_) {
+          // localStorage / matchMedia unavailable — render light by default.
+        }
+      })();
+    </script>
+    <script>
       (function (location) {
         if (!location.search || location.search[1] !== '/') {
           return;
