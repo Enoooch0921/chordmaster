@@ -1,10 +1,11 @@
 import React from 'react';
-import { AppLanguage, BarNumberMode, ChordFontPreset, Key, SetlistDisplayMode, Song } from '../types';
+import { AppLanguage, BarNumberMode, ChordFontPreset, Key, SetlistDisplayMode, Song, SongReference, SongReferenceKind } from '../types';
 import { getUiCopy } from '../constants/i18n';
 import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
 import KeyPicker from './KeyPicker';
 import CapoPicker from './CapoPicker';
 import { CompactSegmentedControl, CompactToggleSwitch } from './SetlistCompactControls';
+import { parseYouTubeVideoId } from '../utils/referenceUtils';
 
 interface SongMetadataPanelProps {
   song: Song;
@@ -19,6 +20,7 @@ interface SongMetadataPanelProps {
   showLyrics?: boolean;
   onDisplayModeChange?: (mode: SetlistDisplayMode) => void;
   onShowLyricsChange?: (showLyrics: boolean) => void;
+  showReferenceFields?: boolean;
 }
 
 const CHORD_FONT_PRESET_OPTIONS: ChordFontPreset[] = ['classic-serif', 'stage-sans'];
@@ -64,6 +66,56 @@ const getMetadataLayoutMode = (width: number): MetadataLayoutMode => {
   return 'wide';
 };
 
+interface TapTempoButtonProps {
+  language: AppLanguage;
+  onApply: (bpm: number) => void;
+}
+
+const TapTempoButton: React.FC<TapTempoButtonProps> = ({ language, onApply }) => {
+  const [tapTimes, setTapTimes] = React.useState<number[]>([]);
+  const [detectedBpm, setDetectedBpm] = React.useState<number | null>(null);
+
+  const handleTap = () => {
+    const now = performance.now();
+    const recentTaps = tapTimes.filter((time) => now - time < 3000);
+    const nextTaps = [...recentTaps, now].slice(-8);
+    setTapTimes(nextTaps);
+
+    if (nextTaps.length < 2) {
+      setDetectedBpm(null);
+      return;
+    }
+
+    const intervals = nextTaps.slice(1).map((time, index) => time - nextTaps[index]);
+    const averageInterval = intervals.reduce((total, interval) => total + interval, 0) / intervals.length;
+    const nextBpm = Math.min(400, Math.max(20, Math.round(60000 / averageInterval)));
+    setDetectedBpm(nextBpm);
+    onApply(nextBpm);
+  };
+
+  return (
+    <button
+      type="button"
+      onPointerDown={(event) => {
+        event.preventDefault();
+        handleTap();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+
+        event.preventDefault();
+        handleTap();
+      }}
+      className="inline-flex h-7 w-full min-w-[4.5rem] items-center justify-center rounded-lg border border-gray-300 bg-white px-2 text-[11px] font-bold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
+      title={language === 'zh' ? '跟著音樂按下節拍，自動套用 BPM' : 'Press with the music to apply BPM'}
+    >
+      {detectedBpm ? `${detectedBpm}` : language === 'zh' ? '測速' : 'Tap'}
+    </button>
+  );
+};
+
 const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   song,
   language,
@@ -76,7 +128,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   displayMode,
   showLyrics,
   onDisplayModeChange,
-  onShowLyricsChange
+  onShowLyricsChange,
+  showReferenceFields = true
 }) => {
   const copy = getUiCopy(language);
   const panelRef = React.useRef<HTMLElement>(null);
@@ -132,6 +185,108 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
   const updateField = <K extends keyof Song>(field: K, value: Song[K]) => {
     onChange({ ...song, [field]: value });
+  };
+
+  const updateReference = (kind: SongReferenceKind, updates: Partial<SongReference>) => {
+    const currentReferences = song.references ?? {};
+    const currentReference = currentReferences[kind] ?? {};
+    const nextReference = { ...currentReference, ...updates };
+    const cleanReference: SongReference = {};
+
+    if (nextReference.url?.trim()) {
+      cleanReference.url = nextReference.url;
+    }
+
+    if (nextReference.key) {
+      cleanReference.key = nextReference.key;
+    }
+
+    if (typeof nextReference.bpm === 'number') {
+      cleanReference.bpm = nextReference.bpm;
+    }
+
+    const nextReferences = { ...currentReferences };
+    if (cleanReference.url || cleanReference.key || typeof cleanReference.bpm === 'number') {
+      nextReferences[kind] = cleanReference;
+    } else {
+      delete nextReferences[kind];
+    }
+
+    onChange({
+      ...song,
+      references: nextReferences.band || nextReferences.vocal ? nextReferences : undefined
+    });
+  };
+
+  const renderReferenceEditor = (kind: SongReferenceKind) => {
+    const reference = song.references?.[kind] ?? {};
+    const url = reference.url ?? '';
+    const videoId = parseYouTubeVideoId(url);
+    const hasInvalidUrl = url.trim().length > 0 && !videoId;
+    const label = language === 'zh'
+      ? kind === 'band' ? '樂團版本' : '歌手版本'
+      : kind === 'band' ? 'Band Version' : 'Vocal Version';
+
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500">{label}</div>
+          {hasInvalidUrl ? (
+            <span className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600 ring-1 ring-rose-100">
+              {language === 'zh' ? '無效 YouTube' : 'Invalid YouTube'}
+            </span>
+          ) : videoId ? (
+            <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-100">
+              YouTube
+            </span>
+          ) : null}
+        </div>
+
+        <div className="grid grid-cols-12 gap-1.5">
+          <input
+            type="url"
+            value={url}
+            onChange={(event) => updateReference(kind, { url: event.target.value })}
+            placeholder={language === 'zh' ? '貼上 YouTube 連結' : 'Paste YouTube URL'}
+            className="col-span-12 h-7 min-w-0 rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 sm:col-span-6"
+          />
+
+          <div className="col-span-5 sm:col-span-2">
+            <KeyPicker
+              value={reference.key ?? null}
+              onChange={(key) => updateReference(kind, { key: key ?? undefined })}
+              label={language === 'zh' ? 'Reference 調性' : 'Reference Key'}
+              originalKey={song.originalKey}
+              clearLabel={language === 'zh' ? '清除' : 'Clear'}
+              align="left"
+              triggerDensity="compact"
+              buttonClassName="h-7 w-full min-w-0 rounded-lg px-2"
+              valueTextClassName="text-[12px]"
+              metaTextClassName="hidden"
+              triggerIconSize={13}
+            />
+          </div>
+
+          <input
+            type="number"
+            min={20}
+            max={400}
+            step={1}
+            value={typeof reference.bpm === 'number' ? reference.bpm : ''}
+            onChange={(event) => {
+              const digitsOnly = event.target.value.replace(/\D+/g, '').slice(0, 3);
+              updateReference(kind, { bpm: digitsOnly ? Number(digitsOnly) : undefined });
+            }}
+            placeholder="BPM"
+            className="col-span-4 h-7 min-w-0 rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 sm:col-span-2"
+          />
+
+          <div className="col-span-3 sm:col-span-2">
+            <TapTempoButton language={language} onApply={(bpm) => updateReference(kind, { bpm })} />
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const displayModeOptions = DISPLAY_MODE_OPTIONS.map((mode) => ({
@@ -396,6 +551,19 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     </div>
   );
 
+  const referencesField = (
+    <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-2.5">
+      <div className="flex items-center gap-2">
+        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-500">{language === 'zh' ? '參考音源' : 'Reference'}</div>
+        <div className="h-px flex-1 bg-gray-200" />
+      </div>
+      <div className={`mt-2 ${isWideLayout ? 'grid grid-cols-2 gap-2' : 'space-y-1.5'}`}>
+        {renderReferenceEditor('band')}
+        {renderReferenceEditor('vocal')}
+      </div>
+    </div>
+  );
+
   return (
     <section
       ref={panelRef}
@@ -429,6 +597,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
             {showLyricsField}
             {barNumbersField}
           </div>
+
+          {showReferenceFields ? referencesField : null}
         </div>
       ) : isStackedLayout ? (
         <div className="mt-2 space-y-2">
@@ -458,6 +628,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
           {displayModeField}
           {barNumbersField}
+          {showReferenceFields ? referencesField : null}
         </div>
       ) : (
         <div className="mt-2 space-y-2">
@@ -481,6 +652,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
             <div className="col-span-2">{showLyricsField}</div>
             <div className="col-span-3">{barNumbersField}</div>
           </div>
+
+          {showReferenceFields ? referencesField : null}
         </div>
       )}
     </section>

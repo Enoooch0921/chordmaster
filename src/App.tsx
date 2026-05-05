@@ -21,10 +21,12 @@ import {
   SetlistDisplayMode,
   StoredSong,
   BarNumberMode,
+  SongReferenceKind,
   TeamManagementSnapshot
 } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
+import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
@@ -35,9 +37,10 @@ import SongEditor from './components/SongEditor';
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
+import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -816,6 +819,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
       ? song.chordFontPreset
       : DEFAULT_CHORD_FONT_PRESET,
     capo: normalizeOptionalInteger(song.capo, 0, 12),
+    references: normalizeSongReferences(song.references, VALID_KEYS),
     pickup: pickup && (pickup.id || pickup.riff || pickup.rhythm) ? pickup : undefined,
     sections: sections.length > 0 ? sections : [
       {
@@ -1322,6 +1326,7 @@ export default function App() {
   const [isPerformanceMode, setIsPerformanceMode] = useState(false);
   const [performancePageIndex, setPerformancePageIndex] = useState(0);
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
+  const [activeReferenceKind, setActiveReferenceKind] = useState<SongReferenceKind | null>(null);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
@@ -1544,6 +1549,7 @@ export default function App() {
   const activeSetlistPreviewSong = selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
     ? {
         ...applySetlistSongOverrides(activeSetlistEditableSong ?? selectedSetlistSourceSong, effectiveSelectedSetlist, selectedSetlistSong),
+        references: selectedSetlistSourceSong.references,
         ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
           ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
           : {})
@@ -1837,6 +1843,59 @@ export default function App() {
   const mobileMetadataTime = mobileMetadataSong?.timeSignature?.trim() || '—';
   const mobileMetadataVersion = mobileMetadataSong ? getSongVersionSummary(mobileMetadataSong) : '';
   const mobileMetadataTranslator = mobileMetadataSong?.translator?.trim() || '';
+  const activeReferenceSong = isSetlistMode ? activeSetlistPreviewSong : song;
+  const activeReferenceCurrentKey = isSetlistMode ? currentSetlistKey : song.currentKey;
+  const playableReferenceKinds = (['band', 'vocal'] as SongReferenceKind[])
+    .filter((kind) => hasPlayableReference(activeReferenceSong?.references?.[kind]));
+  const shouldShowReferenceControls = isSheetView && Boolean(activeReferenceSong) && playableReferenceKinds.length > 0;
+  const getReferenceKindLabel = (kind: SongReferenceKind) => (
+    language === 'zh'
+      ? kind === 'band' ? '樂團' : '歌手'
+      : kind === 'band' ? 'Band' : 'Vocal'
+  );
+  const openReferencePlayer = (kind: SongReferenceKind) => {
+    setActiveReferenceKind(kind);
+  };
+  const renderReferenceButtons = (
+    className: string,
+    options: { showLabels?: boolean; activeClassName?: string } = {}
+  ) => {
+    if (!shouldShowReferenceControls) {
+      return null;
+    }
+
+    return (
+      <>
+        {playableReferenceKinds.map((kind) => {
+          const isActive = activeReferenceKind === kind;
+          const buttonClassName = isActive && options.activeClassName ? options.activeClassName : className;
+
+          return (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => openReferencePlayer(kind)}
+              className={buttonClassName}
+              title={`${getReferenceKindLabel(kind)} Reference`}
+              aria-label={`${getReferenceKindLabel(kind)} Reference`}
+            >
+              {kind === 'band' ? <Music2 size={14} /> : <Mic2 size={14} />}
+              {options.showLabels ? <span>{getReferenceKindLabel(kind)}</span> : null}
+            </button>
+          );
+        })}
+      </>
+    );
+  };
+  React.useEffect(() => {
+    if (!activeReferenceKind) {
+      return;
+    }
+
+    if (!playableReferenceKinds.includes(activeReferenceKind)) {
+      setActiveReferenceKind(playableReferenceKinds[0] ?? null);
+    }
+  }, [activeReferenceKind, playableReferenceKinds.join('|')]);
   const duplicateLabel = language === 'zh' ? '副本' : 'Copy';
   const previewScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, previewBaseScale * previewZoom));
   const previewSheetWidth = sheetMetrics.width * previewScale;
@@ -5274,6 +5333,7 @@ export default function App() {
 
             handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextShowLyrics });
           }}
+          showReferenceFields={false}
         />
       ) : null)
     : hasSongs ? (
@@ -7312,6 +7372,10 @@ export default function App() {
                     <FileText size={16} />
                   </button>
 
+                  {renderReferenceButtons(`${getMobileTopbarActionClassName('default')} shrink-0`, {
+                    activeClassName: `${getMobileTopbarActionClassName('primary')} shrink-0`
+                  })}
+
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(key) => {
@@ -7443,6 +7507,13 @@ export default function App() {
                     <Play size={14} />
                     {denseToolbarShowsLabels ? <span>{copy.performanceMode}</span> : null}
                   </button>
+
+                  {renderReferenceButtons(denseToolbarActionClassName, {
+                    showLabels: denseToolbarShowsLabels,
+                    activeClassName: denseToolbarShowsLabels
+                      ? desktopToolbarPrimaryActionClassName
+                      : denseToolbarPrimaryActionClassName
+                  })}
 
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
@@ -7694,6 +7765,10 @@ export default function App() {
                   >
                     <Play size={14} />
                   </button>
+
+                  {renderReferenceButtons(denseToolbarActionClassName, {
+                    activeClassName: denseToolbarPrimaryActionClassName
+                  })}
 
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
@@ -8131,6 +8206,11 @@ export default function App() {
                       <Play size={16} />
                       <span>{copy.performanceMode}</span>
                     </button>
+
+                    {renderReferenceButtons(toolbarPrimaryActionClassName, {
+                      showLabels: true,
+                      activeClassName: toolbarPrimaryEmphasisActionClassName
+                    })}
                   </div>
 
                   {!isSetlistMode && (
@@ -9152,6 +9232,17 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {activeReferenceKind && activeReferenceSong && (
+        <ReferencePlayer
+          song={activeReferenceSong}
+          currentKey={activeReferenceCurrentKey}
+          activeKind={activeReferenceKind}
+          language={language}
+          onKindChange={setActiveReferenceKind}
+          onClose={() => setActiveReferenceKind(null)}
+        />
+      )}
+
       {isPerformanceMode && (
         <div
           className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-950 select-none"
@@ -9197,6 +9288,16 @@ export default function App() {
           </div>
 
           {/* Exit button — top right */}
+          <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
+            {renderReferenceButtons(
+              'inline-flex h-9 items-center gap-1.5 rounded-full bg-white/15 px-3 text-xs font-bold text-white backdrop-blur-sm transition-colors hover:bg-white/25',
+              {
+                showLabels: true,
+                activeClassName: 'inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-3 text-xs font-bold text-gray-900 shadow-sm transition-colors hover:bg-white'
+              }
+            )}
+          </div>
+
           <button
             type="button"
             onClick={handleExitPerformanceMode}

@@ -4,6 +4,7 @@ import { Key, Setlist, SetlistDisplayMode, SetlistSong, Song, StoredSong, Worksp
 import { ALL_KEYS } from '../utils/musicUtils';
 import { getDefaultSectionOrder } from '../utils/setlistUtils';
 import { normalizeBarChords } from '../utils/barUtils';
+import { normalizeSongReferences } from '../utils/referenceUtils';
 
 export const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 export const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -190,6 +191,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
       ? song.chordFontPreset
       : DEFAULT_CHORD_FONT_PRESET,
     capo: normalizeOptionalInteger(song.capo, 0, 12),
+    references: normalizeSongReferences(song.references, VALID_KEYS),
     pickup: pickup && (pickup.id || pickup.riff || pickup.rhythm) ? pickup : undefined,
     sections: sections.length > 0 ? sections : [
       {

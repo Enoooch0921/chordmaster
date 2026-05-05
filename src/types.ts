@@ -21,6 +21,18 @@ export type SetlistDisplayMode =
   | 'chord-movable-key';
 export type LibraryKind = 'personal' | 'team';
 export type LibraryRole = 'owner' | 'editor' | 'setlist_manager' | 'viewer';
+export type SongReferenceKind = 'band' | 'vocal';
+
+export interface SongReference {
+  url?: string;
+  key?: Key;
+  bpm?: number;
+}
+
+export interface SongReferences {
+  band?: SongReference;
+  vocal?: SongReference;
+}
 
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
@@ -75,6 +87,7 @@ export interface Song {
   nashvilleFontPreset?: NashvilleFontPreset;
   chordFontPreset?: ChordFontPreset;
   capo?: number;
+  references?: SongReferences;
   pickup?: PickupMeasure;
   sections: Section[];
 }
