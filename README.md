@@ -2,7 +2,7 @@
 
 ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器，聚焦在和弦譜、節奏譜與簡譜的整合編輯。專案使用 Vite + React 建構；未登入時資料預設儲存在瀏覽器 `localStorage`，登入後可切換到 Supabase 雲端同步。
 
-目前版本：`0.8.0`
+目前版本：`0.8.1`
 
 ## 特色
 
@@ -30,6 +30,7 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 
 ## 最近更新
 
+- 升級到 `0.8.1`，改善搜尋正規化，`你 / 祢` 與簡體 / 繁體可互相命中
 - 升級到 `0.8.0`，新增歌曲層級 YouTube Reference 練習播放器
 - 每首歌可保存兩個 reference：`樂團版本` 與 `歌手版本`，各自包含 YouTube URL、原調與 BPM
 - 看譜、歌單預覽與 Performance Mode 都可開啟底部 mini player，不必離開譜面即可播放 reference

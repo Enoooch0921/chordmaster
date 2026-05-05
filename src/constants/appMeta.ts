@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-05-05',
+        title: 'Search normalization update',
+        bullets: [
+          'Improved Song Library, Setlist, and add-song search normalization.',
+          'Search now treats `你` and `祢` as equivalent for worship-song wording differences.',
+          'Search now normalizes Simplified and Traditional Chinese with OpenCC so either script can match the other.'
+        ]
+      },
+      {
+        version: '0.8.0',
+        date: '2026-05-05',
         title: 'Song-level YouTube reference player',
         bullets: [
           'Added song-level band and vocal references with YouTube URL, reference key, BPM, normalization, import/export, sync, and share-payload support.',
@@ -210,6 +220,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-05',
+        title: '搜尋正規化更新',
+        bullets: [
+          '改善 Song Library、Setlist 與加入歌曲搜尋的文字正規化。',
+          '搜尋時 `你` 和 `祢` 會視為同一個字，符合敬拜歌曲常見用字差異。',
+          '搜尋時會透過 OpenCC 統一簡繁文字，讓簡體與繁體可互相命中。'
+        ]
+      },
+      {
+        version: '0.8.0',
         date: '2026-05-05',
         title: '歌曲層級 YouTube Reference 播放器',
         bullets: [

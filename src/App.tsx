@@ -8,6 +8,7 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { toPng, toCanvas, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
+import * as OpenCC from 'opencc-js/t2cn';
 import {
   CloudLibrarySummary,
   LibraryRole,
@@ -471,6 +472,15 @@ const normalizeOptionalText = (value: unknown): string | undefined => {
 
 const normalizeText = (value: unknown, fallback = ''): string => (
   typeof value === 'string' ? value : fallback
+);
+
+const traditionalToSimplifiedForSearch = OpenCC.Converter({ from: 'tw', to: 'cn' });
+
+const normalizeSearchText = (value: string): string => (
+  traditionalToSimplifiedForSearch(value)
+    .trim()
+    .toLowerCase()
+    .replace(/祢/g, '你')
 );
 
 const normalizeBoolean = (value: unknown): boolean | undefined => (
@@ -1856,9 +1866,9 @@ export default function App() {
       </div>
     </div>
   ) : null;
-  const normalizedLibrarySearchQuery = librarySearchQuery.trim().toLowerCase();
-  const normalizedSetlistSearchQuery = setlistSearchQuery.trim().toLowerCase();
-  const normalizedSetlistSongSearchQuery = setlistSongSearchQuery.trim().toLowerCase();
+  const normalizedLibrarySearchQuery = normalizeSearchText(librarySearchQuery);
+  const normalizedSetlistSearchQuery = normalizeSearchText(setlistSearchQuery);
+  const normalizedSetlistSongSearchQuery = normalizeSearchText(setlistSongSearchQuery);
   const currentCapo = song.capo || 0;
   const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
   const currentSetlistKey = activeSetlistPreviewSong?.currentKey ?? selectedSetlistSourceSong?.currentKey ?? 'C';
@@ -1967,9 +1977,9 @@ export default function App() {
     ]
       .filter(Boolean)
       .join(' ')
-      .toLowerCase();
+      .trim();
 
-    return librarySearchText.includes(normalizedLibrarySearchQuery);
+    return normalizeSearchText(librarySearchText).includes(normalizedLibrarySearchQuery);
   });
   const getSetlistSongSource = (item: SetlistSong): StoredSong | null => {
     const libSong = songs.find((songItem) => songItem.id === item.songId);
@@ -2019,9 +2029,9 @@ export default function App() {
     const searchText = [
       item.name,
       ...item.songs.map((setlistSong) => songs.find((songItem) => songItem.id === setlistSong.songId)?.title ?? '')
-    ].join(' ').toLowerCase();
+    ].join(' ');
 
-    return searchText.includes(normalizedSetlistSearchQuery);
+    return normalizeSearchText(searchText).includes(normalizedSetlistSearchQuery);
   });
   const filteredSongsForSetlist = filteredSongs.filter((item) => {
     if (!normalizedSetlistSongSearchQuery) {
@@ -2033,9 +2043,9 @@ export default function App() {
       item.currentKey,
       item.originalKey,
       ...item.sections.map((section) => section.title)
-    ].join(' ').toLowerCase();
+    ].join(' ');
 
-    return searchText.includes(normalizedSetlistSongSearchQuery);
+    return normalizeSearchText(searchText).includes(normalizedSetlistSongSearchQuery);
   });
 
   useEffect(() => {
