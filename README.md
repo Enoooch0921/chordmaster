@@ -2,12 +2,15 @@
 
 ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器，聚焦在和弦譜、節奏譜與簡譜的整合編輯。專案使用 Vite + React 建構；未登入時資料預設儲存在瀏覽器 `localStorage`，登入後可切換到 Supabase 雲端同步。
 
-目前版本：`0.7.0`
+目前版本：`0.8.0`
 
 ## 特色
 
 - Song Library 側欄：建立、搜尋、複製、刪除歌譜
 - Service Setlist：以 Song Library 為來源建立服事歌單，並保留每次服事專屬的臨時設定
+- 歌曲層級 Reference 參考音源：每首歌可保存樂團版本與歌手版本 YouTube 連結、原調與 BPM
+- Reference mini player：看譜、歌單預覽與 Performance Mode 可直接開啟內嵌播放器，支援播放 / 暫停、前後跳秒與練習速度控制
+- Reference 練習資訊：顯示 reference 調、目前譜面調、相差半音與練習 BPM，並提供 TAP tempo 手動抓 BPM
 - 雙欄編輯體驗：左側編輯，右側即時預覽
 - 中文預設介面：預設優先顯示中文，英文切換保留
 - 全站統一 Key / Capo 選擇器：Song Library、Service Setlist 與預覽列共用同一套 popup picker
@@ -27,6 +30,13 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 
 ## 最近更新
 
+- 升級到 `0.8.0`，新增歌曲層級 YouTube Reference 練習播放器
+- 每首歌可保存兩個 reference：`樂團版本` 與 `歌手版本`，各自包含 YouTube URL、原調與 BPM
+- 看譜、歌單預覽與 Performance Mode 都可開啟底部 mini player，不必離開譜面即可播放 reference
+- 播放器新增樂團 / 歌手切換、播放 / 暫停、前後跳秒、BPM 式速度調整與原 BPM 回復
+- 新增 reference key 對目前譜面 key 的半音差顯示，方便臨時轉調練習
+- 新增 TAP tempo 按鈕，可跟著音樂點擊並套用 BPM
+- 改善 Reference metadata UI、窄螢幕排版與 YouTube / Transpose 插件提示文案
 - 升級到 `0.7.0`，補齊 Supabase 登入 / 同步、分享連結、shared setlist 加入與成員管理的 release note
 - 新增 Google OAuth、Email Magic Link、個人歌曲庫與歌單雲端同步基礎
 - 新增歌曲 / 歌單公開唯讀分享連結，包含 Edge Functions、SPA fallback、剪貼簿 fallback 與登入後開啟受邀歌單流程
@@ -116,6 +126,17 @@ npm run build
 - 每個 SetlistSong 可獨立覆蓋 `Key`、`Capo`、`section order`
 - 整份 setlist 可統一控制 `顯示設定`、`顯示歌詞`，且不影響 Song Library 原始資料
 
+### Reference 參考音源
+
+- 在歌曲 metadata 的 `參考音源` 區塊設定 `樂團版本` 與 `歌手版本`
+- 每個 reference 可填入 YouTube URL、reference 原調與 BPM
+- 支援常見 YouTube URL 格式，包括 `watch?v=...`、`youtu.be/...`、`embed/...`、`shorts/...`
+- 可用 `TAP` 按鈕跟著音樂點擊，自動估算並套用目前 reference BPM
+- 在歌曲模式、歌單預覽與 Performance Mode 可開啟同一首歌的 reference mini player
+- mini player 會顯示 reference key、目前譜面 key、相差半音與練習 BPM
+- 速度控制以樂手習慣的 BPM 增減呈現，支援 `-10 / -5 / -1 / 原 BPM / +1 / +5 / +10`
+- 需要 YouTube 音高升降時，可用 `在 YouTube 開啟` 搭配瀏覽器工具列中的 Transpose 插件；ChordMaster v0.8.0 不直接改變 YouTube 音訊音高
+
 ### 編輯區
 
 - 編輯和弦、段落與小節
@@ -146,6 +167,7 @@ src/
     Jianpu.tsx
     KeyPicker.tsx
     LyricsEditor.tsx
+    ReferencePlayer.tsx
     SetlistEditor.tsx
     SongMetadataPanel.tsx
     RhythmNotation.tsx
@@ -158,6 +180,7 @@ src/
     jianpuUtils.ts
     lyricsUtils.ts
     musicUtils.ts
+    referenceUtils.ts
     rhythmUtils.ts
     setlistUtils.ts
   App.tsx
@@ -219,12 +242,15 @@ VITE_PUBLIC_APP_URL=https://your-domain.example/chordmaster/
 - Apple Sign-In 尚未實作
 - 團隊共享庫與多人協作尚未實作
 - PDF 目前仍是圖片式輸出，不是向量文字 PDF
+- Reference v1 只支援 YouTube，不支援 Spotify、Apple Music、mp3 上傳或自動音訊分析
+- 內嵌 YouTube 播放器可調整播放速度，但不直接升降音高；若要改變 YouTube 音訊 key，需在 YouTube 頁面搭配瀏覽器插件
 - 簡譜與節奏連接線仍會依不同版型持續微調
 
 ## Roadmap
 
 - Apple Sign-In
 - 團隊共享庫與協作權限
+- ChordMaster companion 瀏覽器插件，用於更深度整合 YouTube 轉調、循環與練習控制
 - 更完整的簡譜 / 節奏排版邏輯
 - 更完整的分享控制與協作
 - 更完整的快捷鍵與編輯模式

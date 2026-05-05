@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.8.0 - 2026-05-05
+
+### Added
+
+- 新增歌曲層級 YouTube Reference，單首歌可保存 `樂團版本` 與 `歌手版本` 兩組 reference
+- Reference 可保存 YouTube URL、原調與 BPM，並會隨歌曲資料一起保留、匯入、同步與分享
+- 新增 Reference mini player，可在歌曲模式、歌單預覽與 Performance Mode 直接播放，不必跳出譜面
+- 新增樂團 / 歌手切換、播放 / 暫停、前後跳秒、BPM 式速度調整與原 BPM 回復
+- 新增 reference key、目前譜面 key、相差半音與練習 BPM 顯示
+- 新增 TAP tempo，可用滑鼠按下節拍估算 BPM 並套用到目前 reference
+- 新增 YouTube URL 解析工具，支援 `watch?v=...`、`youtu.be/...`、`embed/...`、`shorts/...`
+
+### Changed
+
+- Reference 速度控制改以樂手習慣的 BPM 增減呈現，支援 `-10 / -5 / -1 / 原 BPM / +1 / +5 / +10`
+- 調整 Reference metadata UI，移除過重卡片感並改善窄螢幕欄位重疊
+- 調整 Reference player 版面，將樂團 / 歌手切換移到標題列，BPM 控制獨立成第二行
+- 更新 YouTube / Transpose 插件提示文案，清楚區分「在 YouTube 開啟」與「安裝 / 啟用插件」
+
+### Fixed
+
+- 修正 TAP tempo 等待滑鼠放開才計算造成的體感延遲，現在按下即算
+- 修正未填 reference BPM 時歌手版本無法使用 BPM 式速度控制的問題，現在會 fallback 到歌曲 tempo
+- 修正部分 YouTube iframe 載入失敗或黑畫面時缺少清楚 fallback 提示的體驗問題
+- 修正 reference 編輯區在瀏覽器縮窄時 URL、Key、BPM、TAP 控制互相擠壓或被吃掉的問題
+
 ## 0.7.0 - 2026-04-23
 
 ### Added

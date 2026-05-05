@@ -64,6 +64,15 @@ const localizedMeta: Record<AppLanguage, {
         ]
       },
       {
+        title: 'Reference Practice',
+        description: 'Each song can keep band and vocal YouTube references for rehearsal.',
+        bullets: [
+          'Store a YouTube URL, reference key, and BPM for both the band version and vocal version.',
+          'Open the mini player from song view, setlist preview, or Performance Mode without leaving the chart.',
+          'Use play/pause, seek buttons, BPM-based speed controls, key-difference display, and TAP tempo for practice.'
+        ]
+      },
+      {
         title: 'Preview & Export',
         description: 'The right-side preview is designed for layout verification before printing or PDF export.',
         bullets: [
@@ -76,6 +85,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-05',
+        title: 'Song-level YouTube reference player',
+        bullets: [
+          'Added song-level band and vocal references with YouTube URL, reference key, BPM, normalization, import/export, sync, and share-payload support.',
+          'Added a bottom mini player for song view, setlist preview, and Performance Mode with band/vocal switching, play/pause, seek controls, and YouTube fallback links.',
+          'Added BPM-based practice speed controls, TAP tempo, effective BPM display, reference key vs chart key comparison, and clearer Transpose extension guidance.',
+          'Improved reference metadata layout and responsive behavior so URL, key, BPM, and TAP controls remain usable on narrower screens.'
+        ]
+      },
+      {
+        version: '0.7.0',
         date: '2026-04-23',
         title: 'Cloud sync, shared setlists, performance mode, and PDF export update',
         bullets: [
@@ -169,6 +189,15 @@ const localizedMeta: Record<AppLanguage, {
         ]
       },
       {
+        title: 'Reference 練習',
+        description: '每首歌可保存樂團版本與歌手版本 YouTube 參考音源。',
+        bullets: [
+          '樂團版本與歌手版本可各自保存 YouTube URL、reference 原調與 BPM。',
+          '歌曲模式、歌單預覽與 Performance Mode 都可開啟 mini player，不必離開譜面。',
+          '可使用播放 / 暫停、前後跳秒、BPM 式速度控制、半音差顯示與 TAP tempo 輔助練習。'
+        ]
+      },
+      {
         title: '預覽與輸出',
         description: '右側預覽可在匯出或列印前先確認排版，不會影響左側編輯。',
         bullets: [
@@ -181,6 +210,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-05',
+        title: '歌曲層級 YouTube Reference 播放器',
+        bullets: [
+          '新增歌曲層級樂團版本與歌手版本 reference，可保存 YouTube URL、reference 原調與 BPM，並支援整理、匯入、同步與分享資料保留。',
+          '新增底部 mini player，歌曲模式、歌單預覽與 Performance Mode 都可開啟，並支援樂團 / 歌手切換、播放 / 暫停、前後跳秒與 YouTube fallback。',
+          '新增 BPM 式練習速度控制、TAP tempo、體感 BPM、reference key 對目前譜面 key 的半音差，以及更清楚的 Transpose 插件提示。',
+          '改善 Reference metadata UI 與窄螢幕排版，避免 URL、Key、BPM、TAP 控制重疊或被吃掉。'
+        ]
+      },
+      {
+        version: '0.7.0',
         date: '2026-04-23',
         title: '雲端同步、共同歌單、演出模式與 PDF 匯出更新',
         bullets: [
