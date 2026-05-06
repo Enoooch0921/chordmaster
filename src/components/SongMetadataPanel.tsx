@@ -11,6 +11,10 @@ interface SongMetadataPanelProps {
   song: Song;
   language: AppLanguage;
   onChange: (song: Song) => void;
+  metadataSuggestions?: {
+    versions: string[];
+    translators: string[];
+  };
   title?: string;
   keyValue?: Key;
   capoValue?: number;
@@ -69,36 +73,190 @@ const getMetadataLayoutMode = (width: number): MetadataLayoutMode => {
 interface TapTempoButtonProps {
   language: AppLanguage;
   onApply: (bpm: number) => void;
+  onActivate?: () => void;
 }
 
-const TapTempoButton: React.FC<TapTempoButtonProps> = ({ language, onApply }) => {
-  const [tapTimes, setTapTimes] = React.useState<number[]>([]);
-  const [detectedBpm, setDetectedBpm] = React.useState<number | null>(null);
+interface TapTempoButtonHandle {
+  tap: (eventTimeStamp?: number) => void;
+}
 
-  const handleTap = () => {
-    const now = performance.now();
-    const recentTaps = tapTimes.filter((time) => now - time < 3000);
-    const nextTaps = [...recentTaps, now].slice(-8);
-    setTapTimes(nextTaps);
+const TAP_RESET_AFTER_MS = 2500;
+const TAP_MAX_SAMPLES = 8;
+const TAP_MIN_INTERVAL_MS = 150;
+const TAP_MAX_INTERVAL_MS = 3000;
+const TAP_OUTLIER_TOLERANCE = 0.16;
+const TAP_DEADBAND_BPM = 1;
+const TAP_MAX_STEP_BPM = 4;
+const TAP_APPLY_IDLE_MS = 1400;
+const REFERENCE_BPM_TAP_COMMIT_DELAY_MS = 1400;
+const REFERENCE_BPM_INPUT_COMMIT_DELAY_MS = 300;
 
-    if (nextTaps.length < 2) {
-      setDetectedBpm(null);
+const getTapTimestamp = (eventTimeStamp?: number): number => {
+  const now = performance.now();
+  if (typeof eventTimeStamp !== 'number' || eventTimeStamp <= 0) {
+    return now;
+  }
+
+  return Math.abs(eventTimeStamp - now) < 60000 ? eventTimeStamp : now;
+};
+
+const getStableTapBpm = (tapTimes: number[], previousBpm: number | null): number | null => {
+  if (tapTimes.length < 2) {
+    return null;
+  }
+
+  const intervals = tapTimes
+    .slice(1)
+    .map((time, index) => time - tapTimes[index])
+    .filter((interval) => interval >= TAP_MIN_INTERVAL_MS && interval <= TAP_MAX_INTERVAL_MS);
+
+  if (intervals.length < 2) {
+    const interval = intervals[0];
+    return interval ? Math.min(400, Math.max(20, Math.round(60000 / interval))) : null;
+  }
+
+  const sortedIntervals = [...intervals].sort((a, b) => a - b);
+  const medianInterval = sortedIntervals[Math.floor(sortedIntervals.length / 2)];
+  const inlierIntervals = sortedIntervals.filter((interval) => (
+    Math.abs(interval - medianInterval) <= medianInterval * TAP_OUTLIER_TOLERANCE
+  ));
+  const usableIntervals = inlierIntervals.length >= 2 ? inlierIntervals : sortedIntervals;
+  const trimmedIntervals = usableIntervals.length >= 5
+    ? usableIntervals.slice(1, -1)
+    : usableIntervals;
+  const trimmedAverageInterval = trimmedIntervals.reduce((total, interval) => total + interval, 0) / trimmedIntervals.length;
+  const stableInterval = medianInterval * 0.65 + trimmedAverageInterval * 0.35;
+  const rawBpm = Math.min(400, Math.max(20, Math.round(60000 / stableInterval)));
+
+  if (previousBpm === null) {
+    return rawBpm;
+  }
+
+  const difference = Math.abs(rawBpm - previousBpm);
+  if (difference <= TAP_DEADBAND_BPM) {
+    return previousBpm;
+  }
+
+  return previousBpm + Math.sign(rawBpm - previousBpm) * Math.min(TAP_MAX_STEP_BPM, difference);
+};
+
+const getReferenceBpmDrafts = (song: Song): Record<SongReferenceKind, string> => ({
+  band: typeof song.references?.band?.bpm === 'number' ? String(song.references.band.bpm) : '',
+  vocal: typeof song.references?.vocal?.bpm === 'number' ? String(song.references.vocal.bpm) : ''
+});
+
+const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return target.isContentEditable
+    || target.tagName === 'INPUT'
+    || target.tagName === 'TEXTAREA'
+    || target.tagName === 'SELECT';
+};
+
+const TapTempoButton = React.forwardRef<TapTempoButtonHandle, TapTempoButtonProps>(({ language, onApply, onActivate }, ref) => {
+  const buttonRef = React.useRef<HTMLButtonElement>(null);
+  const tapTimesRef = React.useRef<number[]>([]);
+  const detectedBpmRef = React.useRef<number | null>(null);
+  const displayedBpmRef = React.useRef<number | null>(null);
+  const applyTimeoutRef = React.useRef<number | null>(null);
+  const displayFrameRef = React.useRef<number | null>(null);
+  const onApplyRef = React.useRef(onApply);
+  const [displayedBpm, setDisplayedBpm] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    onApplyRef.current = onApply;
+  }, [onApply]);
+
+  React.useEffect(() => () => {
+    if (applyTimeoutRef.current !== null) {
+      window.clearTimeout(applyTimeoutRef.current);
+    }
+    if (displayFrameRef.current !== null) {
+      window.cancelAnimationFrame(displayFrameRef.current);
+    }
+  }, []);
+
+  const updateDisplayedBpm = React.useCallback((bpm: number | null) => {
+    if (displayedBpmRef.current === bpm) {
       return;
     }
 
-    const intervals = nextTaps.slice(1).map((time, index) => time - nextTaps[index]);
-    const averageInterval = intervals.reduce((total, interval) => total + interval, 0) / intervals.length;
-    const nextBpm = Math.min(400, Math.max(20, Math.round(60000 / averageInterval)));
-    setDetectedBpm(nextBpm);
-    onApply(nextBpm);
-  };
+    displayedBpmRef.current = bpm;
+    if (displayFrameRef.current !== null) {
+      window.cancelAnimationFrame(displayFrameRef.current);
+    }
+
+    displayFrameRef.current = window.requestAnimationFrame(() => {
+      setDisplayedBpm(displayedBpmRef.current);
+      displayFrameRef.current = null;
+    });
+  }, []);
+
+  const handleTap = React.useCallback((eventTimeStamp?: number) => {
+    const now = getTapTimestamp(eventTimeStamp);
+    buttonRef.current?.animate([
+      {
+        transform: 'scale(0.94)',
+        backgroundColor: '#ecfdf5',
+        borderColor: '#6ee7b7',
+        color: '#047857',
+        boxShadow: '0 0 0 3px rgba(167, 243, 208, 0.9)'
+      },
+      {
+        transform: 'scale(1)',
+        backgroundColor: '#ffffff',
+        borderColor: '#d1d5db',
+        color: '#4b5563',
+        boxShadow: '0 0 0 0 rgba(167, 243, 208, 0)'
+      }
+    ], {
+      duration: 150,
+      easing: 'ease-out'
+    });
+
+    const recentTaps = tapTimesRef.current.filter((time) => now - time < TAP_RESET_AFTER_MS);
+    const nextTaps = [...recentTaps, now].slice(-TAP_MAX_SAMPLES);
+    tapTimesRef.current = nextTaps;
+
+    const nextBpm = getStableTapBpm(nextTaps, detectedBpmRef.current);
+    if (nextBpm === null) {
+      detectedBpmRef.current = null;
+      updateDisplayedBpm(null);
+      return;
+    }
+
+    if (nextBpm !== detectedBpmRef.current) {
+      detectedBpmRef.current = nextBpm;
+      updateDisplayedBpm(nextBpm);
+    }
+
+    if (applyTimeoutRef.current !== null) {
+      window.clearTimeout(applyTimeoutRef.current);
+    }
+
+    applyTimeoutRef.current = window.setTimeout(() => {
+      if (detectedBpmRef.current !== null) {
+        onApplyRef.current(detectedBpmRef.current);
+      }
+      applyTimeoutRef.current = null;
+    }, TAP_APPLY_IDLE_MS);
+  }, [updateDisplayedBpm]);
+
+  React.useImperativeHandle(ref, () => ({
+    tap: handleTap
+  }), [handleTap]);
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       onPointerDown={(event) => {
         event.preventDefault();
-        handleTap();
+        onActivate?.();
+        handleTap(event.timeStamp);
       }}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') {
@@ -106,20 +264,25 @@ const TapTempoButton: React.FC<TapTempoButtonProps> = ({ language, onApply }) =>
         }
 
         event.preventDefault();
-        handleTap();
+        onActivate?.();
+        handleTap(event.timeStamp);
       }}
-      className="inline-flex h-7 w-full min-w-[4.5rem] items-center justify-center rounded-lg border border-gray-300 bg-white px-2 text-[11px] font-bold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
+      onFocus={onActivate}
+      className="inline-flex h-7 w-full min-w-[4.5rem] items-center justify-center rounded-lg border border-gray-300 bg-white px-2 text-[11px] font-bold tabular-nums text-gray-600 transition-colors duration-75 hover:border-indigo-200 hover:text-indigo-700 active:scale-95 active:border-emerald-300 active:bg-emerald-50 active:text-emerald-700 active:ring-2 active:ring-emerald-100"
       title={language === 'zh' ? '跟著音樂按下節拍，自動套用 BPM' : 'Press with the music to apply BPM'}
     >
-      {detectedBpm ? `${detectedBpm}` : 'TAP'}
+      {displayedBpm ?? 'TAP'}
     </button>
   );
-};
+});
+
+TapTempoButton.displayName = 'TapTempoButton';
 
 const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   song,
   language,
   onChange,
+  metadataSuggestions,
   title,
   keyValue,
   capoValue,
@@ -133,8 +296,17 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 }) => {
   const copy = getUiCopy(language);
   const panelRef = React.useRef<HTMLElement>(null);
+  const metadataInputId = React.useId();
   const [tempoDraft, setTempoDraft] = React.useState(typeof song.tempo === 'number' ? String(song.tempo) : '');
+  const [referenceBpmDrafts, setReferenceBpmDrafts] = React.useState<Record<SongReferenceKind, string>>(() => getReferenceBpmDrafts(song));
+  const [activeReferenceTapKind, setActiveReferenceTapKind] = React.useState<SongReferenceKind>('band');
   const [layoutMode, setLayoutMode] = React.useState<MetadataLayoutMode>('wide');
+  const bandTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
+  const vocalTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
+  const referenceBpmCommitTimeoutsRef = React.useRef<Record<SongReferenceKind, number | null>>({
+    band: null,
+    vocal: null
+  });
   const timeSignatureParts = splitTimeSignatureInput(song.timeSignature);
   const resolvedKey = keyValue ?? song.originalKey;
   const resolvedCapo = capoValue ?? (song.capo ?? 0);
@@ -174,6 +346,54 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   React.useEffect(() => {
     setTempoDraft(typeof song.tempo === 'number' ? String(song.tempo) : '');
   }, [song.tempo]);
+
+  React.useEffect(() => {
+    setReferenceBpmDrafts(getReferenceBpmDrafts(song));
+  }, [song.id, song.references?.band?.bpm, song.references?.vocal?.bpm]);
+
+  React.useEffect(() => () => {
+    (['band', 'vocal'] as SongReferenceKind[]).forEach((kind) => {
+      const timeout = referenceBpmCommitTimeoutsRef.current[kind];
+      if (timeout !== null) {
+        window.clearTimeout(timeout);
+      }
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (!showReferenceFields) {
+      return;
+    }
+
+    const handleReferenceTapKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key.toLowerCase() !== 't'
+        || event.metaKey
+        || event.ctrlKey
+        || event.altKey
+        || isEditableKeyboardTarget(event.target)
+      ) {
+        return;
+      }
+
+      const activeTapButton = activeReferenceTapKind === 'vocal'
+        ? vocalTapButtonRef.current
+        : bandTapButtonRef.current;
+      const fallbackTapButton = activeReferenceTapKind === 'vocal'
+        ? bandTapButtonRef.current
+        : vocalTapButtonRef.current;
+      const tapButton = activeTapButton ?? fallbackTapButton;
+      if (!tapButton) {
+        return;
+      }
+
+      event.preventDefault();
+      tapButton.tap(event.timeStamp);
+    };
+
+    window.addEventListener('keydown', handleReferenceTapKeyDown);
+    return () => window.removeEventListener('keydown', handleReferenceTapKeyDown);
+  }, [activeReferenceTapKind, showReferenceFields]);
 
   const commitTempoDraft = React.useCallback(() => {
     const digitsOnly = tempoDraft.replace(/\D+/g, '').slice(0, 3);
@@ -218,8 +438,40 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     });
   };
 
+  const commitReferenceBpmDraft = (kind: SongReferenceKind, draft: string) => {
+    const currentTimeout = referenceBpmCommitTimeoutsRef.current[kind];
+    if (currentTimeout !== null) {
+      window.clearTimeout(currentTimeout);
+      referenceBpmCommitTimeoutsRef.current[kind] = null;
+    }
+
+    const digitsOnly = draft.replace(/\D+/g, '').slice(0, 3);
+    updateReference(kind, { bpm: digitsOnly ? Number(digitsOnly) : undefined });
+  };
+
+  const scheduleReferenceBpmCommit = (kind: SongReferenceKind, draft: string, delay: number) => {
+    const currentTimeout = referenceBpmCommitTimeoutsRef.current[kind];
+    if (currentTimeout !== null) {
+      window.clearTimeout(currentTimeout);
+    }
+
+    referenceBpmCommitTimeoutsRef.current[kind] = window.setTimeout(() => {
+      commitReferenceBpmDraft(kind, draft);
+      referenceBpmCommitTimeoutsRef.current[kind] = null;
+    }, delay);
+  };
+
+  const updateReferenceBpmDraft = (kind: SongReferenceKind, draft: string, delay: number) => {
+    const digitsOnly = draft.replace(/\D+/g, '').slice(0, 3);
+    setReferenceBpmDrafts((current) => (
+      current[kind] === digitsOnly ? current : { ...current, [kind]: digitsOnly }
+    ));
+    scheduleReferenceBpmCommit(kind, digitsOnly, delay);
+  };
+
   const renderReferenceEditor = (kind: SongReferenceKind) => {
     const reference = song.references?.[kind] ?? {};
+    const bpmDraft = referenceBpmDrafts[kind] ?? '';
     const url = reference.url ?? '';
     const videoId = parseYouTubeVideoId(url);
     const hasInvalidUrl = url.trim().length > 0 && !videoId;
@@ -272,17 +524,22 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
             min={20}
             max={400}
             step={1}
-            value={typeof reference.bpm === 'number' ? reference.bpm : ''}
+            value={bpmDraft}
             onChange={(event) => {
-              const digitsOnly = event.target.value.replace(/\D+/g, '').slice(0, 3);
-              updateReference(kind, { bpm: digitsOnly ? Number(digitsOnly) : undefined });
+              updateReferenceBpmDraft(kind, event.target.value, REFERENCE_BPM_INPUT_COMMIT_DELAY_MS);
             }}
+            onBlur={() => commitReferenceBpmDraft(kind, referenceBpmDrafts[kind] ?? '')}
             placeholder="BPM"
             className="col-span-4 h-7 min-w-[4.75rem] rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 sm:col-span-2 xl:col-span-1"
           />
 
           <div className="col-span-4 sm:col-span-2">
-            <TapTempoButton language={language} onApply={(bpm) => updateReference(kind, { bpm })} />
+            <TapTempoButton
+              ref={kind === 'band' ? bandTapButtonRef : vocalTapButtonRef}
+              language={language}
+              onActivate={() => setActiveReferenceTapKind((current) => current === kind ? current : kind)}
+              onApply={(bpm) => updateReferenceBpmDraft(kind, String(bpm), REFERENCE_BPM_TAP_COMMIT_DELAY_MS)}
+            />
           </div>
         </div>
       </div>
@@ -486,10 +743,19 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       <label className={labelClassName}>{copy.version}</label>
       <input
         type="text"
+        list={metadataSuggestions?.versions.length ? `${metadataInputId}-versions` : undefined}
         value={getVersionValue(song)}
         onChange={(event) => onChange({ ...song, lyricist: event.target.value, composer: '' })}
+        onKeyDown={(event) => event.stopPropagation()}
         className={fieldClassName}
       />
+      {metadataSuggestions?.versions.length ? (
+        <datalist id={`${metadataInputId}-versions`}>
+          {metadataSuggestions.versions.map((version) => (
+            <option key={version} value={version} />
+          ))}
+        </datalist>
+      ) : null}
     </div>
   );
 
@@ -498,10 +764,19 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       <label className={labelClassName}>{copy.editor.translator}</label>
       <input
         type="text"
+        list={metadataSuggestions?.translators.length ? `${metadataInputId}-translators` : undefined}
         value={song.translator || ''}
         onChange={(event) => updateField('translator', event.target.value)}
+        onKeyDown={(event) => event.stopPropagation()}
         className={fieldClassName}
       />
+      {metadataSuggestions?.translators.length ? (
+        <datalist id={`${metadataInputId}-translators`}>
+          {metadataSuggestions.translators.map((translator) => (
+            <option key={translator} value={translator} />
+          ))}
+        </datalist>
+      ) : null}
     </div>
   );
 

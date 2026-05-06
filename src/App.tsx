@@ -458,6 +458,16 @@ const getSongVersionSummary = (song: Song) => (
   Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ')
 );
 
+const isReferenceOnlySongChange = (previousSong: Song, nextSong: Song): boolean => {
+  if (previousSong.sections !== nextSong.sections || previousSong.references === nextSong.references) {
+    return false;
+  }
+
+  const { references: _previousReferences, sections: _previousSections, ...previousRest } = previousSong;
+  const { references: _nextReferences, sections: _nextSections, ...nextRest } = nextSong;
+  return JSON.stringify(previousRest) === JSON.stringify(nextRest);
+};
+
 const normalizeTempo = (tempo: unknown): number | undefined => {
   if (tempo === '' || tempo === null || tempo === undefined) return undefined;
   const numericTempo = typeof tempo === 'number' ? tempo : Number(tempo);
@@ -2706,7 +2716,9 @@ export default function App() {
       }
     }
 
-    pushSongHistory(song.id, song);
+    if (!isReferenceOnlySongChange(song, nextSong)) {
+      pushSongHistory(song.id, song);
+    }
     replaceSongInLibrary(song.id, nextSong);
   };
 
@@ -5340,6 +5352,24 @@ export default function App() {
     setIsSidebarResizing(true);
   };
 
+  const metadataSuggestions = React.useMemo(() => {
+    const versions = new Set<string>();
+    const translators = new Set<string>();
+
+    songs.forEach((item) => {
+      const version = getSongVersionSummary(item).trim();
+      const translator = item.translator?.trim();
+
+      if (version) versions.add(version);
+      if (translator) translators.add(translator);
+    });
+
+    return {
+      versions: Array.from(versions).sort((a, b) => a.localeCompare(b, language === 'zh' ? 'zh-Hant' : 'en')),
+      translators: Array.from(translators).sort((a, b) => a.localeCompare(b, language === 'zh' ? 'zh-Hant' : 'en'))
+    };
+  }, [language, songs]);
+
   const metadataPanelContent = isSetlistMode
     ? (selectedSetlist && effectiveSelectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
         <SongMetadataPanel
@@ -5353,6 +5383,7 @@ export default function App() {
               }
             : activeSetlistEditableSong ?? selectedSetlistSourceSong}
           language={language}
+          metadataSuggestions={metadataSuggestions}
           title={copy.setlistEditor.instanceSettings}
           onChange={(nextSong) => {
             if (isJoinedSetlist) {
@@ -5398,6 +5429,7 @@ export default function App() {
         <SongMetadataPanel
           song={song}
           language={language}
+          metadataSuggestions={metadataSuggestions}
           title={language === 'zh' ? '編輯歌曲' : 'Edit Song'}
           onChange={handleSongChange}
           displayMode={

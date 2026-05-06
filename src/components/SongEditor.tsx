@@ -4387,6 +4387,7 @@ const SongEditor: React.FC<Props> = ({
         type="text"
         value={getVersionValue(song)}
         onChange={e => onChange({ ...song, lyricist: e.target.value, composer: '' })}
+        onKeyDown={e => e.stopPropagation()}
         className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
       />
     </div>
@@ -4399,6 +4400,7 @@ const SongEditor: React.FC<Props> = ({
         type="text"
         value={song.translator || ''}
         onChange={e => updateField('translator', e.target.value)}
+        onKeyDown={e => e.stopPropagation()}
         className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
       />
     </div>

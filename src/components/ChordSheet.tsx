@@ -1436,8 +1436,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       : bar?.repeatStart
                         ? 'pl-3.5'
                         : '';
+                    const shouldReserveBarNumberForNavigationMarker = Boolean(bar?.leftMarker || previousBar?.rightMarker);
                     const showBarNumber = Boolean(
-                      bar && barNumberMode !== 'none' && (barNumberMode === 'all' || bIdx === 0)
+                      bar
+                      && barNumberMode !== 'none'
+                      && (barNumberMode === 'all' || bIdx === 0)
+                      && !shouldReserveBarNumberForNavigationMarker
                     );
                     const barNumberTopClass = bar?.ending
                       ? 'top-[8px]'

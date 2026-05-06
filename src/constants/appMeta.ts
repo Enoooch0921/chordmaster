@@ -85,6 +85,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-06',
+        title: 'Rehearsal input bug fixes',
+        bullets: [
+          'Improved TAP tempo so BPM feedback appears inside the TAP button without forcing full metadata re-renders while tapping.',
+          'Added reusable suggestions for Version and Translator from existing songs, and fixed spacebar entry in those fields.',
+          'Fixed Segno and Coda markers overlapping bar numbers by letting navigation markers take priority.'
+        ]
+      },
+      {
+        version: '0.8.1',
         date: '2026-05-05',
         title: 'Search normalization update',
         bullets: [
@@ -220,6 +230,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-06',
+        title: '排練輸入修復',
+        bullets: [
+          '改善 TAP tempo，TAP 按鈕會即時顯示偵測 BPM，但拍擊時不再觸發整個 metadata 區塊重 render。',
+          '版本與翻譯欄位新增歌曲庫既有值建議，並修正這些欄位無法輸入空白鍵的問題。',
+          '修正 Segno / Coda 導覽記號與小節數重疊時，由導覽記號優先顯示。'
+        ]
+      },
+      {
+        version: '0.8.1',
         date: '2026-05-05',
         title: '搜尋正規化更新',
         bullets: [
