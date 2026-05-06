@@ -1231,6 +1231,32 @@ const SongEditor: React.FC<Props> = ({
     input.setSelectionRange(caretPosition, caretPosition);
   };
 
+  const focusSectionTitleWithRetry = (sIdx: number, sectionId: string, attempt = 0) => {
+    const input = sectionTitleRefs.current.get(sectionId);
+    const sectionElement = sectionRefs.current.get(sectionId) ?? document.getElementById(`section-${sIdx}`);
+
+    if (!input) {
+      if (attempt < 10) {
+        window.setTimeout(() => focusSectionTitleWithRetry(sIdx, sectionId, attempt + 1), 50);
+      }
+      return;
+    }
+
+    if (sectionElement) {
+      sectionElement.scrollIntoView({ behavior: attempt === 0 ? 'smooth' : 'auto', block: 'start' });
+    }
+
+    try {
+      input.focus({ preventScroll: true });
+    } catch {
+      input.focus();
+    }
+
+    resizeSectionTitleTextarea(input);
+    const caretPosition = input.value.length;
+    input.setSelectionRange(caretPosition, caretPosition);
+  };
+
   const queueChordInputFocus = (sIdx: number, bIdx: number, sectionId: string | null) => {
     markActiveSection(sectionId);
     markActiveBar(sIdx, bIdx);
@@ -1243,6 +1269,13 @@ const SongEditor: React.FC<Props> = ({
       type: 'chord'
     });
     window.requestAnimationFrame(() => focusChordInputWithRetry(sIdx, bIdx));
+  };
+
+  const queueSectionTitleFocus = (sIdx: number, sectionId: string) => {
+    markActiveSection(sectionId);
+    onActiveBarChange?.(null);
+    clearEditorSelectionState();
+    window.requestAnimationFrame(() => focusSectionTitleWithRetry(sIdx, sectionId));
   };
 
   const insertEmptyBarAt = (sIdx: number, insertIndex: number) => {
@@ -4198,7 +4231,7 @@ const SongEditor: React.FC<Props> = ({
         bars: [createEmptyBar()] 
       }]
     });
-    queueChordInputFocus(song.sections.length, 0, newSectionId);
+    queueSectionTitleFocus(song.sections.length, newSectionId);
   };
 
   const splitSectionAtBar = (sIdx: number, bIdx: number) => {
@@ -4220,7 +4253,7 @@ const SongEditor: React.FC<Props> = ({
 
     clearEditorSelectionState();
     notifyChange({ ...song, sections: newSections });
-    queueChordInputFocus(sIdx + 1, 0, newSectionId);
+    queueSectionTitleFocus(sIdx + 1, newSectionId);
   };
 
   const mergeSectionToPrevious = (sIdx: number) => {

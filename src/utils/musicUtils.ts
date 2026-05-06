@@ -7,6 +7,8 @@ import { Key } from '../types';
 
 const NOTES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const NOTES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+const KEYS_SHARP = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
+const KEYS_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 const NOTE_ALIASES: Record<string, string> = {
   Cb: 'B',
   Fb: 'E',
@@ -79,6 +81,11 @@ function shouldPreferSharps(key: string): boolean {
 function getNoteFromIndex(index: number, preferFlats: boolean = false): string {
   const normalizedIndex = ((index % 12) + 12) % 12;
   return preferFlats ? NOTES_FLAT[normalizedIndex] : NOTES_SHARP[normalizedIndex];
+}
+
+function getKeyFromIndex(index: number, preferFlats: boolean = false): Key {
+  const normalizedIndex = ((index % 12) + 12) % 12;
+  return (preferFlats ? KEYS_FLAT[normalizedIndex] : KEYS_SHARP[normalizedIndex]) as Key;
 }
 
 function getLetterIndex(noteLetter: string): number {
@@ -185,15 +192,29 @@ export function transposeKey(key: Key, steps: number): Key {
   const keyIndex = getNoteIndex(key);
   if (keyIndex === -1) return key;
   const nextIndex = ((keyIndex + steps) % 12 + 12) % 12;
-  const nextKey = getNoteFromIndex(nextIndex, shouldPreferFlats(key) && !shouldPreferSharps(key));
-  return nextKey as Key;
+  return getKeyFromIndex(nextIndex, shouldPreferFlats(key) && !shouldPreferSharps(key));
 }
 
 export function transposeKeyPreferFlats(key: Key, steps: number): Key {
   const keyIndex = getNoteIndex(key);
   if (keyIndex === -1) return key;
   const nextIndex = ((keyIndex + steps) % 12 + 12) % 12;
-  return getNoteFromIndex(nextIndex, true) as Key;
+  return getKeyFromIndex(nextIndex, true);
+}
+
+export function transposeKeyWithPreference(key: Key, steps: number, preferenceKey: Key): Key {
+  const keyIndex = getNoteIndex(key);
+  if (keyIndex === -1) return key;
+  const nextIndex = ((keyIndex + steps) % 12 + 12) % 12;
+  const preferFlats = shouldPreferFlats(preferenceKey) && !shouldPreferSharps(preferenceKey);
+  return getKeyFromIndex(nextIndex, preferFlats);
+}
+
+export function normalizeKeySpelling(key: Key): Key {
+  const keyIndex = getNoteIndex(key);
+  if (keyIndex === -1) return key;
+  const preferFlats = shouldPreferFlats(key) && !shouldPreferSharps(key);
+  return getKeyFromIndex(keyIndex, preferFlats);
 }
 
 export function transposeChord(chord: string, offset: number, targetKey?: Key): string {
@@ -464,5 +485,5 @@ export function getPlayKey(targetKey: Key, capo: number): Key {
   // Play Key = Target Key - Capo
   const playIndex = (targetIndex - (capo % 12) + 12) % 12;
   const preferFlats = shouldPreferFlats(targetKey);
-  return getNoteFromIndex(playIndex, preferFlats) as Key;
+  return getKeyFromIndex(playIndex, preferFlats);
 }

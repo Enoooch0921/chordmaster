@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-05-06',
+        title: 'Key spelling and section focus fixes',
+        bullets: [
+          'Fixed `Bb` being displayed as `A#` in the chart preview and key-sync flows.',
+          'Constrained transposed song keys to the official KeyPicker spelling set.',
+          'New sections now focus the section title field first instead of jumping directly to the first chord input.'
+        ]
+      },
+      {
+        version: '0.8.2',
+        date: '2026-05-06',
         title: 'Rehearsal input bug fixes',
         bullets: [
           'Improved TAP tempo so BPM feedback appears inside the TAP button without forcing full metadata re-renders while tapping.',
@@ -230,6 +240,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-06',
+        title: 'Key 命名與段落焦點修復',
+        bullets: [
+          '修正 `Bb` 在右側預覽或 key 同步流程中顯示成 `A#` 的問題。',
+          'key 轉調結果現在會限制在 KeyPicker 的正式命名清單內。',
+          '新增段落後會先聚焦段落標題欄位，不再直接跳到第一個和弦輸入框。'
+        ]
+      },
+      {
+        version: '0.8.2',
         date: '2026-05-06',
         title: '排練輸入修復',
         bullets: [

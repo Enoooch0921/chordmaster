@@ -25,7 +25,7 @@ import {
   SongReferenceKind,
   TeamManagementSnapshot
 } from './types';
-import { ALL_KEYS, getPlayKey, getTransposeOffset, transposeKey, transposeKeyPreferFlats } from './utils/musicUtils';
+import { ALL_KEYS, getPlayKey, getTransposeOffset, normalizeKeySpelling, transposeKeyPreferFlats, transposeKeyWithPreference } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
 import { useThemeMode } from './hooks/useThemeMode';
@@ -2698,9 +2698,15 @@ export default function App() {
       const keyShift = getTransposeOffset(song.originalKey, newSong.originalKey);
       nextSong = {
         ...newSong,
-        currentKey: transposeKey(song.currentKey, keyShift)
+        currentKey: transposeKeyWithPreference(song.currentKey, keyShift, newSong.originalKey)
       };
     }
+
+    nextSong = {
+      ...nextSong,
+      originalKey: normalizeKeySpelling(nextSong.originalKey),
+      currentKey: normalizeKeySpelling(nextSong.currentKey)
+    };
 
     // Detect if sections were reordered
     const oldIds = song.sections.map(s => s.id);

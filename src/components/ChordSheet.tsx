@@ -6,7 +6,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker } from '../types';
-import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats } from '../utils/musicUtils';
+import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, normalizeKeySpelling } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
@@ -1009,9 +1009,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   }, [previewIdentity]);
 
   const capo = song.capo || 0;
-  const playKey = getPlayKey(currentKey, capo);
-  const baseWrittenKey = transposeFromOriginal ? song.originalKey : currentKey;
-  const globalKeyShift = transposeFromOriginal ? getTransposeOffset(song.originalKey, currentKey) : 0;
+  const displayedCurrentKey = normalizeKeySpelling(currentKey);
+  const playKey = getPlayKey(displayedCurrentKey, capo);
+  const baseWrittenKey = transposeFromOriginal ? song.originalKey : displayedCurrentKey;
+  const globalKeyShift = transposeFromOriginal ? getTransposeOffset(song.originalKey, displayedCurrentKey) : 0;
   const sectionStartKeys: Key[] = [];
   let activeSectionKey = baseWrittenKey;
   song.sections.forEach((section) => {
@@ -1159,7 +1160,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     <div className="shrink-0">
                       <span>{copy.key} - </span>
                       <span className="text-gray-900 font-bold">
-                        <FormattedChord chordString={currentKey} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />
+                        <FormattedChord chordString={displayedCurrentKey} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />
                       </span>
                     </div>
                     {typeof song.tempo === 'number' && (
@@ -1215,7 +1216,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
               const previousWrittenKey = row.sIdx > 0 ? (sectionStartKeys[row.sIdx - 1] || song.originalKey) : song.originalKey;
               const sectionCurrentKey = transposeKeyPreferFlats(sectionWrittenKey, globalKeyShift);
-              const previousSectionKey = row.sIdx > 0 ? transposeKeyPreferFlats(previousWrittenKey, globalKeyShift) : currentKey;
+              const previousSectionKey = row.sIdx > 0 ? transposeKeyPreferFlats(previousWrittenKey, globalKeyShift) : displayedCurrentKey;
               const sectionPlayKey = getPlayKey(sectionCurrentKey, capo);
               const sectionOffset = getTransposeOffset(sectionWrittenKey, sectionPlayKey);
               const sectionKeyChanged = sectionCurrentKey !== previousSectionKey;
