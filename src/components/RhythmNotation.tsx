@@ -65,7 +65,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   }
 
   const { beats, beatUnits, barUnits, overflow } = parsed;
-  const minHeight = (compact ? 16 : 58) * scale;
+  const baseMinHeight = (compact ? 16 : 58) * scale;
   const stroke = overflow ? '#dc2626' : '#111827';
   const guide = overflow ? 'rgba(220, 38, 38, 0.16)' : 'rgba(17, 24, 39, 0.08)';
   const accentY = ((compact ? -9 : -2) + accentVerticalOffset) * scale;
@@ -117,6 +117,12 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
     return groups;
   }, [visibleEvents]);
+  const hasCompactTriplets = compact && tripletGroups.length > 0;
+  const minHeight = hasCompactTriplets
+    ? Math.max(baseMinHeight, 24 * scale)
+    : baseMinHeight;
+  const rhythmContentTop = '50%';
+  const visualBeamTop = effectiveBeamTop;
   const cursorUnits = React.useMemo(() => {
     if (visibleEvents.length === 0) {
       return [0];
@@ -180,17 +186,17 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const unitToPercentNumber = (unit: number) => (unit * 100) / Math.max(1, barUnits);
   const getEditorBeamAnchorUnit = (event: typeof visibleEvents[number]) => getHeadCenterUnit(event) + 0.18;
   const getTripletLayout = (base: 'q' | 'e') => {
-    const tripletVerticalLift = (compact ? 1.0 : 5.0) * scale;
+    const tripletVerticalLift = (compact ? 0 : 5.0) * scale;
     const rawBracketY = compact
-      ? Math.max(1.2 * scale, base === 'e' ? effectiveBeamTop + (4.8 * scale) : 2.4 * scale)
+      ? (base === 'e' ? 2.1 * scale : 2.5 * scale)
       : Math.max(3.8 * scale, base === 'e' ? effectiveBeamTop - (2.6 * scale) : 5.2 * scale);
     const bracketY = rawBracketY - tripletVerticalLift;
     const numberY = compact
-      ? Math.max(2.6 * scale, bracketY - (1.8 * scale))
+      ? 0.4 * scale
       : bracketY - (3.1 * scale);
 
     return {
-      bracketY: compact ? Math.max(3.8 * scale, bracketY) : bracketY,
+      bracketY,
       bracketDrop: compact ? 2.2 : 3,
       numberY,
       numberGap: compact ? 1.25 : 1.7
@@ -490,9 +496,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             <g key={`editor-beam-${index}`}>
               <line
                 x1={unitToPercentNumber(Math.max(0, group.primaryStartUnit - editorBeamVisualExtension + beamOffsetUnits))}
-                y1={effectiveBeamTop}
+                y1={visualBeamTop}
                 x2={unitToPercentNumber(Math.min(barUnits, group.primaryEndUnit + editorBeamVisualExtension + beamOffsetUnits))}
-                y2={effectiveBeamTop}
+                y2={visualBeamTop}
                 stroke={stroke}
                 strokeWidth={editorBeamStroke.primary * beamStrokeScale}
                 strokeLinecap="butt"
@@ -502,9 +508,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                 <line
                   key={`editor-beam-secondary-${index}-${runIndex}`}
                   x1={unitToPercentNumber(Math.max(0, run.startUnit - editorBeamVisualExtension + beamOffsetUnits))}
-                  y1={effectiveBeamTop + editorBeamGap}
+                  y1={visualBeamTop + editorBeamGap}
                   x2={unitToPercentNumber(Math.min(barUnits, run.endUnit + editorBeamVisualExtension + beamOffsetUnits))}
-                  y2={effectiveBeamTop + editorBeamGap}
+                  y2={visualBeamTop + editorBeamGap}
                   stroke={stroke}
                   strokeWidth={editorBeamStroke.secondary * beamStrokeScale}
                   strokeLinecap="butt"
@@ -515,9 +521,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                 <line
                   key={`editor-beam-secondary-tick-${index}-${tickIndex}`}
                   x1={unitToPercentNumber(Math.max(0, tick.startUnit - editorBeamVisualExtension + beamOffsetUnits))}
-                  y1={effectiveBeamTop + editorBeamGap}
+                  y1={visualBeamTop + editorBeamGap}
                   x2={unitToPercentNumber(Math.min(barUnits, tick.endUnit + editorBeamVisualExtension + beamOffsetUnits))}
-                  y2={effectiveBeamTop + editorBeamGap}
+                  y2={visualBeamTop + editorBeamGap}
                   stroke={stroke}
                   strokeWidth={editorBeamStroke.secondary * beamStrokeScale}
                   strokeLinecap="butt"
@@ -738,7 +744,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                     className="absolute z-[2] select-none font-rhythm leading-none whitespace-pre"
                     style={{
                       left: unitToPercent(centerUnit),
-                      top: '50%',
+                      top: rhythmContentTop,
                       color: stroke,
                     transform: `translate(-50%, ${
                       event.isRest
@@ -761,7 +767,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                       className="absolute z-[3] select-none leading-none"
                       style={{
                         left: unitToPercent(centerUnit),
-                        top: '50%',
+                        top: rhythmContentTop,
                         color: stroke,
                         transform: `translate(${compact ? '3px' : '4px'}, ${
                           event.isRest
@@ -799,7 +805,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                 className="absolute z-[2] select-none font-rhythm leading-none whitespace-pre"
                 style={{
                   left: unitToPercent(anchorUnit),
-                  top: '50%',
+                  top: rhythmContentTop,
                   color: stroke,
                   transform: 'translate(-50%, -50%)',
                   fontSize: `${currentGlyphFontSize}px`

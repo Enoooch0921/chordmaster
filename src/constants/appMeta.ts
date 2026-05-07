@@ -85,6 +85,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-07',
+        title: 'Team invite and mobile rhythm fixes',
+        bullets: [
+          'Team Invite failures now show the underlying Supabase reason instead of a generic message.',
+          'Duplicate personal libraries are deduped in the workspace switcher, with a migration to merge existing duplicates and prevent new ones.',
+          'Fixed compact triplet markers being clipped in narrow mobile rhythm lanes.'
+        ]
+      },
+      {
+        version: '0.8.3',
         date: '2026-05-06',
         title: 'Key spelling and section focus fixes',
         bullets: [
@@ -240,6 +250,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-07',
+        title: '團隊邀請與手機節奏修復',
+        bullets: [
+          'Team Invite 接受失敗時會顯示 Supabase 回傳的實際原因，不再只顯示泛用錯誤。',
+          'workspace 切換列會去除重複 personal library，並新增 migration 合併既有重複個人區、避免之後再重複建立。',
+          '修正手機窄版節奏列中，compact 三連音數字被裁切或顯示不完整的問題。'
+        ]
+      },
+      {
+        version: '0.8.3',
         date: '2026-05-06',
         title: 'Key 命名與段落焦點修復',
         bullets: [

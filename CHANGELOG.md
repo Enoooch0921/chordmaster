@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.4 - 2026-05-07
+
+### Added
+
+- 新增 Supabase migration，合併同一帳號重複建立的個人區，並限制每個帳號只能有一個 personal library
+
+### Fixed
+
+- 修正 Team Invite 接受失敗時只顯示泛用錯誤，現在會顯示 Supabase 回傳的實際原因
+- 修正重複 personal library 會在 workspace 切換列顯示成多個「個人區」的問題
+- 修正手機窄版節奏列中，三連音數字被裁切或顯示不完整的問題
+
 ## 0.8.3 - 2026-05-06
 
 ### Fixed
