@@ -180,15 +180,17 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const unitToPercentNumber = (unit: number) => (unit * 100) / Math.max(1, barUnits);
   const getEditorBeamAnchorUnit = (event: typeof visibleEvents[number]) => getHeadCenterUnit(event) + 0.18;
   const getTripletLayout = (base: 'q' | 'e') => {
-    const tripletVerticalLift = (compact ? 6.0 : 5.0) * scale;
+    const tripletVerticalLift = (compact ? 1.0 : 5.0) * scale;
     const rawBracketY = compact
       ? Math.max(1.2 * scale, base === 'e' ? effectiveBeamTop + (4.8 * scale) : 2.4 * scale)
       : Math.max(3.8 * scale, base === 'e' ? effectiveBeamTop - (2.6 * scale) : 5.2 * scale);
     const bracketY = rawBracketY - tripletVerticalLift;
-    const numberY = bracketY - ((compact ? 1.8 : 3.1) * scale);
+    const numberY = compact
+      ? Math.max(2.6 * scale, bracketY - (1.8 * scale))
+      : bracketY - (3.1 * scale);
 
     return {
-      bracketY,
+      bracketY: compact ? Math.max(3.8 * scale, bracketY) : bracketY,
       bracketDrop: compact ? 2.2 : 3,
       numberY,
       numberGap: compact ? 1.25 : 1.7

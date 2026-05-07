@@ -3,6 +3,37 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { signInWithGoogleRedirect, useSupabaseAuth } from '../lib/auth';
 import { createCloudRepository } from '../lib/repository';
 
+const getUnknownErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error.trim();
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as {
+      code?: unknown;
+      message?: unknown;
+      details?: unknown;
+      hint?: unknown;
+    };
+    const parts = [record.code, record.message, record.details, record.hint]
+      .filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
+    if (parts.length > 0) {
+      return parts.join('\n');
+    }
+  }
+
+  return '';
+};
+
+const getTeamInviteErrorMessage = (error: unknown, fallback: string) => {
+  const reason = getUnknownErrorMessage(error);
+  return reason ? `${fallback}\n\n${reason}` : fallback;
+};
+
 export default function TeamInvitePage() {
   const navigate = useNavigate();
   const { token } = useParams();
@@ -23,7 +54,7 @@ export default function TeamInvitePage() {
     if (!user) {
       setMessage('Redirecting to Google sign-in...');
       void signInWithGoogleRedirect(`/team-invite/${token}`).catch((error) => {
-        setErrorMessage(error instanceof Error ? error.message : 'Unable to start sign-in.');
+        setErrorMessage(getTeamInviteErrorMessage(error, 'Unable to start sign-in.'));
       });
       return;
     }
@@ -44,7 +75,7 @@ export default function TeamInvitePage() {
         }
       } catch (error) {
         if (!isCancelled) {
-          setErrorMessage(error instanceof Error ? error.message : 'Unable to accept this invite.');
+          setErrorMessage(getTeamInviteErrorMessage(error, 'Unable to accept this invite.'));
         }
       }
     };

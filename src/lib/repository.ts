@@ -352,11 +352,35 @@ const normalizeLibrarySummary = (value: unknown): CloudLibrarySummary | null => 
   };
 };
 
-const normalizeLibrarySummaries = (payload: unknown): CloudLibrarySummary[] => (
-  Array.isArray(payload)
-    ? payload.map(normalizeLibrarySummary).filter((item): item is CloudLibrarySummary => Boolean(item))
-    : []
-);
+const normalizeLibrarySummaries = (payload: unknown): CloudLibrarySummary[] => {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  const summaries = payload
+    .map(normalizeLibrarySummary)
+    .filter((item): item is CloudLibrarySummary => Boolean(item));
+  const seenIds = new Set<string>();
+  let hasPersonalLibrary = false;
+
+  return summaries.filter((library) => {
+    if (seenIds.has(library.id)) {
+      return false;
+    }
+    seenIds.add(library.id);
+
+    if (library.kind !== 'personal') {
+      return true;
+    }
+
+    if (hasPersonalLibrary) {
+      return false;
+    }
+
+    hasPersonalLibrary = true;
+    return true;
+  });
+};
 
 const normalizeTeamInvite = (value: unknown): TeamInvite | null => {
   const row = value as Partial<TeamInvite> & Record<string, unknown>;
