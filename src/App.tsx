@@ -3366,6 +3366,18 @@ export default function App() {
       return;
     }
 
+    const targetSetlistSong = selectedSetlist.songs.find((item) => item.id === setlistSongId);
+    const sourceSong = targetSetlistSong ? songs.find((item) => item.id === targetSetlistSong.songId) : undefined;
+    const songTitle = targetSetlistSong?.songData?.title || sourceSong?.title || copy.untitledSong;
+    const confirmed = window.confirm(
+      language === 'zh'
+        ? `要從歌單移出「${songTitle}」嗎？`
+        : `Remove "${songTitle}" from this setlist?`
+    );
+    if (!confirmed) {
+      return;
+    }
+
     replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
       ...currentSetlist,
       songs: currentSetlist.songs.filter((item) => item.id !== setlistSongId)
@@ -5501,6 +5513,89 @@ export default function App() {
   ) : null;
 
   const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist ? (
+    isPhoneViewport ? (
+      <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSharingTitle}</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                selectedSetlistShareStatus?.activeToken
+                  ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                  : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
+              }`}>
+                {isLoadingSetlistShareStatus
+                  ? copy.cloudSyncSyncing
+                  : selectedSetlistShareStatus?.activeToken
+                    ? copy.setlistSharingActive
+                    : copy.setlistSharingInactive}
+              </span>
+              <span className="text-xs font-semibold text-gray-500">
+                {copy.setlistSharingParticipants}: {selectedSetlistShareStatus?.participantCount ?? 0}
+              </span>
+            </div>
+          </div>
+          <ChevronRight size={16} className="shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
+        </summary>
+
+        <div className="mt-3 border-t border-gray-100 pt-3">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void loadSetlistShareStatus(selectedSetlist.id)}
+              disabled={isLoadingSetlistShareStatus}
+              className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
+            >
+              {isLoadingSetlistShareStatus ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
+            </button>
+          </div>
+
+          {selectedSetlistShareStatus?.participants.length ? (
+            <div className="mt-3 max-h-36 space-y-2 overflow-y-auto">
+              {selectedSetlistShareStatus.participants.map((participant) => (
+                <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
+                  {participant.picture ? (
+                    <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
+                  ) : (
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
+                      {(participant.name || participant.email || '?').slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
+                    <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+              {copy.setlistSharingNoParticipants}
+            </div>
+          )}
+
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            <button
+              type="button"
+              onClick={() => selectedSetlistShareStatus?.activeToken ? void handleCopyActiveSetlistShareLink() : void handleCreateShareLink('setlist')}
+              disabled={isExportingPdf || isRevokingSetlistShare}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
+            >
+              <Share2 size={13} />
+              <span>{selectedSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingRevokeShareSetlistId(selectedSetlist.id)}
+              disabled={!selectedSetlistShareStatus?.activeToken || isRevokingSetlistShare}
+              className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {copy.setlistSharingCancel}
+            </button>
+          </div>
+        </div>
+      </details>
+    ) : (
     <div className="rounded-2xl border border-gray-200 bg-white px-3 py-3 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -5576,9 +5671,72 @@ export default function App() {
         </button>
       </div>
     </div>
+    )
   ) : null;
 
   const joinedSetlistDisplayPreferencePanel = isJoinedSetlist && selectedSetlist && effectiveSelectedSetlist ? (
+    isPhoneViewport ? (
+      <details className="group rounded-2xl border border-indigo-100 bg-indigo-50/50 px-3 py-2.5">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-500">
+              {language === 'zh' ? '個人顯示' : 'Personal View'}
+            </div>
+            <div className="mt-1 truncate text-xs font-semibold text-indigo-700">
+              {setlistDisplayModeOptions.find((option) => option.value === currentSetlistDisplayMode)?.label}
+              {' · '}
+              {effectiveSelectedSetlist.showLyrics ? (language === 'zh' ? '顯示歌詞' : 'Lyrics on') : (language === 'zh' ? '不顯示歌詞' : 'Lyrics off')}
+            </div>
+          </div>
+          <ChevronRight size={16} className="shrink-0 text-indigo-400 transition-transform group-open:rotate-90" />
+        </summary>
+
+        <div className="mt-3 border-t border-indigo-100 pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-100">
+              {language === 'zh' ? '只影響你' : 'Local'}
+            </span>
+          </div>
+
+          <div className="mt-2.5 space-y-2">
+            <CompactSegmentedControl
+              value={currentSetlistDisplayMode}
+              options={setlistDisplayModeOptions}
+              onChange={handleSetlistDisplayModeChange}
+              size="xs"
+              stretch
+              className="bg-white"
+              buttonClassName="min-w-0"
+            />
+
+            <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-[96px_minmax(0,1fr)]">
+              <button
+                type="button"
+                onClick={() => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { showLyrics: !effectiveSelectedSetlist.showLyrics })}
+                className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border px-2 text-[11px] font-bold transition-colors ${
+                  effectiveSelectedSetlist.showLyrics
+                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-amber-200 hover:bg-amber-50'
+                }`}
+              >
+                <FileText size={13} />
+                <span>{language === 'zh' ? '歌詞' : 'Lyrics'}</span>
+              </button>
+
+              <CompactSegmentedControl
+                value={currentSetlistBarNumberMode}
+                options={barNumberModeOptions}
+                onChange={(mode) => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { barNumberMode: mode })}
+                size="xs"
+                stretch
+                className="bg-white"
+                buttonClassName="min-w-0"
+              />
+            </div>
+          </div>
+        </div>
+      </details>
+    ) : (
     <section className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-500">
@@ -5626,6 +5784,7 @@ export default function App() {
         </div>
       </div>
     </section>
+    )
   ) : null;
 
   const librarySwitcherPanel = isAuthenticated ? (
@@ -5856,6 +6015,9 @@ export default function App() {
       ) : null}
     </div>
   ) : null;
+
+  const showSidebarWorkspacePanels = !isPhoneViewport || !isSetlistMode || mobileSetlistDrawerView === 'list';
+  const showMobileSetlistFooter = mobileSetlistDrawerView === 'list';
 
   return (
     <div
@@ -6117,8 +6279,8 @@ export default function App() {
               </div>
             )}
 
-            {librarySwitcherPanel}
-            {teamManagementPanel}
+            {showSidebarWorkspacePanels ? librarySwitcherPanel : null}
+            {showSidebarWorkspacePanels ? teamManagementPanel : null}
 
             {isSetlistMode ? (
               isPhoneViewport ? (
@@ -6193,19 +6355,19 @@ export default function App() {
                         </div>
 	                      </div>
 
-	                      {canShareSelectedSetlist && setlistSharingPanel ? (
-	                        <div className="border-b border-gray-200 px-4 py-3">
-	                          {setlistSharingPanel}
-	                        </div>
-	                      ) : null}
-
-	                      {joinedSetlistDisplayPreferencePanel ? (
-	                        <div className="border-b border-gray-200 px-4 py-3">
-	                          {joinedSetlistDisplayPreferencePanel}
-	                        </div>
-	                      ) : null}
-
 	                      <div className="flex-1 overflow-y-auto p-3">
+                        {canShareSelectedSetlist && setlistSharingPanel ? (
+                          <div className="mb-3">
+                            {setlistSharingPanel}
+                          </div>
+                        ) : null}
+
+                        {joinedSetlistDisplayPreferencePanel ? (
+                          <div className="mb-3">
+                            {joinedSetlistDisplayPreferencePanel}
+                          </div>
+                        ) : null}
+
                         <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
                         {setlistSongsWithSource.length === 0 ? (
                           <div className="mt-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -6597,17 +6759,19 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="border-t border-gray-200 px-5 py-4">
-                    <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
-                      {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
-                    </div>
-                    <div className="mt-1 text-xs text-gray-400">
-                      {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
-                    </div>
-                    <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
-                      v{APP_VERSION}
-                    </div>
-                  </div>
+	                  {showMobileSetlistFooter && (
+	                    <div className="border-t border-gray-200 px-5 py-4">
+	                      <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
+	                        {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
+	                      </div>
+	                      <div className="mt-1 text-xs text-gray-400">
+	                        {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
+	                      </div>
+	                      <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+	                        v{APP_VERSION}
+	                      </div>
+	                    </div>
+	                  )}
                 </>
               ) : (
                 <>
@@ -7268,76 +7432,66 @@ export default function App() {
                             </div>
                           </button>
                         )}
-                        <div className="absolute right-2 top-1/2 flex w-6 -translate-y-1/2 flex-col items-center justify-center gap-0">
-                          {canEditTeamSongs ? (
-                            <>
-                              {hasLinkedTeamUpdate ? (
+                        {!isLibraryEditing && (
+                          <div className="absolute right-2 top-1/2 flex w-6 -translate-y-1/2 flex-col items-center justify-center gap-0">
+                            {canEditTeamSongs ? (
+                              <>
+                                {hasLinkedTeamUpdate ? (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleSyncPersonalSongFromTeam(item.id);
+                                    }}
+                                    className="rounded-md p-0.5 text-amber-600 transition-colors hover:bg-white hover:text-amber-700"
+                                    aria-label={language === 'zh' ? `同步 ${item.title || copy.untitledSong} 到團隊最新版` : `Sync ${item.title || copy.untitledSong} to latest team version`}
+                                    title={language === 'zh' ? '同步團隊最新版' : 'Sync latest team version'}
+                                  >
+                                    <Download size={13} />
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
-                                    void handleSyncPersonalSongFromTeam(item.id);
+                                    handleDuplicateSong(item.id);
                                   }}
-                                  className="rounded-md p-0.5 text-amber-600 transition-colors hover:bg-white hover:text-amber-700"
-                                  aria-label={language === 'zh' ? `同步 ${item.title || copy.untitledSong} 到團隊最新版` : `Sync ${item.title || copy.untitledSong} to latest team version`}
-                                  title={language === 'zh' ? '同步團隊最新版' : 'Sync latest team version'}
+                                  className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                                  aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                                  title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
                                 >
-                                  <Download size={13} />
+                                  <Copy size={13} />
                                 </button>
-                              ) : null}
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleSelectSong(item.id);
+                                    setIsEditing(true);
+                                  }}
+                                  className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                                  aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
+                                  title={`${copy.edit} ${item.title || copy.untitledSong}`}
+                                >
+                                  <Edit3 size={13} />
+                                </button>
+                              </>
+                            ) : isTeamWorkspace ? (
                               <button
                                 type="button"
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  handleDuplicateSong(item.id);
+                                  void handleCopyTeamSongToPersonal(item.id);
                                 }}
                                 className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                                aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                                title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                                aria-label={language === 'zh' ? `轉存 ${item.title || copy.untitledSong}` : `Copy ${item.title || copy.untitledSong} to personal library`}
+                                title={language === 'zh' ? '轉存到個人區' : 'Copy to personal'}
                               >
                                 <Copy size={13} />
                               </button>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleSelectSong(item.id);
-                                  setIsEditing(true);
-                                }}
-                                className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                                aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
-                                title={`${copy.edit} ${item.title || copy.untitledSong}`}
-                              >
-                                <Edit3 size={13} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleDeleteSong(item.id);
-                                }}
-                                className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-rose-600"
-                                aria-label={`${copy.delete} ${item.title || copy.untitledSong}`}
-                                title={`${copy.delete} ${item.title || copy.untitledSong}`}
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </>
-                          ) : isTeamWorkspace ? (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleCopyTeamSongToPersonal(item.id);
-                              }}
-                              className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                              aria-label={language === 'zh' ? `轉存 ${item.title || copy.untitledSong}` : `Copy ${item.title || copy.untitledSong} to personal library`}
-                              title={language === 'zh' ? '轉存到個人區' : 'Copy to personal'}
-                            >
-                              <Copy size={13} />
-                            </button>
-                          ) : null}
-                        </div>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

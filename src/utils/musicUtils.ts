@@ -395,6 +395,9 @@ export function getNashvilleNumber(chord: string, key: Key): string {
   // Handle slash chords like E/G#
   if (chord.includes('/')) {
     const [base, bass] = chord.split('/');
+    if (!base && bass) {
+      return `/${getNashvilleNumber(bass, key)}`;
+    }
     if (base && bass) {
       return `${getNashvilleNumber(base, key)}/${getNashvilleNumber(bass, key)}`;
     }
@@ -429,6 +432,9 @@ export function parseNashvilleToChord(input: string, key: Key): string {
   // Handle slash chords
   if (input.includes('/')) {
     const [base, bass] = input.split('/');
+    if (!base && bass) {
+      return `/${parseNashvilleToChord(bass, key)}`;
+    }
     if (base && bass) {
       return `${parseNashvilleToChord(base, key)}/${parseNashvilleToChord(bass, key)}`;
     }
@@ -475,7 +481,8 @@ export function parseNashvilleToChord(input: string, key: Key): string {
 
 export function isNashville(chord: string): boolean {
   if (!chord || chord === '%' || chord === '/') return false;
-  return /^([b#]?)([1-7])([#b]?)/.test(chord);
+  const trimmed = chord.trim();
+  return /^([b#]?)([1-7])([#b]?)/.test(trimmed) || /^\/([b#]?)([1-7])([#b]?)/.test(trimmed);
 }
 
 export function getPlayKey(targetKey: Key, capo: number): Key {
