@@ -4978,24 +4978,66 @@ export default function App() {
     );
   }, [activeBar, activeSectionId, canEditTeamSongs, copy.newSong, handleCreateSong, handleElementClick, hasSongs, highlightedSectionIds, isEditing, language, song]);
 
+  const setlistPreviewSongs = React.useMemo(() => {
+    if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
+      return [];
+    }
+
+    return setlistSongsWithSource.map(({ item, sourceSong }) => {
+      const isSelected = item.id === selectedSetlistSong?.id;
+      const previewSong = isSelected && activeSetlistPreviewSong
+        ? activeSetlistPreviewSong
+        : {
+            ...applySetlistSongOverrides(sourceSong, effectiveSelectedSetlist, item),
+            references: sourceSong.references,
+            ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
+              ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+              : {})
+          };
+
+      return {
+        item,
+        isSelected,
+        song: previewSong
+      };
+    });
+  }, [
+    activeSetlistPreviewSong,
+    effectiveSelectedSetlist,
+    isJoinedSetlist,
+    joinedSetlistDisplayPreference.barNumberMode,
+    selectedSetlistSong?.id,
+    setlistSongsWithSource
+  ]);
+
   const setlistPreviewSheet = React.useMemo(() => {
-    if (!activeSetlistPreviewSong) {
+    if (setlistPreviewSongs.length === 0) {
       return null;
     }
 
     return (
-      <ChordSheet
-        song={activeSetlistPreviewSong}
-        language={language}
-        currentKey={activeSetlistPreviewSong.currentKey}
-        onElementClick={handleElementClick}
-        highlightedSectionIds={highlightedSectionIds}
-        activeSectionId={isEditing ? activeSectionId : null}
-        activeBar={isEditing ? activeBar : null}
-        previewIdentity={selectedSetlistSong?.id ?? null}
-      />
+      <div className="flex flex-col gap-8">
+        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong }) => (
+          <div
+            key={item.id}
+            data-setlist-preview-song-id={item.id}
+            className="w-full"
+          >
+            <ChordSheet
+              song={previewSong}
+              language={language}
+              currentKey={previewSong.currentKey}
+              onElementClick={isSelected ? handleElementClick : undefined}
+              highlightedSectionIds={isSelected ? highlightedSectionIds : []}
+              activeSectionId={isSelected && isEditing ? activeSectionId : null}
+              activeBar={isSelected && isEditing ? activeBar : null}
+              previewIdentity={item.id}
+            />
+          </div>
+        ))}
+      </div>
     );
-  }, [activeBar, activeSectionId, activeSetlistPreviewSong, handleElementClick, highlightedSectionIds, isEditing, language, selectedSetlistSong?.id]);
+  }, [activeBar, activeSectionId, handleElementClick, highlightedSectionIds, isEditing, language, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)

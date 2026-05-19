@@ -85,6 +85,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-19',
+        title: 'Full setlist preview scrolling',
+        bullets: [
+          'Setlist mode now shows every song in the right-side preview in setlist order for vertical scrolling.',
+          'The selected setlist song remains editable from the preview, while the other songs stay available as read-only preview context.'
+        ]
+      },
+      {
+        version: '0.8.4',
         date: '2026-05-07',
         title: 'Team invite and mobile rhythm fixes',
         bullets: [
@@ -250,6 +259,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-19',
+        title: '整份歌單直向預覽',
+        bullets: [
+          '歌單模式右側預覽現在會依歌單順序顯示所有歌曲，可直接往下滑瀏覽整份歌單。',
+          '目前選中的歌單歌曲仍可從預覽點擊回編輯器定位，其他歌曲則維持只讀預覽。'
+        ]
+      },
+      {
+        version: '0.8.4',
         date: '2026-05-07',
         title: '團隊邀請與手機節奏修復',
         bullets: [
