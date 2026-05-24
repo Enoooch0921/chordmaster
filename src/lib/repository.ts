@@ -244,7 +244,7 @@ const mapSetlistRows = (
           sectionOrder: Array.isArray(item.override_json?.sectionOrder) ? item.override_json.sectionOrder : [],
           songData: item.override_json?.songData ? normalizeSongBars(item.override_json.songData) : undefined
         }))
-        .filter((item) => songsById.has(item.songId))
+        .filter((item) => songsById.has(item.songId) || Boolean(item.songData))
     );
 
     return normalizeStoredSetlist({

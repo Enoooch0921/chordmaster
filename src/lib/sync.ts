@@ -67,6 +67,28 @@ const diffSetlists = (currentSetlists: Setlist[], savedSetlists: Setlist[]) => {
   };
 };
 
+const collectEmbeddedSetlistSongs = (setlists: Setlist[], songs: StoredSong[]) => {
+  const songIds = new Set(songs.map((song) => song.id));
+  const embeddedSongs = new Map<string, StoredSong>();
+
+  for (const setlist of setlists) {
+    for (const setlistSong of setlist.songs) {
+      if (songIds.has(setlistSong.songId) || !setlistSong.songData) {
+        continue;
+      }
+
+      embeddedSongs.set(setlistSong.songId, {
+        ...setlistSong.songData,
+        id: setlistSong.songId,
+        updatedAt: setlist.updatedAt
+      });
+      songIds.add(setlistSong.songId);
+    }
+  }
+
+  return Array.from(embeddedSongs.values());
+};
+
 export const syncWorkspaceDiff = async (params: {
   repository: WorkspaceRepository;
   songs: StoredSong[];
@@ -86,6 +108,10 @@ export const syncWorkspaceDiff = async (params: {
   }
 
   for (const song of songDiff.changed) {
+    await params.repository.saveSong(song);
+  }
+
+  for (const song of collectEmbeddedSetlistSongs(params.setlists, params.songs)) {
     await params.repository.saveSong(song);
   }
 
