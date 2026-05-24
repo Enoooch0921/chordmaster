@@ -57,6 +57,7 @@ const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
 const SELECTED_SONG_STORAGE_KEY = 'chordmaster.selected-song-id.v1';
 const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
 const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.v1';
+const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
 const AUTO_SAVE_STORAGE_KEY = 'chordmaster.auto-save.v1';
@@ -108,6 +109,11 @@ const VALID_SETLIST_DISPLAY_MODES = new Set([
   'nashville-number-system',
   'chord-fixed-key',
   'chord-movable-key'
+]);
+const VALID_SETLIST_SORT_MODES = new Set<SetlistSortMode>([
+  'updated-desc',
+  'created-desc',
+  'name-asc'
 ]);
 
 const isLineInAppBrowser = () => (
@@ -190,6 +196,8 @@ interface ExportedSongLibraryPayload {
 
 type WorkspaceMode = 'songs' | 'setlists';
 type MobileSetlistDrawerView = 'list' | 'detail' | 'addSongs';
+type DesktopSetlistPanelView = 'list' | 'detail' | 'addSongs';
+type SetlistSortMode = 'updated-desc' | 'created-desc' | 'name-asc';
 interface JoinedSetlistDisplayPreference {
   displayMode?: SetlistDisplayMode;
   showLyrics?: boolean;
@@ -1140,6 +1148,38 @@ const loadWorkspaceMode = (): WorkspaceMode => {
   return window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY) === 'setlists' ? 'setlists' : 'songs';
 };
 
+const loadSetlistSortPreference = (): SetlistSortMode => {
+  if (typeof window === 'undefined') {
+    return 'updated-desc';
+  }
+
+  const storedMode = window.localStorage.getItem(SETLIST_SORT_STORAGE_KEY);
+  return storedMode && VALID_SETLIST_SORT_MODES.has(storedMode as SetlistSortMode)
+    ? storedMode as SetlistSortMode
+    : 'updated-desc';
+};
+
+const sortSetlistsForDisplay = <T extends Pick<Setlist, 'name' | 'createdAt' | 'updatedAt'>>(items: T[], sortMode: SetlistSortMode): T[] => {
+  const getTimestamp = (item: T, field: 'createdAt' | 'updatedAt') => {
+    const value = item[field];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  };
+
+  return [...items].sort((first, second) => {
+    if (sortMode === 'name-asc') {
+      const firstName = first.name.trim() || '\uffff';
+      const secondName = second.name.trim() || '\uffff';
+      return firstName.localeCompare(secondName, undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    if (sortMode === 'created-desc') {
+      return getTimestamp(second, 'createdAt') - getTimestamp(first, 'createdAt');
+    }
+
+    return getTimestamp(second, 'updatedAt') - getTimestamp(first, 'updatedAt');
+  });
+};
+
 const formatSavedAt = (timestamp: number | null, language: AppLanguage) => {
   if (!timestamp) {
     return language === 'zh' ? '尚未儲存' : 'Not saved yet';
@@ -1366,6 +1406,8 @@ export default function App() {
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [setlistSearchQuery, setSetlistSearchQuery] = useState('');
   const [setlistSongSearchQuery, setSetlistSongSearchQuery] = useState('');
+  const [setlistSortMode, setSetlistSortMode] = useState<SetlistSortMode>(loadSetlistSortPreference);
+  const [desktopSetlistPanelView, setDesktopSetlistPanelView] = useState<DesktopSetlistPanelView>('list');
   const [isSetlistAddSongsOpen, setIsSetlistAddSongsOpen] = useState(false);
   const [isSetlistActionsMenuOpen, setIsSetlistActionsMenuOpen] = useState(false);
   const [isToolbarOverflowMenuOpen, setIsToolbarOverflowMenuOpen] = useState(false);
@@ -2039,18 +2081,24 @@ export default function App() {
     const sourceSong = getSetlistSongSource(item);
     return { item, sourceSong };
   }).filter((entry): entry is { item: SetlistSong; sourceSong: StoredSong } => entry.sourceSong !== null);
-  const filteredSetlists = setlists.filter((item) => {
+  const setlistMatchesSearch = (item: Setlist | JoinedSetlist) => {
     if (!normalizedSetlistSearchQuery) {
       return true;
     }
 
     const searchText = [
       item.name,
-      ...item.songs.map((setlistSong) => songs.find((songItem) => songItem.id === setlistSong.songId)?.title ?? '')
+      ...item.songs.map((setlistSong) => {
+        const sourceSong = getSetlistSongSource(setlistSong);
+        const displaySong = setlistSong.songData ?? sourceSong;
+        return displaySong?.title ?? '';
+      })
     ].join(' ');
 
     return normalizeSearchText(searchText).includes(normalizedSetlistSearchQuery);
-  });
+  };
+  const filteredSetlists: Setlist[] = sortSetlistsForDisplay<Setlist>(setlists.filter(setlistMatchesSearch), setlistSortMode);
+  const filteredJoinedSetlists: JoinedSetlist[] = sortSetlistsForDisplay<JoinedSetlist>(joinedSetlists.filter(setlistMatchesSearch), setlistSortMode);
   const filteredSongsForSetlist = filteredSongs.filter((item) => {
     if (!normalizedSetlistSongSearchQuery) {
       return true;
@@ -2106,6 +2154,23 @@ export default function App() {
       setMobileSwipeOpenSetlistId(null);
     }
   }, [isPhoneSetlistDrawer, mobileSetlistDrawerView, mobileSwipeOpenSetlistId, setlists]);
+
+  useEffect(() => {
+    if (isPhoneViewport) {
+      return;
+    }
+
+    if (!isSetlistMode || !selectedSetlist) {
+      setDesktopSetlistPanelView('list');
+      setIsSetlistAddSongsOpen(false);
+      return;
+    }
+
+    if (desktopSetlistPanelView === 'addSongs' && !canEditSelectedSetlist) {
+      setDesktopSetlistPanelView('detail');
+      setIsSetlistAddSongsOpen(false);
+    }
+  }, [canEditSelectedSetlist, desktopSetlistPanelView, isPhoneViewport, isSetlistMode, selectedSetlist?.id]);
 
   useEffect(() => () => {
     clearMobileLongPressTimer();
@@ -2169,6 +2234,14 @@ export default function App() {
 
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(SETLIST_SORT_STORAGE_KEY, setlistSortMode);
+  }, [setlistSortMode]);
 
   useEffect(() => {
     if (!isSidebarResizing) {
@@ -2960,6 +3033,10 @@ export default function App() {
       setMobileSetlistDrawerView('detail');
       setIsSetlistAddSongsOpen(false);
       setSetlistSongSearchQuery('');
+    } else {
+      setDesktopSetlistPanelView('detail');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
     }
   };
 
@@ -2968,6 +3045,10 @@ export default function App() {
 
     if (isPhoneViewport) {
       setMobileSetlistDrawerView('detail');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+    } else {
+      setDesktopSetlistPanelView('detail');
       setIsSetlistAddSongsOpen(false);
       setSetlistSongSearchQuery('');
     }
@@ -2989,6 +3070,10 @@ export default function App() {
     setMobileSwipeOpenSetlistId(null);
     if (isPhoneViewport) {
       setMobileSetlistDrawerView('detail');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
+    } else {
+      setDesktopSetlistPanelView('detail');
       setIsSetlistAddSongsOpen(false);
       setSetlistSongSearchQuery('');
     }
@@ -3198,6 +3283,10 @@ export default function App() {
       setMobileSetlistDrawerView(nextSetlist ? 'detail' : 'list');
       setIsSetlistAddSongsOpen(false);
       setSetlistSongSearchQuery('');
+    } else {
+      setDesktopSetlistPanelView(nextSetlist ? 'detail' : 'list');
+      setIsSetlistAddSongsOpen(false);
+      setSetlistSongSearchQuery('');
     }
     if (remainingSetlists.length === 0) {
       setWorkspaceMode('songs');
@@ -3343,6 +3432,7 @@ export default function App() {
       setIsSetlistAddSongsOpen(false);
       setSetlistSongSearchQuery('');
     } else {
+      setDesktopSetlistPanelView('addSongs');
       setIsSetlistAddSongsOpen(true);
     }
   };
@@ -6111,6 +6201,459 @@ export default function App() {
     </div>
   ) : null;
 
+  const setlistSortOptions: Array<{ value: SetlistSortMode; label: string }> = [
+    { value: 'updated-desc', label: copy.setlistSortUpdated },
+    { value: 'created-desc', label: copy.setlistSortCreated },
+    { value: 'name-asc', label: copy.setlistSortName }
+  ];
+
+  const desktopSetlistSavedFooter = (
+    <div className="border-t border-gray-200 px-5 py-4">
+      <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
+        {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
+      </div>
+      <div className="mt-1 text-xs text-gray-400">
+        {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
+      </div>
+      <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+        v{APP_VERSION}
+      </div>
+    </div>
+  );
+
+  const desktopSetlistListPanel = (
+    <>
+      <div className="px-5 py-6 border-b border-gray-200">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
+            <div className="text-lg font-bold tracking-tight">ChordMaster</div>
+          </div>
+          <div className="text-xs font-medium text-gray-500">{copy.serviceSetlist}</div>
+        </div>
+        {canCreateTeamSetlists && (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleCreateSetlist}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+            >
+              <Plus size={16} />
+              <span>{copy.newSetlist}</span>
+            </button>
+          </div>
+        )}
+        <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+          <Search size={15} className="text-gray-400" />
+          <input
+            type="text"
+            value={setlistSearchQuery}
+            onChange={(event) => setSetlistSearchQuery(event.target.value)}
+            placeholder={copy.searchSetlists}
+            className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+          />
+        </label>
+        <label className="mt-3 block">
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSort}</div>
+          <select
+            value={setlistSortMode}
+            onChange={(event) => setSetlistSortMode(event.target.value as SetlistSortMode)}
+            className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300"
+          >
+            {setlistSortOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="px-3 py-3 border-b border-gray-100">
+        <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
+          <span>{copy.setlists}</span>
+          <span>{normalizedSetlistSearchQuery ? `${filteredSetlists.length}/${setlists.length}` : setlists.length}</span>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3">
+        <div className="space-y-2">
+          {filteredSetlists.length === 0 && (
+            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+              {copy.noSetlists}
+            </div>
+          )}
+          {filteredSetlists.map((item) => {
+            const isActive = item.id === selectedSetlist?.id;
+            return (
+              <div
+                key={item.id}
+                className={`rounded-2xl border p-3 transition-all ${
+                  isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
+                }`}
+              >
+                <button type="button" onClick={() => handleSelectSetlist(item.id)} className="w-full text-left">
+                  <div className="text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
+                  <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {joinedSetlists.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
+              <span>{copy.sharedWithMe}</span>
+              <span>{normalizedSetlistSearchQuery ? `${filteredJoinedSetlists.length}/${joinedSetlists.length}` : joinedSetlists.length}</span>
+            </div>
+            {filteredJoinedSetlists.length === 0 && (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+                {copy.noSetlists}
+              </div>
+            )}
+            {filteredJoinedSetlists.map((item) => {
+              const isActive = item.id === selectedSetlist?.id;
+              const joinedSongSummaries = getSetlistCardSongSummaries(item);
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-2xl border p-3 transition-all ${
+                    isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <button type="button" onClick={() => handleSelectJoinedSetlist(item.id)} className="w-full text-left">
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
+                      <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
+                    {joinedSongSummaries.length > 0 ? (
+                      <div className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-xl border border-indigo-100 bg-white/70 p-2">
+                        {joinedSongSummaries.map((summary, index) => (
+                          <div key={summary.id} className="min-w-0">
+                            <div className="truncate text-[11px] font-bold text-gray-800">{index + 1}. {summary.title}</div>
+                            <div className="break-words text-[10px] font-medium leading-4 text-gray-500">{summary.summary}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </button>
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => requestLeaveSharedSetlist(item.id)}
+                      disabled={leavingSharedSetlistId === item.id}
+                      className="rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {leavingSharedSetlistId === item.id ? copy.leavingSetlist : copy.leaveSetlist}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {desktopSetlistSavedFooter}
+    </>
+  );
+
+  const desktopSetlistDetailPanel = selectedSetlist ? (
+    <>
+      <div className="border-b border-gray-200 px-4 py-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setIsSetlistActionsMenuOpen(false);
+              setIsSetlistAddSongsOpen(false);
+              setSetlistSongSearchQuery('');
+              setDesktopSetlistPanelView('list');
+            }}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+            title={copy.backToSetlists}
+            aria-label={copy.backToSetlists}
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistDetails}</div>
+            {isJoinedSetlist || !canEditSelectedSetlist ? (
+              <div className="mt-1 truncate text-base font-bold text-gray-900">{selectedSetlist.name || copy.untitledSetlist}</div>
+            ) : (
+              <input
+                value={selectedSetlist.name}
+                onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
+                className="mt-1 w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50"
+                placeholder={copy.untitledSetlist}
+              />
+            )}
+            <div className="mt-0.5 text-xs font-medium text-gray-500">{setlistSongsWithSource.length} {copy.setlistItems}</div>
+          </div>
+          {isJoinedSetlist ? (
+            <button
+              type="button"
+              onClick={() => requestLeaveSharedSetlist(selectedSetlist.id)}
+              disabled={leavingSharedSetlistId === selectedSetlist.id}
+              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+            >
+              {leavingSharedSetlistId === selectedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
+            </button>
+          ) : canEditSelectedSetlist ? (
+            <div ref={setlistActionsMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                title={language === 'zh' ? '歌單操作' : 'Setlist Actions'}
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {isSetlistActionsMenuOpen && (
+                <div className="absolute right-0 top-full z-20 mt-2 w-40 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSetlist(selectedSetlist.id)}
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+                  >
+                    {copy.delete}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600">
+              {getRoleLabel(activeLibraryRole, language)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3">
+        {canShareSelectedSetlist && setlistSharingPanel ? <div className="mb-3">{setlistSharingPanel}</div> : null}
+        {joinedSetlistDisplayPreferencePanel ? <div className="mb-3">{joinedSetlistDisplayPreferencePanel}</div> : null}
+
+        <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
+        {setlistSongsWithSource.length === 0 ? (
+          <div className="mt-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+            {copy.noSetlistSongs}
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {setlistSongsWithSource.map(({ item, sourceSong }) => {
+              const isActive = item.id === selectedSetlistSong?.id;
+              const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
+              const effectiveCapo = getEffectiveSetlistSongCapo(item, sourceSong.capo ?? 0) ?? 0;
+              const displaySong = item.songData ?? sourceSong;
+              const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
+              const isDropTarget = dragOverSetlistSongId === item.id;
+
+              return (
+                <div
+                  key={item.id}
+                  {...(canEditSelectedSetlist && {
+                    draggable: true,
+                    onDragStart: () => setDraggingSetlistSongId(item.id),
+                    onDragOver: (event: React.DragEvent) => {
+                      event.preventDefault();
+                      if (dragOverSetlistSongId !== item.id) setDragOverSetlistSongId(item.id);
+                    },
+                    onDragLeave: () => { if (dragOverSetlistSongId === item.id) setDragOverSetlistSongId(null); },
+                    onDrop: (event: React.DragEvent) => {
+                      event.preventDefault();
+                      if (draggingSetlistSongId) moveSetlistSong(draggingSetlistSongId, item.id);
+                      setDraggingSetlistSongId(null);
+                      setDragOverSetlistSongId(null);
+                    },
+                    onDragEnd: () => { setDraggingSetlistSongId(null); setDragOverSetlistSongId(null); }
+                  })}
+                  className={`group rounded-xl border px-2.5 py-2 transition-all ${
+                    isActive
+                      ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
+                      : isDropTarget
+                        ? 'border-indigo-200 bg-indigo-50/70'
+                        : 'border-gray-200 bg-white hover:bg-gray-50/70'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <div className="flex min-w-0 items-center gap-2">
+                        {canEditSelectedSetlist && (
+                          <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
+                            <GripVertical size={14} />
+                          </div>
+                        )}
+                        <button type="button" onClick={() => handleSelectSetlistSong(item.id)} className="min-w-0 flex-1 text-left">
+                          <div className="text-sm font-bold text-gray-900">{displaySong.title || sourceSong.title || copy.untitledSong}</div>
+                          {songInfoSummary ? (
+                            <div className="mt-0.5 break-words text-[11px] font-medium leading-4 text-gray-400">
+                              {songInfoSummary}
+                            </div>
+                          ) : null}
+                        </button>
+                        {canEditSelectedSetlist && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSetlistSong(item.id)}
+                            className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
+                            title={copy.removeFromSetlist}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <div className={`flex min-w-0 items-center gap-1 ${canEditSelectedSetlist ? 'pl-10' : ''}`}>
+                        <div className="w-[56px] shrink-0">
+                          <KeyPicker
+                            value={effectiveKey}
+                            onChange={(key) => {
+                              if (!key || isJoinedSetlist || !canEditSelectedSetlist) return;
+                              handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
+                                ...currentSetlistSong,
+                                overrideKey: key
+                              }));
+                            }}
+                            label={copy.key}
+                            originalKey={sourceSong.currentKey}
+                            align="left"
+                            disabled={isJoinedSetlist || !canEditSelectedSetlist}
+                            buttonClassName={`!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5 ${isJoinedSetlist || !canEditSelectedSetlist ? '!cursor-default !opacity-100' : ''}`}
+                            valueTextClassName="!text-[10px] !leading-none"
+                            triggerIconSize={10}
+                          />
+                        </div>
+                        <div className="w-[56px] shrink-0">
+                          <CapoPicker
+                            value={effectiveCapo}
+                            currentKey={effectiveKey}
+                            onChange={isJoinedSetlist
+                              ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
+                              : isTeamWorkspace && !canEditSelectedSetlist
+                                ? (capo) => handleTeamPersonalSetlistCapoChange(item.id, capo)
+                              : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
+                            label="Capo"
+                            align="right"
+                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
+                            valueTextClassName="!text-[10px] !leading-none"
+                            showPlayKey={false}
+                            triggerIconSize={10}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {selectedSetlist && canEditSelectedSetlist && (
+        <div className="border-t border-gray-200 bg-white px-4 py-3">
+          <button
+            type="button"
+            onClick={() => {
+              setIsSetlistActionsMenuOpen(false);
+              setIsSetlistAddSongsOpen(true);
+              setDesktopSetlistPanelView('addSongs');
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+          >
+            <Plus size={16} />
+            <span>{copy.addToSetlist}</span>
+          </button>
+        </div>
+      )}
+
+      {desktopSetlistSavedFooter}
+    </>
+  ) : desktopSetlistListPanel;
+
+  const desktopSetlistAddSongsPanel = selectedSetlist ? (
+    <>
+      <div className="border-b border-gray-200 px-4 py-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setIsSetlistActionsMenuOpen(false);
+              setIsSetlistAddSongsOpen(false);
+              setSetlistSongSearchQuery('');
+              setDesktopSetlistPanelView('detail');
+            }}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+            title={copy.backToPreview}
+            aria-label={copy.backToPreview}
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-base font-bold text-gray-900">{copy.addToSetlist}</div>
+            <div className="mt-0.5 truncate text-xs font-medium text-gray-500">{selectedSetlist.name || copy.untitledSetlist}</div>
+          </div>
+        </div>
+
+        <label className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+          <Search size={14} className="text-gray-400" />
+          <input
+            type="text"
+            value={setlistSongSearchQuery}
+            onChange={(event) => setSetlistSongSearchQuery(event.target.value)}
+            placeholder={copy.searchSongsToAdd}
+            className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+          />
+        </label>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3">
+        <div className="space-y-2">
+          {filteredSongsForSetlist.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
+              {copy.noSongsMatch}
+            </div>
+          ) : (
+            filteredSongsForSetlist.map((librarySong) => {
+              const libraryMeta = getSongLibraryMeta(librarySong, copy.editor.shuffle);
+              return (
+                <div key={`setlist-add-${librarySong.id}`} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-bold text-gray-900">
+                      {librarySong.title || copy.untitledSong}
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
+                      {libraryMeta.primary}
+                    </div>
+                    {libraryMeta.secondary && (
+                      <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
+                        {libraryMeta.secondary}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleAddSongToSetlist(librarySong.id)}
+                    className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+                  >
+                    {copy.addToSetlist}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {desktopSetlistSavedFooter}
+    </>
+  ) : desktopSetlistListPanel;
+
+  const desktopSetlistSidebarPanel = desktopSetlistPanelView === 'addSongs'
+    ? desktopSetlistAddSongsPanel
+    : desktopSetlistPanelView === 'detail'
+      ? desktopSetlistDetailPanel
+      : desktopSetlistListPanel;
+
   const showSidebarWorkspacePanels = !isPhoneViewport || !isSetlistMode || mobileSetlistDrawerView === 'list';
   const showMobileSetlistFooter = mobileSetlistDrawerView === 'list';
 
@@ -6222,7 +6765,10 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setWorkspaceMode('setlists')}
+                  onClick={() => {
+                    setWorkspaceMode('setlists');
+                    setDesktopSetlistPanelView('list');
+                  }}
                   className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
                     isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
@@ -6870,386 +7416,8 @@ export default function App() {
                 </>
               ) : (
                 <>
-                <div className="px-5 py-6 border-b border-gray-200">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
-                      <div className="text-lg font-bold tracking-tight">ChordMaster</div>
-                    </div>
-                    <div className="text-xs font-medium text-gray-500">{copy.serviceSetlist}</div>
-                  </div>
-                  {canCreateTeamSetlists && (
-                    <div className="mt-4">
-                      <button
-                        type="button"
-                        onClick={handleCreateSetlist}
-                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                      >
-                        <Plus size={16} />
-                        <span>{copy.newSetlist}</span>
-                      </button>
-                    </div>
-                  )}
-                  <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                    <Search size={15} className="text-gray-400" />
-                    <input
-                      type="text"
-                      value={setlistSearchQuery}
-                      onChange={(event) => setSetlistSearchQuery(event.target.value)}
-                      placeholder={copy.searchSetlists}
-                      className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                    />
-                  </label>
-                </div>
-
-                <div className="px-3 py-3 border-b border-gray-100">
-                  <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
-                    <span>{copy.setlists}</span>
-                    <span>{normalizedSetlistSearchQuery ? `${filteredSetlists.length}/${setlists.length}` : setlists.length}</span>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-3">
-                  <div className="space-y-2">
-                    {filteredSetlists.length === 0 && (
-                      <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-                        {copy.noSetlists}
-                      </div>
-                    )}
-                    {filteredSetlists.map((item) => {
-                      const isActive = item.id === selectedSetlist?.id;
-                      return (
-                        <div
-                          key={item.id}
-                          className={`rounded-2xl border p-3 transition-all ${
-                            isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
-                          }`}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => handleSelectSetlist(item.id)}
-                            className="w-full text-left"
-                          >
-                            <div className="text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
-                            <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {joinedSetlists.length > 0 && (
-                    <div className="mt-4 space-y-2">
-                      <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.sharedWithMe}</div>
-                      {joinedSetlists.map((item) => {
-                        const isActive = item.id === selectedSetlist?.id;
-                        const joinedSongSummaries = getSetlistCardSongSummaries(item);
-                        return (
-                          <div
-                            key={item.id}
-                            className={`rounded-2xl border p-3 transition-all ${
-                              isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
-                            }`}
-                          >
-	                            <button
-	                              type="button"
-	                              onClick={() => handleSelectJoinedSetlist(item.id)}
-	                              className="w-full text-left"
-	                            >
-	                              <div className="flex items-center gap-2">
-	                                <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
-	                                <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
-	                              </div>
-	                              <div className="mt-1 text-xs text-gray-500">{item.songs.length} {copy.setlistItems}</div>
-                                {joinedSongSummaries.length > 0 ? (
-                                  <div className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-xl border border-indigo-100 bg-white/70 p-2">
-                                    {joinedSongSummaries.map((summary, index) => (
-                                      <div key={summary.id} className="min-w-0">
-                                        <div className="truncate text-[11px] font-bold text-gray-800">{index + 1}. {summary.title}</div>
-                                        <div className="break-words text-[10px] font-medium leading-4 text-gray-500">{summary.summary}</div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : null}
-	                            </button>
-	                            <div className="mt-2 flex justify-end">
-	                              <button
-	                                type="button"
-	                                onClick={() => requestLeaveSharedSetlist(item.id)}
-	                                disabled={leavingSharedSetlistId === item.id}
-	                                className="rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
-	                              >
-	                                {leavingSharedSetlistId === item.id ? copy.leavingSetlist : copy.leaveSetlist}
-	                              </button>
-	                            </div>
-	                          </div>
-	                        );
-	                      })}
-                    </div>
-                  )}
-
-                  {selectedSetlist && (
-                    <div className="mt-5 space-y-4 border-t border-gray-200 pt-4">
-                      {isJoinedSetlist ? (
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">{copy.joinedSetlistBadge}</span>
-                            <div className="mt-1 truncate text-sm font-bold text-gray-900">{selectedSetlist.name}</div>
-                          </div>
-	                          <button
-	                            type="button"
-	                            onClick={() => requestLeaveSharedSetlist(selectedSetlist.id)}
-	                            disabled={leavingSharedSetlistId === selectedSetlist.id}
-	                            className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
-	                          >
-	                            {leavingSharedSetlistId === selectedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
-	                          </button>
-                        </div>
-                      ) : (
-                      <div className="space-y-2">
-                        <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistName}</div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            value={selectedSetlist.name}
-                            onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
-                            disabled={!canEditSelectedSetlist}
-                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-900 outline-none focus:border-indigo-300 disabled:bg-gray-50 disabled:text-gray-500"
-                            placeholder={copy.untitledSetlist}
-                          />
-                          {canEditSelectedSetlist && <div ref={setlistActionsMenuRef} className="relative">
-                            <button
-                              type="button"
-                              onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
-                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-                              title={language === 'zh' ? '歌單操作' : 'Setlist Actions'}
-                            >
-                              <MoreHorizontal size={16} />
-                            </button>
-                            {isSetlistActionsMenuOpen && (
-                              <div className="absolute right-0 top-full z-20 mt-2 w-40 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteSetlist(selectedSetlist.id)}
-                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
-                                >
-                                  {copy.delete}
-                                </button>
-                              </div>
-                            )}
-                          </div>}
-                        </div>
-                      </div>
-	                      )}
-
-	                      {canShareSelectedSetlist && setlistSharingPanel}
-
-	                      {joinedSetlistDisplayPreferencePanel}
-
-	                      <div className="space-y-2">
-                        <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
-                        {setlistSongsWithSource.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
-                            {copy.noSetlistSongs}
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {setlistSongsWithSource.map(({ item, sourceSong }) => {
-                              const isActive = item.id === selectedSetlistSong?.id;
-                              const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-                              const effectiveCapo = getEffectiveSetlistSongCapo(item, sourceSong.capo ?? 0) ?? 0;
-                              const displaySong = item.songData ?? sourceSong;
-                              const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
-                              const isDropTarget = dragOverSetlistSongId === item.id;
-
-                              return (
-                                <div
-                                  key={item.id}
-                                  {...(canEditSelectedSetlist && {
-                                    draggable: true,
-                                    onDragStart: () => setDraggingSetlistSongId(item.id),
-                                    onDragOver: (event: React.DragEvent) => {
-                                      event.preventDefault();
-                                      if (dragOverSetlistSongId !== item.id) setDragOverSetlistSongId(item.id);
-                                    },
-                                    onDragLeave: () => { if (dragOverSetlistSongId === item.id) setDragOverSetlistSongId(null); },
-                                    onDrop: (event: React.DragEvent) => {
-                                      event.preventDefault();
-                                      if (draggingSetlistSongId) moveSetlistSong(draggingSetlistSongId, item.id);
-                                      setDraggingSetlistSongId(null);
-                                      setDragOverSetlistSongId(null);
-                                    },
-                                    onDragEnd: () => { setDraggingSetlistSongId(null); setDragOverSetlistSongId(null); }
-                                  })}
-                                  className={`group rounded-xl border px-2.5 py-2 transition-all ${
-                                    isActive
-                                      ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
-                                      : isDropTarget
-                                        ? 'border-indigo-200 bg-indigo-50/70'
-                                        : 'border-gray-200 bg-white hover:bg-gray-50/70'
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-2">
-                                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                                      <div className="flex min-w-0 items-center gap-2">
-                                        {canEditSelectedSetlist && (
-                                          <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
-                                            <GripVertical size={14} />
-                                          </div>
-                                        )}
-                                        <button
-                                          type="button"
-                                          onClick={() => handleSelectSetlistSong(item.id)}
-                                          className="min-w-0 flex-1 text-left"
-                                        >
-                                          <div className="text-sm font-bold text-gray-900">{displaySong.title || sourceSong.title || copy.untitledSong}</div>
-                                          {songInfoSummary ? (
-                                            <div className="mt-0.5 break-words text-[11px] font-medium leading-4 text-gray-400">
-                                              {songInfoSummary}
-                                            </div>
-                                          ) : null}
-                                        </button>
-                                        {canEditSelectedSetlist && (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleRemoveSetlistSong(item.id)}
-                                            className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
-                                            title={copy.removeFromSetlist}
-                                          >
-                                            <Trash2 size={13} />
-                                          </button>
-                                        )}
-                                      </div>
-                                      <div className={`flex min-w-0 items-center gap-1 ${canEditSelectedSetlist ? 'pl-10' : ''}`}>
-                                        <div className="w-[56px] shrink-0">
-                                          <KeyPicker
-                                            value={effectiveKey}
-                                            onChange={(key) => {
-                                              if (!key || isJoinedSetlist || !canEditSelectedSetlist) return;
-                                              handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
-                                                ...currentSetlistSong,
-                                                overrideKey: key
-                                              }));
-                                            }}
-                                            label={copy.key}
-                                            originalKey={sourceSong.currentKey}
-                                            align="left"
-                                            disabled={isJoinedSetlist || !canEditSelectedSetlist}
-                                            buttonClassName={`!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5 ${isJoinedSetlist || !canEditSelectedSetlist ? '!cursor-default !opacity-100' : ''}`}
-                                            valueTextClassName="!text-[10px] !leading-none"
-                                            triggerIconSize={10}
-                                          />
-                                        </div>
-                                        <div className="w-[56px] shrink-0">
-                                          <CapoPicker
-                                            value={effectiveCapo}
-                                            currentKey={effectiveKey}
-                                            onChange={isJoinedSetlist
-                                              ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
-                                              : isTeamWorkspace && !canEditSelectedSetlist
-                                                ? (capo) => handleTeamPersonalSetlistCapoChange(item.id, capo)
-                                              : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
-                                            label="Capo"
-                                            align="right"
-                                            buttonClassName="!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5"
-                                            valueTextClassName="!text-[10px] !leading-none"
-                                            showPlayKey={false}
-                                            triggerIconSize={10}
-                                          />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {canEditSelectedSetlist && isSetlistAddSongsOpen && (
-                        <div className="space-y-3 border-t border-gray-200 pt-4">
-                          <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.addToSetlist}</div>
-                          <label className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                            <Search size={14} className="text-gray-400" />
-                            <input
-                              type="text"
-                              value={setlistSongSearchQuery}
-                              onChange={(event) => setSetlistSongSearchQuery(event.target.value)}
-                              placeholder={copy.searchSongsToAdd}
-                              className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                            />
-                          </label>
-
-                          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                            {filteredSongsForSetlist.length === 0 ? (
-                              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
-                                {copy.noSongsMatch}
-                              </div>
-                            ) : (
-                              filteredSongsForSetlist.map((librarySong) => {
-                                const libraryMeta = getSongLibraryMeta(librarySong, copy.editor.shuffle);
-                                return (
-                                  <div
-                                    key={`setlist-add-${librarySong.id}`}
-                                    className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3"
-                                  >
-                                    <div className="min-w-0 flex-1">
-                                      <div className="truncate text-sm font-bold text-gray-900">
-                                        {librarySong.title || copy.untitledSong}
-                                      </div>
-                                      <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
-                                        {libraryMeta.primary}
-                                      </div>
-                                      {libraryMeta.secondary && (
-                                        <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
-                                          {libraryMeta.secondary}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleAddSongToSetlist(librarySong.id)}
-                                      className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
-                                    >
-                                      {copy.addToSetlist}
-                                    </button>
-                                  </div>
-                                );
-                              })
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                    </div>
-                  )}
-                </div>
-
-                {selectedSetlist && canEditSelectedSetlist && (
-                  <div className="border-t border-gray-200 bg-white px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => setIsSetlistAddSongsOpen((current) => !current)}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                    >
-                      <Plus size={16} />
-                      <span>{isSetlistAddSongsOpen ? copy.done : copy.addToSetlist}</span>
-                    </button>
-                  </div>
-                )}
-
-                <div className="border-t border-gray-200 px-5 py-4">
-                  <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
-                    {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
-                  </div>
-                  <div className="mt-1 text-xs text-gray-400">
-                    {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
-                  </div>
-                  <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
-                    v{APP_VERSION}
-                  </div>
-                </div>
-              </>
+                  {desktopSetlistSidebarPanel}
+                </>
               )
             ) : (
               <>
