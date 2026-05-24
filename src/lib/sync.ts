@@ -2,6 +2,33 @@ import { Setlist, StoredSong } from '../types';
 import { PendingSyncPayload, savePendingSync, serializeSetlists, serializeSongLibrary } from './workspace';
 import { WorkspaceRepository } from './repository';
 
+const pickNewestByUpdatedAt = <T extends { id: string; updatedAt: number }>(localItem: T | undefined, remoteItem: T | undefined, localDeletedAt?: number) => {
+  if (!localItem && remoteItem && typeof localDeletedAt === 'number') {
+    return remoteItem.updatedAt > localDeletedAt ? remoteItem : undefined;
+  }
+  if (!localItem) return remoteItem;
+  if (!remoteItem) return localItem;
+  return localItem.updatedAt >= remoteItem.updatedAt ? localItem : remoteItem;
+};
+
+const mergeByUpdatedAt = <T extends { id: string; updatedAt: number }>(localItems: T[], remoteItems: T[], localDeletedAt?: number) => {
+  const ids = new Set([...localItems.map((item) => item.id), ...remoteItems.map((item) => item.id)]);
+  const localById = new Map(localItems.map((item) => [item.id, item] as const));
+  const remoteById = new Map(remoteItems.map((item) => [item.id, item] as const));
+
+  return Array.from(ids)
+    .map((id) => pickNewestByUpdatedAt(localById.get(id), remoteById.get(id), localDeletedAt))
+    .filter((item): item is T => Boolean(item));
+};
+
+export const mergeWorkspaceByUpdatedAt = (
+  localWorkspace: { songs: StoredSong[]; setlists: Setlist[]; savedAt?: number },
+  remoteWorkspace: { songs: StoredSong[]; setlists: Setlist[] }
+) => ({
+  songs: mergeByUpdatedAt(localWorkspace.songs, remoteWorkspace.songs, localWorkspace.savedAt),
+  setlists: mergeByUpdatedAt(localWorkspace.setlists, remoteWorkspace.setlists, localWorkspace.savedAt)
+});
+
 const diffSongs = (currentSongs: StoredSong[], savedSongs: StoredSong[]) => {
   const savedById = new Map(savedSongs.map((song) => [song.id, song] as const));
   const currentById = new Map(currentSongs.map((song) => [song.id, song] as const));

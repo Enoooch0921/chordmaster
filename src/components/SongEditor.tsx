@@ -183,6 +183,17 @@ const formatSectionTitleCase = (value: string) => (
 
 const formatTitleCase = formatInitialCaps;
 
+const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return target.isContentEditable
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || (target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'file', 'range'].includes(target.type));
+};
+
 const getSectionKeyStates = (song: Song) => {
   const baseKeys: Key[] = [];
   const activeKeys: Key[] = [];
@@ -997,6 +1008,56 @@ const SongEditor: React.FC<Props> = ({
     newSections[sIdx] = { ...section, bars: newBars };
     notifyChange({ ...song, sections: newSections });
   };
+
+  useEffect(() => {
+    const handleBarMarkerShortcut = (event: KeyboardEvent) => {
+      if (
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey ||
+        event.isComposing ||
+        isEditableKeyboardTarget(event.target) ||
+        !activeBar ||
+        isPickupTarget(activeBar.sIdx, activeBar.bIdx)
+      ) {
+        return;
+      }
+
+      const currentBar = getEditorBar(activeBar.sIdx, activeBar.bIdx);
+      if (!currentBar) {
+        return;
+      }
+
+      if (event.key === '[' || event.code === 'BracketLeft') {
+        event.preventDefault();
+        updateBar(activeBar.sIdx, activeBar.bIdx, { repeatStart: !currentBar.repeatStart });
+        return;
+      }
+
+      if (event.key === ']' || event.code === 'BracketRight') {
+        event.preventDefault();
+        const nextRepeatEnd = !currentBar.repeatEnd;
+        updateBar(activeBar.sIdx, activeBar.bIdx, {
+          repeatEnd: nextRepeatEnd,
+          finalBar: nextRepeatEnd ? false : currentBar.finalBar
+        });
+        return;
+      }
+
+      if (event.key === '\\' || event.code === 'Backslash') {
+        event.preventDefault();
+        const nextFinalBar = !currentBar.finalBar;
+        updateBar(activeBar.sIdx, activeBar.bIdx, {
+          finalBar: nextFinalBar,
+          repeatEnd: nextFinalBar ? false : currentBar.repeatEnd
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleBarMarkerShortcut);
+    return () => window.removeEventListener('keydown', handleBarMarkerShortcut);
+  }, [activeBar, song]);
 
   const isPickupTarget = (sIdx: number, bIdx: number) => (
     sIdx === PICKUP_SECTION_INDEX && bIdx === PICKUP_BAR_INDEX

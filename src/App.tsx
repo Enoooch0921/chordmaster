@@ -49,7 +49,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
 import { loadPendingSync, markMigrationCompleted, hasCompletedMigration, savePendingSync } from './lib/workspace';
-import { syncWorkspaceDiff } from './lib/sync';
+import { mergeWorkspaceByUpdatedAt, syncWorkspaceDiff } from './lib/sync';
 import { hasSupabaseConfig } from './lib/supabase';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
@@ -755,6 +755,13 @@ interface PreviewDragState {
 }
 
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+
+const inactiveSetlistShareStatus: SetlistShareStatus = {
+  activeToken: null,
+  activeCreatedAt: null,
+  participantCount: 0,
+  participants: []
+};
 
 const createSongId = () => crypto.randomUUID();
 const createSetlistId = () => crypto.randomUUID();
@@ -3082,6 +3089,13 @@ export default function App() {
       return;
     }
 
+    if (!savedSetlists.some((setlist) => setlist.id === setlistId)) {
+      setSelectedSetlistShareStatus(inactiveSetlistShareStatus);
+      setIsLoadingSetlistShareStatus(false);
+      setAuthUiError(null);
+      return;
+    }
+
     try {
       setIsLoadingSetlistShareStatus(true);
       const status = await repository.getSetlistShareStatus(setlistId);
@@ -3104,7 +3118,7 @@ export default function App() {
     }
 
     void loadSetlistShareStatus(selectedSetlist.id);
-  }, [authenticatedUser, canShareSelectedSetlist, isSetlistMode, selectedSetlist?.id]);
+  }, [authenticatedUser, canShareSelectedSetlist, isSetlistMode, savedSetlists, selectedSetlist?.id]);
 
   useEffect(() => {
     if (!isTeamManagementOpen || !canManageActiveTeam) {
@@ -4600,9 +4614,40 @@ export default function App() {
       }
 
       try {
+        const repository = cloudRepositoryRef.current!;
         setSyncStatus('syncing');
-        await persistWorkspace(pending.songs, pending.setlists);
+        const remoteWorkspace = await repository.loadWorkspace();
+        const mergedWorkspace = mergeWorkspaceByUpdatedAt(pending, remoteWorkspace);
+        const savedAt = Math.max(
+          pending.savedAt,
+          remoteWorkspace.lastSavedAt ?? 0,
+          ...mergedWorkspace.songs.map((songItem) => songItem.updatedAt),
+          ...mergedWorkspace.setlists.map((setlistItem) => setlistItem.updatedAt)
+        ) || Date.now();
+
+        await syncWorkspaceDiff({
+          repository,
+          songs: mergedWorkspace.songs,
+          setlists: mergedWorkspace.setlists,
+          savedSongs: remoteWorkspace.songs,
+          savedSetlists: remoteWorkspace.setlists
+        });
+
         savePendingSync(null);
+        try {
+          window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(mergedWorkspace.songs));
+          window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(mergedWorkspace.setlists));
+          window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
+        } catch {
+          // Ignore local cache failures and keep the synced state in memory.
+        }
+        setSongs(mergedWorkspace.songs);
+        setSavedSongs(cloneSong(mergedWorkspace.songs));
+        setSetlists(mergedWorkspace.setlists);
+        setSavedSetlists(cloneSong(mergedWorkspace.setlists));
+        setJoinedSetlists(remoteWorkspace.joinedSetlists);
+        setLastSavedAt(savedAt);
+        setSyncStatus('saved');
       } catch {
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       }
@@ -4615,7 +4660,7 @@ export default function App() {
     void flushPending();
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, [authenticatedUser, savedSetlists, savedSongs]);
+  }, [authenticatedUser]);
 
   useEffect(() => {
     if (!isAutoSaveEnabled || !workspaceIsDirty) {

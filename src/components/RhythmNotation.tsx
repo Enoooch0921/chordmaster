@@ -520,36 +520,56 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             const isIncomingCrossBar = tie.crossBarSegment === 'incoming';
             const isOutgoingCrossBar = tie.crossBarSegment === 'outgoing';
             const isCrossBarTie = isIncomingCrossBar || isOutgoingCrossBar;
-            const edgeOvershoot = compact ? 3.5 : 5.5;
-            const crossBarGap = compact ? 7.5 : 9.5;
+            // Each cross-bar half terminates a tiny bit past its own bar edge,
+            // so the two halves visually meet in the gap between bars.
+            const crossBarMeetOvershoot = compact ? 3.5 : 4.5;
             const startX = isIncomingCrossBar
-              ? -edgeOvershoot
+              ? -crossBarMeetOvershoot
               : unitToPercentNumber(tie.startHeadUnit);
             const endX = isOutgoingCrossBar
-              ? nextCrossBarPlayableHeadPercent !== null
-                ? 100 + crossBarGap + nextCrossBarPlayableHeadPercent
-                : 100 + edgeOvershoot
+              ? 100 + crossBarMeetOvershoot
               : unitToPercentNumber(tie.endHeadUnit);
+            // For half-arc geometry, estimate the would-be full span so the
+            // half curves match the visual depth they'd have as one arc.
+            const fullCrossBarSpan = isCrossBarTie
+              ? (() => {
+                  const ownContribution = isOutgoingCrossBar
+                    ? 100 - unitToPercentNumber(tie.startHeadUnit)
+                    : unitToPercentNumber(tie.endHeadUnit);
+                  const peerContribution = isOutgoingCrossBar
+                    ? (nextCrossBarPlayableHeadPercent ?? 8)
+                    : 8;
+                  return Math.max(8, ownContribution + peerContribution + (compact ? 7 : 9));
+                })()
+              : 0;
             const span = Math.max(1.8, endX - startX);
             const controlOffset = isCrossBarTie
-              ? Math.max(2.8, span * (compact ? 0.38 : 0.34))
+              ? Math.max(2.8, span * (compact ? 0.55 : 0.5))
               : Math.max(1.2, span * 0.28);
             const curveDepth = (
               isCrossBarTie
-                ? Math.min(compact ? 2.8 : 5.4, Math.max(compact ? 1.8 : 3.6, span * (compact ? 0.18 : 0.14)))
+                ? Math.min(
+                    compact ? 2.8 : 5.4,
+                    Math.max(compact ? 1.8 : 3.6, fullCrossBarSpan * (compact ? 0.14 : 0.11))
+                  )
                 : Math.min(
                     compact ? 4.2 : 8.6,
                     Math.max(compact ? 2.3 : 4.8, span * (compact ? 0.34 : 0.24))
                   )
             ) * Math.max(0.92, Math.min(1.18, tieFontScale));
-            const controlY = Math.min(minHeight - (compact ? 0.4 : 0.8), tieAnchorY + curveDepth);
-            const startY = isIncomingCrossBar ? tieAnchorY + (compact ? 0.2 : 0.35) : tieAnchorY;
-            const endY = isOutgoingCrossBar ? tieAnchorY + (compact ? 0.2 : 0.35) : tieAnchorY;
+            const dipY = Math.min(minHeight - (compact ? 0.4 : 0.8), tieAnchorY + curveDepth);
+            const startY = isIncomingCrossBar ? dipY : tieAnchorY;
+            const endY = isOutgoingCrossBar ? dipY : tieAnchorY;
+            // For a smooth join at the meeting point, that endpoint needs
+            // horizontal tangent — achieved by placing the adjacent control
+            // point at the same Y as the endpoint.
+            const controlY1 = isIncomingCrossBar ? dipY : tieAnchorY + curveDepth;
+            const controlY2 = isOutgoingCrossBar ? dipY : tieAnchorY + curveDepth;
 
             return (
               <path
                 key={`tie-${tie.eventIndex}-${tieIndex}`}
-                d={`M ${startX} ${startY} C ${startX + controlOffset} ${controlY} ${endX - controlOffset} ${controlY} ${endX} ${endY}`}
+                d={`M ${startX} ${startY} C ${startX + controlOffset} ${controlY1} ${endX - controlOffset} ${controlY2} ${endX} ${endY}`}
                 fill="none"
                 stroke={stroke}
                 strokeWidth={tieStrokeWidth}
