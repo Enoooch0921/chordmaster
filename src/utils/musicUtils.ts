@@ -151,9 +151,10 @@ function getNashvilleNumberForNote(note: string, key: Key): string {
 }
 
 function shouldPreferFlatsForChordRoot(root: string, targetKey?: Key): boolean {
+  if (targetKey) return shouldPreferFlats(targetKey) && !shouldPreferSharps(targetKey);
   if (root.includes('b')) return true;
   if (root.includes('#')) return false;
-  return targetKey ? shouldPreferFlats(targetKey) && !shouldPreferSharps(targetKey) : false;
+  return false;
 }
 
 export function normalizeChordEnharmonic(chord: string): string {
@@ -220,7 +221,7 @@ export function normalizeKeySpelling(key: Key): Key {
 export function transposeChord(chord: string, offset: number, targetKey?: Key): string {
   if (!chord || chord === '%' || chord === '/') return chord;
   const normalizedOffset = ((offset % 12) + 12) % 12;
-  if (normalizedOffset === 0) {
+  if (normalizedOffset === 0 && !targetKey) {
     return normalizeChordEnharmonic(chord);
   }
 
