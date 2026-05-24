@@ -1,5 +1,5 @@
 import React from 'react';
-import { getHeadCenterUnit, getRhythmEventGlyph, rationalizeRhythmDisplay, rhythmUnitsEqual } from '../utils/rhythmUtils';
+import { getHeadCenterUnit, getRhythmEventGlyph, parseRhythmNotation, rationalizeRhythmDisplay, rhythmUnitsEqual } from '../utils/rhythmUtils';
 
 interface RhythmNotationProps {
   notation: string;
@@ -21,6 +21,9 @@ interface RhythmNotationProps {
   className?: string;
   selectedEventIndex?: number | null;
   selectedInsertIndex?: number | null;
+  tieFromPrevious?: boolean;
+  nextNotationForCrossBar?: string;
+  nextTimeSignatureForCrossBar?: string;
   onEventSelect?: (eventIndex: number) => void;
   onInsertSelect?: (insertIndex: number) => void;
 }
@@ -45,6 +48,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   className = '',
   selectedEventIndex = null,
   selectedInsertIndex = null,
+  tieFromPrevious = false,
+  nextNotationForCrossBar,
+  nextTimeSignatureForCrossBar,
   onEventSelect,
   onInsertSelect
 }) => {
@@ -206,6 +212,56 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     () => visibleEvents,
     [visibleEvents]
   );
+  const nextCrossBarPlayableHeadPercent = React.useMemo(() => {
+    if (!nextNotationForCrossBar?.trim()) {
+      return null;
+    }
+
+    const nextParsed = parseRhythmNotation(nextNotationForCrossBar, nextTimeSignatureForCrossBar || timeSignature);
+    const firstPlayableEvent = nextParsed.events.find((event) => !event.isRest && !event.isHidden);
+    if (!firstPlayableEvent) {
+      return null;
+    }
+
+    return (getHeadCenterUnit(firstPlayableEvent) * 100) / Math.max(1, nextParsed.barUnits);
+  }, [nextNotationForCrossBar, nextTimeSignatureForCrossBar, timeSignature]);
+  const displayTies = React.useMemo(() => {
+    const nextTies = [...ties];
+    const firstPlayableEvent = visibleEvents.find((event) => !event.isRest);
+    const lastPlayableEvent = [...visibleEvents].reverse().find((event) => !event.isRest);
+
+    if (tieFromPrevious && firstPlayableEvent) {
+      const endHeadUnit = getHeadCenterUnit(firstPlayableEvent);
+      if (endHeadUnit > 0.12) {
+        nextTies.unshift({
+          eventIndex: -1,
+          startUnit: 0,
+          endUnit: endHeadUnit,
+          startHeadUnit: 0,
+          endHeadUnit,
+          crossesBeat: false,
+          crossBarSegment: 'incoming'
+        });
+      }
+    }
+
+    if (lastPlayableEvent?.tieAfter) {
+      const startHeadUnit = getHeadCenterUnit(lastPlayableEvent);
+      if (barUnits - startHeadUnit > 0.12) {
+        nextTies.push({
+          eventIndex: lastPlayableEvent.index,
+          startUnit: startHeadUnit,
+          endUnit: barUnits,
+          startHeadUnit,
+          endHeadUnit: barUnits,
+          crossesBeat: false,
+          crossBarSegment: 'outgoing'
+        });
+      }
+    }
+
+    return nextTies;
+  }, [barUnits, tieFromPrevious, ties, visibleEvents]);
   const editorBeamGroups = React.useMemo(() => {
     if (!useEditorStyleRenderer) return [];
 
@@ -454,27 +510,46 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         </svg>
       )}
 
-      {ties.length > 0 && (
+      {displayTies.length > 0 && (
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           viewBox={`0 0 100 ${minHeight}`}
           preserveAspectRatio="none"
         >
-          {ties.map((tie) => {
-            const startX = unitToPercentNumber(tie.startHeadUnit);
-            const endX = unitToPercentNumber(tie.endHeadUnit);
+          {displayTies.map((tie, tieIndex) => {
+            const isIncomingCrossBar = tie.crossBarSegment === 'incoming';
+            const isOutgoingCrossBar = tie.crossBarSegment === 'outgoing';
+            const isCrossBarTie = isIncomingCrossBar || isOutgoingCrossBar;
+            const edgeOvershoot = compact ? 3.5 : 5.5;
+            const crossBarGap = compact ? 7.5 : 9.5;
+            const startX = isIncomingCrossBar
+              ? -edgeOvershoot
+              : unitToPercentNumber(tie.startHeadUnit);
+            const endX = isOutgoingCrossBar
+              ? nextCrossBarPlayableHeadPercent !== null
+                ? 100 + crossBarGap + nextCrossBarPlayableHeadPercent
+                : 100 + edgeOvershoot
+              : unitToPercentNumber(tie.endHeadUnit);
             const span = Math.max(1.8, endX - startX);
-            const controlOffset = Math.max(1.2, span * 0.28);
-            const curveDepth = Math.min(
-              compact ? 4.2 : 8.6,
-              Math.max(compact ? 2.3 : 4.8, span * (compact ? 0.34 : 0.24))
+            const controlOffset = isCrossBarTie
+              ? Math.max(2.8, span * (compact ? 0.38 : 0.34))
+              : Math.max(1.2, span * 0.28);
+            const curveDepth = (
+              isCrossBarTie
+                ? Math.min(compact ? 2.8 : 5.4, Math.max(compact ? 1.8 : 3.6, span * (compact ? 0.18 : 0.14)))
+                : Math.min(
+                    compact ? 4.2 : 8.6,
+                    Math.max(compact ? 2.3 : 4.8, span * (compact ? 0.34 : 0.24))
+                  )
             ) * Math.max(0.92, Math.min(1.18, tieFontScale));
             const controlY = Math.min(minHeight - (compact ? 0.4 : 0.8), tieAnchorY + curveDepth);
+            const startY = isIncomingCrossBar ? tieAnchorY + (compact ? 0.2 : 0.35) : tieAnchorY;
+            const endY = isOutgoingCrossBar ? tieAnchorY + (compact ? 0.2 : 0.35) : tieAnchorY;
 
             return (
               <path
-                key={`tie-${tie.eventIndex}`}
-                d={`M ${startX} ${tieAnchorY} C ${startX + controlOffset} ${controlY} ${endX - controlOffset} ${controlY} ${endX} ${tieAnchorY}`}
+                key={`tie-${tie.eventIndex}-${tieIndex}`}
+                d={`M ${startX} ${startY} C ${startX + controlOffset} ${controlY} ${endX - controlOffset} ${controlY} ${endX} ${endY}`}
                 fill="none"
                 stroke={stroke}
                 strokeWidth={tieStrokeWidth}

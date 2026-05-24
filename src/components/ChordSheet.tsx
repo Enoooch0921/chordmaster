@@ -6,7 +6,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker } from '../types';
-import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, normalizeKeySpelling } from '../utils/musicUtils';
+import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
@@ -16,7 +16,7 @@ import RhythmNotation from './RhythmNotation';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
 import { getChordDisplaySlots, getLyricAnchors, getLyricFitScale, getLyricFontScale, getLyricTrackingEm, getTwoChordSplitSlotIndex } from '../utils/lyricsUtils';
-import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
+import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 
 interface FormattedChordProps {
   chordString: string;
@@ -413,6 +413,10 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
   const { qualityText, extensionTokens } = splitChordQualityDisplay(quality);
   const hasExtensionTokens = extensionTokens.length > 0;
   const isSingleExtensionToken = extensionTokens.length === 1;
+  const symbolicQualityMatch = qualityText.match(/^([°ø])(\d*)$/);
+  const symbolicQuality = symbolicQualityMatch
+    ? { symbol: symbolicQualityMatch[1], extension: symbolicQualityMatch[2] }
+    : null;
   const isNumericRoot = /^[1-7]$/.test(root);
   const numericFigureStyle = isNumericRoot
     ? ({ fontVariantNumeric: 'lining-nums tabular-nums', fontFeatureSettings: '"lnum" 1, "tnum" 1' } as const)
@@ -434,8 +438,11 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
     : undefined;
   const numericChordOffsetClass = '';
   const numericRootSizeClass = 'text-lg';
+  const numericQualityOffsetClass = symbolicQuality ? '' : '-translate-y-[0.6em]';
   const numericQualityTextClass = qualityText === 'm'
     ? 'text-[11px] leading-none'
+    : symbolicQuality
+      ? 'leading-none'
     : /^dim/i.test(qualityText)
       ? 'text-[10px] leading-none'
       : 'text-[10px] leading-none';
@@ -467,16 +474,27 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
             })}
             {qualityText && (
               <span className="absolute left-full bottom-0 ml-[0.03em] inline-flex items-end whitespace-nowrap">
-                <span className={`relative inline-flex items-end -translate-y-[0.6em] ${numericQualityTextClass}`} style={numericQualityStyle}>
-                  <span>{qualityText}</span>
+                <span className={`relative inline-flex items-end ${numericQualityOffsetClass} ${numericQualityTextClass}`.trim()} style={numericQualityStyle}>
+                  {symbolicQuality ? (
+                    <span className="inline-flex translate-y-[0.08em] items-baseline leading-none">
+                      <span className="text-[16px] leading-none">{symbolicQuality.symbol}</span>
+                      {symbolicQuality.extension && (
+                        <span className="text-[8px] leading-none -ml-[0.04em] -translate-y-[0.5em]">
+                          {symbolicQuality.extension}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span>{qualityText}</span>
+                  )}
                   {hasExtensionTokens && (
-	                    <span
-	                      className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.06em] text-[7px] leading-none tracking-[-0.02em] whitespace-nowrap ${
-	                        isSingleExtensionToken
-	                          ? singleExtensionPositionClass
-	                          : 'left-[0.18em] top-[-0.86em]'
-	                      }`}
-	                    >
+                      <span
+                        className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.06em] text-[7px] leading-none tracking-[-0.02em] whitespace-nowrap ${
+                          isSingleExtensionToken
+                            ? singleExtensionPositionClass
+                            : 'left-[0.18em] top-[-0.86em]'
+                        }`}
+                      >
                       <span className={isSingleExtensionToken ? 'inline-flex h-[1em] items-center leading-none' : ''}>(</span>
                       {extensionTokens.map((token, index) => {
                         const accidentalGlyph = token[0];
@@ -507,7 +525,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
                   degree: bassRoot,
                   accidentalGlyph: bassAccidental,
                   compact: compactSlashBass,
-                  degreeClassName: compactSlashBass ? 'text-[13px] leading-none' : 'text-lg leading-none',
+	                  degreeClassName: compactSlashBass ? 'text-[16px] leading-none' : 'text-lg leading-none',
                   degreeStyle: numericFigureStyle
                 })}
               </span>
@@ -531,15 +549,26 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
         {accidental && <span className="text-xs -translate-y-1.5 ml-[0.5px]">{accidental}</span>}
         {qualityText && (
           <span className="relative inline-block ml-[0.5px]">
-            <span className="text-[10px] -translate-y-[0.55em]">{qualityText}</span>
+            {symbolicQuality ? (
+              <span className="inline-flex translate-y-[0.08em] items-baseline leading-none">
+                <span className="text-[18px] leading-none">{symbolicQuality.symbol}</span>
+                {symbolicQuality.extension && (
+                  <span className="text-[10px] leading-none -ml-[0.04em] -translate-y-[0.55em]">
+                    {symbolicQuality.extension}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span className="text-[10px] -translate-y-[0.55em]">{qualityText}</span>
+            )}
             {hasExtensionTokens && (
-	              <span
-	                className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.08em] text-[8px] leading-none tracking-[-0.02em] whitespace-nowrap ${
-	                  isSingleExtensionToken
-	                    ? singleChordExtensionPositionClass
-	                    : 'left-[0.18em] top-[-0.86em]'
-	                }`}
-	              >
+                <span
+                  className={`absolute inline-flex ${isSingleExtensionToken ? 'items-center' : 'items-start'} gap-[0.08em] text-[8px] leading-none tracking-[-0.02em] whitespace-nowrap ${
+                    isSingleExtensionToken
+                      ? singleChordExtensionPositionClass
+                      : 'left-[0.18em] top-[-0.86em]'
+                  }`}
+                >
                 <span className={isSingleExtensionToken ? 'inline-flex h-[1em] items-center leading-none' : ''}>(</span>
                 {extensionTokens.map((token, index) => {
                   const accidentalGlyph = token[0];
@@ -568,12 +597,12 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
           <span className="inline-flex items-end ml-[0.01em]">
             <span className="text-lg font-bold text-gray-900 leading-none">/</span>
             <span className={`relative inline-flex items-end leading-none -ml-[0.06em] ${bassAccidental ? 'pr-[0.12em]' : ''}`}>
-              <span className={compactSlashBass ? 'text-[14px] leading-none' : 'text-lg leading-none'}>{bassRoot}</span>
-              {bassAccidental && (
-                <span className={`absolute left-full top-0 ${compactSlashBass ? 'text-[9px] -translate-x-[0.18em] -translate-y-[0.26em]' : 'text-xs -translate-x-[0.22em] -translate-y-[0.38em]'}`}>
-                  {bassAccidental}
-                </span>
-              )}
+	              <span className={compactSlashBass ? 'text-[16px] leading-none' : 'text-lg leading-none'}>{bassRoot}</span>
+	              {bassAccidental && (
+	                <span className={`absolute left-full top-0 ${compactSlashBass ? 'text-[10px] -translate-x-[0.18em] -translate-y-[0.3em]' : 'text-xs -translate-x-[0.22em] -translate-y-[0.38em]'}`}>
+	                  {bassAccidental}
+	                </span>
+	              )}
             </span>
           </span>
         )}
@@ -582,6 +611,34 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
     </div>
   );
 };
+
+const getConsecutiveKeySequence = (keys: Key[]) => (
+  keys.reduce<Key[]>((sequence, key) => {
+    if (sequence[sequence.length - 1] !== key) {
+      sequence.push(key);
+    }
+    return sequence;
+  }, [])
+);
+
+const FormattedKeySequence: React.FC<{
+  keys: Key[];
+  nashvilleFontFamily?: string;
+  chordFontFamily?: string;
+}> = ({ keys, nashvilleFontFamily, chordFontFamily }) => (
+  <span className="inline-flex items-baseline whitespace-nowrap">
+    {keys.map((key, index) => (
+      <React.Fragment key={`${key}-${index}`}>
+        {index > 0 && <span className="mx-1 text-gray-900 font-bold">-</span>}
+        <FormattedChord
+          chordString={key}
+          nashvilleFontFamily={nashvilleFontFamily}
+          chordFontFamily={chordFontFamily}
+        />
+      </React.Fragment>
+    ))}
+  </span>
+);
 
 interface ChordSheetProps {
   song: Song;
@@ -806,7 +863,13 @@ const getCrowdedChordScaleClass = (displayChords: string[]) => {
     }
   });
 
-  if (meaningfulChords.length >= 4 || longestAdjacentRun >= 4 || (meaningfulChords.length >= 3 && maxChordLength >= 6)) {
+  if (meaningfulChords.length >= 4 || longestAdjacentRun >= 4) {
+    if (maxChordLength <= 4) return 'scale-x-[0.88]';
+    if (maxChordLength <= 5) return 'scale-x-[0.8]';
+    return 'scale-x-[0.72]';
+  }
+
+  if (meaningfulChords.length >= 3 && maxChordLength >= 6) {
     return 'scale-x-[0.72]';
   }
 
@@ -828,10 +891,39 @@ const getSingleChordScaleClass = (chord: string) => {
   const trimmed = chord.trim();
   if (!trimmed || trimmed === '/') return '';
   if (trimmed.length >= 9) return 'scale-x-[0.76]';
-  if (trimmed.includes('/')) return trimmed.length >= 6 ? 'scale-x-[0.86]' : 'scale-x-[0.92]';
+  if (trimmed.includes('/')) {
+    if (trimmed.length >= 7) return 'scale-x-[0.86]';
+    if (trimmed.length >= 6) return 'scale-x-[0.92]';
+    return '';
+  }
   if (trimmed.length >= 7) return 'scale-x-[0.86]';
   if (trimmed.length >= 6) return 'scale-x-[0.92]';
   return '';
+};
+
+const abbreviateChordQualityForDisplay = (chord: string) => (
+  chord
+    .replace(/(?:m|min|-|minor)7\(?[b♭]5\)?/gi, 'ø7')
+    .replace(/dim/gi, '°')
+);
+
+const getDisplayedChordString = (
+  chord: string,
+  sectionOffset: number,
+  sectionPlayKey: Key,
+  useNashvilleNumbers: boolean
+) => {
+  const transposed = transposeChord(chord, sectionOffset, sectionPlayKey);
+
+  if (useNashvilleNumbers) {
+    return abbreviateChordQualityForDisplay(
+      isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey)
+    );
+  }
+
+  return abbreviateChordQualityForDisplay(
+    isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed
+  );
 };
 
 const ENDING_LEFT_OFFSETS = {
@@ -1010,7 +1102,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
   const capo = song.capo || 0;
   const displayedCurrentKey = normalizeKeySpelling(currentKey);
-  const playKey = getPlayKey(displayedCurrentKey, capo);
   const baseWrittenKey = transposeFromOriginal ? song.originalKey : displayedCurrentKey;
   const globalKeyShift = transposeFromOriginal ? getTransposeOffset(song.originalKey, displayedCurrentKey) : 0;
   const sectionStartKeys: Key[] = [];
@@ -1021,6 +1112,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     }
     sectionStartKeys.push(activeSectionKey);
   });
+  const displayedChartKeySequence = getConsecutiveKeySequence(
+    (sectionStartKeys.length > 0 ? sectionStartKeys : [baseWrittenKey])
+      .map((key) => transposeKeyWithPreference(key, globalKeyShift, displayedCurrentKey))
+  );
+  const displayedPlayKeySequence = getConsecutiveKeySequence(
+    displayedChartKeySequence.map((key) => getPlayKey(key, capo))
+  );
 
   const getFlashColor = (accent: string) => {
     switch (accent) {
@@ -1160,7 +1258,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     <div className="shrink-0">
                       <span>{copy.key} - </span>
                       <span className="text-gray-900 font-bold">
-                        <FormattedChord chordString={displayedCurrentKey} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />
+                        <FormattedKeySequence
+                          keys={displayedChartKeySequence}
+                          nashvilleFontFamily={nashvilleFontFamily}
+                          chordFontFamily={chordFontFamily}
+                        />
                       </span>
                     </div>
                     {typeof song.tempo === 'number' && (
@@ -1194,7 +1296,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         <span className="text-gray-400">|</span>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span className="text-indigo-600 font-semibold">Capo {capo}</span>
-                          <span className="text-gray-400 font-medium">(<FormattedChord chordString={playKey} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />)</span>
+                          <span className="text-gray-400 font-medium">(<FormattedKeySequence keys={displayedPlayKeySequence} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />)</span>
                         </div>
                       </>
                     )}
@@ -1215,8 +1317,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               const section = song.sections[row.sIdx];
               const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
               const previousWrittenKey = row.sIdx > 0 ? (sectionStartKeys[row.sIdx - 1] || song.originalKey) : song.originalKey;
-              const sectionCurrentKey = transposeKeyPreferFlats(sectionWrittenKey, globalKeyShift);
-              const previousSectionKey = row.sIdx > 0 ? transposeKeyPreferFlats(previousWrittenKey, globalKeyShift) : displayedCurrentKey;
+              const sectionCurrentKey = transposeKeyWithPreference(sectionWrittenKey, globalKeyShift, displayedCurrentKey);
+              const previousSectionKey = row.sIdx > 0 ? transposeKeyWithPreference(previousWrittenKey, globalKeyShift, displayedCurrentKey) : displayedCurrentKey;
               const sectionPlayKey = getPlayKey(sectionCurrentKey, capo);
               const sectionOffset = getTransposeOffset(sectionWrittenKey, sectionPlayKey);
               const sectionKeyChanged = sectionCurrentKey !== previousSectionKey;
@@ -1409,6 +1511,26 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const lyricAnchors = bar ? getLyricAnchors(bar.chords, bar.lyrics, beatsPerBar) : [];
                     const hasRhythm = Boolean(bar?.rhythm);
                     const hasRiff = Boolean(bar?.riff);
+                    const previousRhythmBar = bIdx > 0
+                      ? row.bars[bIdx - 1]
+                      : row.startBIdx > 0
+                        ? section?.bars[row.startBIdx - 1]
+                        : row.sIdx === 0 && song.pickup
+                          ? song.pickup
+                          : row.sIdx > 0
+                          ? song.sections[row.sIdx - 1]?.bars.at(-1)
+                          : undefined;
+                    const previousRhythmTimeSignature = previousRhythmBar
+                      ? getEffectiveTimeSignature(previousRhythmBar.timeSignature, song.timeSignature)
+                      : song.timeSignature;
+                    const tieRhythmFromPrevious = Boolean(
+                      previousRhythmBar?.rhythm
+                      && rhythmEndsWithTieToNext(previousRhythmBar.rhythm, previousRhythmTimeSignature)
+                    );
+                    const nextRhythmBar = bIdx < row.bars.length - 1 ? row.bars[bIdx + 1] : undefined;
+                    const nextRhythmTimeSignature = nextRhythmBar
+                      ? getEffectiveTimeSignature(nextRhythmBar.timeSignature, song.timeSignature)
+                      : song.timeSignature;
                     const hasChordContent = Boolean(bar && hasMeaningfulChordContent(bar.chords));
                     const showRhythmInChordLane = !hasChordContent && hasRhythm;
                     const showLyricsLane = Boolean(song.showLyrics && bar && hasVisibleChordTokens(bar.chords) && !showRhythmInChordLane);
@@ -1611,36 +1733,51 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           <div className="w-full max-w-full overflow-visible translate-y-[3px]">
-                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} className="w-full" />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} tieFromPrevious={tieRhythmFromPrevious} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
                                           </div>
                                         </div>
                                       );
                                     }
 
-                                    const lyricsAnchorCount = Math.max(1, lyricAnchors.length);
-                                    const evenAnchorUnitSpan = beatsPerBar / lyricsAnchorCount;
-                                    const crowdedChordScaleClass = !showLyricsLane ? getCrowdedChordScaleClass(displayChords) : '';
-                                    const meaningfulChordFlags = displayChords.map((token) => {
-                                      const trimmed = token.trim();
-                                      return Boolean(trimmed && trimmed !== '/');
-                                    });
-                                    const occupiedChordAnchors = displayChords.flatMap((displayChord, slotIndex) => {
-                                      if (!displayChord) return [];
+                                      const lyricsAnchorCount = Math.max(1, lyricAnchors.length);
+                                      const evenAnchorUnitSpan = beatsPerBar / lyricsAnchorCount;
+                                      const renderedDisplayChords = displayChords.map((displayChord) => (
+                                        displayChord
+                                          ? getDisplayedChordString(displayChord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers)
+                                          : displayChord
+                                      ));
+                                      const crowdedChordScaleClass = !showLyricsLane ? getCrowdedChordScaleClass(renderedDisplayChords) : '';
+                                      const meaningfulChordFlags = displayChords.map((token) => {
+                                        const trimmed = token.trim();
+                                        return Boolean(trimmed && trimmed !== '/');
+                                      });
+                                      const occupiedChordAnchors = displayChords.flatMap((displayChord, slotIndex) => {
+                                        if (!displayChord) return [];
 
                                       const nextOccupiedSlot = displayChords.findIndex((candidate, candidateIndex) => (
                                         candidateIndex > slotIndex && Boolean(candidate)
                                       ));
-                                      const span = nextOccupiedSlot === -1
+                                      const rawSpan = nextOccupiedSlot === -1
                                         ? beatsPerBar - slotIndex
                                         : nextOccupiedSlot - slotIndex;
+                                      const span = displayChord.trim() === '/' ? 1 : rawSpan;
 
                                       return [{
                                         chord: displayChord,
                                         slotIndex,
-                                        span: Math.max(1, span)
-                                      }];
-                                    });
-                                    const halfSplitSlotIndex = getTwoChordSplitSlotIndex(beatsPerBar);
+                                          span: Math.max(1, span)
+                                        }];
+                                      });
+                                      const meaningfulOccupiedChordCount = occupiedChordAnchors.filter((anchor) => {
+                                        const trimmed = anchor.chord.trim();
+                                        return trimmed && trimmed !== '/';
+                                      }).length;
+                                      const useEqualBeatChordLayout = meaningfulOccupiedChordCount >= beatsPerBar
+                                        && occupiedChordAnchors.every((anchor) => {
+                                          const trimmed = anchor.chord.trim();
+                                          return !trimmed || trimmed === '/' || anchor.span === 1;
+                                        });
+                                      const halfSplitSlotIndex = getTwoChordSplitSlotIndex(beatsPerBar);
                                     const isDefaultTwoChordSpread = occupiedChordAnchors.length === 2
                                       && occupiedChordAnchors[0]?.slotIndex === 0
                                       && occupiedChordAnchors[1]?.slotIndex === halfSplitSlotIndex;
@@ -1653,8 +1790,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
                                         onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'lyrics')}
                                       >
-                                        {lyricAnchors.map((anchor) => {
-                                          const isFirstAnchor = anchor.slotIndex === 0;
+                                          {lyricAnchors.map((anchor) => {
+                                            const isFirstAnchor = anchor.slotIndex === 0;
                                           const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
                                           const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
                                             && anchor.slotIndex > 0
@@ -1744,18 +1881,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             className={`flex flex-1 h-full w-full items-center justify-center cursor-pointer rounded transition-colors hover:bg-indigo-50/50 ${contentLeftInsetClass}`}
                                             onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                           >
-                                            <FormattedChord
-                                              chordString={(() => {
-                                                const transposed = transposeChord(centeredWholeRestAnchor.chord, sectionOffset, sectionPlayKey);
-                                                if (song.showNashvilleNumbers) {
-                                                  return isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey);
-                                                }
-
-                                                return isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;
-                                              })()}
-                                              compactModifier={compactModifier}
-                                              nashvilleFontFamily={nashvilleFontFamily}
-                                              chordFontFamily={chordFontFamily}
+                                              <FormattedChord
+                                                chordString={getDisplayedChordString(centeredWholeRestAnchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers)}
+                                                compactModifier={compactModifier}
+                                                nashvilleFontFamily={nashvilleFontFamily}
+                                                chordFontFamily={chordFontFamily}
                                             />
                                           </div>
                                         );
@@ -1767,34 +1897,43 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           style={{ gridTemplateColumns: `repeat(${beatsPerBar}, 1fr)` }}
                                           onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
-                                          {occupiedChordAnchors.map((anchor) => {
-                                            const singleChordScaleClass = getSingleChordScaleClass(anchor.chord);
-                                            const effectiveChordScaleClass = singleChordScaleClass || crowdedChordScaleClass;
+                                            {occupiedChordAnchors.map((anchor) => {
+                                              const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers);
+                                              const singleChordScaleClass = getSingleChordScaleClass(renderedChord);
+                                              const effectiveChordScaleClass = singleChordScaleClass || crowdedChordScaleClass;
                                             const isFirstAnchor = anchor.slotIndex === 0;
                                             const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
                                             const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
                                               && anchor.slotIndex > 0
-                                              && !isDefaultTwoChordSpread;
-                                            const align: 'left' | 'center' | 'right' = isFirstAnchor
+                                              && !isDefaultTwoChordSpread
+                                              && !useEqualBeatChordLayout;
+                                            const align: 'left' | 'center' | 'right' = useEqualBeatChordLayout
+                                              ? 'center'
+                                              : isFirstAnchor
                                               ? 'left'
                                               : isTwoChordSecondHalfAnchor
                                                 ? 'left'
                                               : isTerminalAnchor
                                                 ? 'right'
                                                 : 'center';
-                                            const anchorPaddingClass = isFirstAnchor
+                                            const anchorPaddingClass = useEqualBeatChordLayout
+                                              ? 'px-[2px]'
+                                              : isFirstAnchor
                                               ? 'pl-[2px]'
                                               : isTwoChordSecondHalfAnchor
                                                 ? 'pl-[2px] pr-[6px]'
                                               : isTerminalAnchor
                                                 ? 'pl-[14px] pr-[6px]'
                                                 : 'px-[3px]';
-                                            const shrinkMinScale = isTerminalAnchor ? 0.2 : 0.44;
-                                            const compactSlashBass = anchor.chord.includes('/')
-                                              && anchor.chord.trim() !== '/'
+                                            const useDenseSlashLayout = useEqualBeatChordLayout
+                                              && renderedChord.includes('/')
+                                              && renderedChord.trim() !== '/';
+                                            const shrinkMinScale = useDenseSlashLayout ? 0.68 : isTerminalAnchor ? 0.2 : 0.44;
+                                            const compactSlashBass = renderedChord.includes('/')
+                                              && renderedChord.trim() !== '/'
                                               && (
-                                                meaningfulChordFlags[anchor.slotIndex - 1] === true
-                                                || meaningfulChordFlags[anchor.slotIndex + 1] === true
+                                                  meaningfulChordFlags[anchor.slotIndex - 1] === true
+                                                  || meaningfulChordFlags[anchor.slotIndex + 1] === true
                                               );
 
                                             return (
@@ -1811,7 +1950,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                   align={align}
                                                   minScale={shrinkMinScale}
                                                   overflowVisible
-                                                  shrinkAxis={isTerminalAnchor ? 'x-only' : 'uniform'}
+                                                  shrinkAxis={useDenseSlashLayout || isTerminalAnchor ? 'x-only' : 'uniform'}
                                                 >
                                                   <div
                                                     className={`min-w-0 ${
@@ -1820,17 +1959,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                         : ''
                                                     }`.trim()}
                                                   >
-                                                    <FormattedChord
-                                                      chordString={(() => {
-                                                        const transposed = transposeChord(anchor.chord, sectionOffset, sectionPlayKey);
-                                                        if (song.showNashvilleNumbers) {
-                                                          return isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey);
-                                                        }
-
-                                                        return isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;
-                                                      })()}
-                                                      compactModifier={compactModifier}
-                                                      nashvilleFontFamily={nashvilleFontFamily}
+                                                      <FormattedChord
+                                                        chordString={renderedChord}
+                                                        compactModifier={compactModifier}
+                                                        nashvilleFontFamily={nashvilleFontFamily}
                                                       chordFontFamily={chordFontFamily}
                                                       compactSlashBass={compactSlashBass}
                                                     />
@@ -1843,15 +1975,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       );
                                     }
 
-                                    if (centeredWholeRestAnchor) {
-                                      const wholeRestChordString = (() => {
-                                        const transposed = transposeChord(centeredWholeRestAnchor.chord, sectionOffset, sectionPlayKey);
-                                        if (song.showNashvilleNumbers) {
-                                          return isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey);
-                                        }
-
-                                        return isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;
-                                      })();
+                                      if (centeredWholeRestAnchor) {
+                                        const wholeRestChordString = getDisplayedChordString(
+                                          centeredWholeRestAnchor.chord,
+                                          sectionOffset,
+                                          sectionPlayKey,
+                                          song.showNashvilleNumbers
+                                        );
 
                                       return (
                                         <div className={`flex flex-1 min-h-0 flex-col justify-center ${lyricsContainerGapClass} w-full cursor-pointer rounded px-0.5 pt-0 hover:bg-amber-50/60 transition-colors ${contentLeftInsetClass}`}>
@@ -1879,20 +2009,26 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
                                           onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
-                                          {lyricAnchors.map((anchor) => {
-                                            const isFirstAnchor = anchor.slotIndex === 0;
+                                            {lyricAnchors.map((anchor) => {
+                                              const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers);
+                                              const isFirstAnchor = anchor.slotIndex === 0;
                                             const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
                                             const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
                                               && anchor.slotIndex > 0
-                                              && !isDefaultTwoChordSpread;
-                                            const originClass = isFirstAnchor
+                                              && !isDefaultTwoChordSpread
+                                              && !useEqualBeatChordLayout;
+                                            const originClass = useEqualBeatChordLayout
+                                              ? 'origin-top'
+                                              : isFirstAnchor
                                               ? 'origin-top-left'
                                               : isTwoChordSecondHalfAnchor
                                                 ? 'origin-top-left'
                                               : isTerminalAnchor
                                                 ? 'origin-top-right'
                                                 : 'origin-top';
-                                            const anchorPaddingClass = isFirstAnchor
+                                            const anchorPaddingClass = useEqualBeatChordLayout
+                                              ? 'px-[2px]'
+                                              : isFirstAnchor
                                               ? 'pl-[2px]'
                                               : isTwoChordSecondHalfAnchor
                                                 ? 'pl-[2px] pr-[6px]'
@@ -1900,7 +2036,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                 ? 'pl-[14px] pr-[6px]'
                                                 : 'px-[3px]';
                                             const shrinkMinScale = isTerminalAnchor ? 0.2 : 0.44;
-                                            const align: 'left' | 'center' | 'right' = isFirstAnchor
+                                            const align: 'left' | 'center' | 'right' = useEqualBeatChordLayout
+                                              ? 'center'
+                                              : isFirstAnchor
                                               ? 'left'
                                               : isTwoChordSecondHalfAnchor
                                                 ? 'left'
@@ -1920,18 +2058,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                 overflowVisible
                                                 shrinkAxis={isTerminalAnchor ? 'x-only' : 'uniform'}
                                               >
-                                                <div className={`${originClass} ${lyricsChordScaleClass}`.trim()}>
-                                                  <FormattedChord
-                                                    chordString={(() => {
-                                                      const transposed = transposeChord(anchor.chord, sectionOffset, sectionPlayKey);
-                                                      if (song.showNashvilleNumbers) {
-                                                        return isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey);
-                                                      }
-
-                                                      return isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;
-                                                    })()}
-                                                    compactModifier={compactModifier}
-                                                    nashvilleFontFamily={nashvilleFontFamily}
+                                                  <div className={`${originClass} ${lyricsChordScaleClass}`.trim()}>
+                                                    <FormattedChord
+                                                      chordString={renderedChord}
+                                                      compactModifier={compactModifier}
+                                                      nashvilleFontFamily={nashvilleFontFamily}
                                                     chordFontFamily={chordFontFamily}
                                                   />
                                                 </div>
@@ -1977,7 +2108,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           }}
                                         >
                                           <div className="w-full translate-y-[3px]">
-                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} className="w-full" />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={tieRhythmFromPrevious} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
                                           </div>
                                         </div>
                                       </div>
@@ -2028,7 +2159,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       >
                                         {showBottomRhythmLane ? (
                                           <div className="w-full translate-y-[3px]">
-                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} className="w-full" />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={tieRhythmFromPrevious} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
                                           </div>
                                         ) : (
                                           <Jianpu

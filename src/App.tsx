@@ -43,6 +43,7 @@ import SongMetadataPanel from './components/SongMetadataPanel';
 import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
+import { formatInitialCaps } from './utils/textUtils';
 import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
@@ -3695,6 +3696,13 @@ export default function App() {
 
     pushSongHistory(songId, targetSong);
     replaceSongInLibrary(songId, { ...targetSong, title });
+  };
+
+  const handleSongListTitleCommit = (songId: string, title: string) => {
+    const formattedTitle = formatInitialCaps(title);
+    if (formattedTitle !== title) {
+      handleSongListTitleChange(songId, formattedTitle);
+    }
   };
 
   const handleDeleteSong = (songId: string) => {
@@ -7392,6 +7400,12 @@ export default function App() {
                                 <input
                                   value={item.title}
                                   onChange={(event) => handleSongListTitleChange(item.id, event.target.value)}
+                                  onBlur={(event) => handleSongListTitleCommit(item.id, event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                                      event.currentTarget.blur();
+                                    }
+                                  }}
                                   className={`w-full rounded-md border px-2 py-1 text-sm font-bold outline-none transition-colors ${
                                     isActive
                                       ? 'border-indigo-200 bg-white text-indigo-900 focus:border-indigo-400'

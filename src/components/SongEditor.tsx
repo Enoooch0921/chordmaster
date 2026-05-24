@@ -7,10 +7,11 @@ import RhythmNotation from './RhythmNotation';
 import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
-import { getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats } from '../utils/musicUtils';
+import { getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyWithPreference } from '../utils/musicUtils';
 import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
 import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
-import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature } from '../utils/rhythmUtils';
+import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
+import { formatInitialCaps } from '../utils/textUtils';
 
 type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics';
 
@@ -179,6 +180,8 @@ const formatSectionTitleCase = (value: string) => (
     })
     .join('\n')
 );
+
+const formatTitleCase = formatInitialCaps;
 
 const getSectionKeyStates = (song: Song) => {
   const baseKeys: Key[] = [];
@@ -953,7 +956,7 @@ const SongEditor: React.FC<Props> = ({
 
       return {
         ...nextSection,
-        keyChangeTo: transposeKeyPreferFlats(section.keyChangeTo, shift)
+        keyChangeTo: transposeKeyWithPreference(section.keyChangeTo, shift, resolvedWrittenKey)
       };
     });
 
@@ -1012,6 +1015,43 @@ const SongEditor: React.FC<Props> = ({
       riff: song.pickup.riff,
       rhythm: song.pickup.rhythm
     };
+  };
+
+  const getPreviousRhythmEditorBar = (sIdx: number, bIdx: number): Bar | undefined => {
+    if (isPickupTarget(sIdx, bIdx)) return undefined;
+    if (sIdx === 0 && bIdx === 0 && song.pickup) {
+      return getEditorBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
+    }
+    if (bIdx > 0) {
+      return song.sections[sIdx]?.bars[bIdx - 1];
+    }
+    if (sIdx > 0) {
+      return song.sections[sIdx - 1]?.bars.at(-1);
+    }
+    return undefined;
+  };
+
+  const getNextRhythmEditorBar = (sIdx: number, bIdx: number): Bar | undefined => {
+    if (isPickupTarget(sIdx, bIdx)) {
+      return song.sections[0]?.bars[0];
+    }
+    if (bIdx < (song.sections[sIdx]?.bars.length ?? 0) - 1) {
+      return song.sections[sIdx]?.bars[bIdx + 1];
+    }
+    return undefined;
+  };
+
+  const getRhythmTieFromPrevious = (sIdx: number, bIdx: number) => {
+    const previousBar = getPreviousRhythmEditorBar(sIdx, bIdx);
+    if (!previousBar?.rhythm) return false;
+    return rhythmEndsWithTieToNext(previousBar.rhythm, getBarTimeSignature(previousBar));
+  };
+
+  const getNextRhythmNotation = (sIdx: number, bIdx: number) => getNextRhythmEditorBar(sIdx, bIdx)?.rhythm;
+
+  const getNextRhythmTimeSignature = (sIdx: number, bIdx: number) => {
+    const nextBar = getNextRhythmEditorBar(sIdx, bIdx);
+    return nextBar ? getBarTimeSignature(nextBar) : song.timeSignature;
   };
 
   const addPickupMeasure = () => {
@@ -1255,6 +1295,20 @@ const SongEditor: React.FC<Props> = ({
     resizeSectionTitleTextarea(input);
     const caretPosition = input.value.length;
     input.setSelectionRange(caretPosition, caretPosition);
+  };
+
+  const focusFirstChordInputInSection = (sIdx: number) => {
+    const input = document.querySelector<HTMLInputElement>(`input[data-chord-input][data-sidx="${sIdx}"]`);
+    if (!input) return;
+
+    window.requestAnimationFrame(() => {
+      try {
+        input.focus({ preventScroll: true });
+      } catch {
+        input.focus();
+      }
+      input.select();
+    });
   };
 
   const queueChordInputFocus = (sIdx: number, bIdx: number, sectionId: string | null) => {
@@ -1863,13 +1917,25 @@ const SongEditor: React.FC<Props> = ({
       return;
     }
 
-    if (isMetaKey && loweredKey === 'v') {
-      e.preventDefault();
-      handlePasteRhythm(sIdx, bIdx);
-      return;
-    }
+	    if (isMetaKey && loweredKey === 'v') {
+	      e.preventDefault();
+	      handlePasteRhythm(sIdx, bIdx);
+	      return;
+	    }
 
-    if (e.key === 'Tab') {
+	    if (!isMetaKey && !e.altKey && !e.shiftKey && (loweredKey === 'd' || e.key === '.')) {
+	      e.preventDefault();
+	      toggleRhythmDot();
+	      return;
+	    }
+
+	    if (!isMetaKey && !e.altKey && !e.shiftKey && (loweredKey === 't' || e.key === '~')) {
+	      e.preventDefault();
+	      toggleRhythmTie();
+	      return;
+	    }
+
+	    if (e.key === 'Tab') {
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-rhythm-input]'));
       const idx = inputs.indexOf(e.currentTarget);
 
@@ -2147,6 +2213,36 @@ const SongEditor: React.FC<Props> = ({
     getJianpuNoteUnits({ duration, dotted })
   );
 
+  const canUseDottedJianpuDuration = (duration: JianpuDuration) => duration !== 'sixteenth';
+
+  const normalizeJianpuInputModeForDuration = (mode: JianpuInputMode): JianpuInputMode => ({
+    ...mode,
+    dotted: mode.dotted && canUseDottedJianpuDuration(mode.duration)
+  });
+
+  const fitJianpuInputModeToUnits = (mode: JianpuInputMode, availableUnits: number): JianpuInputMode => {
+    const normalizedMode = normalizeJianpuInputModeForDuration(mode);
+    if (availableUnits <= 0.001) return normalizedMode;
+
+    if (getJianpuDurationUnits(normalizedMode.duration, normalizedMode.dotted) <= availableUnits + 0.001) {
+      return normalizedMode;
+    }
+
+    if (
+      normalizedMode.dotted &&
+      getJianpuDurationUnits(normalizedMode.duration, false) <= availableUnits + 0.001
+    ) {
+      return { ...normalizedMode, dotted: false };
+    }
+
+    const fallbackDuration = (['quarter', 'eighth', 'sixteenth'] as JianpuDuration[])
+      .find((duration) => getJianpuDurationUnits(duration, false) <= availableUnits + 0.001);
+
+    return fallbackDuration
+      ? { ...normalizedMode, duration: fallbackDuration, dotted: false }
+      : normalizedMode;
+  };
+
   const getCanonicalBeatTokens = (value: string, sIdx: number, bIdx: number) => {
     return getCanonicalJianpuBeatTokens(value, getBarTimeSignature(getEditorBar(sIdx, bIdx)));
   };
@@ -2332,28 +2428,13 @@ const SongEditor: React.FC<Props> = ({
     if (availability.remainingUnits <= 0.001) return;
 
     setJianpuInputMode((current) => {
-      const currentUnits = getJianpuDurationUnits(current.duration, current.dotted);
-      if (currentUnits <= availability.remainingUnits + 0.001) {
-        return current;
-      }
-
-      if (current.dotted && getJianpuDurationUnits(current.duration, false) <= availability.remainingUnits + 0.001) {
-        return { ...current, dotted: false };
-      }
-
-      if (availability.remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', false)) {
-        return { ...current, duration: 'quarter', dotted: false };
-      }
-
-      if (availability.remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', false)) {
-        return { ...current, duration: 'eighth', dotted: false };
-      }
-
-      if (availability.remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false)) {
-        return { ...current, duration: 'sixteenth', dotted: false };
-      }
-
-      return current;
+      const next = fitJianpuInputModeToUnits(current, availability.remainingUnits);
+      return next.duration === current.duration &&
+        next.dotted === current.dotted &&
+        next.octave === current.octave &&
+        next.accidental === current.accidental
+        ? current
+        : next;
     });
   };
 
@@ -2771,7 +2852,9 @@ const SongEditor: React.FC<Props> = ({
       item.end <= localCaret ? sum + item.units : sum
     ), 0);
     const slotIndex = Math.max(0, Math.min(beatUnits, unitsBeforeCaret));
-    const desiredSpanSlots = getJianpuDurationUnits(jianpuInputMode.duration, jianpuInputMode.dotted);
+    const availableUnits = Math.max(0, beatUnits - slotIndex);
+    const fittedMode = fitJianpuInputModeToUnits(jianpuInputMode, availableUnits);
+    const desiredSpanSlots = getJianpuDurationUnits(fittedMode.duration, fittedMode.dotted);
     const visibleSpanSlots = Math.max(0, Math.min(desiredSpanSlots, beatUnits - slotIndex));
 
     if (slotIndex >= beatUnits - 0.001) {
@@ -2805,12 +2888,14 @@ const SongEditor: React.FC<Props> = ({
         beatIndex,
         placeholderAtCaret.start
       );
+      const remainingUnits = placeholderCapacity.currentBeatUnits;
       return {
-        remainingUnits: placeholderCapacity.totalUnits,
-        canQuarter: placeholderCapacity.totalUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted),
-        canEighth: placeholderCapacity.totalUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted),
-        canSixteenth: placeholderCapacity.totalUnits + 0.001 >= getJianpuDurationUnits('sixteenth', jianpuInputMode.dotted),
-        canDot: placeholderCapacity.totalUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true)
+        remainingUnits,
+        canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted),
+        canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted),
+        canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', jianpuInputMode.dotted),
+        canDot: canUseDottedJianpuDuration(jianpuInputMode.duration) &&
+          remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true)
       };
     }
 
@@ -2821,7 +2906,8 @@ const SongEditor: React.FC<Props> = ({
       canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted),
       canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted),
       canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', jianpuInputMode.dotted),
-      canDot: remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true)
+      canDot: canUseDottedJianpuDuration(jianpuInputMode.duration) &&
+        remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true)
     };
   };
 
@@ -3094,7 +3180,12 @@ const SongEditor: React.FC<Props> = ({
 
       if (unitsToConsume > 0.001) return false;
     } else if (newUnits < oldUnits) {
-      suffix = 's'.repeat(Math.max(1, Math.round(oldUnits - newUnits)));
+      const { beatUnits } = getJianpuBarTiming(selection.sIdx, selection.bIdx);
+      const releasedUnitsInCurrentBeat = Math.min(
+        oldUnits - newUnits,
+        Math.max(0, beatUnits - currentEntry.unitStart - newUnits)
+      );
+      suffix = 's'.repeat(Math.max(0, Math.round(releasedUnitsInCurrentBeat)));
     }
 
     const nextToken = replaceJianpuRange(beat.token, localStart, replacementEnd, `${replacement}${suffix}`);
@@ -3113,22 +3204,28 @@ const SongEditor: React.FC<Props> = ({
     const selectedNote = getSelectedJianpuNote(selection, riff);
     const currentDuration = selectedNote?.duration ?? jianpuInputMode.duration;
     const nextDuration = currentDuration === duration ? 'quarter' : duration;
+    const desiredDotted = selectedNote?.dotted ?? jianpuInputMode.dotted;
+    const nextDotted = desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
     if (!selectedNote) {
       const activeBeatIndex = (jianpuCursor && jianpuCursor.sIdx === selection.sIdx && jianpuCursor.bIdx === selection.bIdx)
         ? jianpuCursor.beatIndex
         : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
       const availability = getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
-      if (nextDuration === 'quarter') return availability.canQuarter;
-      if (nextDuration === 'eighth') return availability.canEighth;
-      return availability.canSixteenth;
+      const desiredUnits = getJianpuDurationUnits(nextDuration, nextDotted);
+      const undottedUnits = getJianpuDurationUnits(nextDuration, false);
+      return availability.remainingUnits + 0.001 >= desiredUnits ||
+        availability.remainingUnits + 0.001 >= undottedUnits;
     }
 
     const beat = getBeatNoteRanges(riff, selection.sIdx, selection.bIdx)
       .find((entry) => entry.notes.some((entryNote) => entryNote.start === selectedNote.start && entryNote.end === selectedNote.end));
     if (!beat) return false;
 
-    const replacement = rebuildJianpuNote(selectedNote, { duration: nextDuration });
+    const replacement = rebuildJianpuNote(selectedNote, {
+      duration: nextDuration,
+      dotted: nextDotted
+    });
     const replacementNote = findJianpuNoteRanges(replacement)[0];
     if (!replacementNote) return false;
 
@@ -3208,18 +3305,15 @@ const SongEditor: React.FC<Props> = ({
     const riff = getRiffValue(selection.sIdx, selection.bIdx);
     const selectedNote = getSelectedJianpuNote(selection, riff);
     const selectedAccidental = normalizeEditableJianpuAccidental(selectedNote?.accidental);
-    const replacement = selectedNote
-      ? rebuildJianpuNote(selectedNote, {
-          accidental: selectedAccidental || jianpuInputMode.accidental,
-          pitch,
-          duration: jianpuInputMode.duration,
-          octave: jianpuInputMode.octave
-        })
-      : buildJianpuNoteFromMode(pitch, jianpuInputMode);
-    const replacementNote = findJianpuNoteRanges(replacement)[0];
-    if (!replacementNote) return;
 
     if (selectedNote) {
+      const replacement = rebuildJianpuNote(selectedNote, {
+        accidental: selectedAccidental || jianpuInputMode.accidental,
+        pitch,
+        duration: jianpuInputMode.duration,
+        dotted: selectedNote.dotted && canUseDottedJianpuDuration(jianpuInputMode.duration),
+        octave: jianpuInputMode.octave
+      });
       updateSelectedJianpuNote(() => replacement);
       return;
     }
@@ -3234,7 +3328,6 @@ const SongEditor: React.FC<Props> = ({
     const startingBeat = beatData[startingBeatIndex];
     const localCaret = startingBeat ? Math.max(0, selection.start - startingBeat.start) : 0;
     const placeholderAtCaret = startingBeat ? findPlaceholderAtCaret(startingBeat.token, localCaret) : null;
-    const replacementUnits = getJianpuNoteUnits(replacementNote);
 
     if (startingBeat && placeholderAtCaret) {
       const placeholderCapacity = getPlaceholderContinuationCapacity(
@@ -3244,13 +3337,17 @@ const SongEditor: React.FC<Props> = ({
         startingBeatIndex,
         placeholderAtCaret.start
       );
-      if (replacementUnits > placeholderCapacity.totalUnits + 0.001) {
+      const insertionMode = fitJianpuInputModeToUnits(jianpuInputMode, placeholderCapacity.currentBeatUnits);
+      const replacement = buildJianpuNoteFromMode(pitch, insertionMode);
+      const replacementNote = findJianpuNoteRanges(replacement)[0];
+      if (!replacementNote) return;
+      const replacementUnits = getJianpuNoteUnits(replacementNote);
+      if (replacementUnits > placeholderCapacity.currentBeatUnits + 0.001) {
         return;
       }
+      setJianpuInputMode(insertionMode);
 
-      const replacementEnd = replacementUnits > placeholderCapacity.currentBeatUnits + 0.001
-        ? placeholderCapacity.replacementEnd
-        : placeholderAtCaret.start + Math.max(1, Math.round(replacementUnits));
+      const replacementEnd = placeholderAtCaret.start + Math.max(1, Math.round(replacementUnits));
       beatTokens[startingBeatIndex] = replaceJianpuRange(
         startingBeat.token,
         placeholderAtCaret.start,
@@ -3274,7 +3371,18 @@ const SongEditor: React.FC<Props> = ({
 
     let targetBeatIndex = -1;
     const currentBeat = beatData[startingBeatIndex];
-    if ((currentBeat?.usedUnits ?? 0) > 0 && (currentBeat?.usedUnits ?? 0) < beatUnits - 0.001) {
+    const currentBeatRemainingUnits = Math.max(0, beatUnits - (currentBeat?.usedUnits ?? 0));
+    const isPartiallyFilledCurrentBeat = (currentBeat?.usedUnits ?? 0) > 0 && (currentBeat?.usedUnits ?? 0) < beatUnits - 0.001;
+    const initialAvailableUnits = isPartiallyFilledCurrentBeat
+      ? currentBeatRemainingUnits
+      : beatUnits;
+    const insertionMode = fitJianpuInputModeToUnits(jianpuInputMode, initialAvailableUnits);
+    const replacement = buildJianpuNoteFromMode(pitch, insertionMode);
+    const replacementNote = findJianpuNoteRanges(replacement)[0];
+    if (!replacementNote) return;
+    const replacementUnits = getJianpuNoteUnits(replacementNote);
+
+    if (isPartiallyFilledCurrentBeat) {
       if ((currentBeat.usedUnits + replacementUnits) > beatUnits + 0.001) {
         return;
       }
@@ -3291,6 +3399,7 @@ const SongEditor: React.FC<Props> = ({
     }
 
     if (targetBeatIndex === -1) return;
+    setJianpuInputMode(insertionMode);
 
     const targetBeatRange = beatData[targetBeatIndex];
     const insertionLocalStart = targetBeatIndex === startingBeatIndex && targetBeatRange
@@ -3324,6 +3433,8 @@ const SongEditor: React.FC<Props> = ({
   const setSelectedJianpuDuration = (duration: JianpuDuration) => {
     const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
     const nextDuration = currentDuration === duration ? 'quarter' : duration;
+    const desiredDotted = selectedJianpuNote?.dotted ?? jianpuInputMode.dotted;
+    const nextDotted = desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
     if (!canApplyJianpuDurationChoice(duration)) {
       if (selectedJianpuNote && nextDuration === 'quarter') {
@@ -3338,18 +3449,20 @@ const SongEditor: React.FC<Props> = ({
         ? jianpuCursor.beatIndex
         : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
       const availability = getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
-      if (
-        (nextDuration === 'quarter' && !availability.canQuarter) ||
-        (nextDuration === 'eighth' && !availability.canEighth) ||
-        (nextDuration === 'sixteenth' && !availability.canSixteenth)
-      ) {
+      if (getJianpuDurationUnits(nextDuration, nextDotted) > availability.remainingUnits + 0.001) {
+        const undottedUnits = getJianpuDurationUnits(nextDuration, false);
+        if (undottedUnits > availability.remainingUnits + 0.001) {
+          return;
+        }
+        setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: false }));
         return;
       }
     }
 
     if (selectedJianpuNote) {
       const didUpdate = updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
-        duration: note.duration === duration ? 'quarter' : duration
+        duration: note.duration === duration ? 'quarter' : duration,
+        dotted: nextDotted
       }));
 
       if (!didUpdate) {
@@ -3359,13 +3472,14 @@ const SongEditor: React.FC<Props> = ({
         return;
       }
 
-      setJianpuInputMode((current) => ({ ...current, duration: nextDuration }));
+      setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: nextDotted }));
       return;
     }
 
-    setJianpuInputMode((current) => ({ ...current, duration: nextDuration }));
+    setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: nextDotted }));
     updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
-      duration: note.duration === duration ? 'quarter' : duration
+      duration: note.duration === duration ? 'quarter' : duration,
+      dotted: nextDotted
     }));
   };
 
@@ -3406,19 +3520,23 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const toggleSelectedJianpuDot = () => {
+    const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
+    const nextDotted = !(selectedJianpuNote?.dotted ?? jianpuInputMode.dotted);
+    if (nextDotted && !canUseDottedJianpuDuration(currentDuration)) {
+      return;
+    }
+
     if (!selectedJianpuNote && selection?.type === 'riff') {
       const riff = getRiffValue(selection.sIdx, selection.bIdx);
       const activeBeatIndex = (jianpuCursor && jianpuCursor.sIdx === selection.sIdx && jianpuCursor.bIdx === selection.bIdx)
         ? jianpuCursor.beatIndex
         : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
       const availability = getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
-      const nextDotted = !(selectedJianpuNote?.dotted ?? jianpuInputMode.dotted);
       if (nextDotted && !availability.canDot) {
         return;
       }
     }
 
-    const nextDotted = !(selectedJianpuNote?.dotted ?? jianpuInputMode.dotted);
     setJianpuInputMode((current) => ({ ...current, dotted: nextDotted }));
 
     if (!selectedJianpuNote) return;
@@ -4315,6 +4433,17 @@ const SongEditor: React.FC<Props> = ({
         type="text"
         value={song.title}
         onChange={e => updateField('title', e.target.value)}
+        onBlur={e => {
+          const formattedTitle = formatTitleCase(e.target.value);
+          if (formattedTitle !== song.title) {
+            updateField('title', formattedTitle);
+          }
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+            e.currentTarget.blur();
+          }
+        }}
         className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
       />
     </div>
@@ -4346,6 +4475,11 @@ const SongEditor: React.FC<Props> = ({
         step={1}
         value={tempoDraft}
         onChange={e => setTempoDraft(e.target.value.replace(/\D+/g, '').slice(0, 3))}
+        onFocus={e => {
+          const input = e.currentTarget;
+          window.requestAnimationFrame(() => input.select());
+        }}
+        onMouseUp={e => e.preventDefault()}
         onBlur={commitTempoDraft}
         onKeyDown={e => {
           if (e.key === 'Enter') {
@@ -4420,7 +4554,18 @@ const SongEditor: React.FC<Props> = ({
         type="text"
         value={getVersionValue(song)}
         onChange={e => onChange({ ...song, lyricist: e.target.value, composer: '' })}
-        onKeyDown={e => e.stopPropagation()}
+        onBlur={e => {
+          const formattedVersion = formatTitleCase(e.target.value);
+          if (formattedVersion !== getVersionValue(song)) {
+            onChange({ ...song, lyricist: formattedVersion, composer: '' });
+          }
+        }}
+        onKeyDown={e => {
+          e.stopPropagation();
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+            e.currentTarget.blur();
+          }
+        }}
         className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
       />
     </div>
@@ -4433,7 +4578,18 @@ const SongEditor: React.FC<Props> = ({
         type="text"
         value={song.translator || ''}
         onChange={e => updateField('translator', e.target.value)}
-        onKeyDown={e => e.stopPropagation()}
+        onBlur={e => {
+          const formattedTranslator = formatTitleCase(e.target.value);
+          if (formattedTranslator !== (song.translator || '')) {
+            updateField('translator', formattedTranslator);
+          }
+        }}
+        onKeyDown={e => {
+          e.stopPropagation();
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+            e.currentTarget.blur();
+          }
+        }}
         className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
       />
     </div>
@@ -5029,11 +5185,14 @@ const SongEditor: React.FC<Props> = ({
                             notation={bar.rhythm || ''}
                             timeSignature={effectiveTimeSignature}
                             compact
-                            renderMode="editor"
-                            selectionMode="insert"
-                            selectedInsertIndex={selectedCursorUnit}
-                            onInsertSelect={(cursorUnit) => setRhythmInsertSelection(sIdx, bIdx, bar.rhythm || '', cursorUnit)}
-                          />
+	                            renderMode="editor"
+	                            selectionMode="insert"
+	                            selectedInsertIndex={selectedCursorUnit}
+	                            tieFromPrevious={getRhythmTieFromPrevious(sIdx, bIdx)}
+	                            nextNotationForCrossBar={getNextRhythmNotation(sIdx, bIdx)}
+	                            nextTimeSignatureForCrossBar={getNextRhythmTimeSignature(sIdx, bIdx)}
+	                            onInsertSelect={(cursorUnit) => setRhythmInsertSelection(sIdx, bIdx, bar.rhythm || '', cursorUnit)}
+	                          />
                         ) : (
                           <span className="text-[10px] italic text-gray-300">{copy.editor.clickToStartRhythm}</span>
                         )}
@@ -5563,11 +5722,12 @@ const SongEditor: React.FC<Props> = ({
                           notation={pickupBar.rhythm || ''}
                           timeSignature={song.timeSignature}
                           compact
-                          renderMode="editor"
-                          selectionMode="insert"
-                          selectedInsertIndex={selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX ? getSelectedRhythmInsertIndex(selection) : -1}
-                          onInsertSelect={(cursorUnit) => setRhythmInsertSelection(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX, pickupBar.rhythm || '', cursorUnit)}
-                        />
+	                          renderMode="editor"
+	                          selectionMode="insert"
+	                          selectedInsertIndex={selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX ? getSelectedRhythmInsertIndex(selection) : -1}
+	                          tieFromPrevious={false}
+	                          onInsertSelect={(cursorUnit) => setRhythmInsertSelection(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX, pickupBar.rhythm || '', cursorUnit)}
+	                        />
                       ) : (
                         <span className="text-[10px] italic text-gray-300">{copy.editor.clickToStartRhythm}</span>
                       )}
@@ -5598,9 +5758,9 @@ const SongEditor: React.FC<Props> = ({
           const sectionId = section.id || `section-${sIdx}`;
           const sectionStartKey = sectionBaseKeys[sIdx] || song.originalKey;
           const sectionWrittenKey = sectionActiveKeys[sIdx] || sectionStartKey;
-          const sectionDisplayBaseKey = transposeKeyPreferFlats(sectionStartKey, globalKeyShift);
-          const sectionDisplayKey = transposeKeyPreferFlats(sectionWrittenKey, globalKeyShift);
-          const sectionTargetKey = section.keyChangeTo ? transposeKeyPreferFlats(section.keyChangeTo, globalKeyShift) : undefined;
+          const sectionDisplayBaseKey = transposeKeyWithPreference(sectionStartKey, globalKeyShift, song.currentKey);
+          const sectionDisplayKey = transposeKeyWithPreference(sectionWrittenKey, globalKeyShift, song.currentKey);
+          const sectionTargetKey = section.keyChangeTo ? transposeKeyWithPreference(section.keyChangeTo, globalKeyShift, song.currentKey) : undefined;
           const isActiveSection = activeSectionId === sectionId;
           const accentHighlight = getAccentHighlight(colors.accent);
           const hasSectionTitleLineBreak = section.title.includes('\n');
@@ -5700,9 +5860,20 @@ const SongEditor: React.FC<Props> = ({
                           return;
                         }
 
-                        if ((e.key === 'Enter' || e.key === 'Tab') && isSectionTitleSuggestionsOpen && highlightedSuggestionIndex >= 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+                        if (e.key === 'Enter' && isSectionTitleSuggestionsOpen && highlightedSuggestionIndex >= 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
                           e.preventDefault();
                           applySectionTitleSuggestion(sIdx, section, sectionTitleSuggestions[highlightedSuggestionIndex]);
+                          return;
+                        }
+
+                        if (e.key === 'Tab' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+                          e.preventDefault();
+                          const formattedTitle = formatSectionTitleCase(e.currentTarget.value);
+                          if (formattedTitle !== section.title) {
+                            updateSection(sIdx, { ...section, title: formattedTitle });
+                          }
+                          closeSectionTitleSuggestions(sectionId);
+                          focusFirstChordInputInSection(sIdx);
                           return;
                         }
 
@@ -5788,7 +5959,7 @@ const SongEditor: React.FC<Props> = ({
                         return;
                       }
 
-                      const nextWrittenKey = transposeKeyPreferFlats(key, -globalKeyShift);
+                      const nextWrittenKey = transposeKeyWithPreference(key, -globalKeyShift, key);
                       applySectionKeyChangeFromIndex(sIdx, nextWrittenKey);
                     }}
                     label={copy.key}
@@ -6579,11 +6750,14 @@ const SongEditor: React.FC<Props> = ({
                                   notation={bar.rhythm || ''}
                                   timeSignature={effectiveTimeSignature}
                                   compact
-                                  renderMode="editor"
-                                  selectionMode="insert"
-                                  selectedInsertIndex={selectedCursorUnit}
-                                  onInsertSelect={(cursorUnit) => setRhythmInsertSelection(sIdx, bIdx, bar.rhythm || '', cursorUnit)}
-                                />
+	                                  renderMode="editor"
+	                                  selectionMode="insert"
+	                                  selectedInsertIndex={selectedCursorUnit}
+	                                  tieFromPrevious={getRhythmTieFromPrevious(sIdx, bIdx)}
+	                                  nextNotationForCrossBar={getNextRhythmNotation(sIdx, bIdx)}
+	                                  nextTimeSignatureForCrossBar={getNextRhythmTimeSignature(sIdx, bIdx)}
+	                                  onInsertSelect={(cursorUnit) => setRhythmInsertSelection(sIdx, bIdx, bar.rhythm || '', cursorUnit)}
+	                                />
                               ) : (
                                 <span className="text-[10px] text-gray-300 italic">{copy.editor.clickToStartRhythm}</span>
                               )}
@@ -6842,26 +7016,9 @@ const SongEditor: React.FC<Props> = ({
             }`}
             onMouseDown={e => e.preventDefault()} // Prevent losing focus/selection
           >
-            <div className={`${
-              isCompactJianpuSelectionToolbar
-                ? 'w-full border-b border-gray-100 px-2 pb-1.5'
-                : isCompactSelectionToolbar
-                  ? 'mr-0.5 border-r border-gray-100 px-2 py-0.5'
-                  : 'mr-1 border-r border-gray-100 px-3 py-1'
-            }`}>
-              <span className="text-[10px] font-bold text-gray-400 uppercase block">{copy.editor.selection}</span>
-              <span className={`${isCompactSelectionToolbar ? 'max-w-[82px] text-[13px]' : 'max-w-[100px] text-sm'} block truncate font-mono font-bold text-indigo-600`}>
-                {selection.type === 'rhythm'
-                  ? getRhythmSelectionLabel()
-                  : selection.type === 'riff'
-                    ? getJianpuSelectionLabel()
-                    : selection.text}
-              </span>
-            </div>
-            
-            <div className={`flex ${
-              isCompactJianpuSelectionToolbar
-                ? 'w-full flex-col items-stretch gap-1'
+	            <div className={`flex ${
+	              isCompactJianpuSelectionToolbar
+	                ? 'w-full flex-col items-stretch gap-1'
                 : `items-center ${isCompactSelectionToolbar ? 'gap-0.5' : 'gap-1'} ${selection.type === 'riff' ? 'flex-wrap' : ''}`
             } ${
               isCompactSelectionToolbar

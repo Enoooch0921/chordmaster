@@ -6,6 +6,7 @@ import KeyPicker from './KeyPicker';
 import CapoPicker from './CapoPicker';
 import { CompactSegmentedControl, CompactToggleSwitch } from './SetlistCompactControls';
 import { parseYouTubeVideoId } from '../utils/referenceUtils';
+import { formatInitialCaps } from '../utils/textUtils';
 
 interface SongMetadataPanelProps {
   song: Song;
@@ -38,6 +39,8 @@ type MetadataLayoutMode = 'stacked' | 'compact' | 'wide';
 
 const getVersionValue = (song: Song) =>
   Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ');
+
+const formatMetadataText = formatInitialCaps;
 
 const splitTimeSignatureInput = (value?: string) => {
   const trimmed = value?.trim() ?? '';
@@ -599,6 +602,17 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         type="text"
         value={song.title}
         onChange={(event) => updateField('title', event.target.value)}
+        onBlur={(event) => {
+          const formattedTitle = formatMetadataText(event.target.value);
+          if (formattedTitle !== song.title) {
+            updateField('title', formattedTitle);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+            event.currentTarget.blur();
+          }
+        }}
         className={`${fieldClassName} font-semibold`}
       />
     </div>
@@ -746,7 +760,18 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         list={metadataSuggestions?.versions.length ? `${metadataInputId}-versions` : undefined}
         value={getVersionValue(song)}
         onChange={(event) => onChange({ ...song, lyricist: event.target.value, composer: '' })}
-        onKeyDown={(event) => event.stopPropagation()}
+        onBlur={(event) => {
+          const formattedVersion = formatMetadataText(event.target.value);
+          if (formattedVersion !== getVersionValue(song)) {
+            onChange({ ...song, lyricist: formattedVersion, composer: '' });
+          }
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+            event.currentTarget.blur();
+          }
+        }}
         className={fieldClassName}
       />
       {metadataSuggestions?.versions.length ? (
@@ -767,7 +792,18 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         list={metadataSuggestions?.translators.length ? `${metadataInputId}-translators` : undefined}
         value={song.translator || ''}
         onChange={(event) => updateField('translator', event.target.value)}
-        onKeyDown={(event) => event.stopPropagation()}
+        onBlur={(event) => {
+          const formattedTranslator = formatMetadataText(event.target.value);
+          if (formattedTranslator !== (song.translator || '')) {
+            updateField('translator', formattedTranslator);
+          }
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+            event.currentTarget.blur();
+          }
+        }}
         className={fieldClassName}
       />
       {metadataSuggestions?.translators.length ? (

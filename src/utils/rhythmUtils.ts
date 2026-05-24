@@ -48,6 +48,7 @@ export interface RhythmTieArc {
   endHeadUnit: number;
   crossesBeat: boolean;
   breakUnit?: number;
+  crossBarSegment?: 'incoming' | 'outgoing';
 }
 
 export interface RationalizedRhythmDisplay {
@@ -260,6 +261,12 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
     overflow: rhythmUnitsGreater(cursor, barUnits),
     underfilled: rhythmUnitsGreater(barUnits, cursor)
   };
+}
+
+export function rhythmEndsWithTieToNext(notation: string | undefined, timeSignature: string): boolean {
+  const parsed = parseRhythmNotation(notation || '', timeSignature);
+  const lastPlayableEvent = [...parsed.events].reverse().find((event) => !event.isRest && !event.isHidden);
+  return Boolean(lastPlayableEvent?.tieAfter);
 }
 
 function B(code: number): string {
