@@ -85,11 +85,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-05-19',
-        title: 'Full setlist preview scrolling',
+        date: '2026-05-25',
+        title: 'Desktop setlist workflow and performance paging',
         bullets: [
-          'Setlist mode now shows every song in the right-side preview in setlist order for vertical scrolling.',
-          'The selected setlist song remains editable from the preview, while the other songs stay available as read-only preview context.'
+          'Desktop setlist mode now uses List, Detail, and Add Songs panels so larger setlist libraries are easier to manage.',
+          'Clicking a song inside a setlist now scrolls the right-side preview directly to that song.',
+          'Performance Mode now turns pages by tapping the left or right half of the screen.'
         ]
       },
       {
@@ -259,11 +260,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-05-19',
-        title: '整份歌單直向預覽',
+        date: '2026-05-25',
+        title: '桌面歌單流程與演出模式翻頁',
         bullets: [
-          '歌單模式右側預覽現在會依歌單順序顯示所有歌曲，可直接往下滑瀏覽整份歌單。',
-          '目前選中的歌單歌曲仍可從預覽點擊回編輯器定位，其他歌曲則維持只讀預覽。'
+          '桌面歌單模式改為 List、Detail、Add Songs 分層面板，歌單變多時更容易管理。',
+          '點擊歌單內歌曲時，右側預覽會直接定位到該歌曲。',
+          '演出模式現在可點螢幕左半邊或右半邊快速翻頁。'
         ]
       },
       {
