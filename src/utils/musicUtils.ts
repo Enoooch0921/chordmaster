@@ -15,6 +15,30 @@ const NOTE_ALIASES: Record<string, string> = {
   'E#': 'F',
   'B#': 'C'
 };
+const NOTE_LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const NATURAL_NOTE_INDEX: Record<string, number> = {
+  C: 0,
+  D: 2,
+  E: 4,
+  F: 5,
+  G: 7,
+  A: 9,
+  B: 11
+};
+const MAJOR_KEY_DEGREE_SPELLING: Record<number, { degreeIndex: number; accidental: -1 | 0 | 1 }> = {
+  0: { degreeIndex: 0, accidental: 0 },
+  1: { degreeIndex: 1, accidental: -1 },
+  2: { degreeIndex: 1, accidental: 0 },
+  3: { degreeIndex: 2, accidental: -1 },
+  4: { degreeIndex: 2, accidental: 0 },
+  5: { degreeIndex: 3, accidental: 0 },
+  6: { degreeIndex: 3, accidental: 1 },
+  7: { degreeIndex: 4, accidental: 0 },
+  8: { degreeIndex: 5, accidental: -1 },
+  9: { degreeIndex: 5, accidental: 0 },
+  10: { degreeIndex: 6, accidental: -1 },
+  11: { degreeIndex: 6, accidental: 0 }
+};
 
 export const ALL_KEYS: Key[] = [
   'C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'Bb', 'B'
@@ -89,7 +113,7 @@ function getKeyFromIndex(index: number, preferFlats: boolean = false): Key {
 }
 
 function getLetterIndex(noteLetter: string): number {
-  return ['C', 'D', 'E', 'F', 'G', 'A', 'B'].indexOf(noteLetter);
+  return NOTE_LETTERS.indexOf(noteLetter);
 }
 
 function getNashvilleNumberForNote(note: string, key: Key): string {
@@ -155,6 +179,35 @@ function shouldPreferFlatsForChordRoot(root: string, targetKey?: Key): boolean {
   if (root.includes('b')) return true;
   if (root.includes('#')) return false;
   return false;
+}
+
+function getNoteFromIndexForKey(index: number, key: Key): string {
+  const keyMatch = key.match(/^([A-G])/);
+  const keyIndex = getNoteIndex(key);
+  if (!keyMatch || keyIndex === -1) {
+    return getNoteFromIndex(index, false);
+  }
+
+  const normalizedIndex = ((index % 12) + 12) % 12;
+  const relativeIndex = ((normalizedIndex - keyIndex) % 12 + 12) % 12;
+  const spelling = MAJOR_KEY_DEGREE_SPELLING[relativeIndex];
+  const keyLetterIndex = getLetterIndex(keyMatch[1]);
+  if (!spelling || keyLetterIndex === -1) {
+    return getNoteFromIndex(index, shouldPreferFlats(key) && !shouldPreferSharps(key));
+  }
+
+  const letter = NOTE_LETTERS[(keyLetterIndex + spelling.degreeIndex) % NOTE_LETTERS.length];
+  const naturalIndex = NATURAL_NOTE_INDEX[letter];
+  let accidentalOffset = ((normalizedIndex - naturalIndex) % 12 + 12) % 12;
+  if (accidentalOffset > 6) {
+    accidentalOffset -= 12;
+  }
+
+  if (accidentalOffset === -1) return `${letter}b`;
+  if (accidentalOffset === 0) return letter;
+  if (accidentalOffset === 1) return `${letter}#`;
+
+  return getNoteFromIndex(index, spelling.accidental < 0);
 }
 
 export function normalizeChordEnharmonic(chord: string): string {
@@ -251,8 +304,9 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key): 
   const rootIndex = getNoteIndex(root);
   if (rootIndex === -1) return chord; // Not a valid note, return as is
 
-  const preferFlats = shouldPreferFlatsForChordRoot(root, targetKey);
-  const newRoot = getNoteFromIndex(rootIndex + offset, preferFlats);
+  const newRoot = targetKey
+    ? getNoteFromIndexForKey(rootIndex + offset, targetKey)
+    : getNoteFromIndex(rootIndex + offset, shouldPreferFlatsForChordRoot(root));
   return normalizeChordEnharmonic(newRoot + rest);
 }
 

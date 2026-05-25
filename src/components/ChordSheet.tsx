@@ -15,7 +15,7 @@ import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
-import { getChordDisplaySlots, getLyricAnchors, getLyricFitScale, getLyricFontScale, getLyricTrackingEm, getTwoChordSplitSlotIndex } from '../utils/lyricsUtils';
+import { getChordDisplaySlots, getLyricAnchors, getLyricFitScale, getLyricFontScale, getLyricTrackingEm } from '../utils/lyricsUtils';
 import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 
 interface FormattedChordProps {
@@ -46,6 +46,25 @@ const splitChordQualityDisplay = (quality: string) => {
     qualityText: trimmedQuality.slice(0, extensionMatch.index),
     extensionTokens: tokens
   };
+};
+
+const getMajorQualitySuffix = (qualityText: string) => {
+  const match = qualityText.match(/^maj(.*)$/i);
+  return match ? match[1] : null;
+};
+
+const MajorQualityGlyph: React.FC<{ qualityText: string; numeric?: boolean }> = ({ qualityText, numeric = false }) => {
+  const suffix = getMajorQualitySuffix(qualityText);
+  if (suffix === null) {
+    return <>{qualityText}</>;
+  }
+
+  return (
+    <span className="inline-flex items-baseline tracking-[-0.04em]">
+      <span className={numeric ? 'text-[1.12em] leading-none' : 'text-[1.16em] leading-none'}>△</span>
+      {suffix && <span className="-ml-[0.12em] leading-none">{suffix}</span>}
+    </span>
+  );
 };
 
 const getBarDisplayLabel = (bar?: Bar) => (
@@ -421,8 +440,19 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
   const numericFigureStyle = isNumericRoot
     ? ({ fontVariantNumeric: 'lining-nums tabular-nums', fontFeatureSettings: '"lnum" 1, "tnum" 1' } as const)
     : undefined;
+  const qualityVisualLength = (() => {
+    if (!qualityText) return 0;
+    if (symbolicQuality) {
+      return 1 + (symbolicQuality.extension?.length ?? 0);
+    }
+    const majSuffix = getMajorQualitySuffix(qualityText);
+    if (majSuffix !== null) {
+      return 1 + majSuffix.length;
+    }
+    return qualityText.length;
+  })();
   const numericQualityReserveEm = isNumericRoot && qualityText
-    ? Math.max(0.34, qualityText.length * 0.42)
+    ? Math.max(0.34, qualityVisualLength * 0.42)
     : 0;
   const numericBassReserveEm = isNumericRoot && bass
     ? Math.max(0.7, (bassRoot.length + (bassAccidental ? 1 : 0)) * 0.42 + 0.46)
@@ -453,6 +483,11 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
   const singleChordExtensionPositionClass = /^dim/i.test(qualityText)
     ? 'left-full top-[-0.74em] ml-[-1.32em]'
     : 'left-full top-[-0.08em] ml-[-1.32em]';
+  const plainQualityClass = qualityText === 'm'
+    ? 'text-[12px] -translate-y-[0.4em]'
+    : /^sus/i.test(qualityText)
+      ? 'text-[11px] -translate-y-[0.42em]'
+      : 'text-[10px] -translate-y-[0.48em]';
   if (isNumericRoot) {
     const numericTextStyle = {
       ...(numericSuffixReserveEm > 0 ? { paddingRight: `${numericSuffixReserveEm}em` } : {}),
@@ -485,7 +520,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
                       )}
                     </span>
                   ) : (
-                    <span>{qualityText}</span>
+                    <MajorQualityGlyph qualityText={qualityText} numeric />
                   )}
                   {hasExtensionTokens && (
                       <span
@@ -559,7 +594,9 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
                 )}
               </span>
             ) : (
-              <span className="text-[10px] -translate-y-[0.55em]">{qualityText}</span>
+              <span className={plainQualityClass}>
+                <MajorQualityGlyph qualityText={qualityText} />
+              </span>
             )}
             {hasExtensionTokens && (
                 <span
@@ -845,61 +882,8 @@ const getDefaultRightNavigationText = (marker: NavigationMarker | undefined) => 
             : ''
 );
 
-const getCrowdedChordScaleClass = (displayChords: string[]) => {
-  const normalizedChords = displayChords.map((chord) => chord.trim());
-  const meaningfulChords = normalizedChords.filter((chord) => chord && chord !== '/');
-  if (meaningfulChords.length <= 1) return '';
-
-  const maxChordLength = meaningfulChords.reduce((maximum, chord) => Math.max(maximum, chord.length), 0);
-  let longestAdjacentRun = 0;
-  let currentRun = 0;
-
-  normalizedChords.forEach((chord) => {
-    if (chord && chord !== '/') {
-      currentRun += 1;
-      longestAdjacentRun = Math.max(longestAdjacentRun, currentRun);
-    } else {
-      currentRun = 0;
-    }
-  });
-
-  if (meaningfulChords.length >= 4 || longestAdjacentRun >= 4) {
-    if (maxChordLength <= 4) return 'scale-x-[0.88]';
-    if (maxChordLength <= 5) return 'scale-x-[0.8]';
-    return 'scale-x-[0.72]';
-  }
-
-  if (meaningfulChords.length >= 3 && maxChordLength >= 6) {
-    return 'scale-x-[0.72]';
-  }
-
-  if (meaningfulChords.length >= 3 || longestAdjacentRun >= 3 || maxChordLength >= 7) {
-    return 'scale-x-[0.8]';
-  }
-
-  if ((meaningfulChords.length >= 2 && longestAdjacentRun >= 2) || maxChordLength >= 5) {
-    return 'scale-x-[0.9]';
-  }
-
-  return '';
-};
-
 const getLyricDisplayText = (text: string) => text.replace(/\s+/g, ' ').trim();
 const getLyricMeasureText = (text: string) => getLyricDisplayText(text).replace(/[ \t]+/g, '');
-
-const getSingleChordScaleClass = (chord: string) => {
-  const trimmed = chord.trim();
-  if (!trimmed || trimmed === '/') return '';
-  if (trimmed.length >= 9) return 'scale-x-[0.76]';
-  if (trimmed.includes('/')) {
-    if (trimmed.length >= 7) return 'scale-x-[0.86]';
-    if (trimmed.length >= 6) return 'scale-x-[0.92]';
-    return '';
-  }
-  if (trimmed.length >= 7) return 'scale-x-[0.86]';
-  if (trimmed.length >= 6) return 'scale-x-[0.92]';
-  return '';
-};
 
 const abbreviateChordQualityForDisplay = (chord: string) => (
   chord
@@ -990,6 +974,7 @@ const AutoShrink: React.FC<{
   className?: string;
   align?: 'left' | 'center' | 'right';
   minScale?: number;
+  maxScale?: number;
   overflowVisible?: boolean;
   shrinkAxis?: 'uniform' | 'x-only';
 }> = ({
@@ -997,6 +982,7 @@ const AutoShrink: React.FC<{
   className = "",
   align = 'left',
   minScale = 0.6,
+  maxScale = 1,
   overflowVisible = false,
   shrinkAxis = 'uniform'
 }) => {
@@ -1015,12 +1001,10 @@ const AutoShrink: React.FC<{
         const contentWidth = contentRef.current.scrollWidth;
         contentRef.current.style.whiteSpace = originalWS;
 
-        if (contentWidth > containerWidth && containerWidth > 30) {
-          const newScale = Math.max(minScale, (containerWidth - 2) / contentWidth);
-          setScale(newScale);
-        } else {
-          setScale(1);
-        }
+        const fittedScale = contentWidth > containerWidth && containerWidth > 30
+          ? Math.max(minScale, (containerWidth - 2) / contentWidth)
+          : 1;
+        setScale(Math.min(maxScale, fittedScale));
       }
     };
 
@@ -1041,7 +1025,7 @@ const AutoShrink: React.FC<{
       observer.disconnect();
       clearTimeout(timer);
     };
-  }, [children, minScale]);
+  }, [children, minScale, maxScale]);
 
   const justifyClass = align === 'left'
     ? 'justify-start'
@@ -1739,51 +1723,96 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       );
                                     }
 
-                                      const lyricsAnchorCount = Math.max(1, lyricAnchors.length);
-                                      const evenAnchorUnitSpan = beatsPerBar / lyricsAnchorCount;
-                                      const renderedDisplayChords = displayChords.map((displayChord) => (
-                                        displayChord
-                                          ? getDisplayedChordString(displayChord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers)
-                                          : displayChord
-                                      ));
-                                      const crowdedChordScaleClass = !showLyricsLane ? getCrowdedChordScaleClass(renderedDisplayChords) : '';
-                                      const meaningfulChordFlags = displayChords.map((token) => {
-                                        const trimmed = token.trim();
-                                        return Boolean(trimmed && trimmed !== '/');
-                                      });
                                       const occupiedChordAnchors = displayChords.flatMap((displayChord, slotIndex) => {
                                         if (!displayChord) return [];
-
-                                      const nextOccupiedSlot = displayChords.findIndex((candidate, candidateIndex) => (
-                                        candidateIndex > slotIndex && Boolean(candidate)
-                                      ));
-                                      const rawSpan = nextOccupiedSlot === -1
-                                        ? beatsPerBar - slotIndex
-                                        : nextOccupiedSlot - slotIndex;
-                                      const span = displayChord.trim() === '/' ? 1 : rawSpan;
 
                                       return [{
                                         chord: displayChord,
                                         slotIndex,
-                                          span: Math.max(1, span)
+                                          span: 1
                                         }];
                                       });
-                                      const meaningfulOccupiedChordCount = occupiedChordAnchors.filter((anchor) => {
-                                        const trimmed = anchor.chord.trim();
-                                        return trimmed && trimmed !== '/';
-                                      }).length;
-                                      const useEqualBeatChordLayout = meaningfulOccupiedChordCount >= beatsPerBar
-                                        && occupiedChordAnchors.every((anchor) => {
-                                          const trimmed = anchor.chord.trim();
-                                          return !trimmed || trimmed === '/' || anchor.span === 1;
-                                        });
-                                      const halfSplitSlotIndex = getTwoChordSplitSlotIndex(beatsPerBar);
-                                    const isDefaultTwoChordSpread = occupiedChordAnchors.length === 2
-                                      && occupiedChordAnchors[0]?.slotIndex === 0
-                                      && occupiedChordAnchors[1]?.slotIndex === halfSplitSlotIndex;
                                     const centeredWholeRestAnchor = occupiedChordAnchors.length === 1 && isWholeRestChord(occupiedChordAnchors[0]?.chord)
                                       ? occupiedChordAnchors[0]
                                       : null;
+                                    const renderBeatSlotChordGrid = (className: string) => (
+                                      <div
+                                        className={className}
+                                        style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
+                                        onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                      >
+                                        {(() => {
+                                          const renderedAnchors = occupiedChordAnchors.map((anchor) => {
+                                            const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers);
+                                            return {
+                                              ...anchor,
+                                              renderedChord,
+                                              trimmedChord: renderedChord.trim()
+                                            };
+                                          });
+                                          const meaningfulRenderedAnchors = renderedAnchors.filter((anchor) => anchor.trimmedChord !== '/');
+                                          const hasLongChordInBar = meaningfulRenderedAnchors.some((anchor) => (
+                                            anchor.trimmedChord !== '/'
+                                            && (anchor.renderedChord.includes('/') || anchor.renderedChord.length >= 6)
+                                          ));
+                                          const shouldUniformCompress = hasLongChordInBar && meaningfulRenderedAnchors.length >= 3;
+                                          const longestChordLength = meaningfulRenderedAnchors.reduce((maximum, anchor) => (
+                                            Math.max(maximum, anchor.renderedChord.length)
+                                          ), 0);
+                                          const uniformChordMaxScale = shouldUniformCompress
+                                            ? longestChordLength >= 8
+                                              ? 0.72
+                                              : longestChordLength >= 7
+                                                ? 0.74
+                                                : 0.76
+                                            : 1;
+
+                                          return renderedAnchors.map((anchor) => {
+                                            const { renderedChord, trimmedChord } = anchor;
+                                            const isSlashPlaceholder = trimmedChord === '/';
+                                            const isLongChord = !isSlashPlaceholder && (renderedChord.includes('/') || renderedChord.length >= 6);
+                                            const minScale = isSlashPlaceholder
+                                              ? 1
+                                              : isLongChord
+                                                ? 0.66
+                                                : shouldUniformCompress
+                                                  ? 0.68
+                                                  : 0.82;
+                                            const maxScale = isSlashPlaceholder ? 1 : uniformChordMaxScale;
+
+	                                            return (
+	                                              <div
+	                                                key={`${row.sIdx}-${row.startBIdx + bIdx}-slot-${anchor.slotIndex}`}
+	                                                className="flex h-[24px] min-w-0 items-end px-[3px]"
+	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span 1` }}
+	                                                onClick={(event) => {
+	                                                  event.stopPropagation();
+	                                                  onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords');
+                                                }}
+                                              >
+                                                <AutoShrink
+                                                  align="center"
+                                                  minScale={minScale}
+	                                                  maxScale={maxScale}
+	                                                  overflowVisible
+	                                                  shrinkAxis="x-only"
+	                                                  className="h-[24px] items-end"
+	                                                >
+	                                                  <div className={`min-w-0 origin-center leading-none ${showLyricsLane ? lyricsChordScaleClass : ''}`.trim()}>
+	                                                    <FormattedChord
+	                                                      chordString={renderedChord}
+	                                                      compactModifier={compactModifier}
+                                                      nashvilleFontFamily={nashvilleFontFamily}
+                                                      chordFontFamily={chordFontFamily}
+                                                    />
+                                                  </div>
+                                                </AutoShrink>
+                                              </div>
+                                            );
+                                          });
+                                        })()}
+                                      </div>
+                                    );
                                     const renderLyricsLane = () => (
                                       <div
                                         className={`grid ${lyricsLaneHeightClass} min-h-0 w-full shrink-0 content-start items-start overflow-hidden`}
@@ -1792,33 +1821,27 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       >
                                           {lyricAnchors.map((anchor) => {
                                             const isFirstAnchor = anchor.slotIndex === 0;
-                                          const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
-                                          const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
+                                          const visualSpan = Math.max(1, anchor.span);
+                                          const isTerminalAnchor = anchor.slotIndex + visualSpan >= beatsPerBar
                                             && anchor.slotIndex > 0
-                                            && !isDefaultTwoChordSpread;
+                                            && !isFirstAnchor;
                                           const lyricText = getLyricDisplayText(anchor.lyric);
                                           const measureText = getLyricMeasureText(lyricText);
-                                          const lyricScale = getLyricFontScale(measureText || lyricText, anchor.span);
-                                          const lyricTracking = getLyricTrackingEm(measureText || lyricText, anchor.span);
+                                          const lyricScale = getLyricFontScale(measureText || lyricText, visualSpan);
+                                          const lyricTracking = getLyricTrackingEm(measureText || lyricText, visualSpan);
                                           const anchorPaddingClass = isFirstAnchor
                                             ? 'pl-[2px]'
-                                            : isTwoChordSecondHalfAnchor
-                                              ? 'pl-[2px] pr-[6px]'
-                                              : isTerminalAnchor
+                                            : isTerminalAnchor
                                                 ? 'pl-[14px] pr-[6px]'
                                                 : 'px-[3px]';
                                           const justifyClass = isFirstAnchor
                                             ? 'justify-start'
-                                            : isTwoChordSecondHalfAnchor
-                                              ? 'justify-start'
-                                              : isTerminalAnchor
+                                            : isTerminalAnchor
                                                   ? 'justify-end'
                                                   : 'justify-center';
                                           const textAlignClass = isFirstAnchor
                                             ? 'text-left'
-                                            : isTwoChordSecondHalfAnchor
-                                              ? 'text-left'
-                                              : isTerminalAnchor
+                                            : isTerminalAnchor
                                                   ? 'text-right'
                                                   : 'text-center';
 
@@ -1826,7 +1849,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             <div
                                               key={`${row.sIdx}-${row.startBIdx + bIdx}-lyric-${anchor.rawIndex}`}
                                               className={`min-w-0 overflow-hidden ${anchorPaddingClass}`}
-                                              style={{ gridColumn: `${anchor.slotIndex + 1} / span ${Math.max(1, anchor.span)}` }}
+                                              style={{ gridColumn: `${anchor.slotIndex + 1} / span ${Math.max(1, visualSpan)}` }}
                                             >
                                               <div
                                                 className={`flex min-w-0 py-0 ${justifyClass}`}
@@ -1892,86 +1915,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       }
 
                                       return (
-                                        <div
-                                          className={`flex-1 grid w-full content-start items-start pt-[3px] cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${contentLeftInsetClass}`}
-                                          style={{ gridTemplateColumns: `repeat(${beatsPerBar}, 1fr)` }}
-                                          onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
-                                        >
-                                            {occupiedChordAnchors.map((anchor) => {
-                                              const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers);
-                                              const singleChordScaleClass = getSingleChordScaleClass(renderedChord);
-                                              const effectiveChordScaleClass = singleChordScaleClass || crowdedChordScaleClass;
-                                            const isFirstAnchor = anchor.slotIndex === 0;
-                                            const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
-                                            const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
-                                              && anchor.slotIndex > 0
-                                              && !isDefaultTwoChordSpread
-                                              && !useEqualBeatChordLayout;
-                                            const align: 'left' | 'center' | 'right' = useEqualBeatChordLayout
-                                              ? 'center'
-                                              : isFirstAnchor
-                                              ? 'left'
-                                              : isTwoChordSecondHalfAnchor
-                                                ? 'left'
-                                              : isTerminalAnchor
-                                                ? 'right'
-                                                : 'center';
-                                            const anchorPaddingClass = useEqualBeatChordLayout
-                                              ? 'px-[2px]'
-                                              : isFirstAnchor
-                                              ? 'pl-[2px]'
-                                              : isTwoChordSecondHalfAnchor
-                                                ? 'pl-[2px] pr-[6px]'
-                                              : isTerminalAnchor
-                                                ? 'pl-[14px] pr-[6px]'
-                                                : 'px-[3px]';
-                                            const useDenseSlashLayout = useEqualBeatChordLayout
-                                              && renderedChord.includes('/')
-                                              && renderedChord.trim() !== '/';
-                                            const shrinkMinScale = useDenseSlashLayout ? 0.68 : isTerminalAnchor ? 0.2 : 0.44;
-                                            const compactSlashBass = renderedChord.includes('/')
-                                              && renderedChord.trim() !== '/'
-                                              && (
-                                                  meaningfulChordFlags[anchor.slotIndex - 1] === true
-                                                  || meaningfulChordFlags[anchor.slotIndex + 1] === true
-                                              );
-
-                                            return (
-                                              <div
-                                                key={`${row.sIdx}-${row.startBIdx + bIdx}-anchor-${anchor.slotIndex}`}
-                                                className={`min-w-0 ${anchorPaddingClass}`}
-                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span ${anchor.span}` }}
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords');
-                                                }}
-                                              >
-                                                <AutoShrink
-                                                  align={align}
-                                                  minScale={shrinkMinScale}
-                                                  overflowVisible
-                                                  shrinkAxis={useDenseSlashLayout || isTerminalAnchor ? 'x-only' : 'uniform'}
-                                                >
-                                                  <div
-                                                    className={`min-w-0 ${
-                                                      effectiveChordScaleClass
-                                                        ? `${align === 'right' ? 'origin-right' : align === 'center' ? 'origin-center' : 'origin-left'} ${effectiveChordScaleClass}`
-                                                        : ''
-                                                    }`.trim()}
-                                                  >
-                                                      <FormattedChord
-                                                        chordString={renderedChord}
-                                                        compactModifier={compactModifier}
-                                                        nashvilleFontFamily={nashvilleFontFamily}
-                                                      chordFontFamily={chordFontFamily}
-                                                      compactSlashBass={compactSlashBass}
-                                                    />
-                                                  </div>
-                                                </AutoShrink>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
+                                        renderBeatSlotChordGrid(
+                                          `flex-1 grid w-full content-start items-start pt-[3px] cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${contentLeftInsetClass}`
+                                        )
                                       );
                                     }
 
@@ -2004,72 +1950,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
                                     return (
                                       <div className={`flex flex-1 min-h-0 flex-col justify-start ${lyricsContainerGapClass} w-full cursor-pointer rounded px-0.5 pt-0 hover:bg-amber-50/60 transition-colors ${contentLeftInsetClass}`}>
-                                        <div
-                                          className="grid w-full content-start items-start"
-                                          style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
-                                          onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
-                                        >
-                                            {lyricAnchors.map((anchor) => {
-                                              const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers);
-                                              const isFirstAnchor = anchor.slotIndex === 0;
-                                            const isTwoChordSecondHalfAnchor = isDefaultTwoChordSpread && anchor.slotIndex === halfSplitSlotIndex;
-                                            const isTerminalAnchor = anchor.slotIndex + anchor.span >= beatsPerBar
-                                              && anchor.slotIndex > 0
-                                              && !isDefaultTwoChordSpread
-                                              && !useEqualBeatChordLayout;
-                                            const originClass = useEqualBeatChordLayout
-                                              ? 'origin-top'
-                                              : isFirstAnchor
-                                              ? 'origin-top-left'
-                                              : isTwoChordSecondHalfAnchor
-                                                ? 'origin-top-left'
-                                              : isTerminalAnchor
-                                                ? 'origin-top-right'
-                                                : 'origin-top';
-                                            const anchorPaddingClass = useEqualBeatChordLayout
-                                              ? 'px-[2px]'
-                                              : isFirstAnchor
-                                              ? 'pl-[2px]'
-                                              : isTwoChordSecondHalfAnchor
-                                                ? 'pl-[2px] pr-[6px]'
-                                              : isTerminalAnchor
-                                                ? 'pl-[14px] pr-[6px]'
-                                                : 'px-[3px]';
-                                            const shrinkMinScale = isTerminalAnchor ? 0.2 : 0.44;
-                                            const align: 'left' | 'center' | 'right' = useEqualBeatChordLayout
-                                              ? 'center'
-                                              : isFirstAnchor
-                                              ? 'left'
-                                              : isTwoChordSecondHalfAnchor
-                                                ? 'left'
-                                              : isTerminalAnchor
-                                                  ? 'right'
-                                                  : 'center';
-
-                                            return (
-                                            <div
-                                              key={`${row.sIdx}-${row.startBIdx + bIdx}-chord-${anchor.rawIndex}`}
-                                              className={`min-w-0 ${anchorPaddingClass}`}
-                                              style={{ gridColumn: `${anchor.slotIndex + 1} / span ${Math.max(1, anchor.span)}` }}
-                                            >
-                                              <AutoShrink
-                                                align={align}
-                                                minScale={shrinkMinScale}
-                                                overflowVisible
-                                                shrinkAxis={isTerminalAnchor ? 'x-only' : 'uniform'}
-                                              >
-                                                  <div className={`${originClass} ${lyricsChordScaleClass}`.trim()}>
-                                                    <FormattedChord
-                                                      chordString={renderedChord}
-                                                      compactModifier={compactModifier}
-                                                      nashvilleFontFamily={nashvilleFontFamily}
-                                                    chordFontFamily={chordFontFamily}
-                                                  />
-                                                </div>
-                                              </AutoShrink>
-                                            </div>
-                                          )})}
-                                        </div>
+                                        {renderBeatSlotChordGrid('grid w-full content-start items-start')}
 
                                         {renderLyricsLane()}
                                       </div>

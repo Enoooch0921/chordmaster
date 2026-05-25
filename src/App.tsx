@@ -55,6 +55,7 @@ import { hasSupabaseConfig } from './lib/supabase';
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
 const SELECTED_SONG_STORAGE_KEY = 'chordmaster.selected-song-id.v1';
+const SELECTED_SONG_BY_LIBRARY_STORAGE_KEY = 'chordmaster.selected-song-id-by-library.v1';
 const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
 const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.v1';
 const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
@@ -1039,6 +1040,55 @@ const getDefaultLibrary = () => {
   };
 };
 
+const getSongSelectionLibraryKey = (libraryId: string | null | undefined) => (
+  libraryId ? `cloud:${libraryId}` : 'personal'
+);
+
+const readSelectedSongByLibrary = () => {
+  if (typeof window === 'undefined') return {};
+
+  try {
+    const stored = window.localStorage.getItem(SELECTED_SONG_BY_LIBRARY_STORAGE_KEY);
+    const parsed = stored ? JSON.parse(stored) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, string>
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const getStoredSelectedSongId = (libraryId: string | null | undefined) => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const selectedByLibrary = readSelectedSongByLibrary();
+    return selectedByLibrary[getSongSelectionLibraryKey(libraryId)]
+      ?? window.localStorage.getItem(SELECTED_SONG_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const pickAvailableSongId = (songs: StoredSong[], preferredIds: Array<string | null | undefined>) => {
+  for (const preferredId of preferredIds) {
+    if (preferredId && songs.some((song) => song.id === preferredId)) {
+      return preferredId;
+    }
+  }
+
+  return songs[0]?.id ?? '';
+};
+
+const persistSelectedSongId = (libraryId: string | null | undefined, songId: string) => {
+  if (typeof window === 'undefined') return;
+
+  const selectedByLibrary = readSelectedSongByLibrary();
+  selectedByLibrary[getSongSelectionLibraryKey(libraryId)] = songId;
+  window.localStorage.setItem(SELECTED_SONG_BY_LIBRARY_STORAGE_KEY, JSON.stringify(selectedByLibrary));
+  window.localStorage.setItem(SELECTED_SONG_STORAGE_KEY, songId);
+};
+
 const loadSongLibrary = () => {
   if (typeof window === 'undefined') {
     return {
@@ -1049,7 +1099,7 @@ const loadSongLibrary = () => {
 
   try {
     const storedSongs = window.localStorage.getItem(SONG_LIBRARY_STORAGE_KEY);
-    const storedSelectedId = window.localStorage.getItem(SELECTED_SONG_STORAGE_KEY);
+    const storedSelectedId = getStoredSelectedSongId(null);
     const storedLastSavedAt = window.localStorage.getItem(LAST_SAVED_AT_STORAGE_KEY);
 
     if (!storedSongs) {
@@ -1072,7 +1122,7 @@ const loadSongLibrary = () => {
       id: song.id || `song-restored-${index + 1}`,
       updatedAt: typeof song.updatedAt === 'number' ? song.updatedAt : Date.now()
     }));
-    const selectedSongId = songs.some((song) => song.id === storedSelectedId) ? (storedSelectedId as string) : songs[0].id;
+    const selectedSongId = pickAvailableSongId(songs, [storedSelectedId]);
     const parsedLastSavedAt = storedLastSavedAt ? Number(storedLastSavedAt) : null;
 
     return {
@@ -2567,7 +2617,10 @@ export default function App() {
     setIsLibraryEditing((current) => !current);
   };
 
-  const applyWorkspaceSnapshot = (workspace: { songs: StoredSong[]; setlists: Setlist[]; joinedSetlists: JoinedSetlist[]; lastSavedAt: number | null }) => {
+  const applyWorkspaceSnapshot = (
+    workspace: { songs: StoredSong[]; setlists: Setlist[]; joinedSetlists: JoinedSetlist[]; lastSavedAt: number | null },
+    libraryId = activeLibraryId
+  ) => {
     setSongs(workspace.songs);
     setSavedSongs(cloneSong(workspace.songs));
     setSetlists(workspace.setlists);
@@ -2579,7 +2632,10 @@ export default function App() {
     setSelectedSongIdsForBulkDelete([]);
     setIsLibraryEditing(false);
     setIsSetlistAddSongsOpen(false);
-    setSelectedSongId(workspace.songs[0]?.id ?? '');
+    setSelectedSongId(pickAvailableSongId(workspace.songs, [
+      getStoredSelectedSongId(libraryId),
+      selectedSongId
+    ]));
     const nextSetlist = workspace.setlists[0] ?? workspace.joinedSetlists[0] ?? null;
     setSelectedSetlistId(nextSetlist?.id ?? null);
     setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
@@ -2610,7 +2666,7 @@ export default function App() {
       setAuthUiError(null);
       repository.setActiveLibrary(libraryId);
       const workspace = await repository.loadLibraryWorkspace(libraryId);
-      applyWorkspaceSnapshot(workspace);
+      applyWorkspaceSnapshot(workspace, libraryId);
       setActiveLibraryId(libraryId);
       setSelectedSetlistShareStatus(null);
       setTeamManagement(null);
@@ -4644,7 +4700,24 @@ export default function App() {
           setSavedSetlists(cloneSong(nextSetlists));
           setJoinedSetlists(nextJoinedSetlists);
           setLastSavedAt(cloudWorkspace.lastSavedAt);
-          setSelectedSongId((currentId) => nextSongs.some((item) => item.id === currentId) ? currentId : nextSongs[0]?.id ?? '');
+          const storedSelectedSongId = getStoredSelectedSongId(targetLibrary?.id ?? null);
+          setSelectedSongId((currentId) => pickAvailableSongId(nextSongs, [
+            storedSelectedSongId,
+            currentId
+          ]));
+          if (targetLibrary?.kind === 'personal') {
+            try {
+              window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
+              window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(nextSetlists));
+              if (cloudWorkspace.lastSavedAt !== null) {
+                window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(cloudWorkspace.lastSavedAt));
+              } else {
+                window.localStorage.removeItem(LAST_SAVED_AT_STORAGE_KEY);
+              }
+            } catch {
+              // Ignore local cache failures; the cloud workspace is already loaded in memory.
+            }
+          }
           setSelectedSetlistId((currentId) => {
             if (requestedSetlist) return requestedSetlist.id;
             if (nextSetlists.some((item) => item.id === currentId)) return currentId;
@@ -4777,12 +4850,19 @@ export default function App() {
   }, [isAutoSaveEnabled, setlists, songs, workspaceIsDirty]);
 
   useEffect(() => {
+    if (authenticatedUser && !activeLibraryId) {
+      return;
+    }
+
     try {
-      window.localStorage.setItem(SELECTED_SONG_STORAGE_KEY, selectedSongId);
+      persistSelectedSongId(activeLibraryId, selectedSongId);
+      if (activeCloudLibrary?.kind === 'personal') {
+        persistSelectedSongId(null, selectedSongId);
+      }
     } catch {
       // Ignore storage failures and keep the app usable.
     }
-  }, [selectedSongId]);
+  }, [activeCloudLibrary?.kind, activeLibraryId, authenticatedUser, selectedSongId]);
 
   useEffect(() => {
     try {

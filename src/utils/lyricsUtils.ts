@@ -47,23 +47,54 @@ export const normalizeBarLyrics = (lyrics?: string[] | null) => {
 export const getChordAnchorSlotIndexes = (chords: string[], beatsPerBar: number) => {
   const visibleChords = normalizeBarChords(chords);
   const beatCount = Math.max(1, beatsPerBar);
+  let lastVisibleIndex = visibleChords.length - 1;
+  while (lastVisibleIndex >= 0 && !visibleChords[lastVisibleIndex].trim()) {
+    lastVisibleIndex -= 1;
+  }
+  const layoutChords = visibleChords.slice(0, lastVisibleIndex + 1);
 
-  if (visibleChords.length === 0) {
+  if (layoutChords.length === 0) {
     return [] as number[];
   }
 
-  if (visibleChords.length === 2 && beatCount > 1 && !visibleChords.includes('')) {
-    return [0, getTwoChordSplitSlotIndex(beatCount)];
+  const meaningfulChords = layoutChords.filter((chord) => {
+    const trimmed = chord.trim();
+    return trimmed && trimmed !== '/';
+  });
+  const hasBeatSlashPlaceholder = layoutChords.some((chord) => chord.trim() === '/');
+  const meaningfulIndexes = layoutChords
+    .map((chord, index) => ({ chord: chord.trim(), index }))
+    .filter(({ chord }) => chord && chord !== '/')
+    .map(({ index }) => index);
+
+  if (meaningfulChords.length === 2 && !hasBeatSlashPlaceholder) {
+    const firstMeaningfulIndex = meaningfulIndexes[0] ?? 0;
+    const secondMeaningfulIndex = meaningfulIndexes[1] ?? layoutChords.length - 1;
+    const emptyBeatsBetween = layoutChords
+      .slice(firstMeaningfulIndex + 1, secondMeaningfulIndex)
+      .filter((chord) => !chord.trim()).length;
+    const secondSlotIndex = Math.min(beatCount - 1, getTwoChordSplitSlotIndex(beatCount) + emptyBeatsBetween);
+
+    return layoutChords.map((_, index) => {
+      if (index === firstMeaningfulIndex) return Math.min(firstMeaningfulIndex, beatCount - 1);
+      if (index === secondMeaningfulIndex) return secondSlotIndex;
+      return Math.min(index, beatCount - 1);
+    });
   }
 
-  return visibleChords
+  return layoutChords
     .slice(0, beatCount)
     .map((_, index) => index);
 };
 
 export const getChordDisplaySlots = (chords: string[], beatsPerBar: number) => {
   const beatCount = Math.max(1, beatsPerBar);
-  const visibleChords = normalizeBarChords(chords).slice(0, beatCount);
+  const normalizedChords = normalizeBarChords(chords);
+  let lastVisibleIndex = normalizedChords.length - 1;
+  while (lastVisibleIndex >= 0 && !normalizedChords[lastVisibleIndex].trim()) {
+    lastVisibleIndex -= 1;
+  }
+  const visibleChords = normalizedChords.slice(0, lastVisibleIndex + 1).slice(0, beatCount);
   const slotIndexes = getChordAnchorSlotIndexes(visibleChords, beatCount);
   const slots = Array.from({ length: beatCount }, () => '');
 
@@ -81,7 +112,12 @@ export const getLyricAnchors = (
   beatsPerBar: number
 ): LyricAnchor[] => {
   const beatCount = Math.max(1, beatsPerBar);
-  const visibleChords = normalizeBarChords(chords).slice(0, beatCount);
+  const normalizedChords = normalizeBarChords(chords);
+  let lastVisibleIndex = normalizedChords.length - 1;
+  while (lastVisibleIndex >= 0 && !normalizedChords[lastVisibleIndex].trim()) {
+    lastVisibleIndex -= 1;
+  }
+  const visibleChords = normalizedChords.slice(0, lastVisibleIndex + 1).slice(0, beatCount);
   const visibleLyrics = normalizeBarLyrics(lyrics);
   const slotIndexes = getChordAnchorSlotIndexes(visibleChords, beatCount);
 
