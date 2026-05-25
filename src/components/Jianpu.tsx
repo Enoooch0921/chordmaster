@@ -1,5 +1,6 @@
 import React from 'react';
 import { JianpuDuration, JianpuNoteRange, findJianpuNoteRanges, findJianpuPlaceholderRanges } from '../utils/jianpuUtils';
+import { parseTimeSignature } from '../utils/rhythmUtils';
 
 interface JianpuProps {
   notation?: string;
@@ -8,6 +9,7 @@ interface JianpuProps {
   scale?: number;
   className?: string;
   renderMode?: 'preview' | 'editor';
+  timeSignature?: string;
   previousNotationForCrossBar?: string;
   nextNotationForCrossBar?: string;
   activeTokenIndex?: number | null;
@@ -68,23 +70,21 @@ const JIANPU_SYMBOL_FONT = '"Avenir Next", "PingFang TC", "Microsoft JhengHei", 
 const applyAutoDurationShorthand = (
   notes: JianpuNoteRange[],
   slotCount = notes.length,
-  hasExplicitGrid = false
+  hasExplicitGrid = false,
+  tokenCapacityUnits = 4
 ) => {
   if (notes.length === 0) return notes;
   if (hasExplicitGrid) return notes;
 
   const hasExplicitDurations = notes.some((note) => note.duration !== 'quarter');
-  if (!hasExplicitDurations) {
-    if (slotCount === 2) {
-      return notes.map((note) => ({ ...note, duration: 'eighth' as const }));
-    }
-    if (slotCount === 4) {
-      return notes.map((note) => ({ ...note, duration: 'sixteenth' as const }));
-    }
-    return notes;
-  }
+  if (hasExplicitDurations) return notes;
 
-  return notes;
+  const unitsPerNote = slotCount > 0 ? tokenCapacityUnits / slotCount : 4;
+  if (unitsPerNote >= 4) return notes;
+  if (unitsPerNote >= 2) {
+    return notes.map((note) => ({ ...note, duration: 'eighth' as const }));
+  }
+  return notes.map((note) => ({ ...note, duration: 'sixteenth' as const }));
 };
 
 const getTokenList = (notation?: string, tokens?: string[]) => {
@@ -122,6 +122,7 @@ const Jianpu: React.FC<JianpuProps> = ({
   scale = 1,
   className = '',
   renderMode = 'preview',
+  timeSignature = '4/4',
   previousNotationForCrossBar,
   nextNotationForCrossBar,
   activeTokenIndex = null,
@@ -133,6 +134,10 @@ const Jianpu: React.FC<JianpuProps> = ({
   onNoteClick,
   showPlaceholders = false
 }) => {
+  const tokenCapacityUnits = React.useMemo(() => {
+    const { beatUnits } = parseTimeSignature(timeSignature);
+    return beatUnits > 0 ? beatUnits : 4;
+  }, [timeSignature]);
   const tokenList = React.useMemo(
     () => getTokenList(notation, tokens),
     [notation, tokens]
@@ -241,14 +246,15 @@ const Jianpu: React.FC<JianpuProps> = ({
       const parsedNotes = applyAutoDurationShorthand(
         rawNotes,
         rawNotes.length + parsedPlaceholders.length,
-        parsedPlaceholders.length > 0
+        parsedPlaceholders.length > 0,
+        tokenCapacityUnits
       );
       const slotItems = [
         ...parsedNotes.map((note) => ({ kind: 'note' as const, start: note.start, end: note.end, note })),
         ...parsedPlaceholders.map((placeholder) => ({ kind: 'placeholder' as const, start: placeholder.start, end: placeholder.end, placeholder }))
       ].sort((a, b) => a.start - b.start);
       if (slotItems.length === 0) {
-        carryUnits = useCarryLayout ? Math.max(0, carryInUnits - TOKEN_CAPACITY_UNITS) : 0;
+        carryUnits = useCarryLayout ? Math.max(0, carryInUnits - tokenCapacityUnits) : 0;
         return;
       }
 
@@ -259,9 +265,9 @@ const Jianpu: React.FC<JianpuProps> = ({
         const unitStart = carryInUnits + unitCursor;
         const unitEnd = unitStart + spanUnits;
         const anchorOffsetUnits = renderMode === 'editor'
-          ? Math.max(0.5, Math.min(spanUnits, Math.max(0, TOKEN_CAPACITY_UNITS - unitStart)) / 2)
+          ? Math.max(0.5, Math.min(spanUnits, Math.max(0, tokenCapacityUnits - unitStart)) / 2)
           : getAnchorOffsetUnits(item.kind === 'note' ? item.note : item.placeholder);
-        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + anchorOffsetUnits) / TOKEN_CAPACITY_UNITS));
+        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + anchorOffsetUnits) / tokenCapacityUnits));
         unitCursor += spanUnits;
 
         if (item.kind === 'placeholder') {
@@ -293,7 +299,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       const tokenTotalUnits = slotItems.reduce((sum, item) => (
         sum + (item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder))
       ), 0);
-      carryUnits = useCarryLayout ? Math.max(0, carryInUnits + tokenTotalUnits - TOKEN_CAPACITY_UNITS) : 0;
+      carryUnits = useCarryLayout ? Math.max(0, carryInUnits + tokenTotalUnits - tokenCapacityUnits) : 0;
 
       if (tokenNotes.length > 0) {
         for (let level = 1 as const; level <= 2; level += 1) {
@@ -393,7 +399,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       underlineSegments: underlines,
       slurSegments: slurs
     };
-  }, [metrics.noteHalfWidthUnits, metrics.tokenPaddingUnits, renderMode, tokenList]);
+  }, [metrics.noteHalfWidthUnits, metrics.tokenPaddingUnits, renderMode, tokenList, tokenCapacityUnits]);
 
   const tokenCount = Math.max(1, tokenList.length);
   const totalWidthUnits = tokenCount * TOKEN_WIDTH_UNITS;
@@ -455,14 +461,15 @@ const Jianpu: React.FC<JianpuProps> = ({
       const parsedNotes = applyAutoDurationShorthand(
         rawNotes,
         rawNotes.length + parsedPlaceholders.length,
-        parsedPlaceholders.length > 0
+        parsedPlaceholders.length > 0,
+        tokenCapacityUnits
       );
       const slotItems = [
         ...parsedNotes.map((note) => ({ kind: 'note' as const, start: note.start, end: note.end, note })),
         ...parsedPlaceholders.map((placeholder) => ({ kind: 'placeholder' as const, start: placeholder.start, end: placeholder.end, placeholder }))
       ].sort((a, b) => a.start - b.start);
       if (slotItems.length === 0) {
-        carryUnits = Math.max(0, carryInUnits - TOKEN_CAPACITY_UNITS);
+        carryUnits = Math.max(0, carryInUnits - tokenCapacityUnits);
         return;
       }
 
@@ -473,7 +480,7 @@ const Jianpu: React.FC<JianpuProps> = ({
         const spanUnits = item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder);
         const unitStart = carryInUnits + unitCursor;
         const unitEnd = unitStart + spanUnits;
-        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + getAnchorOffsetUnits(item.kind === 'note' ? item.note : item.placeholder)) / TOKEN_CAPACITY_UNITS));
+        const xUnits = beatStartUnits + (TOKEN_WIDTH_UNITS * ((unitStart + getAnchorOffsetUnits(item.kind === 'note' ? item.note : item.placeholder)) / tokenCapacityUnits));
         unitCursor += spanUnits;
 
         if (item.kind !== 'note') return;
@@ -495,11 +502,11 @@ const Jianpu: React.FC<JianpuProps> = ({
       const tokenTotalUnits = slotItems.reduce((sum, item) => (
         sum + (item.kind === 'note' ? getLayoutUnits(item.note) : getLayoutUnits(item.placeholder))
       ), 0);
-      carryUnits = Math.max(0, carryInUnits + tokenTotalUnits - TOKEN_CAPACITY_UNITS);
+      carryUnits = Math.max(0, carryInUnits + tokenTotalUnits - tokenCapacityUnits);
     });
 
     return nextNotes;
-  }, [metrics.noteHalfWidthUnits]);
+  }, [metrics.noteHalfWidthUnits, tokenCapacityUnits]);
   const previousCrossBarNotes = React.useMemo(
     () => getNotationPreviewNotes(previousNotationForCrossBar),
     [getNotationPreviewNotes, previousNotationForCrossBar]
@@ -667,13 +674,13 @@ const Jianpu: React.FC<JianpuProps> = ({
         const centerLeft = centerPx !== null ? `${centerPx}px` : `${xPercent}%`;
         const isSelectedNote = activeNote?.tokenIndex === note.tokenIndex && activeNote?.noteIndex === note.noteIndex;
         const selectionStartUnits = note.tokenIndex * TOKEN_WIDTH_UNITS
-          + (TOKEN_WIDTH_UNITS * (Math.min(note.unitStart, TOKEN_CAPACITY_UNITS) / TOKEN_CAPACITY_UNITS));
+          + (TOKEN_WIDTH_UNITS * (Math.min(note.unitStart, tokenCapacityUnits) / tokenCapacityUnits));
         const selectionVisibleSpanUnits = Math.max(
           0,
-          Math.min(note.unitEnd, TOKEN_CAPACITY_UNITS) - Math.min(note.unitStart, TOKEN_CAPACITY_UNITS)
+          Math.min(note.unitEnd, tokenCapacityUnits) - Math.min(note.unitStart, tokenCapacityUnits)
         );
         const selectionLeftPercent = (selectionStartUnits / totalWidthUnits) * 100;
-        const selectionWidthPercent = ((TOKEN_WIDTH_UNITS * (selectionVisibleSpanUnits / TOKEN_CAPACITY_UNITS)) / totalWidthUnits) * 100;
+        const selectionWidthPercent = ((TOKEN_WIDTH_UNITS * (selectionVisibleSpanUnits / tokenCapacityUnits)) / totalWidthUnits) * 100;
         const selectionMetrics = renderMode === 'editor'
           ? note.duration === 'sixteenth'
             ? { width: 10, height: 23, radius: '4px' }

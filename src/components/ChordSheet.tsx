@@ -78,6 +78,19 @@ const isWholeRestChord = (chordString?: string) => {
   return trimmed === '0w' || trimmed.toUpperCase() === 'RW' || normalized === 'restw' || normalized === 'whole_rest';
 };
 
+const MULTI_MEASURE_REST_PATTERN = /^\|(\d{1,3})\|$/;
+
+const getMultiMeasureRestCount = (chordString?: string) => {
+  const trimmed = chordString?.trim();
+  if (!trimmed) return 0;
+  const match = trimmed.match(MULTI_MEASURE_REST_PATTERN);
+  if (!match) return 0;
+  const count = parseInt(match[1], 10);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+};
+
+const isMultiMeasureRestChord = (chordString?: string) => getMultiMeasureRestCount(chordString) > 0;
+
 const getPreviewRiffNotation = (notation: string | undefined, timeSignature: string) => {
   const trimmed = notation?.trim();
   if (!trimmed) return undefined;
@@ -208,6 +221,27 @@ const getSectionBadgeStyle = (accent: string): React.CSSProperties => {
 };
 
 const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactModifier = false, nashvilleFontFamily, chordFontFamily, compactSlashBass = false }) => {
+  const multiMeasureRestCount = getMultiMeasureRestCount(chordString);
+  if (multiMeasureRestCount > 0) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <div className="flex w-1/3 min-w-[42px] flex-col items-center leading-none text-gray-900">
+          <span className="text-[16px] font-semibold tabular-nums">{multiMeasureRestCount}</span>
+          <svg
+            viewBox="0 0 100 20"
+            preserveAspectRatio="none"
+            className="mt-[2px] h-[18px] w-full"
+            aria-hidden="true"
+          >
+            <line x1="3" y1="1" x2="3" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <line x1="97" y1="1" x2="97" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <rect x="3" y="7" width="94" height="6" fill="currentColor" />
+          </svg>
+        </div>
+      </div>
+    );
+  }
+
   if (chordString === '%') {
     return (
       <div className="flex items-center justify-center w-full h-full">
@@ -897,6 +931,10 @@ const getDisplayedChordString = (
   sectionPlayKey: Key,
   useNashvilleNumbers: boolean
 ) => {
+  if (isMultiMeasureRestChord(chord)) {
+    return chord.trim();
+  }
+
   const transposed = transposeChord(chord, sectionOffset, sectionPlayKey);
 
   if (useNashvilleNumbers) {
@@ -1451,7 +1489,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                   style={pickupRiffHighlightStyle}
                                 />
                               )}
-                              <Jianpu notation={pickupPreviewNotation} compact scale={previewJianpuScale} className="relative z-10 w-full min-w-0" />
+                              <Jianpu notation={pickupPreviewNotation} compact scale={previewJianpuScale} timeSignature={song.timeSignature} className="relative z-10 w-full min-w-0" />
                             </div>
                           </button>
                         )}
@@ -1723,16 +1761,19 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       );
                                     }
 
-                                      const occupiedChordAnchors = displayChords.flatMap((displayChord, slotIndex) => {
-                                        if (!displayChord) return [];
-
-                                      return [{
-                                        chord: displayChord,
-                                        slotIndex,
-                                          span: 1
-                                        }];
-                                      });
-                                    const centeredWholeRestAnchor = occupiedChordAnchors.length === 1 && isWholeRestChord(occupiedChordAnchors[0]?.chord)
+                                      const occupiedChordAnchors = (() => {
+                                        const anchors = displayChords.flatMap((displayChord, slotIndex) => {
+                                          if (!displayChord) return [];
+                                          return [{ chord: displayChord, slotIndex, span: 1 }];
+                                        });
+                                        return anchors.map((anchor, index) => {
+                                          const nextSlotIndex = anchors[index + 1]?.slotIndex ?? beatsPerBar;
+                                          const slotsUntilNext = Math.max(1, nextSlotIndex - anchor.slotIndex);
+                                          return { ...anchor, span: 1, slotsUntilNext };
+                                        });
+                                      })();
+                                    const centeredWholeRestAnchor = occupiedChordAnchors.length === 1
+                                      && (isWholeRestChord(occupiedChordAnchors[0]?.chord) || isMultiMeasureRestChord(occupiedChordAnchors[0]?.chord))
                                       ? occupiedChordAnchors[0]
                                       : null;
                                     const renderBeatSlotChordGrid = (className: string) => (
@@ -1771,14 +1812,21 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             const { renderedChord, trimmedChord } = anchor;
                                             const isSlashPlaceholder = trimmedChord === '/';
                                             const isLongChord = !isSlashPlaceholder && (renderedChord.includes('/') || renderedChord.length >= 6);
+                                            const hasRoomToBreathe = !isSlashPlaceholder && (anchor.slotsUntilNext ?? 1) >= 2;
                                             const minScale = isSlashPlaceholder
                                               ? 1
-                                              : isLongChord
-                                                ? 0.66
-                                                : shouldUniformCompress
-                                                  ? 0.68
-                                                  : 0.82;
-                                            const maxScale = isSlashPlaceholder ? 1 : uniformChordMaxScale;
+                                              : hasRoomToBreathe
+                                                ? 1
+                                                : isLongChord
+                                                  ? 0.66
+                                                  : shouldUniformCompress
+                                                    ? 0.68
+                                                    : 0.82;
+                                            const maxScale = isSlashPlaceholder
+                                              ? 1
+                                              : hasRoomToBreathe
+                                                ? 1
+                                                : uniformChordMaxScale;
 
 	                                            return (
 	                                              <div
@@ -1791,7 +1839,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                 }}
                                               >
                                                 <AutoShrink
-                                                  align="center"
+                                                  align={hasRoomToBreathe ? 'left' : 'center'}
                                                   minScale={minScale}
 	                                                  maxScale={maxScale}
 	                                                  overflowVisible
@@ -2006,6 +2054,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             notation={previewRiffNotation}
                                             compact
                                             scale={previewJianpuScale}
+                                            timeSignature={effectiveTimeSignature}
                                             className="w-full min-w-0"
                                             previousNotationForCrossBar={previewPreviousRiffNotation}
                                             nextNotationForCrossBar={previewNextRiffNotation}
@@ -2047,6 +2096,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             notation={previewRiffNotation}
                                             compact
                                             scale={previewJianpuScale}
+                                            timeSignature={effectiveTimeSignature}
                                             className="w-full min-w-0"
                                             previousNotationForCrossBar={previewPreviousRiffNotation}
                                             nextNotationForCrossBar={previewNextRiffNotation}

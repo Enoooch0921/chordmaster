@@ -4928,9 +4928,19 @@ const SongEditor: React.FC<Props> = ({
                   : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
               }`}
             >
-              <div className="w-8 scale-[0.9] origin-center">
-                <Jianpu notation="1=2=3=4=" compact className="pointer-events-none" />
-              </div>
+              <span className="text-[11px] font-bold leading-none">簡譜</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => updateBarPanelState(bar, sIdx, bIdx, { rhythm: !panelState.rhythm })}
+              title={copy.editor.rhythm}
+              className={`h-7 min-w-[44px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
+                panelState.rhythm
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                  : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <span className="text-[11px] font-bold leading-none">節奏</span>
             </button>
             <button
               type="button"
@@ -4944,20 +4954,6 @@ const SongEditor: React.FC<Props> = ({
             >
               <span className="text-[11px] font-bold leading-none">
                 {bar.timeSignature || song.timeSignature || '4/4'}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => updateBarPanelState(bar, sIdx, bIdx, { rhythm: !panelState.rhythm })}
-              title={copy.editor.rhythm}
-              className={`h-7 min-w-[44px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
-                panelState.rhythm
-                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
-                  : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
-              }`}
-            >
-              <span className="font-rhythm text-[18px] leading-none select-none whitespace-pre -translate-y-[1px]">
-                ♬
               </span>
             </button>
             <button
@@ -6508,9 +6504,19 @@ const SongEditor: React.FC<Props> = ({
                             : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
                         }`}
                       >
-                        <div className="w-8 scale-[0.9] origin-center">
-                          <Jianpu notation="1=2=3=4=" compact className="pointer-events-none" />
-                        </div>
+                        <span className="text-[11px] font-bold leading-none">簡譜</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateBarPanelState(bar, sIdx, bIdx, { rhythm: !panelState.rhythm })}
+                        title={copy.editor.rhythm}
+                        className={`h-7 min-w-[44px] px-1.5 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
+                          panelState.rhythm
+                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                            : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+                        }`}
+                      >
+                        <span className="text-[11px] font-bold leading-none">節奏</span>
                       </button>
                       <button
                         type="button"
@@ -6524,20 +6530,6 @@ const SongEditor: React.FC<Props> = ({
                       >
                         <span className="text-[11px] font-bold leading-none">
                           {bar.timeSignature || song.timeSignature || '4/4'}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateBarPanelState(bar, sIdx, bIdx, { rhythm: !panelState.rhythm })}
-                        title={copy.editor.rhythm}
-                        className={`h-7 min-w-[44px] px-1.5 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
-                          panelState.rhythm
-                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
-                            : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
-                        }`}
-                      >
-                        <span className="font-rhythm text-[18px] leading-none select-none whitespace-pre -translate-y-[1px]">
-                          ♬
                         </span>
                       </button>
                       <button

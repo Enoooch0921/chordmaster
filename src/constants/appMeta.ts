@@ -85,6 +85,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-26',
+        title: 'Compound-meter jianpu fix, multi-measure rest, and chord layout polish',
+        bullets: [
+          'Fixed 6/8 and other compound-meter jianpu where notes beyond the first pulse overflowed past the bar line.',
+          'Added a multi-measure rest symbol — type `|N|` (e.g. `|4|`) in a chord cell to render an N-bar rest.',
+          'Single-chord bars and bars with chords on beats 1 and 3 are no longer auto-compressed; the chord renders at natural size anchored to its beat.',
+          'Bar toolbar 1234 / ♬ icons are now text labels `簡譜` / `節奏`, reordered so they sit next to each other.'
+        ]
+      },
+      {
+        version: '0.8.6',
         date: '2026-05-25',
         title: 'Desktop setlist workflow and performance paging',
         bullets: [
@@ -260,6 +271,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-26',
+        title: '複合拍子簡譜修正、多小節休止符、和弦排版優化',
+        bullets: [
+          '修正 6/8 等複合拍子簡譜在第一拍以後的音會溢出小節線的問題。',
+          '新增多小節休止符記號 ── 在和弦欄位輸入 `|N|` (例如 `|4|`) 即可顯示 N 個小節休止。',
+          '單和弦小節，以及第 1+3 拍兩個和弦的小節，不再自動壓縮，和弦會以原始大小從拍點開始顯示。',
+          '小節工具列的 1234 / ♬ 圖示改成「簡譜」/「節奏」文字，並把兩者調整為相鄰排列。'
+        ]
+      },
+      {
+        version: '0.8.6',
         date: '2026-05-25',
         title: '桌面歌單流程與演出模式翻頁',
         bullets: [
