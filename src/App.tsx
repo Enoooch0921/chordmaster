@@ -5164,7 +5164,9 @@ export default function App() {
           <div
             key={item.id}
             data-setlist-preview-song-id={item.id}
-            className="w-full"
+            className={`w-full rounded-[18px] transition-[box-shadow,outline-color] duration-200 ${
+              isSelected ? 'outline outline-2 outline-offset-4 outline-indigo-200 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'outline outline-2 outline-offset-4 outline-transparent'
+            }`}
           >
             <ChordSheet
               song={previewSong}
@@ -5191,6 +5193,36 @@ export default function App() {
     setActiveBar(null);
     setActiveSectionId(activeEditorSong?.sections[0]?.id ?? null);
   }, [currentPreviewIdentity]);
+
+  useEffect(() => {
+    if (!isSetlistMode || !selectedSetlistSongId || setlistPreviewSongs.length === 0) {
+      return;
+    }
+
+    let frameId = window.requestAnimationFrame(() => {
+      frameId = window.requestAnimationFrame(() => {
+        const scrollRoot = previewRef.current;
+        if (!scrollRoot) return;
+
+        const target = scrollRoot.querySelector<HTMLElement>(`[data-setlist-preview-song-id="${selectedSetlistSongId}"]`);
+        if (!target) return;
+
+        const rootRect = scrollRoot.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const offsetTop = targetRect.top - rootRect.top + scrollRoot.scrollTop;
+        const desiredTop = Math.max(0, offsetTop - Math.min(120, rootRect.height * 0.16));
+
+        if (Math.abs(scrollRoot.scrollTop - desiredTop) < 12) return;
+
+        scrollRoot.scrollTo({
+          top: desiredTop,
+          behavior: 'smooth'
+        });
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
 
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
     const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));
@@ -9846,7 +9878,7 @@ export default function App() {
           <button
             type="button"
             onClick={handlePerformancePrevPage}
-            className="absolute left-0 top-0 bottom-0 w-16 flex items-center justify-start pl-3 text-white/25 transition-colors hover:text-white/60"
+            className="absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3 text-white/25 transition-colors hover:text-white/60"
             aria-label="Previous page"
           >
             <ChevronLeft size={32} />
@@ -9856,7 +9888,7 @@ export default function App() {
           <button
             type="button"
             onClick={handlePerformanceNextPage}
-            className="absolute right-0 top-0 bottom-0 w-16 flex items-center justify-end pr-3 text-white/25 transition-colors hover:text-white/60"
+            className="absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3 text-white/25 transition-colors hover:text-white/60"
             aria-label="Next page"
           >
             <ChevronRight size={32} />
