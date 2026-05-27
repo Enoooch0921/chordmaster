@@ -124,11 +124,16 @@ const PERFORMANCE_NEXT_KEY_CODES = new Set([13, 32, 34, 39, 40]);
 const PERFORMANCE_PREV_KEY_CODES = new Set([33, 37, 38]);
 const PERFORMANCE_TOGGLE_KEY_VALUES = new Set([' ', 'Space', 'Spacebar', 'Enter']);
 const PERFORMANCE_SPACE_KEY_VALUES = new Set([' ', 'Space', 'Spacebar']);
+const PERFORMANCE_KEYBOARD_CAPTURE_ATTRIBUTE = 'data-performance-keyboard-capture';
 
 type PerformancePageDirection = 'next' | 'prev';
 
 const isInteractiveKeyboardTarget = (target: EventTarget | null) => {
   if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target.closest(`[${PERFORMANCE_KEYBOARD_CAPTURE_ATTRIBUTE}]`)) {
     return false;
   }
 
@@ -1589,6 +1594,7 @@ export default function App() {
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
   const performanceOverlayRef = useRef<HTMLDivElement>(null);
+  const performanceKeyboardCaptureRef = useRef<HTMLInputElement>(null);
   const performanceSheetRef = useRef<HTMLDivElement>(null);
   const performanceTranslatorRef = useRef<HTMLDivElement>(null);
   const performancePageIndexRef = useRef(0);
@@ -4513,6 +4519,13 @@ export default function App() {
       `scale(${scale}) translateY(-${offset}px)`;
   };
 
+  const focusPerformanceKeyboardCapture = () => {
+    const focusTarget = performanceKeyboardCaptureRef.current ?? performanceOverlayRef.current;
+    if (!focusTarget || document.activeElement === focusTarget) return;
+
+    focusTarget.focus({ preventScroll: true });
+  };
+
   const handleEnterPerformanceMode = () => {
     performancePageIndexRef.current = 0;
     setPerformancePageIndex(0);
@@ -4683,8 +4696,9 @@ export default function App() {
 
   useEffect(() => {
     if (!isPerformanceMode) return;
-    const rafId = window.requestAnimationFrame(() => performanceOverlayRef.current?.focus({ preventScroll: true }));
+    const rafId = window.requestAnimationFrame(focusPerformanceKeyboardCapture);
     return () => window.cancelAnimationFrame(rafId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPerformanceMode]);
 
   // Prevent background scroll on iOS when performance mode is active
@@ -9978,9 +9992,25 @@ export default function App() {
           ref={performanceOverlayRef}
           tabIndex={-1}
           className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-950 select-none"
+          onPointerDownCapture={focusPerformanceKeyboardCapture}
+          onMouseDownCapture={focusPerformanceKeyboardCapture}
+          onTouchStartCapture={focusPerformanceKeyboardCapture}
           onTouchStart={handlePerformanceTouchStart}
           onTouchEnd={handlePerformanceTouchEnd}
         >
+          <input
+            ref={performanceKeyboardCaptureRef}
+            data-performance-keyboard-capture
+            aria-label="Performance keyboard capture"
+            autoCapitalize="off"
+            autoComplete="off"
+            autoCorrect="off"
+            inputMode="none"
+            spellCheck={false}
+            tabIndex={-1}
+            className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0"
+          />
+
           {/* Clip container: shows exactly one A4 page at performanceScale */}
           <div style={{
             width: PREVIEW_TARGET_WIDTH * performanceScale,
