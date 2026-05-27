@@ -116,6 +116,70 @@ const VALID_SETLIST_SORT_MODES = new Set<SetlistSortMode>([
   'created-desc',
   'name-asc'
 ]);
+const PERFORMANCE_NEXT_KEYS = new Set(['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Space', 'Spacebar', 'Enter']);
+const PERFORMANCE_PREV_KEYS = new Set(['ArrowLeft', 'ArrowUp', 'PageUp']);
+const PERFORMANCE_NEXT_CODES = new Set(['ArrowRight', 'ArrowDown', 'PageDown', 'Space', 'Enter', 'NumpadEnter']);
+const PERFORMANCE_PREV_CODES = new Set(['ArrowLeft', 'ArrowUp', 'PageUp']);
+const PERFORMANCE_NEXT_KEY_CODES = new Set([13, 32, 34, 39, 40]);
+const PERFORMANCE_PREV_KEY_CODES = new Set([33, 37, 38]);
+const PERFORMANCE_TOGGLE_KEY_VALUES = new Set([' ', 'Space', 'Spacebar', 'Enter']);
+const PERFORMANCE_SPACE_KEY_VALUES = new Set([' ', 'Space', 'Spacebar']);
+
+type PerformancePageDirection = 'next' | 'prev';
+
+const isInteractiveKeyboardTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return target.isContentEditable || Boolean(target.closest('button, input, select, textarea, a[href]'));
+};
+
+const getPerformancePageDirection = (event: KeyboardEvent): PerformancePageDirection | null => {
+  const legacyKeyCode = event.keyCode || event.which || 0;
+  const isToggleKey = (
+    PERFORMANCE_TOGGLE_KEY_VALUES.has(event.key) ||
+    event.code === 'Space' ||
+    event.code === 'Enter' ||
+    event.code === 'NumpadEnter' ||
+    legacyKeyCode === 13 ||
+    legacyKeyCode === 32
+  );
+
+  if (isToggleKey && isInteractiveKeyboardTarget(event.target)) {
+    return null;
+  }
+
+  if (
+    event.shiftKey &&
+    (PERFORMANCE_SPACE_KEY_VALUES.has(event.key) || event.code === 'Space' || legacyKeyCode === 32)
+  ) {
+    return 'prev';
+  }
+
+  if (
+    PERFORMANCE_NEXT_KEYS.has(event.key) ||
+    PERFORMANCE_NEXT_CODES.has(event.code) ||
+    PERFORMANCE_NEXT_KEY_CODES.has(legacyKeyCode)
+  ) {
+    return 'next';
+  }
+
+  if (
+    PERFORMANCE_PREV_KEYS.has(event.key) ||
+    PERFORMANCE_PREV_CODES.has(event.code) ||
+    PERFORMANCE_PREV_KEY_CODES.has(legacyKeyCode)
+  ) {
+    return 'prev';
+  }
+
+  return null;
+};
+
+const getPerformanceKeyboardSignature = (event: KeyboardEvent) => {
+  const legacyKeyCode = event.keyCode || event.which || 0;
+  return `${event.key}:${event.code}:${legacyKeyCode}:${event.shiftKey ? 'shift' : ''}`;
+};
 
 const isLineInAppBrowser = () => (
   typeof navigator !== 'undefined' && /Line\//i.test(navigator.userAgent)
@@ -1524,11 +1588,13 @@ export default function App() {
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
+  const performanceOverlayRef = useRef<HTMLDivElement>(null);
   const performanceSheetRef = useRef<HTMLDivElement>(null);
   const performanceTranslatorRef = useRef<HTMLDivElement>(null);
   const performancePageIndexRef = useRef(0);
   const performancePageOffsetsRef = useRef<number[]>([]);
   const performanceTouchRef = useRef<{ x: number; y: number } | null>(null);
+  const lastPerformanceKeyboardEventRef = useRef<{ signature: string; handledAt: number } | null>(null);
   const autoSaveTimeoutRef = useRef<number | null>(null);
   const cloudRepositoryRef = useRef<ReturnType<typeof createCloudRepository> | null>(null);
   const [previewBaseScale, setPreviewBaseScale] = useState(1);
@@ -4579,13 +4645,46 @@ export default function App() {
   useEffect(() => {
     if (!isPerformanceMode) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') { e.preventDefault(); handlePerformanceNextPageRef.current(); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); handlePerformancePrevPageRef.current(); }
-      else if (e.key === 'Escape') { e.preventDefault(); handleExitPerformanceMode(); }
+      const direction = getPerformancePageDirection(e);
+      const signature = getPerformanceKeyboardSignature(e);
+      const now = window.performance.now();
+      const lastHandled = lastPerformanceKeyboardEventRef.current;
+
+      if (
+        e.type === 'keyup' &&
+        lastHandled?.signature === signature &&
+        now - lastHandled.handledAt < 350
+      ) {
+        return;
+      }
+
+      if (direction === 'next') {
+        e.preventDefault();
+        lastPerformanceKeyboardEventRef.current = { signature, handledAt: now };
+        handlePerformanceNextPageRef.current();
+      } else if (direction === 'prev') {
+        e.preventDefault();
+        lastPerformanceKeyboardEventRef.current = { signature, handledAt: now };
+        handlePerformancePrevPageRef.current();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        lastPerformanceKeyboardEventRef.current = { signature, handledAt: now };
+        handleExitPerformanceMode();
+      }
     };
     window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keyup', handler);
+    return () => {
+      window.removeEventListener('keydown', handler);
+      window.removeEventListener('keyup', handler);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPerformanceMode]);
+
+  useEffect(() => {
+    if (!isPerformanceMode) return;
+    const rafId = window.requestAnimationFrame(() => performanceOverlayRef.current?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(rafId);
   }, [isPerformanceMode]);
 
   // Prevent background scroll on iOS when performance mode is active
@@ -9876,6 +9975,8 @@ export default function App() {
 
       {isPerformanceMode && (
         <div
+          ref={performanceOverlayRef}
+          tabIndex={-1}
           className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-950 select-none"
           onTouchStart={handlePerformanceTouchStart}
           onTouchEnd={handlePerformanceTouchEnd}
@@ -9960,6 +10061,7 @@ export default function App() {
             onClick={handlePerformancePrevPage}
             className="absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3 text-white/25 transition-colors hover:text-white/60"
             aria-label="Previous page"
+            aria-keyshortcuts="ArrowLeft ArrowUp PageUp Shift+Space"
           >
             <ChevronLeft size={32} />
           </button>
@@ -9970,6 +10072,7 @@ export default function App() {
             onClick={handlePerformanceNextPage}
             className="absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3 text-white/25 transition-colors hover:text-white/60"
             aria-label="Next page"
+            aria-keyshortcuts="ArrowRight ArrowDown PageDown Space Enter"
           >
             <ChevronRight size={32} />
           </button>
