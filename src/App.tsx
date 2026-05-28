@@ -1591,6 +1591,13 @@ export default function App() {
   const editorFocusRequestIdRef = useRef(0);
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
+  const skipNextSetlistPreviewAutoScrollRef = useRef(false);
+  const setlistSongPointerDragRef = useRef<{
+    sourceId: string;
+    pointerId: number;
+    lastTargetId: string | null;
+    previousUserSelect: string;
+  } | null>(null);
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
   const performanceOverlayRef = useRef<HTMLDivElement>(null);
@@ -3643,6 +3650,72 @@ export default function App() {
     });
   };
 
+  const finishSetlistSongPointerDrag = (event?: React.PointerEvent<HTMLElement>) => {
+    const dragState = setlistSongPointerDragRef.current;
+    if (!dragState || (event && event.pointerId !== dragState.pointerId)) {
+      return;
+    }
+
+    if (event) {
+      try {
+        event.currentTarget.releasePointerCapture(dragState.pointerId);
+      } catch {
+        // Pointer capture may already be released by the browser.
+      }
+    }
+
+    document.body.style.userSelect = dragState.previousUserSelect;
+    setlistSongPointerDragRef.current = null;
+    setDraggingSetlistSongId(null);
+    setDragOverSetlistSongId(null);
+  };
+
+  const handleSetlistSongDragHandlePointerDown = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    setlistSongId: string
+  ) => {
+    if (!canEditSelectedSetlist || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    setlistSongPointerDragRef.current = {
+      sourceId: setlistSongId,
+      pointerId: event.pointerId,
+      lastTargetId: setlistSongId,
+      previousUserSelect: document.body.style.userSelect
+    };
+    document.body.style.userSelect = 'none';
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingSetlistSongId(setlistSongId);
+    setDragOverSetlistSongId(setlistSongId);
+  };
+
+  const handleSetlistSongDragHandlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const dragState = setlistSongPointerDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const targetElement = document.elementFromPoint(event.clientX, event.clientY);
+    const targetCard = targetElement?.closest('[data-setlist-song-id]') as HTMLElement | null;
+    const targetId = targetCard?.dataset.setlistSongId;
+    if (!targetId || targetId === dragState.lastTargetId) {
+      return;
+    }
+
+    dragState.lastTargetId = targetId;
+    setDragOverSetlistSongId(targetId);
+    if (targetId !== dragState.sourceId) {
+      moveSetlistSong(dragState.sourceId, targetId);
+    }
+  };
+
   const handleExportSongLibraryJson = () => {
     const payload: ExportedSongLibraryPayload = {
       version: 1,
@@ -5392,6 +5465,11 @@ export default function App() {
       return;
     }
 
+    if (skipNextSetlistPreviewAutoScrollRef.current) {
+      skipNextSetlistPreviewAutoScrollRef.current = false;
+      return;
+    }
+
     let frameId = window.requestAnimationFrame(() => {
       frameId = window.requestAnimationFrame(() => {
         const scrollRoot = previewRef.current;
@@ -5415,6 +5493,65 @@ export default function App() {
     });
 
     return () => window.cancelAnimationFrame(frameId);
+  }, [isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
+
+  useEffect(() => {
+    if (!isSetlistMode || setlistPreviewSongs.length === 0) {
+      return;
+    }
+
+    const scrollRoot = previewRef.current;
+    if (!scrollRoot) {
+      return;
+    }
+
+    let frameId: number | null = null;
+    const updateActiveSetlistSongFromScroll = () => {
+      frameId = null;
+      const rootRect = scrollRoot.getBoundingClientRect();
+      const activationY = rootRect.top + Math.min(180, Math.max(72, rootRect.height * 0.28));
+      const songCards = Array.from(scrollRoot.querySelectorAll('[data-setlist-preview-song-id]')) as HTMLElement[];
+
+      let nextSetlistSongId: string | null = null;
+      let smallestDistance = Number.POSITIVE_INFINITY;
+
+      for (const card of songCards) {
+        const cardRect = card.getBoundingClientRect();
+        const containsActivationLine = cardRect.top <= activationY && cardRect.bottom >= activationY;
+        const distance = containsActivationLine
+          ? 0
+          : Math.min(Math.abs(cardRect.top - activationY), Math.abs(cardRect.bottom - activationY));
+
+        if (distance < smallestDistance) {
+          smallestDistance = distance;
+          nextSetlistSongId = card.dataset.setlistPreviewSongId ?? null;
+        }
+      }
+
+      if (nextSetlistSongId && nextSetlistSongId !== selectedSetlistSongId) {
+        skipNextSetlistPreviewAutoScrollRef.current = true;
+        setSelectedSetlistSongId(nextSetlistSongId);
+      }
+    };
+
+    const requestScrollUpdate = () => {
+      if (frameId !== null) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(updateActiveSetlistSongFromScroll);
+    };
+
+    requestScrollUpdate();
+    scrollRoot.addEventListener('scroll', requestScrollUpdate, { passive: true });
+    window.addEventListener('resize', requestScrollUpdate);
+
+    return () => {
+      scrollRoot.removeEventListener('scroll', requestScrollUpdate);
+      window.removeEventListener('resize', requestScrollUpdate);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
   }, [isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
 
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
@@ -6672,41 +6809,36 @@ export default function App() {
               const displaySong = item.songData ?? sourceSong;
               const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
               const isDropTarget = dragOverSetlistSongId === item.id;
+              const isDragging = draggingSetlistSongId === item.id;
 
               return (
                 <div
                   key={item.id}
-                  {...(canEditSelectedSetlist && {
-                    draggable: true,
-                    onDragStart: () => setDraggingSetlistSongId(item.id),
-                    onDragOver: (event: React.DragEvent) => {
-                      event.preventDefault();
-                      if (dragOverSetlistSongId !== item.id) setDragOverSetlistSongId(item.id);
-                    },
-                    onDragLeave: () => { if (dragOverSetlistSongId === item.id) setDragOverSetlistSongId(null); },
-                    onDrop: (event: React.DragEvent) => {
-                      event.preventDefault();
-                      if (draggingSetlistSongId) moveSetlistSong(draggingSetlistSongId, item.id);
-                      setDraggingSetlistSongId(null);
-                      setDragOverSetlistSongId(null);
-                    },
-                    onDragEnd: () => { setDraggingSetlistSongId(null); setDragOverSetlistSongId(null); }
-                  })}
-                  className={`group rounded-xl border px-2.5 py-2 transition-all ${
+                  data-setlist-song-id={item.id}
+                  className={`group select-none rounded-xl border px-2.5 py-2 transition-all ${
                     isActive
                       ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
                       : isDropTarget
                         ? 'border-indigo-200 bg-indigo-50/70'
                         : 'border-gray-200 bg-white hover:bg-gray-50/70'
-                  }`}
+                  } ${isDragging ? 'scale-[0.99] ring-2 ring-indigo-200' : ''}`}
                 >
                   <div className="flex items-start gap-2">
                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <div className="flex min-w-0 items-center gap-2">
                         {canEditSelectedSetlist && (
-                          <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
+                          <button
+                            type="button"
+                            onPointerDown={(event) => handleSetlistSongDragHandlePointerDown(event, item.id)}
+                            onPointerMove={handleSetlistSongDragHandlePointerMove}
+                            onPointerUp={finishSetlistSongPointerDrag}
+                            onPointerCancel={finishSetlistSongPointerDrag}
+                            className="touch-none cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing"
+                            title={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
+                            aria-label={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
+                          >
                             <GripVertical size={14} />
-                          </div>
+                          </button>
                         )}
                         <button type="button" onClick={() => handleSelectSetlistSong(item.id)} className="min-w-0 flex-1 text-left">
                           <div className="text-sm font-bold text-gray-900">{displaySong.title || sourceSong.title || copy.untitledSong}</div>
@@ -7248,41 +7380,36 @@ export default function App() {
                               const displaySong = item.songData ?? sourceSong;
                               const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
                               const isDropTarget = dragOverSetlistSongId === item.id;
+                              const isDragging = draggingSetlistSongId === item.id;
 
                               return (
                                 <div
                                   key={item.id}
-                                  {...(canEditSelectedSetlist && {
-                                    draggable: true,
-                                    onDragStart: () => setDraggingSetlistSongId(item.id),
-                                    onDragOver: (event: React.DragEvent) => {
-                                      event.preventDefault();
-                                      if (dragOverSetlistSongId !== item.id) setDragOverSetlistSongId(item.id);
-                                    },
-                                    onDragLeave: () => { if (dragOverSetlistSongId === item.id) setDragOverSetlistSongId(null); },
-                                    onDrop: (event: React.DragEvent) => {
-                                      event.preventDefault();
-                                      if (draggingSetlistSongId) moveSetlistSong(draggingSetlistSongId, item.id);
-                                      setDraggingSetlistSongId(null);
-                                      setDragOverSetlistSongId(null);
-                                    },
-                                    onDragEnd: () => { setDraggingSetlistSongId(null); setDragOverSetlistSongId(null); }
-                                  })}
-                                  className={`group rounded-xl border px-2.5 py-2 transition-all ${
+                                  data-setlist-song-id={item.id}
+                                  className={`group select-none rounded-xl border px-2.5 py-2 transition-all ${
                                     isActive
                                       ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
                                       : isDropTarget
                                         ? 'border-indigo-200 bg-indigo-50/70'
                                         : 'border-gray-200 bg-white hover:bg-gray-50/70'
-                                  }`}
+                                  } ${isDragging ? 'scale-[0.99] ring-2 ring-indigo-200' : ''}`}
                                 >
                                   <div className="flex items-start gap-2">
                                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center gap-2">
                                         {canEditSelectedSetlist && (
-                                          <div className="cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing">
+                                          <button
+                                            type="button"
+                                            onPointerDown={(event) => handleSetlistSongDragHandlePointerDown(event, item.id)}
+                                            onPointerMove={handleSetlistSongDragHandlePointerMove}
+                                            onPointerUp={finishSetlistSongPointerDrag}
+                                            onPointerCancel={finishSetlistSongPointerDrag}
+                                            className="touch-none cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing"
+                                            title={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
+                                            aria-label={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
+                                          >
                                             <GripVertical size={14} />
-                                          </div>
+                                          </button>
                                         )}
                                         <button
                                           type="button"

@@ -1,7 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { resolveActiveSession } from '../lib/auth';
+import { NATIVE_AUTH_NEXT_PATH_STORAGE_KEY, resolveActiveSession } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+
+const getCallbackNextPath = (url: URL) => {
+  const nextPath = url.searchParams.get('next');
+  if (nextPath) {
+    return nextPath;
+  }
+
+  try {
+    const storedNextPath = window.localStorage.getItem(NATIVE_AUTH_NEXT_PATH_STORAGE_KEY);
+    window.localStorage.removeItem(NATIVE_AUTH_NEXT_PATH_STORAGE_KEY);
+    return storedNextPath || '/';
+  } catch {
+    return '/';
+  }
+};
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -18,7 +33,7 @@ export default function AuthCallbackPage() {
 
       const url = new URL(window.location.href);
       const authError = url.searchParams.get('error_description') || url.searchParams.get('error');
-      const nextPath = url.searchParams.get('next') || '/';
+      const nextPath = getCallbackNextPath(url);
       if (authError) {
         if (!isCancelled) {
           setErrorMessage(authError);
@@ -63,7 +78,7 @@ export default function AuthCallbackPage() {
       }
 
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-        const nextPath = new URL(window.location.href).searchParams.get('next') || '/';
+        const nextPath = getCallbackNextPath(new URL(window.location.href));
         navigate(nextPath.startsWith('/') ? nextPath : '/', { replace: true });
       }
     });

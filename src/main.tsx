@@ -1,4 +1,7 @@
 import { StrictMode } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import App from './App.tsx';
@@ -36,6 +39,34 @@ const restoreGitHubPagesSpaRedirect = () => {
 };
 
 restoreGitHubPagesSpaRedirect();
+
+const resolveNativeAppPath = (nativeUrl: string) => {
+  const url = new URL(nativeUrl);
+  if (url.protocol !== 'chordmaster:') {
+    return null;
+  }
+
+  const pathParts = [
+    url.hostname,
+    url.pathname.replace(/^\/+/, '')
+  ].filter(Boolean);
+  const path = `/${pathParts.join('/')}`.replace(/\/{2,}/g, '/');
+  return `${path}${url.search}${url.hash}`;
+};
+
+if (Capacitor.isNativePlatform()) {
+  void CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
+    const appPath = resolveNativeAppPath(url);
+    if (!appPath) {
+      return;
+    }
+
+    await Browser.close().catch(() => undefined);
+    const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+    window.history.replaceState(null, '', `${basePath}${appPath}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

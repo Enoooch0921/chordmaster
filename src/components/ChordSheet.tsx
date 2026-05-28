@@ -24,6 +24,7 @@ interface FormattedChordProps {
   nashvilleFontFamily?: string;
   chordFontFamily?: string;
   compactSlashBass?: boolean;
+  abbreviateMajorQuality?: boolean;
 }
 
 const splitChordQualityDisplay = (quality: string) => {
@@ -53,9 +54,9 @@ const getMajorQualitySuffix = (qualityText: string) => {
   return match ? match[1] : null;
 };
 
-const MajorQualityGlyph: React.FC<{ qualityText: string; numeric?: boolean }> = ({ qualityText, numeric = false }) => {
+const MajorQualityGlyph: React.FC<{ qualityText: string; numeric?: boolean; abbreviate?: boolean }> = ({ qualityText, numeric = false, abbreviate = false }) => {
   const suffix = getMajorQualitySuffix(qualityText);
-  if (suffix === null) {
+  if (suffix === null || !abbreviate) {
     return <>{qualityText}</>;
   }
 
@@ -220,7 +221,14 @@ const getSectionBadgeStyle = (accent: string): React.CSSProperties => {
   };
 };
 
-const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactModifier = false, nashvilleFontFamily, chordFontFamily, compactSlashBass = false }) => {
+const FormattedChord: React.FC<FormattedChordProps> = ({
+  chordString,
+  compactModifier = false,
+  nashvilleFontFamily,
+  chordFontFamily,
+  compactSlashBass = false,
+  abbreviateMajorQuality = false
+}) => {
   const multiMeasureRestCount = getMultiMeasureRestCount(chordString);
   if (multiMeasureRestCount > 0) {
     return (
@@ -517,6 +525,9 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
   const singleChordExtensionPositionClass = /^dim/i.test(qualityText)
     ? 'left-full top-[-0.74em] ml-[-1.32em]'
     : 'left-full top-[-0.08em] ml-[-1.32em]';
+  const symbolicQualityOffsetClass = hasExtensionTokens
+    ? 'translate-y-[0.22em]'
+    : 'translate-y-[0.08em]';
   const plainQualityClass = qualityText === 'm'
     ? 'text-[12px] -translate-y-[0.4em]'
     : /^sus/i.test(qualityText)
@@ -545,7 +556,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
               <span className="absolute left-full bottom-0 ml-[0.03em] inline-flex items-end whitespace-nowrap">
                 <span className={`relative inline-flex items-end ${numericQualityOffsetClass} ${numericQualityTextClass}`.trim()} style={numericQualityStyle}>
                   {symbolicQuality ? (
-                    <span className="inline-flex translate-y-[0.08em] items-baseline leading-none">
+                    <span className={`inline-flex ${symbolicQualityOffsetClass} items-baseline leading-none`}>
                       <span className="text-[16px] leading-none">{symbolicQuality.symbol}</span>
                       {symbolicQuality.extension && (
                         <span className="text-[8px] leading-none -ml-[0.04em] -translate-y-[0.5em]">
@@ -554,7 +565,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
                       )}
                     </span>
                   ) : (
-                    <MajorQualityGlyph qualityText={qualityText} numeric />
+                    <MajorQualityGlyph qualityText={qualityText} numeric abbreviate={abbreviateMajorQuality} />
                   )}
                   {hasExtensionTokens && (
                       <span
@@ -619,7 +630,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
         {qualityText && (
           <span className="relative inline-block ml-[0.5px]">
             {symbolicQuality ? (
-              <span className="inline-flex translate-y-[0.08em] items-baseline leading-none">
+              <span className={`inline-flex ${symbolicQualityOffsetClass} items-baseline leading-none`}>
                 <span className="text-[18px] leading-none">{symbolicQuality.symbol}</span>
                 {symbolicQuality.extension && (
                   <span className="text-[10px] leading-none -ml-[0.04em] -translate-y-[0.55em]">
@@ -629,7 +640,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({ chordString, compactMod
               </span>
             ) : (
               <span className={plainQualityClass}>
-                <MajorQualityGlyph qualityText={qualityText} />
+                <MajorQualityGlyph qualityText={qualityText} abbreviate={abbreviateMajorQuality} />
               </span>
             )}
             {hasExtensionTokens && (
@@ -925,27 +936,27 @@ const abbreviateChordQualityForDisplay = (chord: string) => (
     .replace(/dim/gi, '°')
 );
 
+const hasCrowdedAbbreviatableChordQuality = (chord: string) => (
+  /maj\d*/i.test(chord) || /dim/i.test(chord)
+);
+
 const getDisplayedChordString = (
   chord: string,
   sectionOffset: number,
   sectionPlayKey: Key,
-  useNashvilleNumbers: boolean
+  useNashvilleNumbers: boolean,
+  abbreviateQuality = false
 ) => {
   if (isMultiMeasureRestChord(chord)) {
     return chord.trim();
   }
 
   const transposed = transposeChord(chord, sectionOffset, sectionPlayKey);
+  const displayedChord = useNashvilleNumbers
+    ? isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey)
+    : isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;
 
-  if (useNashvilleNumbers) {
-    return abbreviateChordQualityForDisplay(
-      isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey)
-    );
-  }
-
-  return abbreviateChordQualityForDisplay(
-    isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed
-  );
+  return abbreviateQuality ? abbreviateChordQualityForDisplay(displayedChord) : displayedChord;
 };
 
 const ENDING_LEFT_OFFSETS = {
@@ -1783,14 +1794,27 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                       >
                                         {(() => {
-                                          const renderedAnchors = occupiedChordAnchors.map((anchor) => {
-                                            const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers);
+                                          const fullRenderedAnchors = occupiedChordAnchors.map((anchor) => {
+                                            const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers, false);
                                             return {
                                               ...anchor,
                                               renderedChord,
                                               trimmedChord: renderedChord.trim()
                                             };
                                           });
+                                          const meaningfulFullRenderedAnchors = fullRenderedAnchors.filter((anchor) => anchor.trimmedChord !== '/');
+                                          const shouldAbbreviateCrowdedQuality = meaningfulFullRenderedAnchors.length === 3
+                                            && meaningfulFullRenderedAnchors.some((anchor) => hasCrowdedAbbreviatableChordQuality(anchor.renderedChord));
+                                          const renderedAnchors = shouldAbbreviateCrowdedQuality
+                                            ? fullRenderedAnchors.map((anchor) => {
+                                                const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers, true);
+                                                return {
+                                                  ...anchor,
+                                                  renderedChord,
+                                                  trimmedChord: renderedChord.trim()
+                                                };
+                                              })
+                                            : fullRenderedAnchors;
                                           const meaningfulRenderedAnchors = renderedAnchors.filter((anchor) => anchor.trimmedChord !== '/');
                                           const hasLongChordInBar = meaningfulRenderedAnchors.some((anchor) => (
                                             anchor.trimmedChord !== '/'
@@ -1850,6 +1874,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                                    <FormattedChord
 	                                                      chordString={renderedChord}
 	                                                      compactModifier={compactModifier}
+                                                      abbreviateMajorQuality={shouldAbbreviateCrowdedQuality}
                                                       nashvilleFontFamily={nashvilleFontFamily}
                                                       chordFontFamily={chordFontFamily}
                                                     />

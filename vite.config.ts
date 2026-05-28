@@ -11,8 +11,9 @@ const packageJson = JSON.parse(readFileSync(new URL('./package.json', import.met
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const isDevelopment = mode === 'development';
+  const isCapacitorBuild = mode === 'capacitor' || env.VITE_APP_TARGET === 'capacitor';
   return {
-    base: isDevelopment ? '/' : '/chordmaster/',
+    base: isDevelopment || isCapacitorBuild ? '/' : '/chordmaster/',
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),

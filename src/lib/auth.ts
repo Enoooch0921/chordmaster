@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import type { Session } from '@supabase/supabase-js';
 import { AuthenticatedUser } from '../types';
 import { hasSupabaseConfig, supabase } from './supabase';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unconfigured';
 const SESSION_EXPIRY_SAFETY_WINDOW_SECONDS = 30;
+export const NATIVE_AUTH_NEXT_PATH_STORAGE_KEY = 'chordmaster.native-auth-next-path.v1';
 
 const mapSessionUser = (session: Session | null): AuthenticatedUser | null => {
   const user = session?.user;
@@ -32,22 +35,40 @@ export const buildAppUrl = (path: string) => (
   new URL(path.replace(/^\//, ''), new URL(import.meta.env.BASE_URL, window.location.origin)).toString()
 );
 
+const buildNativeAppUrl = (path: string) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `chordmaster://${normalizedPath.replace(/^\//, '')}`;
+};
+
 export const signInWithGoogleRedirect = async (nextPath = '/') => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
 
-  const callbackUrl = new URL(buildAppUrl('auth/callback'));
-  callbackUrl.searchParams.set('next', nextPath.startsWith('/') ? nextPath : `/${nextPath}`);
-  const { error } = await supabase.auth.signInWithOAuth({
+  const isNative = Capacitor.isNativePlatform();
+  const normalizedNextPath = nextPath.startsWith('/') ? nextPath : `/${nextPath}`;
+  const callbackUrl = new URL(isNative ? buildNativeAppUrl('auth/callback') : buildAppUrl('auth/callback'));
+
+  if (isNative) {
+    window.localStorage.setItem(NATIVE_AUTH_NEXT_PATH_STORAGE_KEY, normalizedNextPath);
+  } else {
+    callbackUrl.searchParams.set('next', normalizedNextPath);
+  }
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: callbackUrl.toString()
+      redirectTo: callbackUrl.toString(),
+      skipBrowserRedirect: isNative
     }
   });
 
   if (error) {
     throw error;
+  }
+
+  if (isNative && data.url) {
+    await Browser.open({ url: data.url });
   }
 };
 

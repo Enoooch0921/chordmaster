@@ -85,6 +85,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-28',
+        title: 'iPadOS app setup, setlist key tracking, and chord display refinements',
+        bullets: [
+          'Added Capacitor iPadOS project setup, build scripts, and Xcode sync documentation.',
+          'Google/Supabase sign-in now returns to the native ChordMaster app through the app URL scheme.',
+          'Setlist preview scrolling now updates the active setlist song, so top-bar Key and editing target follow the song currently in view.',
+          'Setlist song reordering now uses a pointer/touch drag handle instead of native HTML drag, improving iPad behavior.',
+          '`maj7` and `dim` abbreviations now only appear in crowded three-chord bars, and `°7(#4)` spacing avoids overlap.'
+        ]
+      },
+      {
+        version: '0.8.7',
         date: '2026-05-26',
         title: 'Compound-meter jianpu fix, multi-measure rest, and chord layout polish',
         bullets: [
@@ -271,6 +283,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-05-28',
+        title: 'iPadOS App、歌單 Key 跟隨與和弦顯示優化',
+        bullets: [
+          '新增 Capacitor iPadOS 專案設定、建置指令與 Xcode 同步說明。',
+          'Google/Supabase 登入現在會透過 app URL scheme 回到 ChordMaster app。',
+          '歌單模式預覽滑到哪一首歌，頂部 Key 與編輯目標會自動跟著切到目前歌曲。',
+          '歌單歌曲排序改用 pointer/touch 拖曳手把，改善 iPad 上拖動歌曲時變成文字選取的問題。',
+          '`maj7` 與 `dim` 只在三個和弦的擁擠小節才縮寫，並修正 `°7(#4)` 的重疊。'
+        ]
+      },
+      {
+        version: '0.8.7',
         date: '2026-05-26',
         title: '複合拍子簡譜修正、多小節休止符、和弦排版優化',
         bullets: [

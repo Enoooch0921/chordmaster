@@ -113,6 +113,21 @@ npm run build
 
 - `dist/`
 
+### iPadOS App
+
+專案使用 Capacitor 共用同一套 React/Vite 核心，iPadOS 版本會把 `dist/` 包進 `ios/` Xcode 專案。
+
+```bash
+npm run ipad:sync
+npm run ipad:open
+```
+
+- `npm run build:ipad`：使用 Capacitor 專用路徑建置 web assets
+- `npm run ipad:sync`：建置並同步到 `ios/App/App/public`
+- `npm run ipad:open`：用 Xcode 開啟 iPadOS 專案
+
+目前 Xcode target 已設定為 iPad device family。若要在模擬器或實機執行，需要本機安裝完整 Xcode，並在 Xcode 中設定 signing team。
+
 ## 使用說明
 
 ### Song Library

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.8 - 2026-05-28
+
+### Added
+
+- 新增 iPadOS / Capacitor 專案設定與 Xcode 同步流程，支援把同一套 React/Vite app 打包到 iPad 實機測試
+- 新增 iPadOS deep link 登入回跳，Google/Supabase 登入後可回到 ChordMaster app
+
+### Changed
+
+- 歌單模式預覽滑到哪一首歌，頂部 Key / Capo / 編輯狀態會自動跟著切換到目前歌曲
+- 歌單歌曲排序改為 pointer/touch 拖曳手把，改善 iPad 上拖動歌曲時變成文字選取的問題
+- `maj7` 與 `dim` 縮寫只在同一小節剛好有三個有效和弦、且包含 `maj7` 或 `dim` 時觸發
+
+### Fixed
+
+- 修正 iPad app 登入後停在 app 內網頁而不是回到 app route 的問題
+- 修正 `°7(#4)` 這類和弦中 `°7` 與 `(#4)` 重疊的問題，保留 extension 位置並下移 `°7`
+
 ## 0.8.7 - 2026-05-26
 
 ### Added
