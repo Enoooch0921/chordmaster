@@ -66,6 +66,34 @@ if (Capacitor.isNativePlatform()) {
     window.history.replaceState(null, '', `${basePath}${appPath}`);
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
+
+  // Suppress double-tap-to-zoom on iPad. The touch-action CSS occasionally lets
+  // it slip through, so also block the synthesized zoom for a quick second tap
+  // landing in roughly the same spot. Single taps and fast taps on different
+  // targets are unaffected.
+  let lastTouchEnd = 0;
+  let lastTouchX = 0;
+  let lastTouchY = 0;
+  document.addEventListener(
+    'touchend',
+    (event) => {
+      const now = Date.now();
+      const touch = event.changedTouches[0];
+      const x = touch?.clientX ?? 0;
+      const y = touch?.clientY ?? 0;
+      if (
+        now - lastTouchEnd <= 300 &&
+        Math.abs(x - lastTouchX) < 32 &&
+        Math.abs(y - lastTouchY) < 32
+      ) {
+        event.preventDefault();
+      }
+      lastTouchEnd = now;
+      lastTouchX = x;
+      lastTouchY = y;
+    },
+    { passive: false }
+  );
 }
 
 createRoot(document.getElementById('root')!).render(

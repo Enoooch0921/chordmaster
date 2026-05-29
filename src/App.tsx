@@ -832,6 +832,13 @@ interface PreviewDragState {
   moved: boolean;
 }
 
+interface PreviewPinchState {
+  startDistance: number;
+  startScale: number;
+  contentRatioX: number;
+  contentRatioY: number;
+}
+
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const inactiveSetlistShareStatus: SetlistShareStatus = {
@@ -1590,6 +1597,7 @@ export default function App() {
   const editorFocusTimeoutRef = useRef<number | null>(null);
   const editorFocusRequestIdRef = useRef(0);
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
+  const previewPinchStateRef = useRef<PreviewPinchState | null>(null);
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
   const skipNextSetlistPreviewAutoScrollRef = useRef(false);
   const setlistSongPointerDragRef = useRef<{
@@ -2228,7 +2236,9 @@ export default function App() {
   };
   const filteredSetlists: Setlist[] = sortSetlistsForDisplay<Setlist>(setlists.filter(setlistMatchesSearch), setlistSortMode);
   const filteredJoinedSetlists: JoinedSetlist[] = sortSetlistsForDisplay<JoinedSetlist>(joinedSetlists.filter(setlistMatchesSearch), setlistSortMode);
-  const filteredSongsForSetlist = filteredSongs.filter((item) => {
+  // Filter from the full library (not filteredSongs) so the song-library search
+  // query never leaks into the setlist "add songs" list.
+  const filteredSongsForSetlist = songs.filter((item) => {
     if (!normalizedSetlistSongSearchQuery) {
       return true;
     }
@@ -2348,11 +2358,27 @@ export default function App() {
       setViewportHeight(window.innerHeight);
     };
 
+    // iOS/iPadOS reports stale window dimensions while a rotation is animating,
+    // which can leave the layout broken after rotating back. Re-measure a few
+    // times after the orientation settles.
+    const settleTimers: number[] = [];
+    const handleOrientationChange = () => {
+      handleResize();
+      settleTimers.push(window.setTimeout(handleResize, 200));
+      settleTimers.push(window.setTimeout(handleResize, 450));
+      settleTimers.push(window.setTimeout(handleResize, 800));
+    };
+
     handleResize();
     window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleOrientationChange);
+    window.visualViewport?.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+      window.visualViewport?.removeEventListener('resize', handleResize);
+      settleTimers.forEach((timer) => window.clearTimeout(timer));
     };
   }, []);
 
@@ -2615,10 +2641,17 @@ export default function App() {
       return;
     }
 
+    // Only treat this edit as a key change if the editable song's key actually
+    // changed; otherwise keep the user's existing setlist key override so that
+    // editing other content (chords, lyrics, etc.) does not reset the key.
+    const keyChangedInEdit = nextSong.currentKey !== activeSetlistEditableSong.currentKey;
+
     pushSetlistSongHistory(selectedSetlistSong.id, activeSetlistEditableSong);
     handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
       ...currentSetlistSong,
-      overrideKey: nextSong.currentKey,
+      overrideKey: keyChangedInEdit
+        ? nextSong.currentKey
+        : (currentSetlistSong.overrideKey ?? nextSong.currentKey),
       capo: nextSong.capo ?? 0,
       sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong, nextSong),
       songData: cloneSong(normalizeSongBars(nextSong))
@@ -2644,25 +2677,16 @@ export default function App() {
   const runSelectionChange = async (applySelection: () => void) => {
     setActiveAppView('sheet');
 
-    if (isAutoSaveEnabled && workspaceIsDirty) {
-      await persistWorkspace(songs, setlists);
-      applySelection();
-      return;
+    // Always persist silently in the background when switching songs so the user
+    // is never interrupted by a save prompt (changes are never lost).
+    if (workspaceIsDirty) {
+      try {
+        await persistWorkspace(songs, setlists);
+      } catch {
+        // Keep edits in memory and still switch; the next save will retry.
+      }
     }
 
-    if (!workspaceIsDirty) {
-      applySelection();
-      return;
-    }
-
-    const shouldSave = window.confirm(copy.confirmSaveBeforeSwitch);
-    if (shouldSave) {
-      await persistWorkspace(songs, setlists);
-      applySelection();
-      return;
-    }
-
-    restoreSavedWorkspace();
     applySelection();
   };
 
@@ -5461,7 +5485,7 @@ export default function App() {
   }, [currentPreviewIdentity]);
 
   useEffect(() => {
-    if (!isSetlistMode || !selectedSetlistSongId || setlistPreviewSongs.length === 0) {
+    if (isPerformanceMode || !isSetlistMode || !selectedSetlistSongId || setlistPreviewSongs.length === 0) {
       return;
     }
 
@@ -5493,10 +5517,10 @@ export default function App() {
     });
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
+  }, [isPerformanceMode, isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
 
   useEffect(() => {
-    if (!isSetlistMode || setlistPreviewSongs.length === 0) {
+    if (isPerformanceMode || !isSetlistMode || setlistPreviewSongs.length === 0) {
       return;
     }
 
@@ -5552,7 +5576,7 @@ export default function App() {
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
+  }, [isPerformanceMode, isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
 
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
     const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));
@@ -5612,6 +5636,107 @@ export default function App() {
     }
 
     setPreviewScale(previewFitHeightScale, 'fit-height');
+  };
+
+  const getTouchDistance = (touches: TouchList) => {
+    const firstTouch = touches[0];
+    const secondTouch = touches[1];
+    if (!firstTouch || !secondTouch) {
+      return 0;
+    }
+
+    return Math.hypot(secondTouch.clientX - firstTouch.clientX, secondTouch.clientY - firstTouch.clientY);
+  };
+
+  const getTouchCenter = (touches: TouchList) => {
+    const firstTouch = touches[0];
+    const secondTouch = touches[1];
+    if (!firstTouch || !secondTouch) {
+      return null;
+    }
+
+    return {
+      x: (firstTouch.clientX + secondTouch.clientX) / 2,
+      y: (firstTouch.clientY + secondTouch.clientY) / 2
+    };
+  };
+
+  const handlePreviewTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 2 || !previewRef.current) {
+      return;
+    }
+
+    const distance = getTouchDistance(event.touches);
+    const center = getTouchCenter(event.touches);
+    if (!distance || !center) {
+      return;
+    }
+
+    event.preventDefault();
+    endPreviewDrag();
+
+    const scrollRoot = previewRef.current;
+    const rootRect = scrollRoot.getBoundingClientRect();
+    const focalX = center.x - rootRect.left;
+    const focalY = center.y - rootRect.top;
+
+    previewPinchStateRef.current = {
+      startDistance: distance,
+      startScale: previewScale,
+      contentRatioX: previewSheetWidth > 0
+        ? Math.min(1, Math.max(0, (scrollRoot.scrollLeft + focalX) / previewSheetWidth))
+        : 0.5,
+      contentRatioY: previewSheetHeight > 0
+        ? Math.min(1, Math.max(0, (scrollRoot.scrollTop + focalY) / previewSheetHeight))
+        : 0
+    };
+  };
+
+  const handlePreviewTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const pinchState = previewPinchStateRef.current;
+    const scrollRoot = previewRef.current;
+    if (!pinchState || !scrollRoot || event.touches.length !== 2) {
+      return;
+    }
+
+    const distance = getTouchDistance(event.touches);
+    const center = getTouchCenter(event.touches);
+    if (!distance || !center) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const nextScale = Math.min(
+      PREVIEW_MAX_SCALE,
+      Math.max(PREVIEW_MIN_SCALE, pinchState.startScale * (distance / pinchState.startDistance))
+    );
+    const rootRect = scrollRoot.getBoundingClientRect();
+    const focalX = center.x - rootRect.left;
+    const focalY = center.y - rootRect.top;
+
+    setPreviewZoom(nextScale / previewBaseScale);
+
+    window.requestAnimationFrame(() => {
+      const nextScrollRoot = previewRef.current;
+      if (!nextScrollRoot) {
+        return;
+      }
+
+      const nextWidth = sheetMetrics.width * nextScale;
+      const nextHeight = sheetMetrics.height * nextScale;
+      nextScrollRoot.scrollTo({
+        left: Math.max(0, nextWidth * pinchState.contentRatioX - focalX),
+        top: Math.max(0, nextHeight * pinchState.contentRatioY - focalY),
+        behavior: 'auto'
+      });
+    });
+  };
+
+  const handlePreviewTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length < 2) {
+      previewPinchStateRef.current = null;
+    }
   };
 
   const endPreviewDrag = () => {
@@ -6972,11 +7097,19 @@ export default function App() {
           ) : (
             filteredSongsForSetlist.map((librarySong) => {
               const libraryMeta = getSongLibraryMeta(librarySong, copy.editor.shuffle);
+              const addedCount = selectedSetlist?.songs.filter((item) => item.songId === librarySong.id).length ?? 0;
               return (
                 <div key={`setlist-add-${librarySong.id}`} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold text-gray-900">
-                      {librarySong.title || copy.untitledSong}
+                    <div className="flex items-center gap-2">
+                      <div className="truncate text-sm font-bold text-gray-900">
+                        {librarySong.title || copy.untitledSong}
+                      </div>
+                      {addedCount > 0 && (
+                        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                          {language === 'zh' ? '已加入' : 'Added'}{addedCount > 1 ? ` ×${addedCount}` : ''}
+                        </span>
+                      )}
                     </div>
                     <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
                       {libraryMeta.primary}
@@ -7526,14 +7659,22 @@ export default function App() {
                           ) : (
                             filteredSongsForSetlist.map((librarySong) => {
                               const libraryMeta = getSongLibraryMeta(librarySong, copy.editor.shuffle);
+                              const addedCount = selectedSetlist?.songs.filter((item) => item.songId === librarySong.id).length ?? 0;
                               return (
                                 <div
                                   key={`setlist-add-${librarySong.id}`}
                                   className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3"
                                 >
                                   <div className="min-w-0 flex-1">
-                                    <div className="truncate text-sm font-bold text-gray-900">
-                                      {librarySong.title || copy.untitledSong}
+                                    <div className="flex items-center gap-2">
+                                      <div className="truncate text-sm font-bold text-gray-900">
+                                        {librarySong.title || copy.untitledSong}
+                                      </div>
+                                      {addedCount > 0 && (
+                                        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                                          {language === 'zh' ? '已加入' : 'Added'}{addedCount > 1 ? ` ×${addedCount}` : ''}
+                                        </span>
+                                      )}
                                     </div>
                                     <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
                                       {libraryMeta.primary}
@@ -9357,8 +9498,12 @@ export default function App() {
               ref={previewRef}
               data-print-preview-container
               onMouseDown={handlePreviewMouseDown}
+              onTouchStart={handlePreviewTouchStart}
+              onTouchMove={handlePreviewTouchMove}
+              onTouchEnd={handlePreviewTouchEnd}
+              onTouchCancel={handlePreviewTouchEnd}
               onClickCapture={handlePreviewClickCapture}
-              className={`h-full overflow-auto p-3 sm:p-4 lg:p-8 xl:p-12 [scrollbar-gutter:stable_both-edges] ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+              className={`h-full overflow-auto p-3 sm:p-4 lg:p-8 xl:p-12 [scrollbar-gutter:stable_both-edges] [touch-action:pan-x_pan-y] ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
             >
               <div
                 className="relative flex min-h-full min-w-full items-start justify-center"

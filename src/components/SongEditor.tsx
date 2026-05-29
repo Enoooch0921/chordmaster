@@ -4160,7 +4160,7 @@ const SongEditor: React.FC<Props> = ({
     }
   };
 
-  const applyTransformation = (type: 'sixteenth' | 'eighth' | 'dot' | 'slur' | 'clear' | 'push' | 'pull' | 'accent' | 'fermata' | 'rest' | 'rest8' | 'rest2' | 'rest1') => {
+  const applyTransformation = (type: 'sixteenth' | 'eighth' | 'dot' | 'slur' | 'clear' | 'push' | 'pull' | 'accent' | 'fermata' | 'rest' | 'rest8' | 'rest2' | 'rest1' | 'multirest') => {
     if (!selection) return;
     const { sIdx, bIdx, start, end, text, type: selectionType } = selection;
     const bar = song.sections[sIdx].bars[bIdx];
@@ -4238,6 +4238,12 @@ const SongEditor: React.FC<Props> = ({
         hasFermata = false;
       } else if (type === 'rest1') {
         clean = '0w';
+        hasPush = false;
+        hasPull = false;
+        hasAccent = false;
+        hasFermata = false;
+      } else if (type === 'multirest') {
+        clean = '||';
         hasPush = false;
         hasPull = false;
         hasAccent = false;
@@ -7563,6 +7569,21 @@ const SongEditor: React.FC<Props> = ({
                       </span>
                     </div>
                     <span className={chordToolbarLabelClass}>{copy.editor.eighthRestShort}</span>
+                  </button>
+
+                  <button
+                    onClick={() => applyTransformation('multirest')}
+                    className={chordToolbarButtonClass}
+                    title={language === 'zh' ? '多小節休止' : 'Multi-measure rest'}
+                  >
+                    <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      <svg viewBox="0 0 24 14" className="w-5 h-3" aria-hidden="true">
+                        <line x1="2" y1="1" x2="2" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        <line x1="22" y1="1" x2="22" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        <rect x="2" y="5" width="20" height="4" fill="currentColor" />
+                      </svg>
+                    </div>
+                    <span className={chordToolbarLabelClass}>{language === 'zh' ? '多小節' : 'Multi'}</span>
                   </button>
                 </>
               ) : (

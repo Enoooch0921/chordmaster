@@ -40,6 +40,14 @@ const MAJOR_KEY_DEGREE_SPELLING: Record<number, { degreeIndex: number; accidenta
   11: { degreeIndex: 6, accidental: 0 }
 };
 
+// Slash bass notes prefer the ascending spelling for the pitch between scale
+// degrees 5 and 6 (#5 / e.g. G# in C) instead of b6 / Ab, so an inversion like
+// E/G# stays spelled as a chord tone rather than E/Ab.
+const BASS_DEGREE_SPELLING: Record<number, { degreeIndex: number; accidental: -1 | 0 | 1 }> = {
+  ...MAJOR_KEY_DEGREE_SPELLING,
+  8: { degreeIndex: 4, accidental: 1 }
+};
+
 export const ALL_KEYS: Key[] = [
   'C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'Bb', 'B'
 ];
@@ -181,7 +189,7 @@ function shouldPreferFlatsForChordRoot(root: string, targetKey?: Key): boolean {
   return false;
 }
 
-function getNoteFromIndexForKey(index: number, key: Key): string {
+function getNoteFromIndexForKey(index: number, key: Key, isBass: boolean = false): string {
   const keyMatch = key.match(/^([A-G])/);
   const keyIndex = getNoteIndex(key);
   if (!keyMatch || keyIndex === -1) {
@@ -190,7 +198,7 @@ function getNoteFromIndexForKey(index: number, key: Key): string {
 
   const normalizedIndex = ((index % 12) + 12) % 12;
   const relativeIndex = ((normalizedIndex - keyIndex) % 12 + 12) % 12;
-  const spelling = MAJOR_KEY_DEGREE_SPELLING[relativeIndex];
+  const spelling = (isBass ? BASS_DEGREE_SPELLING : MAJOR_KEY_DEGREE_SPELLING)[relativeIndex];
   const keyLetterIndex = getLetterIndex(keyMatch[1]);
   if (!spelling || keyLetterIndex === -1) {
     return getNoteFromIndex(index, shouldPreferFlats(key) && !shouldPreferSharps(key));
@@ -271,7 +279,7 @@ export function normalizeKeySpelling(key: Key): Key {
   return getKeyFromIndex(keyIndex, preferFlats);
 }
 
-export function transposeChord(chord: string, offset: number, targetKey?: Key): string {
+export function transposeChord(chord: string, offset: number, targetKey?: Key, isBass: boolean = false): string {
   if (!chord || chord === '%' || chord === '/') return chord;
   const normalizedOffset = ((offset % 12) + 12) % 12;
   if (normalizedOffset === 0 && !targetKey) {
@@ -282,10 +290,10 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key): 
   if (chord.includes('/')) {
     const [base, bass] = chord.split('/');
     if (!base && bass) {
-      return `/${transposeChord(bass, offset, targetKey)}`;
+      return `/${transposeChord(bass, offset, targetKey, true)}`;
     }
     if (base && bass) {
-      return `${transposeChord(base, offset, targetKey)}/${transposeChord(bass, offset, targetKey)}`;
+      return `${transposeChord(base, offset, targetKey, false)}/${transposeChord(bass, offset, targetKey, true)}`;
     }
   }
 
@@ -305,7 +313,7 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key): 
   if (rootIndex === -1) return chord; // Not a valid note, return as is
 
   const newRoot = targetKey
-    ? getNoteFromIndexForKey(rootIndex + offset, targetKey)
+    ? getNoteFromIndexForKey(rootIndex + offset, targetKey, isBass)
     : getNoteFromIndex(rootIndex + offset, shouldPreferFlatsForChordRoot(root));
   return normalizeChordEnharmonic(newRoot + rest);
 }
@@ -444,17 +452,17 @@ export function getSectionColor(title: string, useColors: boolean = true) {
   return DEFAULT_SECTION_COLOR;
 }
 
-export function getNashvilleNumber(chord: string, key: Key): string {
+export function getNashvilleNumber(chord: string, key: Key, isBass: boolean = false): string {
   if (!chord || chord === '%' || chord === '/') return chord;
 
   // Handle slash chords like E/G#
   if (chord.includes('/')) {
     const [base, bass] = chord.split('/');
     if (!base && bass) {
-      return `/${getNashvilleNumber(bass, key)}`;
+      return `/${getNashvilleNumber(bass, key, true)}`;
     }
     if (base && bass) {
-      return `${getNashvilleNumber(base, key)}/${getNashvilleNumber(bass, key)}`;
+      return `${getNashvilleNumber(base, key, false)}/${getNashvilleNumber(bass, key, true)}`;
     }
   }
 
@@ -475,10 +483,14 @@ export function getNashvilleNumber(chord: string, key: Key): string {
   if (rootIndex === -1 || keyIndex === -1) return chord;
 
   const number = getNashvilleNumberForNote(root, key);
-  
+
+  // For slash bass notes, prefer the ascending spelling #5 over b6 (the pitch
+  // between scale degrees 5 and 6), which reads better for bass walk-ups.
+  const adjustedNumber = isBass && number === 'b6' ? '#5' : number;
+
   // Nashville numbers often use lowercase 'm' for minor, but we can keep the 'rest' part
   // e.g. Am -> 6m, G7 -> 57
-  return number + rest;
+  return adjustedNumber + rest;
 }
 
 export function parseNashvilleToChord(input: string, key: Key): string {

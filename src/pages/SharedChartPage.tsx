@@ -19,6 +19,23 @@ export default function SharedChartPage() {
   const [isJoining, setIsJoining] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  // In-app browsers (LINE, Facebook, Instagram) block Google OAuth as "unsafe".
+  // Detect them so we can prompt the user to open the page in a real browser.
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  const isLineBrowser = /\bLine\//i.test(userAgent);
+  const isInAppBrowser = isLineBrowser || /FBAN|FBAV|Instagram/i.test(userAgent);
+
+  const handleCopyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable; the user can still copy the URL manually.
+    }
+  };
 
   useEffect(() => {
     if (!supabase) return;
@@ -94,10 +111,24 @@ export default function SharedChartPage() {
         throw new Error('Please sign in first.');
       }
 
-      const { data, error } = await supabase.rpc('join_shared_setlist', { p_token: token });
-      if (error) throw error;
-      const setlistId = typeof data === 'string' ? data : payload?.setlist?.id;
-      navigate(setlistId ? `/?setlist=${encodeURIComponent(setlistId)}` : '/');
+      // Right after sign-in the auth token isn't always attached to the very
+      // first RPC call, so the first import can fail while a second succeeds.
+      // Retry once after a short delay so a single tap is enough.
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const { data, error } = await supabase.rpc('join_shared_setlist', { p_token: token });
+        if (!error) {
+          const setlistId = typeof data === 'string' ? data : payload?.setlist?.id;
+          navigate(setlistId ? `/?setlist=${encodeURIComponent(setlistId)}` : '/');
+          return;
+        }
+        lastError = error;
+        if (attempt === 0) {
+          await supabase.auth.getSession();
+          await new Promise((resolve) => setTimeout(resolve, 700));
+        }
+      }
+      throw lastError;
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
       setJoinError(
@@ -152,6 +183,32 @@ export default function SharedChartPage() {
               </button>
             </div>
           </div>
+
+          {isInAppBrowser && (
+            <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="text-sm font-bold text-amber-800">
+                {language === 'zh' ? '請用系統瀏覽器開啟' : 'Open in your browser'}
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-amber-700">
+                {language === 'zh'
+                  ? (isLineBrowser
+                      ? '偵測到你正在 LINE 內建瀏覽器開啟，Google 登入會被視為不安全而失敗。請點右上角「⋯」選單 →「用其他瀏覽器開啟」，或複製連結到 Safari／Chrome 開啟。'
+                      : '偵測到你正在 App 內建瀏覽器開啟，Google 登入可能會失敗。請複製連結到 Safari／Chrome 等系統瀏覽器開啟。')
+                  : (isLineBrowser
+                      ? 'You are in LINE’s in-app browser, which blocks Google sign-in. Tap the “⋯” menu → “Open in other browser”, or copy the link into Safari/Chrome.'
+                      : 'You are in an in-app browser that can block Google sign-in. Copy the link and open it in Safari/Chrome.')}
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleCopyShareLink()}
+                className="mt-2 inline-flex items-center rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100"
+              >
+                {linkCopied
+                  ? (language === 'zh' ? '已複製連結 ✓' : 'Link copied ✓')
+                  : (language === 'zh' ? '複製連結' : 'Copy link')}
+              </button>
+            </div>
+          )}
 
           {isLoading ? (
             <div className="py-12 text-center text-sm text-stone-400">
