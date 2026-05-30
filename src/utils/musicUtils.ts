@@ -279,6 +279,52 @@ export function normalizeKeySpelling(key: Key): Key {
   return getKeyFromIndex(keyIndex, preferFlats);
 }
 
+function parseChordRootAndRest(chord: string): { root: string; rest: string } | null {
+  if (!chord) return null;
+  const head = chord.length > 1 && (chord[1] === '#' || chord[1] === 'b')
+    ? { root: chord.substring(0, 2), rest: chord.substring(2) }
+    : { root: chord.substring(0, 1), rest: chord.substring(1) };
+  return NOTE_LETTERS.includes(head.root[0]) ? head : null;
+}
+
+function transposeBassPreservingChordToneSpelling(
+  originalBase: string,
+  originalBass: string,
+  newBase: string,
+  offset: number
+): string | null {
+  const baseParsed = parseChordRootAndRest(originalBase);
+  const bassParsed = parseChordRootAndRest(originalBass);
+  const newBaseParsed = parseChordRootAndRest(newBase);
+  if (!baseParsed || !bassParsed || !newBaseParsed) return null;
+
+  const baseLetterIdx = NOTE_LETTERS.indexOf(baseParsed.root[0]);
+  const bassLetterIdx = NOTE_LETTERS.indexOf(bassParsed.root[0]);
+  const newBaseLetterIdx = NOTE_LETTERS.indexOf(newBaseParsed.root[0]);
+  if (baseLetterIdx === -1 || bassLetterIdx === -1 || newBaseLetterIdx === -1) return null;
+
+  // Letter distance from the chord root to its bass (0 = root, 2 = a 3rd, 4 = a 5th, ...).
+  const letterDistance = (bassLetterIdx - baseLetterIdx + NOTE_LETTERS.length) % NOTE_LETTERS.length;
+  const newBassLetter = NOTE_LETTERS[(newBaseLetterIdx + letterDistance) % NOTE_LETTERS.length];
+  const naturalIdx = NATURAL_NOTE_INDEX[newBassLetter];
+  if (naturalIdx === undefined) return null;
+
+  const bassRootIdx = getNoteIndex(bassParsed.root);
+  if (bassRootIdx === -1) return null;
+  const targetIdx = ((bassRootIdx + offset) % 12 + 12) % 12;
+
+  let accidental = ((targetIdx - naturalIdx) % 12 + 12) % 12;
+  if (accidental > 6) accidental -= 12;
+
+  let newRoot: string;
+  if (accidental === -1) newRoot = `${newBassLetter}b`;
+  else if (accidental === 0) newRoot = newBassLetter;
+  else if (accidental === 1) newRoot = `${newBassLetter}#`;
+  else return null; // double accidental — let the existing logic handle it
+
+  return `${newRoot}${bassParsed.rest}`;
+}
+
 export function transposeChord(chord: string, offset: number, targetKey?: Key, isBass: boolean = false): string {
   if (!chord || chord === '%' || chord === '/') return chord;
   const normalizedOffset = ((offset % 12) + 12) % 12;
@@ -293,7 +339,14 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key, i
       return `/${transposeChord(bass, offset, targetKey, true)}`;
     }
     if (base && bass) {
-      return `${transposeChord(base, offset, targetKey, false)}/${transposeChord(bass, offset, targetKey, true)}`;
+      const newBase = transposeChord(base, offset, targetKey, false);
+      // For a slash chord, the bass note's spelling should mirror its interval
+      // letter-distance from the chord root rather than being forced into the
+      // target key's degree spelling. E.g. Cm/Eb (Eb = minor 3rd of C, letter
+      // distance 2) must stay Cm/Eb in G major — not be respelled as Cm/D#.
+      const preservedBass = transposeBassPreservingChordToneSpelling(base, bass, newBase, offset);
+      const newBass = preservedBass ?? transposeChord(bass, offset, targetKey, true);
+      return `${newBase}/${newBass}`;
     }
   }
 
