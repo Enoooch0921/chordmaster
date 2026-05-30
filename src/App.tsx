@@ -3765,6 +3765,19 @@ export default function App() {
         songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, capo } : s)
       }
     ));
+    // Joined-project setlists live inside joinedProjects, not joinedSetlists.
+    setJoinedProjects((current) => current.map((jp) => {
+      if (!jp.setlists.some((sl) => sl.id === selectedSetlistId)) return jp;
+      return {
+        ...jp,
+        setlists: jp.setlists.map((sl) =>
+          sl.id !== selectedSetlistId ? sl : {
+            ...sl,
+            songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, capo } : s)
+          }
+        )
+      };
+    }));
     if (cloudRepositoryRef.current) {
       void cloudRepositoryRef.current.saveCapoOverride(setlistSongId, capo);
     }
@@ -5864,11 +5877,14 @@ export default function App() {
         return setlists[0]?.id ?? joinedSetlists[0]?.id ?? null;
       }
 
-      return setlists.some((item) => item.id === currentId) || joinedSetlists.some((item) => item.id === currentId)
+      const inOwned = setlists.some((item) => item.id === currentId);
+      const inJoined = joinedSetlists.some((item) => item.id === currentId);
+      const inJoinedProject = joinedProjects.some((jp) => jp.setlists.some((sl) => sl.id === currentId));
+      return inOwned || inJoined || inJoinedProject
         ? currentId
         : setlists[0]?.id ?? joinedSetlists[0]?.id ?? null;
     });
-  }, [joinedSetlists, setlists]);
+  }, [joinedSetlists, setlists, joinedProjects]);
 
   useEffect(() => {
     const activeSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? null;
