@@ -5596,7 +5596,7 @@ export default function App() {
         const hasLocalData = initialLibraryRef.current.songs.length > 0 || initialSetlistsRef.current.setlists.length > 0;
         const migrationCompleted = hasCompletedMigration(authenticatedUser.id);
         const loadingTeamWorkspace = targetLibrary?.kind === 'team';
-        const shouldUseCloudWorkspace = loadingTeamWorkspace || cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || cloudWorkspace.joinedSetlists.length > 0 || migrationCompleted || !hasLocalData;
+        const shouldUseCloudWorkspace = loadingTeamWorkspace || cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || cloudWorkspace.joinedSetlists.length > 0 || (cloudWorkspace.joinedProjects ?? []).length > 0 || migrationCompleted || !hasLocalData;
         let openedSharedSetlistFromLink = false;
         setCloudLibraries(libraries);
         setTeamFeatureError(libraryListError);
@@ -5621,6 +5621,7 @@ export default function App() {
           setProjects(nextProjects);
           setSavedProjects(cloneSong(nextProjects));
           setJoinedSetlists(nextJoinedSetlists);
+          setJoinedProjects(cloudWorkspace.joinedProjects ?? []);
           setLastSavedAt(cloudWorkspace.lastSavedAt);
           const storedSelectedSongId = getStoredSelectedSongId(targetLibrary?.id ?? null);
           setSelectedSongId((currentId) => pickAvailableSongId(nextSongs, [
