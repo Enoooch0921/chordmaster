@@ -1606,6 +1606,7 @@ export default function App() {
   const [multiSelectedSetlistIds, setMultiSelectedSetlistIds] = useState<string[]>([]);
   const [joinedSetlists, setJoinedSetlists] = useState<JoinedSetlist[]>([]);
   const [joinedProjects, setJoinedProjects] = useState<JoinedProject[]>([]);
+  const [selectedJoinedProjectId, setSelectedJoinedProjectId] = useState<string | null>(null);
   const [joinedSetlistDisplayPreferences, setJoinedSetlistDisplayPreferences] = useState<Record<string, JoinedSetlistDisplayPreference>>(loadJoinedSetlistDisplayPreferences);
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistId);
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistSongId);
@@ -1846,7 +1847,18 @@ export default function App() {
       ? 'grid-cols-4'
       : 'grid-cols-7';
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
-  const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? setlists[0] ?? joinedSetlists[0] ?? null;
+  const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId)
+    ?? joinedSetlists.find((item) => item.id === selectedSetlistId)
+    ?? (() => {
+      for (const jp of joinedProjects) {
+        const match = jp.setlists.find((item) => item.id === selectedSetlistId);
+        if (match) return { ...match, isJoined: true } as JoinedSetlist;
+      }
+      return undefined;
+    })()
+    ?? setlists[0]
+    ?? joinedSetlists[0]
+    ?? null;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
   const canEditSelectedSetlist = !isTeamWorkspace
     ? !isJoinedSetlist
@@ -2380,10 +2392,22 @@ export default function App() {
 
     return normalizeSearchText(searchText).includes(normalizedSetlistSearchQuery);
   };
+  // Joined projects expose plain Setlist objects in their .setlists. Stamp
+  // isJoined=true so existing setlist viewer/edit-permission code treats them
+  // as read-only.
+  const selectedJoinedProject = selectedJoinedProjectId
+    ? joinedProjects.find((item) => item.id === selectedJoinedProjectId) ?? null
+    : null;
+  const allJoinedProjectSetlists: JoinedSetlist[] = joinedProjects.flatMap((project) =>
+    project.setlists.map((sl) => ({ ...sl, isJoined: true } as JoinedSetlist))
+  );
+
   // Within a project view, only show setlists belonging to that project.
   // `selectedProjectId === null` while viewing the setlist list represents the
   // "Ungrouped" bucket (setlists with no projectId).
-  const setlistsInScope = setlists.filter((item) => (item.projectId ?? null) === selectedProjectId);
+  const setlistsInScope: Setlist[] = selectedJoinedProject
+    ? selectedJoinedProject.setlists.map((sl) => ({ ...sl, isJoined: true } as JoinedSetlist))
+    : setlists.filter((item) => (item.projectId ?? null) === selectedProjectId);
   const archivedSetlistCount = setlistsInScope.filter((item) => item.archived).length;
   const visibleSetlists = showArchivedSetlists ? setlistsInScope : setlistsInScope.filter((item) => !item.archived);
   const filteredSetlists: Setlist[] = sortSetlistsForDisplay<Setlist>(visibleSetlists.filter(setlistMatchesSearch), setlistSortMode);
@@ -3490,6 +3514,8 @@ export default function App() {
   const handleSelectProject = (nextProjectId: string | null) => {
     exitMultiSelect();
     setSelectedProjectId(nextProjectId);
+    // Picking an owned project should always exit any joined-project drill-in.
+    setSelectedJoinedProjectId(null);
     if (isPhoneViewport) {
       setMobileSetlistDrawerView('list');
     } else {
@@ -7663,9 +7689,12 @@ export default function App() {
               <button
                 key={jp.id}
                 type="button"
-                onClick={() => toast.success(language === 'zh'
-                  ? `「${jp.name}」已在你的帳號中，共 ${jp.setlists.length} 份歌單。可瀏覽介面準備中。`
-                  : `"${jp.name}" is in your account with ${jp.setlists.length} setlist${jp.setlists.length === 1 ? '' : 's'}. Read view coming soon.`)}
+                onClick={() => {
+                  setSelectedJoinedProjectId(jp.id);
+                  setSelectedProjectId(null);
+                  setDesktopSetlistPanelView('list');
+                  setMobileSetlistDrawerView('list');
+                }}
                 className="block w-full rounded-2xl border border-indigo-100 bg-white p-3 text-left transition-colors hover:bg-indigo-50/40"
               >
                 <div className="flex items-center gap-2">
@@ -7691,7 +7720,10 @@ export default function App() {
         <div className="min-w-0">
           <button
             type="button"
-            onClick={() => setDesktopSetlistPanelView('projects')}
+            onClick={() => {
+              setDesktopSetlistPanelView('projects');
+              setSelectedJoinedProjectId(null);
+            }}
             className="-ml-1 mb-2 inline-flex items-center gap-1 rounded-lg px-1 py-0.5 text-xs font-semibold text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
           >
             <ChevronLeft size={14} />
@@ -7701,11 +7733,18 @@ export default function App() {
             <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
             <div className="text-lg font-bold tracking-tight">ChordMaster</div>
           </div>
-          <div className="truncate text-xs font-medium text-gray-500">
-            {selectedProject ? selectedProject.name : copy.ungroupedProject}
+          <div className="flex min-w-0 items-center gap-2 truncate text-xs font-medium text-gray-500">
+            <span className="truncate">
+              {selectedJoinedProject ? selectedJoinedProject.name : (selectedProject ? selectedProject.name : copy.ungroupedProject)}
+            </span>
+            {selectedJoinedProject && (
+              <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                {language === 'zh' ? '已加入' : 'Joined'}
+              </span>
+            )}
           </div>
         </div>
-        {canCreateTeamSetlists && (
+        {canCreateTeamSetlists && !selectedJoinedProject && (
           <div className="mt-4 flex items-center gap-2">
             <button
               type="button"
