@@ -73,6 +73,92 @@ Deno.serve(async (request) => {
       });
     }
 
+    if (shareLink.resource_type === 'project') {
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('id, name')
+        .eq('id', shareLink.resource_id)
+        .maybeSingle();
+
+      if (projectError || !project) {
+        return jsonResponse({ error: 'Project not found.' }, 404);
+      }
+
+      // Don't filter by `archived` — archive is the owner's local-view concept,
+      // not a shareability concept. Recipients should see whatever setlists
+      // exist in the project at the time the link is resolved.
+      const { data: projectSetlists, error: projectSetlistsError } = await supabase
+        .from('setlists')
+        .select('id, name, display_mode, show_lyrics, created_at')
+        .eq('project_id', shareLink.resource_id)
+        .order('created_at', { ascending: true });
+
+      if (projectSetlistsError) {
+        return jsonResponse({ error: projectSetlistsError.message }, 500);
+      }
+
+      const setlistIds = (projectSetlists ?? []).map((sl) => sl.id);
+      const { data: projectSetlistSongs, error: projectSetlistSongsError } = setlistIds.length > 0
+        ? await supabase
+          .from('setlist_songs')
+          .select('id, setlist_id, song_id, order_index, override_json')
+          .in('setlist_id', setlistIds)
+          .order('order_index', { ascending: true })
+        : { data: [], error: null };
+
+      if (projectSetlistSongsError) {
+        return jsonResponse({ error: projectSetlistSongsError.message }, 500);
+      }
+
+      const projectSongIds = Array.from(new Set((projectSetlistSongs ?? []).map((item) => item.song_id)));
+      const { data: projectSongs, error: projectSongsError } = projectSongIds.length > 0
+        ? await supabase
+          .from('songs')
+          .select('id, title, content_json')
+          .in('id', projectSongIds)
+        : { data: [], error: null };
+
+      if (projectSongsError) {
+        return jsonResponse({ error: projectSongsError.message }, 500);
+      }
+
+      const projectSongsById = new Map((projectSongs ?? []).map((song) => [song.id, song] as const));
+      const setlistPayloads = (projectSetlists ?? []).map((sl) => {
+        const songsForSetlist = (projectSetlistSongs ?? [])
+          .filter((item) => item.setlist_id === sl.id)
+          .map((item) => {
+            const baseSong = projectSongsById.get(item.song_id);
+            const songContent = item.override_json?.songData ?? baseSong?.content_json;
+            if (!songContent) {
+              return null;
+            }
+            return {
+              id: item.id,
+              title: baseSong?.title ?? '',
+              song: songContent
+            };
+          })
+          .filter(Boolean);
+
+        return {
+          id: sl.id,
+          name: sl.name,
+          displayMode: sl.display_mode,
+          showLyrics: sl.show_lyrics,
+          songs: songsForSetlist
+        };
+      });
+
+      return jsonResponse({
+        resourceType: 'project',
+        project: {
+          id: project.id,
+          name: project.name,
+          setlists: setlistPayloads
+        }
+      });
+    }
+
     const { data: setlist, error: setlistError } = await supabase
       .from('setlists')
       .select('id, name, display_mode, show_lyrics')

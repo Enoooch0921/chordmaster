@@ -95,6 +95,7 @@ export interface Song {
 export interface StoredSong extends Song {
   id: string;
   updatedAt: number;
+  createdAt?: number;
   teamSource?: {
     libraryId: string;
     libraryName?: string;
@@ -125,7 +126,19 @@ export interface Setlist {
   updatedBy?: string;
   createdAt: number;
   updatedAt: number;
+  archived?: boolean;
+  projectId?: string | null;
   songs: SetlistSong[];
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  archived?: boolean;
+  createdBy?: string;
+  updatedBy?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface JoinedSetlist extends Setlist {
@@ -136,7 +149,14 @@ export interface WorkspaceSnapshot {
   songs: StoredSong[];
   setlists: Setlist[];
   joinedSetlists: JoinedSetlist[];
+  projects: Project[];
+  joinedProjects: JoinedProject[];
   lastSavedAt: number | null;
+}
+
+export interface JoinedProject extends Project {
+  isJoined: true;
+  setlists: Setlist[];
 }
 
 export interface AuthenticatedUser {
@@ -146,7 +166,7 @@ export interface AuthenticatedUser {
   picture?: string;
 }
 
-export type ShareResourceType = 'song' | 'setlist';
+export type ShareResourceType = 'song' | 'setlist' | 'project';
 
 export interface SharedSongPayload {
   id: string;
@@ -166,10 +186,17 @@ export interface SharedSetlistPayload {
   }>;
 }
 
+export interface SharedProjectPayload {
+  id: string;
+  name: string;
+  setlists: SharedSetlistPayload[];
+}
+
 export interface SharedResourcePayload {
   resourceType: ShareResourceType;
   song?: SharedSongPayload;
   setlist?: SharedSetlistPayload;
+  project?: SharedProjectPayload;
 }
 
 export interface ShareParticipant {
@@ -181,6 +208,13 @@ export interface ShareParticipant {
 }
 
 export interface SetlistShareStatus {
+  activeToken: string | null;
+  activeCreatedAt: string | null;
+  participantCount: number;
+  participants: ShareParticipant[];
+}
+
+export interface ProjectShareStatus {
   activeToken: string | null;
   activeCreatedAt: string | null;
   participantCount: number;

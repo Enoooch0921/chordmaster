@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.8.9",
+  "version": "0.8.10",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@capacitor/app": "^8.1.0",
     "@capacitor/browser": "^8.0.3",
+    "@capacitor/clipboard": "^8.0.1",
     "@capacitor/core": "^8.3.4",
     "@capacitor/ios": "^8.3.4",
     "@google/genai": "^1.29.0",

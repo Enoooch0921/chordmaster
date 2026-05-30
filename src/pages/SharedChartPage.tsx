@@ -101,6 +101,20 @@ export default function SharedChartPage() {
       });
   }, [authUserId, payload?.setlist?.id]);
 
+  useEffect(() => {
+    if (!supabase || !authUserId || !payload?.project) return;
+
+    supabase
+      .from('user_project_memberships')
+      .select('project_id')
+      .eq('user_id', authUserId)
+      .eq('project_id', payload.project.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setIsMember(Boolean(data));
+      });
+  }, [authUserId, payload?.project?.id]);
+
   const handleImport = async () => {
     if (!supabase || !token) return;
     setIsJoining(true);
@@ -111,15 +125,23 @@ export default function SharedChartPage() {
         throw new Error('Please sign in first.');
       }
 
+      const isProjectShare = Boolean(payload?.project);
+      const rpcName = isProjectShare ? 'join_shared_project' : 'join_shared_setlist';
+
       // Right after sign-in the auth token isn't always attached to the very
       // first RPC call, so the first import can fail while a second succeeds.
       // Retry once after a short delay so a single tap is enough.
       let lastError: unknown = null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const { data, error } = await supabase.rpc('join_shared_setlist', { p_token: token });
+        const { data, error } = await supabase.rpc(rpcName, { p_token: token });
         if (!error) {
-          const setlistId = typeof data === 'string' ? data : payload?.setlist?.id;
-          navigate(setlistId ? `/?setlist=${encodeURIComponent(setlistId)}` : '/');
+          if (isProjectShare) {
+            const projectId = typeof data === 'string' ? data : payload?.project?.id;
+            navigate(projectId ? `/?project=${encodeURIComponent(projectId)}` : '/');
+          } else {
+            const setlistId = typeof data === 'string' ? data : payload?.setlist?.id;
+            navigate(setlistId ? `/?setlist=${encodeURIComponent(setlistId)}` : '/');
+          }
           return;
         }
         lastError = error;
@@ -131,10 +153,13 @@ export default function SharedChartPage() {
       throw lastError;
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
+      const resourceLabel = payload?.project
+        ? (language === 'zh' ? '專案' : 'project')
+        : (language === 'zh' ? '歌單' : 'setlist');
       setJoinError(
         reason
-          ? (language === 'zh' ? `無法導入歌單：${reason}` : `Unable to import setlist: ${reason}`)
-          : (language === 'zh' ? '無法導入歌單，請稍後再試。' : 'Unable to import setlist. Please try again.')
+          ? (language === 'zh' ? `無法導入${resourceLabel}：${reason}` : `Unable to import ${resourceLabel}: ${reason}`)
+          : (language === 'zh' ? `無法導入${resourceLabel}，請稍後再試。` : `Unable to import ${resourceLabel}. Please try again.`)
       );
       setIsJoining(false);
     }
@@ -271,6 +296,97 @@ export default function SharedChartPage() {
                 <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-4 text-center">
                   <p className="mb-3 text-sm text-stone-500">
                     {language === 'zh' ? '登入後即可導入此歌單' : 'Sign in to import this setlist'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleSignIn()}
+                    disabled={isSigningIn}
+                    className="inline-block rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-stone-700 disabled:opacity-60"
+                  >
+                    {isSigningIn
+                      ? (language === 'zh' ? '登入中...' : 'Signing in...')
+                      : (language === 'zh' ? '前往登入' : 'Sign In')}
+                  </button>
+                  {joinError && (
+                    <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
+                  )}
+                </div>
+              )}
+            </>
+          ) : payload?.project ? (
+            <>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                {language === 'zh' ? '專案' : 'Project'}
+              </div>
+              <h1 className="mb-5 text-2xl font-bold tracking-tight text-stone-900">
+                {payload.project.name}
+              </h1>
+
+              <div className="mb-6 space-y-3">
+                {payload.project.setlists.length === 0 ? (
+                  <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-3 text-center text-sm text-stone-500">
+                    {language === 'zh' ? '這個專案目前沒有歌單。' : 'This project has no setlists yet.'}
+                  </div>
+                ) : (
+                  payload.project.setlists.map((sl) => (
+                    <div key={sl.id} className="rounded-xl border border-stone-100 bg-stone-50">
+                      <div className="border-b border-stone-100 px-4 py-2 text-sm font-bold text-stone-800">
+                        {sl.name}
+                      </div>
+                      {sl.songs.length === 0 ? (
+                        <div className="px-4 py-2 text-xs text-stone-400">
+                          {language === 'zh' ? '無歌曲' : 'No songs'}
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-stone-100">
+                          {sl.songs.map((item, index) => (
+                            <div key={item.id} className="flex items-center gap-3 px-4 py-2">
+                              <span className="w-5 shrink-0 text-right text-xs font-bold text-stone-400">{index + 1}</span>
+                              <span className="text-sm font-semibold text-stone-800">{item.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {authUserId ? (
+                isMember ? (
+                  <div className="rounded-xl border border-green-100 bg-green-50 px-4 py-4 text-center">
+                    <div className="text-sm font-semibold text-green-700">
+                      {language === 'zh' ? '✓ 已在你的帳號中' : '✓ Already in your account'}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/?project=${encodeURIComponent(payload.project!.id)}`)}
+                      className="mt-3 inline-flex items-center justify-center rounded-xl bg-green-700 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-green-800"
+                    >
+                      {language === 'zh' ? '打開專案' : 'Open Project'}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleImport()}
+                      disabled={isJoining}
+                      className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      {isJoining
+                        ? (language === 'zh' ? '導入中...' : 'Importing...')
+                        : (language === 'zh' ? '加入專案' : 'Join Project')}
+                    </button>
+                    {joinError && (
+                      <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
+                    )}
+                  </>
+                )
+              ) : (
+                <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-4 text-center">
+                  <p className="mb-3 text-sm text-stone-500">
+                    {language === 'zh' ? '登入後即可加入此專案' : 'Sign in to join this project'}
                   </p>
                   <button
                     type="button"

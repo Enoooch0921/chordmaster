@@ -1,7 +1,7 @@
 # ChordMaster — notes for Claude
 
 ## Release / push workflow (IMPORTANT)
-- **Before every push to GitHub, bump the app version in `package.json` (`version` field), and include that bump in the commit being pushed.**
+- **Only bump the app version in `package.json` (`version` field) when pushing to GitHub. Do NOT bump for intermediate work like `npm run ipad:sync`, local rebuilds, or any flow that doesn't end in a push.** Include the bump in the commit being pushed.
   - Default to a patch bump (e.g. `0.8.9` → `0.8.10`). Only do a minor/major bump if the user asks.
   - `package.json` `version` is the single source of truth: `vite.config.ts` injects it as the `__APP_VERSION__` define, which `src/constants/appMeta.ts` exposes and the UI shows (e.g. "v0.8.9"). The user uses this visible version to confirm a deploy/build actually updated.
 

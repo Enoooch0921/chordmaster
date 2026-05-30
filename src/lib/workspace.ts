@@ -1,6 +1,6 @@
 import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from '../constants/nashvilleFonts';
-import { Key, Setlist, SetlistDisplayMode, SetlistSong, Song, StoredSong, WorkspaceSnapshot } from '../types';
+import { Key, Project, Setlist, SetlistDisplayMode, SetlistSong, Song, StoredSong, WorkspaceSnapshot } from '../types';
 import { ALL_KEYS } from '../utils/musicUtils';
 import { getDefaultSectionOrder } from '../utils/setlistUtils';
 import { normalizeBarChords } from '../utils/barUtils';
@@ -8,6 +8,7 @@ import { normalizeSongReferences } from '../utils/referenceUtils';
 
 export const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 export const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
+export const PROJECT_STORAGE_KEY = 'chordmaster.projects.v1';
 export const SELECTED_SONG_STORAGE_KEY = 'chordmaster.selected-song-id.v1';
 export const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
 export const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.v1';
@@ -47,6 +48,7 @@ const VALID_SETLIST_DISPLAY_MODES = new Set<SetlistDisplayMode>([
 export interface PendingSyncPayload {
   songs: StoredSong[];
   setlists: Setlist[];
+  projects: Project[];
   savedAt: number;
 }
 
@@ -302,9 +304,24 @@ export const normalizeStoredSetlist = (
     updatedBy: normalizeOptionalText(setlist.updatedBy),
     createdAt: typeof setlist.createdAt === 'number' && Number.isFinite(setlist.createdAt) ? setlist.createdAt : Date.now(),
     updatedAt: typeof setlist.updatedAt === 'number' && Number.isFinite(setlist.updatedAt) ? setlist.updatedAt : Date.now(),
+    archived: normalizeBoolean(setlist.archived) ?? false,
+    projectId: typeof setlist.projectId === 'string' && setlist.projectId.trim() ? setlist.projectId : null,
     songs
   };
 };
+
+export const normalizeStoredProject = (project: Partial<Project> & Record<string, unknown>, index: number): Project => ({
+  id: typeof project.id === 'string' && project.id.trim() ? project.id : crypto.randomUUID(),
+  name: normalizeText(project.name, `Project ${index + 1}`),
+  archived: normalizeBoolean(project.archived) ?? false,
+  createdBy: normalizeOptionalText(project.createdBy),
+  updatedBy: normalizeOptionalText(project.updatedBy),
+  createdAt: typeof project.createdAt === 'number' && Number.isFinite(project.createdAt) ? project.createdAt : Date.now(),
+  updatedAt: typeof project.updatedAt === 'number' && Number.isFinite(project.updatedAt) ? project.updatedAt : Date.now()
+});
+
+export const serializeProjects = (projects: Project[]) =>
+  JSON.stringify(projects.map((project) => ({ ...project })));
 
 export const reindexSetlistSongs = (setlistSongs: SetlistSong[]) => setlistSongs.map((item, index) => ({
   ...item,
@@ -336,12 +353,15 @@ export const loadLocalWorkspaceSnapshot = (): WorkspaceSnapshot => {
       songs: [],
       setlists: [],
       joinedSetlists: [],
+      projects: [],
+      joinedProjects: [],
       lastSavedAt: null
     };
   }
 
   let songs: StoredSong[] = [];
   let setlists: Setlist[] = [];
+  let projects: Project[] = [];
   let lastSavedAt: number | null = null;
 
   try {
@@ -367,18 +387,31 @@ export const loadLocalWorkspaceSnapshot = (): WorkspaceSnapshot => {
     setlists = [];
   }
 
+  try {
+    const storedProjects = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+    const parsedProjects = storedProjects ? JSON.parse(storedProjects) as Array<Partial<Project> & Record<string, unknown>> : [];
+    projects = Array.isArray(parsedProjects)
+      ? parsedProjects.map((project, index) => normalizeStoredProject(project, index))
+      : [];
+  } catch {
+    projects = [];
+  }
+
   return {
     songs,
     setlists,
     joinedSetlists: [],
+    projects,
+    joinedProjects: [],
     lastSavedAt
   };
 };
 
-export const persistLocalWorkspaceSnapshot = (songs: StoredSong[], setlists: Setlist[]) => {
+export const persistLocalWorkspaceSnapshot = (songs: StoredSong[], setlists: Setlist[], projects: Project[] = []) => {
   const savedAt = Date.now();
   window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(songs));
   window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(setlists));
+  window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(projects));
   window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
   return savedAt;
 };
@@ -415,10 +448,14 @@ export const loadPendingSync = (): PendingSyncPayload | null => {
     const songs = parsed.songs.map((song, index) => normalizeStoredSong(song, index));
     const songsById = new Map(songs.map((song) => [song.id, song] as const));
     const setlists = parsed.setlists.map((setlist, index) => normalizeStoredSetlist(setlist as Partial<Setlist> & Record<string, unknown>, songsById, index));
+    const projects = Array.isArray(parsed.projects)
+      ? parsed.projects.map((project, index) => normalizeStoredProject(project as Partial<Project> & Record<string, unknown>, index))
+      : [];
 
     return {
       songs,
       setlists,
+      projects,
       savedAt: parsed.savedAt
     };
   } catch {

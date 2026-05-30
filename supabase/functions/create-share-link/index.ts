@@ -53,11 +53,13 @@ Deno.serve(async (request) => {
     }
 
     const { resourceType, resourceId } = await request.json();
-    if (!resourceType || !resourceId || !['song', 'setlist'].includes(resourceType)) {
+    if (!resourceType || !resourceId || !['song', 'setlist', 'project'].includes(resourceType)) {
       return jsonResponse({ error: 'Invalid resource payload.' }, 400);
     }
 
-    const tableName = resourceType === 'song' ? 'songs' : 'setlists';
+    const tableName = resourceType === 'song'
+      ? 'songs'
+      : resourceType === 'setlist' ? 'setlists' : 'projects';
     const { data: resource, error: resourceError } = await supabase
       .from(tableName)
       .select('id')
