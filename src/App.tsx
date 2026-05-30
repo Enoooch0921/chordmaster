@@ -2927,23 +2927,22 @@ export default function App() {
     }
 
     // When opening the editor in setlist mode, snap selection to the setlist
-    // song the user is currently looking at — relying on the scroll observer
-    // alone left the editor pointing at the first song if the scroll handler
-    // had not yet fired for the latest scroll position.
+    // song the user is currently looking at by picking the card whose center
+    // is closest to the viewport center. Using a 28%-from-top activation line
+    // (the auto-track scroll observer's heuristic) often picked the song
+    // above the one the user was actually reading.
     if (!isEditing && isSetlistMode && previewRef.current) {
       const scrollRoot = previewRef.current;
       const songCards = Array.from(scrollRoot.querySelectorAll('[data-setlist-preview-song-id]')) as HTMLElement[];
       if (songCards.length > 0) {
         const rootRect = scrollRoot.getBoundingClientRect();
-        const activationY = rootRect.top + Math.min(180, Math.max(72, rootRect.height * 0.28));
+        const viewportCenterY = rootRect.top + rootRect.height / 2;
         let nextId: string | null = null;
         let smallestDistance = Number.POSITIVE_INFINITY;
         for (const card of songCards) {
           const cardRect = card.getBoundingClientRect();
-          const contains = cardRect.top <= activationY && cardRect.bottom >= activationY;
-          const distance = contains
-            ? 0
-            : Math.min(Math.abs(cardRect.top - activationY), Math.abs(cardRect.bottom - activationY));
+          const cardCenter = (cardRect.top + cardRect.bottom) / 2;
+          const distance = Math.abs(cardCenter - viewportCenterY);
           if (distance < smallestDistance) {
             smallestDistance = distance;
             nextId = card.dataset.setlistPreviewSongId ?? null;
@@ -4262,15 +4261,15 @@ export default function App() {
 
     // Switching the focused setlist song takes priority over the editor: release
     // any editor focus / pending focus request first so the editor can't grab
-    // focus back and block the switch. Also clear the active bar/section so the
-    // next song's editor doesn't immediately auto-focus the previous song's bar.
+    // focus back and block the switch. (activeBar / activeSectionId are reset
+    // automatically by the currentPreviewIdentity effect when the song
+    // changes, so we don't double-set them here — doing so causes a visible
+    // flicker as the editor re-renders twice.)
     if (editorFocusTimeoutRef.current !== null) {
       window.clearTimeout(editorFocusTimeoutRef.current);
       editorFocusTimeoutRef.current = null;
     }
     setEditorFocusRequest(null);
-    setActiveBar(null);
-    setActiveSectionId(null);
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
