@@ -6326,7 +6326,13 @@ export default function App() {
   }, [isPerformanceMode, isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
 
   useEffect(() => {
-    if (isPerformanceMode || !isSetlistMode || setlistPreviewSongs.length === 0) {
+    // The scroll observer auto-selects the setlist song nearest the preview
+    // activation line as the user scrolls. Disabling it in edit mode is
+    // intentional: with the split editor pane open, the preview can be
+    // narrow and any reflow/scroll (including the auto-scroll-to-selected
+    // effect itself) would otherwise ping-pong the selection between two
+    // adjacent songs and re-mount the editor on each swap.
+    if (isPerformanceMode || !isSetlistMode || isEditing || setlistPreviewSongs.length === 0) {
       return;
     }
 
@@ -6382,7 +6388,7 @@ export default function App() {
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [isPerformanceMode, isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
+  }, [isPerformanceMode, isSetlistMode, isEditing, selectedSetlistSongId, setlistPreviewSongs.length]);
 
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
     const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));
