@@ -2926,6 +2926,36 @@ export default function App() {
       return;
     }
 
+    // When opening the editor in setlist mode, snap selection to the setlist
+    // song the user is currently looking at — relying on the scroll observer
+    // alone left the editor pointing at the first song if the scroll handler
+    // had not yet fired for the latest scroll position.
+    if (!isEditing && isSetlistMode && previewRef.current) {
+      const scrollRoot = previewRef.current;
+      const songCards = Array.from(scrollRoot.querySelectorAll('[data-setlist-preview-song-id]')) as HTMLElement[];
+      if (songCards.length > 0) {
+        const rootRect = scrollRoot.getBoundingClientRect();
+        const activationY = rootRect.top + Math.min(180, Math.max(72, rootRect.height * 0.28));
+        let nextId: string | null = null;
+        let smallestDistance = Number.POSITIVE_INFINITY;
+        for (const card of songCards) {
+          const cardRect = card.getBoundingClientRect();
+          const contains = cardRect.top <= activationY && cardRect.bottom >= activationY;
+          const distance = contains
+            ? 0
+            : Math.min(Math.abs(cardRect.top - activationY), Math.abs(cardRect.bottom - activationY));
+          if (distance < smallestDistance) {
+            smallestDistance = distance;
+            nextId = card.dataset.setlistPreviewSongId ?? null;
+          }
+        }
+        if (nextId && nextId !== selectedSetlistSongId) {
+          skipNextSetlistPreviewAutoScrollRef.current = true;
+          setSelectedSetlistSongId(nextId);
+        }
+      }
+    }
+
     setIsEditing((current) => !current);
   };
 
@@ -4232,12 +4262,15 @@ export default function App() {
 
     // Switching the focused setlist song takes priority over the editor: release
     // any editor focus / pending focus request first so the editor can't grab
-    // focus back and block the switch.
+    // focus back and block the switch. Also clear the active bar/section so the
+    // next song's editor doesn't immediately auto-focus the previous song's bar.
     if (editorFocusTimeoutRef.current !== null) {
       window.clearTimeout(editorFocusTimeoutRef.current);
       editorFocusTimeoutRef.current = null;
     }
     setEditorFocusRequest(null);
+    setActiveBar(null);
+    setActiveSectionId(null);
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
