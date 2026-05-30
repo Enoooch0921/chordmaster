@@ -7861,7 +7861,7 @@ export default function App() {
                         event.stopPropagation();
                         handleSetSetlistArchived(item.id, !item.archived);
                       }}
-                      className="flex w-20 items-center justify-center bg-indigo-500 px-3 text-center text-sm font-bold leading-tight text-white"
+                      className="flex w-20 items-center justify-center rounded-l-2xl bg-indigo-500 px-3 text-center text-sm font-bold leading-tight text-white"
                       aria-label={`${item.archived ? copy.unarchiveSetlist : copy.archiveSetlist} ${item.name || copy.untitledSetlist}`}
                       title={item.archived ? copy.unarchiveSetlist : copy.archiveSetlist}
                     >
@@ -7876,7 +7876,7 @@ export default function App() {
                       event.stopPropagation();
                       handleDeleteSetlist(item.id);
                     }}
-                    className="flex w-20 items-center justify-center bg-rose-500 px-3 text-sm font-bold text-white"
+                    className="flex w-20 items-center justify-center rounded-r-2xl bg-rose-500 px-3 text-sm font-bold text-white"
                     aria-label={`${copy.delete} ${item.name || copy.untitledSetlist}`}
                     title={copy.delete}
                   >
@@ -9076,7 +9076,7 @@ export default function App() {
                                         event.stopPropagation();
                                         handleSetSetlistArchived(item.id, !item.archived);
                                       }}
-                                      className="flex w-20 items-center justify-center bg-indigo-500 px-3 text-center text-sm font-bold leading-tight text-white"
+                                      className="flex w-20 items-center justify-center rounded-l-2xl bg-indigo-500 px-3 text-center text-sm font-bold leading-tight text-white"
                                       aria-label={`${item.archived ? copy.unarchiveSetlist : copy.archiveSetlist} ${item.name || copy.untitledSetlist}`}
                                       title={item.archived ? copy.unarchiveSetlist : copy.archiveSetlist}
                                     >
@@ -9091,7 +9091,7 @@ export default function App() {
                                       event.stopPropagation();
                                       handleDeleteSetlist(item.id);
                                     }}
-                                    className="flex w-20 items-center justify-center bg-rose-500 px-3 text-sm font-bold text-white"
+                                    className="flex w-20 items-center justify-center rounded-r-2xl bg-rose-500 px-3 text-sm font-bold text-white"
                                     aria-label={`${copy.delete} ${item.name || copy.untitledSetlist}`}
                                     title={copy.delete}
                                   >
