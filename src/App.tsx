@@ -48,7 +48,7 @@ import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -7740,9 +7740,11 @@ export default function App() {
               setDesktopSetlistPanelView('projects');
               setSelectedJoinedProjectId(null);
             }}
-            className="-ml-1 mb-2 inline-flex items-center gap-1 rounded-lg px-1 py-0.5 text-xs font-semibold text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            className="group mb-3 inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-indigo-700 shadow-sm shadow-indigo-100 transition-all hover:-translate-x-0.5 hover:border-indigo-300 hover:bg-indigo-100"
+            title={language === 'zh' ? '返回專案列表' : 'Back to projects'}
           >
-            <ChevronLeft size={14} />
+            <ChevronLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
+            <FolderTree size={13} />
             <span>{copy.projects}</span>
           </button>
           <div className="flex items-center gap-2">
@@ -8979,10 +8981,15 @@ export default function App() {
                       <div className="px-5 py-6 border-b border-gray-200">
                         <button
                           type="button"
-                          onClick={() => setMobileSetlistDrawerView('projects')}
-                          className="-ml-1 mb-2 inline-flex items-center gap-1 rounded-lg px-1 py-0.5 text-xs font-semibold text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                          onClick={() => {
+                            setMobileSetlistDrawerView('projects');
+                            setSelectedJoinedProjectId(null);
+                          }}
+                          className="group mb-3 inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-indigo-700 shadow-sm shadow-indigo-100 transition-all hover:-translate-x-0.5 hover:border-indigo-300 hover:bg-indigo-100"
+                          title={language === 'zh' ? '返回專案列表' : 'Back to projects'}
                         >
-                          <ChevronLeft size={14} />
+                          <ChevronLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
+                          <FolderTree size={13} />
                           <span>{copy.projects}</span>
                         </button>
                         <div className={isPhoneViewport ? '' : 'min-w-0'}>
