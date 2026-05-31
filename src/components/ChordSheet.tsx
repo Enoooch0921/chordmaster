@@ -516,7 +516,11 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
     : undefined;
   const numericChordOffsetClass = '';
   const numericRootSizeClass = 'text-lg';
-  const numericQualityOffsetClass = '';
+  // The quality suffix (m7, 7, dim, sus…) is anchored by box-bottom (bottom-0 +
+  // items-end), but a 10–11px suffix has a shorter descender than the 18px root,
+  // so its baseline ends up ~0.17em low. Nudge non-symbolic suffixes up so their
+  // baseline sits flush with the root's. (Symbolic °/ø keep their own offset.)
+  const numericQualityOffsetClass = symbolicQuality ? '' : '-translate-y-[0.17em]';
   const numericQualityTextClass = qualityText === 'm'
     ? 'text-[11px] leading-none'
     : symbolicQuality
@@ -1860,7 +1864,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                 }}
                                               >
                                                 <AutoShrink
-                                                  align={hasRoomToBreathe ? 'left' : 'center'}
+                                                  align="left"
                                                   minScale={minScale}
 	                                                  maxScale={maxScale}
 	                                                  overflowVisible

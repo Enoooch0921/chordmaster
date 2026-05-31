@@ -7,6 +7,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import { createRoot } from 'react-dom/client';
 import { toPng, toCanvas, getFontEmbedCSS } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -27,7 +29,10 @@ import {
   StoredSong,
   BarNumberMode,
   SongReferenceKind,
-  TeamManagementSnapshot
+  TeamManagementSnapshot,
+  ShareContact,
+  AppNotification,
+  NotificationResourceType
 } from './types';
 import { ALL_KEYS, getPlayKey, getTransposeOffset, normalizeKeySpelling, transposeKeyPreferFlats, transposeKeyWithPreference } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
@@ -46,6 +51,8 @@ import CapoPicker from './components/CapoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
 import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
+import { NotificationBell } from './components/NotificationBell';
+import { ShareContactPicker } from './components/ShareContactPicker';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
 import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
@@ -449,6 +456,45 @@ const copyShareUrlToClipboard = async (shareUrl: string) => {
   } finally {
     textArea.remove();
     previousActiveElement?.focus({ preventScroll: true });
+  }
+};
+
+// On native iPad (Capacitor WKWebView), jsPDF's `.save()` relies on an
+// `<a download>` click that WKWebView silently ignores, so nothing happens.
+// Instead, write the PDF to the cache directory and hand it to the iOS share
+// sheet (Save to Files, AirDrop, Mail, etc.).
+const savePdfDocument = async (pdf: jsPDF, fileName: string) => {
+  const safeFileName = `${fileName}.pdf`;
+
+  if (!Capacitor.isNativePlatform()) {
+    pdf.save(safeFileName);
+    return;
+  }
+
+  // jsPDF emits a "data:application/pdf;filename=...;base64,XXXX" URI; strip the
+  // prefix so Filesystem.writeFile receives raw base64 data.
+  const dataUri = pdf.output('datauristring');
+  const base64Data = dataUri.slice(dataUri.indexOf(',') + 1);
+
+  const writeResult = await Filesystem.writeFile({
+    path: safeFileName,
+    data: base64Data,
+    directory: Directory.Cache,
+  });
+
+  try {
+    await Share.share({
+      title: fileName,
+      url: writeResult.uri,
+    });
+  } catch (error) {
+    // Dismissing the iOS share sheet rejects with a "canceled" error — that is
+    // not an export failure, so swallow it.
+    const message = error instanceof Error ? error.message : String(error);
+    if (/cancel/i.test(message)) {
+      return;
+    }
+    throw error;
   }
 };
 
@@ -1676,6 +1722,11 @@ export default function App() {
   const [pendingRevokeShareSetlistId, setPendingRevokeShareSetlistId] = useState<string | null>(null);
   const [isRevokingSetlistShare, setIsRevokingSetlistShare] = useState(false);
   const [pendingShareUrl, setPendingShareUrl] = useState<string | null>(null);
+  const [shareDialogContext, setShareDialogContext] = useState<{ resourceType: NotificationResourceType; resourceId: string } | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [shareContacts, setShareContacts] = useState<ShareContact[]>([]);
+  const [isLoadingShareContacts, setIsLoadingShareContacts] = useState(false);
+  const [isSharingToContacts, setIsSharingToContacts] = useState(false);
   const [cloudLibraries, setCloudLibraries] = useState<CloudLibrarySummary[]>([]);
   const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
   const [isSwitchingLibrary, setIsSwitchingLibrary] = useState(false);
@@ -2455,7 +2506,9 @@ export default function App() {
     }
 
     if (!selectedSetlist) {
-      setMobileSetlistDrawerView('list');
+      // Keep an intentional 'projects' (or 'list') view; only setlist-bound
+      // views fall back to the list when nothing is selected.
+      setMobileSetlistDrawerView((view) => (view === 'detail' || view === 'addSongs') ? 'list' : view);
       return;
     }
 
@@ -2498,7 +2551,10 @@ export default function App() {
     }
 
     if (!isSetlistMode || !selectedSetlist) {
-      setDesktopSetlistPanelView('list');
+      // Only the views that REQUIRE a selected setlist fall back to the list.
+      // The 'projects' (and 'list') views are valid with no selection, so a new
+      // user who opens 'projects' isn't bounced straight back to the setlist list.
+      setDesktopSetlistPanelView((view) => (view === 'detail' || view === 'addSongs') ? 'list' : view);
       setIsSetlistAddSongsOpen(false);
       return;
     }
@@ -3812,7 +3868,12 @@ export default function App() {
     }
   };
 
-  const handleTeamPersonalSetlistCapoChange = (setlistSongId: string, capo: number) => {
+  // Signed-in users remember capo per-account (a personal override stored in
+  // user_setlist_capo_overrides) for every setlist in their local store —
+  // whether they own it, can edit it, or merely belong to a team copy — rather
+  // than mutating the setlist's shared capo. This is the write half of the
+  // resolution already done by getEffectiveSetlistSongCapo (personal ?? base).
+  const handlePersonalSetlistCapoChange = (setlistSongId: string, capo: number) => {
     setSetlists((currentSetlists) => currentSetlists.map((setlist) =>
       setlist.id !== selectedSetlistId
         ? setlist
@@ -3836,8 +3897,11 @@ export default function App() {
       return;
     }
 
-    if (isTeamWorkspace && !canEditSelectedSetlist) {
-      handleTeamPersonalSetlistCapoChange(selectedSetlistSong.id, capo);
+    // Signed-in: capo is a per-account override. Anonymous/local users have no
+    // account (and saveCapoOverride/personalCapoOverride don't persist locally),
+    // so capo stays in the setlist's own state as before.
+    if (isCloudMode) {
+      handlePersonalSetlistCapoChange(selectedSetlistSong.id, capo);
       return;
     }
 
@@ -3917,6 +3981,158 @@ export default function App() {
 
     void loadSetlistShareStatus(selectedSetlist.id);
   }, [authenticatedUser, canShareSelectedSetlist, isSetlistMode, savedSetlists, selectedSetlist?.id]);
+
+  // In-app notification inbox + "people I shared with before" contact list.
+  const refreshNotifications = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) return;
+    try {
+      const list = await repository.getNotifications();
+      setNotifications(list);
+    } catch {
+      // Transient; the next focus/refresh will retry.
+    }
+  };
+
+  const refreshShareContacts = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) return;
+    try {
+      setIsLoadingShareContacts(true);
+      const list = await repository.getShareContacts();
+      setShareContacts(list);
+    } catch {
+      // Silent; the picker simply shows no contacts.
+    } finally {
+      setIsLoadingShareContacts(false);
+    }
+  };
+
+  const refreshNotificationsAndContacts = async () => {
+    await Promise.all([refreshNotifications(), refreshShareContacts()]);
+  };
+
+  const handleShareToContacts = async (resourceType: NotificationResourceType, resourceId: string, userIds: string[]) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || userIds.length === 0 || isSharingToContacts) return;
+    try {
+      setIsSharingToContacts(true);
+      const count = await repository.shareToContacts(resourceType, resourceId, userIds);
+      toast.success(language === 'zh' ? `已分享給 ${count} 人` : `Shared with ${count} ${count === 1 ? 'person' : 'people'}`);
+      // Reflect the new participants in the open share-status panel.
+      if (resourceType === 'setlist' && selectedSetlist?.id === resourceId) {
+        void loadSetlistShareStatus(resourceId);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      toast.error(reason ? `${copy.shareToContactsError}\n\n${reason}` : copy.shareToContactsError);
+    } finally {
+      setIsSharingToContacts(false);
+    }
+  };
+
+  const handleMarkAllNotificationsRead = () => {
+    const repository = cloudRepositoryRef.current;
+    const unreadIds = notifications.filter((item) => !item.readAt).map((item) => item.id);
+    if (unreadIds.length === 0) return;
+    const readAt = new Date().toISOString();
+    setNotifications((current) => current.map((item) => item.readAt ? item : { ...item, readAt }));
+    if (repository) {
+      void repository.markNotificationsRead(unreadIds);
+    }
+  };
+
+  const handleOpenNotification = async (notification: AppNotification) => {
+    const repository = cloudRepositoryRef.current;
+    if (!notification.readAt) {
+      const readAt = new Date().toISOString();
+      setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, readAt } : item));
+      if (repository) {
+        void repository.markNotificationsRead([notification.id]);
+      }
+    }
+
+    // The membership was created server-side, so reload joined data to make the
+    // shared resource available before navigating to it.
+    if (repository) {
+      try {
+        const workspace = await repository.loadWorkspace();
+        setJoinedSetlists(workspace.joinedSetlists);
+        setJoinedProjects(workspace.joinedProjects ?? []);
+      } catch {
+        // Navigate with whatever is already loaded.
+      }
+    }
+
+    setWorkspaceMode('setlists');
+    if (notification.resourceType === 'project') {
+      setSelectedJoinedProjectId(notification.resourceId);
+    } else {
+      setSelectedJoinedProjectId(null);
+      setSelectedSetlistId(notification.resourceId);
+    }
+  };
+
+  useEffect(() => {
+    if (!authenticatedUser) {
+      setNotifications([]);
+      setShareContacts([]);
+      return;
+    }
+
+    void refreshNotificationsAndContacts();
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'hidden') return;
+      // Don't refresh (and thus re-render) while the user is mid-edit in a
+      // field. A re-render resets controlled inputs to their committed value,
+      // which would drop an autofill/datalist pick that hasn't been committed
+      // via change/blur yet (e.g. selecting an artist, then tab-switching back).
+      const active = document.activeElement as HTMLElement | null;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+        return;
+      }
+      void refreshNotifications();
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticatedUser?.id]);
+
+  const notificationBell = isAuthenticated ? (
+    <NotificationBell
+      notifications={notifications}
+      labels={{
+        title: copy.notificationsTitle,
+        empty: copy.notificationsEmpty,
+        markAllRead: copy.notificationsMarkAllRead,
+        open: copy.notificationOpen,
+        sharedSetlist: copy.notificationSharedSetlist,
+        sharedProject: copy.notificationSharedProject,
+      }}
+      onOpen={(notification) => void handleOpenNotification(notification)}
+      onMarkAllRead={handleMarkAllNotificationsRead}
+    />
+  ) : null;
+
+  const renderShareContactPicker = (resourceType: NotificationResourceType, resourceId: string) => (
+    <ShareContactPicker
+      contacts={shareContacts}
+      loading={isLoadingShareContacts}
+      sharing={isSharingToContacts}
+      labels={{
+        title: copy.shareToContactsTitle,
+        empty: copy.shareToContactsEmpty,
+        button: copy.shareToContactsButton,
+        syncing: copy.cloudSyncSyncing,
+      }}
+      onShare={(userIds) => void handleShareToContacts(resourceType, resourceId, userIds)}
+    />
+  );
 
   useEffect(() => {
     if (!isTeamManagementOpen || !canManageActiveTeam) {
@@ -5264,7 +5480,7 @@ export default function App() {
       throw new PdfExportCancelledError();
     }
 
-    pdf.save(`${fileName}.pdf`);
+    await savePdfDocument(pdf, fileName);
   };
 
   const handleExportPdf = async () => {
@@ -5694,6 +5910,10 @@ export default function App() {
           setJoinedSetlists(nextJoinedSetlists);
           setJoinedProjects(cloudWorkspace.joinedProjects ?? []);
           setLastSavedAt(cloudWorkspace.lastSavedAt);
+          // The cloud repository is ready now, so populate the notification
+          // inbox + share contacts (the auth-keyed effect may have run before
+          // the repository ref was assigned).
+          void refreshNotificationsAndContacts();
           const storedSelectedSongId = getStoredSelectedSongId(targetLibrary?.id ?? null);
           setSelectedSongId((currentId) => pickAvailableSongId(nextSongs, [
             storedSelectedSongId,
@@ -5849,6 +6069,61 @@ export default function App() {
       }
     };
   }, [isAutoSaveEnabled, setlists, songs, workspaceIsDirty]);
+
+  // Latest-snapshot ref read by the exit flush below. Updated every render so
+  // the (once-registered) listeners always see the current workspace.
+  const exitFlushRef = useRef({ songs, setlists, projects, isDirty: workspaceIsDirty, isTeam: isTeamWorkspace, isCloud: isCloudMode });
+  exitFlushRef.current = { songs, setlists, projects, isDirty: workspaceIsDirty, isTeam: isTeamWorkspace, isCloud: isCloudMode };
+
+  // Persist unsaved edits when the tab/app is hidden or closed. Without this,
+  // leaving while the workspace is dirty (and before the next save or song
+  // switch) drops the change: the cloud-first reload has nothing local to
+  // reconcile against. Queuing it to pendingSync lets the existing
+  // merge-by-updatedAt path fold it back in on the next load. Mirrors
+  // persistWorkspace: team workspaces never queue offline, so skip them.
+  useEffect(() => {
+    const flushOnExit = () => {
+      const snapshot = exitFlushRef.current;
+      if (!snapshot.isDirty || snapshot.isTeam) {
+        return;
+      }
+      const savedAt = Date.now();
+      // Cloud users: queue for the merge-by-updatedAt path on next load. (For
+      // anonymous users the local cache below is enough, and a pending blob
+      // would otherwise muddy the sign-in import flow.)
+      if (snapshot.isCloud) {
+        savePendingSync({
+          songs: cloneSong(snapshot.songs),
+          setlists: cloneSong(snapshot.setlists),
+          projects: cloneSong(snapshot.projects),
+          savedAt
+        });
+      }
+      // Refresh the local cache so the next launch (and the pre-auth first
+      // render) reflects the unsaved edits instead of stale last-saved data.
+      try {
+        window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(snapshot.songs));
+        window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(snapshot.setlists));
+        window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(snapshot.projects));
+        window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
+      } catch {
+        // Ignore cache write failures; pendingSync still carries the edits.
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushOnExit();
+      }
+    };
+
+    window.addEventListener('pagehide', flushOnExit);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', flushOnExit);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (authenticatedUser && !activeLibraryId) {
@@ -6782,13 +7057,9 @@ export default function App() {
     try {
       await ensureShareResourceIsSynced('project', projectId);
       const token = await cloudRepositoryRef.current.createShareLink('project', projectId);
-      const shareUrl = buildShareUrl(token);
-      const didCopy = await copyShareUrlToClipboard(shareUrl);
-      if (didCopy) {
-        toast.success(copy.shareCopied);
-      } else {
-        setPendingShareUrl(shareUrl);
-      }
+      setPendingShareUrl(buildShareUrl(token));
+      setShareDialogContext({ resourceType: 'project', resourceId: projectId });
+      void refreshShareContacts();
     } catch (error) {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       const reason = error instanceof Error ? error.message.trim() : '';
@@ -6821,19 +7092,22 @@ export default function App() {
 
     try {
       await ensureShareResourceIsSynced(resourceType);
+
+      if (resourceType === 'setlist') {
+        // Reuse the existing active token when there is one so reopening the
+        // dialog doesn't mint duplicate links.
+        const token = selectedSetlistShareStatus?.activeToken
+          ?? await cloudRepositoryRef.current.createShareLink(resourceType, resourceId);
+        setPendingShareUrl(buildShareUrl(token));
+        setShareDialogContext({ resourceType: 'setlist', resourceId });
+        void refreshShareContacts();
+        void loadSetlistShareStatus(resourceId);
+        return;
+      }
+
       const token = await cloudRepositoryRef.current.createShareLink(resourceType, resourceId);
       const shareUrl = buildShareUrl(token);
       const didCopy = await copyShareUrlToClipboard(shareUrl);
-
-      if (resourceType === 'setlist') {
-        void loadSetlistShareStatus(resourceId);
-        if (didCopy) {
-          toast.success(copy.shareCopied);
-        } else {
-          toast.error(copy.shareCopyFailed);
-        }
-        return;
-      }
 
       if (didCopy) {
         toast.success(copy.shareCopied);
@@ -7152,7 +7426,7 @@ export default function App() {
           <div className="mt-3 grid grid-cols-1 gap-2">
             <button
               type="button"
-              onClick={() => selectedSetlistShareStatus?.activeToken ? void handleCopyActiveSetlistShareLink() : void handleCreateShareLink('setlist')}
+              onClick={() => void handleCreateShareLink('setlist')}
               disabled={isExportingPdf || isRevokingSetlistShare}
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
             >
@@ -7229,7 +7503,7 @@ export default function App() {
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button
           type="button"
-          onClick={() => selectedSetlistShareStatus?.activeToken ? void handleCopyActiveSetlistShareLink() : void handleCreateShareLink('setlist')}
+          onClick={() => void handleCreateShareLink('setlist')}
           disabled={isExportingPdf || isRevokingSetlistShare}
           className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
         >
@@ -8248,8 +8522,8 @@ export default function App() {
                             currentKey={effectiveKey}
                             onChange={isJoinedSetlist
                               ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
-                              : isTeamWorkspace && !canEditSelectedSetlist
-                                ? (capo) => handleTeamPersonalSetlistCapoChange(item.id, capo)
+                              : isCloudMode
+                                ? (capo) => handlePersonalSetlistCapoChange(item.id, capo)
                               : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
                             label="Capo"
                             align="right"
@@ -8867,8 +9141,8 @@ export default function App() {
                                             currentKey={effectiveKey}
                                             onChange={isJoinedSetlist
                                               ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
-                                              : isTeamWorkspace && !canEditSelectedSetlist
-                                                ? (capo) => handleTeamPersonalSetlistCapoChange(item.id, capo)
+                                              : isCloudMode
+                                                ? (capo) => handlePersonalSetlistCapoChange(item.id, capo)
                                               : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
                                             label="Capo"
                                             align="right"
@@ -10035,6 +10309,7 @@ export default function App() {
                   {toolbarOverflowPanel}
                 </div>
 
+                {notificationBell}
                 {isAuthenticated ? (
                   <div ref={googleAccountMenuRef} className="relative shrink-0">
                     <button
@@ -10278,6 +10553,7 @@ export default function App() {
                   {toolbarOverflowPanel}
                 </div>
 
+                {notificationBell}
                 {isAuthenticated ? (
                   <div ref={googleAccountMenuRef} className="relative shrink-0">
                     <button
@@ -11696,7 +11972,7 @@ export default function App() {
               className="w-full max-w-lg rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
               <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{APP_NAME}</div>
-              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{copy.shareManualCopyPrompt}</h2>
+              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{shareDialogContext ? copy.shareDialogTitle : copy.shareManualCopyPrompt}</h2>
               <input
                 type="text"
                 readOnly
@@ -11704,10 +11980,16 @@ export default function App() {
                 onFocus={(event) => event.currentTarget.select()}
                 className="mt-4 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-800 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
               />
+              {shareDialogContext && (
+                <>
+                  <p className="mt-3 text-[11px] leading-relaxed text-gray-500">{copy.shareDialogContactsHint}</p>
+                  {renderShareContactPicker(shareDialogContext.resourceType, shareDialogContext.resourceId)}
+                </>
+              )}
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   type="button"
-                  onClick={() => setPendingShareUrl(null)}
+                  onClick={() => { setPendingShareUrl(null); setShareDialogContext(null); }}
                   className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
                 >
                   {copy.done}
@@ -11718,6 +12000,7 @@ export default function App() {
                     const didCopy = await copyShareUrlToClipboard(pendingShareUrl);
                     if (didCopy) {
                       setPendingShareUrl(null);
+                      setShareDialogContext(null);
                       toast.success(copy.shareCopied);
                     }
                   }}

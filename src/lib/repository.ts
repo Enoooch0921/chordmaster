@@ -1,10 +1,13 @@
 import {
+  AppNotification,
   CloudLibrarySummary,
   JoinedProject,
   JoinedSetlist,
   LibraryRole,
+  NotificationResourceType,
   Project,
   ProjectShareStatus,
+  ShareContact,
   Setlist,
   SetlistShareStatus,
   SetlistSong,
@@ -217,6 +220,10 @@ export interface WorkspaceRepository {
   getProjectShareStatus(projectId: string): Promise<ProjectShareStatus>;
   revokeProjectSharing(projectId: string): Promise<void>;
   saveCapoOverride(setlistSongId: string, capo: number | null): Promise<void>;
+  getShareContacts(): Promise<ShareContact[]>;
+  shareToContacts(resourceType: NotificationResourceType, resourceId: string, userIds: string[]): Promise<number>;
+  getNotifications(): Promise<AppNotification[]>;
+  markNotificationsRead(ids: string[]): Promise<void>;
 }
 
 const mapSongRow = (row: SongRow): StoredSong => ({
@@ -581,6 +588,18 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async saveCapoOverride() {
     throw new Error('Please sign in to save capo overrides.');
+  },
+  async getShareContacts() {
+    return [];
+  },
+  async shareToContacts() {
+    throw new Error('Please sign in to share.');
+  },
+  async getNotifications() {
+    return [];
+  },
+  async markNotificationsRead() {
+    // No notifications exist for anonymous users.
   }
 });
 
@@ -1521,6 +1540,38 @@ export const createCloudRepository = (params: {
           );
         if (error) throw error;
       }
+    },
+
+    async getShareContacts() {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('get_share_contacts');
+      if (error) throw error;
+      return (data ?? []) as ShareContact[];
+    },
+
+    async shareToContacts(resourceType, resourceId, userIds) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('share_to_contacts', {
+        p_resource_type: resourceType,
+        p_resource_id: resourceId,
+        p_user_ids: userIds
+      });
+      if (error) throw error;
+      return (data ?? 0) as number;
+    },
+
+    async getNotifications() {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('get_notifications');
+      if (error) throw error;
+      return (data ?? []) as AppNotification[];
+    },
+
+    async markNotificationsRead(ids) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      if (ids.length === 0) return;
+      const { error } = await supabase.rpc('mark_notifications_read', { p_ids: ids });
+      if (error) throw error;
     }
   };
 };

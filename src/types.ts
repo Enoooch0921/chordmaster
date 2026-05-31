@@ -221,6 +221,30 @@ export interface ProjectShareStatus {
   participants: ShareParticipant[];
 }
 
+// A person the current user has shared with before (joined one of their
+// libraries). Used to re-share directly without sending a link again.
+export interface ShareContact {
+  userId: string;
+  email: string;
+  name: string;
+  picture?: string;
+}
+
+export type NotificationResourceType = 'setlist' | 'project';
+
+export interface AppNotification {
+  id: string;
+  type: 'resource_shared';
+  resourceType: NotificationResourceType;
+  resourceId: string;
+  resourceName: string;
+  actorName: string;
+  actorEmail: string;
+  actorPicture?: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
 export interface CloudLibrarySummary {
   id: string;
   name: string;

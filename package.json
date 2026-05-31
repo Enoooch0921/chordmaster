@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.8.19",
+  "version": "0.8.20",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -18,7 +18,9 @@
     "@capacitor/browser": "^8.0.3",
     "@capacitor/clipboard": "^8.0.1",
     "@capacitor/core": "^8.3.4",
+    "@capacitor/filesystem": "^8.1.2",
     "@capacitor/ios": "^8.3.4",
+    "@capacitor/share": "^8.0.1",
     "@google/genai": "^1.29.0",
     "@supabase/supabase-js": "^2.103.0",
     "@tailwindcss/vite": "^4.1.14",
