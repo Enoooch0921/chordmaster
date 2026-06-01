@@ -5540,11 +5540,14 @@ const SongEditor: React.FC<Props> = ({
       ) : null}
 
       {/* Section Navigation Bar */}
-      <div className="sticky top-0 z-10 -mx-4 mb-5 flex items-center gap-2 overflow-x-auto border-b border-gray-200 bg-white/80 px-4 py-2.5 shadow-sm backdrop-blur-md no-scrollbar sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div className="sticky top-0 z-10 -mx-4 mb-5 flex items-center gap-2 border-b border-gray-200 bg-white/80 px-4 py-2.5 shadow-sm backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         <div className="flex-shrink-0 text-[10px] font-bold text-gray-400 uppercase tracking-widest mr-2">{copy.editor.jumpTo}</div>
-        <Reorder.Group 
-          axis="x" 
-          values={song.sections} 
+        {/* Only the chips scroll; the add button stays pinned and visible on the
+            right even when there are enough sections to overflow the row. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto no-scrollbar">
+        <Reorder.Group
+          axis="x"
+          values={song.sections}
           onReorder={(newSections) => notifyChange({ ...song, sections: realignSectionsForCurrentOrder(newSections) })}
           className="flex items-center gap-2"
         >
@@ -5571,6 +5574,7 @@ const SongEditor: React.FC<Props> = ({
             );
           })}
         </Reorder.Group>
+        </div>
         {showInlineAddSectionButton && (
           <button
             type="button"

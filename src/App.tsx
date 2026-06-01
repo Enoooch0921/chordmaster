@@ -11135,6 +11135,7 @@ export default function App() {
                             onRedo={handleRedo}
                             onChange={handleSongChange}
                             hideMetadataPanel
+                            showInlineAddSectionButton
                             activeSectionId={activeSectionId}
                             onActiveSectionChange={setActiveSectionId}
                             activeBar={activeBar}
