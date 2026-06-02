@@ -8247,10 +8247,10 @@ export default function App() {
           >
             <ChevronLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
           </button>
-          <div className="min-w-0 flex-1">
+          <div className="flex min-h-9 min-w-0 flex-1 items-center">
             <div className="flex min-w-0 items-center gap-2">
               <FolderTree size={14} className="shrink-0 text-gray-400" />
-              <span className="truncate text-base font-bold leading-tight text-gray-900">
+              <span className="line-clamp-2 min-w-0 whitespace-normal break-words text-base font-bold leading-tight text-gray-900">
                 {selectedJoinedProject ? selectedJoinedProject.name : (selectedProject ? selectedProject.name : copy.ungroupedProject)}
               </span>
               {selectedJoinedProject && (
@@ -8260,16 +8260,6 @@ export default function App() {
               )}
             </div>
           </div>
-          {canCreateTeamSetlists && !selectedJoinedProject && (
-            <button
-              type="button"
-              onClick={handleCreateSetlist}
-              className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-            >
-              <Plus size={16} />
-              <span>{copy.newSetlist}</span>
-            </button>
-          )}
           {canCreateTeamSetlists && !selectedJoinedProject && selectedProject && canManageProject(selectedProject) && (
             <button
               type="button"
@@ -8287,16 +8277,29 @@ export default function App() {
             </button>
           )}
         </div>
-        <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-          <Search size={15} className="shrink-0 text-gray-400" />
-          <input
-            type="text"
-            value={setlistSearchQuery}
-            onChange={(event) => setSetlistSearchQuery(event.target.value)}
-            placeholder={copy.searchSetlists}
-            className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-          />
-        </label>
+        <div className="mt-3 flex min-w-0 items-center gap-2">
+          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+            <Search size={15} className="shrink-0 text-gray-400" />
+            <input
+              type="text"
+              value={setlistSearchQuery}
+              onChange={(event) => setSetlistSearchQuery(event.target.value)}
+              placeholder={copy.searchSetlists}
+              className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+            />
+          </label>
+          {canCreateTeamSetlists && !selectedJoinedProject && (
+            <button
+              type="button"
+              onClick={handleCreateSetlist}
+              title={copy.newSetlist}
+              aria-label={copy.newSetlist}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+            >
+              <Plus size={18} />
+            </button>
+          )}
+        </div>
         <div className="mt-3 flex min-w-0 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-1.5 text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
             <span>{copy.setlists}</span>
@@ -9486,10 +9489,10 @@ export default function App() {
                           >
                             <ChevronLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
                           </button>
-                          <div className="min-w-0 flex-1">
+                          <div className="flex min-h-9 min-w-0 flex-1 items-center">
                             <div className="flex min-w-0 items-center gap-2">
                               <FolderTree size={14} className="shrink-0 text-gray-400" />
-                              <span className="truncate text-base font-bold leading-tight text-gray-900">
+                              <span className="line-clamp-2 min-w-0 whitespace-normal break-words text-base font-bold leading-tight text-gray-900">
                                 {selectedJoinedProject ? selectedJoinedProject.name : (selectedProject ? selectedProject.name : copy.ungroupedProject)}
                               </span>
                               {selectedJoinedProject && (
@@ -9499,27 +9502,46 @@ export default function App() {
                               )}
                             </div>
                           </div>
+                          {canCreateTeamSetlists && !selectedJoinedProject && selectedProject && canManageProject(selectedProject) && (
+                            <button
+                              type="button"
+                              onClick={() => void handleCreateProjectShareLink(selectedProject.id)}
+                              disabled={creatingProjectShareLinkId === selectedProject.id}
+                              title={language === 'zh' ? '分享專案' : 'Share project'}
+                              aria-label={language === 'zh' ? '分享專案' : 'Share project'}
+                              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
+                            >
+                              {creatingProjectShareLinkId === selectedProject.id ? (
+                                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-500" aria-hidden />
+                              ) : (
+                                <Share2 size={15} />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                        <div className="mt-3 flex min-w-0 items-center gap-2">
+                          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                            <Search size={15} className="shrink-0 text-gray-400" />
+                            <input
+                              type="text"
+                              value={setlistSearchQuery}
+                              onChange={(event) => setSetlistSearchQuery(event.target.value)}
+                              placeholder={copy.searchSetlists}
+                              className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                            />
+                          </label>
                           {canCreateTeamSetlists && !selectedJoinedProject && (
                             <button
                               type="button"
                               onClick={handleCreateSetlist}
-                              className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                              title={copy.newSetlist}
+                              aria-label={copy.newSetlist}
+                              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
                             >
-                              <Plus size={16} />
-                              <span>{copy.newSetlist}</span>
+                              <Plus size={18} />
                             </button>
                           )}
                         </div>
-                        <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                          <Search size={15} className="shrink-0 text-gray-400" />
-                          <input
-                            type="text"
-                            value={setlistSearchQuery}
-                            onChange={(event) => setSetlistSearchQuery(event.target.value)}
-                            placeholder={copy.searchSetlists}
-                            className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                          />
-                        </label>
                         <div className="mt-3 flex min-w-0 items-center justify-between gap-3">
                           <div className="flex min-w-0 items-center gap-1.5 text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
                             <span>{copy.setlists}</span>
