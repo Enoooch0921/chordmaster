@@ -735,7 +735,8 @@ interface ChordSheetProps {
   language: AppLanguage;
   currentKey: Key;
   transposeFromOriginal?: boolean;
-  onElementClick?: (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics') => void;
+  onElementClick?: (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics' | 'sectionName') => void;
+  onAddBarClick?: (sIdx: number) => void;
   highlightedSectionIds?: string[];
   activeSectionId?: string | null;
   activeBar?: { sIdx: number; bIdx: number } | null;
@@ -1120,7 +1121,8 @@ const AutoShrink: React.FC<{
 const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, previewIdentity = null }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
-  const chordFontFamily = getChordFontFamily(song.chordFontPreset);
+  // Chords always use the sans-serif preset; the serif option was removed.
+  const chordFontFamily = getChordFontFamily('stage-sans');
   const previousPreviewIdentityRef = React.useRef(previewIdentity);
   const [keepTransitionsSuppressed, setKeepTransitionsSuppressed] = React.useState(false);
   const isPreviewIdentityChanged = previousPreviewIdentityRef.current !== previewIdentity;
@@ -1445,8 +1447,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         <div className={`w-full flex justify-center transition-all ${isActiveSection ? 'scale-[1.02]' : ''}`}>
                           <div className="relative flex w-full justify-center">
                             <div
-                              className="flex w-full items-center justify-center rounded-sm border px-1 py-1 min-h-[24px] overflow-visible"
+                              className={`flex w-full items-center justify-center rounded-sm border px-1 py-1 min-h-[24px] overflow-visible ${onElementClick ? 'cursor-pointer transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.4)]' : ''}`}
                               style={getSectionBadgeStyle(colors.accent)}
+                              {...(onElementClick ? { role: 'button' as const, tabIndex: 0, onClick: () => onElementClick(row.sIdx, -1, 'sectionName') } : {})}
                             >
                               {hasManualLineBreak ? (
                                 <div className="w-full whitespace-pre-line break-words px-[1px] text-center text-[10px] font-black tracking-[0.04em] leading-[1.15]">

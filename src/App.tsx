@@ -908,7 +908,7 @@ interface SongHistoryState {
 }
 
 type AppView = 'sheet' | 'about' | 'help';
-type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics';
+type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics' | 'sectionName';
 
 interface EditorFocusRequest {
   sIdx: number;
@@ -6676,12 +6676,9 @@ export default function App() {
       return null;
     }
 
-    const selectedPreviewSong = setlistPreviewSongs.find(({ item }) => item.id === selectedSetlistSong?.id) ?? setlistPreviewSongs[0];
-    const visibleSetlistPreviewSongs = selectedPreviewSong ? [selectedPreviewSong] : [];
-
     return (
       <div className="flex flex-col gap-8">
-        {visibleSetlistPreviewSongs.map(({ item, isSelected, song: previewSong }) => (
+        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong }) => (
           <div
             key={item.id}
             data-setlist-preview-song-id={item.id}
@@ -8191,7 +8188,7 @@ export default function App() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <div className="space-y-2">
           {renderProjectCard(null, { isUngrouped: true })}
           {visibleProjects.map((project) => renderProjectCard(project, { isUngrouped: false }))}
@@ -8613,7 +8610,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {canShareSelectedSetlist && setlistSharingPanel ? <div className="mb-3">{setlistSharingPanel}</div> : null}
         {joinedSetlistDisplayPreferencePanel ? <div className="mb-3">{joinedSetlistDisplayPreferencePanel}</div> : null}
 
@@ -8785,7 +8782,7 @@ export default function App() {
         </label>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <div className="space-y-2">
           {filteredSongsForSetlist.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
@@ -9026,7 +9023,7 @@ export default function App() {
               x: isSidebarExpanded ? 0 : -20
             }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="min-w-0 flex-1 flex flex-col"
+            className="min-w-0 min-h-0 flex-1 flex flex-col"
             style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           >
             {isPhoneViewport && (
@@ -9219,7 +9216,7 @@ export default function App() {
                         </div>
 	                      </div>
 
-	                      <div className="flex-1 overflow-y-auto p-3">
+	                      <div className="min-h-0 flex-1 overflow-y-auto p-3">
                         {canShareSelectedSetlist && setlistSharingPanel ? (
                           <div className="mb-3">
                             {setlistSharingPanel}
@@ -9381,7 +9378,7 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="flex-1 overflow-y-auto p-3">
+                      <div className="min-h-0 flex-1 overflow-y-auto p-3">
                         <div className="space-y-2">
                           {renderProjectCard(null, { isUngrouped: true })}
                           {visibleProjects.map((project) => renderProjectCard(project, { isUngrouped: false }))}
@@ -9424,7 +9421,7 @@ export default function App() {
                         </label>
                       </div>
 
-                      <div className="flex-1 overflow-y-auto p-3">
+                      <div className="min-h-0 flex-1 overflow-y-auto p-3">
                         <div className="space-y-2">
                           {filteredSongsForSetlist.length === 0 ? (
                             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">

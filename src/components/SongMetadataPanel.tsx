@@ -1,7 +1,6 @@
 import React from 'react';
-import { AppLanguage, BarNumberMode, ChordFontPreset, Key, SetlistDisplayMode, Song, SongReference, SongReferenceKind } from '../types';
+import { AppLanguage, BarNumberMode, Key, SetlistDisplayMode, Song, SongReference, SongReferenceKind } from '../types';
 import { getUiCopy } from '../constants/i18n';
-import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
 import KeyPicker from './KeyPicker';
 import CapoPicker from './CapoPicker';
 import { CompactSegmentedControl, CompactToggleSwitch } from './SetlistCompactControls';
@@ -28,7 +27,6 @@ interface SongMetadataPanelProps {
   showReferenceFields?: boolean;
 }
 
-const CHORD_FONT_PRESET_OPTIONS: ChordFontPreset[] = ['classic-serif', 'stage-sans'];
 const DISPLAY_MODE_OPTIONS: SetlistDisplayMode[] = [
   'nashville-number-system',
   'chord-fixed-key',
@@ -738,23 +736,6 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     </div>
   );
 
-  const chordFontField = (
-    <div>
-      <label className={controlLabelClassName}>{copy.editor.chordFont}</label>
-      <select
-        value={song.chordFontPreset || DEFAULT_CHORD_FONT_PRESET}
-        onChange={(event) => updateField('chordFontPreset', event.target.value as ChordFontPreset)}
-        className={controlFieldClassName}
-      >
-        {CHORD_FONT_PRESET_OPTIONS.map((preset) => (
-          <option key={preset} value={preset}>
-            {preset === 'classic-serif' ? copy.editor.chordFontClassic : copy.editor.chordFontStage}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-
   const versionField = (
     <div>
       <label className={labelClassName}>{copy.version}</label>
@@ -935,11 +916,12 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
       {isWideLayout ? (
         <div className="mt-1.5 space-y-1.5">
-          <div className="grid gap-2 [grid-template-columns:minmax(0,3fr)_minmax(5.5rem,1fr)_minmax(4.5rem,0.85fr)_minmax(5.5rem,1.05fr)]">
+          <div className="grid items-start gap-2 [grid-template-columns:minmax(0,2.6fr)_minmax(5rem,0.9fr)_minmax(4.5rem,0.8fr)_minmax(5.5rem,1fr)_minmax(6rem,1.05fr)]">
             {titleField}
             {keyField}
-            {capoField}
+            {tempoField}
             {timeField}
+            {shuffleField}
           </div>
 
           {advancedToggle}
@@ -949,12 +931,10 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               <div className="grid gap-2 [grid-template-columns:minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(4.5rem,0.7fr)]">
                 {versionField}
                 {translatorField}
-                {tempoField}
+                {capoField}
               </div>
 
-              <div className="grid items-start gap-2 [grid-template-columns:minmax(5rem,0.8fr)_minmax(6rem,1fr)_minmax(7rem,1.4fr)_minmax(5rem,0.9fr)_minmax(7rem,1.2fr)]">
-                {shuffleField}
-                {chordFontField}
+              <div className="grid items-start gap-2 [grid-template-columns:minmax(7rem,1.4fr)_minmax(5rem,0.9fr)_minmax(7rem,1.2fr)]">
                 {displayModeField}
                 {showLyricsField}
                 {barNumbersField}
@@ -970,9 +950,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
           <div className="grid grid-cols-12 gap-2">
             <div className="col-span-4">{keyField}</div>
-            <div className="col-span-4">{capoField}</div>
+            <div className="col-span-4">{tempoField}</div>
             <div className="col-span-4">{timeField}</div>
           </div>
+
+          {shuffleField}
 
           {advancedToggle}
 
@@ -983,11 +965,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
                 {translatorField}
               </div>
 
-              {tempoField}
-              {shuffleField}
-
               <div className="grid grid-cols-2 gap-2">
-                {chordFontField}
+                {capoField}
                 {showLyricsField}
               </div>
 
@@ -1000,10 +979,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       ) : (
         <div className="mt-2 space-y-2">
           <div className="grid grid-cols-12 gap-2">
-            <div className="col-span-6">{titleField}</div>
+            <div className="col-span-4">{titleField}</div>
             <div className="col-span-2">{keyField}</div>
-            <div className="col-span-2">{capoField}</div>
+            <div className="col-span-2">{tempoField}</div>
             <div className="col-span-2">{timeField}</div>
+            <div className="col-span-2">{shuffleField}</div>
           </div>
 
           {advancedToggle}
@@ -1013,15 +993,13 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               <div className="grid grid-cols-12 gap-2">
                 <div className="col-span-4">{versionField}</div>
                 <div className="col-span-4">{translatorField}</div>
-                <div className="col-span-2">{tempoField}</div>
-                <div className="col-span-2">{shuffleField}</div>
+                <div className="col-span-4">{capoField}</div>
               </div>
 
               <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-3">{chordFontField}</div>
-                <div className="col-span-4">{displayModeField}</div>
-                <div className="col-span-2">{showLyricsField}</div>
-                <div className="col-span-3">{barNumbersField}</div>
+                <div className="col-span-5">{displayModeField}</div>
+                <div className="col-span-3">{showLyricsField}</div>
+                <div className="col-span-4">{barNumbersField}</div>
               </div>
 
               {showReferenceFields ? referencesField : null}

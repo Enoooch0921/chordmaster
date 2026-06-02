@@ -1,12 +1,11 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure, ChordFontPreset } from '../types';
+import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure } from '../types';
 import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpLeft, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, LayoutGroup, useDragControls } from 'motion/react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
-import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
 import { getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyWithPreference } from '../utils/musicUtils';
 import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
 import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
@@ -143,8 +142,6 @@ const SECTION_TITLE_PRESETS = [
   'Outro',
   'Ending'
 ] as const;
-
-const CHORD_FONT_PRESET_OPTIONS: ChordFontPreset[] = ['classic-serif', 'stage-sans'];
 
 const getVersionValue = (song: Song) =>
   Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ');
@@ -4038,6 +4035,40 @@ const SongEditor: React.FC<Props> = ({
     if (!focusRequest) return;
 
     const { sIdx, bIdx, field, requestId } = focusRequest;
+
+    // Clicking a section name in the preview focuses that section's title input.
+    if (field === 'sectionName') {
+      let sectionRetryTimer: number | null = null;
+      const focusSectionTitle = () => {
+        const node = document.getElementById(`editor-section-${sIdx}-title`) as HTMLTextAreaElement | null;
+        if (!node) {
+          sectionRetryTimer = window.setTimeout(focusSectionTitle, 80);
+          return;
+        }
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        window.requestAnimationFrame(() => {
+          try {
+            node.focus({ preventScroll: true });
+          } catch {
+            node.focus();
+          }
+          const len = node.value.length;
+          try {
+            node.setSelectionRange(len, len);
+          } catch {
+            /* noop */
+          }
+        });
+        onFocusRequestHandled?.(requestId);
+      };
+      focusSectionTitle();
+      return () => {
+        if (sectionRetryTimer !== null) {
+          window.clearTimeout(sectionRetryTimer);
+        }
+      };
+    }
+
     const isPickupFocusTarget = isPickupTarget(sIdx, bIdx);
     const targetField = isPickupFocusTarget && field === 'chords'
       ? 'riff'
@@ -4594,23 +4625,6 @@ const SongEditor: React.FC<Props> = ({
           <span className="text-[12px] font-medium leading-none text-gray-600">{copy.editor.shuffle}</span>
         </label>
       </div>
-    </div>
-  );
-
-  const chordFontField = (
-    <div>
-      <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.chordFont}</label>
-      <select
-        value={song.chordFontPreset || DEFAULT_CHORD_FONT_PRESET}
-        onChange={e => updateField('chordFontPreset', e.target.value as ChordFontPreset)}
-        className="h-9 w-full rounded-lg border border-gray-300 bg-white px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
-      >
-        {CHORD_FONT_PRESET_OPTIONS.map((preset) => (
-          <option key={preset} value={preset}>
-            {preset === 'classic-serif' ? copy.editor.chordFontClassic : copy.editor.chordFontStage}
-          </option>
-        ))}
-      </select>
     </div>
   );
 
@@ -5492,7 +5506,6 @@ const SongEditor: React.FC<Props> = ({
             <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
               <div className="text-xs font-bold uppercase tracking-[0.16em] text-gray-500">{copy.setlistEditor.additionalInfo}</div>
               <div className="mt-2.5 grid grid-cols-1 gap-3">
-                {chordFontField}
                 {versionField}
                 {translatorField}
                 {!hideBarNumberControls && <div className="rounded-lg border border-gray-300 bg-white px-3 py-2">{barNumberControls}</div>}
@@ -5508,7 +5521,6 @@ const SongEditor: React.FC<Props> = ({
             {originalKeyField}
             {tempoField}
             {timeSignatureField}
-            {chordFontField}
           </div>
 
           <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -5843,6 +5855,7 @@ const SongEditor: React.FC<Props> = ({
                   </div>
                   <div className="relative flex-1 sm:flex-none sm:w-60">
                     <textarea
+                      id={`editor-section-${sIdx}-title`}
                       ref={(node) => setSectionTitleRef(sectionId, node)}
                       value={section.title}
                       rows={1}
