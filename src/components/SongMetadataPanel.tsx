@@ -69,7 +69,7 @@ const buildTimeSignatureInput = (numeratorInput: string, denominatorInput: strin
 
 const getMetadataLayoutMode = (width: number): MetadataLayoutMode => {
   if (width < 480) return 'stacked';
-  if (width < 880) return 'compact';
+  if (width < 820) return 'compact';
   return 'wide';
 };
 
@@ -304,6 +304,9 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const [referenceBpmDrafts, setReferenceBpmDrafts] = React.useState<Record<SongReferenceKind, string>>(() => getReferenceBpmDrafts(song));
   const [activeReferenceTapKind, setActiveReferenceTapKind] = React.useState<SongReferenceKind>('band');
   const [layoutMode, setLayoutMode] = React.useState<MetadataLayoutMode>('wide');
+  // Keep only the core fields visible by default; everything else lives in a
+  // collapsible "advanced" block so the panel stays compact on small laptops.
+  const [isAdvancedOpen, setIsAdvancedOpen] = React.useState(false);
   const bandTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
   const vocalTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
   const referenceBpmCommitTimeoutsRef = React.useRef<Record<SongReferenceKind, number | null>>({
@@ -875,6 +878,47 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     </div>
   );
 
+  // Whether any of the collapsed advanced fields actually hold a value, so the
+  // toggle can hint that there's hidden content even while collapsed.
+  const hasAdvancedValues = Boolean(
+    getVersionValue(song)?.trim()
+    || typeof song.tempo === 'number'
+    || song.shuffle
+    || song.showLyrics
+    || song.references?.band?.url?.trim()
+    || song.references?.vocal?.url?.trim()
+  );
+
+  const advancedToggle = (
+    <button
+      type="button"
+      onClick={() => setIsAdvancedOpen((current) => !current)}
+      aria-expanded={isAdvancedOpen}
+      className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500 transition-colors hover:bg-gray-100"
+    >
+      <span className="flex items-center gap-1.5">
+        {language === 'zh' ? '進階設定' : 'Advanced'}
+        {hasAdvancedValues && !isAdvancedOpen ? (
+          <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" aria-hidden />
+        ) : null}
+      </span>
+      <svg
+        viewBox="0 0 24 24"
+        width="13"
+        height="13"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`transition-transform ${isAdvancedOpen ? 'rotate-180' : ''}`}
+        aria-hidden
+      >
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </button>
+  );
+
   return (
     <section
       ref={panelRef}
@@ -891,80 +935,98 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
       {isWideLayout ? (
         <div className="mt-1.5 space-y-1.5">
-          <div className="grid gap-2 [grid-template-columns:minmax(0,3.5fr)_minmax(6rem,1.2fr)_minmax(6rem,1.2fr)_minmax(4.5rem,0.85fr)_minmax(5rem,0.95fr)_minmax(4.5rem,0.85fr)_minmax(5.5rem,1.1fr)]">
+          <div className="grid gap-2 [grid-template-columns:minmax(0,3fr)_minmax(5.5rem,1fr)_minmax(4.5rem,0.85fr)_minmax(5.5rem,1.05fr)]">
             {titleField}
-            {versionField}
-            {translatorField}
             {keyField}
             {capoField}
-            {tempoField}
             {timeField}
           </div>
 
-          <div className="grid items-start gap-2 [grid-template-columns:minmax(5rem,0.8fr)_minmax(6rem,1fr)_minmax(7rem,1.4fr)_minmax(5rem,0.9fr)_minmax(7rem,1.2fr)]">
-            {shuffleField}
-            {chordFontField}
-            {displayModeField}
-            {showLyricsField}
-            {barNumbersField}
-          </div>
+          {advancedToggle}
 
-          {showReferenceFields ? referencesField : null}
+          {isAdvancedOpen ? (
+            <div className="space-y-1.5">
+              <div className="grid gap-2 [grid-template-columns:minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(4.5rem,0.7fr)]">
+                {versionField}
+                {translatorField}
+                {tempoField}
+              </div>
+
+              <div className="grid items-start gap-2 [grid-template-columns:minmax(5rem,0.8fr)_minmax(6rem,1fr)_minmax(7rem,1.4fr)_minmax(5rem,0.9fr)_minmax(7rem,1.2fr)]">
+                {shuffleField}
+                {chordFontField}
+                {displayModeField}
+                {showLyricsField}
+                {barNumbersField}
+              </div>
+
+              {showReferenceFields ? referencesField : null}
+            </div>
+          ) : null}
         </div>
       ) : isStackedLayout ? (
         <div className="mt-2 space-y-2">
           {titleField}
 
-          <div className="grid grid-cols-2 gap-2">
-            {versionField}
-            {translatorField}
-          </div>
-
           <div className="grid grid-cols-12 gap-2">
-            <div className="col-span-6">{keyField}</div>
-            <div className="col-span-6">{capoField}</div>
+            <div className="col-span-4">{keyField}</div>
+            <div className="col-span-4">{capoField}</div>
+            <div className="col-span-4">{timeField}</div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            {tempoField}
-            {timeField}
-          </div>
+          {advancedToggle}
 
-          {shuffleField}
+          {isAdvancedOpen ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                {versionField}
+                {translatorField}
+              </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            {chordFontField}
-            {showLyricsField}
-          </div>
+              {tempoField}
+              {shuffleField}
 
-          {displayModeField}
-          {barNumbersField}
-          {showReferenceFields ? referencesField : null}
+              <div className="grid grid-cols-2 gap-2">
+                {chordFontField}
+                {showLyricsField}
+              </div>
+
+              {displayModeField}
+              {barNumbersField}
+              {showReferenceFields ? referencesField : null}
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="mt-2 space-y-2">
           <div className="grid grid-cols-12 gap-2">
             <div className="col-span-6">{titleField}</div>
-            <div className="col-span-3">{versionField}</div>
-            <div className="col-span-3">{translatorField}</div>
-          </div>
-
-          <div className="grid grid-cols-12 gap-2">
             <div className="col-span-2">{keyField}</div>
-            <div className="col-span-3">{capoField}</div>
-            <div className="col-span-2">{tempoField}</div>
-            <div className="col-span-3">{timeField}</div>
-            <div className="col-span-2">{shuffleField}</div>
+            <div className="col-span-2">{capoField}</div>
+            <div className="col-span-2">{timeField}</div>
           </div>
 
-          <div className="grid grid-cols-12 gap-2">
-            <div className="col-span-3">{chordFontField}</div>
-            <div className="col-span-4">{displayModeField}</div>
-            <div className="col-span-2">{showLyricsField}</div>
-            <div className="col-span-3">{barNumbersField}</div>
-          </div>
+          {advancedToggle}
 
-          {showReferenceFields ? referencesField : null}
+          {isAdvancedOpen ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-12 gap-2">
+                <div className="col-span-4">{versionField}</div>
+                <div className="col-span-4">{translatorField}</div>
+                <div className="col-span-2">{tempoField}</div>
+                <div className="col-span-2">{shuffleField}</div>
+              </div>
+
+              <div className="grid grid-cols-12 gap-2">
+                <div className="col-span-3">{chordFontField}</div>
+                <div className="col-span-4">{displayModeField}</div>
+                <div className="col-span-2">{showLyricsField}</div>
+                <div className="col-span-3">{barNumbersField}</div>
+              </div>
+
+              {showReferenceFields ? referencesField : null}
+            </div>
+          ) : null}
         </div>
       )}
     </section>

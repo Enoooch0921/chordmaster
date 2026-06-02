@@ -55,7 +55,7 @@ import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -92,6 +92,29 @@ const SETLIST_SWIPE_REVEAL_PX = 80;
 const SETLIST_SWIPE_OPEN_THRESHOLD_PX = 10;
 const SIDEBAR_OVERLAY_BREAKPOINT = 1280;
 const SPLIT_EDITOR_BREAKPOINT = 1360;
+// User-draggable editor/preview split bounds (desktop split view only).
+const EDITOR_PANE_MIN_WIDTH = 440;
+const PREVIEW_PANE_MIN_WIDTH = 360;
+const EDITOR_WIDTH_STORAGE_KEY = 'chordmaster.editor-width.v1';
+// Editor-pane widths at which the inner layout flips to its richer form: the
+// full bar cards appear once content width >= 640 (≈720px pane after ~80px of
+// padding) and the wide metadata panel once content width >= 820 (≈900px pane).
+// Each detent sits a safe margin *inside* the richer side of its threshold, and
+// pulls symmetrically from both directions, so wherever you release near a
+// boundary the editor always lands on the richer ("more info") layout — never
+// snapping onto the simpler one — regardless of drag direction.
+const EDITOR_SNAP_POINTS = [720, 900];
+const EDITOR_SNAP_DETENT = 12;
+const EDITOR_SNAP_PULL = 36;
+const snapEditorPaneWidth = (rawWidth: number) => {
+  for (const threshold of EDITOR_SNAP_POINTS) {
+    const detent = threshold + EDITOR_SNAP_DETENT;
+    if (Math.abs(rawWidth - detent) <= EDITOR_SNAP_PULL) {
+      return detent;
+    }
+  }
+  return rawWidth;
+};
 const PREVIEW_TARGET_WIDTH = 794;
 const PREVIEW_MIN_SCALE = 0.35;
 const PREVIEW_MAX_SCALE = 2.4;
@@ -1563,6 +1586,26 @@ const loadSidebarWidthPreference = () => {
   return Math.max(MIN_EXPANDED_SIDEBAR_WIDTH, Math.min(MAX_EXPANDED_SIDEBAR_WIDTH, rawValue));
 };
 
+// null = use the automatic (responsive) editor width; a number = the user's
+// dragged preference, clamped against the current viewport when applied.
+const loadEditorWidthPreference = (): number | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(EDITOR_WIDTH_STORAGE_KEY);
+  if (raw === null || raw === '') {
+    return null;
+  }
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
+};
+
 const parseGoogleCredential = (credential: string): GoogleUserSession | null => {
   try {
     const payloadSegment = credential.split('.')[1];
@@ -1676,6 +1719,14 @@ export default function App() {
   const [viewportHeight, setViewportHeight] = useState(() => (
     typeof window === 'undefined' ? 800 : window.innerHeight
   ));
+  // Distinguishes real laptop/desktop pointers (mouse/trackpad) from touch
+  // tablets so the split-editor layout can engage at a smaller width on
+  // desktops without affecting iPad-style touch devices.
+  const [hasFinePointer, setHasFinePointer] = useState(() => (
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(pointer: fine)').matches
+      : false
+  ));
   const [isPerformanceMode, setIsPerformanceMode] = useState(false);
   const [performancePageIndex, setPerformancePageIndex] = useState(0);
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
@@ -1684,6 +1735,9 @@ export default function App() {
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
+  const [editorWidthPreference, setEditorWidthPreference] = useState<number | null>(loadEditorWidthPreference);
+  const [isEditorResizing, setIsEditorResizing] = useState(false);
+  const editorPaneLeftRef = useRef(0);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [setlistSearchQuery, setSetlistSearchQuery] = useState('');
   const [setlistSongSearchQuery, setSetlistSongSearchQuery] = useState('');
@@ -1733,6 +1787,7 @@ export default function App() {
   const [teamManagement, setTeamManagement] = useState<TeamManagementSnapshot | null>(null);
   const [isTeamManagementOpen, setIsTeamManagementOpen] = useState(false);
   const [isLoadingTeamManagement, setIsLoadingTeamManagement] = useState(false);
+  const [isWorkspacePanelOpen, setIsWorkspacePanelOpen] = useState(false);
   const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
@@ -1842,7 +1897,10 @@ export default function App() {
   const canEditTeamSongs = !isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole);
   const canCreateTeamSetlists = !isTeamWorkspace || TEAM_SETLIST_CREATE_ROLES.has(activeLibraryRole);
   const canManageActiveTeam = isTeamWorkspace && activeLibraryRole === 'owner';
-  const shouldShowCreateTeamForm = isCreateTeamOpen || !cloudLibraries.some((library) => library.kind === 'team');
+  const hasTeamLibraries = cloudLibraries.some((library) => library.kind === 'team');
+  // Keep the create-team form collapsed by default so it never permanently
+  // compresses the sidebar; it only expands when the user opens it explicitly.
+  const shouldShowCreateTeamForm = isCreateTeamOpen;
   const song = songs.find((item) => item.id === selectedSongId) ?? songs[0] ?? EMPTY_LIBRARY_PREVIEW_SONG;
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
   const setlistIsDirty = serializeSetlists(setlists) !== serializeSetlists(savedSetlists);
@@ -1883,13 +1941,36 @@ export default function App() {
   const sidebarShellWidth = usesOverlaySidebar ? collapsedSidebarWidth : currentSidebarWidth;
   const isPhoneSetlistDrawer = isPhoneViewport && isSetlistMode;
   const mainViewportWidth = Math.max(0, viewportWidth - sidebarShellWidth);
-  const shouldUseSplitEditor = mainViewportWidth >= 1360;
-  const splitEditorWidth = Math.max(680, Math.min(860, Math.round(mainViewportWidth * 0.5)));
+  // Desktop laptops (fine pointer) keep the side-by-side split far below the
+  // touch threshold so 14" MacBooks — especially with "Larger Text" display
+  // scaling or a pinned song list — stay on the desktop layout instead of the
+  // iPad-style floating overlay editor.
+  const splitEditorMinMain = hasFinePointer ? 1024 : SPLIT_EDITOR_BREAKPOINT;
+  const shouldUseSplitEditor = mainViewportWidth >= splitEditorMinMain;
+  // On desktops give the editor pane whatever is left after reserving a
+  // readable minimum preview width, capped so it never grows absurdly wide.
+  // This lets the editor reach its full desktop layout (wide metadata panel +
+  // full bar cards) whenever the screen allows, while still keeping the preview
+  // usable. On genuinely narrow laptops the editor simply gets less room and
+  // gracefully degrades to its compact cards rather than squeezing the preview.
+  const splitPreviewMinWidth = 440;
+  const splitEditorMaxWidth = 1040;
+  const autoSplitEditorWidth = hasFinePointer
+    ? Math.min(splitEditorMaxWidth, Math.max(560, mainViewportWidth - splitPreviewMinWidth))
+    : Math.max(680, Math.min(860, Math.round(mainViewportWidth * 0.5)));
+  // When the user has dragged the divider, honour their width (clamped so the
+  // editor stays usable and the preview keeps a readable minimum); otherwise
+  // fall back to the automatic responsive width.
+  const draggedEditorMaxWidth = Math.max(EDITOR_PANE_MIN_WIDTH, mainViewportWidth - PREVIEW_PANE_MIN_WIDTH);
+  const splitEditorWidth = editorWidthPreference != null
+    ? Math.max(EDITOR_PANE_MIN_WIDTH, Math.min(draggedEditorMaxWidth, editorWidthPreference))
+    : autoSplitEditorWidth;
   const overlayEditorWidth = Math.min(
     isPhoneViewport ? mainViewportWidth : Math.max(560, Math.round(mainViewportWidth * 0.52)),
     Math.max(0, mainViewportWidth - (isPhoneViewport ? 0 : 32))
   );
-  const usesDenseDesktopHeader = isSheetView && mainViewportWidth >= 1200;
+  const denseDesktopHeaderMinMain = hasFinePointer ? 1024 : 1200;
+  const usesDenseDesktopHeader = isSheetView && mainViewportWidth >= denseDesktopHeaderMinMain;
   const usesTabletHeader = isSheetView && !isPhoneViewport && !usesDenseDesktopHeader;
   const isToolbarSecondaryCollapsed = mainViewportWidth < 1240;
   const toolbarPrimaryGridClassName = mainViewportWidth < 1040
@@ -2637,6 +2718,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const finePointerQuery = window.matchMedia('(pointer: fine)');
+    const updateFinePointer = () => setHasFinePointer(finePointerQuery.matches);
+
+    updateFinePointer();
+    finePointerQuery.addEventListener('change', updateFinePointer);
+
+    return () => {
+      finePointerQuery.removeEventListener('change', updateFinePointer);
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -2689,6 +2786,55 @@ export default function App() {
       window.removeEventListener('mouseup', handlePointerUp);
     };
   }, [isSidebarResizing, responsiveSidebarMaxWidth, responsiveSidebarMinWidth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (editorWidthPreference == null) {
+      window.localStorage.removeItem(EDITOR_WIDTH_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(EDITOR_WIDTH_STORAGE_KEY, String(Math.round(editorWidthPreference)));
+    }
+  }, [editorWidthPreference]);
+
+  useEffect(() => {
+    if (!isEditorResizing) {
+      return;
+    }
+
+    const handlePointerMove = (event: MouseEvent) => {
+      const maxWidth = Math.max(EDITOR_PANE_MIN_WIDTH, mainViewportWidth - PREVIEW_PANE_MIN_WIDTH);
+      const rawWidth = Math.max(
+        EDITOR_PANE_MIN_WIDTH,
+        Math.min(maxWidth, event.clientX - editorPaneLeftRef.current)
+      );
+      // Snap onto layout boundaries so crossing them feels magnetic rather than
+      // jumpy; keep the snapped value within the usable range.
+      const nextWidth = Math.max(
+        EDITOR_PANE_MIN_WIDTH,
+        Math.min(maxWidth, snapEditorPaneWidth(rawWidth))
+      );
+      setEditorWidthPreference(nextWidth);
+    };
+
+    const handlePointerUp = () => {
+      setIsEditorResizing(false);
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+    };
+  }, [isEditorResizing, mainViewportWidth]);
 
   useEffect(() => {
     const repository = cloudRepositoryRef.current;
@@ -5817,6 +5963,7 @@ export default function App() {
       setActiveLibraryId(null);
       setTeamManagement(null);
       setIsTeamManagementOpen(false);
+      setIsWorkspacePanelOpen(false);
       setIsCreateTeamOpen(false);
       setNewTeamName('');
       setTeamFeatureError(null);
@@ -6529,9 +6676,12 @@ export default function App() {
       return null;
     }
 
+    const selectedPreviewSong = setlistPreviewSongs.find(({ item }) => item.id === selectedSetlistSong?.id) ?? setlistPreviewSongs[0];
+    const visibleSetlistPreviewSongs = selectedPreviewSong ? [selectedPreviewSong] : [];
+
     return (
       <div className="flex flex-col gap-8">
-        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong }) => (
+        {visibleSetlistPreviewSongs.map(({ item, isSelected, song: previewSong }) => (
           <div
             key={item.id}
             data-setlist-preview-song-id={item.id}
@@ -6553,7 +6703,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activeSectionId, handleElementClick, highlightedSectionIds, isEditing, language, setlistPreviewSongs]);
+  }, [activeBar, activeSectionId, handleElementClick, highlightedSectionIds, isEditing, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -7219,6 +7369,18 @@ export default function App() {
     setIsSidebarResizing(true);
   };
 
+  const handleEditorResizeStart = (event: React.MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const pane = (event.currentTarget as HTMLElement).closest('[data-editor-pane]');
+    editorPaneLeftRef.current = pane ? pane.getBoundingClientRect().left : 0;
+    setIsEditorResizing(true);
+  };
+
+  const handleEditorResizeReset = () => {
+    setEditorWidthPreference(null);
+  };
+
   const metadataSuggestions = React.useMemo(() => {
     const versions = new Set<string>();
     const translators = new Set<string>();
@@ -7636,121 +7798,152 @@ export default function App() {
     )
   ) : null;
 
+  const activeWorkspaceLabel = activeCloudLibrary?.kind === 'personal'
+    ? (language === 'zh' ? '個人區' : 'Personal')
+    : activeCloudLibrary?.name ?? (language === 'zh' ? '個人區' : 'Personal');
   const librarySwitcherPanel = isAuthenticated ? (
-    <div className="border-b border-gray-200 bg-white px-3 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
+    <div className="border-b border-gray-200 bg-white px-3 py-2">
+      <button
+        type="button"
+        onClick={() => setIsWorkspacePanelOpen((current) => !current)}
+        className="flex h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
+        aria-expanded={isWorkspacePanelOpen}
+        aria-label={language === 'zh' ? '顯示工作區選項' : 'Show workspace options'}
+        title={activeWorkspaceLabel}
+      >
+        <Users size={15} className="shrink-0 text-indigo-600" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">
             {language === 'zh' ? '工作區' : 'Workspace'}
           </div>
-          <div className="mt-0.5 truncate text-xs font-semibold text-gray-600">
-            {activeCloudLibrary?.name ?? (language === 'zh' ? '個人區' : 'Personal')}
+          <div className="truncate text-xs font-bold text-gray-800">
+            {activeWorkspaceLabel}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setIsCreateTeamOpen((current) => !current)}
-          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 text-[11px] font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
-          title={language === 'zh' ? '建立團隊' : 'Create team'}
-          aria-label={language === 'zh' ? '建立團隊' : 'Create team'}
-        >
-          <UserPlus size={14} />
-          <span>{language === 'zh' ? '建立團隊' : 'Create team'}</span>
-        </button>
-      </div>
+        {isWorkspacePanelOpen ? (
+          <ChevronUp size={15} className="shrink-0 text-gray-400" />
+        ) : (
+          <ChevronDown size={15} className="shrink-0 text-gray-400" />
+        )}
+      </button>
 
-      {shouldShowCreateTeamForm ? (
-        <form onSubmit={handleCreateTeam} className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/70 p-2">
-          <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-500">
-            {language === 'zh' ? '團隊名稱' : 'Team name'}
-          </label>
-          <input
-            type="text"
-            value={newTeamName}
-            onChange={(event) => setNewTeamName(event.target.value)}
-            placeholder={language === 'zh' ? '例如：主日敬拜團' : 'e.g. Sunday Worship Team'}
-            className="mt-1 h-9 w-full rounded-lg border border-indigo-100 bg-white px-2.5 text-sm font-semibold text-gray-800 outline-none transition-colors placeholder:text-gray-400 focus:border-indigo-300"
-          />
-          <div className="mt-2 grid grid-cols-2 gap-2">
+      {isWorkspacePanelOpen ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => {
+              setIsWorkspacePanelOpen(true);
+              setIsCreateTeamOpen((current) => !current);
+            }}
+            className={`flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${
+              isCreateTeamOpen
+                ? 'border-indigo-200 bg-indigo-100 text-indigo-700'
+                : 'border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+            }`}
+            title={language === 'zh' ? '建立團隊' : 'Create team'}
+            aria-label={language === 'zh' ? '建立團隊' : 'Create team'}
+            aria-expanded={isCreateTeamOpen}
+          >
+            <UserPlus size={14} />
+            <span>{language === 'zh' ? '建立團隊' : 'Create team'}</span>
+          </button>
+
+          {shouldShowCreateTeamForm ? (
+            <form onSubmit={handleCreateTeam} className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/70 p-2">
+              <label className="block text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-500">
+                {language === 'zh' ? '團隊名稱' : 'Team name'}
+              </label>
+              <input
+                type="text"
+                value={newTeamName}
+                onChange={(event) => setNewTeamName(event.target.value)}
+                placeholder={language === 'zh' ? '例如：主日敬拜團' : 'e.g. Sunday Worship Team'}
+                className="mt-1 h-9 w-full rounded-lg border border-indigo-100 bg-white px-2.5 text-sm font-semibold text-gray-800 outline-none transition-colors placeholder:text-gray-400 focus:border-indigo-300"
+              />
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreateTeamOpen(false);
+                    setNewTeamName('');
+                  }}
+                  disabled={isCreatingTeam}
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {language === 'zh' ? '取消' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingTeam || !newTeamName.trim()}
+                  className="inline-flex h-8 items-center justify-center rounded-lg bg-indigo-600 px-2 text-xs font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
+                >
+                  {isCreatingTeam ? copy.cloudSyncSyncing : (language === 'zh' ? '建立' : 'Create')}
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {hasTeamLibraries ? (
+            <div className="mt-2 flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+              {workspaceLibraryButtons.map((library) => {
+                const isPlaceholder = cloudLibraries.length === 0;
+                const isActive = isPlaceholder || library.id === activeCloudLibrary?.id;
+                return (
+                  <button
+                    key={library.id}
+                    type="button"
+                    onClick={() => {
+                      if (!isPlaceholder) {
+                        void handleSwitchCloudLibrary(library.id);
+                      }
+                    }}
+                    disabled={isPlaceholder || isSwitchingLibrary || isActive}
+                    className={`inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors disabled:cursor-default ${
+                      isActive
+                        ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                        : 'border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-700'
+                    }`}
+                    title={library.name}
+                  >
+                    <Users size={12} />
+                    <span className="max-w-[120px] truncate">{library.kind === 'personal' ? (language === 'zh' ? '個人區' : 'Personal') : library.name}</span>
+                    {library.kind === 'team' ? (
+                      <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] text-gray-500">
+                        {getRoleLabel(library.role, language)}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {teamFeatureError ? (
+            <div className="mt-2 whitespace-pre-line rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-800">
+              {teamFeatureError}
+            </div>
+          ) : null}
+
+          {canManageActiveTeam ? (
             <button
               type="button"
-              onClick={() => {
-                setIsCreateTeamOpen(false);
-                setNewTeamName('');
-              }}
-              disabled={isCreatingTeam}
-              className="inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+              onClick={() => setIsTeamManagementOpen((current) => !current)}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
             >
-              {language === 'zh' ? '取消' : 'Cancel'}
+              <Users size={14} />
+              <span>{language === 'zh' ? '成員與邀請' : 'Members & Invites'}</span>
             </button>
-            <button
-              type="submit"
-              disabled={isCreatingTeam || !newTeamName.trim()}
-              className="inline-flex h-8 items-center justify-center rounded-lg bg-indigo-600 px-2 text-xs font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
-            >
-              {isCreatingTeam ? copy.cloudSyncSyncing : (language === 'zh' ? '建立' : 'Create')}
-            </button>
-          </div>
-        </form>
-      ) : null}
-
-      <div className="mt-2 flex gap-1 overflow-x-auto pb-1 no-scrollbar">
-        {workspaceLibraryButtons.map((library) => {
-          const isPlaceholder = cloudLibraries.length === 0;
-          const isActive = isPlaceholder || library.id === activeCloudLibrary?.id;
-          return (
-            <button
-              key={library.id}
-              type="button"
-              onClick={() => {
-                if (!isPlaceholder) {
-                  void handleSwitchCloudLibrary(library.id);
-                }
-              }}
-              disabled={isPlaceholder || isSwitchingLibrary || isActive}
-              className={`inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors disabled:cursor-default ${
-                isActive
-                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                  : 'border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-700'
-              }`}
-              title={library.name}
-            >
-              <Users size={12} />
-              <span className="max-w-[120px] truncate">{library.kind === 'personal' ? (language === 'zh' ? '個人區' : 'Personal') : library.name}</span>
-              {library.kind === 'team' ? (
-                <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] text-gray-500">
-                  {getRoleLabel(library.role, language)}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
-
-      {teamFeatureError ? (
-        <div className="mt-2 whitespace-pre-line rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-800">
-          {teamFeatureError}
-        </div>
-      ) : null}
-
-      {canManageActiveTeam ? (
-        <button
-          type="button"
-          onClick={() => setIsTeamManagementOpen((current) => !current)}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
-        >
-          <Users size={14} />
-          <span>{language === 'zh' ? '成員與邀請' : 'Members & Invites'}</span>
-        </button>
-      ) : isTeamWorkspace ? (
-        <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-500">
-          {language === 'zh' ? `目前權限：${getRoleLabel(activeLibraryRole, language)}` : `Role: ${getRoleLabel(activeLibraryRole, language)}`}
+          ) : isTeamWorkspace ? (
+            <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-500">
+              {language === 'zh' ? `目前權限：${getRoleLabel(activeLibraryRole, language)}` : `Role: ${getRoleLabel(activeLibraryRole, language)}`}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
   ) : null;
 
-  const teamManagementPanel = isTeamManagementOpen && canManageActiveTeam ? (
+  const teamManagementPanel = isWorkspacePanelOpen && isTeamManagementOpen && canManageActiveTeam ? (
     <div className="border-b border-gray-200 bg-white px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <div>
@@ -7961,13 +8154,9 @@ export default function App() {
 
   const desktopSetlistProjectsPanel = (
     <>
-      <div className="px-5 py-6 border-b border-gray-200">
+      <div className="px-5 py-4 border-b border-gray-200">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
-            <div className="text-lg font-bold tracking-tight">ChordMaster</div>
-          </div>
-          <div className="text-xs font-medium text-gray-500">{copy.projects}</div>
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-gray-400">{copy.projects}</div>
         </div>
         {canCreateProject && (
           <div className="mt-4">
@@ -8044,92 +8233,85 @@ export default function App() {
 
   const desktopSetlistListPanel = (
     <>
-      <div className="px-5 py-6 border-b border-gray-200">
-        <div className="min-w-0">
+      <div className="px-4 py-3 border-b border-gray-200">
+        <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
             onClick={() => {
               setDesktopSetlistPanelView('projects');
               setSelectedJoinedProjectId(null);
             }}
-            className="group mb-3 inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-indigo-700 shadow-sm shadow-indigo-100 transition-all hover:-translate-x-0.5 hover:border-indigo-300 hover:bg-indigo-100"
+            className="group inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-indigo-700 shadow-sm shadow-indigo-100 transition-all hover:-translate-x-0.5 hover:border-indigo-200 hover:bg-indigo-100"
             title={language === 'zh' ? '返回專案列表' : 'Back to projects'}
+            aria-label={language === 'zh' ? '返回專案列表' : 'Back to projects'}
           >
             <ChevronLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
-            <FolderTree size={13} />
-            <span>{copy.projects}</span>
           </button>
-          <div className="flex items-center gap-2">
-            <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
-            <div className="text-lg font-bold tracking-tight">ChordMaster</div>
-          </div>
-          <div className="flex min-w-0 items-center gap-2 truncate text-xs font-medium text-gray-500">
-            <span className="truncate">
-              {selectedJoinedProject ? selectedJoinedProject.name : (selectedProject ? selectedProject.name : copy.ungroupedProject)}
-            </span>
-            {selectedJoinedProject && (
-              <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                {language === 'zh' ? '已加入' : 'Joined'}
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <FolderTree size={14} className="shrink-0 text-gray-400" />
+              <span className="truncate text-base font-bold leading-tight text-gray-900">
+                {selectedJoinedProject ? selectedJoinedProject.name : (selectedProject ? selectedProject.name : copy.ungroupedProject)}
               </span>
-            )}
+              {selectedJoinedProject && (
+                <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                  {language === 'zh' ? '已加入' : 'Joined'}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-        {canCreateTeamSetlists && !selectedJoinedProject && (
-          <div className="mt-4 flex items-center gap-2">
+          {canCreateTeamSetlists && !selectedJoinedProject && (
             <button
               type="button"
               onClick={handleCreateSetlist}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+              className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
             >
               <Plus size={16} />
               <span>{copy.newSetlist}</span>
             </button>
-            {selectedProject && canManageProject(selectedProject) && (
-              <button
-                type="button"
-                onClick={() => void handleCreateProjectShareLink(selectedProject.id)}
-                disabled={creatingProjectShareLinkId === selectedProject.id}
-                className="inline-flex h-9 min-w-[2.25rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-bold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
-                title={language === 'zh' ? '分享專案' : 'Share project'}
-                aria-label={language === 'zh' ? '分享專案' : 'Share project'}
-              >
-                {creatingProjectShareLinkId === selectedProject.id ? (
-                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-500" aria-hidden />
-                ) : (
-                  <Share2 size={15} />
-                )}
-              </button>
-            )}
-          </div>
-        )}
+          )}
+          {canCreateTeamSetlists && !selectedJoinedProject && selectedProject && canManageProject(selectedProject) && (
+            <button
+              type="button"
+              onClick={() => void handleCreateProjectShareLink(selectedProject.id)}
+              disabled={creatingProjectShareLinkId === selectedProject.id}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
+              title={language === 'zh' ? '分享專案' : 'Share project'}
+              aria-label={language === 'zh' ? '分享專案' : 'Share project'}
+            >
+              {creatingProjectShareLinkId === selectedProject.id ? (
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-500" aria-hidden />
+              ) : (
+                <Share2 size={15} />
+              )}
+            </button>
+          )}
+        </div>
         <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-          <Search size={15} className="text-gray-400" />
+          <Search size={15} className="shrink-0 text-gray-400" />
           <input
             type="text"
             value={setlistSearchQuery}
             onChange={(event) => setSetlistSearchQuery(event.target.value)}
             placeholder={copy.searchSetlists}
-            className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+            className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
           />
         </label>
-        <label className="mt-3 block">
-          <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSort}</div>
+        <div className="mt-3 flex min-w-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-1.5 text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
+            <span>{copy.setlists}</span>
+            <span>{normalizedSetlistSearchQuery ? `${filteredSetlists.length}/${visibleSetlists.length}` : visibleSetlists.length}</span>
+          </div>
           <select
             value={setlistSortMode}
             onChange={(event) => setSetlistSortMode(event.target.value as SetlistSortMode)}
-            className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300"
+            className="h-8 min-w-0 max-w-[9rem] shrink-0 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300"
+            aria-label={copy.setlistSort}
           >
             {setlistSortOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
-        </label>
-      </div>
-
-      <div className="px-3 py-3 border-b border-gray-100">
-        <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
-          <span>{copy.setlists}</span>
-          <span>{normalizedSetlistSearchQuery ? `${filteredSetlists.length}/${visibleSetlists.length}` : visibleSetlists.length}</span>
         </div>
         {archivedSetlistCount > 0 && (
           <button
@@ -8145,7 +8327,7 @@ export default function App() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <div className="space-y-2">
           {filteredSetlists.length === 0 && (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -9164,7 +9346,7 @@ export default function App() {
                     </>
                   ) : mobileSetlistDrawerView === 'projects' ? (
                     <>
-                      <div className="px-5 py-6 border-b border-gray-200">
+                      <div className="px-5 py-4 border-b border-gray-200">
                         {canCreateProject && (
                           <button
                             type="button"
@@ -9290,61 +9472,69 @@ export default function App() {
                     </>
                   ) : (
                     <>
-                      <div className="px-5 py-6 border-b border-gray-200">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setMobileSetlistDrawerView('projects');
-                            setSelectedJoinedProjectId(null);
-                          }}
-                          className="group mb-3 inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-indigo-700 shadow-sm shadow-indigo-100 transition-all hover:-translate-x-0.5 hover:border-indigo-300 hover:bg-indigo-100"
-                          title={language === 'zh' ? '返回專案列表' : 'Back to projects'}
-                        >
-                          <ChevronLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
-                          <FolderTree size={13} />
-                          <span>{copy.projects}</span>
-                        </button>
-                        <div className={isPhoneViewport ? '' : 'min-w-0'}>
-                          {!isPhoneViewport && (
-                            <>
-                              <div className="flex items-center gap-2">
-                                <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
-                                <div className="text-lg font-bold tracking-tight">ChordMaster</div>
-                              </div>
-                            </>
-                          )}
-                          <div className="truncate text-xs font-medium text-gray-500">
-                            {selectedProject ? selectedProject.name : copy.ungroupedProject}
+                      <div className="px-4 py-3 border-b border-gray-200">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMobileSetlistDrawerView('projects');
+                              setSelectedJoinedProjectId(null);
+                            }}
+                            className="group inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-indigo-700 shadow-sm shadow-indigo-100 transition-all hover:-translate-x-0.5 hover:border-indigo-200 hover:bg-indigo-100"
+                            title={language === 'zh' ? '返回專案列表' : 'Back to projects'}
+                            aria-label={language === 'zh' ? '返回專案列表' : 'Back to projects'}
+                          >
+                            <ChevronLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <FolderTree size={14} className="shrink-0 text-gray-400" />
+                              <span className="truncate text-base font-bold leading-tight text-gray-900">
+                                {selectedJoinedProject ? selectedJoinedProject.name : (selectedProject ? selectedProject.name : copy.ungroupedProject)}
+                              </span>
+                              {selectedJoinedProject && (
+                                <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                                  {language === 'zh' ? '已加入' : 'Joined'}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                        {canCreateTeamSetlists && (
-                          <div className={isPhoneViewport ? '' : 'mt-4'}>
+                          {canCreateTeamSetlists && !selectedJoinedProject && (
                             <button
                               type="button"
                               onClick={handleCreateSetlist}
-                              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+                              className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
                             >
                               <Plus size={16} />
                               <span>{copy.newSetlist}</span>
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                         <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                          <Search size={15} className="text-gray-400" />
+                          <Search size={15} className="shrink-0 text-gray-400" />
                           <input
                             type="text"
                             value={setlistSearchQuery}
                             onChange={(event) => setSetlistSearchQuery(event.target.value)}
                             placeholder={copy.searchSetlists}
-                            className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                            className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                           />
                         </label>
-                      </div>
-
-                      <div className="px-3 py-3 border-b border-gray-100">
-                        <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
-                          <span>{copy.setlists}</span>
-                          <span>{normalizedSetlistSearchQuery ? `${filteredSetlists.length}/${visibleSetlists.length}` : visibleSetlists.length}</span>
+                        <div className="mt-3 flex min-w-0 items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-1.5 text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
+                            <span>{copy.setlists}</span>
+                            <span>{normalizedSetlistSearchQuery ? `${filteredSetlists.length}/${visibleSetlists.length}` : visibleSetlists.length}</span>
+                          </div>
+                          <select
+                            value={setlistSortMode}
+                            onChange={(event) => setSetlistSortMode(event.target.value as SetlistSortMode)}
+                            className="h-8 min-w-0 max-w-[9rem] shrink-0 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300"
+                            aria-label={copy.setlistSort}
+                          >
+                            {setlistSortOptions.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
                         </div>
                         {archivedSetlistCount > 0 && (
                           <button
@@ -9360,7 +9550,7 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="flex-1 overflow-y-auto p-3">
+                      <div className="min-h-0 flex-1 overflow-y-auto p-3">
                         <div className="space-y-2">
                           {filteredSetlists.length === 0 && (
                             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -9580,16 +9770,8 @@ export default function App() {
               )
             ) : (
               <>
-                <div className="px-5 py-6 border-b border-gray-200">
-                  {!isPhoneViewport && (
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <img src={logoSrc} alt="ChordMaster" className="h-7 w-7 rounded-lg shadow-sm ring-1 ring-gray-200" />
-                        <div className="text-lg font-bold tracking-tight">ChordMaster</div>
-                      </div>
-                      <div className="text-xs font-medium text-gray-500">{copy.songLibrary}</div>
-                    </div>
-                  )}
+                <div className="shrink-0">
+                <div className="px-5 py-4 border-b border-gray-200">
                   {isPhoneViewport ? (
                     <div className="flex items-center gap-2">
                       <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
@@ -9649,60 +9831,59 @@ export default function App() {
                           <span>{isLibraryEditing ? copy.done : copy.manage}</span>
                         </button>
                       </div>}
-                      <label className="mt-3 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                        <Search size={15} className="text-gray-400" />
-                        <input
-                          type="text"
-                          value={librarySearchQuery}
-                          onChange={(event) => setLibrarySearchQuery(event.target.value)}
-                          placeholder={copy.searchSongs}
-                          className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                        />
-                      </label>
+                      <div className="mt-3 flex items-center gap-1.5">
+                        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+                          <Search size={15} className="shrink-0 text-gray-400" />
+                          <input
+                            type="text"
+                            value={librarySearchQuery}
+                            onChange={(event) => setLibrarySearchQuery(event.target.value)}
+                            placeholder={copy.searchSongs}
+                            className="w-full min-w-0 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleExportSongLibraryJson}
+                          aria-label={copy.exportJson}
+                          title={copy.exportJson}
+                          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                        >
+                          <Download size={15} />
+                        </button>
+                        {canEditTeamSongs && (
+                          <button
+                            type="button"
+                            onClick={handleImportSongLibraryClick}
+                            aria-label={copy.importJson}
+                            title={copy.importJson}
+                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                          >
+                            <Upload size={15} />
+                          </button>
+                        )}
+                        {isTeamWorkspace && canEditTeamSongs && personalCloudLibrary && personalCloudLibrary.id !== activeLibraryId ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleImportPersonalSongsToTeam()}
+                            disabled={isImportingPersonalSongs}
+                            aria-label={language === 'zh' ? '從個人區批量匯入' : 'Import personal songs'}
+                            title={language === 'zh' ? '從個人區批量匯入' : 'Import personal songs'}
+                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60"
+                          >
+                            <Copy size={15} />
+                          </button>
+                        ) : null}
+                      </div>
                     </>
                   )}
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={handleExportSongLibraryJson}
-                      className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
-                    >
-                      <Download size={15} />
-                      <span>{copy.exportJson}</span>
-                    </button>
-                    {canEditTeamSongs && (
-                      <button
-                        type="button"
-                        onClick={handleImportSongLibraryClick}
-                        className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
-                      >
-                        <Upload size={15} />
-                        <span>{copy.importJson}</span>
-                      </button>
-                    )}
-                    <input
-                      ref={importLibraryInputRef}
-                      type="file"
-                      accept="application/json,.json"
-                      onChange={handleImportSongLibrary}
-                      className="hidden"
-                    />
-                  </div>
-                  {isTeamWorkspace && canEditTeamSongs && personalCloudLibrary && personalCloudLibrary.id !== activeLibraryId ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleImportPersonalSongsToTeam()}
-                      disabled={isImportingPersonalSongs}
-                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60"
-                    >
-                      <Copy size={15} />
-                      <span>
-                        {isImportingPersonalSongs
-                          ? copy.cloudSyncSyncing
-                          : (language === 'zh' ? '從個人區批量匯入' : 'Import personal songs')}
-                      </span>
-                    </button>
-                  ) : null}
+                  <input
+                    ref={importLibraryInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={handleImportSongLibrary}
+                    className="hidden"
+                  />
                   {isLibraryEditing && (
                     <>
                       <button
@@ -9725,6 +9906,7 @@ export default function App() {
                     </>
                   )}
                 </div>
+                </div>
 
                 <div className="px-3 py-3 border-b border-gray-100">
                   <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
@@ -9743,7 +9925,7 @@ export default function App() {
                   </select>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
                   {filteredSongs.length === 0 && (
                     <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
                       {copy.noSongsMatch}
@@ -11038,7 +11220,7 @@ export default function App() {
                 initial={shouldUseSplitEditor ? { width: 0, opacity: 0 } : { x: -32, opacity: 0 }}
                 animate={shouldUseSplitEditor ? { width: splitEditorWidth, opacity: 1 } : { x: 0, opacity: 1 }}
                 exit={shouldUseSplitEditor ? { width: 0, opacity: 0 } : { x: -32, opacity: 0 }}
-                transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+                transition={isEditorResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.4 }}
                 className={`overflow-hidden border-r border-gray-200 bg-white shadow-xl ${
                   shouldUseSplitEditor
                     ? 'relative z-10 flex-shrink-0'
@@ -11048,6 +11230,18 @@ export default function App() {
                 }`}
                 style={shouldUseSplitEditor ? undefined : { width: overlayEditorWidth > 0 ? `${overlayEditorWidth}px` : '100%' }}
               >
+                {shouldUseSplitEditor && !isPhoneViewport && hasFinePointer && (
+                  <div
+                    onMouseDown={handleEditorResizeStart}
+                    onDoubleClick={handleEditorResizeReset}
+                    role="separator"
+                    aria-orientation="vertical"
+                    title={language === 'zh' ? '拖曳調整編輯區寬度（雙擊還原自動）' : 'Drag to resize editor (double-click to reset)'}
+                    className="group absolute inset-y-0 right-0 z-30 flex w-3 cursor-col-resize touch-none items-center justify-center"
+                  >
+                    <span className={`h-12 w-1 rounded-full transition-colors ${isEditorResizing ? 'bg-indigo-400' : 'bg-gray-200 group-hover:bg-indigo-300'}`} />
+                  </div>
+                )}
                 <div data-editor-scroll-root className="h-full overflow-y-auto">
                   <div className="min-w-0 p-4 pb-24 sm:p-6 lg:p-8">
                     {isSetlistMode && selectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (

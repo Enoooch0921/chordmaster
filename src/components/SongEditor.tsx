@@ -112,7 +112,7 @@ type BarLayoutMode = 'stacked' | 'compact4' | 'full4';
 const PICKUP_SECTION_INDEX = 0;
 const PICKUP_BAR_INDEX = -1;
 const STACKED_BAR_LAYOUT_MAX_WIDTH = 560;
-const FULL_BAR_LAYOUT_MIN_WIDTH = 680;
+const FULL_BAR_LAYOUT_MIN_WIDTH = 640;
 const MOBILE_SECTION_REORDER_LONG_PRESS_MS = 360;
 
 const SECTION_TITLE_PRESETS = [
@@ -4923,12 +4923,12 @@ const SongEditor: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="mt-3 flex items-center gap-1 overflow-x-auto whitespace-nowrap pb-0.5 no-scrollbar">
+          <div className="mt-3 grid grid-cols-4 items-center gap-1">
             <button
               type="button"
               onClick={() => updateBarPanelState(bar, sIdx, bIdx, { riff: !panelState.riff })}
               title={copy.editor.jianpu}
-              className={`h-7 min-w-[44px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
+              className={`h-7 min-w-0 w-full overflow-hidden rounded-md border px-1 transition-colors flex items-center justify-center ${
                 panelState.riff
                   ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                   : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -4940,7 +4940,7 @@ const SongEditor: React.FC<Props> = ({
               type="button"
               onClick={() => updateBarPanelState(bar, sIdx, bIdx, { rhythm: !panelState.rhythm })}
               title={copy.editor.rhythm}
-              className={`h-7 min-w-[44px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
+              className={`h-7 min-w-0 w-full overflow-hidden rounded-md border px-1 transition-colors flex items-center justify-center ${
                 panelState.rhythm
                   ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                   : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -4952,7 +4952,7 @@ const SongEditor: React.FC<Props> = ({
               type="button"
               onClick={() => updateBarPanelState(bar, sIdx, bIdx, { barTime: !panelState.barTime })}
               title={copy.editor.barTime}
-              className={`h-7 min-w-[38px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
+              className={`h-7 min-w-0 w-full overflow-hidden rounded-md border px-1 transition-colors flex items-center justify-center ${
                 panelState.barTime
                   ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                   : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -4966,7 +4966,7 @@ const SongEditor: React.FC<Props> = ({
               type="button"
               onClick={() => updateBarPanelState(bar, sIdx, bIdx, { more: !panelState.more })}
               title={copy.editor.more}
-              className={`h-7 min-w-[30px] shrink-0 rounded-md border px-1 transition-colors flex items-center justify-center ${
+              className={`h-7 min-w-0 w-full overflow-hidden rounded-md border px-1 transition-colors flex items-center justify-center ${
                 panelState.more
                   ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                   : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -4980,35 +4980,27 @@ const SongEditor: React.FC<Props> = ({
             {panelState.riff && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                 <div className="mb-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase">{copy.editor.jianpuRiff}</label>
-                    <div className="flex items-center gap-1.5">
+                  <div className="@container flex items-center justify-between gap-1">
+                    <label className="block shrink-0 text-[10px] font-bold text-gray-400 uppercase">{copy.editor.jianpuRiff}</label>
+                    <div className="flex min-w-0 items-center justify-end gap-1">
                       <button
                         type="button"
                         onClick={() => handleCopyJianpu(sIdx, bIdx)}
-                        className={`inline-flex h-8 items-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 ${
-                          isPhoneViewport ? 'w-8 justify-center px-0' : 'gap-1.5 px-2.5'
-                        }`}
+                        className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
                         title={copy.editor.copyJianpu}
                       >
-                        <Copy size={12} />
-                        {!isPhoneViewport && (
-                          <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
-                        )}
+                        <Copy size={12} className="shrink-0" />
+                        <span className="hidden whitespace-nowrap text-[11px] font-bold @min-[168px]:inline">{language === 'zh' ? '複製' : 'Copy'}</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => handlePasteJianpu(sIdx, bIdx)}
                         disabled={copiedJianpu === null}
-                        className={`inline-flex h-8 items-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 ${
-                          isPhoneViewport ? 'w-8 justify-center px-0' : 'gap-1.5 px-2.5'
-                        }`}
+                        className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
                         title={copiedJianpu === null ? copy.editor.copyJianpuFirst : copy.editor.pasteJianpu}
                       >
-                        <ArrowDownRight size={12} />
-                        {!isPhoneViewport && (
-                          <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
-                        )}
+                        <ArrowDownRight size={12} className="shrink-0" />
+                        <span className="hidden whitespace-nowrap text-[11px] font-bold @min-[168px]:inline">{language === 'zh' ? '貼上' : 'Paste'}</span>
                       </button>
                     </div>
                   </div>
@@ -5162,35 +5154,27 @@ const SongEditor: React.FC<Props> = ({
             {panelState.rhythm && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                 <div className="mb-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.rhythm}</label>
-                    <div className="flex items-center gap-1.5">
+                  <div className="@container flex items-center justify-between gap-1">
+                    <label className="block shrink-0 text-[10px] font-bold uppercase text-gray-400">{copy.editor.rhythm}</label>
+                    <div className="flex min-w-0 items-center justify-end gap-1">
                       <button
                         type="button"
                         onClick={() => handleCopyRhythm(sIdx, bIdx)}
-                        className={`inline-flex h-8 items-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 ${
-                          isPhoneViewport ? 'w-8 justify-center px-0' : 'gap-1.5 px-2.5'
-                        }`}
+                        className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
                         title={copy.editor.copyRhythm}
                       >
-                        <Copy size={12} />
-                        {!isPhoneViewport && (
-                          <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
-                        )}
+                        <Copy size={12} className="shrink-0" />
+                        <span className="hidden whitespace-nowrap text-[11px] font-bold @min-[168px]:inline">{language === 'zh' ? '複製' : 'Copy'}</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => handlePasteRhythm(sIdx, bIdx)}
                         disabled={copiedRhythm === null}
-                        className={`inline-flex h-8 items-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 ${
-                          isPhoneViewport ? 'w-8 justify-center px-0' : 'gap-1.5 px-2.5'
-                        }`}
+                        className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
                         title={copiedRhythm === null ? copy.editor.copyFirst : copy.editor.pasteRhythm}
                       >
-                        <ArrowDownRight size={12} />
-                        {!isPhoneViewport && (
-                          <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
-                        )}
+                        <ArrowDownRight size={12} className="shrink-0" />
+                        <span className="hidden whitespace-nowrap text-[11px] font-bold @min-[168px]:inline">{language === 'zh' ? '貼上' : 'Paste'}</span>
                       </button>
                     </div>
                   </div>
@@ -5242,7 +5226,7 @@ const SongEditor: React.FC<Props> = ({
                         aria-label={`${copy.editor.rhythm} editor for bar ${bIdx + 1}`}
                       />
 
-                      <div className="flex min-h-[44px] items-center justify-center overflow-hidden p-1.5">
+                      <div className="flex min-h-[44px] items-center justify-center overflow-visible p-1.5">
                         {hasVisibleRhythm || rhythmSelected ? (
                           <RhythmNotation
                             notation={bar.rhythm || ''}
@@ -5350,7 +5334,7 @@ const SongEditor: React.FC<Props> = ({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 border-t border-gray-100 pt-2">
+                <div className="@container flex flex-wrap items-center justify-between gap-x-1 gap-y-2 border-t border-gray-100 pt-2">
                   <div className="flex shrink-0 gap-1">
                     <button
                       onClick={() => {
@@ -5389,7 +5373,7 @@ const SongEditor: React.FC<Props> = ({
                     </button>
                   </div>
 
-                  <div className={`min-w-0 ${isPhoneViewport ? 'grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-1 pt-1' : 'flex flex-1 items-center justify-end gap-1'}`}>
+                  <div className={`min-w-0 ${isPhoneViewport ? 'grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-1 pt-1' : 'flex w-full items-center gap-1 @min-[238px]:w-auto @min-[238px]:flex-1 @min-[238px]:justify-end'}`}>
                     <span className="shrink-0 text-[10px] font-bold text-gray-400">
                       {isPhoneViewport && language === 'zh' ? '房記' : copy.editor.endShort}
                     </span>
@@ -5783,7 +5767,7 @@ const SongEditor: React.FC<Props> = ({
                       className="absolute inset-0 h-full w-full opacity-0 pointer-events-none"
                       aria-label={`${copy.editor.rhythm} editor for pickup bar`}
                     />
-                    <div className="min-h-[44px] p-1.5 flex items-center justify-center overflow-hidden">
+                    <div className="min-h-[44px] p-1.5 flex items-center justify-center overflow-visible">
                       {pickupBar.rhythm || (selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX) ? (
                         <RhythmNotation
                           notation={pickupBar.rhythm || ''}
@@ -6503,12 +6487,12 @@ const SongEditor: React.FC<Props> = ({
                       />
                     </div>
 
-                    <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap pb-0.5">
+                    <div className="grid grid-cols-4 items-center gap-1">
                       <button
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { riff: !panelState.riff })}
                         title={copy.editor.jianpu}
-                        className={`h-7 min-w-[44px] px-1.5 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
+                        className={`h-7 min-w-0 w-full overflow-hidden px-1 rounded-md border transition-colors flex items-center justify-center ${
                           panelState.riff
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                             : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -6520,7 +6504,7 @@ const SongEditor: React.FC<Props> = ({
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { rhythm: !panelState.rhythm })}
                         title={copy.editor.rhythm}
-                        className={`h-7 min-w-[44px] px-1.5 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
+                        className={`h-7 min-w-0 w-full overflow-hidden px-1 rounded-md border transition-colors flex items-center justify-center ${
                           panelState.rhythm
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                             : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -6532,7 +6516,7 @@ const SongEditor: React.FC<Props> = ({
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { barTime: !panelState.barTime })}
                         title={copy.editor.barTime}
-                        className={`h-7 min-w-[38px] shrink-0 rounded-md border px-1.5 transition-colors flex items-center justify-center ${
+                        className={`h-7 min-w-0 w-full overflow-hidden rounded-md border px-1 transition-colors flex items-center justify-center ${
                           panelState.barTime
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                             : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -6546,7 +6530,7 @@ const SongEditor: React.FC<Props> = ({
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { more: !panelState.more })}
                         title={copy.editor.more}
-                        className={`h-7 min-w-[30px] px-1 rounded-md border transition-colors shrink-0 flex items-center justify-center ${
+                        className={`h-7 min-w-0 w-full overflow-hidden px-1 rounded-md border transition-colors flex items-center justify-center ${
                           panelState.more
                             ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                             : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
@@ -6560,27 +6544,27 @@ const SongEditor: React.FC<Props> = ({
                     {panelState.riff && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                       <div className="mb-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <label className="block text-[10px] font-bold text-gray-400 uppercase">{copy.editor.jianpuRiff}</label>
-                          <div className="flex items-center gap-1.5">
+                        <div className="@container flex items-center justify-between gap-1">
+                          <label className="block shrink-0 text-[10px] font-bold text-gray-400 uppercase">{copy.editor.jianpuRiff}</label>
+                          <div className="flex min-w-0 items-center justify-end gap-1">
                             <button
                               type="button"
                               onClick={() => handleCopyJianpu(sIdx, bIdx)}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                              className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
                               title={copy.editor.copyJianpu}
                             >
-                              <Copy size={12} />
-                              <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                              <Copy size={12} className="shrink-0" />
+                              <span className="hidden whitespace-nowrap text-[11px] font-bold @min-[168px]:inline">{language === 'zh' ? '複製' : 'Copy'}</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handlePasteJianpu(sIdx, bIdx)}
                               disabled={copiedJianpu === null}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
                               title={copiedJianpu === null ? copy.editor.copyJianpuFirst : copy.editor.pasteJianpu}
                             >
-                              <ArrowDownRight size={12} />
-                              <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                              <ArrowDownRight size={12} className="shrink-0" />
+                              <span className="hidden whitespace-nowrap text-[11px] font-bold @min-[168px]:inline">{language === 'zh' ? '貼上' : 'Paste'}</span>
                             </button>
                           </div>
                         </div>
@@ -6735,27 +6719,27 @@ const SongEditor: React.FC<Props> = ({
                     {panelState.rhythm && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                       <div className="mb-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <label className="block text-[10px] font-bold text-gray-400 uppercase">{copy.editor.rhythm}</label>
-                          <div className="flex items-center gap-1.5">
+                        <div className="@container flex items-center justify-between gap-1">
+                          <label className="block shrink-0 text-[10px] font-bold text-gray-400 uppercase">{copy.editor.rhythm}</label>
+                          <div className="flex min-w-0 items-center justify-end gap-1">
                             <button
                               type="button"
                               onClick={() => handleCopyRhythm(sIdx, bIdx)}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                              className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
                               title={copy.editor.copyRhythm}
                             >
-                              <Copy size={12} />
-                              <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '複製' : 'Copy'}</span>
+                              <Copy size={12} className="shrink-0" />
+                              <span className="hidden whitespace-nowrap text-[11px] font-bold @min-[168px]:inline">{language === 'zh' ? '複製' : 'Copy'}</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handlePasteRhythm(sIdx, bIdx)}
                               disabled={copiedRhythm === null}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
                               title={copiedRhythm === null ? copy.editor.copyFirst : copy.editor.pasteRhythm}
                             >
-                              <ArrowDownRight size={12} />
-                              <span className="whitespace-nowrap text-[11px] font-bold">{language === 'zh' ? '貼上' : 'Paste'}</span>
+                              <ArrowDownRight size={12} className="shrink-0" />
+                              <span className="hidden whitespace-nowrap text-[11px] font-bold @min-[168px]:inline">{language === 'zh' ? '貼上' : 'Paste'}</span>
                             </button>
                           </div>
                         </div>
@@ -6807,7 +6791,7 @@ const SongEditor: React.FC<Props> = ({
                               aria-label={`${copy.editor.rhythm} editor for bar ${bIdx + 1}`}
                             />
 
-                            <div className="min-h-[44px] p-1.5 flex items-center justify-center overflow-hidden">
+                            <div className="min-h-[44px] p-1.5 flex items-center justify-center overflow-visible">
                               {hasVisibleRhythm || rhythmSelected ? (
                                 <RhythmNotation
                                   notation={bar.rhythm || ''}
@@ -6920,9 +6904,9 @@ const SongEditor: React.FC<Props> = ({
 
                     {/* Repeat & Ending Controls */}
                     {panelState.more && (
-                    <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-y-2 gap-x-1">
+                    <div className="@container pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-y-2 gap-x-1">
                       <div className="flex gap-1 shrink-0">
-                        <button 
+                        <button
                           onClick={() => {
                             const newBars = [...section.bars];
                             newBars[bIdx] = { ...bar, repeatStart: !bar.repeatStart };
@@ -6959,7 +6943,7 @@ const SongEditor: React.FC<Props> = ({
                         </button>
                       </div>
                       
-                      <div className="flex items-center gap-1 min-w-0 flex-1 justify-end">
+                      <div className="flex w-full min-w-0 items-center gap-1 @min-[238px]:w-auto @min-[238px]:flex-1 @min-[238px]:justify-end">
                         <span className="text-[10px] font-bold text-gray-400 uppercase shrink-0">{copy.editor.endShort}</span>
                         <input
                           list={`ending-options-${sIdx}-${bIdx}`}

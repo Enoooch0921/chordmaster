@@ -55,6 +55,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   onInsertSelect
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const [measuredNextCrossBarEndPercent, setMeasuredNextCrossBarEndPercent] = React.useState<number | null>(null);
   const { parsed, glyphs, accents, ties } = React.useMemo(
     () => rationalizeRhythmDisplay(notation, timeSignature, { beamGroups }),
     [beamGroups, notation, timeSignature]
@@ -74,6 +75,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const baseMinHeight = (compact ? 16 : 58) * scale;
   const stroke = overflow ? '#dc2626' : '#111827';
   const guide = overflow ? 'rgba(220, 38, 38, 0.16)' : 'rgba(17, 24, 39, 0.08)';
+  const crossBarMeasurementVersion = 5;
+  const crossBarNoteheadOvershootPx = compact ? 0.6 : 1.4;
   const accentY = ((compact ? -9 : -2) + accentVerticalOffset) * scale;
   const tieAnchorY = (((compact ? 13.2 : 46.1) + (renderMode === 'editor' ? (compact ? -1.1 : -1.3) : 0)) + tieVerticalOffset) * scale;
   const tieStrokeWidth = (compact ? 0.9 : 1.15) * Math.max(0.9, Math.min(1.25, tieFontScale));
@@ -225,6 +228,83 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
     return (getHeadCenterUnit(firstPlayableEvent) * 100) / Math.max(1, nextParsed.barUnits);
   }, [nextNotationForCrossBar, nextTimeSignatureForCrossBar, timeSignature]);
+  React.useEffect(() => {
+    if (renderMode !== 'preview' || !nextNotationForCrossBar?.trim()) {
+      setMeasuredNextCrossBarEndPercent(null);
+      return;
+    }
+
+    const currentRoot = rootRef.current;
+    if (!currentRoot) {
+      setMeasuredNextCrossBarEndPercent(null);
+      return;
+    }
+
+    let frameId: number | null = null;
+
+    const measure = () => {
+      frameId = null;
+      const sourceRoot = rootRef.current;
+      if (!sourceRoot) {
+        setMeasuredNextCrossBarEndPercent(null);
+        return;
+      }
+
+      const scope = sourceRoot.closest<HTMLElement>('[data-rhythm-measure-row]');
+      const rhythmRoots: HTMLElement[] = scope
+        ? Array.from(scope.querySelectorAll<HTMLElement>('[data-rhythm-notation]'))
+        : Array.from(document.querySelectorAll<HTMLElement>('[data-rhythm-notation]'));
+      const sourceIndex = rhythmRoots.indexOf(sourceRoot);
+      const nextRoot = sourceIndex >= 0 ? rhythmRoots[sourceIndex + 1] ?? null : null;
+      const firstNextGlyph = nextRoot?.querySelector<HTMLElement>('[data-rhythm-glyph]');
+
+      if (!firstNextGlyph) {
+        setMeasuredNextCrossBarEndPercent(null);
+        return;
+      }
+
+      const sourceRect = sourceRoot.getBoundingClientRect();
+      const overlayRect = sourceRoot.querySelector<HTMLElement>('[data-rhythm-overlay]')?.getBoundingClientRect() ?? sourceRect;
+      const glyphRect = firstNextGlyph.getBoundingClientRect();
+      if (overlayRect.width <= 0 || glyphRect.width <= 0) {
+        setMeasuredNextCrossBarEndPercent(null);
+        return;
+      }
+
+      const glyphCenterX = (glyphRect.left + glyphRect.right) / 2;
+      const nextPercent = ((glyphCenterX + crossBarNoteheadOvershootPx - overlayRect.left) / overlayRect.width) * 100;
+      const clampedPercent = Math.max(100, Math.min(220, nextPercent));
+
+      setMeasuredNextCrossBarEndPercent((current) => (
+        current !== null && Math.abs(current - clampedPercent) < 0.1 ? current : clampedPercent
+      ));
+    };
+
+    const scheduleMeasure = () => {
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(measure);
+    };
+
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(currentRoot);
+    if (currentRoot.parentElement) {
+      observer.observe(currentRoot.parentElement);
+    }
+    scheduleMeasure();
+    const delayedMeasureId = window.setTimeout(scheduleMeasure, 120);
+    const settledMeasureId = window.setTimeout(scheduleMeasure, 320);
+    window.addEventListener('resize', scheduleMeasure);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+      window.clearTimeout(delayedMeasureId);
+      window.clearTimeout(settledMeasureId);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [crossBarMeasurementVersion, crossBarNoteheadOvershootPx, glyphs.length, nextNotationForCrossBar, nextTimeSignatureForCrossBar, notation, renderMode, timeSignature]);
   const displayTies = React.useMemo(() => {
     const nextTies = [...ties];
     const firstPlayableEvent = visibleEvents.find((event) => !event.isRest);
@@ -423,6 +503,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   return (
     <div
       ref={rootRef}
+      data-rhythm-notation
       className={`relative w-full ${className}`}
       style={{ minHeight: `${minHeight}px` }}
       onMouseDown={(e) => {
@@ -481,6 +562,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       )}
 
       <div
+        data-rhythm-overlay
         className="absolute inset-0 z-[1] pointer-events-none"
         style={{
           transform: `scale(${previewRendererScale})`,
@@ -520,13 +602,24 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             const isIncomingCrossBar = tie.crossBarSegment === 'incoming';
             const isOutgoingCrossBar = tie.crossBarSegment === 'outgoing';
             const isCrossBarTie = isIncomingCrossBar || isOutgoingCrossBar;
+            const projectsToNextBar = (
+              renderMode === 'preview'
+              && isOutgoingCrossBar
+              && nextCrossBarPlayableHeadPercent !== null
+            );
             // Each cross-bar half terminates a tiny bit past its own bar edge,
             // so the two halves visually meet in the gap between bars.
             const crossBarMeetOvershoot = compact ? 3.5 : 4.5;
+            const projectedCrossBarGap = compact ? 22 : 24;
             const startX = isIncomingCrossBar
               ? -crossBarMeetOvershoot
               : unitToPercentNumber(tie.startHeadUnit);
-            const endX = isOutgoingCrossBar
+            const projectedEndX = measuredNextCrossBarEndPercent ?? (
+              100 + projectedCrossBarGap + (nextCrossBarPlayableHeadPercent ?? 0)
+            );
+            const endX = projectsToNextBar
+              ? projectedEndX
+              : isOutgoingCrossBar
               ? 100 + crossBarMeetOvershoot
               : unitToPercentNumber(tie.endHeadUnit);
             // For half-arc geometry, estimate the would-be full span so the
@@ -543,28 +636,42 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                 })()
               : 0;
             const span = Math.max(1.8, endX - startX);
-            const controlOffset = isCrossBarTie
-              ? Math.max(2.8, span * (compact ? 0.55 : 0.5))
-              : Math.max(1.2, span * 0.28);
+            const controlOffset = projectsToNextBar
+              ? Math.max(3.2, Math.min(span * 0.31, span / 2 - 1.2))
+              : isCrossBarTie
+                ? Math.max(2.8, Math.min(span * (compact ? 0.42 : 0.38), span / 2 - 0.8))
+                : Math.max(1.2, span * 0.28);
             const curveDepth = (
               isCrossBarTie
                 ? Math.min(
-                    compact ? 2.8 : 5.4,
-                    Math.max(compact ? 1.8 : 3.6, fullCrossBarSpan * (compact ? 0.14 : 0.11))
+                    compact ? 3.4 : 6.2,
+                    Math.max(compact ? 2.2 : 4.1, fullCrossBarSpan * (compact ? 0.17 : 0.13))
                   )
                 : Math.min(
                     compact ? 4.2 : 8.6,
                     Math.max(compact ? 2.3 : 4.8, span * (compact ? 0.34 : 0.24))
                   )
             ) * Math.max(0.92, Math.min(1.18, tieFontScale));
-            const dipY = Math.min(minHeight - (compact ? 0.4 : 0.8), tieAnchorY + curveDepth);
-            const startY = isIncomingCrossBar ? dipY : tieAnchorY;
-            const endY = isOutgoingCrossBar ? dipY : tieAnchorY;
+            const crossBarVerticalShift = isCrossBarTie && renderMode === 'preview'
+              ? (compact ? 0.75 : 1.25)
+              : 0;
+            const tieBaseY = tieAnchorY + crossBarVerticalShift;
+            const dipY = Math.min(minHeight - (compact ? 0.4 : 0.8), tieBaseY + curveDepth);
+            const startY = isIncomingCrossBar ? dipY : tieBaseY;
+            const endY = projectsToNextBar
+              ? tieBaseY
+              : isOutgoingCrossBar
+                ? dipY
+                : tieBaseY;
             // For a smooth join at the meeting point, that endpoint needs
             // horizontal tangent — achieved by placing the adjacent control
             // point at the same Y as the endpoint.
-            const controlY1 = isIncomingCrossBar ? dipY : tieAnchorY + curveDepth;
-            const controlY2 = isOutgoingCrossBar ? dipY : tieAnchorY + curveDepth;
+            const controlY1 = isIncomingCrossBar ? dipY : tieBaseY + curveDepth;
+            const controlY2 = projectsToNextBar
+              ? tieBaseY + curveDepth
+              : isOutgoingCrossBar
+                ? dipY
+                : tieBaseY + curveDepth;
 
             return (
               <path
@@ -821,6 +928,15 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                   ? event.startUnit + (event.durationUnits / 2)
                   : getHeadCenterUnit(event)
               );
+              const glyphTranslateY = event.isRest
+                ? '-62%'
+                : isWholeDuration
+                  ? '-53%'
+                  : isHalfDuration
+                    ? '-50%'
+                    : (isEditorBeamed || event.base === 'e' || event.base === 's')
+                      ? (renderMode === 'preview' ? '-48.5%' : '-54%')
+                      : '-48.5%';
               const displayGlyph = isEditorBeamed
                 ? getRhythmEventGlyph({
                     base: 'q',
@@ -836,22 +952,15 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
               return (
                 <React.Fragment key={`editor-glyph-${event.index}`}>
                   <span
+                    data-rhythm-glyph
+                    data-rhythm-base={event.base}
+                    data-rhythm-rendered-beamed={isEditorBeamed ? 'true' : 'false'}
                     className="absolute z-[2] select-none font-rhythm leading-none whitespace-pre"
                     style={{
                       left: unitToPercent(centerUnit),
                       top: rhythmContentTop,
                       color: stroke,
-                    transform: `translate(-50%, ${
-                      event.isRest
-                        ? '-62%'
-                        : isWholeDuration
-                          ? '-53%'
-                          : isHalfDuration
-                            ? '-50%'
-                            : (isEditorBeamed || event.base === 'e' || event.base === 's')
-                              ? '-54%'
-                              : '-48.5%'
-                    })`,
+                      transform: `translate(-50%, ${glyphTranslateY})`,
                       fontSize: `${hasSingleWholeEvent && isWholeDuration ? editorGlyphFontSize * 1.16 : editorGlyphFontSize}px`
                     }}
                   >
@@ -896,6 +1005,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
             return (
               <span
+                data-rhythm-glyph
                 key={`glyph-${idx}-${glyph.startUnit}-${glyph.text}`}
                 className="absolute z-[2] select-none font-rhythm leading-none whitespace-pre"
                 style={{
@@ -913,6 +1023,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
           return (
             <span
+              data-rhythm-glyph
               key={`glyph-${idx}-${glyph.startUnit}-${glyph.text}`}
               className="justify-self-center self-center select-none font-rhythm leading-none whitespace-pre"
               style={{

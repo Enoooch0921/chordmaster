@@ -85,14 +85,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-05-28',
-        title: 'iPadOS app setup, setlist key tracking, and chord display refinements',
+        date: '2026-06-02',
+        title: 'Compact sidebars, adjustable editor layout, and rhythm tie polish',
         bullets: [
-          'Added Capacitor iPadOS project setup, build scripts, and Xcode sync documentation.',
-          'Google/Supabase sign-in now returns to the native ChordMaster app through the app URL scheme.',
-          'Setlist preview scrolling now updates the active setlist song, so top-bar Key and editing target follow the song currently in view.',
-          'Setlist song reordering now uses a pointer/touch drag handle instead of native HTML drag, improving iPad behavior.',
-          '`maj7` and `dim` abbreviations now only appear in crowded three-chord bars, and `°7(#4)` spacing avoids overlap.'
+          'Song Library and Service Setlist sidebars now use more compact toolbars, with search, sorting, counts, and primary actions taking less vertical space.',
+          'The Workspace / Team switcher now stays collapsed by default and opens only when you need team switching, team creation, or member management.',
+          'Desktop split-editor mode now supports draggable editor width with snap points for stable laptop layouts.',
+          'Song metadata keeps core fields visible and moves version, translator, tempo, display, lyrics, bar numbers, and references into an Advanced section.',
+          'Preview rhythm ties now measure across adjacent bars so cross-bar ties land more accurately on the next notehead.'
         ]
       },
       {
@@ -283,14 +283,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-05-28',
-        title: 'iPadOS App、歌單 Key 跟隨與和弦顯示優化',
+        date: '2026-06-02',
+        title: '精簡側欄、可調整編輯區與節奏連線優化',
         bullets: [
-          '新增 Capacitor iPadOS 專案設定、建置指令與 Xcode 同步說明。',
-          'Google/Supabase 登入現在會透過 app URL scheme 回到 ChordMaster app。',
-          '歌單模式預覽滑到哪一首歌，頂部 Key 與編輯目標會自動跟著切到目前歌曲。',
-          '歌單歌曲排序改用 pointer/touch 拖曳手把，改善 iPad 上拖動歌曲時變成文字選取的問題。',
-          '`maj7` 與 `dim` 只在三個和弦的擁擠小節才縮寫，並修正 `°7(#4)` 的重疊。'
+          '歌曲庫與服事歌單側欄改為更精簡的工具列，搜尋、排序、數量與主要動作佔用更少高度。',
+          '工作區 / 團隊切換器預設收合，只有需要切換團隊、建立團隊或管理成員時才展開。',
+          '桌面分割編輯器現在可拖曳調整編輯區寬度，並在版面臨界點自動吸附，筆電使用更穩定。',
+          '歌曲 metadata 保留核心欄位在外層，版本、翻譯、速度、顯示設定、歌詞、小節數與 Reference 會收進進階設定。',
+          '預覽節奏跨小節連線會量測相鄰小節位置，讓連線更準確接到下一個音頭。'
         ]
       },
       {

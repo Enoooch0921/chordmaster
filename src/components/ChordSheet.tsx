@@ -109,6 +109,13 @@ const getPreviewRiffNotation = (notation: string | undefined, timeSignature: str
   return serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(trimmed, timeSignature));
 };
 
+const hasVisiblePreviewRiff = (notation: string | undefined) => {
+  const trimmed = notation?.trim();
+  if (!trimmed) return false;
+  if (trimmed === '-') return true;
+  return findJianpuNoteRanges(trimmed).length > 0 || findJianpuPlaceholderRanges(trimmed).length > 0;
+};
+
 const getOccupiedTokenSpan = (tokens: string[]) => {
   const firstIndex = tokens.findIndex((token) => token.trim());
   if (firstIndex === -1) {
@@ -1510,7 +1517,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 </div>
 
                 {/* Right Column: Bars */}
-                <div className="flex-1 grid min-h-0 grid-cols-4 w-full">
+                <div className="flex-1 grid min-h-0 grid-cols-4 w-full" data-rhythm-measure-row>
                   {Array.from({ length: 4 }).map((_, bIdx) => {
                     const bar = row.bars[bIdx];
                     const previousBar = row.bars[bIdx - 1];
@@ -1544,7 +1551,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const displayChords = bar ? getChordDisplaySlots(bar.chords, beatsPerBar) : [];
                     const lyricAnchors = bar ? getLyricAnchors(bar.chords, bar.lyrics, beatsPerBar) : [];
                     const hasRhythm = Boolean(bar?.rhythm);
-                    const hasRiff = Boolean(bar?.riff);
+                    const hasRiff = hasVisiblePreviewRiff(previewRiffNotation);
                     const previousRhythmBar = bIdx > 0
                       ? row.bars[bIdx - 1]
                       : row.startBIdx > 0
@@ -1561,15 +1568,21 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       previousRhythmBar?.rhythm
                       && rhythmEndsWithTieToNext(previousRhythmBar.rhythm, previousRhythmTimeSignature)
                     );
+                    const showIncomingRhythmTie = tieRhythmFromPrevious && bIdx === 0;
                     const nextRhythmBar = bIdx < row.bars.length - 1 ? row.bars[bIdx + 1] : undefined;
                     const nextRhythmTimeSignature = nextRhythmBar
                       ? getEffectiveTimeSignature(nextRhythmBar.timeSignature, song.timeSignature)
                       : song.timeSignature;
+                    const projectsRhythmTieToNextBar = Boolean(
+                      bar?.rhythm
+                      && nextRhythmBar?.rhythm
+                      && rhythmEndsWithTieToNext(bar.rhythm, effectiveTimeSignature)
+                    );
                     const hasChordContent = Boolean(bar && hasMeaningfulChordContent(bar.chords));
                     const showRhythmInChordLane = !hasChordContent && hasRhythm;
                     const showLyricsLane = Boolean(song.showLyrics && bar && hasVisibleChordTokens(bar.chords) && !showRhythmInChordLane);
                     const showBottomRhythmLane = hasRhythm && !showRhythmInChordLane;
-                    const showBottomLane = showBottomRhythmLane || Boolean(bar?.riff) || hasBarLabel;
+                    const showBottomLane = showBottomRhythmLane || hasRiff || hasBarLabel;
                     const compactModifier = Boolean(
                       bar?.ending ||
                       bar?.annotation ||
@@ -1642,7 +1655,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           previousBar?.repeatEnd ? 'sheet-after-repeat-end' : ''
                         } ${previousBar?.finalBar ? 'sheet-after-final-bar' : ''} ${
                           suppressRightBarline ? 'sheet-has-terminal-right' : ''
-                        } ${isActiveBar ? 'z-20' : ''}`}
+                        } ${isActiveBar ? 'z-20' : projectsRhythmTieToNextBar ? 'z-10' : ''}`}
                         style={isActiveBar ? { paddingBottom: `${barPaddingBottom}px`, backgroundColor: activeTone.barFill, boxShadow: `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}` } : { paddingBottom: `${barPaddingBottom}px` }}
                       >
                         {showBarNumber && (
@@ -1726,7 +1739,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         {bar && (
                           <>
                             {(() => {
-                              const showBottomLane = showBottomRhythmLane || Boolean(bar.riff) || hasBarLabel;
+                              const showBottomLane = showBottomRhythmLane || hasRiff || hasBarLabel;
 
                               return (
                                 <>
@@ -1767,7 +1780,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           <div className="w-full max-w-full overflow-visible translate-y-[3px]">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} tieFromPrevious={tieRhythmFromPrevious} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
                                           </div>
                                         </div>
                                       );
@@ -2035,7 +2048,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 className={`absolute left-1 right-1 ${contentLeftInsetClass}`}
                                 style={{ bottom: '4px' }}
                               >
-                                {showBottomRhythmLane && bar.riff ? (
+                                {showBottomRhythmLane && hasRiff ? (
                                   <div className="flex gap-1">
                                     {hasBarLabel && (
                                       <div className="flex items-end">
@@ -2063,7 +2076,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           }}
                                         >
                                           <div className="w-full translate-y-[3px]">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={tieRhythmFromPrevious} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
                                           </div>
                                         </div>
                                       </div>
@@ -2105,7 +2118,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       </div>
                                     )}
 
-                                    {(showBottomRhythmLane || bar.riff) && (
+                                    {(showBottomRhythmLane || hasRiff) && (
                                       <div
                                         className={`bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass}`}
                                         onClick={(e) => {
@@ -2115,7 +2128,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       >
                                         {showBottomRhythmLane ? (
                                           <div className="w-full translate-y-[3px]">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={tieRhythmFromPrevious} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
                                           </div>
                                         ) : (
                                           <Jianpu
