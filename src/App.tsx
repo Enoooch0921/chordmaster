@@ -2215,7 +2215,7 @@ export default function App() {
         className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
           workspaceIsDirty
             ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]'
         }`}
       >
         <Save size={14} />
@@ -2232,7 +2232,7 @@ export default function App() {
         className={`mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
           isExportingPdf
             ? 'cursor-wait bg-gray-100 text-gray-400'
-            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]'
         }`}
       >
         <Save size={14} />
@@ -2259,7 +2259,7 @@ export default function App() {
                 void handleCreateShareLink('song');
                 setIsToolbarOverflowMenuOpen(false);
               }}
-              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]"
             >
               <Share2 size={14} />
               <span>{copy.shareCurrentSong}</span>
@@ -2273,7 +2273,7 @@ export default function App() {
                 void handleCreateShareLink('setlist');
                 setIsToolbarOverflowMenuOpen(false);
               }}
-              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]"
             >
               <Share2 size={14} />
               <span>{copy.shareCurrentSetlist}</span>
@@ -2288,7 +2288,7 @@ export default function App() {
             setIsToolbarOverflowMenuOpen(false);
           }}
           disabled={!isAuthConfigured}
-          className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ExternalLink size={14} />
           <span>{copy.continueWithGoogle}</span>
@@ -8427,7 +8427,7 @@ export default function App() {
           <div className="flex min-h-9 min-w-0 flex-1 items-center">
             <div className="flex min-w-0 items-center gap-2">
               <FolderTree size={14} className="shrink-0 text-gray-400" />
-              <span className="line-clamp-2 min-w-0 whitespace-normal break-words text-base font-bold leading-tight text-gray-900">
+              <span className="line-clamp-2 min-w-0 whitespace-normal break-words text-base font-bold leading-tight text-gray-900 dark:text-[color:var(--color-text)]">
                 {selectedJoinedProject ? selectedJoinedProject.name : (selectedProject ? selectedProject.name : copy.ungroupedProject)}
               </span>
               {selectedJoinedProject && (
@@ -8710,12 +8710,12 @@ export default function App() {
           <div className="min-w-0 flex-1">
             <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistDetails}</div>
             {isJoinedSetlist || !canEditSelectedSetlist ? (
-              <div className="mt-1 truncate text-base font-bold text-gray-900">{selectedSetlist.name || copy.untitledSetlist}</div>
+              <div className="mt-1 truncate text-base font-bold text-gray-900 dark:text-[color:var(--color-text)]">{selectedSetlist.name || copy.untitledSetlist}</div>
             ) : (
               <input
                 value={selectedSetlist.name}
                 onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
-                className="mt-1 w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50"
+                className="mt-1 w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50 dark:text-[color:var(--color-text)] dark:focus:bg-[color:var(--color-surface-raised)]"
                 placeholder={copy.untitledSetlist}
               />
             )}
@@ -9247,7 +9247,7 @@ export default function App() {
                   <div className="min-w-0 flex items-center gap-3">
                     <img src={logoSrc} alt="ChordMaster" className="h-10 w-10 rounded-xl shadow-sm ring-1 ring-gray-200" />
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-bold text-gray-900">{APP_NAME}</div>
+                      <div className="truncate text-sm font-bold text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</div>
                       <div className="mt-0.5 truncate text-xs font-medium text-gray-500">
                         {mobileDrawerContextLabel}
                         {mobileDrawerContextValue ? ` · ${mobileDrawerContextValue}` : ''}
@@ -9350,12 +9350,12 @@ export default function App() {
                           </button>
                           <div className="min-w-0 flex-1">
                             {isJoinedSetlist || !canEditSelectedSetlist ? (
-                              <div className="text-base font-bold text-gray-900 truncate">{selectedSetlist.name}</div>
+                              <div className="text-base font-bold text-gray-900 truncate dark:text-[color:var(--color-text)]">{selectedSetlist.name}</div>
                             ) : (
                               <input
                                 value={selectedSetlist.name}
                                 onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
-                                className="w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50"
+                                className="w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50 dark:text-[color:var(--color-text)] dark:focus:bg-[color:var(--color-surface-raised)]"
                                 placeholder={copy.untitledSetlist}
                               />
                             )}
@@ -9687,6 +9687,9 @@ export default function App() {
                     </>
                   ) : (
                     <>
+                      {/* Phone: header (project + sharing + search/sort) shares ONE scroll
+                          area with the setlist list, so it scrolls away as you scroll. */}
+                      <div className="min-h-0 flex-1 overflow-y-auto">
                       <div className="px-4 py-3 border-b border-gray-200">
                         <div className="flex min-w-0 items-center gap-2">
                           <button
@@ -9704,7 +9707,7 @@ export default function App() {
                           <div className="flex min-h-9 min-w-0 flex-1 items-center">
                             <div className="flex min-w-0 items-center gap-2">
                               <FolderTree size={14} className="shrink-0 text-gray-400" />
-                              <span className="line-clamp-2 min-w-0 whitespace-normal break-words text-base font-bold leading-tight text-gray-900">
+                              <span className="line-clamp-2 min-w-0 whitespace-normal break-words text-base font-bold leading-tight text-gray-900 dark:text-[color:var(--color-text)]">
                                 {selectedJoinedProject ? selectedJoinedProject.name : (selectedProject ? selectedProject.name : copy.ungroupedProject)}
                               </span>
                               {selectedJoinedProject && (
@@ -9785,7 +9788,7 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                      <div className="p-3">
                         <div className="space-y-2">
                           {filteredSetlists.length === 0 && (
                             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -9963,6 +9966,7 @@ export default function App() {
 	                            })}
                           </div>
                         )}
+                      </div>
                       </div>
                     </>
                   )}
@@ -10564,7 +10568,7 @@ export default function App() {
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
-                  <h2 className="truncate font-display text-lg font-bold tracking-tight text-gray-900">{APP_NAME}</h2>
+                  <h2 className="truncate font-display text-lg font-bold tracking-tight text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</h2>
                   <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">
                     v{APP_VERSION}
                   </span>
@@ -10834,7 +10838,7 @@ export default function App() {
               <div className="flex min-w-0 items-center gap-2">
                 <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
                 <div className="min-w-0">
-                  <div className="truncate font-display text-lg font-bold tracking-tight text-gray-900">{APP_NAME}</div>
+                  <div className="truncate font-display text-lg font-bold tracking-tight text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-2">
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
                       isSetlistMode
