@@ -1118,7 +1118,7 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, previewIdentity = null }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onAddBarClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, previewIdentity = null }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   // Chords always use the sans-serif preset; the serif option was removed.
@@ -1175,6 +1175,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   };
 
   // Flatten all sections into rows
+  const allowAddBar = Boolean(onAddBarClick);
+  const lastSectionIndex = song.sections.length - 1;
   const allRows: { sectionTitle: string | null; bars: Bar[]; sIdx: number; startBIdx: number }[] = [];
   song.sections.forEach((section, sIdx) => {
     const sectionRows = Math.max(1, Math.ceil(section.bars.length / 4));
@@ -1186,6 +1188,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         startBIdx: i * 4
       });
       }
+    // Only the very last section gets an add-bar slot. If its bars fill the last
+    // row exactly, append one empty row so the "+" has somewhere to live.
+    if (allowAddBar && sIdx === lastSectionIndex && section.bars.length > 0 && section.bars.length % 4 === 0) {
+      allRows.push({
+        sectionTitle: null,
+        bars: [],
+        sIdx,
+        startBIdx: sectionRows * 4
+      });
+    }
   });
   const sectionBarOffsets: number[] = [];
   let accumulatedBarCount = 0;
@@ -1622,6 +1634,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         ? '-top-[8px]'
                         : '-top-[2px]';
                     const isActiveBar = activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
+                    // The first empty slot right after a section's last bar becomes a
+                    // clickable "+" that appends a new bar (editable preview only).
+                    // Add-bar "+" only appears in the very last section, at the slot right after
+                    // its last bar. Barlines always render like any other bar; we only drop the
+                    // "empty bar" horizontal mark on a fully empty trailing add-row.
+                    const isLastSectionForAdd = allowAddBar && row.sIdx === lastSectionIndex && Boolean(section);
+                    const isAddBarRow = isLastSectionForAdd && row.bars.length === 0;
+                    const isAddBarSlot = !bar && isLastSectionForAdd && (row.startBIdx + bIdx === (section?.bars.length ?? -1));
                     const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
                     const suppressRightBarline = bIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
                     const leftBorderClass = suppressLeftBarline
@@ -1658,9 +1678,23 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           previousBar?.repeatEnd ? 'sheet-after-repeat-end' : ''
                         } ${previousBar?.finalBar ? 'sheet-after-final-bar' : ''} ${
                           suppressRightBarline ? 'sheet-has-terminal-right' : ''
-                        } ${isActiveBar ? 'z-20' : projectsRhythmTieToNextBar ? 'z-10' : ''}`}
+                        } ${isActiveBar ? 'z-20' : projectsRhythmTieToNextBar ? 'z-10' : ''} ${isAddBarSlot ? 'group/addbar cursor-pointer' : ''}`}
                         style={isActiveBar ? { paddingBottom: `${barPaddingBottom}px`, backgroundColor: activeTone.barFill, boxShadow: `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}` } : { paddingBottom: `${barPaddingBottom}px` }}
+                        {...(isAddBarSlot ? {
+                          role: 'button' as const,
+                          tabIndex: 0,
+                          title: language === 'zh' ? '新增小節' : 'Add bar',
+                          'aria-label': language === 'zh' ? '新增小節' : 'Add bar',
+                          onClick: () => onAddBarClick?.(row.sIdx)
+                        } : {})}
                       >
+                        {isAddBarSlot && (
+                          <div className="pointer-events-none absolute inset-0 z-[1100] flex items-center justify-center">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-gray-300 text-gray-300 transition-colors group-hover/addbar:border-indigo-400 group-hover/addbar:text-indigo-500">
+                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                            </span>
+                          </div>
+                        )}
                         {showBarNumber && (
                           <div
                             className={`pointer-events-none absolute left-0 z-[1200] -translate-x-1/2 text-[8px] font-bold leading-none text-gray-400 ${barNumberTopClass}`}
@@ -1733,7 +1767,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           />
                         )}
 
-                        {isUnusedBar && (
+                        {isUnusedBar && !isAddBarRow && (
                           <div className="absolute inset-0 z-[1] flex items-center pointer-events-none">
                             <div className="h-[2px] w-full bg-gray-400" />
                           </div>

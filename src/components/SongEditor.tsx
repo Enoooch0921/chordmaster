@@ -1425,6 +1425,80 @@ const SongEditor: React.FC<Props> = ({
     insertEmptyBarAt(sIdx, bIdx + 1);
   };
 
+  const deleteBarAndFocusPrevious = (sIdx: number, bIdx: number) => {
+    const section = song.sections[sIdx];
+    if (!section || bIdx < 0 || bIdx >= section.bars.length) return;
+
+    const newBars = section.bars.filter((_, index) => index !== bIdx);
+    updateSection(sIdx, sanitizeSectionJianpuSlurs({ ...section, bars: newBars }, sIdx));
+
+    if (newBars.length > 0) {
+      queueChordInputFocus(sIdx, Math.max(0, bIdx - 1), section.id ?? null);
+    } else {
+      clearEditorSelectionState();
+      onActiveBarChange?.(null);
+    }
+  };
+
+  // Shared chord-input keys: [ ] \ toggle the bar markers (repeat/ending) even while
+  // typing in the chord box; Backspace on an empty bar deletes it. Returns true when
+  // the key was handled so the caller can stop.
+  const handleChordInputShortcutKeys = (event: React.KeyboardEvent<HTMLInputElement>, sIdx: number, bIdx: number): boolean => {
+    if (event.altKey || event.ctrlKey || event.metaKey || (event.nativeEvent as KeyboardEvent).isComposing) {
+      return false;
+    }
+    if (isPickupTarget(sIdx, bIdx)) {
+      return false;
+    }
+
+    const currentBar = getEditorBar(sIdx, bIdx);
+
+    if (event.key === '[' || event.code === 'BracketLeft') {
+      event.preventDefault();
+      if (currentBar) updateBar(sIdx, bIdx, { repeatStart: !currentBar.repeatStart });
+      return true;
+    }
+    if (event.key === ']' || event.code === 'BracketRight') {
+      event.preventDefault();
+      if (currentBar) {
+        const nextRepeatEnd = !currentBar.repeatEnd;
+        updateBar(sIdx, bIdx, { repeatEnd: nextRepeatEnd, finalBar: nextRepeatEnd ? false : currentBar.finalBar });
+      }
+      return true;
+    }
+    if (event.key === '\\' || event.code === 'Backslash') {
+      event.preventDefault();
+      if (currentBar) {
+        const nextFinalBar = !currentBar.finalBar;
+        updateBar(sIdx, bIdx, { finalBar: nextFinalBar, repeatEnd: nextFinalBar ? false : currentBar.repeatEnd });
+      }
+      return true;
+    }
+
+    if (event.key === 'Backspace') {
+      const input = event.currentTarget;
+      const isEmptyBar = (currentBar?.chords.length ?? 0) === 0
+        && !currentBar?.rhythm
+        && !currentBar?.riff
+        && !currentBar?.repeatStart
+        && !currentBar?.repeatEnd
+        && !currentBar?.finalBar
+        && !currentBar?.ending
+        && !currentBar?.label
+        && !currentBar?.annotation
+        && !currentBar?.leftMarker
+        && !currentBar?.rightMarker
+        && input.value.length === 0;
+      if (isEmptyBar && input.selectionStart === 0 && input.selectionEnd === 0) {
+        event.preventDefault();
+        deleteBarAndFocusPrevious(sIdx, bIdx);
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   useEffect(() => {
     const rootNode = rootRef.current;
     const scrollRoot = rootNode?.closest('[data-editor-scroll-root]') as HTMLElement | null;
@@ -6206,6 +6280,9 @@ const SongEditor: React.FC<Props> = ({
                             onKeyUp={e => handleSelection(sIdx, bIdx, e, 'chord')}
                             onBlur={clearSelectionIfFocusLeftEditor}
                             onKeyDown={e => {
+                              if (handleChordInputShortcutKeys(e, sIdx, bIdx)) {
+                                return;
+                              }
                               if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
                                 if ((e.nativeEvent as KeyboardEvent).isComposing) {
                                   return;
@@ -6412,6 +6489,9 @@ const SongEditor: React.FC<Props> = ({
                         onKeyUp={e => handleSelection(sIdx, bIdx, e, 'chord')}
                         onBlur={clearSelectionIfFocusLeftEditor}
                         onKeyDown={e => {
+                          if (handleChordInputShortcutKeys(e, sIdx, bIdx)) {
+                            return;
+                          }
                           if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
                             if ((e.nativeEvent as KeyboardEvent).isComposing) {
                               return;

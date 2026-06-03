@@ -6594,6 +6594,60 @@ export default function App() {
     }
   }, [activeEditorSong, activeNavigationPreviewSong, focusEditorField, isEditing]);
 
+  // Clicking the empty "+" slot after a section's last bar in the preview adds a
+  // new bar to that section (works in both song-library and setlist modes).
+  const handleAddBarToSection = React.useCallback((previewSIdx: number) => {
+    const canEdit = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs;
+    if (!canEdit || !activeEditorSong || !activeNavigationPreviewSong) {
+      return;
+    }
+
+    const previewSection = activeNavigationPreviewSong.sections[previewSIdx] ?? null;
+    const nextSectionId = previewSection?.id ?? null;
+    const mappedIndex = nextSectionId
+      ? activeEditorSong.sections.findIndex((section) => section.id === nextSectionId)
+      : previewSIdx;
+    const targetIndex = mappedIndex >= 0 ? mappedIndex : previewSIdx;
+    const targetSection = activeEditorSong.sections[targetIndex];
+    if (!targetSection) {
+      return;
+    }
+
+    const newBarIndex = targetSection.bars.length;
+    const newBar = { chords: [] as string[] };
+    const nextSections = activeEditorSong.sections.map((section, index) => (
+      index === targetIndex ? { ...section, bars: [...section.bars, newBar] } : section
+    ));
+    const nextSong = { ...activeEditorSong, sections: nextSections };
+
+    if (isSetlistMode) {
+      handleSetlistSongContentChange(nextSong);
+    } else {
+      handleSongChange(nextSong);
+    }
+
+    // Move focus to the freshly added bar so chords can be typed right away.
+    setActiveSectionId(nextSectionId ?? targetSection.id ?? null);
+    setActiveBar({ sIdx: targetIndex, bIdx: newBarIndex });
+
+    if (editorFocusTimeoutRef.current !== null) {
+      window.clearTimeout(editorFocusTimeoutRef.current);
+      editorFocusTimeoutRef.current = null;
+    }
+
+    const focusNewBar = () => {
+      focusEditorField(targetIndex, newBarIndex, 'chords');
+      editorFocusTimeoutRef.current = null;
+    };
+
+    if (!isEditing) {
+      setIsEditing(true);
+      editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 500);
+    } else {
+      editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 60);
+    }
+  }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlist, canEditTeamSongs, focusEditorField, handleSetlistSongContentChange, handleSongChange, isEditing, isSetlistMode]);
+
   const previewSheet = React.useMemo(() => {
     if (!hasSongs) {
       return (
@@ -6631,13 +6685,14 @@ export default function App() {
         language={language}
         currentKey={song.currentKey}
         onElementClick={handleElementClick}
+        onAddBarClick={canEditTeamSongs ? handleAddBarToSection : undefined}
         highlightedSectionIds={highlightedSectionIds}
         activeSectionId={isEditing ? activeSectionId : null}
         activeBar={isEditing ? activeBar : null}
         previewIdentity={song.id}
       />
     );
-  }, [activeBar, activeSectionId, canEditTeamSongs, copy.newSong, handleCreateSong, handleElementClick, hasSongs, highlightedSectionIds, isEditing, language, song]);
+  }, [activeBar, activeSectionId, canEditTeamSongs, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, hasSongs, highlightedSectionIds, isEditing, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -6691,6 +6746,7 @@ export default function App() {
               language={language}
               currentKey={previewSong.currentKey}
               onElementClick={isSelected ? handleElementClick : undefined}
+              onAddBarClick={isSelected && canEditSelectedSetlist ? handleAddBarToSection : undefined}
               highlightedSectionIds={isSelected ? highlightedSectionIds : []}
               activeSectionId={isSelected && isEditing ? activeSectionId : null}
               activeBar={isSelected && isEditing ? activeBar : null}
@@ -6700,7 +6756,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activeSectionId, handleElementClick, highlightedSectionIds, isEditing, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activeSectionId, canEditSelectedSetlist, handleAddBarToSection, handleElementClick, highlightedSectionIds, isEditing, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
