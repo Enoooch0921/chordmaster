@@ -56,7 +56,7 @@ import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -76,7 +76,6 @@ const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
 const LIBRARY_SORT_STORAGE_KEY = 'chordmaster.library-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
-const AUTO_SAVE_STORAGE_KEY = 'chordmaster.auto-save.v1';
 const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'chordmaster.sidebar-width.v1';
@@ -1499,13 +1498,6 @@ const serializeSetlists = (setlists: Setlist[]) =>
     }))
   );
 
-const loadAutoSavePreference = () => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  return window.localStorage.getItem(AUTO_SAVE_STORAGE_KEY) === 'true';
-};
 
 const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisplayPreference> => {
   if (typeof window === 'undefined') {
@@ -1709,7 +1701,9 @@ export default function App() {
   const [pdfExportProgress, setPdfExportProgress] = useState<PdfExportProgressState | null>(null);
   const [isLibraryEditing, setIsLibraryEditing] = useState(false);
   const [activeAppView, setActiveAppView] = useState<AppView>('sheet');
-  const [isAutoSaveEnabled, setIsAutoSaveEnabled] = useState(loadAutoSavePreference);
+  // Auto-save is always on now (the toggle was removed). Kept as a constant so
+  // the existing "auto-saved" hints and the auto-save effect read true.
+  const isAutoSaveEnabled = true;
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(initialLibraryRef.current.lastSavedAt);
   const [highlightedSectionIds, setHighlightedSectionIds] = useState<string[]>([]);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
@@ -2154,7 +2148,6 @@ export default function App() {
   const denseToolbarMenuButtonClassName = `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
   const compactEditorToggleLabel = language === 'zh' ? '編輯' : 'Editor';
   const compactLyricsToggleLabel = language === 'zh' ? '歌詞' : 'Lyrics';
-  const compactAutoSaveLabel = language === 'zh' ? '自存' : 'Auto';
   const compactSaveLabel = language === 'zh' ? '儲存' : 'Save';
   const compactPdfLabel = language === 'zh' ? 'PDF' : 'PDF';
   const mobileTopbarActionBaseClassName = 'flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-colors';
@@ -2213,26 +2206,6 @@ export default function App() {
   );
   const toolbarOverflowPanel = isToolbarOverflowMenuOpen ? (
     <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
-      <button
-        type="button"
-        onClick={() => {
-          setIsAutoSaveEnabled((current) => !current);
-          setIsToolbarOverflowMenuOpen(false);
-        }}
-        className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
-          isAutoSaveEnabled
-            ? 'bg-emerald-50 text-emerald-700'
-            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-        }`}
-      >
-        <span>{copy.autoSave}</span>
-        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-          isAutoSaveEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
-        }`}>
-          {isAutoSaveEnabled ? copy.on : copy.off}
-        </span>
-      </button>
-
       <button
         type="button"
         onClick={() => {
@@ -6051,14 +6024,6 @@ export default function App() {
   }, [isPerformanceMode, revealPerformanceChrome]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(AUTO_SAVE_STORAGE_KEY, String(isAutoSaveEnabled));
-    } catch {
-      // Ignore storage failures and keep the app usable.
-    }
-  }, [isAutoSaveEnabled]);
-
-  useEffect(() => {
     if (!authenticatedUser) {
       cloudRepositoryRef.current = null;
       setCloudLibraries([]);
@@ -6878,8 +6843,12 @@ export default function App() {
           <div
             key={item.id}
             data-setlist-preview-song-id={item.id}
-            className={`w-full rounded-[18px] transition-[box-shadow,outline-color] duration-200 ${
-              isSelected ? 'outline outline-2 outline-offset-4 outline-indigo-200 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'outline outline-2 outline-offset-4 outline-transparent'
+            className={`w-full rounded-[18px] transition-shadow duration-200 ${
+              // Use a ring (box-shadow) rather than `outline` for the selection
+              // frame: iOS WebKit mis-scales `outline` on transform:scale()'d
+              // elements, which made this frame the wrong size in iPad landscape.
+              // box-shadow scales correctly under the preview's transform.
+              isSelected ? 'ring-2 ring-indigo-300 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'ring-2 ring-transparent'
             }`}
           >
             <ChordSheet
@@ -7804,21 +7773,22 @@ export default function App() {
             </span>
           </div>
         </div>
-        <ChevronRight size={16} className="shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void loadSetlistShareStatus(selectedSetlist.id); }}
+            disabled={isLoadingSetlistShareStatus}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
+            title={copy.setlistSharingRefresh}
+            aria-label={copy.setlistSharingRefresh}
+          >
+            <RefreshCw size={13} className={isLoadingSetlistShareStatus ? 'animate-spin' : ''} />
+          </button>
+          <ChevronRight size={16} className="text-gray-400 transition-transform group-open:rotate-90" />
+        </div>
       </summary>
 
       <div className="mt-3 border-t border-gray-100 pt-3">
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => void loadSetlistShareStatus(selectedSetlist.id)}
-            disabled={isLoadingSetlistShareStatus}
-            className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
-          >
-            {isLoadingSetlistShareStatus ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
-          </button>
-        </div>
-
         {renderShareParticipantList(selectedSetlistShareStatus?.participants, 'max-h-48')}
 
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -7871,21 +7841,22 @@ export default function App() {
             </span>
           </div>
         </div>
-        <ChevronRight size={16} className="shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void loadProjectShareStatus(selectedProject.id); }}
+            disabled={isLoadingProjectShareStatus}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
+            title={copy.setlistSharingRefresh}
+            aria-label={copy.setlistSharingRefresh}
+          >
+            <RefreshCw size={13} className={isLoadingProjectShareStatus ? 'animate-spin' : ''} />
+          </button>
+          <ChevronRight size={16} className="text-gray-400 transition-transform group-open:rotate-90" />
+        </div>
       </summary>
 
       <div className="mt-3 border-t border-gray-100 pt-3">
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => void loadProjectShareStatus(selectedProject.id)}
-            disabled={isLoadingProjectShareStatus}
-            className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
-          >
-            {isLoadingProjectShareStatus ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
-          </button>
-        </div>
-
         {renderShareParticipantList(selectedProjectShareStatus?.participants, 'max-h-48')}
       </div>
     </details>
@@ -9060,6 +9031,13 @@ export default function App() {
     <div
       data-app-root
       className="relative flex h-[100dvh] min-h-[100dvh] min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900 dark:bg-[color:var(--color-surface-muted)] dark:text-[color:var(--color-text)] dark:selection:bg-[color:var(--color-indigo-800)] dark:selection:text-[color:var(--color-indigo-100)]"
+      style={{
+        // Keep the app clear of the iOS status bar / notch (Capacitor). These are
+        // 0 in a normal browser, so the web build is unaffected.
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingLeft: 'env(safe-area-inset-left)',
+        paddingRight: 'env(safe-area-inset-right)'
+      }}
     >
       {usesOverlaySidebar && isSidebarExpanded && (
         <button
@@ -11256,23 +11234,6 @@ export default function App() {
                       <span>{copy.lyricsMode}</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setIsAutoSaveEnabled((current) => !current)}
-                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-all ${
-                        isAutoSaveEnabled
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <span>{copy.autoSave}</span>
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                        isAutoSaveEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'
-                      }`}>
-                        {isAutoSaveEnabled ? copy.on : copy.off}
-                      </span>
-                    </button>
-
                     <KeyPicker
                       value={isSetlistMode ? currentSetlistKey : song.currentKey}
                       onChange={(key) => {
@@ -11872,20 +11833,7 @@ export default function App() {
                   <div className="max-h-[calc(82dvh-4.5rem)] space-y-4 overflow-y-auto px-4 py-4">
                     {isSheetView ? (
                       <>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setIsAutoSaveEnabled((current) => !current)}
-                            className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
-                              isAutoSaveEnabled
-                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                : 'border-gray-200 bg-white text-gray-700'
-                            }`}
-                          >
-                            <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">{copy.autoSave}</div>
-                            <div className="mt-1 text-sm font-bold">{isAutoSaveEnabled ? copy.on : copy.off}</div>
-                          </button>
-
+                        <div className="grid grid-cols-1 gap-2">
                           <button
                             type="button"
                             onClick={() => {
