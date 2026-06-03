@@ -1175,6 +1175,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   };
 
   // Flatten all sections into rows
+  // A4 page row capacity. Declared here (not just before pagination) so the
+  // add-bar row below can check whether it would still fit on the current page.
+  // Kept stable between chord and lyrics modes so barline heights do not jump.
+  const ROWS_PER_PAGE_FIRST = 12;
+  const ROWS_PER_PAGE_OTHER = 14;
+  const pageIndexOfRow = (rowIndex: number) =>
+    rowIndex < ROWS_PER_PAGE_FIRST
+      ? 0
+      : 1 + Math.floor((rowIndex - ROWS_PER_PAGE_FIRST) / ROWS_PER_PAGE_OTHER);
+
   const allowAddBar = Boolean(onAddBarClick);
   const lastSectionIndex = song.sections.length - 1;
   const allRows: { sectionTitle: string | null; bars: Bar[]; sIdx: number; startBIdx: number }[] = [];
@@ -1188,17 +1198,26 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         startBIdx: i * 4
       });
       }
-    // Only the very last section gets an add-bar slot. If its bars fill the last
-    // row exactly, append one empty row so the "+" has somewhere to live.
-    if (allowAddBar && sIdx === lastSectionIndex && section.bars.length > 0 && section.bars.length % 4 === 0) {
+  });
+
+  // Only the very last section may grow a *new* row for the "+" slot (nothing
+  // follows it, so reflow is harmless). If its bars fill the last row exactly,
+  // append one empty row so the "+" has somewhere to live — but only when that
+  // row stays on the same page as the section. Otherwise it would spawn a blank
+  // trailing page whose only content is the "+". Non-last sections reuse their
+  // existing trailing empty cells and never get an extra row.
+  const finalSection = song.sections[lastSectionIndex];
+  if (allowAddBar && finalSection && finalSection.bars.length > 0 && finalSection.bars.length % 4 === 0) {
+    const addRowIndex = allRows.length;
+    if (addRowIndex > 0 && pageIndexOfRow(addRowIndex) === pageIndexOfRow(addRowIndex - 1)) {
       allRows.push({
         sectionTitle: null,
         bars: [],
-        sIdx,
-        startBIdx: sectionRows * 4
+        sIdx: lastSectionIndex,
+        startBIdx: finalSection.bars.length
       });
     }
-  });
+  }
   const sectionBarOffsets: number[] = [];
   let accumulatedBarCount = 0;
   song.sections.forEach((section) => {
@@ -1250,10 +1269,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const lyricsLaneHeightClass = song.showLyrics ? 'h-[12px]' : 'h-[14px]';
   const lyricsContainerGapClass = song.showLyrics ? 'gap-[1px]' : 'gap-[2px]';
 
-  // Keep row counts stable between chord and lyrics modes so barline heights do not jump when toggling lyrics.
-  const ROWS_PER_PAGE_FIRST = 12;
-  const ROWS_PER_PAGE_OTHER = 14;
-
   const pages: { sectionTitle: string | null; bars: Bar[]; sIdx: number; startBIdx: number }[][] = [];
   let currentRow = 0;
 
@@ -1285,6 +1300,23 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         const currentSectionIndex = currentSectionRow ? currentSectionRow.sIdx + 1 : 0;
         const currentSectionTitle = currentSectionRow?.sectionTitle ?? song.sections[currentSectionRow?.sIdx ?? 0]?.title ?? '';
 
+        // Obvious top-of-page "page x of n" marker, only when the song spans more
+        // than one page — a clear performance cue so it's hard to lose your place.
+        const isMultiPage = pages.length > 1;
+        const pageBadge = isMultiPage ? (
+          <div
+            className="shrink-0 inline-flex items-baseline gap-1 rounded-lg border-2 border-indigo-500 bg-white px-2.5 py-1 leading-none shadow-sm"
+            aria-label={language === 'zh' ? `第 ${pIdx + 1} 頁，共 ${pages.length} 頁` : `Page ${pIdx + 1} of ${pages.length}`}
+          >
+            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">
+              {language === 'zh' ? '頁' : 'P'}
+            </span>
+            <span className="text-lg font-extrabold tabular-nums text-indigo-700">{pIdx + 1}</span>
+            <span className="text-sm font-bold text-gray-300">/</span>
+            <span className="text-sm font-bold tabular-nums text-gray-400">{pages.length}</span>
+          </div>
+        ) : null;
+
         return (
         <div 
           key={pIdx} 
@@ -1300,9 +1332,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
           {pIdx === 0 ? (
             <div className="shrink-0 mb-4 border-b-2 border-gray-900 pb-2">
               <div className="min-w-0 relative">
-                <AutoShrink className="mb-0">
-                  <h1 className="text-3xl font-bold tracking-tight">{song.title}</h1>
-                </AutoShrink>
+                <div className="flex items-start gap-3">
+                  <AutoShrink className="mb-0 min-w-0 flex-1">
+                    <h1 className="text-3xl font-bold tracking-tight">{song.title}</h1>
+                  </AutoShrink>
+                  {pageBadge}
+                </div>
                 {hasCredits && (
                   <div className="absolute left-0 right-0 top-[38px] text-xs font-semibold text-gray-900 tracking-tight leading-tight whitespace-nowrap overflow-hidden text-ellipsis">
                     {creditLine}
@@ -1360,9 +1395,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               </div>
             </div>
           ) : (
-            <div className="shrink-0 flex justify-between items-center mb-4 border-b border-gray-200 pb-2">
-              <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">{song.title} ({copy.continued})</span>
-              <span className="text-xs font-bold text-gray-400">{language === 'zh' ? `${copy.page} ${pIdx + 1} 頁` : `${copy.page} ${pIdx + 1}`}</span>
+            <div className="shrink-0 flex justify-between items-center gap-3 mb-4 border-b border-gray-200 pb-2">
+              <span className="min-w-0 truncate text-sm font-bold text-gray-400 uppercase tracking-widest">{song.title} ({copy.continued})</span>
+              {pageBadge}
             </div>
           )}
 
@@ -1639,9 +1674,15 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     // Add-bar "+" only appears in the very last section, at the slot right after
                     // its last bar. Barlines always render like any other bar; we only drop the
                     // "empty bar" horizontal mark on a fully empty trailing add-row.
-                    const isLastSectionForAdd = allowAddBar && row.sIdx === lastSectionIndex && Boolean(section);
-                    const isAddBarRow = isLastSectionForAdd && row.bars.length === 0;
-                    const isAddBarSlot = !bar && isLastSectionForAdd && (row.startBIdx + bIdx === (section?.bars.length ?? -1));
+                    // The "+" add-bar affordance lives in the first empty cell right after a
+                    // section's last bar. The last section may sprout a brand-new row (nothing
+                    // follows it). A non-last section only offers "+" when that slot sits inside
+                    // an *existing* trailing empty cell of its last row, so adding a bar fills the
+                    // gap without reflowing the sections below.
+                    const sectionAllowsAddBar = allowAddBar && Boolean(section)
+                      && (row.sIdx === lastSectionIndex || section.bars.length > 0);
+                    const isAddBarRow = sectionAllowsAddBar && row.bars.length === 0;
+                    const isAddBarSlot = !bar && sectionAllowsAddBar && (row.startBIdx + bIdx === (section?.bars.length ?? -1));
                     const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
                     const suppressRightBarline = bIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
                     const leftBorderClass = suppressLeftBarline

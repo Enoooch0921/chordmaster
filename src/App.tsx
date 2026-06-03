@@ -24,6 +24,7 @@ import {
   Project,
   Setlist,
   SetlistShareStatus,
+  ProjectShareStatus,
   SetlistSong,
   SetlistDisplayMode,
   StoredSong,
@@ -55,7 +56,7 @@ import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -1729,6 +1730,7 @@ export default function App() {
   ));
   const [isPerformanceMode, setIsPerformanceMode] = useState(false);
   const [performancePageIndex, setPerformancePageIndex] = useState(0);
+  const [performanceChromeVisible, setPerformanceChromeVisible] = useState(true);
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
   const [activeReferenceKind, setActiveReferenceKind] = useState<SongReferenceKind | null>(null);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
@@ -1773,6 +1775,8 @@ export default function App() {
   const [pendingLeaveSharedSetlistId, setPendingLeaveSharedSetlistId] = useState<string | null>(null);
   const [selectedSetlistShareStatus, setSelectedSetlistShareStatus] = useState<SetlistShareStatus | null>(null);
   const [isLoadingSetlistShareStatus, setIsLoadingSetlistShareStatus] = useState(false);
+  const [selectedProjectShareStatus, setSelectedProjectShareStatus] = useState<ProjectShareStatus | null>(null);
+  const [isLoadingProjectShareStatus, setIsLoadingProjectShareStatus] = useState(false);
   const [pendingRevokeShareSetlistId, setPendingRevokeShareSetlistId] = useState<string | null>(null);
   const [isRevokingSetlistShare, setIsRevokingSetlistShare] = useState(false);
   const [pendingShareUrl, setPendingShareUrl] = useState<string | null>(null);
@@ -1826,10 +1830,23 @@ export default function App() {
   const mobileLongPressTriggeredRef = useRef(false);
   const editorFocusTimeoutRef = useRef<number | null>(null);
   const editorFocusRequestIdRef = useRef(0);
+  // When a section/chord of a *non-selected* setlist song is clicked in the
+  // preview, we first switch the focused setlist song (async) and stash the
+  // desired editor target here so it can be applied once that song is active.
+  const pendingSetlistElementFocusRef = useRef<{
+    itemId: string;
+    sectionId: string | null;
+    sIdx: number;
+    bIdx: number;
+    field: EditorFocusField;
+  } | null>(null);
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
   const previewPinchStateRef = useRef<PreviewPinchState | null>(null);
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
   const skipNextSetlistPreviewAutoScrollRef = useRef(false);
+  // Whether the setlist preview pane is scrolled down far enough to show the
+  // "back to top" button (the preview can be a tall stack of songs).
+  const [showPreviewBackToTop, setShowPreviewBackToTop] = useState(false);
   const setlistSongPointerDragRef = useRef<{
     sourceId: string;
     pointerId: number;
@@ -1851,6 +1868,9 @@ export default function App() {
   const performancePageOffsetsRef = useRef<number[]>([]);
   const performanceTouchRef = useRef<{ x: number; y: number } | null>(null);
   const lastPerformanceKeyboardEventRef = useRef<{ signature: string; handledAt: number } | null>(null);
+  // Performance-mode chrome (exit / references / page indicator / arrows) auto-hides
+  // after a short idle so it stops covering the sheet; any touch reveals it again.
+  const performanceChromeHideTimerRef = useRef<number | null>(null);
   const autoSaveTimeoutRef = useRef<number | null>(null);
   const cloudRepositoryRef = useRef<ReturnType<typeof createCloudRepository> | null>(null);
   const [previewBaseScale, setPreviewBaseScale] = useState(1);
@@ -2081,6 +2101,14 @@ export default function App() {
       : syncStatus === 'offline'
         ? copy.cloudSyncOffline
         : copy.cloudSyncFailed;
+  // Colour tone for the compact sync-status indicator in the collapsed sidebar.
+  const syncStatusTone = syncStatus === 'failed'
+    ? 'bg-rose-50 text-rose-600 ring-rose-200/70 hover:bg-rose-100'
+    : syncStatus === 'offline'
+      ? 'bg-amber-50 text-amber-600 ring-amber-200/70 hover:bg-amber-100'
+      : syncStatus === 'syncing'
+        ? 'bg-indigo-50 text-indigo-600 ring-indigo-200/70 hover:bg-indigo-100'
+        : 'bg-emerald-50 text-emerald-600 ring-emerald-200/70 hover:bg-emerald-100';
   const importSummaryLabel = copy.importLocalStats
     .replace('{songs}', String(songs.length))
     .replace('{setlists}', String(setlists.length));
@@ -4128,6 +4156,44 @@ export default function App() {
     void loadSetlistShareStatus(selectedSetlist.id);
   }, [authenticatedUser, canShareSelectedSetlist, isSetlistMode, savedSetlists, selectedSetlist?.id]);
 
+  // Project "who joined" — mirrors the setlist share status, but for the whole
+  // project. Only loadable for owned/manageable projects (not joined ones).
+  const loadProjectShareStatus = async (projectId: string) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) {
+      setSelectedProjectShareStatus(null);
+      return;
+    }
+    try {
+      setIsLoadingProjectShareStatus(true);
+      const status = await repository.getProjectShareStatus(projectId);
+      setSelectedProjectShareStatus(status);
+    } catch {
+      // Non-fatal: the panel just shows an empty/zero state and can be refreshed.
+      setSelectedProjectShareStatus(null);
+    } finally {
+      setIsLoadingProjectShareStatus(false);
+    }
+  };
+
+  useEffect(() => {
+    if (
+      !authenticatedUser
+      || !cloudRepositoryRef.current
+      || !isSetlistMode
+      || !selectedProject
+      || selectedJoinedProject
+      || !canManageProject(selectedProject)
+    ) {
+      setSelectedProjectShareStatus(null);
+      setIsLoadingProjectShareStatus(false);
+      return;
+    }
+
+    void loadProjectShareStatus(selectedProject.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticatedUser, isSetlistMode, selectedProject?.id, selectedJoinedProject?.id]);
+
   // In-app notification inbox + "people I shared with before" contact list.
   const refreshNotifications = async () => {
     const repository = cloudRepositoryRef.current;
@@ -5758,6 +5824,19 @@ export default function App() {
     focusTarget.focus({ preventScroll: true });
   };
 
+  // Show the performance-mode chrome and (re)arm the 2s idle timer that hides it.
+  // Purely visual — it never blocks taps, so page turning is unaffected.
+  const revealPerformanceChrome = React.useCallback(() => {
+    setPerformanceChromeVisible(true);
+    if (performanceChromeHideTimerRef.current !== null) {
+      window.clearTimeout(performanceChromeHideTimerRef.current);
+    }
+    performanceChromeHideTimerRef.current = window.setTimeout(() => {
+      setPerformanceChromeVisible(false);
+      performanceChromeHideTimerRef.current = null;
+    }, 2000);
+  }, []);
+
   const handleEnterPerformanceMode = () => {
     performancePageIndexRef.current = 0;
     setPerformancePageIndex(0);
@@ -5769,6 +5848,7 @@ export default function App() {
   };
 
   const handlePerformanceNextPage = () => {
+    revealPerformanceChrome();
     const current = performancePageIndexRef.current;
     if (current < performanceTotalPages - 1) {
       const next = current + 1;
@@ -5790,6 +5870,7 @@ export default function App() {
   };
 
   const handlePerformancePrevPage = () => {
+    revealPerformanceChrome();
     const current = performancePageIndexRef.current;
     if (current > 0) {
       const prev = current - 1;
@@ -5811,6 +5892,7 @@ export default function App() {
   };
 
   const handlePerformanceTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    revealPerformanceChrome();
     const t = e.touches[0];
     if (!t) return;
     performanceTouchRef.current = { x: t.clientX, y: t.clientY };
@@ -5947,6 +6029,26 @@ export default function App() {
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev; };
   }, [isPerformanceMode]);
+
+  // Show the chrome when entering performance mode, then let the idle timer hide
+  // it after 2s. Reset to visible (and drop any timer) on exit for next time.
+  useEffect(() => {
+    if (!isPerformanceMode) {
+      if (performanceChromeHideTimerRef.current !== null) {
+        window.clearTimeout(performanceChromeHideTimerRef.current);
+        performanceChromeHideTimerRef.current = null;
+      }
+      setPerformanceChromeVisible(true);
+      return;
+    }
+    revealPerformanceChrome();
+    return () => {
+      if (performanceChromeHideTimerRef.current !== null) {
+        window.clearTimeout(performanceChromeHideTimerRef.current);
+        performanceChromeHideTimerRef.current = null;
+      }
+    };
+  }, [isPerformanceMode, revealPerformanceChrome]);
 
   useEffect(() => {
     try {
@@ -6594,6 +6696,45 @@ export default function App() {
     }
   }, [activeEditorSong, activeNavigationPreviewSong, focusEditorField, isEditing]);
 
+  // In setlist mode the preview stacks every song. Clicking a section/chord of a
+  // song that isn't the currently focused one should (1) switch the focused
+  // setlist song and (2) jump the editor to that exact section/bar — mirroring
+  // the same-song behaviour of handleElementClick. The song switch is async, so
+  // we stash the target and let the effect below apply the focus once it lands.
+  const handleSetlistElementClick = React.useCallback((
+    itemId: string,
+    previewSong: Song,
+    sIdx: number,
+    bIdx: number,
+    field: EditorFocusField
+  ) => {
+    if (itemId === selectedSetlistSong?.id) {
+      handleElementClick(sIdx, bIdx, field);
+      return;
+    }
+
+    pendingSetlistElementFocusRef.current = {
+      itemId,
+      sectionId: previewSong.sections[sIdx]?.id ?? null,
+      sIdx,
+      bIdx,
+      field
+    };
+    setIsEditing(true);
+    handleSelectSetlistSong(itemId);
+  }, [handleElementClick, handleSelectSetlistSong, selectedSetlistSong?.id]);
+
+  const handleScrollPreviewToTop = React.useCallback(() => {
+    const scrollRoot = previewRef.current;
+    if (!scrollRoot) return;
+    scrollRoot.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handlePreviewScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const shouldShow = event.currentTarget.scrollTop > 240;
+    setShowPreviewBackToTop((prev) => (prev === shouldShow ? prev : shouldShow));
+  }, []);
+
   // Clicking the empty "+" slot after a section's last bar in the preview adds a
   // new bar to that section (works in both song-library and setlist modes).
   const handleAddBarToSection = React.useCallback((previewSIdx: number) => {
@@ -6745,7 +6886,7 @@ export default function App() {
               song={previewSong}
               language={language}
               currentKey={previewSong.currentKey}
-              onElementClick={isSelected ? handleElementClick : undefined}
+              onElementClick={(sIdx, bIdx, field) => handleSetlistElementClick(item.id, previewSong, sIdx, bIdx, field)}
               onAddBarClick={isSelected && canEditSelectedSetlist ? handleAddBarToSection : undefined}
               highlightedSectionIds={isSelected ? highlightedSectionIds : []}
               activeSectionId={isSelected && isEditing ? activeSectionId : null}
@@ -6756,7 +6897,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activeSectionId, canEditSelectedSetlist, handleAddBarToSection, handleElementClick, highlightedSectionIds, isEditing, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activeSectionId, canEditSelectedSetlist, handleAddBarToSection, handleSetlistElementClick, highlightedSectionIds, isEditing, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -6767,6 +6908,37 @@ export default function App() {
     setActiveBar(null);
     setActiveSectionId(activeEditorSong?.sections[0]?.id ?? null);
   }, [currentPreviewIdentity]);
+
+  // Resolve a pending cross-song setlist click once the freshly selected song
+  // becomes the active editor song. We schedule the focus on a timeout so it
+  // runs after the currentPreviewIdentity reset effect above (which clears the
+  // active bar/section on every song switch) and after the editor mounts.
+  useEffect(() => {
+    const pending = pendingSetlistElementFocusRef.current;
+    if (!pending || !isSetlistMode) {
+      return;
+    }
+    if (selectedSetlistSongId !== pending.itemId || !activeEditorSong) {
+      return;
+    }
+
+    pendingSetlistElementFocusRef.current = null;
+
+    const sectionIndexById = pending.sectionId
+      ? activeEditorSong.sections.findIndex((section) => section.id === pending.sectionId)
+      : -1;
+    const targetIndex = sectionIndexById >= 0 ? sectionIndexById : pending.sIdx;
+
+    if (editorFocusTimeoutRef.current !== null) {
+      window.clearTimeout(editorFocusTimeoutRef.current);
+    }
+    editorFocusTimeoutRef.current = window.setTimeout(() => {
+      setActiveSectionId(activeEditorSong.sections[targetIndex]?.id ?? null);
+      setActiveBar({ sIdx: targetIndex, bIdx: pending.bIdx });
+      focusEditorField(targetIndex, pending.bIdx, pending.field);
+      editorFocusTimeoutRef.current = null;
+    }, 520);
+  }, [activeEditorSong, focusEditorField, isSetlistMode, selectedSetlistSongId]);
 
   useEffect(() => {
     if (isPerformanceMode || !isSetlistMode || !selectedSetlistSongId || setlistPreviewSongs.length === 0) {
@@ -7263,6 +7435,8 @@ export default function App() {
       setPendingShareUrl(buildShareUrl(token));
       setShareDialogContext({ resourceType: 'project', resourceId: projectId });
       void refreshShareContacts();
+      // Reflect the (possibly new) link/participants in the open "who joined" panel.
+      void loadProjectShareStatus(projectId);
     } catch (error) {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       const reason = error instanceof Error ? error.message.trim() : '';
@@ -7576,94 +7750,43 @@ export default function App() {
     </button>
   ) : null;
 
-  const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist ? (
-    isPhoneViewport ? (
-      <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
-          <div className="min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSharingTitle}</div>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                selectedSetlistShareStatus?.activeToken
-                  ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-                  : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
-              }`}>
-                {isLoadingSetlistShareStatus
-                  ? copy.cloudSyncSyncing
-                  : selectedSetlistShareStatus?.activeToken
-                    ? copy.setlistSharingActive
-                    : copy.setlistSharingInactive}
-              </span>
-              <span className="text-xs font-semibold text-gray-500">
-                {copy.setlistSharingParticipants}: {selectedSetlistShareStatus?.participantCount ?? 0}
-              </span>
+  // Shared "who joined" list, reused by both the setlist and project panels.
+  const renderShareParticipantList = (
+    participants: ProjectShareStatus['participants'] | undefined,
+    maxHeightClass: string
+  ) => (
+    participants && participants.length ? (
+      <div className={`mt-3 ${maxHeightClass} space-y-2 overflow-y-auto`}>
+        {participants.map((participant) => (
+          <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
+            {participant.picture ? (
+              <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
+            ) : (
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
+                {(participant.name || participant.email || '?').slice(0, 1).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
+              <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
             </div>
           </div>
-          <ChevronRight size={16} className="shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
-        </summary>
-
-        <div className="mt-3 border-t border-gray-100 pt-3">
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => void loadSetlistShareStatus(selectedSetlist.id)}
-              disabled={isLoadingSetlistShareStatus}
-              className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
-            >
-              {isLoadingSetlistShareStatus ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
-            </button>
-          </div>
-
-          {selectedSetlistShareStatus?.participants.length ? (
-            <div className="mt-3 max-h-36 space-y-2 overflow-y-auto">
-              {selectedSetlistShareStatus.participants.map((participant) => (
-                <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
-                  {participant.picture ? (
-                    <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
-                  ) : (
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
-                      {(participant.name || participant.email || '?').slice(0, 1).toUpperCase()}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
-                    <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-              {copy.setlistSharingNoParticipants}
-            </div>
-          )}
-
-          <div className="mt-3 grid grid-cols-1 gap-2">
-            <button
-              type="button"
-              onClick={() => void handleCreateShareLink('setlist')}
-              disabled={isExportingPdf || isRevokingSetlistShare}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
-            >
-              <Share2 size={13} />
-              <span>{selectedSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPendingRevokeShareSetlistId(selectedSetlist.id)}
-              disabled={!selectedSetlistShareStatus?.activeToken || isRevokingSetlistShare}
-              className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {copy.setlistSharingCancel}
-            </button>
-          </div>
-        </div>
-      </details>
+        ))}
+      </div>
     ) : (
-    <div className="rounded-2xl border border-gray-200 bg-white px-3 py-3 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+      <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+        {copy.setlistSharingNoParticipants}
+      </div>
+    )
+  );
+
+  // Collapsible on every viewport (incl. desktop) so the participant list never
+  // permanently covers the setlist area — closed by default.
+  const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist ? (
+    <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
-          <div className="text-xs font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSharingTitle}</div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400 sm:text-xs">{copy.setlistSharingTitle}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
               selectedSetlistShareStatus?.activeToken
@@ -7681,61 +7804,91 @@ export default function App() {
             </span>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadSetlistShareStatus(selectedSetlist.id)}
-          disabled={isLoadingSetlistShareStatus}
-          className="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
-        >
-          {isLoadingSetlistShareStatus ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
-        </button>
-      </div>
+        <ChevronRight size={16} className="shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
+      </summary>
 
-      {selectedSetlistShareStatus?.participants.length ? (
-        <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
-          {selectedSetlistShareStatus.participants.map((participant) => (
-            <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
-              {participant.picture ? (
-                <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
-              ) : (
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
-                  {(participant.name || participant.email || '?').slice(0, 1).toUpperCase()}
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
-                <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
-              </div>
-            </div>
-          ))}
+      <div className="mt-3 border-t border-gray-100 pt-3">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => void loadSetlistShareStatus(selectedSetlist.id)}
+            disabled={isLoadingSetlistShareStatus}
+            className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isLoadingSetlistShareStatus ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
+          </button>
         </div>
-      ) : (
-        <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-          {copy.setlistSharingNoParticipants}
-        </div>
-      )}
 
-      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => void handleCreateShareLink('setlist')}
-          disabled={isExportingPdf || isRevokingSetlistShare}
-          className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
-        >
-          <Share2 size={13} />
-          <span>{selectedSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setPendingRevokeShareSetlistId(selectedSetlist.id)}
-          disabled={!selectedSetlistShareStatus?.activeToken || isRevokingSetlistShare}
-          className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {copy.setlistSharingCancel}
-        </button>
+        {renderShareParticipantList(selectedSetlistShareStatus?.participants, 'max-h-48')}
+
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => void handleCreateShareLink('setlist')}
+            disabled={isExportingPdf || isRevokingSetlistShare}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
+          >
+            <Share2 size={13} />
+            <span>{selectedSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setPendingRevokeShareSetlistId(selectedSetlist.id)}
+            disabled={!selectedSetlistShareStatus?.activeToken || isRevokingSetlistShare}
+            className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {copy.setlistSharingCancel}
+          </button>
+        </div>
       </div>
-    </div>
-    )
+    </details>
+  ) : null;
+
+  // Project mode "who joined" — same idea as the setlist panel, scoped to the
+  // whole project. Read-only list + refresh (the project header already hosts
+  // the share button). Collapsible and closed by default.
+  const projectSharingPanel = isSetlistMode && selectedProject && !selectedJoinedProject && canManageProject(selectedProject) ? (
+    <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400 sm:text-xs">
+            {language === 'zh' ? '專案共享' : 'Project sharing'}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+              selectedProjectShareStatus?.activeToken
+                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
+            }`}>
+              {isLoadingProjectShareStatus
+                ? copy.cloudSyncSyncing
+                : selectedProjectShareStatus?.activeToken
+                  ? copy.setlistSharingActive
+                  : copy.setlistSharingInactive}
+            </span>
+            <span className="text-xs font-semibold text-gray-500">
+              {copy.setlistSharingParticipants}: {selectedProjectShareStatus?.participantCount ?? 0}
+            </span>
+          </div>
+        </div>
+        <ChevronRight size={16} className="shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
+      </summary>
+
+      <div className="mt-3 border-t border-gray-100 pt-3">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => void loadProjectShareStatus(selectedProject.id)}
+            disabled={isLoadingProjectShareStatus}
+            className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isLoadingProjectShareStatus ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
+          </button>
+        </div>
+
+        {renderShareParticipantList(selectedProjectShareStatus?.participants, 'max-h-48')}
+      </div>
+    </details>
   ) : null;
 
   const joinedSetlistDisplayPreferencePanel = isJoinedSetlist && selectedSetlist && effectiveSelectedSetlist ? (
@@ -8330,6 +8483,7 @@ export default function App() {
             </button>
           )}
         </div>
+        {projectSharingPanel ? <div className="mt-3">{projectSharingPanel}</div> : null}
         <div className="mt-3 flex min-w-0 items-center gap-2">
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
             <Search size={15} className="shrink-0 text-gray-400" />
@@ -9067,6 +9221,33 @@ export default function App() {
                   >
                     <BookOpen size={18} />
                   </button>
+                  {isAuthenticated ? (
+                    <button
+                      type="button"
+                      onClick={() => (syncStatus === 'failed' || syncStatus === 'offline' ? toast.error(syncStatusLabel) : toast.success(syncStatusLabel))}
+                      className={`flex h-10 w-10 items-center justify-center rounded-2xl ring-1 ring-inset transition-colors ${syncStatusTone}`}
+                      title={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusLabel}`}
+                      aria-label={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusLabel}`}
+                    >
+                      {syncStatus === 'syncing'
+                        ? <LoaderCircle size={18} className="animate-spin" />
+                        : syncStatus === 'offline'
+                          ? <CloudOff size={18} />
+                          : syncStatus === 'failed'
+                            ? <CloudAlert size={18} />
+                            : <CloudCheck size={18} />}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => toast.info(copy.localModeWarning)}
+                      className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-100 text-gray-500 ring-1 ring-inset ring-gray-200/70 transition-colors hover:bg-gray-200"
+                      title={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${language === 'zh' ? '本地模式（未連線雲端）' : 'Local mode (not synced)'}`}
+                      aria-label={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${language === 'zh' ? '本地模式（未連線雲端）' : 'Local mode (not synced)'}`}
+                    >
+                      <HardDrive size={18} />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -9572,6 +9753,7 @@ export default function App() {
                             </button>
                           )}
                         </div>
+                        {projectSharingPanel ? <div className="mt-3">{projectSharingPanel}</div> : null}
                         <div className="mt-3 flex min-w-0 items-center gap-2">
                           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
                             <Search size={15} className="shrink-0 text-gray-400" />
@@ -11461,6 +11643,7 @@ export default function App() {
               onTouchEnd={handlePreviewTouchEnd}
               onTouchCancel={handlePreviewTouchEnd}
               onClickCapture={handlePreviewClickCapture}
+              onScroll={handlePreviewScroll}
               className={`h-full overflow-auto p-3 sm:p-4 lg:p-8 xl:p-12 [scrollbar-gutter:stable_both-edges] [touch-action:pan-x_pan-y] ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
             >
               <div
@@ -11489,6 +11672,21 @@ export default function App() {
                 </div>
               </div>
             </div>
+            {isSetlistMode && showPreviewBackToTop && (
+              <div className={`pointer-events-none absolute z-40 ${
+                isPhoneViewport ? 'bottom-3 left-3' : 'bottom-2 left-2 sm:bottom-4 sm:left-4 lg:bottom-6 lg:left-6'
+              }`}>
+                <button
+                  type="button"
+                  onClick={handleScrollPreviewToTop}
+                  className="pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white/95 text-gray-600 shadow-lg backdrop-blur-sm transition-colors hover:border-indigo-200 hover:text-indigo-600 sm:h-10 sm:w-10"
+                  title={copy.backToTop}
+                  aria-label={copy.backToTop}
+                >
+                  <ChevronUp size={18} />
+                </button>
+              </div>
+            )}
             {!(isPhoneViewport && isEditing) && (
               <div className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
@@ -12348,6 +12546,7 @@ export default function App() {
           onTouchStartCapture={focusPerformanceKeyboardCapture}
           onTouchStart={handlePerformanceTouchStart}
           onTouchEnd={handlePerformanceTouchEnd}
+          onMouseMove={revealPerformanceChrome}
         >
           <input
             ref={performanceKeyboardCaptureRef}
@@ -12405,29 +12604,31 @@ export default function App() {
             </div>
           </div>
 
-          {/* Exit button — top right */}
-          <div className="absolute left-4 top-4 z-10 flex items-center gap-2">
+          {/* Reference buttons — top left. Dark pills so they stay legible over the
+              white sheet; indigo for the active one (never plain white). */}
+          <div className={`absolute left-4 top-4 z-10 flex items-center gap-2 transition-opacity duration-500 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             {renderReferenceButtons(
-              'inline-flex h-9 items-center gap-1.5 rounded-full bg-white/15 px-3 text-xs font-bold text-white backdrop-blur-sm transition-colors hover:bg-white/25',
+              'inline-flex h-9 items-center gap-1.5 rounded-full bg-stone-900/70 px-3 text-xs font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-colors hover:bg-stone-900/85',
               {
                 showLabels: true,
-                activeClassName: 'inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-3 text-xs font-bold text-gray-900 shadow-sm transition-colors hover:bg-white'
+                activeClassName: 'inline-flex h-9 items-center gap-1.5 rounded-full bg-indigo-500 px-3 text-xs font-bold text-white shadow-sm ring-1 ring-indigo-300/40 transition-colors hover:bg-indigo-500'
               }
             )}
           </div>
 
+          {/* Exit button — top right */}
           <button
             type="button"
             onClick={handleExitPerformanceMode}
-            className="absolute top-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-4 py-2 text-sm font-bold text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+            className={`absolute top-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-stone-900/70 px-4 py-2 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-[opacity,background-color] duration-500 hover:bg-stone-900/85 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           >
             {copy.exitPerformanceMode}
           </button>
 
           {/* Page / song indicator — bottom center, above safe-area */}
-          <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none" style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
+          <div className={`absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none rounded-2xl bg-stone-900/70 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0'}`} style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
             {isSetlistMode && activeSetlistPreviewSong && (
-              <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-white/60">
+              <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-stone-300">
                 {copy.performanceModeSongIndicator}{' '}
                 {setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSongId) + 1}
                 {' / '}
@@ -12436,31 +12637,36 @@ export default function App() {
                 {activeSetlistPreviewSong.title}
               </div>
             )}
-            <div className="text-sm font-bold text-white/80">
+            <div className="text-sm font-bold text-stone-50">
               {copy.performanceModePageIndicator}{' '}{performancePageIndex + 1} / {performanceTotalPages}
             </div>
           </div>
 
-          {/* Left tap area */}
+          {/* Left tap area — the button stays clickable at all times so page turning
+              is never blocked; only the arrow hint fades with the rest of the chrome. */}
           <button
             type="button"
             onClick={handlePerformancePrevPage}
-            className="absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3 text-white/25 transition-colors hover:text-white/60"
+            className="absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3"
             aria-label="Previous page"
             aria-keyshortcuts="ArrowLeft ArrowUp PageUp Shift+Space"
           >
-            <ChevronLeft size={32} />
+            <span className={`flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/55 text-stone-100 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0'}`}>
+              <ChevronLeft size={28} />
+            </span>
           </button>
 
           {/* Right tap area */}
           <button
             type="button"
             onClick={handlePerformanceNextPage}
-            className="absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3 text-white/25 transition-colors hover:text-white/60"
+            className="absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3"
             aria-label="Next page"
             aria-keyshortcuts="ArrowRight ArrowDown PageDown Space Enter"
           >
-            <ChevronRight size={32} />
+            <span className={`flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/55 text-stone-100 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0'}`}>
+              <ChevronRight size={28} />
+            </span>
           </button>
         </div>
       )}
