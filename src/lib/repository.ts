@@ -6,6 +6,7 @@ import {
   LibraryRole,
   NotificationResourceType,
   Project,
+  ProjectMemberRole,
   ProjectShareStatus,
   ShareContact,
   Setlist,
@@ -219,6 +220,9 @@ export interface WorkspaceRepository {
   leaveSharedProject(projectId: string): Promise<void>;
   getProjectShareStatus(projectId: string): Promise<ProjectShareStatus>;
   revokeProjectSharing(projectId: string): Promise<void>;
+  setProjectMemberRole(projectId: string, userId: string, role: ProjectMemberRole): Promise<void>;
+  setProjectSetlistSongKey(setlistSongId: string, key: string | null): Promise<void>;
+  reorderProjectSetlist(setlistId: string, songIds: string[]): Promise<void>;
   saveCapoOverride(setlistSongId: string, capo: number | null): Promise<void>;
   getShareContacts(): Promise<ShareContact[]>;
   shareToContacts(resourceType: NotificationResourceType, resourceId: string, userIds: string[]): Promise<number>;
@@ -586,6 +590,15 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   async revokeProjectSharing() {
     throw new Error('Please sign in to manage sharing.');
   },
+  async setProjectMemberRole() {
+    throw new Error('Please sign in to manage project members.');
+  },
+  async setProjectSetlistSongKey() {
+    throw new Error('Please sign in to edit a shared project.');
+  },
+  async reorderProjectSetlist() {
+    throw new Error('Please sign in to edit a shared project.');
+  },
   async saveCapoOverride() {
     throw new Error('Please sign in to save capo overrides.');
   },
@@ -778,6 +791,7 @@ const getJoinedProjects = async (): Promise<JoinedProject[]> => {
           id,
           name: typeof row.name === 'string' && row.name.trim() ? row.name : `Shared Project ${index + 1}`,
           archived: Boolean(row.archived),
+          role: row.role === 'manager' ? 'manager' : 'viewer',
           createdAt: row.createdAt ? new Date(row.createdAt as string).getTime() : Date.now(),
           updatedAt: row.updatedAt ? new Date(row.updatedAt as string).getTime() : Date.now(),
           isJoined: true,
@@ -1519,6 +1533,34 @@ export const createCloudRepository = (params: {
     async revokeProjectSharing(projectId) {
       if (!supabase) throw new Error('Supabase is not configured.');
       const { error } = await supabase.rpc('revoke_project_sharing', { p_project_id: projectId });
+      if (error) throw error;
+    },
+
+    async setProjectMemberRole(projectId, userId, role) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('set_project_member_role', {
+        p_project_id: projectId,
+        p_user_id: userId,
+        p_role: role
+      });
+      if (error) throw error;
+    },
+
+    async setProjectSetlistSongKey(setlistSongId, key) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('set_project_setlist_song_key', {
+        p_setlist_song_id: setlistSongId,
+        p_key: key
+      });
+      if (error) throw error;
+    },
+
+    async reorderProjectSetlist(setlistId, songIds) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('reorder_project_setlist', {
+        p_setlist_id: setlistId,
+        p_song_ids: songIds
+      });
       if (error) throw error;
     },
 

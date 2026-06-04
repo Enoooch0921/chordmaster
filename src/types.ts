@@ -21,6 +21,9 @@ export type SetlistDisplayMode =
   | 'chord-movable-key';
 export type LibraryKind = 'personal' | 'team';
 export type LibraryRole = 'owner' | 'editor' | 'setlist_manager' | 'viewer';
+// Role a user holds on a *shared project* they joined (distinct from team
+// LibraryRole). A manager may edit the project's shared key + song order.
+export type ProjectMemberRole = 'viewer' | 'manager';
 export type SongReferenceKind = 'band' | 'vocal';
 
 export interface SongReference {
@@ -156,6 +159,9 @@ export interface WorkspaceSnapshot {
 
 export interface JoinedProject extends Project {
   isJoined: true;
+  // The current user's role on this shared project. 'manager' may edit the
+  // project's shared key + song order; 'viewer' is read-only.
+  role: ProjectMemberRole;
   setlists: Setlist[];
 }
 
@@ -205,6 +211,9 @@ export interface ShareParticipant {
   name: string;
   picture?: string;
   joinedAt: string;
+  // Present for project participants: their role on the shared project. Lets the
+  // owner UI show and toggle manager status. Undefined for setlist participants.
+  role?: ProjectMemberRole;
 }
 
 export interface SetlistShareStatus {

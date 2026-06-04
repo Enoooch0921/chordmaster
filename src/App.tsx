@@ -25,6 +25,8 @@ import {
   Setlist,
   SetlistShareStatus,
   ProjectShareStatus,
+  ProjectMemberRole,
+  ShareParticipant,
   SetlistSong,
   SetlistDisplayMode,
   StoredSong,
@@ -2026,6 +2028,17 @@ export default function App() {
       || (activeLibraryRole === 'setlist_manager' && selectedSetlist?.createdBy === authenticatedUser?.id)
     );
   const canShareSelectedSetlist = canEditSelectedSetlist;
+  // The joined project (if any) that contains the currently-selected setlist, plus
+  // whether I'm a *manager* of it. Managers may edit the shared key + song order of
+  // the project's setlists (Phase 1); everyone else stays read-only.
+  const selectedSetlistJoinedProject = selectedSetlistId
+    ? joinedProjects.find((jp) => jp.setlists.some((sl) => sl.id === selectedSetlistId)) ?? null
+    : null;
+  const isJoinedProjectManager = selectedSetlistJoinedProject?.role === 'manager';
+  // Key picker + drag-reorder unlock for owners/team-editors as before, *and* for
+  // joined-project managers.
+  const canEditSelectedSetlistKey = canEditSelectedSetlist || isJoinedProjectManager;
+  const canReorderSelectedSetlist = canEditSelectedSetlist || isJoinedProjectManager;
   const canManageSetlist = (setlist: Pick<Setlist, 'createdBy'>) => !isTeamWorkspace
     || TEAM_EDIT_ROLES.has(activeLibraryRole)
     || (activeLibraryRole === 'setlist_manager' && setlist.createdBy === authenticatedUser?.id);
@@ -3582,8 +3595,39 @@ export default function App() {
     handleSongChange({ ...song, currentKey: newKey });
   };
 
+  // A project manager editing a setlist that lives inside a *joined* project: the
+  // new key is the shared base everyone sees, so it persists via a role-checked RPC
+  // (set_project_setlist_song_key) and updates the local joinedProjects copy.
+  const handleJoinedProjectSetlistKeyChange = (setlistSongId: string, key: Key) => {
+    setJoinedProjects((current) => current.map((jp) => {
+      if (!jp.setlists.some((sl) => sl.id === selectedSetlistId)) return jp;
+      return {
+        ...jp,
+        setlists: jp.setlists.map((sl) =>
+          sl.id !== selectedSetlistId ? sl : {
+            ...sl,
+            songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, overrideKey: key } : s)
+          }
+        )
+      };
+    }));
+    if (cloudRepositoryRef.current) {
+      void cloudRepositoryRef.current.setProjectSetlistSongKey(setlistSongId, key);
+    }
+  };
+
   const handleSetlistKeyChange = (newKey: Key) => {
-    if (!selectedSetlistSong || isJoinedSetlist || !canEditSelectedSetlist) {
+    if (!selectedSetlistSong) {
+      return;
+    }
+
+    // Joined project + I'm a manager: edit the shared key for everyone.
+    if (isJoinedProjectManager) {
+      handleJoinedProjectSetlistKeyChange(selectedSetlistSong.id, newKey);
+      return;
+    }
+
+    if (isJoinedSetlist || !canEditSelectedSetlist) {
       return;
     }
 
@@ -4159,6 +4203,20 @@ export default function App() {
       setSelectedProjectShareStatus(null);
     } finally {
       setIsLoadingProjectShareStatus(false);
+    }
+  };
+
+  // Owner promotes a project participant to manager (can edit shared key + order)
+  // or demotes back to viewer, then refreshes the participant list.
+  const handleToggleProjectMemberRole = async (projectId: string, participant: ShareParticipant) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) return;
+    const nextRole: ProjectMemberRole = participant.role === 'manager' ? 'viewer' : 'manager';
+    try {
+      await repository.setProjectMemberRole(projectId, participant.userId, nextRole);
+      await loadProjectShareStatus(projectId);
+    } catch {
+      toast.error(language === 'zh' ? '更新成員權限失敗，請重試。' : 'Failed to update member role. Please try again.');
     }
   };
 
@@ -4793,8 +4851,40 @@ export default function App() {
     setSelectedSetlistSongId(remainingSongs[0]?.id ?? null);
   };
 
+  // Reorder within a *joined* project's setlist (manager only). Updates the local
+  // joinedProjects copy and persists the new order via a role-checked RPC.
+  const moveJoinedProjectSetlistSong = (sourceId: string, targetId: string) => {
+    let orderedIds: string[] | null = null;
+    setJoinedProjects((current) => current.map((jp) => {
+      if (!jp.setlists.some((sl) => sl.id === selectedSetlistId)) return jp;
+      return {
+        ...jp,
+        setlists: jp.setlists.map((sl) => {
+          if (sl.id !== selectedSetlistId) return sl;
+          const nextSongs = [...sl.songs];
+          const sourceIndex = nextSongs.findIndex((item) => item.id === sourceId);
+          const targetIndex = nextSongs.findIndex((item) => item.id === targetId);
+          if (sourceIndex === -1 || targetIndex === -1) return sl;
+          const [moved] = nextSongs.splice(sourceIndex, 1);
+          nextSongs.splice(targetIndex, 0, moved);
+          const reindexed = reindexSetlistSongs(nextSongs);
+          orderedIds = reindexed.map((item) => item.id);
+          return { ...sl, songs: reindexed };
+        })
+      };
+    }));
+    if (orderedIds && selectedSetlistId && cloudRepositoryRef.current) {
+      void cloudRepositoryRef.current.reorderProjectSetlist(selectedSetlistId, orderedIds);
+    }
+  };
+
   const moveSetlistSong = (sourceId: string, targetId: string) => {
-    if (!selectedSetlist || sourceId === targetId || !canEditSelectedSetlist) {
+    if (!selectedSetlist || sourceId === targetId || !canReorderSelectedSetlist) {
+      return;
+    }
+
+    if (isJoinedProjectManager) {
+      moveJoinedProjectSetlistSong(sourceId, targetId);
       return;
     }
 
@@ -4868,7 +4958,7 @@ export default function App() {
     event: React.PointerEvent<HTMLButtonElement>,
     setlistSongId: string
   ) => {
-    if (!canEditSelectedSetlist || event.button !== 0) {
+    if (!canReorderSelectedSetlist || event.button !== 0) {
       return;
     }
 
@@ -7733,13 +7823,18 @@ export default function App() {
   ) : null;
 
   // Shared "who joined" list, reused by both the setlist and project panels.
+  // When onToggleManager is supplied (project panel, owner view), each participant
+  // gets a control to promote them to manager (edit shared key + order) or demote.
   const renderShareParticipantList = (
     participants: ProjectShareStatus['participants'] | undefined,
-    maxHeightClass: string
+    maxHeightClass: string,
+    onToggleManager?: (participant: ShareParticipant) => void
   ) => (
     participants && participants.length ? (
       <div className={`mt-3 ${maxHeightClass} space-y-2 overflow-y-auto`}>
-        {participants.map((participant) => (
+        {participants.map((participant) => {
+          const isManager = participant.role === 'manager';
+          return (
           <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
             {participant.picture ? (
               <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
@@ -7752,8 +7847,25 @@ export default function App() {
               <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
               <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
             </div>
+            {onToggleManager ? (
+              <button
+                type="button"
+                onClick={() => onToggleManager(participant)}
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition-colors ${
+                  isManager
+                    ? 'bg-indigo-600 text-white ring-indigo-600 hover:bg-indigo-500'
+                    : 'bg-white text-gray-600 ring-gray-200 hover:ring-indigo-300 hover:text-indigo-600'
+                }`}
+                title={language === 'zh'
+                  ? (isManager ? '管理員（可改 key/順序）— 點擊改回唯讀' : '唯讀 — 點擊設為管理員')
+                  : (isManager ? 'Manager (can edit key/order) — tap to make viewer' : 'Viewer — tap to make manager')}
+              >
+                {language === 'zh' ? (isManager ? '管理員' : '唯讀') : (isManager ? 'Manager' : 'Viewer')}
+              </button>
+            ) : null}
           </div>
-        ))}
+          );
+        })}
       </div>
     ) : (
       <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
@@ -7870,7 +7982,11 @@ export default function App() {
       </summary>
 
       <div className="mt-3 border-t border-gray-100 pt-3">
-        {renderShareParticipantList(selectedProjectShareStatus?.participants, 'max-h-48')}
+        {renderShareParticipantList(
+          selectedProjectShareStatus?.participants,
+          'max-h-48',
+          selectedProject ? (participant) => { void handleToggleProjectMemberRole(selectedProject.id, participant); } : undefined
+        )}
       </div>
     </details>
   ) : null;
@@ -8839,7 +8955,7 @@ export default function App() {
                   <div className="flex items-start gap-2">
                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <div className="flex min-w-0 items-center gap-2">
-                        {canEditSelectedSetlist && (
+                        {canReorderSelectedSetlist && (
                           <button
                             type="button"
                             onPointerDown={(event) => handleSetlistSongDragHandlePointerDown(event, item.id)}
@@ -8872,12 +8988,17 @@ export default function App() {
                           </button>
                         )}
                       </div>
-                      <div className={`flex min-w-0 items-center gap-1 ${canEditSelectedSetlist ? 'pl-10' : ''}`}>
+                      <div className={`flex min-w-0 items-center gap-1 ${canReorderSelectedSetlist ? 'pl-10' : ''}`}>
                         <div className="w-[56px] shrink-0">
                           <KeyPicker
                             value={effectiveKey}
                             onChange={(key) => {
-                              if (!key || isJoinedSetlist || !canEditSelectedSetlist) return;
+                              if (!key) return;
+                              if (isJoinedProjectManager) {
+                                handleJoinedProjectSetlistKeyChange(item.id, key);
+                                return;
+                              }
+                              if (isJoinedSetlist || !canEditSelectedSetlist) return;
                               handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
                                 ...currentSetlistSong,
                                 overrideKey: key
@@ -8886,8 +9007,8 @@ export default function App() {
                             label={copy.key}
                             originalKey={sourceSong.currentKey}
                             align="left"
-                            disabled={isJoinedSetlist || !canEditSelectedSetlist}
-                            buttonClassName={`!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5 ${isJoinedSetlist || !canEditSelectedSetlist ? '!cursor-default !opacity-100' : ''}`}
+                            disabled={!canEditSelectedSetlistKey}
+                            buttonClassName={`!h-5 !w-[56px] !min-w-0 !gap-1 !rounded-md !border-gray-200 !bg-gray-50 !px-1.5 ${!canEditSelectedSetlistKey ? '!cursor-default !opacity-100' : ''}`}
                             valueTextClassName="!text-[10px] !leading-none"
                             triggerIconSize={10}
                           />
@@ -9488,7 +9609,7 @@ export default function App() {
                                   <div className="flex items-start gap-2">
                                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center gap-2">
-                                        {canEditSelectedSetlist && (
+                                        {canReorderSelectedSetlist && (
                                           <button
                                             type="button"
                                             onPointerDown={(event) => handleSetlistSongDragHandlePointerDown(event, item.id)}
@@ -9525,18 +9646,23 @@ export default function App() {
                                           </button>
                                         )}
                                       </div>
-                                      <div className={`flex min-w-0 items-center gap-1 ${canEditSelectedSetlist ? 'pl-10' : ''}`}>
+                                      <div className={`flex min-w-0 items-center gap-1 ${canReorderSelectedSetlist ? 'pl-10' : ''}`}>
                                         <div className="w-[56px] shrink-0">
                                           <KeyPicker
                                             value={effectiveKey}
                                             onChange={(key) => {
-                                              if (!key || isJoinedSetlist || !canEditSelectedSetlist) return;
+                                              if (!key) return;
+                                              if (isJoinedProjectManager) {
+                                                handleJoinedProjectSetlistKeyChange(item.id, key);
+                                                return;
+                                              }
+                                              if (isJoinedSetlist || !canEditSelectedSetlist) return;
                                               handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
                                                 ...currentSetlistSong,
                                                 overrideKey: key
                                               }));
                                             }}
-                                            disabled={isJoinedSetlist || !canEditSelectedSetlist}
+                                            disabled={!canEditSelectedSetlistKey}
                                             label={copy.key}
                                             originalKey={sourceSong.currentKey}
                                             align="left"
@@ -10525,7 +10651,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && (isJoinedSetlist || !canEditSelectedSetlist)}
+                    disabled={isSetlistMode && !canEditSelectedSetlistKey}
                     buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -10664,7 +10790,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && (isJoinedSetlist || !canEditSelectedSetlist)}
+                    disabled={isSetlistMode && !canEditSelectedSetlistKey}
                     buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[60px]' : 'min-w-[56px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100`}
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -10920,7 +11046,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && (isJoinedSetlist || !canEditSelectedSetlist)}
+                    disabled={isSetlistMode && !canEditSelectedSetlistKey}
                     buttonClassName="h-9 min-w-[60px] shrink-0 rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -11268,7 +11394,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     triggerMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
-                    disabled={isSetlistMode && (isJoinedSetlist || !canEditSelectedSetlist)}
+                    disabled={isSetlistMode && !canEditSelectedSetlistKey}
                     buttonClassName="h-11 w-full min-w-0 disabled:!cursor-default disabled:!opacity-100"
                   />
 
