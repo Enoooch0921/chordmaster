@@ -90,6 +90,7 @@ interface SetlistSongRow {
 interface UserSetlistCapoOverrideRow {
   setlist_song_id: string;
   capo: number;
+  updated_at?: string;
 }
 
 interface LibraryRow {
@@ -721,7 +722,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
   const { data: personalCapoRows, error: personalCapoError } = userId && setlistSongIds.length > 0
     ? await supabase
       .from('user_setlist_capo_overrides')
-      .select('setlist_song_id, capo')
+      .select('setlist_song_id, capo, updated_at')
       .in('setlist_song_id', setlistSongIds)
       .eq('user_id', userId)
       .returns<UserSetlistCapoOverrideRow[]>()
@@ -740,7 +741,8 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
     0,
     ...songs.map((song) => song.updatedAt),
     ...setlists.map((setlist) => setlist.updatedAt),
-    ...projects.map((project) => project.updatedAt)
+    ...projects.map((project) => project.updatedAt),
+    ...(personalCapoRows ?? []).map((row) => row.updated_at ? new Date(row.updated_at).getTime() : 0)
   ) || null;
 
   return {
@@ -869,10 +871,11 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
   const { data: capoRows, error: capoError } = songItemIds.length > 0
     ? await supabase
       .from('user_setlist_capo_overrides')
-      .select('setlist_song_id, capo')
+      .select('setlist_song_id, capo, updated_at')
       .in('setlist_song_id', songItemIds)
       .eq('user_id', userId)
-    : { data: [] as { setlist_song_id: string; capo: number }[], error: null };
+      .returns<UserSetlistCapoOverrideRow[]>()
+    : { data: [] as UserSetlistCapoOverrideRow[], error: null };
 
   if (capoError) throw capoError;
 

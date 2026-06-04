@@ -130,6 +130,7 @@ const PDF_EXPORT_MOBILE_MAX_CANVAS_AREA = 12_000_000;
 const PDF_EXPORT_DESKTOP_MAX_CANVAS_SIDE = 16384;
 const PDF_EXPORT_DESKTOP_MAX_CANVAS_AREA = 64_000_000;
 const VALID_KEYS = new Set<string>(ALL_KEYS);
+const GUITAR_FRIENDLY_KEYS = new Set<Key>(['C', 'D', 'E', 'G', 'A']);
 const VALID_NAVIGATION_MARKERS = new Set([
   'segno',
   'coda',
@@ -1501,6 +1502,20 @@ const serializeSetlists = (setlists: Setlist[]) =>
   );
 
 
+const getSuggestedGuitarCapo = (targetKey: Key) => {
+  if (GUITAR_FRIENDLY_KEYS.has(targetKey)) {
+    return 0;
+  }
+
+  for (let capo = 1; capo <= 11; capo += 1) {
+    if (GUITAR_FRIENDLY_KEYS.has(getPlayKey(targetKey, capo))) {
+      return capo;
+    }
+  }
+
+  return 0;
+};
+
 const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisplayPreference> => {
   if (typeof window === 'undefined') {
     return {};
@@ -1853,6 +1868,7 @@ export default function App() {
   const previewPinchStateRef = useRef<PreviewPinchState | null>(null);
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
   const skipNextSetlistPreviewAutoScrollRef = useRef(false);
+  const preserveSetlistPreviewSelectionUntilRef = useRef(0);
   // Whether the setlist preview pane is scrolled down far enough to show the
   // "back to top" button (the preview can be a tall stack of songs).
   const [showPreviewBackToTop, setShowPreviewBackToTop] = useState(false);
@@ -3592,7 +3608,13 @@ export default function App() {
   }, []);
 
   const handleKeyChange = (newKey: Key) => {
-    handleSongChange({ ...song, currentKey: newKey });
+    const shouldUpdateCapoForKeyChange = song.currentKey !== newKey && (song.capo ?? 0) > 0;
+
+    handleSongChange({
+      ...song,
+      currentKey: newKey,
+      ...(shouldUpdateCapoForKeyChange ? { capo: getSuggestedGuitarCapo(newKey) } : {})
+    });
   };
 
   // A project manager editing a setlist that lives inside a *joined* project: the
@@ -3621,9 +3643,15 @@ export default function App() {
       return;
     }
 
+    const nextCapo = getSuggestedGuitarCapo(newKey);
+    const shouldUpdateCapoForKeyChange = currentSetlistKey !== newKey && currentSetlistCapo > 0;
+
     // Joined project + I'm a manager: edit the shared key for everyone.
     if (isJoinedProjectManager) {
       handleJoinedProjectSetlistKeyChange(selectedSetlistSong.id, newKey);
+      if (shouldUpdateCapoForKeyChange) {
+        handleJoinedSetlistCapoChange(selectedSetlistSong.id, nextCapo);
+      }
       return;
     }
 
@@ -3633,8 +3661,15 @@ export default function App() {
 
     handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
       ...currentSetlistSong,
-      overrideKey: newKey
+      overrideKey: newKey,
+      ...(shouldUpdateCapoForKeyChange
+        ? (isCloudMode ? { personalCapoOverride: nextCapo } : { capo: nextCapo })
+        : {})
     }));
+
+    if (isCloudMode && shouldUpdateCapoForKeyChange) {
+      savePersonalCapoOverride(selectedSetlistSong.id, nextCapo);
+    }
   };
 
   const getKeyOptionMeta = (key: Key) => {
@@ -4047,6 +4082,29 @@ export default function App() {
     });
   };
 
+  const savePersonalCapoOverride = (setlistSongId: string, capo: number) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) {
+      return;
+    }
+
+    setSyncStatus(navigator.onLine ? 'syncing' : 'offline');
+    void repository.saveCapoOverride(setlistSongId, capo)
+      .then(() => {
+        const savedAt = Date.now();
+        try {
+          window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
+        } catch {
+          // Ignore local cache failures; the override has already reached cloud storage.
+        }
+        setLastSavedAt(savedAt);
+        setSyncStatus('saved');
+      })
+      .catch(() => {
+        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      });
+  };
+
   const handleJoinedSetlistCapoChange = (setlistSongId: string, capo: number) => {
     setJoinedSetlists((current) => current.map((sl) =>
       sl.id !== selectedSetlistId ? sl : {
@@ -4067,9 +4125,7 @@ export default function App() {
         )
       };
     }));
-    if (cloudRepositoryRef.current) {
-      void cloudRepositoryRef.current.saveCapoOverride(setlistSongId, capo);
-    }
+    savePersonalCapoOverride(setlistSongId, capo);
   };
 
   // Signed-in users remember capo per-account (a personal override stored in
@@ -4086,9 +4142,7 @@ export default function App() {
             songs: setlist.songs.map((item) => item.id === setlistSongId ? { ...item, personalCapoOverride: capo } : item)
           }
     ));
-    if (cloudRepositoryRef.current) {
-      void cloudRepositoryRef.current.saveCapoOverride(setlistSongId, capo);
-    }
+    savePersonalCapoOverride(setlistSongId, capo);
   };
 
   const handleSelectedSetlistCapoChange = (capo: number) => {
@@ -7066,6 +7120,10 @@ export default function App() {
     let frameId: number | null = null;
     const updateActiveSetlistSongFromScroll = () => {
       frameId = null;
+      if (preserveSetlistPreviewSelectionUntilRef.current > performance.now()) {
+        return;
+      }
+
       const rootRect = scrollRoot.getBoundingClientRect();
       const activationY = rootRect.top + Math.min(180, Math.max(72, rootRect.height * 0.28));
       const songCards = Array.from(scrollRoot.querySelectorAll('[data-setlist-preview-song-id]')) as HTMLElement[];
@@ -7115,6 +7173,7 @@ export default function App() {
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
     const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));
     const scrollRoot = previewRef.current;
+    const shouldKeepSetlistSongInView = isSetlistMode && mode !== 'preserve' && Boolean(selectedSetlistSongId);
 
     if (!scrollRoot) {
       setPreviewZoom(clampedScale / previewBaseScale);
@@ -7127,6 +7186,10 @@ export default function App() {
     const heightRatio = previewSheetHeight > scrollRoot.clientHeight
       ? Math.min(1, Math.max(0, (scrollRoot.scrollTop + scrollRoot.clientHeight / 2) / previewSheetHeight))
       : 0;
+
+    if (shouldKeepSetlistSongInView) {
+      preserveSetlistPreviewSelectionUntilRef.current = performance.now() + 650;
+    }
 
     setPreviewZoom(clampedScale / previewBaseScale);
 
@@ -7141,9 +7204,19 @@ export default function App() {
       const nextLeft = mode === 'fit-width' || mode === 'fit-height'
         ? Math.max(0, nextWidth / 2 - nextScrollRoot.clientWidth / 2)
         : Math.max(0, nextWidth * widthRatio - nextScrollRoot.clientWidth / 2);
-      const nextTop = mode === 'fit-width' || mode === 'fit-height'
+      let nextTop = mode === 'fit-width' || mode === 'fit-height'
         ? 0
         : Math.max(0, nextHeight * heightRatio - nextScrollRoot.clientHeight / 2);
+
+      if (shouldKeepSetlistSongInView && selectedSetlistSongId) {
+        const target = nextScrollRoot.querySelector<HTMLElement>(`[data-setlist-preview-song-id="${selectedSetlistSongId}"]`);
+        if (target) {
+          const rootRect = nextScrollRoot.getBoundingClientRect();
+          const targetRect = target.getBoundingClientRect();
+          const offsetTop = targetRect.top - rootRect.top + nextScrollRoot.scrollTop;
+          nextTop = Math.max(0, offsetTop - Math.min(120, rootRect.height * 0.16));
+        }
+      }
 
       nextScrollRoot.scrollTo({
         left: nextLeft,
@@ -7726,12 +7799,7 @@ export default function App() {
           keyValue={currentSetlistKey}
           capoValue={currentSetlistCapo}
           onKeyChange={isJoinedSetlist ? undefined : handleSetlistKeyChange}
-          onCapoChange={isJoinedSetlist
-            ? (capo) => handleJoinedSetlistCapoChange(selectedSetlistSong.id, capo)
-            : (capo) => handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-              ...currentSetlistSong,
-              capo
-            }))}
+          onCapoChange={handleSelectedSetlistCapoChange}
           displayMode={effectiveSelectedSetlist.displayMode}
           showLyrics={effectiveSelectedSetlist.showLyrics}
           onDisplayModeChange={(mode) => {
