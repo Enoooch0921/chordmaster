@@ -2024,18 +2024,19 @@ export default function App() {
       ? 'grid-cols-4'
       : 'grid-cols-7';
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
-  const selectedSetlist = setlists.find((item) => item.id === selectedSetlistId)
-    ?? joinedSetlists.find((item) => item.id === selectedSetlistId)
-    ?? (() => {
-      for (const jp of joinedProjects) {
-        const match = jp.setlists.find((item) => item.id === selectedSetlistId);
-        if (match) return { ...match, isJoined: true } as JoinedSetlist;
-      }
-      return undefined;
-    })()
-    ?? setlists[0]
-    ?? joinedSetlists[0]
-    ?? null;
+  const allJoinedProjectSetlists: JoinedSetlist[] = React.useMemo(
+    () => joinedProjects.flatMap((project) =>
+      project.setlists.map((sl) => ({ ...sl, isJoined: true } as JoinedSetlist))
+    ),
+    [joinedProjects]
+  );
+  const firstAvailableSetlist = setlists[0] ?? joinedSetlists[0] ?? allJoinedProjectSetlists[0] ?? null;
+  const selectedSetlist = selectedSetlistId
+    ? setlists.find((item) => item.id === selectedSetlistId)
+      ?? joinedSetlists.find((item) => item.id === selectedSetlistId)
+      ?? allJoinedProjectSetlists.find((item) => item.id === selectedSetlistId)
+      ?? firstAvailableSetlist
+    : firstAvailableSetlist;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
   const canEditSelectedSetlist = !isTeamWorkspace
     ? !isJoinedSetlist
@@ -2567,15 +2568,9 @@ export default function App() {
 
     return normalizeSearchText(searchText).includes(normalizedSetlistSearchQuery);
   };
-  // Joined projects expose plain Setlist objects in their .setlists. Stamp
-  // isJoined=true so existing setlist viewer/edit-permission code treats them
-  // as read-only.
   const selectedJoinedProject = selectedJoinedProjectId
     ? joinedProjects.find((item) => item.id === selectedJoinedProjectId) ?? null
     : null;
-  const allJoinedProjectSetlists: JoinedSetlist[] = joinedProjects.flatMap((project) =>
-    project.setlists.map((sl) => ({ ...sl, isJoined: true } as JoinedSetlist))
-  );
 
   // Within a project view, only show setlists belonging to that project.
   // `selectedProjectId === null` while viewing the setlist list represents the
@@ -3234,10 +3229,13 @@ export default function App() {
       getStoredSelectedSongId(libraryId),
       selectedSongId
     ]));
-    const nextSetlist = workspace.setlists[0] ?? workspace.joinedSetlists[0] ?? null;
+    const nextJoinedProject = workspace.joinedProjects?.find((project) => project.setlists.length > 0) ?? null;
+    const nextJoinedProjectSetlist = nextJoinedProject?.setlists[0] ?? null;
+    const nextSetlist = workspace.setlists[0] ?? workspace.joinedSetlists[0] ?? nextJoinedProjectSetlist ?? null;
     setSelectedSetlistId(nextSetlist?.id ?? null);
     setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
-    setWorkspaceMode(workspace.setlists.length > 0 || workspace.joinedSetlists.length > 0 ? 'setlists' : 'songs');
+    setSelectedJoinedProjectId(nextSetlist?.id === nextJoinedProjectSetlist?.id ? nextJoinedProject?.id ?? null : null);
+    setWorkspaceMode(workspace.setlists.length > 0 || workspace.joinedSetlists.length > 0 || Boolean(nextJoinedProjectSetlist) ? 'setlists' : 'songs');
   };
 
   const handleSwitchCloudLibrary = async (libraryId: string) => {
@@ -4062,7 +4060,10 @@ export default function App() {
 
     void runSelectionChange(() => {
       setIsSetlistActionsMenuOpen(false);
-      const nextSetlist = setlists.find((item) => item.id === nextSetlistId) ?? null;
+      const nextSetlist = setlists.find((item) => item.id === nextSetlistId)
+        ?? joinedSetlists.find((item) => item.id === nextSetlistId)
+        ?? allJoinedProjectSetlists.find((item) => item.id === nextSetlistId)
+        ?? null;
       setWorkspaceMode('setlists');
       setSelectedSetlistId(nextSetlistId);
       setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
@@ -4376,7 +4377,14 @@ export default function App() {
       try {
         const workspace = await repository.loadWorkspace();
         setJoinedSetlists(workspace.joinedSetlists);
-        setJoinedProjects(workspace.joinedProjects ?? []);
+        const refreshedJoinedProjects = workspace.joinedProjects ?? [];
+        setJoinedProjects(refreshedJoinedProjects);
+        if (notification.resourceType === 'project') {
+          const targetProject = refreshedJoinedProjects.find((item) => item.id === notification.resourceId);
+          const firstSetlist = targetProject?.setlists[0] ?? null;
+          setSelectedSetlistId(firstSetlist?.id ?? null);
+          setSelectedSetlistSongId(firstSetlist?.songs[0]?.id ?? null);
+        }
       } catch {
         // Navigate with whatever is already loaded.
       }
@@ -6280,6 +6288,9 @@ export default function App() {
             ? nextSetlists.find((item) => item.id === requestedSetlistId) ?? nextJoinedSetlists.find((item) => item.id === requestedSetlistId) ?? null
             : null;
           const nextProjects = cloudWorkspace.projects;
+          const nextJoinedProjects = cloudWorkspace.joinedProjects ?? [];
+          const firstJoinedProject = nextJoinedProjects.find((project) => project.setlists.length > 0) ?? null;
+          const firstJoinedProjectSetlist = firstJoinedProject?.setlists[0] ?? null;
           setSongs(nextSongs);
           setSavedSongs(cloneSong(nextSongs));
           setSetlists(nextSetlists);
@@ -6287,7 +6298,7 @@ export default function App() {
           setProjects(nextProjects);
           setSavedProjects(cloneSong(nextProjects));
           setJoinedSetlists(nextJoinedSetlists);
-          setJoinedProjects(cloudWorkspace.joinedProjects ?? []);
+          setJoinedProjects(nextJoinedProjects);
           setLastSavedAt(cloudWorkspace.lastSavedAt);
           // The cloud repository is ready now, so populate the notification
           // inbox + share contacts (the auth-keyed effect may have run before
@@ -6315,7 +6326,16 @@ export default function App() {
             if (requestedSetlist) return requestedSetlist.id;
             if (nextSetlists.some((item) => item.id === currentId)) return currentId;
             if (nextJoinedSetlists.some((item) => item.id === currentId)) return currentId;
-            return nextSetlists[0]?.id ?? nextJoinedSetlists[0]?.id ?? null;
+            if (nextJoinedProjects.some((project) => project.setlists.some((item) => item.id === currentId))) return currentId;
+            return nextSetlists[0]?.id ?? nextJoinedSetlists[0]?.id ?? firstJoinedProjectSetlist?.id ?? null;
+          });
+          setSelectedJoinedProjectId((currentId) => {
+            if (currentId && nextJoinedProjects.some((project) => project.id === currentId)) {
+              return currentId;
+            }
+            return nextSetlists.length === 0 && nextJoinedSetlists.length === 0
+              ? firstJoinedProject?.id ?? null
+              : null;
           });
           if (requestedSetlist) {
             openedSharedSetlistFromLink = true;
@@ -6325,7 +6345,7 @@ export default function App() {
           } else if (requestedTeam) {
             setWorkspaceMode(nextSetlists.length > 0 ? 'setlists' : 'songs');
             window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
-          } else if (nextSetlists.length === 0 && nextJoinedSetlists.length > 0) {
+          } else if (nextSetlists.length === 0 && (nextJoinedSetlists.length > 0 || firstJoinedProjectSetlist)) {
             setWorkspaceMode('setlists');
           }
         }
@@ -6560,20 +6580,23 @@ export default function App() {
   useEffect(() => {
     setSelectedSetlistId((currentId) => {
       if (!currentId) {
-        return setlists[0]?.id ?? joinedSetlists[0]?.id ?? null;
+        return firstAvailableSetlist?.id ?? null;
       }
 
       const inOwned = setlists.some((item) => item.id === currentId);
       const inJoined = joinedSetlists.some((item) => item.id === currentId);
-      const inJoinedProject = joinedProjects.some((jp) => jp.setlists.some((sl) => sl.id === currentId));
+      const inJoinedProject = allJoinedProjectSetlists.some((item) => item.id === currentId);
       return inOwned || inJoined || inJoinedProject
         ? currentId
-        : setlists[0]?.id ?? joinedSetlists[0]?.id ?? null;
+        : firstAvailableSetlist?.id ?? null;
     });
-  }, [joinedSetlists, setlists, joinedProjects]);
+  }, [allJoinedProjectSetlists, firstAvailableSetlist?.id, joinedSetlists, setlists]);
 
   useEffect(() => {
-    const activeSetlist = setlists.find((item) => item.id === selectedSetlistId) ?? joinedSetlists.find((item) => item.id === selectedSetlistId) ?? null;
+    const activeSetlist = setlists.find((item) => item.id === selectedSetlistId)
+      ?? joinedSetlists.find((item) => item.id === selectedSetlistId)
+      ?? allJoinedProjectSetlists.find((item) => item.id === selectedSetlistId)
+      ?? null;
     if (!activeSetlist) {
       setSelectedSetlistSongId(null);
       return;
@@ -6584,7 +6607,7 @@ export default function App() {
         ? currentId
         : activeSetlist.songs[0]?.id ?? null
     ));
-  }, [joinedSetlists, selectedSetlistId, setlists]);
+  }, [allJoinedProjectSetlists, joinedSetlists, selectedSetlistId, setlists]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -8579,8 +8602,12 @@ export default function App() {
                 key={jp.id}
                 type="button"
                 onClick={() => {
+                  const firstSetlist = jp.setlists[0] ?? null;
                   setSelectedJoinedProjectId(jp.id);
                   setSelectedProjectId(null);
+                  setSelectedSetlistId(firstSetlist?.id ?? null);
+                  setSelectedSetlistSongId(firstSetlist?.songs[0]?.id ?? null);
+                  setWorkspaceMode('setlists');
                   setDesktopSetlistPanelView('list');
                   setMobileSetlistDrawerView('list');
                 }}
