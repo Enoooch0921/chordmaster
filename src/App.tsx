@@ -1659,13 +1659,26 @@ const loadGoogleIdentityScript = async () => {
 
 export default function App() {
   const {
-    user: authenticatedUser,
+    user: rawAuthenticatedUser,
     session,
     status: authStatus,
     isConfigured: isAuthConfigured,
     signInWithGoogle,
     signOut
   } = useSupabaseAuth();
+  // Supabase fires onAuthStateChange (TOKEN_REFRESHED, focus-driven re-auth, the
+  // periodic auto-refresh, etc.) repeatedly, and each event hands back a brand-new
+  // user object with identical fields. Effects keyed on `authenticatedUser` — most
+  // importantly the cloud-workspace loader and the pending-sync flush — would then
+  // re-run on every refresh, reloading the whole workspace and resetting the
+  // selected project/setlist/song mid-session (the preview suddenly goes blank and
+  // the user has to re-pick the project). Stabilize the reference by user id so
+  // those effects only re-run on a genuine sign-in / sign-out / account switch.
+  const authenticatedUser = React.useMemo(
+    () => rawAuthenticatedUser,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawAuthenticatedUser?.id]
+  );
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
