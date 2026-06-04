@@ -3638,19 +3638,19 @@ export default function App() {
     }
   };
 
-  const handleSetlistKeyChange = (newKey: Key) => {
-    if (!selectedSetlistSong) {
+  const handleSetlistSongKeyChange = (setlistSongId: string, currentKey: Key, currentCapo: number, newKey: Key) => {
+    if (!selectedSetlist) {
       return;
     }
 
     const nextCapo = getSuggestedGuitarCapo(newKey);
-    const shouldUpdateCapoForKeyChange = currentSetlistKey !== newKey && currentSetlistCapo > 0;
+    const shouldUpdateCapoForKeyChange = currentKey !== newKey && currentCapo > 0;
 
     // Joined project + I'm a manager: edit the shared key for everyone.
     if (isJoinedProjectManager) {
-      handleJoinedProjectSetlistKeyChange(selectedSetlistSong.id, newKey);
+      handleJoinedProjectSetlistKeyChange(setlistSongId, newKey);
       if (shouldUpdateCapoForKeyChange) {
-        handleJoinedSetlistCapoChange(selectedSetlistSong.id, nextCapo);
+        handleJoinedSetlistCapoChange(setlistSongId, nextCapo);
       }
       return;
     }
@@ -3659,7 +3659,7 @@ export default function App() {
       return;
     }
 
-    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+    handleUpdateSetlistSong(setlistSongId, (currentSetlistSong) => ({
       ...currentSetlistSong,
       overrideKey: newKey,
       ...(shouldUpdateCapoForKeyChange
@@ -3668,8 +3668,16 @@ export default function App() {
     }));
 
     if (isCloudMode && shouldUpdateCapoForKeyChange) {
-      savePersonalCapoOverride(selectedSetlistSong.id, nextCapo);
+      savePersonalCapoOverride(setlistSongId, nextCapo);
     }
+  };
+
+  const handleSetlistKeyChange = (newKey: Key) => {
+    if (!selectedSetlistSong) {
+      return;
+    }
+
+    handleSetlistSongKeyChange(selectedSetlistSong.id, currentSetlistKey, currentSetlistCapo, newKey);
   };
 
   const getKeyOptionMeta = (key: Key) => {
@@ -7173,7 +7181,7 @@ export default function App() {
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
     const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));
     const scrollRoot = previewRef.current;
-    const shouldKeepSetlistSongInView = isSetlistMode && mode !== 'preserve' && Boolean(selectedSetlistSongId);
+    const shouldPreserveViewportPosition = mode === 'preserve' || isSetlistMode;
 
     if (!scrollRoot) {
       setPreviewZoom(clampedScale / previewBaseScale);
@@ -7187,8 +7195,8 @@ export default function App() {
       ? Math.min(1, Math.max(0, (scrollRoot.scrollTop + scrollRoot.clientHeight / 2) / previewSheetHeight))
       : 0;
 
-    if (shouldKeepSetlistSongInView) {
-      preserveSetlistPreviewSelectionUntilRef.current = performance.now() + 650;
+    if (isSetlistMode) {
+      preserveSetlistPreviewSelectionUntilRef.current = performance.now() + 900;
     }
 
     setPreviewZoom(clampedScale / previewBaseScale);
@@ -7204,19 +7212,9 @@ export default function App() {
       const nextLeft = mode === 'fit-width' || mode === 'fit-height'
         ? Math.max(0, nextWidth / 2 - nextScrollRoot.clientWidth / 2)
         : Math.max(0, nextWidth * widthRatio - nextScrollRoot.clientWidth / 2);
-      let nextTop = mode === 'fit-width' || mode === 'fit-height'
-        ? 0
-        : Math.max(0, nextHeight * heightRatio - nextScrollRoot.clientHeight / 2);
-
-      if (shouldKeepSetlistSongInView && selectedSetlistSongId) {
-        const target = nextScrollRoot.querySelector<HTMLElement>(`[data-setlist-preview-song-id="${selectedSetlistSongId}"]`);
-        if (target) {
-          const rootRect = nextScrollRoot.getBoundingClientRect();
-          const targetRect = target.getBoundingClientRect();
-          const offsetTop = targetRect.top - rootRect.top + nextScrollRoot.scrollTop;
-          nextTop = Math.max(0, offsetTop - Math.min(120, rootRect.height * 0.16));
-        }
-      }
+      const nextTop = shouldPreserveViewportPosition
+        ? Math.max(0, nextHeight * heightRatio - nextScrollRoot.clientHeight / 2)
+        : 0;
 
       nextScrollRoot.scrollTo({
         left: nextLeft,
@@ -9062,15 +9060,7 @@ export default function App() {
                             value={effectiveKey}
                             onChange={(key) => {
                               if (!key) return;
-                              if (isJoinedProjectManager) {
-                                handleJoinedProjectSetlistKeyChange(item.id, key);
-                                return;
-                              }
-                              if (isJoinedSetlist || !canEditSelectedSetlist) return;
-                              handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
-                                ...currentSetlistSong,
-                                overrideKey: key
-                              }));
+                              handleSetlistSongKeyChange(item.id, effectiveKey, effectiveCapo, key);
                             }}
                             label={copy.key}
                             originalKey={sourceSong.currentKey}
@@ -9720,15 +9710,7 @@ export default function App() {
                                             value={effectiveKey}
                                             onChange={(key) => {
                                               if (!key) return;
-                                              if (isJoinedProjectManager) {
-                                                handleJoinedProjectSetlistKeyChange(item.id, key);
-                                                return;
-                                              }
-                                              if (isJoinedSetlist || !canEditSelectedSetlist) return;
-                                              handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({
-                                                ...currentSetlistSong,
-                                                overrideKey: key
-                                              }));
+                                              handleSetlistSongKeyChange(item.id, effectiveKey, effectiveCapo, key);
                                             }}
                                             disabled={!canEditSelectedSetlistKey}
                                             label={copy.key}

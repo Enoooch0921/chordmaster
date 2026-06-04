@@ -85,14 +85,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-06-02',
-        title: 'Compact sidebars, adjustable editor layout, and rhythm tie polish',
+        date: '2026-06-04',
+        title: 'Setlist zoom and capo automation fixes',
         bullets: [
-          'Song Library and Service Setlist sidebars now use more compact toolbars, with search, sorting, counts, and primary actions taking less vertical space.',
-          'The Workspace / Team switcher now stays collapsed by default and opens only when you need team switching, team creation, or member management.',
-          'Desktop split-editor mode now supports draggable editor width with snap points for stable laptop layouts.',
-          'Song metadata keeps core fields visible and moves version, translator, tempo, display, lyrics, bar numbers, and references into an Advanced section.',
-          'Preview rhythm ties now measure across adjacent bars so cross-bar ties land more accurately on the next notehead.'
+          'The setlist preview zoom button now preserves the current viewport instead of jumping back to the first song.',
+          'Setlist row key pickers now use the same capo recalculation behavior as the main toolbar and metadata panel.',
+          'When a setlist item already has Capo > 0, changing key recalculates the smallest capo that lands on C, D, E, G, or A; Capo 0 remains unchanged.'
         ]
       },
       {
@@ -283,14 +281,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-06-02',
-        title: '精簡側欄、可調整編輯區與節奏連線優化',
+        date: '2026-06-04',
+        title: '歌單縮放與 Capo 自動調整修正',
         bullets: [
-          '歌曲庫與服事歌單側欄改為更精簡的工具列，搜尋、排序、數量與主要動作佔用更少高度。',
-          '工作區 / 團隊切換器預設收合，只有需要切換團隊、建立團隊或管理成員時才展開。',
-          '桌面分割編輯器現在可拖曳調整編輯區寬度，並在版面臨界點自動吸附，筆電使用更穩定。',
-          '歌曲 metadata 保留核心欄位在外層，版本、翻譯、速度、顯示設定、歌詞、小節數與 Reference 會收進進階設定。',
-          '預覽節奏跨小節連線會量測相鄰小節位置，讓連線更準確接到下一個音頭。'
+          '歌單預覽的 100% 縮放按鈕現在會保留目前視窗位置，不會再跳回第一首歌。',
+          '歌單列上的 Key 選擇器現在會使用與上方工具列、metadata 面板相同的 Capo 重算邏輯。',
+          '當歌單項目原本 Capo > 0 時，改 Key 會自動找最小 Capo，讓實際彈奏 Key 落在 C、D、E、G、A；Capo 0 會保持不變。'
         ]
       },
       {
