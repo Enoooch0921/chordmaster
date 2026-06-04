@@ -1,4 +1,5 @@
 import { Key, Section, Setlist, SetlistSong, Song } from '../types';
+import { getSuggestedGuitarCapo } from './musicUtils';
 
 export const getSectionReferenceId = (section: Section, index: number) => section.id || `section-${index}`;
 
@@ -32,7 +33,23 @@ export const getEffectiveSetlistSongCapo = (setlistSong: SetlistSong, fallbackCa
       : fallbackCapo
 );
 
-export const applySetlistSongOverrides = (song: Song, setlist: Setlist, setlistSong: SetlistSong): Song => {
+// Guitarist mode: a live, non-destructive overlay. Songs with an explicit capo
+// (base > 0) keep their value; only songs that resolve to capo 0/unset get an
+// auto-filled guitar-friendly capo. Returns the effective capo to display.
+export const resolveSetlistSongCapo = (
+  setlistSong: SetlistSong,
+  sourceSong: Pick<Song, 'capo' | 'currentKey'>,
+  guitaristMode: boolean
+): number => {
+  const base = getEffectiveSetlistSongCapo(setlistSong, sourceSong.capo ?? 0) ?? 0;
+  if (!guitaristMode || base > 0) {
+    return base;
+  }
+  const effectiveKey = (setlistSong.overrideKey ?? sourceSong.currentKey) as Key;
+  return getSuggestedGuitarCapo(effectiveKey);
+};
+
+export const applySetlistSongOverrides = (song: Song, setlist: Setlist, setlistSong: SetlistSong, guitaristMode = false): Song => {
   const sectionMap = new Map<string, Section>();
   song.sections.forEach((section, index) => {
     sectionMap.set(getSectionReferenceId(section, index), section);
@@ -49,7 +66,7 @@ export const applySetlistSongOverrides = (song: Song, setlist: Setlist, setlistS
   return {
     ...JSON.parse(JSON.stringify(song)) as Song,
     currentKey: (setlistSong.overrideKey ?? song.currentKey) as Key,
-    capo: getEffectiveSetlistSongCapo(setlistSong, song.capo),
+    capo: resolveSetlistSongCapo(setlistSong, song, guitaristMode),
     showNashvilleNumbers: setlist.displayMode === 'nashville-number-system',
     showAbsoluteJianpu: setlist.displayMode === 'chord-fixed-key',
     showLyrics: setlist.showLyrics,

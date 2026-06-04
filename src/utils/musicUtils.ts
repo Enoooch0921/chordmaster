@@ -608,9 +608,28 @@ export function isNashville(chord: string): boolean {
 export function getPlayKey(targetKey: Key, capo: number): Key {
   const targetIndex = getNoteIndex(targetKey);
   if (targetIndex === -1) return targetKey;
-  
+
   // Play Key = Target Key - Capo
   const playIndex = (targetIndex - (capo % 12) + 12) % 12;
   const preferFlats = shouldPreferFlats(targetKey);
   return getKeyFromIndex(playIndex, preferFlats);
+}
+
+// Open-chord-friendly keys for guitar (C, D, E, G, A shapes).
+export const GUITAR_FRIENDLY_KEYS = new Set<Key>(['C', 'D', 'E', 'G', 'A']);
+
+// Smallest capo (0–11) whose play key lands on a guitar-friendly key.
+// Smaller capo wins, so it's the easiest playable position for the target key.
+export function getSuggestedGuitarCapo(targetKey: Key): number {
+  if (GUITAR_FRIENDLY_KEYS.has(targetKey)) {
+    return 0;
+  }
+
+  for (let capo = 1; capo <= 11; capo += 1) {
+    if (GUITAR_FRIENDLY_KEYS.has(getPlayKey(targetKey, capo))) {
+      return capo;
+    }
+  }
+
+  return 0;
 }

@@ -37,7 +37,7 @@ import {
   AppNotification,
   NotificationResourceType
 } from './types';
-import { ALL_KEYS, getPlayKey, getTransposeOffset, normalizeKeySpelling, transposeKeyPreferFlats, transposeKeyWithPreference } from './utils/musicUtils';
+import { ALL_KEYS, getPlayKey, getSuggestedGuitarCapo, getTransposeOffset, normalizeKeySpelling, transposeKeyPreferFlats, transposeKeyWithPreference } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
 import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
 import { useThemeMode } from './hooks/useThemeMode';
@@ -56,9 +56,9 @@ import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
-import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo } from './utils/setlistUtils';
+import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo, resolveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -77,6 +77,7 @@ const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.
 const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
 const LIBRARY_SORT_STORAGE_KEY = 'chordmaster.library-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
+const GUITARIST_MODE_STORAGE_KEY = 'chordmaster.guitarist-mode.v1';
 const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
 const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
@@ -130,7 +131,6 @@ const PDF_EXPORT_MOBILE_MAX_CANVAS_AREA = 12_000_000;
 const PDF_EXPORT_DESKTOP_MAX_CANVAS_SIDE = 16384;
 const PDF_EXPORT_DESKTOP_MAX_CANVAS_AREA = 64_000_000;
 const VALID_KEYS = new Set<string>(ALL_KEYS);
-const GUITAR_FRIENDLY_KEYS = new Set<Key>(['C', 'D', 'E', 'G', 'A']);
 const VALID_NAVIGATION_MARKERS = new Set([
   'segno',
   'coda',
@@ -1413,6 +1413,14 @@ const loadWorkspaceMode = (): WorkspaceMode => {
   return window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY) === 'setlists' ? 'setlists' : 'songs';
 };
 
+const loadGuitaristMode = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.localStorage.getItem(GUITARIST_MODE_STORAGE_KEY) === 'true';
+};
+
 const loadSetlistSortPreference = (): SetlistSortMode => {
   if (typeof window === 'undefined') {
     return 'updated-desc';
@@ -1501,20 +1509,6 @@ const serializeSetlists = (setlists: Setlist[]) =>
     }))
   );
 
-
-const getSuggestedGuitarCapo = (targetKey: Key) => {
-  if (GUITAR_FRIENDLY_KEYS.has(targetKey)) {
-    return 0;
-  }
-
-  for (let capo = 1; capo <= 11; capo += 1) {
-    if (GUITAR_FRIENDLY_KEYS.has(getPlayKey(targetKey, capo))) {
-      return capo;
-    }
-  }
-
-  return 0;
-};
 
 const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisplayPreference> => {
   if (typeof window === 'undefined') {
@@ -1706,6 +1700,7 @@ export default function App() {
   const [songs, setSongs] = useState<StoredSong[]>(initialLibraryRef.current.songs);
   const [savedSongs, setSavedSongs] = useState<StoredSong[]>(cloneSong(initialLibraryRef.current.songs));
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(loadWorkspaceMode);
+  const [guitaristMode, setGuitaristMode] = useState<boolean>(loadGuitaristMode);
   const [selectedSongId, setSelectedSongId] = useState(initialLibraryRef.current.selectedSongId);
   const [setlists, setSetlists] = useState<Setlist[]>(initialSetlistsRef.current.setlists);
   const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(cloneSong(initialSetlistsRef.current.setlists));
@@ -2108,7 +2103,7 @@ export default function App() {
     : null;
   const activeSetlistPreviewSong = selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
     ? {
-        ...applySetlistSongOverrides(activeSetlistEditableSong ?? selectedSetlistSourceSong, effectiveSelectedSetlist, selectedSetlistSong),
+        ...applySetlistSongOverrides(activeSetlistEditableSong ?? selectedSetlistSourceSong, effectiveSelectedSetlist, selectedSetlistSong, guitaristMode),
         references: selectedSetlistSourceSong.references,
         ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
           ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
@@ -2406,7 +2401,7 @@ export default function App() {
   const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
   const currentSetlistKey = activeSetlistPreviewSong?.currentKey ?? selectedSetlistSourceSong?.currentKey ?? 'C';
   const currentSetlistCapo = selectedSetlistSong
-    ? getEffectiveSetlistSongCapo(selectedSetlistSong, selectedSetlistSourceSong?.capo ?? 0) ?? 0
+    ? resolveSetlistSongCapo(selectedSetlistSong, selectedSetlistSourceSong ?? { capo: 0, currentKey: currentSetlistKey }, guitaristMode)
     : (selectedSetlistSourceSong?.capo ?? 0);
   const currentSetlistPlayKey = getPlayKey(currentSetlistKey, currentSetlistCapo);
   const exportProgressPercent = pdfExportProgress && pdfExportProgress.totalPages > 0
@@ -2520,7 +2515,7 @@ export default function App() {
   };
   const getSetlistSongInfoSummary = (item: SetlistSong, sourceSong: Song) => {
     const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-    const effectiveCapo = getEffectiveSetlistSongCapo(item, sourceSong.capo ?? 0) ?? 0;
+    const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode);
     const displaySong = item.songData ?? sourceSong;
     const versionSummary = getSongVersionSummary(displaySong);
     const translator = displaySong.translator?.trim();
@@ -5887,7 +5882,7 @@ export default function App() {
           exportRoot?.render(
             <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
               {setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
-                const derivedSong = applySetlistSongOverrides(sourceSong, selectedSetlist, item);
+                const derivedSong = applySetlistSongOverrides(sourceSong, selectedSetlist, item, guitaristMode);
                 return (
                   <div
                     key={item.id}
@@ -6563,6 +6558,14 @@ export default function App() {
 
   useEffect(() => {
     try {
+      window.localStorage.setItem(GUITARIST_MODE_STORAGE_KEY, guitaristMode ? 'true' : 'false');
+    } catch {
+      // Ignore storage failures and keep the app usable.
+    }
+  }, [guitaristMode]);
+
+  useEffect(() => {
+    try {
       if (selectedSetlistId) {
         window.localStorage.setItem(SELECTED_SETLIST_STORAGE_KEY, selectedSetlistId);
       } else {
@@ -7008,7 +7011,7 @@ export default function App() {
       const previewSong = isSelected && activeSetlistPreviewSong
         ? activeSetlistPreviewSong
         : {
-            ...applySetlistSongOverrides(sourceSong, effectiveSelectedSetlist, item),
+            ...applySetlistSongOverrides(sourceSong, effectiveSelectedSetlist, item, guitaristMode),
             references: sourceSong.references,
             ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
               ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
@@ -7024,6 +7027,7 @@ export default function App() {
   }, [
     activeSetlistPreviewSong,
     effectiveSelectedSetlist,
+    guitaristMode,
     isJoinedSetlist,
     joinedSetlistDisplayPreference.barNumberMode,
     selectedSetlistSong?.id,
@@ -9041,7 +9045,7 @@ export default function App() {
             {setlistSongsWithSource.map(({ item, sourceSong }) => {
               const isActive = item.id === selectedSetlistSong?.id;
               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-              const effectiveCapo = getEffectiveSetlistSongCapo(item, sourceSong.capo ?? 0) ?? 0;
+              const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode);
               const displaySong = item.songData ?? sourceSong;
               const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
               const isDropTarget = dragOverSetlistSongId === item.id;
@@ -9396,6 +9400,22 @@ export default function App() {
                     <Plus size={18} />
                   </button>
                 )}
+                {isSetlistMode && (
+                  <button
+                    type="button"
+                    onClick={() => setGuitaristMode((current) => !current)}
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
+                      guitaristMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                    title={language === 'zh'
+                      ? (guitaristMode ? '吉他手模式（開啟中）：自動為未設定的歌補上 Capo，點擊關閉' : '吉他手模式：自動為未設定的歌補上吉他友善 Capo')
+                      : (guitaristMode ? 'Guitarist mode (on): auto-fills capo for unset songs — click to turn off' : 'Guitarist mode: auto-fill guitar-friendly capo for unset songs')}
+                    aria-label={language === 'zh' ? '吉他手模式' : 'Guitarist mode'}
+                    aria-pressed={guitaristMode}
+                  >
+                    <Guitar size={18} />
+                  </button>
+                )}
               </div>
 
               <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
@@ -9687,7 +9707,7 @@ export default function App() {
                             {setlistSongsWithSource.map(({ item, sourceSong }) => {
                               const isActive = item.id === selectedSetlistSong?.id;
                               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-                              const effectiveCapo = getEffectiveSetlistSongCapo(item, sourceSong.capo ?? 0) ?? 0;
+                              const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode);
                               const displaySong = item.songData ?? sourceSong;
                               const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
                               const isDropTarget = dragOverSetlistSongId === item.id;
