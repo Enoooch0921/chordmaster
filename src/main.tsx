@@ -11,6 +11,10 @@ import TeamInvitePage from './pages/TeamInvitePage.tsx';
 import { ToastProvider } from './components/Toast.tsx';
 import './index.css';
 
+const appBaseUrl = import.meta.env.BASE_URL;
+const routerBasename = appBaseUrl === './' ? '/' : appBaseUrl;
+const historyBasePath = appBaseUrl === './' ? '' : appBaseUrl.replace(/\/$/, '');
+
 const restoreGitHubPagesSpaRedirect = () => {
   const redirectSearch = window.location.search;
   if (!redirectSearch.startsWith('?/')) {
@@ -34,7 +38,7 @@ const restoreGitHubPagesSpaRedirect = () => {
   window.history.replaceState(
     null,
     '',
-    `${import.meta.env.BASE_URL.replace(/\/$/, '')}${normalizedPath}${redirectQuery}${window.location.hash}`
+    `${historyBasePath}${normalizedPath}${redirectQuery}${window.location.hash}`
   );
 };
 
@@ -62,8 +66,7 @@ if (Capacitor.isNativePlatform()) {
     }
 
     await Browser.close().catch(() => undefined);
-    const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
-    window.history.replaceState(null, '', `${basePath}${appPath}`);
+    window.history.replaceState(null, '', `${historyBasePath}${appPath}`);
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
 
@@ -98,7 +101,7 @@ if (Capacitor.isNativePlatform()) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
+    <BrowserRouter basename={routerBasename}>
       <ToastProvider>
         <Routes>
           <Route path="/" element={<App />} />

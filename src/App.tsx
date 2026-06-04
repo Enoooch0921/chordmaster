@@ -2044,7 +2044,8 @@ export default function App() {
       TEAM_EDIT_ROLES.has(activeLibraryRole)
       || (activeLibraryRole === 'setlist_manager' && selectedSetlist?.createdBy === authenticatedUser?.id)
     );
-  const canShareSelectedSetlist = canEditSelectedSetlist;
+  const canCreateNewShareLink = !isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole);
+  const canShareSelectedSetlist = canEditSelectedSetlist && canCreateNewShareLink;
   // The joined project (if any) that contains the currently-selected setlist, plus
   // whether I'm a *manager* of it. Managers may edit the shared key + song order of
   // the project's setlists (Phase 1); everyone else stays read-only.
@@ -2068,12 +2069,13 @@ export default function App() {
         : [...current, setlistId]
     ));
   };
-  // Projects share the same management gate as setlists — owners/editors always,
-  // setlist managers only for projects they themselves created.
+  // Owned project sharing follows team owner/editor rights. Joined project
+  // managers get their own sharing path after selectedJoinedProject is known.
   const canCreateProject = canCreateTeamSetlists;
   const canManageProject = (project: Pick<Project, 'createdBy'>) => !isTeamWorkspace
     || TEAM_EDIT_ROLES.has(activeLibraryRole)
     || (activeLibraryRole === 'setlist_manager' && project.createdBy === authenticatedUser?.id);
+  const canShareProject = canCreateNewShareLink;
   const canOpenEditor = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs && hasSongs;
   const joinedSetlistDisplayPreference = isJoinedSetlist && selectedSetlist
     ? joinedSetlistDisplayPreferences[selectedSetlist.id] ?? {}
@@ -2587,6 +2589,10 @@ export default function App() {
   const archivedProjectsCount = projects.length - activeProjects.length;
   const visibleProjects = showArchivedProjects ? projects : activeProjects;
   const selectedProject = selectedProjectId ? projects.find((item) => item.id === selectedProjectId) ?? null : null;
+  const selectedProjectShareTarget = selectedProject ?? selectedJoinedProject;
+  const canShareSelectedProject = selectedProject
+    ? canShareProject
+    : selectedJoinedProject?.role === 'manager';
   const ungroupedSetlistCount = setlists.filter((item) => (item.projectId ?? null) === null && !item.archived).length;
   const projectSetlistCount = (projectId: string) => setlists.filter((item) => item.projectId === projectId && !item.archived).length;
   // Filter from the full library (not filteredSongs) so the song-library search
@@ -3006,7 +3012,7 @@ export default function App() {
       setSavedProjects(cloneSong(nextProjects));
       setLastSavedAt(savedAt);
       setSyncStatus('saved');
-    } catch {
+    } catch (error) {
       if (!isTeamWorkspace) {
         savePendingSync({
           songs: cloneSong(nextSongs),
@@ -3016,7 +3022,11 @@ export default function App() {
         });
       }
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-      throw new Error('Unable to sync workspace.');
+      const fallbackMessage = language === 'zh'
+        ? '雲端儲存失敗，請確認網路後再試一次。'
+        : 'Cloud save failed. Please check your connection and try again.';
+      const detail = error instanceof Error && error.message.trim() ? error.message.trim() : '';
+      throw new Error(detail ? `${fallbackMessage}\n\n${detail}` : fallbackMessage);
     }
   };
 
@@ -4290,7 +4300,7 @@ export default function App() {
       || !isSetlistMode
       || !selectedProject
       || selectedJoinedProject
-      || !canManageProject(selectedProject)
+      || !canShareProject
     ) {
       setSelectedProjectShareStatus(null);
       setIsLoadingProjectShareStatus(false);
@@ -7587,16 +7597,20 @@ export default function App() {
       toast.error(copy.authUnavailable);
       return;
     }
-    const project = projects.find((item) => item.id === projectId);
-    if (!project) return;
-    if (!canManageProject(project)) {
+    const ownedProject = projects.find((item) => item.id === projectId) ?? null;
+    const joinedProject = joinedProjects.find((item) => item.id === projectId) ?? null;
+    if (!ownedProject && !joinedProject) return;
+    const canShareTargetProject = ownedProject ? canShareProject : joinedProject?.role === 'manager';
+    if (!canShareTargetProject) {
       toast.error(language === 'zh' ? '你沒有分享這個專案的權限。' : 'You do not have permission to share this project.');
       return;
     }
 
     setCreatingProjectShareLinkId(projectId);
     try {
-      await ensureShareResourceIsSynced('project', projectId);
+      if (ownedProject) {
+        await ensureShareResourceIsSynced('project', projectId);
+      }
       const token = await cloudRepositoryRef.current.createShareLink('project', projectId);
       setPendingShareUrl(buildShareUrl(token));
       setShareDialogContext({ resourceType: 'project', resourceId: projectId });
@@ -8031,7 +8045,7 @@ export default function App() {
   // Project mode "who joined" — same idea as the setlist panel, scoped to the
   // whole project. Read-only list + refresh (the project header already hosts
   // the share button). Collapsible and closed by default.
-  const projectSharingPanel = isSetlistMode && selectedProject && !selectedJoinedProject && canManageProject(selectedProject) ? (
+  const projectSharingPanel = isSetlistMode && selectedProject && !selectedJoinedProject && canShareProject ? (
     <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
@@ -8659,16 +8673,16 @@ export default function App() {
               )}
             </div>
           </div>
-          {canCreateTeamSetlists && !selectedJoinedProject && selectedProject && canManageProject(selectedProject) && (
+          {selectedProjectShareTarget && canShareSelectedProject && (
             <button
               type="button"
-              onClick={() => void handleCreateProjectShareLink(selectedProject.id)}
-              disabled={creatingProjectShareLinkId === selectedProject.id}
+              onClick={() => void handleCreateProjectShareLink(selectedProjectShareTarget.id)}
+              disabled={creatingProjectShareLinkId === selectedProjectShareTarget.id}
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
               title={language === 'zh' ? '分享專案' : 'Share project'}
               aria-label={language === 'zh' ? '分享專案' : 'Share project'}
             >
-              {creatingProjectShareLinkId === selectedProject.id ? (
+              {creatingProjectShareLinkId === selectedProjectShareTarget.id ? (
                 <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-500" aria-hidden />
               ) : (
                 <Share2 size={15} />
@@ -9933,16 +9947,16 @@ export default function App() {
                               )}
                             </div>
                           </div>
-                          {canCreateTeamSetlists && !selectedJoinedProject && selectedProject && canManageProject(selectedProject) && (
+                          {selectedProjectShareTarget && canShareSelectedProject && (
                             <button
                               type="button"
-                              onClick={() => void handleCreateProjectShareLink(selectedProject.id)}
-                              disabled={creatingProjectShareLinkId === selectedProject.id}
+                              onClick={() => void handleCreateProjectShareLink(selectedProjectShareTarget.id)}
+                              disabled={creatingProjectShareLinkId === selectedProjectShareTarget.id}
                               title={language === 'zh' ? '分享專案' : 'Share project'}
                               aria-label={language === 'zh' ? '分享專案' : 'Share project'}
                               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
                             >
-                              {creatingProjectShareLinkId === selectedProject.id ? (
+                              {creatingProjectShareLinkId === selectedProjectShareTarget.id ? (
                                 <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-500" aria-hidden />
                               ) : (
                                 <Share2 size={15} />

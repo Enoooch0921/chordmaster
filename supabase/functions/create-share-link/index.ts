@@ -18,6 +18,26 @@ const jsonResponse = (body: unknown, status = 200) => (
   })
 );
 
+const getActiveShareToken = async (adminSupabase, resourceType: string, resourceId: string) => {
+  const { data, error } = await adminSupabase
+    .from('share_links')
+    .select('token, expires_at')
+    .eq('resource_type', resourceType)
+    .eq('resource_id', resourceId)
+    .is('revoked_at', null)
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (error) {
+    throw error;
+  }
+
+  const now = Date.now();
+  return (data ?? []).find((link) => (
+    !link.expires_at || new Date(link.expires_at).getTime() > now
+  ))?.token ?? null;
+};
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -62,7 +82,7 @@ Deno.serve(async (request) => {
       : resourceType === 'setlist' ? 'setlists' : 'projects';
     const { data: resource, error: resourceError } = await supabase
       .from(tableName)
-      .select('id')
+      .select('id, library_id')
       .eq('id', resourceId)
       .maybeSingle();
 
@@ -70,18 +90,29 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: 'Resource not found or access denied.' }, 404);
     }
 
-    const { data: existing } = await supabase
-      .from('share_links')
-      .select('token')
-      .eq('resource_type', resourceType)
-      .eq('resource_id', resourceId)
-      .is('revoked_at', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const existingToken = await getActiveShareToken(adminSupabase, resourceType, resourceId);
+    if (existingToken) {
+      return jsonResponse({ token: existingToken });
+    }
 
-    if (existing?.token) {
-      return jsonResponse({ token: existing.token });
+    const { data: canWrite, error: canWriteError } = await supabase
+      .rpc('can_write_library', { target_library_id: resource.library_id });
+    if (canWriteError) {
+      return jsonResponse({ error: canWriteError.message }, 400);
+    }
+
+    let canCreateNewShareLink = canWrite === true;
+    if (!canCreateNewShareLink && resourceType === 'project') {
+      const { data: isProjectManager, error: projectManagerError } = await supabase
+        .rpc('has_project_manager_role', { target_project_id: resourceId });
+      if (projectManagerError) {
+        return jsonResponse({ error: projectManagerError.message }, 400);
+      }
+      canCreateNewShareLink = isProjectManager === true;
+    }
+
+    if (!canCreateNewShareLink) {
+      return jsonResponse({ error: 'You do not have permission to create a new share link.' }, 403);
     }
 
     const token = crypto.randomUUID().replaceAll('-', '');

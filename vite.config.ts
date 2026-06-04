@@ -13,7 +13,7 @@ export default defineConfig(({mode}) => {
   const isDevelopment = mode === 'development';
   const isCapacitorBuild = mode === 'capacitor' || env.VITE_APP_TARGET === 'capacitor';
   return {
-    base: isDevelopment || isCapacitorBuild ? '/' : '/chordmaster/',
+    base: isCapacitorBuild ? './' : isDevelopment ? '/' : '/chordmaster/',
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),

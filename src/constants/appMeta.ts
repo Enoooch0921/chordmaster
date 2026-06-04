@@ -94,6 +94,125 @@ const localizedMeta: Record<AppLanguage, {
         ]
       },
       {
+        version: '0.8.30',
+        date: '2026-06-04',
+        title: 'Personal capo save status and key/capo behavior',
+        bullets: [
+          'Signed-in users now get clearer save feedback when a personal capo override is stored per setlist.',
+          'Refined how changing key interacts with an existing capo so the played key stays on a guitar-friendly shape.'
+        ]
+      },
+      {
+        version: '0.8.29',
+        date: '2026-06-04',
+        title: 'Shared-project managers (Phase 1)',
+        bullets: [
+          'Project owners can now promote joined members to "manager" from the project sharing panel.',
+          'Managers may edit the project\'s shared key and reorder its setlist songs; everyone else stays read-only.'
+        ]
+      },
+      {
+        version: '0.8.28',
+        date: '2026-06-04',
+        title: 'Fix preview going blank on token refresh',
+        bullets: [
+          'Fixed the setlist/project preview going blank after a Supabase token refresh or tab refocus, which previously reloaded the workspace and cleared the current selection mid-session.'
+        ]
+      },
+      {
+        version: '0.8.27',
+        date: '2026-06-03',
+        title: 'Dark-mode contrast and phone setlist drawer scroll',
+        bullets: [
+          'Fixed dark-mode text that was invisible — the ChordMaster wordmark, overflow menu items, and project/setlist titles sitting on the dark sidebar.',
+          'The phone setlist drawer now scrolls the project header, sharing panel, search, and sort together with the list, giving the list more room.'
+        ]
+      },
+      {
+        version: '0.8.26',
+        date: '2026-06-03',
+        title: 'Always-on auto-save and iPad safe-area fixes',
+        bullets: [
+          'Auto-save is now always on; the on/off toggle has been removed.',
+          'Sharing panels use a compact refresh icon button instead of a full row.',
+          'Respects iOS safe-area insets so the top bar no longer sits under the iPad status bar, and fixes the setlist selection frame size in iPad landscape.'
+        ]
+      },
+      {
+        version: '0.8.25',
+        date: '2026-06-03',
+        title: 'Setlist navigation, page badge, performance mode, and sync status',
+        bullets: [
+          'Setlist preview gains a back-to-top button, and clicking any song\'s section/chord switches the focused song and jumps the editor.',
+          'Multi-page sheets show a clear "page x / n" badge on every page.',
+          'Performance Mode chrome auto-hides after 2s and reappears on touch; project panels are collapsible; the sidebar shows an always-visible sync-status icon.'
+        ]
+      },
+      {
+        version: '0.8.24',
+        date: '2026-06-03',
+        title: 'Preview add-bar interaction and chord-box shortcuts',
+        bullets: [
+          'Clicking the "+" slot after the last bar appends a bar (repeatable) in both song-library and setlist modes, with new bars focused for immediate typing.',
+          'In the chord box, Backspace on an empty bar deletes it, and `[`, `]`, `\\` toggle repeat-start / repeat-end / final-bar markers.'
+        ]
+      },
+      {
+        version: '0.8.23',
+        date: '2026-06-02',
+        title: 'Setlist layout, sidebar scroll, and continuous preview',
+        bullets: [
+          'Compacted the setlist panel header (new-setlist "+" next to search, share button on the project-name row).',
+          'Fixed sidebar song/setlist lists getting clipped, and restored the continuous full-setlist preview.',
+          'Editor core row is now Title / Key / Tempo / Time / Shuffle (Capo moved to Advanced); chords are forced to a sans-serif font.'
+        ]
+      },
+      {
+        version: '0.8.22',
+        date: '2026-06-02',
+        title: 'Compact sidebars and rhythm layout polish',
+        bullets: [
+          'Compacted the sidebars and polished the rhythm-lane layout.'
+        ]
+      },
+      {
+        version: '0.8.21',
+        date: '2026-06-01',
+        title: 'Keep the section "+" add button visible',
+        bullets: [
+          'The section "+" add button now stays pinned and visible even when there are enough sections to overflow the row.',
+          'The inline "+" is now available in song-library editing too, not just setlists.'
+        ]
+      },
+      {
+        version: '0.8.20',
+        date: '2026-06-01',
+        title: 'Native PDF export, per-account capo, and share-to-contacts',
+        bullets: [
+          'iPad now exports PDF via the Filesystem + Share sheet, since WKWebView ignores direct jsPDF downloads.',
+          'Signed-in users remember capo per-account on every setlist, and can share directly to previously-shared contacts with an in-app bell notification.',
+          'Unsaved edits are flushed on tab/app exit so a cloud-first reload merges them instead of dropping them, plus Nashville suffix alignment and crowded-chord spacing fixes.'
+        ]
+      },
+      {
+        version: '0.8.10',
+        date: '2026-05-30',
+        title: 'Projects layer, sharing, and joined-project refinements (0.8.10–0.8.19)',
+        bullets: [
+          'Added a Project layer above setlists (CRUD, archive with iOS-style swipe, two-level navigation) with per-project share links and a "Join Project" flow.',
+          'Joined projects can be drilled into for read-only setlist viewing, wired through the initial workspace load, with capo-edit and back-to-projects fixes.',
+          'Parallelised cloud sync, preserved slash-chord bass spelling, and fixed several preview focus/flicker issues when switching songs.'
+        ]
+      },
+      {
+        version: '0.8.8',
+        date: '2026-05-28',
+        title: 'iPadOS setlist polish',
+        bullets: [
+          'iPadOS setlist polish, including Performance Mode page-turner key fixes and better iPad Safari page-turner focus capture.'
+        ]
+      },
+      {
         version: '0.8.7',
         date: '2026-05-26',
         title: 'Compound-meter jianpu fix, multi-measure rest, and chord layout polish',
@@ -112,6 +231,14 @@ const localizedMeta: Record<AppLanguage, {
           'Desktop setlist mode now uses List, Detail, and Add Songs panels so larger setlist libraries are easier to manage.',
           'Clicking a song inside a setlist now scrolls the right-side preview directly to that song.',
           'Performance Mode now turns pages by tapping the left or right half of the screen.'
+        ]
+      },
+      {
+        version: '0.8.5',
+        date: '2026-05-19',
+        title: 'Full setlist preview scrolling',
+        bullets: [
+          'Added full setlist preview scrolling so the entire setlist can be reviewed in the main preview area.'
         ]
       },
       {
@@ -290,6 +417,125 @@ const localizedMeta: Record<AppLanguage, {
         ]
       },
       {
+        version: '0.8.30',
+        date: '2026-06-04',
+        title: '個人 Capo 儲存狀態與 Key／Capo 行為',
+        bullets: [
+          '已登入使用者在歌單保存個人 Capo 覆蓋時，會看到更清楚的儲存狀態回饋。',
+          '調整改 Key 與既有 Capo 的互動方式，讓實際彈奏 Key 維持在好按的吉他指型上。'
+        ]
+      },
+      {
+        version: '0.8.29',
+        date: '2026-06-04',
+        title: '共享專案管理員（Phase 1）',
+        bullets: [
+          '專案擁有者現在可在專案分享面板，把已加入的成員提升為「管理員」。',
+          '管理員可編輯該專案的共用 Key 並重新排序歌單歌曲，其他成員維持唯讀。'
+        ]
+      },
+      {
+        version: '0.8.28',
+        date: '2026-06-04',
+        title: '修正 token 更新時預覽變空白',
+        bullets: [
+          '修正 Supabase token 自動更新或切回分頁時，歌單／專案預覽變空白的問題；先前會重新載入 workspace 並在中途清掉目前選取的專案／歌單／歌曲。'
+        ]
+      },
+      {
+        version: '0.8.27',
+        date: '2026-06-03',
+        title: '深色模式對比與手機歌單抽屜捲動',
+        bullets: [
+          '修正深色模式中看不見的文字 ── ChordMaster 標題、overflow 選單項目，以及位在深色側欄上的專案／歌單名稱。',
+          '手機歌單抽屜的專案標題、分享面板、搜尋與排序現在會與歌單列表一起捲動，讓列表有更多空間。'
+        ]
+      },
+      {
+        version: '0.8.26',
+        date: '2026-06-03',
+        title: '永遠開啟自動儲存與 iPad 安全區修正',
+        bullets: [
+          '自動儲存現在永遠開啟，已移除開／關切換。',
+          '分享面板的「重新整理」改為精簡的圖示按鈕，不再佔用整列。',
+          '尊重 iOS 安全區邊距，讓 top bar 不再被 iPad 狀態列遮住，並修正 iPad 橫向時歌單選取框尺寸錯誤。'
+        ]
+      },
+      {
+        version: '0.8.25',
+        date: '2026-06-03',
+        title: '歌單導覽、頁碼徽章、演出模式與同步狀態',
+        bullets: [
+          '歌單預覽新增回到頂部按鈕，點擊任何歌曲的段落／和弦都會切換焦點歌曲並帶動編輯器。',
+          '多頁譜面在每一頁右上角顯示清楚的「page x / n」頁碼徽章。',
+          '演出模式介面在 2 秒後自動隱藏、觸碰時再出現；專案面板可收合；側欄顯示常駐的同步狀態圖示。'
+        ]
+      },
+      {
+        version: '0.8.24',
+        date: '2026-06-03',
+        title: '預覽新增小節互動與和弦框快捷鍵',
+        bullets: [
+          '點擊最後一小節後的「+」格可新增小節（可連續），歌曲庫與歌單模式皆適用，新小節會自動聚焦方便直接輸入。',
+          '在和弦框中對空白小節按 Backspace 會刪除該小節，`[`、`]`、`\\` 則切換反覆開始／反覆結束／結尾小節記號。'
+        ]
+      },
+      {
+        version: '0.8.23',
+        date: '2026-06-02',
+        title: '歌單版面、側欄捲動與連續預覽',
+        bullets: [
+          '精簡歌單面板標題列（新增歌單「+」移到搜尋旁，分享按鈕移到專案名稱列）。',
+          '修正側欄歌曲／歌單列表被裁切的問題，並還原連續的整份歌單預覽。',
+          '編輯器主要列改為 標題／Key／Tempo／拍號／Shuffle（Capo 移到進階），並統一和弦為無襯線字型。'
+        ]
+      },
+      {
+        version: '0.8.22',
+        date: '2026-06-02',
+        title: '精簡側欄與節奏排版優化',
+        bullets: [
+          '精簡側欄，並優化節奏列的排版。'
+        ]
+      },
+      {
+        version: '0.8.21',
+        date: '2026-06-01',
+        title: '段落「+」新增鈕常駐顯示',
+        bullets: [
+          '段落「+」新增鈕現在會固定顯示在右側，即使段落數量多到溢出整列也不會被推出畫面。',
+          '行內「+」現在歌曲庫編輯也可用，不再只限歌單模式。'
+        ]
+      },
+      {
+        version: '0.8.20',
+        date: '2026-06-01',
+        title: '原生 PDF 匯出、個人帳號 Capo 與分享給聯絡人',
+        bullets: [
+          'iPad 改用 Filesystem + 分享面板匯出 PDF（WKWebView 會忽略 jsPDF 的直接下載）。',
+          '已登入使用者每個歌單都會以帳號為單位記住 Capo，並可直接分享給先前分享過的聯絡人，搭配 App 內鈴鐺通知。',
+          '切換分頁／離開 App 時會把未存編輯寫入 pendingSync，讓雲端優先重載時合併而非丟失；另含 Nashville 後綴對齊與擁擠和弦間距修正。'
+        ]
+      },
+      {
+        version: '0.8.10',
+        date: '2026-05-30',
+        title: '專案 (Projects) 層、分享與加入專案後續修正（0.8.10–0.8.19）',
+        bullets: [
+          '新增歌單之上的專案層（CRUD、iOS 風格滑動封存、兩層導覽），並支援每個專案的分享連結與「加入專案」流程。',
+          '可深入已加入的專案唯讀檢視歌單，並串接初始 workspace 載入，同時修正 Capo 編輯與返回專案的問題。',
+          '雲端同步改為平行化，保留斜線和弦的低音拼法，並修正多個切換歌曲時的預覽焦點／閃爍問題。'
+        ]
+      },
+      {
+        version: '0.8.8',
+        date: '2026-05-28',
+        title: 'iPadOS 歌單細節優化',
+        bullets: [
+          'iPadOS 歌單細節優化，包含演出模式翻頁按鍵修正，以及更好的 iPad Safari 翻頁焦點捕捉。'
+        ]
+      },
+      {
         version: '0.8.7',
         date: '2026-05-26',
         title: '複合拍子簡譜修正、多小節休止符、和弦排版優化',
@@ -308,6 +554,14 @@ const localizedMeta: Record<AppLanguage, {
           '桌面歌單模式改為 List、Detail、Add Songs 分層面板，歌單變多時更容易管理。',
           '點擊歌單內歌曲時，右側預覽會直接定位到該歌曲。',
           '演出模式現在可點螢幕左半邊或右半邊快速翻頁。'
+        ]
+      },
+      {
+        version: '0.8.5',
+        date: '2026-05-19',
+        title: '完整歌單預覽捲動',
+        bullets: [
+          '新增完整歌單預覽捲動，可在主預覽區檢視整份歌單。'
         ]
       },
       {

@@ -927,10 +927,14 @@ const persistSetlistSongs = async (setlist: Setlist) => {
     throw new Error('Supabase is not configured.');
   }
 
-  await supabase
+  const { error: deleteError } = await supabase
     .from('setlist_songs')
     .delete()
     .eq('setlist_id', setlist.id);
+
+  if (deleteError) {
+    throw deleteError;
+  }
 
   if (setlist.songs.length === 0) {
     return;
@@ -1238,14 +1242,14 @@ export const createCloudRepository = (params: {
         return;
       }
 
-      const [{ error }] = await Promise.all([
-        supabase.from('setlists').upsert(payload, { onConflict: 'id' }),
-        persistSetlistSongs(setlist)
-      ]);
-
+      const { error } = await supabase
+        .from('setlists')
+        .upsert(payload, { onConflict: 'id' });
       if (error) {
         throw error;
       }
+
+      await persistSetlistSongs(setlist);
     },
 
     async saveProject(project) {
