@@ -252,9 +252,11 @@ export interface ShareContact {
 
 export type NotificationResourceType = 'setlist' | 'project';
 
+export type NotificationType = 'resource_shared' | 'member_promoted' | 'member_demoted' | 'access_removed';
+
 export interface AppNotification {
   id: string;
-  type: 'resource_shared';
+  type: NotificationType;
   resourceType: NotificationResourceType;
   resourceId: string;
   resourceName: string;

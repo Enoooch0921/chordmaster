@@ -11,6 +11,10 @@ interface NotificationBellProps {
     open: string;
     sharedSetlist: string;
     sharedProject: string;
+    promoted: string;
+    demoted: string;
+    removedSetlist: string;
+    removedProject: string;
   };
   onOpen: (notification: AppNotification) => void;
   onMarkAllRead: () => void;
@@ -62,7 +66,14 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
               <div className="max-h-80 overflow-y-auto">
                 {notifications.map((item) => {
                   const isSetlist = item.resourceType === 'setlist';
-                  const message = isSetlist ? labels.sharedSetlist : labels.sharedProject;
+                  const isRemoval = item.type === 'access_removed';
+                  const message = item.type === 'member_promoted'
+                    ? labels.promoted
+                    : item.type === 'member_demoted'
+                      ? labels.demoted
+                      : isRemoval
+                        ? (isSetlist ? labels.removedSetlist : labels.removedProject)
+                        : (isSetlist ? labels.sharedSetlist : labels.sharedProject);
                   return (
                     <button
                       key={item.id}
@@ -86,7 +97,9 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
                         {item.resourceName && (
                           <div className="mt-0.5 truncate text-[11px] font-semibold text-gray-900">{item.resourceName}</div>
                         )}
-                        <div className="mt-1 text-[11px] font-semibold text-indigo-600">{labels.open}</div>
+                        {!isRemoval && (
+                          <div className="mt-1 text-[11px] font-semibold text-indigo-600">{labels.open}</div>
+                        )}
                       </div>
                       {!item.readAt && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-rose-500" />}
                     </button>

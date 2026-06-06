@@ -60,7 +60,7 @@ import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo, resolveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, UserMinus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -1946,6 +1946,9 @@ export default function App() {
   const [isImportingLocalWorkspace, setIsImportingLocalWorkspace] = useState(false);
   const [leavingSharedSetlistId, setLeavingSharedSetlistId] = useState<string | null>(null);
   const [pendingLeaveSharedSetlistId, setPendingLeaveSharedSetlistId] = useState<string | null>(null);
+  const [leavingSharedProjectId, setLeavingSharedProjectId] = useState<string | null>(null);
+  const [pendingLeaveSharedProjectId, setPendingLeaveSharedProjectId] = useState<string | null>(null);
+  const [removingMemberKey, setRemovingMemberKey] = useState<string | null>(null);
   const [selectedSetlistShareStatus, setSelectedSetlistShareStatus] = useState<SetlistShareStatus | null>(null);
   const [isLoadingSetlistShareStatus, setIsLoadingSetlistShareStatus] = useState(false);
   const [selectedProjectShareStatus, setSelectedProjectShareStatus] = useState<ProjectShareStatus | null>(null);
@@ -2232,7 +2235,12 @@ export default function App() {
       }
     : null;
   const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
-    ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId) ?? null
+    ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId)
+      ?? allJoinedProjectSetlists.find((item) => item.id === pendingLeaveSharedSetlistId)
+      ?? null
+    : null;
+  const pendingLeaveSharedProject = pendingLeaveSharedProjectId
+    ? joinedProjects.find((jp) => jp.id === pendingLeaveSharedProjectId) ?? null
     : null;
   const pendingRevokeShareSetlist = pendingRevokeShareSetlistId
     ? setlists.find((item) => item.id === pendingRevokeShareSetlistId) ?? null
@@ -4333,6 +4341,69 @@ export default function App() {
     setPendingLeaveSharedSetlistId(setlistId);
   };
 
+  const handleLeaveSharedProject = async (projectId: string) => {
+    if (!cloudRepositoryRef.current || leavingSharedProjectId) return;
+
+    setLeavingSharedProjectId(projectId);
+    try {
+      await cloudRepositoryRef.current.leaveSharedProject(projectId);
+      const leftProject = joinedProjects.find((jp) => jp.id === projectId) ?? null;
+      const nextJoinedProjects = joinedProjects.filter((jp) => jp.id !== projectId);
+      setJoinedProjects(nextJoinedProjects);
+      const selectedBelongsToLeft = Boolean(leftProject?.setlists.some((sl) => sl.id === selectedSetlistId));
+      if (selectedJoinedProjectId === projectId || selectedBelongsToLeft) {
+        setSelectedJoinedProjectId(null);
+        const nextSetlist = setlists[0] ?? joinedSetlists[0] ?? null;
+        setSelectedSetlistId(nextSetlist?.id ?? null);
+        setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+        if (!nextSetlist) {
+          setWorkspaceMode('songs');
+        }
+      }
+      setAuthUiError(null);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      const message = reason ? `${copy.leaveProjectError}\n\n${reason}` : copy.leaveProjectError;
+      setAuthUiError(message);
+      toast.error(message);
+    } finally {
+      setLeavingSharedProjectId(null);
+      setPendingLeaveSharedProjectId(null);
+    }
+  };
+
+  const requestLeaveSharedProject = (projectId: string) => {
+    if (leavingSharedProjectId) return;
+    setPendingLeaveSharedProjectId(projectId);
+  };
+
+  // Owner-only: kick a specific participant from a shared setlist/project, then
+  // refresh the participant list. Backed by the remove_shared_member RPC which
+  // re-checks can_write_library (RLS alone only allows self-leave).
+  const handleRemoveSharedMember = async (
+    resourceType: 'setlist' | 'project',
+    resourceId: string,
+    participant: ShareParticipant
+  ) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || removingMemberKey) return;
+    if (!window.confirm(copy.removeMemberConfirm)) return;
+    setRemovingMemberKey(`${resourceType}:${resourceId}:${participant.userId}`);
+    try {
+      await repository.removeSharedMember(resourceType, resourceId, participant.userId);
+      if (resourceType === 'setlist') {
+        await loadSetlistShareStatus(resourceId);
+      } else {
+        await loadProjectShareStatus(resourceId);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      toast.error(reason ? `${copy.removeMemberError}\n\n${reason}` : copy.removeMemberError);
+    } finally {
+      setRemovingMemberKey(null);
+    }
+  };
+
   const loadSetlistShareStatus = async (setlistId: string) => {
     const repository = cloudRepositoryRef.current;
     if (!repository) {
@@ -4493,6 +4564,12 @@ export default function App() {
       }
     }
 
+    // "Removed from a resource" notifications have nothing to open — the access
+    // is already gone — so just mark them read and stop here.
+    if (notification.type === 'access_removed') {
+      return;
+    }
+
     // The membership was created server-side, so reload joined data to make the
     // shared resource available before navigating to it.
     if (repository) {
@@ -4561,6 +4638,10 @@ export default function App() {
         open: copy.notificationOpen,
         sharedSetlist: copy.notificationSharedSetlist,
         sharedProject: copy.notificationSharedProject,
+        promoted: copy.notificationPromoted,
+        demoted: copy.notificationDemoted,
+        removedSetlist: copy.notificationRemovedSetlist,
+        removedProject: copy.notificationRemovedProject,
       }}
       onOpen={(notification) => void handleOpenNotification(notification)}
       onMarkAllRead={handleMarkAllNotificationsRead}
@@ -7972,7 +8053,8 @@ export default function App() {
   const renderShareParticipantList = (
     participants: ProjectShareStatus['participants'] | undefined,
     maxHeightClass: string,
-    onToggleManager?: (participant: ShareParticipant) => void
+    onToggleManager?: (participant: ShareParticipant) => void,
+    onRemove?: (participant: ShareParticipant) => void
   ) => (
     participants && participants.length ? (
       <div className={`mt-3 ${maxHeightClass} space-y-2 overflow-y-auto`}>
@@ -8005,6 +8087,17 @@ export default function App() {
                   : (isManager ? 'Manager (can edit key/order) — tap to make viewer' : 'Viewer — tap to make manager')}
               >
                 {language === 'zh' ? (isManager ? '管理員' : '唯讀') : (isManager ? 'Manager' : 'Viewer')}
+              </button>
+            ) : null}
+            {onRemove ? (
+              <button
+                type="button"
+                onClick={() => onRemove(participant)}
+                className="shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                title={copy.removeMember}
+                aria-label={`${copy.removeMember} ${participant.name || participant.email}`}
+              >
+                <UserMinus size={15} />
               </button>
             ) : null}
           </div>
@@ -8058,7 +8151,12 @@ export default function App() {
       </summary>
 
       <div className="mt-3 border-t border-gray-100 pt-3">
-        {renderShareParticipantList(selectedSetlistShareStatus?.participants, 'max-h-48')}
+        {renderShareParticipantList(
+          selectedSetlistShareStatus?.participants,
+          'max-h-48',
+          undefined,
+          selectedSetlist ? (participant) => { void handleRemoveSharedMember('setlist', selectedSetlist.id, participant); } : undefined
+        )}
 
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <button
@@ -8129,7 +8227,8 @@ export default function App() {
         {renderShareParticipantList(
           selectedProjectShareStatus?.participants,
           'max-h-48',
-          selectedProject ? (participant) => { void handleToggleProjectMemberRole(selectedProject.id, participant); } : undefined
+          selectedProject ? (participant) => { void handleToggleProjectMemberRole(selectedProject.id, participant); } : undefined,
+          selectedProject ? (participant) => { void handleRemoveSharedMember('project', selectedProject.id, participant); } : undefined
         )}
       </div>
     </details>
@@ -9037,14 +9136,47 @@ export default function App() {
             <div className="mt-0.5 text-xs font-medium text-gray-500">{setlistSongsWithSource.length} {copy.setlistItems}</div>
           </div>
           {isJoinedSetlist ? (
-            <button
-              type="button"
-              onClick={() => requestLeaveSharedSetlist(selectedSetlist.id)}
-              disabled={leavingSharedSetlistId === selectedSetlist.id}
-              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
-            >
-              {leavingSharedSetlistId === selectedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
-            </button>
+            <div ref={setlistActionsMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                title={language === 'zh' ? '歌單操作' : 'Setlist Actions'}
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {isSetlistActionsMenuOpen && (
+                <div className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                  {selectedSetlistJoinedProject ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSetlistActionsMenuOpen(false);
+                        requestLeaveSharedProject(selectedSetlistJoinedProject.id);
+                      }}
+                      disabled={leavingSharedProjectId === selectedSetlistJoinedProject.id}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <LogOut size={15} />
+                      {copy.leaveProject}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSetlistActionsMenuOpen(false);
+                        requestLeaveSharedSetlist(selectedSetlist.id);
+                      }}
+                      disabled={leavingSharedSetlistId === selectedSetlist.id}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <LogOut size={15} />
+                      {copy.leaveSetlist}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           ) : canEditSelectedSetlist ? (
             <div ref={setlistActionsMenuRef} className="relative">
               <button
@@ -9694,14 +9826,47 @@ export default function App() {
                             <div className="mt-0.5 text-xs font-medium text-gray-500">{setlistSongsWithSource.length} {copy.setlistItems}</div>
                           </div>
 	                          {isJoinedSetlist ? (
-	                            <button
-	                              type="button"
-	                              onClick={() => requestLeaveSharedSetlist(selectedSetlist.id)}
-	                              disabled={leavingSharedSetlistId === selectedSetlist.id}
-	                              className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
-	                            >
-	                              {leavingSharedSetlistId === selectedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
-	                            </button>
+	                            <div ref={setlistActionsMenuRef} className="relative">
+	                              <button
+	                                type="button"
+	                                onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
+	                                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+	                                title={language === 'zh' ? '歌單操作' : 'Setlist Actions'}
+	                              >
+	                                <MoreHorizontal size={16} />
+	                              </button>
+	                              {isSetlistActionsMenuOpen && (
+	                                <div className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+	                                  {selectedSetlistJoinedProject ? (
+	                                    <button
+	                                      type="button"
+	                                      onClick={() => {
+	                                        setIsSetlistActionsMenuOpen(false);
+	                                        requestLeaveSharedProject(selectedSetlistJoinedProject.id);
+	                                      }}
+	                                      disabled={leavingSharedProjectId === selectedSetlistJoinedProject.id}
+	                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+	                                    >
+	                                      <LogOut size={15} />
+	                                      {copy.leaveProject}
+	                                    </button>
+	                                  ) : (
+	                                    <button
+	                                      type="button"
+	                                      onClick={() => {
+	                                        setIsSetlistActionsMenuOpen(false);
+	                                        requestLeaveSharedSetlist(selectedSetlist.id);
+	                                      }}
+	                                      disabled={leavingSharedSetlistId === selectedSetlist.id}
+	                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+	                                    >
+	                                      <LogOut size={15} />
+	                                      {copy.leaveSetlist}
+	                                    </button>
+	                                  )}
+	                                </div>
+	                              )}
+	                            </div>
 	                          ) : canEditSelectedSetlist ? (
                           <div ref={setlistActionsMenuRef} className="relative">
                             <button
@@ -12565,6 +12730,45 @@ export default function App() {
                   className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
                 >
                   {leavingSharedSetlistId === pendingLeaveSharedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+        {pendingLeaveSharedProject && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+          >
+            <motion.div
+              initial={{ y: 12, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 8, opacity: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+            >
+              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.sharedWithMe}</div>
+              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{copy.leaveProjectConfirm}</h2>
+              <p className="mt-3 text-sm font-semibold text-gray-600">{pendingLeaveSharedProject.name || copy.untitledProject}</p>
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setPendingLeaveSharedProjectId(null)}
+                  disabled={Boolean(leavingSharedProjectId)}
+                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {copy.cancel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleLeaveSharedProject(pendingLeaveSharedProject.id)}
+                  disabled={leavingSharedProjectId === pendingLeaveSharedProject.id}
+                  className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {leavingSharedProjectId === pendingLeaveSharedProject.id ? copy.leavingProject : copy.leaveProject}
                 </button>
               </div>
             </motion.div>

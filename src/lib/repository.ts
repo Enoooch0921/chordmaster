@@ -222,6 +222,7 @@ export interface WorkspaceRepository {
   getProjectShareStatus(projectId: string): Promise<ProjectShareStatus>;
   revokeProjectSharing(projectId: string): Promise<void>;
   setProjectMemberRole(projectId: string, userId: string, role: ProjectMemberRole): Promise<void>;
+  removeSharedMember(resourceType: ShareResourceType, resourceId: string, userId: string): Promise<void>;
   setProjectSetlistSongKey(setlistSongId: string, key: string | null): Promise<void>;
   reorderProjectSetlist(setlistId: string, songIds: string[]): Promise<void>;
   saveCapoOverride(setlistSongId: string, capo: number | null): Promise<void>;
@@ -590,6 +591,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
     throw new Error('Please sign in to manage sharing.');
   },
   async setProjectMemberRole() {
+    throw new Error('Please sign in to manage project members.');
+  },
+  async removeSharedMember() {
     throw new Error('Please sign in to manage project members.');
   },
   async setProjectSetlistSongKey() {
@@ -1545,6 +1549,16 @@ export const createCloudRepository = (params: {
         p_project_id: projectId,
         p_user_id: userId,
         p_role: role
+      });
+      if (error) throw error;
+    },
+
+    async removeSharedMember(resourceType, resourceId, userId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('remove_shared_member', {
+        p_resource_type: resourceType,
+        p_resource_id: resourceId,
+        p_user_id: userId
       });
       if (error) throw error;
     },
