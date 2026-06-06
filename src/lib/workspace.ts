@@ -97,25 +97,6 @@ const normalizeChordTokens = (value: unknown) => {
   return [];
 };
 
-const normalizeLyricTokens = (value: unknown) => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const normalized = value.map((token) => (
-    typeof token === 'string'
-      ? token.replace(/\r\n?/g, '\n')
-      : ''
-  ));
-
-  let lastNonEmptyIndex = normalized.length - 1;
-  while (lastNonEmptyIndex >= 0 && normalized[lastNonEmptyIndex].trim() === '') {
-    lastNonEmptyIndex -= 1;
-  }
-
-  return normalized.slice(0, lastNonEmptyIndex + 1);
-};
-
 export const normalizeSongBars = <T extends Song>(song: T): T => {
   const originalKey = typeof song.originalKey === 'string' && VALID_KEYS.has(song.originalKey) ? song.originalKey as Key : 'C';
   const currentKey = typeof song.currentKey === 'string' && VALID_KEYS.has(song.currentKey) ? song.currentKey as Key : originalKey;
@@ -137,7 +118,6 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           ...safeBar,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
           chords: normalizeChordTokens(safeBar.chords),
-          lyrics: normalizeLyricTokens(safeBar.lyrics),
           timeSignature: normalizeOptionalText(safeBar.timeSignature),
           riff: normalizeOptionalText(safeBar.riff),
           rhythm: normalizeOptionalText(safeBar.rhythm),
@@ -184,7 +164,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
     useSectionColors: normalizeBoolean(song.useSectionColors),
     showNashvilleNumbers: normalizeBoolean(song.showNashvilleNumbers),
     showAbsoluteJianpu: normalizeBoolean(song.showAbsoluteJianpu) ?? false,
-    showLyrics: normalizeBoolean(song.showLyrics) ?? false,
+    jianpuInputAbsolute: normalizeBoolean(song.jianpuInputAbsolute) ?? false,
     barNumberMode: typeof song.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(song.barNumberMode) ? song.barNumberMode : 'none',
     nashvilleFontPreset: typeof song.nashvilleFontPreset === 'string' && VALID_NASHVILLE_FONT_PRESETS.has(song.nashvilleFontPreset)
       ? song.nashvilleFontPreset
@@ -299,7 +279,6 @@ export const normalizeStoredSetlist = (
     id: setlistId,
     name: normalizeText(setlist.name, `Setlist ${index + 1}`),
     displayMode: normalizeSetlistDisplayMode(setlist.displayMode),
-    showLyrics: normalizeBoolean(setlist.showLyrics) ?? false,
     createdBy: normalizeOptionalText(setlist.createdBy),
     updatedBy: normalizeOptionalText(setlist.updatedBy),
     createdAt: typeof setlist.createdAt === 'number' && Number.isFinite(setlist.createdAt) ? setlist.createdAt : Date.now(),

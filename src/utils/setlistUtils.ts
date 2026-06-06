@@ -69,7 +69,6 @@ export const applySetlistSongOverrides = (song: Song, setlist: Setlist, setlistS
     capo: resolveSetlistSongCapo(setlistSong, song, guitaristMode),
     showNashvilleNumbers: setlist.displayMode === 'nashville-number-system',
     showAbsoluteJianpu: setlist.displayMode === 'chord-fixed-key',
-    showLyrics: setlist.showLyrics,
     sections: orderedSections
   };
 };

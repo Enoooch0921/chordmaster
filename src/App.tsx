@@ -39,6 +39,7 @@ import {
 } from './types';
 import { ALL_KEYS, getPlayKey, getSuggestedGuitarCapo, getTransposeOffset, normalizeKeySpelling, transposeKeyPreferFlats, transposeKeyWithPreference } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
+import { convertAbsoluteJianpuToRelativeNotation, convertRelativeJianpuToAbsoluteNotation } from './utils/jianpuUtils';
 import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
 import { useThemeMode } from './hooks/useThemeMode';
 import { useToast } from './components/Toast';
@@ -47,7 +48,8 @@ import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
 import ChordSheet from './components/ChordSheet';
-import LyricsEditor from './components/LyricsEditor';
+import LyricsDocEditor from './components/LyricsDocEditor';
+import LyricsSheet from './components/LyricsSheet';
 import SongEditor from './components/SongEditor';
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
@@ -93,6 +95,149 @@ const PHONE_VIEWPORT_BREAKPOINT = 640;
 const SETLIST_SWIPE_AXIS_LOCK_PX = 6;
 const SETLIST_SWIPE_REVEAL_PX = 80;
 const SETLIST_SWIPE_OPEN_THRESHOLD_PX = 10;
+
+// Shared swipe-to-reveal engine used by both the setlist rows and the project
+// rows so the two lists behave identically (right swipe → archive, left swipe →
+// delete, iOS-style hysteresis, mouse drag on the web). A controller is built
+// per render from the caller's ref + state setters so its closures always see
+// the latest open/dragging state, mirroring inline handlers.
+type SwipeGestureState = {
+  id: string;
+  x: number;
+  y: number;
+  axis: 'h' | 'v' | null;
+  latestDx: number;
+  baseOffset: number;
+  latestOffset: number;
+};
+
+type SwipeControllerConfig = {
+  ref: React.MutableRefObject<SwipeGestureState | null>;
+  handledRef: React.MutableRefObject<boolean>;
+  openId: string | null;
+  openAction: 'delete' | 'archive' | null;
+  setDragging: React.Dispatch<React.SetStateAction<{ id: string; dx: number } | null>>;
+  setOpen: (next: { id: string; action: 'delete' | 'archive' } | null) => void;
+  canArchive: (id: string) => boolean;
+};
+
+const createSwipeController = (config: SwipeControllerConfig) => {
+  // Carry over the row's current open offset so dragging from an open row can
+  // pull it closed instead of jumping the transform back to 0. Delete lives on
+  // the right (row translated left → negative offset); archive on the left.
+  const begin = (id: string, clientX: number, clientY: number) => {
+    const baseOffset = config.openId === id
+      ? (config.openAction === 'delete' ? -SETLIST_SWIPE_REVEAL_PX : SETLIST_SWIPE_REVEAL_PX)
+      : 0;
+    config.ref.current = { id, x: clientX, y: clientY, axis: null, latestDx: 0, baseOffset, latestOffset: baseOffset };
+    config.handledRef.current = false;
+  };
+
+  // Returns the locked axis ('h' once it is a horizontal swipe) so the mouse
+  // pointer handler knows when to capture the pointer and suppress selection.
+  const update = (clientX: number, clientY: number): 'h' | 'v' | null => {
+    const start = config.ref.current;
+    if (!start) return null;
+    const dx = clientX - start.x;
+    const dy = clientY - start.y;
+    if (start.axis === null) {
+      if (Math.abs(dx) < SETLIST_SWIPE_AXIS_LOCK_PX && Math.abs(dy) < SETLIST_SWIPE_AXIS_LOCK_PX) return null;
+      start.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+      // Past the lock threshold, treat as a deliberate swipe so the follow-up
+      // tap doesn't fall through to selecting the row.
+      if (start.axis === 'h') config.handledRef.current = true;
+    }
+    if (start.axis !== 'h') return start.axis;
+    // Neutral rows can travel either direction; an already-open row only swings
+    // back toward 0 so a single gesture can't tear through one action into the other.
+    const candidate = start.baseOffset + dx;
+    const min = start.baseOffset === SETLIST_SWIPE_REVEAL_PX ? 0 : -SETLIST_SWIPE_REVEAL_PX;
+    const max = start.baseOffset === -SETLIST_SWIPE_REVEAL_PX ? 0 : SETLIST_SWIPE_REVEAL_PX;
+    const offset = Math.max(min, Math.min(max, candidate));
+    start.latestDx = dx;
+    start.latestOffset = offset;
+    config.setDragging((current) => (
+      current && current.id === start.id && current.dx === offset ? current : { id: start.id, dx: offset }
+    ));
+    return 'h';
+  };
+
+  // Commits the final action. Returns true when a horizontal swipe was handled
+  // (so the caller can preventDefault and suppress the trailing click).
+  const commit = (id: string): boolean => {
+    const start = config.ref.current;
+    config.ref.current = null;
+    config.setDragging(null);
+    if (!start || start.id !== id) return false;
+    if (start.axis !== 'h') { config.handledRef.current = false; return false; }
+    // iOS-style hysteresis. From neutral: left past threshold → reveal delete,
+    // right past threshold → reveal archive. From an open row: nudging back past
+    // the threshold toward 0 closes it; anything smaller stays open.
+    const offset = start.latestOffset;
+    const movedFromBase = offset - start.baseOffset;
+    const wasOpen = start.baseOffset !== 0;
+    if (wasOpen) {
+      const closingNudge = start.baseOffset < 0 ? movedFromBase : -movedFromBase;
+      if (closingNudge > SETLIST_SWIPE_OPEN_THRESHOLD_PX) config.setOpen(null);
+      else config.setOpen({ id, action: start.baseOffset < 0 ? 'delete' : 'archive' });
+    } else if (offset <= -SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
+      config.setOpen({ id, action: 'delete' });
+    } else if (offset >= SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
+      if (config.canArchive(id)) config.setOpen({ id, action: 'archive' });
+      else config.setOpen(null);
+    } else {
+      config.setOpen(null);
+    }
+    return true;
+  };
+
+  const reset = () => {
+    config.ref.current = null;
+    config.handledRef.current = false;
+    config.setDragging(null);
+  };
+
+  const touchStart = (id: string, event: React.TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    begin(id, touch.clientX, touch.clientY);
+  };
+  const touchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    update(touch.clientX, touch.clientY);
+  };
+  const touchEnd = (id: string, event: React.TouchEvent<HTMLDivElement>) => {
+    if (commit(id)) event.preventDefault();
+  };
+
+  // Mouse-only pointer handlers bring the same swipe to the web. Touch input
+  // keeps flowing through the touch handlers, so these bail for non-mouse
+  // pointers to avoid double-driving the gesture on touchscreens.
+  const pointerDown = (id: string, event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    begin(id, event.clientX, event.clientY);
+  };
+  const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'mouse' || !config.ref.current) return;
+    const axis = update(event.clientX, event.clientY);
+    if (axis === 'h') {
+      // Capture the pointer so the drag keeps tracking if the cursor leaves the
+      // row, and stop the browser from selecting the row's text.
+      if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
+        try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* noop */ }
+      }
+      event.preventDefault();
+    }
+  };
+  const pointerEnd = (id: string, event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'mouse' || !config.ref.current) return;
+    commit(id);
+  };
+
+  return { begin, update, commit, reset, touchStart, touchMove, touchEnd, pointerDown, pointerMove, pointerEnd };
+};
+
 const SIDEBAR_OVERLAY_BREAKPOINT = 1280;
 const SPLIT_EDITOR_BREAKPOINT = 1360;
 // User-draggable editor/preview split bounds (desktop split view only).
@@ -315,7 +460,6 @@ type DesktopSetlistPanelView = 'projects' | 'list' | 'detail' | 'addSongs';
 type SetlistSortMode = 'updated-desc' | 'created-desc' | 'name-asc';
 interface JoinedSetlistDisplayPreference {
   displayMode?: SetlistDisplayMode;
-  showLyrics?: boolean;
   barNumberMode?: BarNumberMode;
 }
 
@@ -380,8 +524,7 @@ const buildPdfFileName = (song: Song) => {
     keyPart,
     ...(capoValue > 0 ? [`Capo${capoValue}`] : []),
     chartType,
-    doModePart,
-    ...(song.showLyrics ? ['歌詞'] : [])
+    doModePart
   ];
 
   return nameParts.join('_');
@@ -404,8 +547,7 @@ const buildSetlistPdfFileName = (setlist: Setlist) => {
   const displayModeLabel = getSetlistPdfDisplayModeLabel(setlist.displayMode);
   const nameParts = [
     title,
-    displayModeLabel,
-    ...(setlist.showLyrics ? ['歌詞'] : [])
+    displayModeLabel
   ];
 
   return nameParts.join('_');
@@ -695,25 +837,6 @@ const normalizeChordTokens = (value: unknown) => {
   return [];
 };
 
-const normalizeLyricTokens = (value: unknown) => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const normalized = value.map((token) => (
-    typeof token === 'string'
-      ? token.replace(/\r\n?/g, '\n')
-      : ''
-  ));
-
-  let lastNonEmptyIndex = normalized.length - 1;
-  while (lastNonEmptyIndex >= 0 && normalized[lastNonEmptyIndex].trim() === '') {
-    lastNonEmptyIndex -= 1;
-  }
-
-  return normalized.slice(0, lastNonEmptyIndex + 1);
-};
-
 const formatSongLibraryCredits = (song: Song) => {
   const lyricist = song.lyricist?.trim();
   const composer = song.composer?.trim();
@@ -757,7 +880,6 @@ const INITIAL_SONG: Song = {
   originalKey: "E",
   currentKey: "E",
   showAbsoluteJianpu: false,
-  showLyrics: false,
   tempo: 74,
   timeSignature: "4/4",
   barNumberMode: 'none',
@@ -900,7 +1022,6 @@ const EMPTY_LIBRARY_PREVIEW_SONG: StoredSong = {
   currentKey: 'C',
   timeSignature: '4/4',
   showAbsoluteJianpu: false,
-  showLyrics: false,
   sections: [],
   updatedAt: 0
 };
@@ -936,6 +1057,43 @@ interface PreviewPinchState {
 }
 
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+
+// Switching the jianpu input mode keeps the on-screen numbers identical and just
+// reinterprets them in the new mode (the user's "keep numbers" choice). Storage is
+// always relative, so we rewrite every riff using each section's sounding (play)
+// key — the same key the editor/chart use to render absolute jianpu — so the
+// displayed digits stay put while the stored pitches shift to the newly intended
+// reading. Fully reversible: switching back (or Undo) restores the original riffs.
+const reinterpretSongJianpuInput = (song: Song, toAbsolute: boolean): Song => {
+  const capo = song.capo || 0;
+  const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
+
+  // Written key in effect at each section (mirrors getSectionKeyStates' activeKeys).
+  let writtenKey = song.originalKey;
+  const sectionPlayKeys = song.sections.map((section) => {
+    if (section.keyChangeTo) writtenKey = section.keyChangeTo;
+    return getPlayKey(transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey), capo);
+  });
+  const pickupPlayKey = getPlayKey(transposeKeyWithPreference(song.originalKey, globalKeyShift, song.currentKey), capo);
+
+  const rewrite = (riff: string | undefined, key: Key): string | undefined => {
+    if (!riff?.trim()) return riff;
+    return toAbsolute
+      ? convertAbsoluteJianpuToRelativeNotation(riff, key)
+      : convertRelativeJianpuToAbsoluteNotation(riff, key);
+  };
+
+  return {
+    ...song,
+    pickup: song.pickup ? { ...song.pickup, riff: rewrite(song.pickup.riff, pickupPlayKey) } : song.pickup,
+    sections: song.sections.map((section, sIdx) => ({
+      ...section,
+      bars: section.bars.map((bar) => (
+        bar.riff?.trim() ? { ...bar, riff: rewrite(bar.riff, sectionPlayKeys[sIdx]) } : bar
+      ))
+    }))
+  };
+};
 
 const inactiveSetlistShareStatus: SetlistShareStatus = {
   activeToken: null,
@@ -974,7 +1132,6 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
           ...safeBar,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
           chords: normalizeChordTokens(safeBar.chords),
-          lyrics: normalizeLyricTokens(safeBar.lyrics),
           timeSignature: normalizeOptionalText(safeBar.timeSignature),
           riff: normalizeOptionalText(safeBar.riff),
           rhythm: normalizeOptionalText(safeBar.rhythm),
@@ -1021,7 +1178,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
     useSectionColors: normalizeBoolean(song.useSectionColors),
     showNashvilleNumbers: normalizeBoolean(song.showNashvilleNumbers),
     showAbsoluteJianpu: normalizeBoolean(song.showAbsoluteJianpu) ?? false,
-    showLyrics: normalizeBoolean(song.showLyrics) ?? false,
+    jianpuInputAbsolute: normalizeBoolean(song.jianpuInputAbsolute) ?? false,
     barNumberMode: typeof song.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(song.barNumberMode) ? song.barNumberMode : 'none',
     nashvilleFontPreset: typeof song.nashvilleFontPreset === 'string' && VALID_NASHVILLE_FONT_PRESETS.has(song.nashvilleFontPreset)
       ? song.nashvilleFontPreset
@@ -1143,7 +1300,6 @@ const normalizeStoredSetlist = (setlist: Partial<Setlist> & Record<string, unkno
     id: setlistId,
     name: normalizeText(setlist.name, `Setlist ${index + 1}`),
     displayMode: normalizeSetlistDisplayMode(setlist.displayMode),
-    showLyrics: normalizeBoolean(setlist.showLyrics) ?? false,
     createdAt: typeof setlist.createdAt === 'number' && Number.isFinite(setlist.createdAt) ? setlist.createdAt : Date.now(),
     updatedAt: typeof setlist.updatedAt === 'number' && Number.isFinite(setlist.updatedAt) ? setlist.updatedAt : Date.now(),
     archived: normalizeBoolean(setlist.archived) ?? false,
@@ -1205,7 +1361,6 @@ const createEmptySong = (title: string): StoredSong =>
     originalKey: 'C',
     currentKey: 'C',
     showAbsoluteJianpu: false,
-    showLyrics: false,
     tempo: 120,
     timeSignature: '4/4',
     barNumberMode: 'none',
@@ -1531,9 +1686,6 @@ const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisp
           if (typeof preference.displayMode === 'string' && VALID_SETLIST_DISPLAY_MODES.has(preference.displayMode)) {
             normalized.displayMode = preference.displayMode as SetlistDisplayMode;
           }
-          if (typeof preference.showLyrics === 'boolean') {
-            normalized.showLyrics = preference.showLyrics;
-          }
           if (typeof preference.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(preference.barNumberMode)) {
             normalized.barNumberMode = preference.barNumberMode as BarNumberMode;
           }
@@ -1780,6 +1932,8 @@ export default function App() {
   );
   const [mobileSwipeSetlist, setMobileSwipeSetlist] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
   const [draggingSetlist, setDraggingSetlist] = useState<{ id: string; dx: number } | null>(null);
+  const [mobileSwipeProject, setMobileSwipeProject] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
+  const [draggingProject, setDraggingProject] = useState<{ id: string; dx: number } | null>(null);
   const [draggingSetlistSongId, setDraggingSetlistSongId] = useState<string | null>(null);
   const [dragOverSetlistSongId, setDragOverSetlistSongId] = useState<string | null>(null);
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
@@ -1834,16 +1988,10 @@ export default function App() {
   const importLibraryInputRef = useRef<HTMLInputElement>(null);
   const googleSignInRef = useRef<HTMLDivElement>(null);
   const googleIdentityInitializedRef = useRef(false);
-  const mobileSetlistSwipeRef = useRef<{
-    id: string;
-    x: number;
-    y: number;
-    axis: 'h' | 'v' | null;
-    latestDx: number;
-    baseOffset: number;
-    latestOffset: number;
-  } | null>(null);
+  const mobileSetlistSwipeRef = useRef<SwipeGestureState | null>(null);
   const mobileSetlistSwipeHandledRef = useRef(false);
+  const mobileProjectSwipeRef = useRef<SwipeGestureState | null>(null);
+  const mobileProjectSwipeHandledRef = useRef(false);
   const mobileLongPressRef = useRef<{ kind: 'song' | 'setlist'; id: string; x: number; y: number } | null>(null);
   const mobileLongPressTimerRef = useRef<number | null>(null);
   const mobileLongPressTriggeredRef = useRef(false);
@@ -2080,10 +2228,7 @@ export default function App() {
         ...selectedSetlist,
         displayMode: isJoinedSetlist
           ? joinedSetlistDisplayPreference.displayMode ?? selectedSetlist.displayMode
-          : selectedSetlist.displayMode,
-        showLyrics: isJoinedSetlist
-          ? joinedSetlistDisplayPreference.showLyrics ?? selectedSetlist.showLyrics
-          : selectedSetlist.showLyrics
+          : selectedSetlist.displayMode
       }
     : null;
   const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
@@ -2714,13 +2859,10 @@ export default function App() {
   }, [activeBar, activeEditorSong, activeSectionId]);
 
   useEffect(() => {
-    if (isSetlistMode && effectiveSelectedSetlist) {
-      setIsLyricsMode(effectiveSelectedSetlist.showLyrics);
-      return;
-    }
-
-    setIsLyricsMode(song?.showLyrics ?? false);
-  }, [effectiveSelectedSetlist?.id, effectiveSelectedSetlist?.showLyrics, isSetlistMode, song?.id, song?.showLyrics]);
+    // The lyrics formatter is a pure local view toggle now; exit it whenever the
+    // active song or setlist changes so we never land on it unexpectedly.
+    setIsLyricsMode(false);
+  }, [effectiveSelectedSetlist?.id, isSetlistMode, song?.id]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -3467,32 +3609,8 @@ export default function App() {
   };
 
   const handleToggleLyricsMode = () => {
-    if (isSetlistMode) {
-      const nextLyricsMode = !isLyricsMode;
-      setIsLyricsMode(nextLyricsMode);
-
-      if (selectedSetlist) {
-        if (isJoinedSetlist) {
-          handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { showLyrics: nextLyricsMode });
-        } else {
-          handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextLyricsMode });
-        }
-      }
-
-      return;
-    }
-
-    if (!song) {
-      return;
-    }
-
-    const nextLyricsMode = !isLyricsMode;
-    setIsLyricsMode(nextLyricsMode);
-
-    handleSongChange({
-      ...song,
-      showLyrics: nextLyricsMode
-    });
+    // Pure local view toggle between the chord chart and the lyrics formatter.
+    setIsLyricsMode((current) => !current);
   };
 
   React.useEffect(() => {
@@ -3730,7 +3848,6 @@ export default function App() {
       id: createSetlistId(),
       name: language === 'zh' ? `服事歌單 ${setlists.length + 1}` : `Service Setlist ${setlists.length + 1}`,
       displayMode: 'chord-movable-key',
-      showLyrics: false,
       createdBy: authenticatedUser?.id,
       updatedBy: authenticatedUser?.id,
       createdAt: now,
@@ -4480,7 +4597,7 @@ export default function App() {
     }));
   };
 
-  const handleSetlistDisplaySettingsChange = (setlistId: string, updates: Partial<Pick<Setlist, 'displayMode' | 'showLyrics'>>) => {
+  const handleSetlistDisplaySettingsChange = (setlistId: string, updates: Partial<Pick<Setlist, 'displayMode'>>) => {
     if (!canEditSelectedSetlist) {
       return;
     }
@@ -4660,115 +4777,43 @@ export default function App() {
     mobileLongPressRef.current = null;
   };
 
-  const handleMobileSetlistTouchStart = (setlistId: string, event: React.TouchEvent<HTMLDivElement>) => {
-    const touch = event.touches[0];
-    if (!touch) {
-      return;
+  // Setlist + project swipe-to-reveal share one engine (see createSwipeController)
+  // so both lists behave identically. Each controller is rebuilt per render so
+  // its closures read the latest open/dragging state.
+  const setlistSwipe = createSwipeController({
+    ref: mobileSetlistSwipeRef,
+    handledRef: mobileSetlistSwipeHandledRef,
+    openId: mobileSwipeSetlist?.id ?? null,
+    openAction: mobileSwipeSetlist?.action ?? null,
+    setDragging: setDraggingSetlist,
+    setOpen: setMobileSwipeSetlist,
+    canArchive: (id) => {
+      const target = setlists.find((item) => item.id === id);
+      return Boolean(target && canManageSetlist(target));
     }
+  });
 
-    // Carry over the card's current open offset so dragging from an open card
-    // can pull it closed, instead of jumping the transform back to 0. Delete
-    // lives on the right (card translated left → negative offset); archive on
-    // the left (card translated right → positive offset).
-    const baseOffset = mobileSwipeSetlist?.id === setlistId
-      ? (mobileSwipeSetlist.action === 'delete' ? -SETLIST_SWIPE_REVEAL_PX : SETLIST_SWIPE_REVEAL_PX)
-      : 0;
-    mobileSetlistSwipeRef.current = {
-      id: setlistId,
-      x: touch.clientX,
-      y: touch.clientY,
-      axis: null,
-      latestDx: 0,
-      baseOffset,
-      latestOffset: baseOffset
-    };
-    mobileSetlistSwipeHandledRef.current = false;
-  };
+  // Preserve the handler names the setlist JSX already wires up.
+  const handleMobileSetlistTouchStart = setlistSwipe.touchStart;
+  const handleMobileSetlistTouchMove = setlistSwipe.touchMove;
+  const handleMobileSetlistTouchEnd = setlistSwipe.touchEnd;
+  const handleSetlistMousePointerDown = setlistSwipe.pointerDown;
+  const handleSetlistMousePointerMove = setlistSwipe.pointerMove;
+  const handleSetlistMousePointerEnd = setlistSwipe.pointerEnd;
+  const resetSetlistSwipe = setlistSwipe.reset;
 
-  const handleMobileSetlistTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    const start = mobileSetlistSwipeRef.current;
-    if (!start) return;
-    const touch = event.touches[0];
-    if (!touch) return;
-
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-
-    if (start.axis === null) {
-      if (Math.abs(dx) < SETLIST_SWIPE_AXIS_LOCK_PX && Math.abs(dy) < SETLIST_SWIPE_AXIS_LOCK_PX) {
-        return;
-      }
-      start.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
-      if (start.axis === 'h') {
-        // Past the lock threshold, treat as a deliberate swipe so the follow-up
-        // tap doesn't fall through to selecting the setlist.
-        mobileSetlistSwipeHandledRef.current = true;
-      }
+  const projectSwipe = createSwipeController({
+    ref: mobileProjectSwipeRef,
+    handledRef: mobileProjectSwipeHandledRef,
+    openId: mobileSwipeProject?.id ?? null,
+    openAction: mobileSwipeProject?.action ?? null,
+    setDragging: setDraggingProject,
+    setOpen: setMobileSwipeProject,
+    canArchive: (id) => {
+      const target = projects.find((item) => item.id === id);
+      return Boolean(target && canManageProject(target));
     }
-
-    if (start.axis !== 'h') return;
-
-    // Clamp range depends on the card's current open state — neutral cards can
-    // travel either direction (delete on the right, archive on the left); a
-    // card that's already open only swings back toward 0 so you don't tear
-    // through one action and into the other in a single gesture.
-    const candidate = start.baseOffset + dx;
-    const min = start.baseOffset === SETLIST_SWIPE_REVEAL_PX ? 0 : -SETLIST_SWIPE_REVEAL_PX;
-    const max = start.baseOffset === -SETLIST_SWIPE_REVEAL_PX ? 0 : SETLIST_SWIPE_REVEAL_PX;
-    const offset = Math.max(min, Math.min(max, candidate));
-    start.latestDx = dx;
-    start.latestOffset = offset;
-    setDraggingSetlist((current) => (
-      current && current.id === start.id && current.dx === offset ? current : { id: start.id, dx: offset }
-    ));
-  };
-
-  const handleMobileSetlistTouchEnd = (setlistId: string, event: React.TouchEvent<HTMLDivElement>) => {
-    const start = mobileSetlistSwipeRef.current;
-    mobileSetlistSwipeRef.current = null;
-    setDraggingSetlist(null);
-
-    if (!start || start.id !== setlistId) {
-      return;
-    }
-
-    if (start.axis !== 'h') {
-      mobileSetlistSwipeHandledRef.current = false;
-      return;
-    }
-
-    // iOS-style hysteresis. From neutral: left past threshold → reveal delete,
-    // right past threshold → reveal archive. From an open card: moving the
-    // card back past the threshold toward 0 closes it; anything smaller stays
-    // open. Same-direction nudges from open state don't change the action.
-    const offset = start.latestOffset;
-    const movedFromBase = offset - start.baseOffset;
-    const wasOpen = start.baseOffset !== 0;
-
-    if (wasOpen) {
-      const closingNudge = start.baseOffset < 0 ? movedFromBase : -movedFromBase;
-      if (closingNudge > SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
-        setMobileSwipeSetlist(null);
-      } else {
-        setMobileSwipeSetlist({
-          id: setlistId,
-          action: start.baseOffset < 0 ? 'delete' : 'archive'
-        });
-      }
-    } else if (offset <= -SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
-      setMobileSwipeSetlist({ id: setlistId, action: 'delete' });
-    } else if (offset >= SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
-      const target = setlists.find((item) => item.id === setlistId);
-      if (target && canManageSetlist(target)) {
-        setMobileSwipeSetlist({ id: setlistId, action: 'archive' });
-      } else {
-        setMobileSwipeSetlist(null);
-      }
-    } else {
-      setMobileSwipeSetlist(null);
-    }
-    event.preventDefault();
-  };
+  });
 
   const handleAddSongToSetlist = (songId: string) => {
     if (!selectedSetlist) {
@@ -6986,6 +7031,10 @@ export default function App() {
       );
     }
 
+    if (isLyricsMode && song) {
+      return <LyricsSheet song={song} language={language} />;
+    }
+
     return (
       <ChordSheet
         song={song}
@@ -6999,7 +7048,7 @@ export default function App() {
         previewIdentity={song.id}
       />
     );
-  }, [activeBar, activeSectionId, canEditTeamSongs, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, hasSongs, highlightedSectionIds, isEditing, language, song]);
+  }, [activeBar, activeSectionId, canEditTeamSongs, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -7039,6 +7088,14 @@ export default function App() {
       return null;
     }
 
+    if (isLyricsMode) {
+      const selected = setlistPreviewSongs.find((entry) => entry.isSelected) ?? setlistPreviewSongs[0];
+      if (!selected) {
+        return null;
+      }
+      return <LyricsSheet song={selected.song} language={language} />;
+    }
+
     return (
       <div className="flex flex-col gap-8">
         {setlistPreviewSongs.map(({ item, isSelected, song: previewSong }) => (
@@ -7068,7 +7125,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activeSectionId, canEditSelectedSetlist, handleAddBarToSection, handleSetlistElementClick, highlightedSectionIds, isEditing, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activeSectionId, canEditSelectedSetlist, handleAddBarToSection, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -7840,7 +7897,6 @@ export default function App() {
           onKeyChange={isJoinedSetlist ? undefined : handleSetlistKeyChange}
           onCapoChange={handleSelectedSetlistCapoChange}
           displayMode={effectiveSelectedSetlist.displayMode}
-          showLyrics={effectiveSelectedSetlist.showLyrics}
           onDisplayModeChange={(mode) => {
             if (isJoinedSetlist) {
               handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { displayMode: mode });
@@ -7848,14 +7904,6 @@ export default function App() {
             }
 
             handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode });
-          }}
-          onShowLyricsChange={(nextShowLyrics) => {
-            if (isJoinedSetlist) {
-              handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { showLyrics: nextShowLyrics });
-              return;
-            }
-
-            handleSetlistDisplaySettingsChange(selectedSetlist.id, { showLyrics: nextShowLyrics });
           }}
           showReferenceFields={false}
         />
@@ -7867,23 +7915,12 @@ export default function App() {
           metadataSuggestions={metadataSuggestions}
           title={language === 'zh' ? '編輯歌曲' : 'Edit Song'}
           onChange={handleSongChange}
-          displayMode={
-            song.showNashvilleNumbers
-              ? 'nashville-number-system'
-              : song.showAbsoluteJianpu
-                ? 'chord-fixed-key'
-                : 'chord-movable-key'
-          }
-          showLyrics={song.showLyrics ?? false}
-          onDisplayModeChange={(mode) => handleSongChange({
-            ...song,
-            showNashvilleNumbers: mode === 'nashville-number-system',
-            showAbsoluteJianpu: mode === 'chord-fixed-key'
-          })}
-          onShowLyricsChange={(nextShowLyrics) => handleSongChange({
-            ...song,
-            showLyrics: nextShowLyrics
-          })}
+          jianpuInputAbsolute={song.jianpuInputAbsolute ?? false}
+          onJianpuInputAbsoluteChange={(value) => handleSongChange(
+            value === Boolean(song.jianpuInputAbsolute)
+              ? { ...song, jianpuInputAbsolute: value }
+              : reinterpretSongJianpuInput({ ...song, jianpuInputAbsolute: value }, value)
+          )}
         />
       ) : null;
 
@@ -8108,8 +8145,6 @@ export default function App() {
             </div>
             <div className="mt-1 truncate text-xs font-semibold text-indigo-700">
               {setlistDisplayModeOptions.find((option) => option.value === currentSetlistDisplayMode)?.label}
-              {' · '}
-              {effectiveSelectedSetlist.showLyrics ? (language === 'zh' ? '顯示歌詞' : 'Lyrics on') : (language === 'zh' ? '不顯示歌詞' : 'Lyrics off')}
             </div>
           </div>
           <ChevronRight size={16} className="shrink-0 text-indigo-400 transition-transform group-open:rotate-90" />
@@ -8133,30 +8168,15 @@ export default function App() {
               buttonClassName="min-w-0"
             />
 
-            <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-[96px_minmax(0,1fr)]">
-              <button
-                type="button"
-                onClick={() => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { showLyrics: !effectiveSelectedSetlist.showLyrics })}
-                className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border px-2 text-[11px] font-bold transition-colors ${
-                  effectiveSelectedSetlist.showLyrics
-                    ? 'border-amber-200 bg-amber-50 text-amber-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-amber-200 hover:bg-amber-50'
-                }`}
-              >
-                <FileText size={13} />
-                <span>{language === 'zh' ? '歌詞' : 'Lyrics'}</span>
-              </button>
-
-              <CompactSegmentedControl
-                value={currentSetlistBarNumberMode}
-                options={barNumberModeOptions}
-                onChange={(mode) => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { barNumberMode: mode })}
-                size="xs"
-                stretch
-                className="bg-white"
-                buttonClassName="min-w-0"
-              />
-            </div>
+            <CompactSegmentedControl
+              value={currentSetlistBarNumberMode}
+              options={barNumberModeOptions}
+              onChange={(mode) => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { barNumberMode: mode })}
+              size="xs"
+              stretch
+              className="bg-white"
+              buttonClassName="min-w-0"
+            />
           </div>
         </div>
       </details>
@@ -8182,30 +8202,15 @@ export default function App() {
           buttonClassName="min-w-0"
         />
 
-        <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-[96px_minmax(0,1fr)]">
-          <button
-            type="button"
-            onClick={() => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { showLyrics: !effectiveSelectedSetlist.showLyrics })}
-            className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border px-2 text-[11px] font-bold transition-colors ${
-              effectiveSelectedSetlist.showLyrics
-                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                : 'border-gray-200 bg-white text-gray-600 hover:border-amber-200 hover:bg-amber-50'
-            }`}
-          >
-            <FileText size={13} />
-            <span>{language === 'zh' ? '歌詞' : 'Lyrics'}</span>
-          </button>
-
-          <CompactSegmentedControl
-            value={currentSetlistBarNumberMode}
-            options={barNumberModeOptions}
-            onChange={(mode) => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { barNumberMode: mode })}
-            size="xs"
-            stretch
-            className="bg-white"
-            buttonClassName="min-w-0"
-          />
-        </div>
+        <CompactSegmentedControl
+          value={currentSetlistBarNumberMode}
+          options={barNumberModeOptions}
+          onChange={(mode) => handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { barNumberMode: mode })}
+          size="xs"
+          stretch
+          className="bg-white"
+          buttonClassName="min-w-0"
+        />
       </div>
     </section>
     )
@@ -8498,6 +8503,119 @@ export default function App() {
     const count = isUngrouped ? ungroupedSetlistCount : (project ? projectSetlistCount(project.id) : 0);
     const archived = !isUngrouped && Boolean(project?.archived);
     const canManage = project ? canManageProject(project) : false;
+
+    // Manageable projects get the same swipe-to-archive/delete row as setlists:
+    // right swipe → archive (indigo, left), left swipe → delete (rose, right).
+    // Rename stays as a pencil inside the foreground card (no swipe equivalent).
+    if (project && !isUngrouped && canManage) {
+      const swipeAction = mobileSwipeProject?.id === project.id ? mobileSwipeProject.action : null;
+      const dragOffset = draggingProject?.id === project.id ? draggingProject.dx : null;
+      const translateClass = dragOffset !== null
+        ? ''
+        : swipeAction === 'delete' ? '-translate-x-20' : swipeAction === 'archive' ? 'translate-x-20' : 'translate-x-0';
+      const baseStyle = archived ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white';
+      return (
+        <div key={project.id} className="relative overflow-hidden rounded-2xl">
+          <div className="absolute inset-y-0 left-0 flex items-stretch">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleSetProjectArchived(project.id, !project.archived);
+              }}
+              className="flex w-20 items-center justify-center rounded-l-2xl bg-indigo-500 px-3 text-center text-sm font-bold leading-tight text-white"
+              aria-label={`${project.archived ? copy.unarchiveProject : copy.archiveProject} ${name}`}
+              title={project.archived ? copy.unarchiveProject : copy.archiveProject}
+            >
+              {project.archived ? copy.unarchiveSetlist : copy.archiveSetlist}
+            </button>
+          </div>
+          <div className="absolute inset-y-0 right-0 flex items-stretch">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleDeleteProject(project.id);
+              }}
+              className="flex w-20 items-center justify-center rounded-r-2xl bg-rose-500 px-3 text-sm font-bold text-white"
+              aria-label={`${copy.delete} ${name}`}
+              title={copy.delete}
+            >
+              {copy.delete}
+            </button>
+          </div>
+          <div
+            onTouchStart={(event) => projectSwipe.touchStart(project.id, event)}
+            onTouchMove={projectSwipe.touchMove}
+            onTouchEnd={(event) => projectSwipe.touchEnd(project.id, event)}
+            onTouchCancel={projectSwipe.reset}
+            onPointerDown={(event) => projectSwipe.pointerDown(project.id, event)}
+            onPointerMove={projectSwipe.pointerMove}
+            onPointerUp={(event) => projectSwipe.pointerEnd(project.id, event)}
+            onPointerCancel={projectSwipe.reset}
+            style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
+            className={`relative flex select-none items-start gap-2 border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (mobileProjectSwipeHandledRef.current) {
+                  mobileProjectSwipeHandledRef.current = false;
+                  return;
+                }
+                if (swipeAction) {
+                  setMobileSwipeProject(null);
+                  return;
+                }
+                handleSelectProject(project.id);
+              }}
+              className="flex min-w-0 flex-1 items-start gap-2 text-left"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="min-w-0 truncate text-sm font-bold text-gray-900">{name}</div>
+                  {archived && (
+                    <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">{copy.archivedProjectBadge}</span>
+                  )}
+                </div>
+                <div className="mt-1 text-xs text-gray-500">{count} {copy.setlists}</div>
+              </div>
+            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const nextName = window.prompt(copy.renameProjectPrompt, project.name);
+                  if (nextName !== null) handleRenameProject(project.id, nextName);
+                }}
+                className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                title={copy.renameProject}
+                aria-label={copy.renameProject}
+              >
+                <Edit3 size={15} />
+              </button>
+              {project.archived && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleSetProjectArchived(project.id, false);
+                  }}
+                  className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                  title={copy.unarchiveProject}
+                  aria-label={copy.unarchiveProject}
+                >
+                  <ArchiveRestore size={15} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Ungrouped pseudo-project and non-manageable projects: plain, non-swipe card.
     return (
       <div
         key={projectId ?? '__ungrouped__'}
@@ -8517,49 +8635,6 @@ export default function App() {
             </div>
             <div className="mt-1 text-xs text-gray-500">{count} {copy.setlists}</div>
           </button>
-          {!isUngrouped && project && canManage && (
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  const nextName = window.prompt(copy.renameProjectPrompt, project.name);
-                  if (nextName !== null) handleRenameProject(project.id, nextName);
-                }}
-                className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
-                title={copy.renameProject}
-                aria-label={copy.renameProject}
-              >
-                <Edit3 size={15} />
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleSetProjectArchived(project.id, !project.archived);
-                }}
-                className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
-                title={project.archived ? copy.unarchiveProject : copy.archiveProject}
-                aria-label={project.archived ? copy.unarchiveProject : copy.archiveProject}
-              >
-                {project.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
-              </button>
-              {project.archived && (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleDeleteProject(project.id);
-                  }}
-                  className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
-                  title={copy.delete}
-                  aria-label={copy.delete}
-                >
-                  <Trash2 size={15} />
-                </button>
-              )}
-            </div>
-          )}
         </div>
       </div>
     );
@@ -8802,13 +8877,13 @@ export default function App() {
                   onTouchStart={(event) => handleMobileSetlistTouchStart(item.id, event)}
                   onTouchMove={handleMobileSetlistTouchMove}
                   onTouchEnd={(event) => handleMobileSetlistTouchEnd(item.id, event)}
-                  onTouchCancel={() => {
-                    mobileSetlistSwipeRef.current = null;
-                    mobileSetlistSwipeHandledRef.current = false;
-                    setDraggingSetlist(null);
-                  }}
+                  onTouchCancel={resetSetlistSwipe}
+                  onPointerDown={(event) => handleSetlistMousePointerDown(item.id, event)}
+                  onPointerMove={handleSetlistMousePointerMove}
+                  onPointerUp={(event) => handleSetlistMousePointerEnd(item.id, event)}
+                  onPointerCancel={resetSetlistSwipe}
                   style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
-                  className={`relative flex items-start gap-2 rounded-2xl border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
+                  className={`relative flex select-none items-start gap-2 border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
                 >
                   <button
                     type="button"
@@ -9359,7 +9434,11 @@ export default function App() {
                   }
                 }}
                 className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
-                  isSidebarExpanded ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  isSidebarPinned
+                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200'
+                    : isSidebarExpanded
+                      ? 'bg-gray-900 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
                 title={isSidebarPinned ? copy.collapseSongList : copy.pinSongList}
               >
@@ -10110,13 +10189,15 @@ export default function App() {
                                     handleMobileSetlistTouchEnd(item.id, event);
                                   }}
                                   onTouchCancel={() => {
-                                    mobileSetlistSwipeRef.current = null;
                                     handleMobileLongPressEnd();
-                                    mobileSetlistSwipeHandledRef.current = false;
-                                    setDraggingSetlist(null);
+                                    resetSetlistSwipe();
                                   }}
+                                  onPointerDown={(event) => handleSetlistMousePointerDown(item.id, event)}
+                                  onPointerMove={handleSetlistMousePointerMove}
+                                  onPointerUp={(event) => handleSetlistMousePointerEnd(item.id, event)}
+                                  onPointerCancel={resetSetlistSwipe}
                                   style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
-                                  className={`relative flex items-start gap-2 rounded-2xl border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
+                                  className={`relative flex select-none items-start gap-2 border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
                                 >
                                   <button
                                     type="button"
@@ -11720,21 +11801,11 @@ export default function App() {
                       <div className="space-y-5">
                         {isPhoneViewport ? mobileMetadataSummaryCard : <div>{metadataPanelContent}</div>}
                         {isLyricsMode ? (
-                          <LyricsEditor
+                          <LyricsDocEditor
                             key={`${selectedSetlistSong.id}-lyrics`}
                             song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
                             language={language}
-                            onUndo={handleSetlistUndo}
-                            onRedo={handleSetlistRedo}
                             onChange={handleSetlistSongContentChange}
-                            activeSectionId={activeSectionId}
-                            onActiveSectionChange={setActiveSectionId}
-                            activeBar={activeBar}
-                            onActiveBarChange={setActiveBar}
-                            focusRequest={editorFocusRequest}
-                            onFocusRequestHandled={(requestId) => {
-                              setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
-                            }}
                           />
                         ) : (
                           <SongEditor
@@ -11774,21 +11845,11 @@ export default function App() {
                       <div className="space-y-5">
                         {isPhoneViewport ? mobileMetadataSummaryCard : metadataPanelContent}
                         {isLyricsMode ? (
-                          <LyricsEditor
+                          <LyricsDocEditor
                             key={`${song.id}-lyrics`}
                             song={song}
                             language={language}
-                            onUndo={handleUndo}
-                            onRedo={handleRedo}
                             onChange={handleSongChange}
-                            activeSectionId={activeSectionId}
-                            onActiveSectionChange={setActiveSectionId}
-                            activeBar={activeBar}
-                            onActiveBarChange={setActiveBar}
-                            focusRequest={editorFocusRequest}
-                            onFocusRequestHandled={(requestId) => {
-                              setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
-                            }}
                           />
                         ) : (
                           <SongEditor

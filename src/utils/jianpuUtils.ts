@@ -2,8 +2,20 @@ import { Key } from '../types';
 import { parseTimeSignature } from './rhythmUtils';
 
 export type JianpuDuration = 'quarter' | 'eighth' | 'sixteenth';
-export type JianpuOctave = 'low' | 'mid' | 'high';
+/**
+ * Signed octave shift relative to the middle octave: 0 = mid, +n = n octaves up,
+ * -n = n octaves down. Stored/rendered without a hard cap so fixed-do (absolute)
+ * charts can round-trip multiple octaves; the relative side is clamped to ±2 via
+ * `clampRelativeOctave` (see `absoluteJianpuPartsToRelative` and the editor).
+ */
+export type JianpuOctave = number;
 export type JianpuAccidental = '' | '#' | 'b';
+
+/** Relative jianpu notation shows at most 2 octave dots above/below a digit. */
+export const MAX_RELATIVE_OCTAVE_SHIFT = 2;
+
+export const clampRelativeOctave = (shift: number): JianpuOctave =>
+  Math.max(-MAX_RELATIVE_OCTAVE_SHIFT, Math.min(MAX_RELATIVE_OCTAVE_SHIFT, Math.trunc(shift)));
 
 export interface JianpuInputMode {
   duration: JianpuDuration;
@@ -112,10 +124,12 @@ const DURATION_MARKERS: Record<JianpuDuration, string> = {
 };
 
 function getOctaveFromParts(prefix: string, octaveMarks: string): JianpuOctave {
+  // Count the octave dots so multi-octave (absolute) notation survives parsing;
+  // relative clamping happens later, not here.
   const normalized = `${prefix === '+' ? "'" : prefix === '-' ? ',' : ''}${octaveMarks}`;
-  if (normalized.includes("'")) return 'high';
-  if (normalized.includes(',')) return 'low';
-  return 'mid';
+  const highs = (normalized.match(/'/g) ?? []).length;
+  const lows = (normalized.match(/,/g) ?? []).length;
+  return highs - lows;
 }
 
 function getDurationFromParts(durationMarks: string): JianpuDuration {
@@ -125,10 +139,8 @@ function getDurationFromParts(durationMarks: string): JianpuDuration {
 }
 
 function buildOctaveMarks(octave: JianpuOctave, pitch: string): string {
-  if (pitch === '0' || pitch === '-') return '';
-  if (octave === 'high') return "'";
-  if (octave === 'low') return ',';
-  return '';
+  // `octave` is the signed shift, so this is the same as the absolute builder.
+  return buildAbsoluteOctaveMarks(octave, pitch);
 }
 
 function buildAccidentalPrefix(accidental: string, pitch: string): string {
@@ -292,16 +304,102 @@ export function convertRelativeJianpuToAbsoluteNotation(notation: string | undef
       : note.accidental.includes('#')
         ? 1
         : 0;
-    const relativeOctaveShift = note.octave === 'high'
-      ? 12
-      : note.octave === 'low'
-        ? -12
-        : 0;
+    const relativeOctaveShift = note.octave * 12;
     const absoluteMidi = 60 + tonicSemitone + scaleOffset + accidentalOffset + relativeOctaveShift;
     const semitoneClass = ((absoluteMidi - 60) % 12 + 12) % 12;
     const absoluteOctaveShift = Math.floor((absoluteMidi - 60) / 12);
     const fixedDoNote = (preferFlats ? FIXED_DO_FLAT_MAP : FIXED_DO_SHARP_MAP)[semitoneClass];
     const replacement = `${note.slurStart ? '(' : ''}${fixedDoNote.accidental}${fixedDoNote.pitch}${buildAbsoluteOctaveMarks(absoluteOctaveShift, fixedDoNote.pitch)}${DURATION_MARKERS[note.duration]}${note.dotted ? '.' : ''}${note.slurEnd ? ')' : ''}`;
+
+    nextNotation = replaceJianpuRange(nextNotation, note.start, note.end, replacement);
+  });
+
+  return nextNotation;
+}
+
+/**
+ * Inverse of `convertRelativeJianpuToAbsoluteNotation` for a single keypad note.
+ *
+ * When the editor shows absolute (fixed-do, 1=C) jianpu, the number the user taps
+ * is an absolute pitch. Storage is always relative (movable-do), so we translate
+ * the tapped absolute pitch+accidental+octave back into the relative degree that
+ * renders as exactly that absolute note. Round-trips with the forward converter:
+ * the absolute display of the returned relative note equals what the user typed.
+ *
+ * Rests / sustains (`0`, `-`) carry no pitch and pass through untouched.
+ */
+export function absoluteJianpuPartsToRelative(
+  pitch: string,
+  accidental: JianpuAccidental,
+  octave: JianpuOctave,
+  key: Key
+): { pitch: string; accidental: JianpuAccidental; octave: JianpuOctave } {
+  if (!/^[1-7]$/.test(pitch)) {
+    return { pitch, accidental, octave };
+  }
+
+  const tonicSemitone = KEY_TO_SEMITONE_INDEX[key];
+  // Fixed-do uses the same major-scale offsets as movable-do, with 1 = C.
+  const absoluteScaleOffset = RELATIVE_MAJOR_SCALE_OFFSETS[pitch as keyof typeof RELATIVE_MAJOR_SCALE_OFFSETS];
+  const accidentalOffset = accidental === 'b' ? -1 : accidental === '#' ? 1 : 0;
+  const absoluteOctaveShift = octave * 12;
+
+  const relativeSemitone = absoluteScaleOffset + accidentalOffset + absoluteOctaveShift - tonicSemitone;
+  const relativeClass = ((relativeSemitone % 12) + 12) % 12;
+  const relativeOctaveShift = Math.floor(relativeSemitone / 12);
+
+  // Spell the relative degree per the user's accidental intent (# stays sharp,
+  // b stays flat), falling back to the key's preference for natural input.
+  const preferFlats = accidental === 'b'
+    ? true
+    : accidental === '#'
+      ? false
+      : FLAT_KEYS.has(key);
+  const relativeNote = (preferFlats ? FIXED_DO_FLAT_MAP : FIXED_DO_SHARP_MAP)[relativeClass];
+
+  // Relative notation shows at most ±2 octave dots; clamp the rare out-of-range case.
+  const relativeOctave = clampRelativeOctave(relativeOctaveShift);
+
+  return {
+    pitch: relativeNote.pitch,
+    accidental: relativeNote.accidental as JianpuAccidental,
+    octave: relativeOctave
+  };
+}
+
+// Whole-notation inverse of convertRelativeJianpuToAbsoluteNotation: read each
+// note as an absolute (fixed-do) pitch and rewrite it as the relative degree in
+// `key`, preserving placeholders, slurs, durations, and dots. Used when the user
+// flips the jianpu input mode and wants the on-screen numbers kept (reinterpreted)
+// rather than visually shifted.
+export function convertAbsoluteJianpuToRelativeNotation(notation: string | undefined, key: Key): string | undefined {
+  if (!notation?.trim() || notation.trim() === '-') {
+    return notation;
+  }
+
+  const noteRanges = findJianpuNoteRanges(notation);
+  if (noteRanges.length === 0) {
+    return notation;
+  }
+
+  let nextNotation = notation;
+
+  [...noteRanges].reverse().forEach((note) => {
+    if (!/^[1-7]$/.test(note.pitch)) {
+      return;
+    }
+
+    const accidental: JianpuAccidental = note.accidental.includes('b')
+      ? 'b'
+      : note.accidental.includes('#')
+        ? '#'
+        : '';
+    const relative = absoluteJianpuPartsToRelative(note.pitch, accidental, note.octave, key);
+    const replacement = rebuildJianpuNote(note, {
+      pitch: relative.pitch,
+      accidental: relative.accidental,
+      octave: relative.octave
+    });
 
     nextNotation = replaceJianpuRange(nextNotation, note.start, note.end, replacement);
   });

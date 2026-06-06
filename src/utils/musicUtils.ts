@@ -325,7 +325,49 @@ function transposeBassPreservingChordToneSpelling(
   return `${newRoot}${bassParsed.rest}`;
 }
 
-export function transposeChord(chord: string, offset: number, targetKey?: Key, isBass: boolean = false): string {
+// Respell a chord root after transposition so that its scale-degree spelling
+// intent (relative to the source key) is preserved. G#dim7 in G major is #1dim7,
+// so transposed to F it must stay #1dim7 → F#dim7, not the pitch-equivalent
+// Gbdim7 (which would read as b2dim7). The letter distance from the source key
+// to the root is kept identical against the target key, and only the accidental
+// is recomputed from the new pitch. Returns null (caller falls back to the
+// pitch-based spelling) for double accidentals or unparseable input.
+function transposeRootPreservingDegree(
+  root: string,
+  offset: number,
+  sourceKey: Key,
+  targetKey: Key
+): string | null {
+  const rootMatch = root.match(/^([A-G])([#b]?)$/);
+  const sourceKeyMatch = sourceKey.match(/^([A-G])/);
+  const targetKeyMatch = targetKey.match(/^([A-G])/);
+  if (!rootMatch || !sourceKeyMatch || !targetKeyMatch) return null;
+
+  const rootLetterIdx = NOTE_LETTERS.indexOf(rootMatch[1]);
+  const sourceKeyLetterIdx = NOTE_LETTERS.indexOf(sourceKeyMatch[1]);
+  const targetKeyLetterIdx = NOTE_LETTERS.indexOf(targetKeyMatch[1]);
+  if (rootLetterIdx === -1 || sourceKeyLetterIdx === -1 || targetKeyLetterIdx === -1) return null;
+
+  // Letter distance from the key root to the chord root (0 = tonic, 2 = a 3rd,
+  // 4 = a 5th, ...). This encodes the scale degree number we want to preserve.
+  const degreeDistance = (rootLetterIdx - sourceKeyLetterIdx + NOTE_LETTERS.length) % NOTE_LETTERS.length;
+  const newLetter = NOTE_LETTERS[(targetKeyLetterIdx + degreeDistance) % NOTE_LETTERS.length];
+  const naturalIdx = NATURAL_NOTE_INDEX[newLetter];
+
+  const rootIdx = getNoteIndex(root);
+  if (rootIdx === -1 || naturalIdx === undefined) return null;
+  const targetIdx = ((rootIdx + offset) % 12 + 12) % 12;
+
+  let accidental = ((targetIdx - naturalIdx) % 12 + 12) % 12;
+  if (accidental > 6) accidental -= 12;
+
+  if (accidental === -1) return `${newLetter}b`;
+  if (accidental === 0) return newLetter;
+  if (accidental === 1) return `${newLetter}#`;
+  return null; // double accidental — let the pitch-based spelling handle it
+}
+
+export function transposeChord(chord: string, offset: number, targetKey?: Key, isBass: boolean = false, sourceKey?: Key): string {
   if (!chord || chord === '%' || chord === '/') return chord;
   const normalizedOffset = ((offset % 12) + 12) % 12;
   if (normalizedOffset === 0 && !targetKey) {
@@ -336,16 +378,16 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key, i
   if (chord.includes('/')) {
     const [base, bass] = chord.split('/');
     if (!base && bass) {
-      return `/${transposeChord(bass, offset, targetKey, true)}`;
+      return `/${transposeChord(bass, offset, targetKey, true, sourceKey)}`;
     }
     if (base && bass) {
-      const newBase = transposeChord(base, offset, targetKey, false);
+      const newBase = transposeChord(base, offset, targetKey, false, sourceKey);
       // For a slash chord, the bass note's spelling should mirror its interval
       // letter-distance from the chord root rather than being forced into the
       // target key's degree spelling. E.g. Cm/Eb (Eb = minor 3rd of C, letter
       // distance 2) must stay Cm/Eb in G major — not be respelled as Cm/D#.
       const preservedBass = transposeBassPreservingChordToneSpelling(base, bass, newBase, offset);
-      const newBass = preservedBass ?? transposeChord(bass, offset, targetKey, true);
+      const newBass = preservedBass ?? transposeChord(bass, offset, targetKey, true, sourceKey);
       return `${newBase}/${newBass}`;
     }
   }
@@ -365,9 +407,16 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key, i
   const rootIndex = getNoteIndex(root);
   if (rootIndex === -1) return chord; // Not a valid note, return as is
 
-  const newRoot = targetKey
-    ? getNoteFromIndexForKey(rootIndex + offset, targetKey, isBass)
-    : getNoteFromIndex(rootIndex + offset, shouldPreferFlatsForChordRoot(root));
+  // When the source key is known, preserve the chord's scale-degree spelling
+  // (so #1 stays #1 and b2 stays b2 across the transposition). Otherwise fall
+  // back to the target key's diatonic spelling, or a raw enharmonic guess.
+  const degreePreservedRoot = sourceKey && targetKey
+    ? transposeRootPreservingDegree(root, offset, sourceKey, targetKey)
+    : null;
+  const newRoot = degreePreservedRoot
+    ?? (targetKey
+      ? getNoteFromIndexForKey(rootIndex + offset, targetKey, isBass)
+      : getNoteFromIndex(rootIndex + offset, shouldPreferFlatsForChordRoot(root)));
   return normalizeChordEnharmonic(newRoot + rest);
 }
 

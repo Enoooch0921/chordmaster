@@ -21,9 +21,12 @@ interface SongMetadataPanelProps {
   onKeyChange?: (key: Key) => void;
   onCapoChange?: (capo: number) => void;
   displayMode?: SetlistDisplayMode;
-  showLyrics?: boolean;
   onDisplayModeChange?: (mode: SetlistDisplayMode) => void;
-  onShowLyricsChange?: (showLyrics: boolean) => void;
+  // Song-library context: provide a jianpu *input* setting (固定/首調) in place of
+  // the display-mode control (which lives in the top-right toolbar there), and hide
+  // the Capo field (also available top-right). Absent for setlist instance settings.
+  jianpuInputAbsolute?: boolean;
+  onJianpuInputAbsoluteChange?: (value: boolean) => void;
   showReferenceFields?: boolean;
 }
 
@@ -290,9 +293,9 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   onKeyChange,
   onCapoChange,
   displayMode,
-  showLyrics,
   onDisplayModeChange,
-  onShowLyricsChange,
+  jianpuInputAbsolute,
+  onJianpuInputAbsoluteChange,
   showReferenceFields = true
 }) => {
   const copy = getUiCopy(language);
@@ -815,21 +818,31 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     </div>
   );
 
-  const showLyricsField = (
+  // In the song library, the panel offers a jianpu *input* setting (固定/首調)
+  // instead of a display control, and hides Capo — both live in the top-right
+  // toolbar there, so repeating them in the editor only wastes space.
+  const isLibraryInputMode = Boolean(onJianpuInputAbsoluteChange);
+
+  const jianpuInputField = (
     <div>
-      <label className={controlLabelClassName}>{copy.setlistEditor.showLyrics}</label>
-      <div className="inline-flex h-7 w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-2">
-        <span className="truncate text-[12px] font-medium text-gray-600">{language === 'zh' ? '歌詞' : 'Lyrics'}</span>
-        <CompactToggleSwitch
-          checked={showLyrics ?? false}
-          onChange={(checked) => onShowLyricsChange?.(checked)}
-          label={(showLyrics ?? false) ? copy.on : copy.off}
-          size={toggleSize}
-          showLabel={false}
-        />
-      </div>
+      <label className={controlLabelClassName}>{language === 'zh' ? '簡譜輸入設定' : 'Jianpu Input'}</label>
+      <CompactSegmentedControl
+        value={jianpuInputAbsolute ? 'fixed' : 'movable'}
+        options={[
+          { value: 'movable', label: language === 'zh' ? '首調' : 'Movable' },
+          { value: 'fixed', label: language === 'zh' ? '固定' : 'Fixed' }
+        ]}
+        onChange={(value) => onJianpuInputAbsoluteChange?.(value === 'fixed')}
+        size={segmentedSize}
+        stretch
+        className="rounded-lg"
+        buttonClassName="min-w-0"
+      />
     </div>
   );
+
+  // The control that sits where the display-mode field used to be.
+  const displayOrInputField = isLibraryInputMode ? jianpuInputField : displayModeField;
 
   const barNumbersField = (
     <div>
@@ -865,7 +878,6 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     getVersionValue(song)?.trim()
     || typeof song.tempo === 'number'
     || song.shuffle
-    || song.showLyrics
     || song.references?.band?.url?.trim()
     || song.references?.vocal?.url?.trim()
   );
@@ -928,15 +940,16 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
           {isAdvancedOpen ? (
             <div className="space-y-1.5">
-              <div className="grid gap-2 [grid-template-columns:minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(4.5rem,0.7fr)]">
+              <div className={`grid gap-2 ${isLibraryInputMode
+                ? '[grid-template-columns:minmax(6rem,1fr)_minmax(6rem,1fr)]'
+                : '[grid-template-columns:minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(4.5rem,0.7fr)]'}`}>
                 {versionField}
                 {translatorField}
-                {capoField}
+                {!isLibraryInputMode && capoField}
               </div>
 
-              <div className="grid items-start gap-2 [grid-template-columns:minmax(7rem,1.4fr)_minmax(5rem,0.9fr)_minmax(7rem,1.2fr)]">
-                {displayModeField}
-                {showLyricsField}
+              <div className="grid items-start gap-2 [grid-template-columns:minmax(7rem,1.4fr)_minmax(7rem,1.2fr)]">
+                {displayOrInputField}
                 {barNumbersField}
               </div>
 
@@ -965,12 +978,9 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
                 {translatorField}
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                {capoField}
-                {showLyricsField}
-              </div>
+              {!isLibraryInputMode && capoField}
 
-              {displayModeField}
+              {displayOrInputField}
               {barNumbersField}
               {showReferenceFields ? referencesField : null}
             </div>
@@ -991,15 +1001,14 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           {isAdvancedOpen ? (
             <div className="space-y-2">
               <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-4">{versionField}</div>
-                <div className="col-span-4">{translatorField}</div>
-                <div className="col-span-4">{capoField}</div>
+                <div className={isLibraryInputMode ? 'col-span-6' : 'col-span-4'}>{versionField}</div>
+                <div className={isLibraryInputMode ? 'col-span-6' : 'col-span-4'}>{translatorField}</div>
+                {!isLibraryInputMode && <div className="col-span-4">{capoField}</div>}
               </div>
 
               <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-5">{displayModeField}</div>
-                <div className="col-span-3">{showLyricsField}</div>
-                <div className="col-span-4">{barNumbersField}</div>
+                <div className="col-span-6">{displayOrInputField}</div>
+                <div className="col-span-6">{barNumbersField}</div>
               </div>
 
               {showReferenceFields ? referencesField : null}

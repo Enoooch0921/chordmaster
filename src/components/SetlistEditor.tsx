@@ -1,7 +1,7 @@
 import React from 'react';
 import { AppLanguage, BarNumberMode, Setlist, SetlistDisplayMode, SetlistSong, Song } from '../types';
 import { getUiCopy } from '../constants/i18n';
-import { CompactSegmentedControl, CompactToggleSwitch } from './SetlistCompactControls';
+import { CompactSegmentedControl } from './SetlistCompactControls';
 import KeyPicker from './KeyPicker';
 import CapoPicker from './CapoPicker';
 
@@ -11,7 +11,7 @@ interface SetlistEditorProps {
   setlistSong: SetlistSong;
   baseSong: Song;
   onChange: (nextSong: SetlistSong) => void;
-  onSetlistChange: (updates: Partial<Pick<Setlist, 'displayMode' | 'showLyrics'>>) => void;
+  onSetlistChange: (updates: Partial<Pick<Setlist, 'displayMode'>>) => void;
 }
 
 const DISPLAY_MODE_LABELS: Record<SetlistDisplayMode, string> = {
@@ -108,12 +108,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({
           <div className={`${toolbarFieldClassName} min-w-[280px]`}>
             <div className={toolbarLabelClassName}>{copy.setlistEditor.displayControls}</div>
             <div className="flex flex-wrap items-center gap-2">
-              <CompactToggleSwitch
-                checked={setlist.showLyrics}
-                onChange={(checked) => onSetlistChange({ showLyrics: checked })}
-                label={`${copy.setlistEditor.showLyrics} · ${setlist.showLyrics ? copy.on : copy.off}`}
-                size="sm"
-              />
               <CompactSegmentedControl
                 value={currentBarNumberMode}
                 options={barNumberOptions}

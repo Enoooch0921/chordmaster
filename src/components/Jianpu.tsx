@@ -746,8 +746,11 @@ const Jianpu: React.FC<JianpuProps> = ({
           ? getTokenAlignedPx(note.tokenIndex, noteLocalUnits)
           : null;
         const centerLeft = centerPx !== null ? `${centerPx}px` : `${xPercent}%`;
-        const showHighDot = note.octave === 'high' && note.pitch !== '0' && note.pitch !== '-';
-        const showLowDot = note.octave === 'low' && note.pitch !== '0' && note.pitch !== '-';
+        const octaveShift = (note.pitch === '0' || note.pitch === '-') ? 0 : note.octave;
+        // Render up to 3 stacked dots (relative is clamped to 2 upstream; absolute
+        // multi-octave is rare — the cap just guards pathological layouts).
+        const highDots = Math.min(3, Math.max(0, octaveShift));
+        const lowDots = Math.min(3, Math.max(0, -octaveShift));
         const digit = note.pitch;
         const isSustain = digit === '-';
         const useDirectSustainPlacement = compact || renderMode === 'editor';
@@ -777,7 +780,7 @@ const Jianpu: React.FC<JianpuProps> = ({
         const snappedHighDotTop = useDirectOctaveDotPlacement
           ? Math.round(metrics.highDotY - (snappedOctaveDotSize / 2))
           : metrics.highDotY;
-        const lowDotCenterY = note.octave === 'low' && durationLevel > 0
+        const lowDotCenterY = lowDots > 0 && durationLevel > 0
           ? (
             metrics.underlineY
             + ((durationLevel - 1) * metrics.underlineGap)
@@ -789,6 +792,8 @@ const Jianpu: React.FC<JianpuProps> = ({
         const snappedLowDotTop = useDirectOctaveDotPlacement
           ? Math.round(lowDotCenterY - (snappedOctaveDotSize / 2))
           : lowDotCenterY;
+        // Stack additional octave dots outward from the digit.
+        const octaveDotGap = snappedOctaveDotSize + (compact ? 1 : 1.5) * scale;
         const accidentalShiftX = renderMode === 'editor'
           ? 0
           : compact
@@ -886,8 +891,9 @@ const Jianpu: React.FC<JianpuProps> = ({
               />
             )}
 
-            {showHighDot && (
+            {Array.from({ length: highDots }, (_, dotIndex) => (
               <span
+                key={`high-${dotIndex}`}
                 className="absolute rounded-full bg-slate-700"
                 style={{
                   left: useDirectOctaveDotPlacement
@@ -898,17 +904,18 @@ const Jianpu: React.FC<JianpuProps> = ({
                       ? `${centerPx + metrics.octaveDotOffsetX}px`
                       : `calc(${xPercent}% + ${metrics.octaveDotOffsetX}px)`,
                   top: useDirectOctaveDotPlacement
-                    ? `${snappedHighDotTop}px`
-                    : `${metrics.highDotY}px`,
+                    ? `${snappedHighDotTop - (dotIndex * octaveDotGap)}px`
+                    : `${metrics.highDotY - (dotIndex * octaveDotGap)}px`,
                   transform: useDirectOctaveDotPlacement ? undefined : 'translate(-50%, -50%)',
                   width: `${snappedOctaveDotSize}px`,
                   height: `${snappedOctaveDotSize}px`
                 }}
               />
-            )}
+            ))}
 
-            {showLowDot && (
+            {Array.from({ length: lowDots }, (_, dotIndex) => (
               <span
+                key={`low-${dotIndex}`}
                 className="absolute rounded-full bg-slate-700"
                 style={{
                   left: useDirectOctaveDotPlacement
@@ -919,14 +926,14 @@ const Jianpu: React.FC<JianpuProps> = ({
                       ? `${centerPx + metrics.octaveDotOffsetX}px`
                       : `calc(${xPercent}% + ${metrics.octaveDotOffsetX}px)`,
                   top: useDirectOctaveDotPlacement
-                    ? `${snappedLowDotTop}px`
-                    : `${metrics.lowDotY}px`,
+                    ? `${snappedLowDotTop + (dotIndex * octaveDotGap)}px`
+                    : `${metrics.lowDotY + (dotIndex * octaveDotGap)}px`,
                   transform: useDirectOctaveDotPlacement ? undefined : 'translate(-50%, -50%)',
                   width: `${snappedOctaveDotSize}px`,
                   height: `${snappedOctaveDotSize}px`
                 }}
               />
-            )}
+            ))}
           </React.Fragment>
         );
       })}

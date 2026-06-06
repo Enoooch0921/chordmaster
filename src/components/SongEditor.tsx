@@ -6,13 +6,13 @@ import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
-import { getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyWithPreference } from '../utils/musicUtils';
+import { getPlayKey, getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyWithPreference } from '../utils/musicUtils';
 import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
-import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, buildJianpuNoteFromMode, buildJianpuPlaceholder, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
+import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, MAX_RELATIVE_OCTAVE_SHIFT, absoluteJianpuPartsToRelative, buildJianpuNoteFromMode, buildJianpuPlaceholder, clampRelativeOctave, convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 import { formatInitialCaps } from '../utils/textUtils';
 
-type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics';
+type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm';
 
 interface FocusRequest {
   sIdx: number;
@@ -599,7 +599,7 @@ const SongEditor: React.FC<Props> = ({
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [rhythmCursor, setRhythmCursor] = useState<RhythmCursor | null>(null);
   const [jianpuCursor, setJianpuCursor] = useState<JianpuCursor | null>(null);
-  const [jianpuInputMode, setJianpuInputMode] = useState<JianpuInputMode>({ duration: 'quarter', octave: 'mid', dotted: false, accidental: '' });
+  const [jianpuInputMode, setJianpuInputMode] = useState<JianpuInputMode>({ duration: 'quarter', octave: 0, dotted: false, accidental: '' });
   const [barPanels, setBarPanels] = useState<Record<string, BarPanelState>>({});
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
   const [isBarDragging, setIsBarDragging] = useState(false);
@@ -637,6 +637,42 @@ const SongEditor: React.FC<Props> = ({
 
   const { baseKeys: sectionBaseKeys, activeKeys: sectionActiveKeys } = getSectionKeyStates(song);
   const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
+
+  // Sounding key used to render/interpret absolute (1=C) jianpu for a section,
+  // matching ChordSheet's sectionPlayKey (written key → current key → capo) so the
+  // editor's absolute view is WYSIWYG-identical to the read-only chart.
+  const getSectionPlayKeyForJianpu = (sIdx: number): Key => {
+    const writtenKey = sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
+    const currentKey = transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey);
+    return getPlayKey(currentKey, song.capo || 0);
+  };
+
+  // The editor's jianpu field follows the per-song *input* setting (簡譜輸入設定),
+  // independent of the top-right display toggle. true = absolute/fixed-do input.
+  const jianpuInputAbsolute = Boolean(song.jianpuInputAbsolute);
+
+  // When absolute input is on, swap the displayed beat tokens to their absolute
+  // spelling. Storage/editing stay relative; this only changes the rendered glyphs.
+  const toDisplayBeatTokens = (beatTokens: string[], sIdx: number): string[] => {
+    if (!jianpuInputAbsolute) return beatTokens;
+    const key = getSectionPlayKeyForJianpu(sIdx);
+    return beatTokens.map((token) => (
+      token.trim() ? (convertRelativeJianpuToAbsoluteNotation(token, key) ?? token) : token
+    ));
+  };
+
+  // Resolve a keypad pitch (+ current accidental/octave) to the relative parts to
+  // store. In absolute mode the tapped number is an absolute pitch, so convert it.
+  const resolveJianpuInputParts = (
+    pitch: string,
+    accidental: JianpuAccidental,
+    octave: JianpuOctave,
+    sIdx: number
+  ): { pitch: string; accidental: JianpuAccidental; octave: JianpuOctave } => (
+    jianpuInputAbsolute
+      ? absoluteJianpuPartsToRelative(pitch, accidental, octave, getSectionPlayKeyForJianpu(sIdx))
+      : { pitch, accidental, octave }
+  );
 
   const clearEditorSelectionState = () => {
     setSelection(null);
@@ -871,7 +907,7 @@ const SongEditor: React.FC<Props> = ({
       bars: section.bars.map((bar) => ({
         ...bar,
         chords: bar.chords.map((token) => (
-          isNashville(token) ? token : transposeChord(token, offset, toKey)
+          isNashville(token) ? token : transposeChord(token, offset, toKey, false, fromKey)
         ))
       }))
     };
@@ -3439,12 +3475,13 @@ const SongEditor: React.FC<Props> = ({
     const selectedAccidental = normalizeEditableJianpuAccidental(selectedNote?.accidental);
 
     if (selectedNote) {
+      const rel = resolveJianpuInputParts(pitch, selectedAccidental || jianpuInputMode.accidental, jianpuInputMode.octave, selection.sIdx);
       const replacement = rebuildJianpuNote(selectedNote, {
-        accidental: selectedAccidental || jianpuInputMode.accidental,
-        pitch,
+        accidental: rel.accidental,
+        pitch: rel.pitch,
         duration: jianpuInputMode.duration,
         dotted: selectedNote.dotted && canUseDottedJianpuDuration(jianpuInputMode.duration),
-        octave: jianpuInputMode.octave
+        octave: rel.octave
       });
       updateSelectedJianpuNote(() => replacement);
       return;
@@ -3470,7 +3507,8 @@ const SongEditor: React.FC<Props> = ({
         placeholderAtCaret.start
       );
       const insertionMode = fitJianpuInputModeToUnits(jianpuInputMode, placeholderCapacity.currentBeatUnits);
-      const replacement = buildJianpuNoteFromMode(pitch, insertionMode);
+      const rel = resolveJianpuInputParts(pitch, insertionMode.accidental, insertionMode.octave, selection.sIdx);
+      const replacement = buildJianpuNoteFromMode(rel.pitch, { ...insertionMode, accidental: rel.accidental, octave: rel.octave });
       const replacementNote = findJianpuNoteRanges(replacement)[0];
       if (!replacementNote) return;
       const replacementUnits = getJianpuNoteUnits(replacementNote);
@@ -3509,7 +3547,8 @@ const SongEditor: React.FC<Props> = ({
       ? currentBeatRemainingUnits
       : beatUnits;
     const insertionMode = fitJianpuInputModeToUnits(jianpuInputMode, initialAvailableUnits);
-    const replacement = buildJianpuNoteFromMode(pitch, insertionMode);
+    const rel = resolveJianpuInputParts(pitch, insertionMode.accidental, insertionMode.octave, selection.sIdx);
+    const replacement = buildJianpuNoteFromMode(rel.pitch, { ...insertionMode, accidental: rel.accidental, octave: rel.octave });
     const replacementNote = findJianpuNoteRanges(replacement)[0];
     if (!replacementNote) return;
     const replacementUnits = getJianpuNoteUnits(replacementNote);
@@ -3615,22 +3654,23 @@ const SongEditor: React.FC<Props> = ({
     }));
   };
 
-  const setSelectedJianpuOctave = (octave: JianpuOctave) => {
-    setJianpuInputMode((current) => {
-      const nextOctave = current.octave === octave ? 'mid' : octave;
-      return { ...current, octave: nextOctave };
-    });
+  // L/H buttons cycle one direction: 0 → ±1 → ±2 → 0 (opposite sign jumps to ±1).
+  const cycleJianpuOctave = (current: JianpuOctave, dir: -1 | 1): JianpuOctave => {
+    if (current * dir < 0) return dir;
+    if (Math.abs(current) >= MAX_RELATIVE_OCTAVE_SHIFT) return 0;
+    return clampRelativeOctave(current + dir);
+  };
+
+  const setSelectedJianpuOctave = (dir: -1 | 1) => {
+    setJianpuInputMode((current) => ({ ...current, octave: cycleJianpuOctave(current.octave, dir) }));
     updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
-      octave: note.octave === octave ? 'mid' : octave
+      octave: cycleJianpuOctave(note.octave, dir)
     }));
   };
 
   const stepSelectedJianpuOctave = (direction: -1 | 1) => {
-    const octaveOrder: JianpuOctave[] = ['low', 'mid', 'high'];
     const currentOctave = selectedJianpuNote?.octave ?? jianpuInputMode.octave;
-    const currentIndex = octaveOrder.indexOf(currentOctave);
-    const nextIndex = Math.max(0, Math.min(octaveOrder.length - 1, currentIndex + direction));
-    const nextOctave = octaveOrder[nextIndex];
+    const nextOctave = clampRelativeOctave(currentOctave + direction);
 
     if (nextOctave === currentOctave) return;
 
@@ -3780,12 +3820,12 @@ const SongEditor: React.FC<Props> = ({
     updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
       accidental: '',
       duration: 'quarter',
-      octave: 'mid',
+      octave: 0,
       dotted: false,
       slurStart: false,
       slurEnd: false
     }));
-    setJianpuInputMode((current) => ({ ...current, accidental: '', duration: 'quarter', octave: 'mid', dotted: false }));
+    setJianpuInputMode((current) => ({ ...current, accidental: '', duration: 'quarter', octave: 0, dotted: false }));
   };
 
   const removeSelectedJianpuNote = () => {
@@ -4058,13 +4098,13 @@ const SongEditor: React.FC<Props> = ({
 
     if (loweredKey === 'l') {
       e.preventDefault();
-      setSelectedJianpuOctave('low');
+      setSelectedJianpuOctave(-1);
       return;
     }
 
     if (loweredKey === 'h') {
       e.preventDefault();
-      setSelectedJianpuOctave('high');
+      setSelectedJianpuOctave(1);
       return;
     }
 
@@ -4146,9 +4186,7 @@ const SongEditor: React.FC<Props> = ({
     const isPickupFocusTarget = isPickupTarget(sIdx, bIdx);
     const targetField = isPickupFocusTarget && field === 'chords'
       ? 'riff'
-      : field === 'lyrics'
-        ? 'chords'
-        : field;
+      : field;
     const barId = isPickupFocusTarget ? 'editor-pickup' : `editor-bar-${sIdx}-b${bIdx}`;
     const fieldId = isPickupFocusTarget ? `editor-pickup-${targetField}` : `editor-s${sIdx}-b${bIdx}-${targetField}`;
     const selectionType = targetField === 'chords'
@@ -4459,6 +4497,14 @@ const SongEditor: React.FC<Props> = ({
     return firstOccupiedBeat >= 0 ? firstOccupiedBeat : 0;
   };
 
+  const octaveLabel = (shift: JianpuOctave): string => {
+    if (shift >= 2) return copy.editor.high2;
+    if (shift === 1) return copy.editor.high;
+    if (shift <= -2) return copy.editor.low2;
+    if (shift === -1) return copy.editor.low;
+    return copy.editor.mid;
+  };
+
   const getJianpuSelectionLabel = () => {
     if (selectedJianpuNote) {
       const durationLabel: Record<JianpuDuration, string> = {
@@ -4466,12 +4512,7 @@ const SongEditor: React.FC<Props> = ({
         eighth: '1/8',
         sixteenth: '1/16'
       };
-      const octaveLabel: Record<JianpuOctave, string> = {
-        low: copy.editor.low,
-        mid: copy.editor.mid,
-        high: copy.editor.high
-      };
-      const parts = [`${selectedJianpuNote.pitch} · ${durationLabel[selectedJianpuNote.duration]}`, octaveLabel[selectedJianpuNote.octave]];
+      const parts = [`${selectedJianpuNote.pitch} · ${durationLabel[selectedJianpuNote.duration]}`, octaveLabel(selectedJianpuNote.octave)];
       if (effectiveJianpuAccidental === '#') parts.push(copy.editor.sharp);
       if (effectiveJianpuAccidental === 'b') parts.push(copy.editor.flat);
       if (selectedJianpuNote.dotted) parts.push(copy.editor.dot);
@@ -4492,7 +4533,7 @@ const SongEditor: React.FC<Props> = ({
       : effectiveJianpuAccidental === 'b'
         ? ` · ${copy.editor.flat}`
         : '';
-    return `${beatLabel} · ${durationLabel} · ${effectiveJianpuOctave === 'high' ? copy.editor.high : effectiveJianpuOctave === 'low' ? copy.editor.low : copy.editor.mid}${accidentalLabel}${effectiveJianpuDotted ? ` · ${copy.editor.dot}` : ''}`;
+    return `${beatLabel} · ${durationLabel} · ${octaveLabel(effectiveJianpuOctave)}${accidentalLabel}${effectiveJianpuDotted ? ` · ${copy.editor.dot}` : ''}`;
   };
 
   const duplicateSection = (sIdx: number) => {
@@ -5158,7 +5199,7 @@ const SongEditor: React.FC<Props> = ({
 
                       <div className="min-h-[62px] flex items-center justify-center overflow-visible px-3 py-2">
                         <Jianpu
-                          tokens={beatTokens}
+                          tokens={toDisplayBeatTokens(beatTokens, sIdx)}
                           renderMode="editor"
                           activeTokenIndex={activeInsertBeatIndex}
                           activeInsertPosition={activeInsertPosition}
@@ -5776,7 +5817,7 @@ const SongEditor: React.FC<Props> = ({
                         />
                         <div className="min-h-[62px] px-3 py-2 flex items-center justify-center overflow-visible">
                           <Jianpu
-                            tokens={beatTokens}
+                            tokens={toDisplayBeatTokens(beatTokens, sIdx)}
                             renderMode="editor"
                             activeTokenIndex={activeInsertBeatIndex}
                             activeInsertPosition={activeInsertPosition}
@@ -6727,7 +6768,7 @@ const SongEditor: React.FC<Props> = ({
 
                             <div className="min-h-[62px] px-3 py-2 flex items-center justify-center overflow-visible">
                               <Jianpu
-                                tokens={beatTokens}
+                                tokens={toDisplayBeatTokens(beatTokens, sIdx)}
                                 renderMode="editor"
                                 activeTokenIndex={activeInsertBeatIndex}
                                 activeInsertPosition={activeInsertPosition}
@@ -7172,28 +7213,28 @@ const SongEditor: React.FC<Props> = ({
                       <>
                         <div className="grid w-full grid-cols-9 gap-0.5">
                           <button 
-                            onClick={() => setSelectedJianpuOctave('low')}
-                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave === 'low' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                            onClick={() => setSelectedJianpuOctave(-1)}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave < 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                             title={copy.editor.lowOctave}
                             aria-keyshortcuts="ArrowDown L"
                           >
-                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave === 'low' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave < 0 ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                               {renderJianpuOctaveGlyph('low')}
-                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave === 'low' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave < 0 ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
                             </div>
-                            <span className={`${compactToolLabelClass} ${effectiveJianpuOctave === 'low' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuOctave < 0 ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
                           </button>
                           <button 
-                            onClick={() => setSelectedJianpuOctave('high')}
-                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave === 'high' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                            onClick={() => setSelectedJianpuOctave(1)}
+                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave > 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                             title={copy.editor.highOctave}
                             aria-keyshortcuts="ArrowUp H"
                           >
-                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave === 'high' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave > 0 ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                               {renderJianpuOctaveGlyph('high')}
-                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave === 'high' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
+                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave > 0 ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
                             </div>
-                            <span className={`${compactToolLabelClass} ${effectiveJianpuOctave === 'high' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.high}</span>
+                            <span className={`${compactToolLabelClass} ${effectiveJianpuOctave > 0 ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.high}</span>
                           </button>
                           <button
                             onClick={() => setSelectedJianpuAccidental('#')}
@@ -7329,29 +7370,29 @@ const SongEditor: React.FC<Props> = ({
                       <>
                       <div className={`${isCompactSelectionToolbar ? 'grid w-full grid-cols-5 gap-0.5' : compactToolbarRowClass} ${isCompactSelectionToolbar ? '[&>button]:min-w-0 [&>button]:gap-0.5 [&>button]:p-1.5 [&>button>div:first-child]:h-7 [&>button>div:first-child]:w-7 [&>button>span:last-child]:text-[9px] [&>button>span:last-child]:leading-none' : ''}`}>
                       <button 
-                        onClick={() => setSelectedJianpuOctave('low')}
-                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave === 'low' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        onClick={() => setSelectedJianpuOctave(-1)}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave < 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.lowOctave}
                         aria-keyshortcuts="ArrowDown L"
                       >
-                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave === 'low' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave < 0 ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                           {renderJianpuOctaveGlyph('low')}
-                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave === 'low' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave < 0 ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>L</span>
                         </div>
-                        <span className={`${compactToolLabelClass} ${effectiveJianpuOctave === 'low' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuOctave < 0 ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
                       </button>
 
                       <button 
-                        onClick={() => setSelectedJianpuOctave('high')}
-                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave === 'high' ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                        onClick={() => setSelectedJianpuOctave(1)}
+                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave > 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.highOctave}
                         aria-keyshortcuts="ArrowUp H"
                       >
-                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave === 'high' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuOctave > 0 ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                           {renderJianpuOctaveGlyph('high')}
-                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave === 'high' ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
+                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuOctave > 0 ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>H</span>
                         </div>
-                        <span className={`${compactToolLabelClass} ${effectiveJianpuOctave === 'high' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.high}</span>
+                        <span className={`${compactToolLabelClass} ${effectiveJianpuOctave > 0 ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.high}</span>
                       </button>
 
                       <button

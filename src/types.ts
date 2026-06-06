@@ -40,7 +40,6 @@ export interface SongReferences {
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
   chords: string[]; // e.g., ["E", "C#m"]
-  lyrics?: string[]; // Lyric fragments aligned to visible chord changes in this bar
   timeSignature?: string; // Per-bar override, e.g., "2/4"
   riff?: string;    // e.g., "3 - 4 - 5 - 7 1"
   rhythm?: string;  // e.g., "q e e qr"
@@ -85,14 +84,28 @@ export interface Song {
   useSectionColors?: boolean;
   showNashvilleNumbers?: boolean;
   showAbsoluteJianpu?: boolean;
-  showLyrics?: boolean;
+  // How jianpu is *entered* in the editor (independent of the display toggle
+  // above): true = absolute/fixed-do (固定), false/undefined = relative/movable (首調).
+  jianpuInputAbsolute?: boolean;
   barNumberMode?: BarNumberMode;
   nashvilleFontPreset?: NashvilleFontPreset;
   chordFontPreset?: ChordFontPreset;
   capo?: number;
   references?: SongReferences;
   pickup?: PickupMeasure;
+  lyricsDoc?: LyricsDoc;
   sections: Section[];
+}
+
+// Standalone worship-lyrics document for the lyrics formatter view. Decoupled
+// from the chord chart: `chinese` is the primary body (mode B = monolingual
+// two-column flow); a non-empty `english` switches to mode A (bilingual,
+// English left / Chinese right, paired by section order).
+// The header's 出處 / 翻譯 are read from the song's own metadata (version =
+// lyricist/composer, translator), so they are not duplicated here.
+export interface LyricsDoc {
+  chinese: string;       // 中文 body（含段落符號）
+  english?: string;      // 英文原文 body（選填）→ 非空進入中英對照
 }
 
 export interface StoredSong extends Song {
@@ -124,7 +137,6 @@ export interface Setlist {
   id: string;
   name: string;
   displayMode: SetlistDisplayMode;
-  showLyrics: boolean;
   createdBy?: string;
   updatedBy?: string;
   createdAt: number;
@@ -184,7 +196,6 @@ export interface SharedSetlistPayload {
   id: string;
   name: string;
   displayMode: SetlistDisplayMode;
-  showLyrics: boolean;
   songs: Array<{
     id: string;
     title: string;

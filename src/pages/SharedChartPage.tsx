@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
+import LyricsSheet from '../components/LyricsSheet';
 import { APP_NAME } from '../constants/appMeta';
 import { AppLanguage, SharedResourcePayload } from '../types';
 import { signInWithGoogleRedirect } from '../lib/auth';
@@ -19,6 +20,7 @@ export default function SharedChartPage() {
   const [isJoining, setIsJoining] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [showSharedLyrics, setShowSharedLyrics] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
   // In-app browsers (LINE, Facebook, Instagram) block Google OAuth as "unsafe".
@@ -406,16 +408,40 @@ export default function SharedChartPage() {
             </>
           ) : payload?.song ? (
             <>
-              <h1 className="mb-6 text-3xl font-bold tracking-tight text-stone-900">
-                {payload.song.title}
-              </h1>
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                <h1 className="text-3xl font-bold tracking-tight text-stone-900">
+                  {payload.song.title}
+                </h1>
+                {(payload.song.song.lyricsDoc?.chinese?.trim() || payload.song.song.lyricsDoc?.english?.trim()) ? (
+                  <div className="inline-flex rounded-xl border border-stone-200 bg-white p-1 text-sm font-semibold shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setShowSharedLyrics(false)}
+                      className={`rounded-lg px-3 py-1.5 transition-colors ${!showSharedLyrics ? 'bg-stone-900 text-white' : 'text-stone-600 hover:text-stone-900'}`}
+                    >
+                      {language === 'zh' ? '和弦譜' : 'Chart'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSharedLyrics(true)}
+                      className={`rounded-lg px-3 py-1.5 transition-colors ${showSharedLyrics ? 'bg-stone-900 text-white' : 'text-stone-600 hover:text-stone-900'}`}
+                    >
+                      {language === 'zh' ? '歌詞' : 'Lyrics'}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
-                <ChordSheet
-                  song={payload.song.song}
-                  language={language}
-                  currentKey={payload.song.song.currentKey}
-                  previewIdentity={payload.song.id}
-                />
+                {showSharedLyrics ? (
+                  <LyricsSheet song={payload.song.song} language={language} />
+                ) : (
+                  <ChordSheet
+                    song={payload.song.song}
+                    language={language}
+                    currentKey={payload.song.song.currentKey}
+                    previewIdentity={payload.song.id}
+                  />
+                )}
               </div>
             </>
           ) : null}
