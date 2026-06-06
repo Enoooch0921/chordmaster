@@ -8173,7 +8173,12 @@ export default function App() {
 
   // Collapsible on every viewport (incl. desktop) so the participant list never
   // permanently covers the setlist area — closed by default.
-  const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist ? (
+  // Mirror the project panel: only surface once the setlist is actually shared
+  // (active link) or someone has joined. Starting a share still works from the
+  // "…" menu, which reloads the status and brings this panel back.
+  const hasSetlistShareActivity = Boolean(selectedSetlistShareStatus?.activeToken)
+    || (selectedSetlistShareStatus?.participantCount ?? 0) > 0;
+  const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist && hasSetlistShareActivity ? (
     <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
