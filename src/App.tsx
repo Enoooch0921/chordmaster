@@ -60,7 +60,7 @@ import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo, resolveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, UserMinus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -1934,6 +1934,8 @@ export default function App() {
   const [draggingSetlist, setDraggingSetlist] = useState<{ id: string; dx: number } | null>(null);
   const [mobileSwipeProject, setMobileSwipeProject] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
   const [draggingProject, setDraggingProject] = useState<{ id: string; dx: number } | null>(null);
+  const [mobileSwipeMember, setMobileSwipeMember] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
+  const [draggingMember, setDraggingMember] = useState<{ id: string; dx: number } | null>(null);
   const [draggingSetlistSongId, setDraggingSetlistSongId] = useState<string | null>(null);
   const [dragOverSetlistSongId, setDragOverSetlistSongId] = useState<string | null>(null);
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
@@ -1995,6 +1997,8 @@ export default function App() {
   const mobileSetlistSwipeHandledRef = useRef(false);
   const mobileProjectSwipeRef = useRef<SwipeGestureState | null>(null);
   const mobileProjectSwipeHandledRef = useRef(false);
+  const mobileMemberSwipeRef = useRef<SwipeGestureState | null>(null);
+  const mobileMemberSwipeHandledRef = useRef(false);
   const mobileLongPressRef = useRef<{ kind: 'song' | 'setlist'; id: string; x: number; y: number } | null>(null);
   const mobileLongPressTimerRef = useRef<number | null>(null);
   const mobileLongPressTriggeredRef = useRef(false);
@@ -4894,6 +4898,18 @@ export default function App() {
       const target = projects.find((item) => item.id === id);
       return Boolean(target && canManageProject(target));
     }
+  });
+
+  // Share-panel member rows reuse the same swipe engine, but only the left
+  // swipe (→ reveal "remove"); there's no archive side, so canArchive is false.
+  const memberSwipe = createSwipeController({
+    ref: mobileMemberSwipeRef,
+    handledRef: mobileMemberSwipeHandledRef,
+    openId: mobileSwipeMember?.id ?? null,
+    openAction: mobileSwipeMember?.action ?? null,
+    setDragging: setDraggingMember,
+    setOpen: setMobileSwipeMember,
+    canArchive: () => false
   });
 
   const handleAddSongToSetlist = (songId: string) => {
@@ -8060,47 +8076,91 @@ export default function App() {
       <div className={`mt-3 ${maxHeightClass} space-y-2 overflow-y-auto`}>
         {participants.map((participant) => {
           const isManager = participant.role === 'manager';
-          return (
-          <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
-            {participant.picture ? (
-              <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
-            ) : (
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
-                {(participant.name || participant.email || '?').slice(0, 1).toUpperCase()}
+          const rowContent = (
+            <>
+              {participant.picture ? (
+                <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
+              ) : (
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
+                  {(participant.name || participant.email || '?').slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
+                <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
               </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
-              <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
+              {onToggleManager ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (mobileMemberSwipeHandledRef.current) {
+                      mobileMemberSwipeHandledRef.current = false;
+                      return;
+                    }
+                    onToggleManager(participant);
+                  }}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition-colors ${
+                    isManager
+                      ? 'bg-indigo-600 text-white ring-indigo-600 hover:bg-indigo-500'
+                      : 'bg-white text-gray-600 ring-gray-200 hover:ring-indigo-300 hover:text-indigo-600'
+                  }`}
+                  title={language === 'zh'
+                    ? (isManager ? '管理員（可改 key/順序）— 點擊改回唯讀' : '唯讀 — 點擊設為管理員')
+                    : (isManager ? 'Manager (can edit key/order) — tap to make viewer' : 'Viewer — tap to make manager')}
+                >
+                  {language === 'zh' ? (isManager ? '管理員' : '唯讀') : (isManager ? 'Manager' : 'Viewer')}
+                </button>
+              ) : null}
+            </>
+          );
+
+          // No remove capability → plain, non-swipe row.
+          if (!onRemove) {
+            return (
+              <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
+                {rowContent}
+              </div>
+            );
+          }
+
+          // Owner view: swipe the row left to reveal the "remove" action,
+          // reusing the shared swipe engine (left swipe only).
+          const swipeAction = mobileSwipeMember?.id === participant.userId ? mobileSwipeMember.action : null;
+          const dragOffset = draggingMember?.id === participant.userId ? draggingMember.dx : null;
+          const translateClass = dragOffset !== null
+            ? ''
+            : swipeAction === 'delete' ? '-translate-x-20' : 'translate-x-0';
+          return (
+            <div key={participant.userId} className="relative overflow-hidden rounded-xl">
+              <div className="absolute inset-y-0 right-0 flex items-stretch">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileSwipeMember(null);
+                    onRemove(participant);
+                  }}
+                  className="flex w-20 items-center justify-center rounded-r-xl bg-rose-500 px-3 text-xs font-bold text-white"
+                  aria-label={`${copy.removeMember} ${participant.name || participant.email}`}
+                  title={copy.removeMember}
+                >
+                  {copy.removeMember}
+                </button>
+              </div>
+              <div
+                onTouchStart={(event) => memberSwipe.touchStart(participant.userId, event)}
+                onTouchMove={memberSwipe.touchMove}
+                onTouchEnd={(event) => memberSwipe.touchEnd(participant.userId, event)}
+                onTouchCancel={memberSwipe.reset}
+                onPointerDown={(event) => memberSwipe.pointerDown(participant.userId, event)}
+                onPointerMove={memberSwipe.pointerMove}
+                onPointerUp={(event) => memberSwipe.pointerEnd(participant.userId, event)}
+                onPointerCancel={memberSwipe.reset}
+                style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
+                className={`relative flex min-w-0 select-none items-center gap-2 bg-gray-50 px-2.5 py-2 transition-transform duration-200 ease-out [touch-action:pan-y] ${translateClass}`}
+              >
+                {rowContent}
+              </div>
             </div>
-            {onToggleManager ? (
-              <button
-                type="button"
-                onClick={() => onToggleManager(participant)}
-                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition-colors ${
-                  isManager
-                    ? 'bg-indigo-600 text-white ring-indigo-600 hover:bg-indigo-500'
-                    : 'bg-white text-gray-600 ring-gray-200 hover:ring-indigo-300 hover:text-indigo-600'
-                }`}
-                title={language === 'zh'
-                  ? (isManager ? '管理員（可改 key/順序）— 點擊改回唯讀' : '唯讀 — 點擊設為管理員')
-                  : (isManager ? 'Manager (can edit key/order) — tap to make viewer' : 'Viewer — tap to make manager')}
-              >
-                {language === 'zh' ? (isManager ? '管理員' : '唯讀') : (isManager ? 'Manager' : 'Viewer')}
-              </button>
-            ) : null}
-            {onRemove ? (
-              <button
-                type="button"
-                onClick={() => onRemove(participant)}
-                className="shrink-0 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
-                title={copy.removeMember}
-                aria-label={`${copy.removeMember} ${participant.name || participant.email}`}
-              >
-                <UserMinus size={15} />
-              </button>
-            ) : null}
-          </div>
           );
         })}
       </div>
@@ -8183,8 +8243,12 @@ export default function App() {
 
   // Project mode "who joined" — same idea as the setlist panel, scoped to the
   // whole project. Read-only list + refresh (the project header already hosts
-  // the share button). Collapsible and closed by default.
-  const projectSharingPanel = isSetlistMode && selectedProject && !selectedJoinedProject && canShareProject ? (
+  // the share button). Collapsible and closed by default. Only surfaces once the
+  // project is actually shared (active link) or someone has joined — otherwise
+  // it's just empty chrome taking up space.
+  const hasProjectShareActivity = Boolean(selectedProjectShareStatus?.activeToken)
+    || (selectedProjectShareStatus?.participantCount ?? 0) > 0;
+  const projectSharingPanel = isSetlistMode && selectedProject && !selectedJoinedProject && canShareProject && hasProjectShareActivity ? (
     <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
@@ -8319,28 +8383,21 @@ export default function App() {
     ? (language === 'zh' ? '個人區' : 'Personal')
     : activeCloudLibrary?.name ?? (language === 'zh' ? '個人區' : 'Personal');
   const librarySwitcherPanel = isAuthenticated ? (
-    <div className="border-b border-gray-200 bg-white px-3 py-2">
+    <div className="border-b border-gray-200 bg-white px-3 py-1.5">
       <button
         type="button"
         onClick={() => setIsWorkspacePanelOpen((current) => !current)}
-        className="flex h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
+        className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
         aria-expanded={isWorkspacePanelOpen}
         aria-label={language === 'zh' ? '顯示工作區選項' : 'Show workspace options'}
-        title={activeWorkspaceLabel}
+        title={`${language === 'zh' ? '工作區' : 'Workspace'} · ${activeWorkspaceLabel}`}
       >
-        <Users size={15} className="shrink-0 text-indigo-600" />
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400">
-            {language === 'zh' ? '工作區' : 'Workspace'}
-          </div>
-          <div className="truncate text-xs font-bold text-gray-800">
-            {activeWorkspaceLabel}
-          </div>
-        </div>
+        <Users size={14} className="shrink-0 text-indigo-600" />
+        <span className="min-w-0 flex-1 truncate text-xs font-bold text-gray-800">{activeWorkspaceLabel}</span>
         {isWorkspacePanelOpen ? (
-          <ChevronUp size={15} className="shrink-0 text-gray-400" />
+          <ChevronUp size={14} className="shrink-0 text-gray-400" />
         ) : (
-          <ChevronDown size={15} className="shrink-0 text-gray-400" />
+          <ChevronDown size={14} className="shrink-0 text-gray-400" />
         )}
       </button>
 
