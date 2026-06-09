@@ -25,6 +25,9 @@ interface FormattedChordProps {
   chordFontFamily?: string;
   compactSlashBass?: boolean;
   abbreviateMajorQuality?: boolean;
+  // For the multi-measure rest symbol: how many bar columns it spans. >1 widens
+  // the thick-bar glyph so it stretches across the absorbed empty bars.
+  restSpan?: number;
 }
 
 const splitChordQualityDisplay = (quality: string) => {
@@ -80,6 +83,7 @@ const isWholeRestChord = (chordString?: string) => {
 };
 
 // Matches the multi-measure rest token, with an optional count: "||" or "|3|".
+// The rest symbol can span following empty bars in the same row (see restPlan).
 const MULTI_MEASURE_REST_PATTERN = /^\|(\d{0,3})\|$/;
 
 const getMultiMeasureRestCount = (chordString?: string) => {
@@ -239,24 +243,27 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   nashvilleFontFamily,
   chordFontFamily,
   compactSlashBass = false,
-  abbreviateMajorQuality = false
+  abbreviateMajorQuality = false,
+  restSpan = 1
 }) => {
   const multiMeasureRestCount = getMultiMeasureRestCount(chordString);
   if (isMultiMeasureRestChord(chordString)) {
     return (
       <div className="flex h-full w-full items-center justify-center">
-        <div className="flex w-1/3 min-w-[42px] flex-col items-center leading-none text-gray-900">
-          {multiMeasureRestCount > 0 && (
-            <span className="text-[16px] font-semibold tabular-nums">{multiMeasureRestCount}</span>
-          )}
+        <div className={`flex flex-col items-center leading-none text-gray-900 ${restSpan > 1 ? 'w-4/5' : 'w-1/3 min-w-[42px]'}`}>
+          {/* Always reserve the count row so the bar glyph lands at the same
+              (vertically centered) spot whether or not a count is shown. */}
+          <span className={`text-[16px] font-semibold tabular-nums ${multiMeasureRestCount > 0 ? '' : 'invisible'}`}>
+            {multiMeasureRestCount > 0 ? multiMeasureRestCount : 0}
+          </span>
           <svg
             viewBox="0 0 100 20"
             preserveAspectRatio="none"
             className="mt-[2px] h-[18px] w-full"
             aria-hidden="true"
           >
-            <line x1="3" y1="1" x2="3" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            <line x1="97" y1="1" x2="97" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <line x1="3" y1="1" x2="3" y2="19" stroke="currentColor" strokeWidth={restSpan > 1 ? 2 : 1.5} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+            <line x1="97" y1="1" x2="97" y2="19" stroke="currentColor" strokeWidth={restSpan > 1 ? 2 : 1.5} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             <rect x="3" y="7" width="94" height="6" fill="currentColor" />
           </svg>
         </div>
@@ -735,7 +742,7 @@ interface ChordSheetProps {
   language: AppLanguage;
   currentKey: Key;
   transposeFromOriginal?: boolean;
-  onElementClick?: (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'sectionName') => void;
+  onElementClick?: (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'sectionName' | 'marker') => void;
   onAddBarClick?: (sIdx: number) => void;
   highlightedSectionIds?: string[];
   activeSectionId?: string | null;
@@ -849,18 +856,27 @@ const NavigationMarkerIcon: React.FC<{
   marker: NavigationMarker;
   side: 'left' | 'right';
   offsetPx?: number;
-}> = ({ marker, side, offsetPx = 0 }) => {
+  onClick?: () => void;
+}> = ({ marker, side, offsetPx = 0, onClick }) => {
   if (TEXT_ONLY_NAVIGATION_MARKERS.has(marker)) {
     return null;
   }
 
+  const interactive = Boolean(onClick);
+
   return (
     <div
-      className={`absolute top-0 z-[1100] select-none leading-none text-gray-900 pointer-events-none ${side === 'left' ? 'left-0' : 'right-0'}`}
+      className={`absolute top-0 z-[1100] select-none leading-none text-gray-900 ${side === 'left' ? 'left-0' : 'right-0'} ${interactive ? 'cursor-pointer pointer-events-auto' : 'pointer-events-none'}`}
       style={{
         transform: `translate(${side === 'left' ? `calc(-50% + ${offsetPx}px)` : `calc(50% + ${offsetPx}px)`}, -54%)`
       }}
-      aria-hidden="true"
+      {...(interactive
+        ? {
+            role: 'button' as const,
+            tabIndex: 0,
+            onClick: (event: React.MouseEvent) => { event.stopPropagation(); onClick?.(); }
+          }
+        : { 'aria-hidden': true })}
     >
       {marker === 'coda' ? (
         <span className="inline-flex h-[20px] w-[18px] items-center justify-center overflow-hidden rounded-full bg-white">
@@ -889,9 +905,10 @@ const NavigationTextTag: React.FC<{
   placement?: 'top' | 'inside-bottom' | 'outside-bottom' | 'outside-bottom-tight';
   className?: string;
   variant?: 'plain' | 'highlight';
-}> = ({ text, side, placement = 'top', className = '', variant = 'plain' }) => (
+  onClick?: () => void;
+}> = ({ text, side, placement = 'top', className = '', variant = 'plain', onClick }) => (
   <div
-    className={`absolute z-20 max-w-[calc(100%-8px)] whitespace-nowrap ${side === 'left' ? 'left-1' : 'right-1'} ${
+    className={`absolute z-20 max-w-[calc(100%-8px)] whitespace-nowrap ${onClick ? 'cursor-pointer pointer-events-auto' : ''} ${side === 'left' ? 'left-1' : 'right-1'} ${
       placement === 'top'
         ? '-top-[18px]'
         : placement === 'inside-bottom'
@@ -905,6 +922,13 @@ const NavigationTextTag: React.FC<{
         ? '0 0 2px rgba(255,255,255,0.75)'
         : '0 0 2px rgba(255,255,255,0.95), 0 0 5px rgba(255,255,255,0.9)'
     }}
+    {...(onClick
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          onClick: (event: React.MouseEvent) => { event.stopPropagation(); onClick(); }
+        }
+      : {})}
   >
     <span
       className={variant === 'highlight'
@@ -1526,7 +1550,39 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
                 {/* Right Column: Bars */}
                 <div className="flex-1 grid min-h-0 grid-cols-4 w-full" data-rhythm-measure-row>
-                  {Array.from({ length: 4 }).map((_, bIdx) => {
+                  {(() => {
+                  // Multi-measure rest spans: a rest bar (|N| / ||) extends right
+                  // across following bars in this row that carry no chord/rhythm/riff
+                  // content, stopping at the first bar with content or the row end.
+                  // Covered cells are skipped so the rest renders as one continuous
+                  // symbol with the inner barlines hidden.
+                  const restPlan = Array.from({ length: 4 }, () => ({ span: 1, covered: false }));
+                  const isAbsorbableRestBar = (candidate: Bar | undefined) => {
+                    if (!candidate) return true;
+                    if (hasMeaningfulChordContent(candidate.chords)) return false;
+                    if (candidate.rhythm?.trim()) return false;
+                    const riffNotation = getPreviewRiffNotation(
+                      candidate.riff,
+                      getEffectiveTimeSignature(candidate.timeSignature, song.timeSignature)
+                    );
+                    if (hasVisiblePreviewRiff(riffNotation)) return false;
+                    return true;
+                  };
+                  for (let i = 0; i < 4; i += 1) {
+                    const restBar = row.bars[i];
+                    if (!restBar || !restBar.chords?.some((chord) => isMultiMeasureRestChord(chord?.trim()))) continue;
+                    let span = 1;
+                    for (let j = i + 1; j < 4 && isAbsorbableRestBar(row.bars[j]); j += 1) {
+                      restPlan[j].covered = true;
+                      span += 1;
+                    }
+                    restPlan[i].span = span;
+                    i += span - 1;
+                  }
+                  return Array.from({ length: 4 }).map((_, bIdx) => {
+                    if (restPlan[bIdx].covered) return null;
+                    const restSpan = restPlan[bIdx].span;
+                    const lastBIdx = bIdx + restSpan - 1;
                     const bar = row.bars[bIdx];
                     const previousBar = row.bars[bIdx - 1];
                     const showKeyChangeTag = sectionKeyChanged && row.startBIdx === 0 && bIdx === (firstBarInRowIndex === -1 ? 0 : firstBarInRowIndex);
@@ -1640,13 +1696,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const isAddBarRow = sectionAllowsAddBar && row.bars.length === 0;
                     const isAddBarSlot = !bar && sectionAllowsAddBar && (row.startBIdx + bIdx === (section?.bars.length ?? -1));
                     const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
-                    const suppressRightBarline = bIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
+                    const suppressRightBarline = lastBIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
                     const leftBorderClass = suppressLeftBarline
                       ? 'border-l-0'
                       : bIdx === 0
                         ? 'border-l-2 border-gray-900 sheet-bar-left-edge'
                         : 'border-l border-gray-900';
-                    const rightBorderClass = bIdx === 3
+                    const rightBorderClass = lastBIdx === 3
                       ? suppressRightBarline
                         ? 'border-r-0'
                         : 'border-r border-r-gray-900 border-r-2 sheet-bar-right-edge'
@@ -1676,7 +1732,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         } ${previousBar?.finalBar ? 'sheet-after-final-bar' : ''} ${
                           suppressRightBarline ? 'sheet-has-terminal-right' : ''
                         } ${isActiveBar ? 'z-20' : projectsRhythmTieToNextBar ? 'z-10' : ''} ${isAddBarSlot ? 'group/addbar cursor-pointer' : ''}`}
-                        style={isActiveBar ? { paddingBottom: `${barPaddingBottom}px`, backgroundColor: activeTone.barFill, boxShadow: `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}` } : { paddingBottom: `${barPaddingBottom}px` }}
+                        style={isActiveBar ? { gridColumn: `${bIdx + 1} / span ${restSpan}`, paddingBottom: `${barPaddingBottom}px`, backgroundColor: activeTone.barFill, boxShadow: `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}` } : { gridColumn: `${bIdx + 1} / span ${restSpan}`, paddingBottom: `${barPaddingBottom}px` }}
                         {...(isAddBarSlot ? {
                           role: 'button' as const,
                           tabIndex: 0,
@@ -1736,6 +1792,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           <NavigationMarkerIcon
                             marker={bar.leftMarker}
                             side="left"
+                            onClick={onElementClick ? () => onElementClick(row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
 
@@ -1743,6 +1800,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           <NavigationMarkerIcon
                             marker={bar.rightMarker}
                             side="right"
+                            onClick={onElementClick ? () => onElementClick(row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
 
@@ -1751,6 +1809,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             text={leftNavigationText}
                             side="left"
                             className={bar?.leftMarker ? 'left-5' : ''}
+                            onClick={onElementClick ? () => onElementClick(row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
 
@@ -1761,6 +1820,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             placement={isRightTextOnlyMarker ? 'outside-bottom-tight' : 'top'}
                             variant={isRightTextOnlyMarker ? 'highlight' : 'plain'}
                             className={isRightTextOnlyMarker ? 'right-0 text-[10px]' : bar?.rightMarker ? 'right-5' : ''}
+                            onClick={onElementClick ? () => onElementClick(row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
 
@@ -1958,6 +2018,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             compactModifier={compactModifier}
                                             nashvilleFontFamily={nashvilleFontFamily}
                                             chordFontFamily={chordFontFamily}
+                                            restSpan={isMultiMeasureRestChord(centeredWholeRestAnchor.chord) ? restSpan : 1}
                                           />
                                         </div>
                                       );
@@ -2080,7 +2141,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         )}
                       </div>
                     );
-                  })}
+                  });
+                  })()}
                 </div>
               </motion.div>
             );

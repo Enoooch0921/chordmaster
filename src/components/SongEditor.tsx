@@ -12,13 +12,17 @@ import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, Jia
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 import { formatInitialCaps } from '../utils/textUtils';
 
-type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm';
+type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'marker';
 
 interface FocusRequest {
   sIdx: number;
   bIdx: number;
   field: FocusField;
   requestId: number;
+  // Jump straight to the bar with an instant (non-animated) scroll. Set when the
+  // editor is opening / switching songs so the still-settling layout doesn't make
+  // a smooth scroll bounce up and down repeatedly.
+  instant?: boolean;
 }
 
 interface Props {
@@ -625,6 +629,11 @@ const SongEditor: React.FC<Props> = ({
   const skipSelectionScrollKeyRef = useRef<string | null>(null);
   const jianpuDurationBlockedHintTimerRef = useRef<number | null>(null);
   const inlineCompactEditorRef = useRef<HTMLDivElement | null>(null);
+  // True for a short window right after the editor opens (this component mounts
+  // when edit mode is entered). While true, auto-scrolls jump instantly instead
+  // of smooth-scrolling, so the still-settling panel doesn't visibly bounce
+  // up/down several times before landing on the clicked bar.
+  const editorJustOpenedRef = useRef(true);
   const isCompactBarLayout = barLayoutMode === 'compact4';
   const isSpaceConstrainedBarLayout = barLayoutMode !== 'full4';
   const shouldUseManualCompactInspector = isPhoneViewport && isSpaceConstrainedBarLayout;
@@ -634,6 +643,13 @@ const SongEditor: React.FC<Props> = ({
   const notifyChange = (newSong: Song) => {
     onChange(newSong);
   };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      editorJustOpenedRef.current = false;
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const { baseKeys: sectionBaseKeys, activeKeys: sectionActiveKeys } = getSectionKeyStates(song);
   const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
@@ -840,7 +856,11 @@ const SongEditor: React.FC<Props> = ({
       const isFullyVisible = nodeRect.top >= rootRect.top && nodeRect.bottom <= rootRect.bottom;
 
       if (!isFullyVisible) {
-        node.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        node.scrollIntoView({
+          behavior: editorJustOpenedRef.current ? 'auto' : 'smooth',
+          block: 'nearest',
+          inline: 'nearest'
+        });
       }
     });
 
@@ -4148,7 +4168,8 @@ const SongEditor: React.FC<Props> = ({
   useEffect(() => {
     if (!focusRequest) return;
 
-    const { sIdx, bIdx, field, requestId } = focusRequest;
+    const { sIdx, bIdx, field, requestId, instant } = focusRequest;
+    const focusScrollBehavior: ScrollBehavior = instant ? 'auto' : 'smooth';
 
     // Clicking a section name in the preview focuses that section's title input.
     if (field === 'sectionName') {
@@ -4159,7 +4180,7 @@ const SongEditor: React.FC<Props> = ({
           sectionRetryTimer = window.setTimeout(focusSectionTitle, 80);
           return;
         }
-        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        node.scrollIntoView({ behavior: focusScrollBehavior, block: 'center' });
         window.requestAnimationFrame(() => {
           try {
             node.focus({ preventScroll: true });
@@ -4183,10 +4204,22 @@ const SongEditor: React.FC<Props> = ({
       };
     }
 
+    // Clicking a navigation marker (segno / coda / D.S. al Coda …) in the preview
+    // selects that bar and opens its "more" panel so the marker controls show. We
+    // then fall through to the proven chord-focus path to scroll the bar on-screen
+    // (reliable even while the editor is still settling its layout).
+    if (field === 'marker') {
+      const markerBar = getEditorBar(sIdx, bIdx);
+      if (markerBar) {
+        updateBarPanelState(markerBar, sIdx, bIdx, { more: true });
+      }
+    }
+    const effectiveField: Exclude<FocusField, 'marker'> = field === 'marker' ? 'chords' : field;
+
     const isPickupFocusTarget = isPickupTarget(sIdx, bIdx);
-    const targetField = isPickupFocusTarget && field === 'chords'
+    const targetField = isPickupFocusTarget && effectiveField === 'chords'
       ? 'riff'
-      : field;
+      : effectiveField;
     const barId = isPickupFocusTarget ? 'editor-pickup' : `editor-bar-${sIdx}-b${bIdx}`;
     const fieldId = isPickupFocusTarget ? `editor-pickup-${targetField}` : `editor-s${sIdx}-b${bIdx}-${targetField}`;
     const selectionType = targetField === 'chords'
@@ -4213,7 +4246,7 @@ const SongEditor: React.FC<Props> = ({
         skipSelectionScrollKeyRef.current = getSelectionScrollKey(selectionType, sIdx, bIdx);
       }
 
-      scrollBarElementToCenter(barElement, 'smooth');
+      scrollBarElementToCenter(barElement, focusScrollBehavior);
 
       window.requestAnimationFrame(() => {
         try {
@@ -4224,11 +4257,11 @@ const SongEditor: React.FC<Props> = ({
 
         const len = fieldElement.value.length;
         fieldElement.setSelectionRange(len, len);
-        scrollBarElementToCenter(barElement, 'smooth');
+        scrollBarElementToCenter(barElement, focusScrollBehavior);
       });
 
       correctionTimer = window.setTimeout(() => {
-        scrollBarElementToCenter(barElement, 'smooth');
+        scrollBarElementToCenter(barElement, focusScrollBehavior);
       }, 160);
 
       onFocusRequestHandled?.(requestId);

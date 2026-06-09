@@ -60,7 +60,7 @@ import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
 import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo, resolveSetlistSongCapo } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -1032,13 +1032,18 @@ interface SongHistoryState {
 }
 
 type AppView = 'sheet' | 'about' | 'help';
-type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics' | 'sectionName';
+type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics' | 'sectionName' | 'marker';
 
 interface EditorFocusRequest {
   sIdx: number;
   bIdx: number;
   field: EditorFocusField;
   requestId: number;
+  // When the editor is being opened (or the song is being switched) by this
+  // request, jump straight to the bar with an instant scroll instead of the
+  // smooth scroll used for in-editor navigation — the panel is still settling
+  // its layout, so a smooth scroll would visibly bounce up/down several times.
+  instant?: boolean;
 }
 
 interface PreviewDragState {
@@ -1914,6 +1919,9 @@ export default function App() {
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [setlistSearchQuery, setSetlistSearchQuery] = useState('');
   const [setlistSongSearchQuery, setSetlistSongSearchQuery] = useState('');
+  // Phone-only multi-select for the "add songs to setlist" picker. Tablet/desktop
+  // keep the single-tap quick-add because their side panel stays open between adds.
+  const [setlistAddSongSelection, setSetlistAddSongSelection] = useState<string[]>([]);
   const [setlistSortMode, setSetlistSortMode] = useState<SetlistSortMode>(loadSetlistSortPreference);
   const [showArchivedSetlists, setShowArchivedSetlists] = useState(false);
   const [librarySortMode, setLibrarySortMode] = useState<LibrarySortMode>(loadLibrarySortPreference);
@@ -4912,7 +4920,36 @@ export default function App() {
     canArchive: () => false
   });
 
-  const handleAddSongToSetlist = (songId: string) => {
+  // The selection is an ordered list of song ids that ALLOWS duplicates: the same
+  // song can appear multiple times so it can be added to the setlist more than once
+  // (e.g. sung in a different key each time). Each occurrence becomes its own entry.
+  const toggleSetlistAddSongSelection = (songId: string) => {
+    setSetlistAddSongSelection((current) =>
+      current.includes(songId)
+        ? current.filter((id) => id !== songId)
+        : [...current, songId]
+    );
+  };
+
+  const incrementSetlistAddSongSelection = (songId: string) => {
+    setSetlistAddSongSelection((current) => [...current, songId]);
+  };
+
+  const decrementSetlistAddSongSelection = (songId: string) => {
+    setSetlistAddSongSelection((current) => {
+      const lastIndex = current.lastIndexOf(songId);
+      if (lastIndex === -1) {
+        return current;
+      }
+      const next = [...current];
+      next.splice(lastIndex, 1);
+      return next;
+    });
+  };
+
+  // Phone batch-add: commit every selected library song to the setlist in one shot,
+  // preserving the order the user picked them in, then return to the detail view.
+  const handleAddSongsToSetlist = (songIds: string[]) => {
     if (!selectedSetlist) {
       return;
     }
@@ -4921,25 +4958,32 @@ export default function App() {
       return;
     }
 
-    const sourceSong = songs.find((item) => item.id === songId);
-    if (!sourceSong) {
+    const newSetlistSongs = songIds
+      .map((songId) => {
+        const sourceSong = songs.find((item) => item.id === songId);
+        return sourceSong ? createStoredSetlistSong(songId, selectedSetlist.id, sourceSong) : null;
+      })
+      .filter((item): item is SetlistSong => item !== null);
+
+    if (newSetlistSongs.length === 0) {
       return;
     }
 
-    const nextSetlistSong = createStoredSetlistSong(songId, selectedSetlist.id, sourceSong);
     replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
       ...currentSetlist,
-      songs: reindexSetlistSongs([...currentSetlist.songs, { ...nextSetlistSong, order: currentSetlist.songs.length }])
+      songs: reindexSetlistSongs([...currentSetlist.songs, ...newSetlistSongs])
     }));
-    setSelectedSetlistSongId(nextSetlistSong.id);
+    setSelectedSetlistSongId(newSetlistSongs[newSetlistSongs.length - 1].id);
     setWorkspaceMode('setlists');
+    setSetlistAddSongSelection([]);
+    setIsSetlistAddSongsOpen(false);
+    setSetlistSongSearchQuery('');
+    // Batch commit returns to the detail view on every viewport so the user
+    // immediately sees what they just added.
     if (isPhoneViewport) {
       setMobileSetlistDrawerView('detail');
-      setIsSetlistAddSongsOpen(false);
-      setSetlistSongSearchQuery('');
     } else {
-      setDesktopSetlistPanelView('addSongs');
-      setIsSetlistAddSongsOpen(true);
+      setDesktopSetlistPanelView('detail');
     }
   };
 
@@ -6964,12 +7008,13 @@ export default function App() {
     };
   }, [copy.googleCredentialError, copy.googleLoadError, googleClientId, googleUser, isMobileActionsSheetOpen, isPhoneViewport, showGoogleAuth]);
 
-  const focusEditorField = React.useCallback((sIdx: number, bIdx: number, field: EditorFocusField) => {
+  const focusEditorField = React.useCallback((sIdx: number, bIdx: number, field: EditorFocusField, instant = false) => {
     setEditorFocusRequest({
       sIdx,
       bIdx,
       field,
-      requestId: editorFocusRequestIdRef.current += 1
+      requestId: editorFocusRequestIdRef.current += 1,
+      instant
     });
   }, []);
 
@@ -6996,7 +7041,7 @@ export default function App() {
     if (!isEditing) {
       setIsEditing(true);
       editorFocusTimeoutRef.current = window.setTimeout(() => {
-        focusEditorField(nextSectionIndex, bIdx, field);
+        focusEditorField(nextSectionIndex, bIdx, field, true);
         editorFocusTimeoutRef.current = null;
       }, 500);
     } else {
@@ -7084,8 +7129,9 @@ export default function App() {
       editorFocusTimeoutRef.current = null;
     }
 
+    const openedEditor = !isEditing;
     const focusNewBar = () => {
-      focusEditorField(targetIndex, newBarIndex, 'chords');
+      focusEditorField(targetIndex, newBarIndex, 'chords', openedEditor);
       editorFocusTimeoutRef.current = null;
     };
 
@@ -7260,7 +7306,7 @@ export default function App() {
     editorFocusTimeoutRef.current = window.setTimeout(() => {
       setActiveSectionId(activeEditorSong.sections[targetIndex]?.id ?? null);
       setActiveBar({ sIdx: targetIndex, bIdx: pending.bIdx });
-      focusEditorField(targetIndex, pending.bIdx, pending.field);
+      focusEditorField(targetIndex, pending.bIdx, pending.field, true);
       editorFocusTimeoutRef.current = null;
     }, 520);
   }, [activeEditorSong, focusEditorField, isSetlistMode, selectedSetlistSongId]);
@@ -9419,6 +9465,7 @@ export default function App() {
             onClick={() => {
               setIsSetlistActionsMenuOpen(false);
               setIsSetlistAddSongsOpen(true);
+              setSetlistAddSongSelection([]);
               setDesktopSetlistPanelView('addSongs');
             }}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
@@ -9443,6 +9490,7 @@ export default function App() {
               setIsSetlistActionsMenuOpen(false);
               setIsSetlistAddSongsOpen(false);
               setSetlistSongSearchQuery('');
+              setSetlistAddSongSelection([]);
               setDesktopSetlistPanelView('detail');
             }}
             className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
@@ -9453,7 +9501,11 @@ export default function App() {
           </button>
           <div className="min-w-0 flex-1">
             <div className="truncate text-base font-bold text-gray-900">{copy.addToSetlist}</div>
-            <div className="mt-0.5 truncate text-xs font-medium text-gray-500">{selectedSetlist.name || copy.untitledSetlist}</div>
+            <div className="mt-0.5 truncate text-xs font-medium text-gray-500">
+              {setlistAddSongSelection.length > 0
+                ? (language === 'zh' ? `已選 ${setlistAddSongSelection.length} 首` : `${setlistAddSongSelection.length} selected`)
+                : (language === 'zh' ? '可勾選多首，同一首可加多份' : 'Tap to select; +/- adds repeats')}
+            </div>
           </div>
         </div>
 
@@ -9479,40 +9531,95 @@ export default function App() {
             filteredSongsForSetlist.map((librarySong) => {
               const libraryMeta = getSongLibraryMeta(librarySong, copy.editor.shuffle);
               const addedCount = selectedSetlist?.songs.filter((item) => item.songId === librarySong.id).length ?? 0;
+              const selectedCount = setlistAddSongSelection.filter((id) => id === librarySong.id).length;
+              const isSelected = selectedCount > 0;
               return (
-                <div key={`setlist-add-${librarySong.id}`} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="truncate text-sm font-bold text-gray-900">
-                        {librarySong.title || copy.untitledSong}
-                      </div>
-                      {addedCount > 0 && (
-                        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                          {language === 'zh' ? '已加入' : 'Added'}{addedCount > 1 ? ` ×${addedCount}` : ''}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
-                      {libraryMeta.primary}
-                    </div>
-                    {libraryMeta.secondary && (
-                      <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
-                        {libraryMeta.secondary}
-                      </div>
-                    )}
-                  </div>
+                <div
+                  key={`setlist-add-${librarySong.id}`}
+                  className={`flex items-center gap-2 rounded-xl border transition-colors ${
+                    isSelected
+                      ? 'border-indigo-300 bg-indigo-50'
+                      : 'border-gray-200 bg-white'
+                  }`}
+                >
                   <button
                     type="button"
-                    onClick={() => handleAddSongToSetlist(librarySong.id)}
-                    className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+                    onClick={() => toggleSetlistAddSongSelection(librarySong.id)}
+                    aria-pressed={isSelected}
+                    className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left"
                   >
-                    {copy.addToSetlist}
+                    <span
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[11px] font-bold transition-colors ${
+                        isSelected
+                          ? 'border-indigo-600 bg-indigo-600 text-white'
+                          : 'border-gray-300 bg-white text-transparent'
+                      }`}
+                    >
+                      {selectedCount > 1 ? selectedCount : <Check size={14} strokeWidth={3} />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <div className="truncate text-sm font-bold text-gray-900">
+                          {librarySong.title || copy.untitledSong}
+                        </div>
+                        {addedCount > 0 && (
+                          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                            {language === 'zh' ? '已加入' : 'Added'}{addedCount > 1 ? ` ×${addedCount}` : ''}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
+                        {libraryMeta.primary}
+                      </div>
+                      {libraryMeta.secondary && (
+                        <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
+                          {libraryMeta.secondary}
+                        </div>
+                      )}
+                    </div>
                   </button>
+                  {isSelected && (
+                    <div className="mr-2 flex shrink-0 items-center gap-1 rounded-lg border border-indigo-200 bg-white p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => decrementSetlistAddSongSelection(librarySong.id)}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-indigo-600 transition-colors hover:bg-indigo-50"
+                        aria-label={language === 'zh' ? `減少一份 ${librarySong.title || copy.untitledSong}` : `Remove one ${librarySong.title || copy.untitledSong}`}
+                      >
+                        <Minus size={14} strokeWidth={3} />
+                      </button>
+                      <span className="min-w-[1.25rem] text-center text-sm font-bold text-indigo-700">{selectedCount}</span>
+                      <button
+                        type="button"
+                        onClick={() => incrementSetlistAddSongSelection(librarySong.id)}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-indigo-600 transition-colors hover:bg-indigo-50"
+                        aria-label={language === 'zh' ? `多加一份 ${librarySong.title || copy.untitledSong}` : `Add one more ${librarySong.title || copy.untitledSong}`}
+                      >
+                        <Plus size={14} strokeWidth={3} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })
           )}
         </div>
+      </div>
+
+      <div className="border-t border-gray-200 bg-white px-4 py-3">
+        <button
+          type="button"
+          disabled={setlistAddSongSelection.length === 0}
+          onClick={() => handleAddSongsToSetlist(setlistAddSongSelection)}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none"
+        >
+          <Plus size={16} />
+          <span>
+            {setlistAddSongSelection.length > 0
+              ? (language === 'zh' ? `加入 ${setlistAddSongSelection.length} 首` : `Add ${setlistAddSongSelection.length}`)
+              : (language === 'zh' ? '加入歌單' : 'Add to setlist')}
+          </span>
+        </button>
       </div>
 
       {desktopSetlistSavedFooter}
@@ -10166,6 +10273,7 @@ export default function App() {
                               setIsSetlistActionsMenuOpen(false);
                               setIsSetlistAddSongsOpen(false);
                               setSetlistSongSearchQuery('');
+                              setSetlistAddSongSelection([]);
                               setMobileSetlistDrawerView('detail');
                             }}
                             className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
@@ -10176,7 +10284,11 @@ export default function App() {
                           </button>
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-base font-bold text-gray-900">{copy.addToSetlist}</div>
-                            <div className="mt-0.5 truncate text-xs font-medium text-gray-500">{selectedSetlist.name || copy.untitledSetlist}</div>
+                            <div className="mt-0.5 truncate text-xs font-medium text-gray-500">
+                              {setlistAddSongSelection.length > 0
+                                ? (language === 'zh' ? `已選 ${setlistAddSongSelection.length} 首` : `${setlistAddSongSelection.length} selected`)
+                                : (language === 'zh' ? '可勾選多首，同一首可加多份' : 'Tap to select; +/- adds repeats')}
+                            </div>
                           </div>
                         </div>
 
@@ -10202,43 +10314,95 @@ export default function App() {
                             filteredSongsForSetlist.map((librarySong) => {
                               const libraryMeta = getSongLibraryMeta(librarySong, copy.editor.shuffle);
                               const addedCount = selectedSetlist?.songs.filter((item) => item.songId === librarySong.id).length ?? 0;
+                              const selectedCount = setlistAddSongSelection.filter((id) => id === librarySong.id).length;
+                              const isSelected = selectedCount > 0;
                               return (
                                 <div
                                   key={`setlist-add-${librarySong.id}`}
-                                  className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3"
+                                  className={`flex items-center gap-2 rounded-xl border transition-colors ${
+                                    isSelected
+                                      ? 'border-indigo-300 bg-indigo-50'
+                                      : 'border-gray-200 bg-white'
+                                  }`}
                                 >
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2">
-                                      <div className="truncate text-sm font-bold text-gray-900">
-                                        {librarySong.title || copy.untitledSong}
-                                      </div>
-                                      {addedCount > 0 && (
-                                        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                                          {language === 'zh' ? '已加入' : 'Added'}{addedCount > 1 ? ` ×${addedCount}` : ''}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
-                                      {libraryMeta.primary}
-                                    </div>
-                                    {libraryMeta.secondary && (
-                                      <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
-                                        {libraryMeta.secondary}
-                                      </div>
-                                    )}
-                                  </div>
                                   <button
                                     type="button"
-                                    onClick={() => handleAddSongToSetlist(librarySong.id)}
-                                    className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+                                    onClick={() => toggleSetlistAddSongSelection(librarySong.id)}
+                                    aria-pressed={isSelected}
+                                    className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left"
                                   >
-                                    {copy.addToSetlist}
+                                    <span
+                                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[11px] font-bold transition-colors ${
+                                        isSelected
+                                          ? 'border-indigo-600 bg-indigo-600 text-white'
+                                          : 'border-gray-300 bg-white text-transparent'
+                                      }`}
+                                    >
+                                      {selectedCount > 1 ? selectedCount : <Check size={14} strokeWidth={3} />}
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-2">
+                                        <div className="truncate text-sm font-bold text-gray-900">
+                                          {librarySong.title || copy.untitledSong}
+                                        </div>
+                                        {addedCount > 0 && (
+                                          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                                            {language === 'zh' ? '已加入' : 'Added'}{addedCount > 1 ? ` ×${addedCount}` : ''}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
+                                        {libraryMeta.primary}
+                                      </div>
+                                      {libraryMeta.secondary && (
+                                        <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
+                                          {libraryMeta.secondary}
+                                        </div>
+                                      )}
+                                    </div>
                                   </button>
+                                  {isSelected && (
+                                    <div className="mr-2 flex shrink-0 items-center gap-1 rounded-lg border border-indigo-200 bg-white p-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => decrementSetlistAddSongSelection(librarySong.id)}
+                                        className="flex h-7 w-7 items-center justify-center rounded-md text-indigo-600 transition-colors hover:bg-indigo-50"
+                                        aria-label={language === 'zh' ? `減少一份 ${librarySong.title || copy.untitledSong}` : `Remove one ${librarySong.title || copy.untitledSong}`}
+                                      >
+                                        <Minus size={14} strokeWidth={3} />
+                                      </button>
+                                      <span className="min-w-[1.25rem] text-center text-sm font-bold text-indigo-700">{selectedCount}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => incrementSetlistAddSongSelection(librarySong.id)}
+                                        className="flex h-7 w-7 items-center justify-center rounded-md text-indigo-600 transition-colors hover:bg-indigo-50"
+                                        aria-label={language === 'zh' ? `多加一份 ${librarySong.title || copy.untitledSong}` : `Add one more ${librarySong.title || copy.untitledSong}`}
+                                      >
+                                        <Plus size={14} strokeWidth={3} />
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })
                           )}
                         </div>
+                      </div>
+
+                      <div className="border-t border-gray-200 bg-white px-4 py-3">
+                        <button
+                          type="button"
+                          disabled={setlistAddSongSelection.length === 0}
+                          onClick={() => handleAddSongsToSetlist(setlistAddSongSelection)}
+                          className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none"
+                        >
+                          <Plus size={16} />
+                          <span>
+                            {setlistAddSongSelection.length > 0
+                              ? (language === 'zh' ? `加入 ${setlistAddSongSelection.length} 首` : `Add ${setlistAddSongSelection.length}`)
+                              : (language === 'zh' ? '加入歌單' : 'Add to setlist')}
+                          </span>
+                        </button>
                       </div>
                     </>
                   ) : (
@@ -10536,6 +10700,7 @@ export default function App() {
                         onClick={() => {
                           setIsSetlistActionsMenuOpen(false);
                           setIsSetlistAddSongsOpen(true);
+                          setSetlistAddSongSelection([]);
                           setMobileSetlistDrawerView('addSongs');
                         }}
                         className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
