@@ -47,9 +47,10 @@ import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
-import ChordSheet from './components/ChordSheet';
+import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetMetaField, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
+import PreviewWysiwygEditor, { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
 import SongEditor from './components/SongEditor';
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
@@ -1848,6 +1849,7 @@ export default function App() {
     [rawAuthenticatedUser?.id]
   );
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
+  const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
   const toast = useToast();
@@ -2020,7 +2022,7 @@ export default function App() {
     sectionId: string | null;
     sIdx: number;
     bIdx: number;
-    field: EditorFocusField;
+    field: ChordSheetElementField;
   } | null>(null);
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
   const previewPinchStateRef = useRef<PreviewPinchState | null>(null);
@@ -7018,7 +7020,38 @@ export default function App() {
     });
   }, []);
 
-  const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: EditorFocusField) => {
+  const findPreviewAnchorRect = React.useCallback((anchorKey: string): PreviewAnchorRect | null => {
+    const root = sheetRef.current;
+    if (!root) return null;
+    const anchors = Array.from(root.querySelectorAll('[data-preview-edit-anchor]')) as HTMLElement[];
+    const node = anchors
+      .find((candidate) => candidate.dataset.previewEditAnchor === anchorKey);
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height
+    };
+  }, []);
+
+  const refreshPreviewEditAnchorRect = React.useCallback(() => {
+    setPreviewMetaEditTarget((current) => {
+      if (!current) return current;
+      const anchorRect = findPreviewAnchorRect(current.anchorKey);
+      if (!anchorRect) return null;
+      return { ...current, anchorRect };
+    });
+  }, [findPreviewAnchorRect]);
+
+  const getPreviewIdentityForCurrentMode = React.useCallback(() => (
+    isSetlistMode ? (selectedSetlistSong?.id ?? null) : (song?.id ?? null)
+  ), [isSetlistMode, selectedSetlistSong?.id, song?.id]);
+
+  const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: ChordSheetElementField) => {
     if (!activeEditorSong || !activeNavigationPreviewSong) {
       return;
     }
@@ -7032,6 +7065,10 @@ export default function App() {
 
     setActiveSectionId(nextSectionId ?? activeEditorSong.sections[nextSectionIndex]?.id ?? null);
     setActiveBar({ sIdx: nextSectionIndex, bIdx });
+    setPreviewMetaEditTarget(null);
+    if (!canOpenEditor) {
+      return;
+    }
 
     if (editorFocusTimeoutRef.current !== null) {
       window.clearTimeout(editorFocusTimeoutRef.current);
@@ -7047,7 +7084,27 @@ export default function App() {
     } else {
       focusEditorField(nextSectionIndex, bIdx, field);
     }
-  }, [activeEditorSong, activeNavigationPreviewSong, focusEditorField, isEditing]);
+  }, [activeEditorSong, activeNavigationPreviewSong, canOpenEditor, focusEditorField, isEditing]);
+
+  const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
+    if (!canOpenEditor) {
+      return;
+    }
+
+    const previewIdentity = getPreviewIdentityForCurrentMode();
+    const anchorKey = meta.anchorKey ?? getChordSheetMetaAnchorKey(previewIdentity, field);
+    const anchorRect = meta.anchorRect ?? findPreviewAnchorRect(anchorKey);
+    if (!anchorRect) {
+      return;
+    }
+
+    setPreviewMetaEditTarget({
+      field,
+      anchorKey,
+      anchorRect,
+      previewIdentity
+    });
+  }, [canOpenEditor, findPreviewAnchorRect, getPreviewIdentityForCurrentMode]);
 
   // In setlist mode the preview stacks every song. Clicking a section/chord of a
   // song that isn't the currently focused one should (1) switch the focused
@@ -7059,7 +7116,7 @@ export default function App() {
     previewSong: Song,
     sIdx: number,
     bIdx: number,
-    field: EditorFocusField
+    field: ChordSheetElementField
   ) => {
     if (itemId === selectedSetlistSong?.id) {
       handleElementClick(sIdx, bIdx, field);
@@ -7073,9 +7130,12 @@ export default function App() {
       bIdx,
       field
     };
-    setIsEditing(true);
+    setPreviewMetaEditTarget(null);
+    if (canOpenEditor) {
+      setIsEditing(true);
+    }
     handleSelectSetlistSong(itemId);
-  }, [handleElementClick, handleSelectSetlistSong, selectedSetlistSong?.id]);
+  }, [canOpenEditor, handleElementClick, handleSelectSetlistSong, selectedSetlistSong?.id]);
 
   const handleScrollPreviewToTop = React.useCallback(() => {
     const scrollRoot = previewRef.current;
@@ -7086,7 +7146,8 @@ export default function App() {
   const handlePreviewScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const shouldShow = event.currentTarget.scrollTop > 240;
     setShowPreviewBackToTop((prev) => (prev === shouldShow ? prev : shouldShow));
-  }, []);
+    refreshPreviewEditAnchorRect();
+  }, [refreshPreviewEditAnchorRect]);
 
   // Clicking the empty "+" slot after a section's last bar in the preview adds a
   // new bar to that section (works in both song-library and setlist modes).
@@ -7120,6 +7181,8 @@ export default function App() {
       handleSongChange(nextSong);
     }
 
+    setPreviewMetaEditTarget(null);
+
     // Move focus to the freshly added bar so chords can be typed right away.
     setActiveSectionId(nextSectionId ?? targetSection.id ?? null);
     setActiveBar({ sIdx: targetIndex, bIdx: newBarIndex });
@@ -7142,6 +7205,14 @@ export default function App() {
       editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 60);
     }
   }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlist, canEditTeamSongs, focusEditorField, handleSetlistSongContentChange, handleSongChange, isEditing, isSetlistMode]);
+
+  const handlePreviewWysiwygEditorChange = React.useCallback((nextSong: Song) => {
+    if (isSetlistMode) {
+      handleSetlistSongContentChange(nextSong);
+    } else {
+      handleSongChange(nextSong);
+    }
+  }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode]);
 
   const previewSheet = React.useMemo(() => {
     if (!hasSongs) {
@@ -7184,6 +7255,7 @@ export default function App() {
         language={language}
         currentKey={song.currentKey}
         onElementClick={handleElementClick}
+        onMetaClick={canOpenEditor ? handleMetaClick : undefined}
         onAddBarClick={canEditTeamSongs ? handleAddBarToSection : undefined}
         highlightedSectionIds={highlightedSectionIds}
         activeSectionId={isEditing ? activeSectionId : null}
@@ -7191,7 +7263,7 @@ export default function App() {
         previewIdentity={song.id}
       />
     );
-  }, [activeBar, activeSectionId, canEditTeamSongs, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
+  }, [activeBar, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, handleMetaClick, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -7258,6 +7330,7 @@ export default function App() {
               language={language}
               currentKey={previewSong.currentKey}
               onElementClick={(sIdx, bIdx, field) => handleSetlistElementClick(item.id, previewSong, sIdx, bIdx, field)}
+              onMetaClick={isSelected && canOpenEditor ? handleMetaClick : undefined}
               onAddBarClick={isSelected && canEditSelectedSetlist ? handleAddBarToSection : undefined}
               highlightedSectionIds={isSelected ? highlightedSectionIds : []}
               activeSectionId={isSelected && isEditing ? activeSectionId : null}
@@ -7268,7 +7341,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activeSectionId, canEditSelectedSetlist, handleAddBarToSection, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleMetaClick, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -7277,8 +7350,15 @@ export default function App() {
   useEffect(() => {
     setHighlightedSectionIds([]);
     setActiveBar(null);
+    setPreviewMetaEditTarget(null);
     setActiveSectionId(activeEditorSong?.sections[0]?.id ?? null);
   }, [currentPreviewIdentity]);
+
+  useEffect(() => {
+    if (isLyricsMode) {
+      setPreviewMetaEditTarget(null);
+    }
+  }, [isLyricsMode]);
 
   // Resolve a pending cross-song setlist click once the freshly selected song
   // becomes the active editor song. We schedule the focus on a timeout so it
@@ -7422,6 +7502,7 @@ export default function App() {
 
     if (!scrollRoot) {
       setPreviewZoom(clampedScale / previewBaseScale);
+      window.requestAnimationFrame(refreshPreviewEditAnchorRect);
       return;
     }
 
@@ -7458,6 +7539,7 @@ export default function App() {
         top: nextTop,
         behavior: 'auto'
       });
+      window.requestAnimationFrame(refreshPreviewEditAnchorRect);
     });
   };
 
@@ -7572,6 +7654,7 @@ export default function App() {
         top: Math.max(0, nextHeight * pinchState.contentRatioY - focalY),
         behavior: 'auto'
       });
+      window.requestAnimationFrame(refreshPreviewEditAnchorRect);
     });
   };
 
@@ -7586,6 +7669,7 @@ export default function App() {
     previewDragStateRef.current = null;
     setIsPreviewDragging(false);
     document.body.style.userSelect = '';
+    window.requestAnimationFrame(refreshPreviewEditAnchorRect);
 
     if (dragState?.moved) {
       suppressPreviewClickRef.current = true;
@@ -12340,6 +12424,35 @@ export default function App() {
                 </div>
               </div>
             </div>
+            {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
+              <PreviewWysiwygEditor
+                song={activeEditorSong}
+                language={language}
+                target={previewMetaEditTarget}
+                isMobile={isPhoneViewport}
+                currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
+                currentCapo={isSetlistMode ? currentSetlistCapo : currentCapo}
+                originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                canEditKey={isSetlistMode ? canEditSelectedSetlistKey : canEditTeamSongs}
+                metadataSuggestions={metadataSuggestions}
+                onChange={handlePreviewWysiwygEditorChange}
+                onKeyChange={(key) => {
+                  if (isSetlistMode) {
+                    handleSetlistKeyChange(key);
+                  } else {
+                    handleKeyChange(key);
+                  }
+                }}
+                onCapoChange={(capo) => {
+                  if (isSetlistMode) {
+                    handleSelectedSetlistCapoChange(capo);
+                  } else {
+                    handleSongChange({ ...song, capo });
+                  }
+                }}
+                onClose={() => setPreviewMetaEditTarget(null)}
+              />
+            )}
             {isSetlistMode && showPreviewBackToTop && (
               <div className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 left-3' : 'bottom-2 left-2 sm:bottom-4 sm:left-4 lg:bottom-6 lg:left-6'

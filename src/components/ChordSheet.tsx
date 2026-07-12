@@ -786,12 +786,49 @@ const FormattedKeySequence: React.FC<{
   </span>
 );
 
+export type ChordSheetElementField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'sectionName' | 'marker';
+export type ChordSheetMetaField = 'title' | 'credits' | 'key' | 'tempo' | 'timeSignature' | 'capo' | 'groove';
+
+export interface PreviewAnchorRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export interface ChordSheetElementClickMeta {
+  anchorKey: string;
+  anchorRect: PreviewAnchorRect;
+}
+
+export const getChordSheetMetaAnchorKey = (
+  previewIdentity: string | null | undefined,
+  field: ChordSheetMetaField
+) => `${previewIdentity || 'preview'}|meta|${field}`;
+
+const getPreviewAnchorRect = (element: HTMLElement): PreviewAnchorRect => {
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height
+  };
+};
+
+const VALUE_ANCHORED_META_FIELDS = new Set<ChordSheetMetaField>(['key', 'tempo', 'timeSignature']);
+
 interface ChordSheetProps {
   song: Song;
   language: AppLanguage;
   currentKey: Key;
   transposeFromOriginal?: boolean;
-  onElementClick?: (sIdx: number, bIdx: number, field: 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'sectionName' | 'marker') => void;
+  onElementClick?: (sIdx: number, bIdx: number, field: ChordSheetElementField) => void;
+  onMetaClick?: (field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => void;
   onAddBarClick?: (sIdx: number) => void;
   highlightedSectionIds?: string[];
   activeSectionId?: string | null;
@@ -1189,7 +1226,7 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onAddBarClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, previewIdentity = null }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, previewIdentity = null }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   // Chords always use the sans-serif preset; the serif option was removed.
@@ -1198,6 +1235,69 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const [keepTransitionsSuppressed, setKeepTransitionsSuppressed] = React.useState(false);
   const isPreviewIdentityChanged = previousPreviewIdentityRef.current !== previewIdentity;
   const suppressSectionTransitions = isPreviewIdentityChanged || keepTransitionsSuppressed;
+  const emitElementClick = (
+    event: React.MouseEvent<HTMLElement>,
+    sIdx: number,
+    bIdx: number,
+    field: ChordSheetElementField
+  ) => {
+    event.stopPropagation();
+    onElementClick?.(sIdx, bIdx, field);
+  };
+  const getMetaEditAnchorKey = (field: ChordSheetMetaField) => getChordSheetMetaAnchorKey(previewIdentity, field);
+  const getMetaValueAnchorKey = (field: ChordSheetMetaField) => `${getMetaEditAnchorKey(field)}|value`;
+  const emitMetaClickFromElement = (element: HTMLElement, field: ChordSheetMetaField) => {
+    if (!onMetaClick) return;
+    const anchorElement = VALUE_ANCHORED_META_FIELDS.has(field)
+      ? element.querySelector<HTMLElement>('[data-preview-edit-anchor]') ?? element
+      : element;
+    const anchorKey = anchorElement.dataset.previewEditAnchor ?? getMetaEditAnchorKey(field);
+    onMetaClick(field, {
+      anchorKey,
+      anchorRect: getPreviewAnchorRect(anchorElement)
+    });
+  };
+  const emitMetaClick = (event: React.MouseEvent<HTMLElement>, field: ChordSheetMetaField) => {
+    emitMetaClickFromElement(event.currentTarget, field);
+  };
+  const getMetaAnchorProps = (field: ChordSheetMetaField) => (
+    onMetaClick
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          'data-preview-edit-anchor': getMetaEditAnchorKey(field),
+          onClick: (event: React.MouseEvent<HTMLElement>) => {
+            event.stopPropagation();
+            emitMetaClick(event, field);
+          }
+        }
+      : {}
+  );
+  const getMetaHitProps = (field: ChordSheetMetaField) => (
+    onMetaClick
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          'data-preview-edit-hit': getMetaEditAnchorKey(field),
+          onClick: (event: React.MouseEvent<HTMLElement>) => {
+            event.stopPropagation();
+            emitMetaClick(event, field);
+          },
+          onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+            if (event.key !== 'Enter' && event.key !== ' ') {
+              return;
+            }
+            event.preventDefault();
+            emitMetaClickFromElement(event.currentTarget, field);
+          }
+        }
+      : {}
+  );
+  const getMetaValueAnchorProps = (field: ChordSheetMetaField) => (
+    onMetaClick
+      ? { 'data-preview-edit-anchor': getMetaValueAnchorKey(field) }
+      : {}
+  );
 
   React.useEffect(() => {
     if (previousPreviewIdentityRef.current === previewIdentity) {
@@ -1365,20 +1465,35 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               <div className="min-w-0 relative">
                 <div className="flex items-start gap-3">
                   <AutoShrink className="mb-0 min-w-0 flex-1">
-                    <h1 className="text-3xl font-bold tracking-tight">{song.title}</h1>
+                    <div
+                      {...getMetaAnchorProps('title')}
+                      className={onMetaClick ? 'cursor-text rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : undefined}
+                    >
+                      <h1 className="text-3xl font-bold tracking-tight">{song.title}</h1>
+                    </div>
                   </AutoShrink>
                   {pageBadge}
                 </div>
-                {hasCredits && (
-                  <div className="absolute left-0 right-0 top-[38px] text-xs font-semibold text-gray-900 tracking-tight leading-tight whitespace-nowrap overflow-hidden text-ellipsis">
-                    {creditLine}
+                {(hasCredits || onMetaClick) && (
+                  <div
+                    {...getMetaAnchorProps('credits')}
+                    aria-label={hasCredits ? undefined : (language === 'zh' ? '編輯版本與翻譯' : 'Edit version and translation')}
+                    className={`absolute left-0 top-[38px] ${hasCredits ? 'max-w-[48%] text-xs font-semibold text-gray-900 tracking-tight leading-tight whitespace-nowrap overflow-hidden text-ellipsis' : 'h-4 w-36'} ${onMetaClick ? 'cursor-text rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : ''}`}
+                  >
+                    {hasCredits ? creditLine : null}
                   </div>
                 )}
                 <AutoShrink className="min-w-0 overflow-visible mt-4.5">
                   <div className="flex items-center gap-3 text-xs font-medium text-gray-500 tracking-widest" style={{ fontFamily: chordFontFamily }}>
-                    <div className="shrink-0">
+                    <div
+                      {...getMetaHitProps('key')}
+                      className={`shrink-0 -mx-1 rounded-sm px-1 py-0.5 ${onMetaClick ? 'cursor-pointer transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(99,102,241,0.4)]' : ''}`}
+                    >
                       <span>{copy.key} - </span>
-                      <span className="text-gray-900 font-bold">
+                      <span
+                        {...getMetaValueAnchorProps('key')}
+                        className="text-gray-900 font-bold"
+                      >
                         <FormattedKeySequence
                           keys={displayedChartKeySequence}
                           nashvilleFontFamily={nashvilleFontFamily}
@@ -1389,16 +1504,34 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     {typeof song.tempo === 'number' && (
                       <>
                         <span className="text-gray-400">|</span>
-                        <div className="shrink-0">
+                        <div
+                          {...getMetaHitProps('tempo')}
+                          className={`shrink-0 -mx-1 rounded-sm px-1 py-0.5 ${onMetaClick ? 'cursor-text transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(99,102,241,0.4)]' : ''}`}
+                        >
                           <span>{copy.editor.tempo} - </span>
-                          <span className="text-gray-900 font-bold">{song.tempo}</span>
+                          <span
+                            {...getMetaValueAnchorProps('tempo')}
+                            className="text-gray-900 font-bold"
+                          >
+                            {song.tempo}
+                          </span>
                         </div>
                       </>
                     )}
                     <span className="text-gray-400">|</span>
                     <div className="shrink-0 flex items-center gap-2">
-                      <span>{copy.editor.timeSignature} - </span>
-                      <span className="text-gray-900 font-bold">{song.timeSignature}</span>
+                      <span
+                        {...getMetaHitProps('timeSignature')}
+                        className={`-mx-1 rounded-sm px-1 py-0.5 ${onMetaClick ? 'cursor-text transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(99,102,241,0.4)]' : ''}`}
+                      >
+                        <span>{copy.editor.timeSignature} - </span>
+                        <span
+                          {...getMetaValueAnchorProps('timeSignature')}
+                          className="text-gray-900 font-bold"
+                        >
+                          {song.timeSignature}
+                        </span>
+                      </span>
                       {song.showAbsoluteJianpu && (
                         <>
                           <span className="text-gray-400">|</span>
@@ -1408,14 +1541,22 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       {isShuffle && (
                         <>
                           <span className="text-gray-400">|</span>
-                          <ShuffleSymbol className="self-center -translate-y-[3px]" />
+                          <span
+                            {...getMetaAnchorProps('groove')}
+                            className={`inline-flex ${onMetaClick ? 'cursor-pointer rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : ''}`}
+                          >
+                            <ShuffleSymbol className="self-center -translate-y-[3px]" />
+                          </span>
                         </>
                       )}
                     </div>
                     {capo > 0 && (
                       <>
                         <span className="text-gray-400">|</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div
+                          {...getMetaAnchorProps('capo')}
+                          className={`flex items-center gap-1.5 shrink-0 ${onMetaClick ? 'cursor-pointer rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : ''}`}
+                        >
                           <span className="text-indigo-600 font-semibold">Capo {capo}</span>
                           <span className="text-gray-400 font-medium">(<FormattedKeySequence keys={displayedPlayKeySequence} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />)</span>
                         </div>
@@ -1527,7 +1668,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             <div
                               className={`flex w-full items-center justify-center rounded-sm border px-1 py-1 min-h-[24px] overflow-visible ${onElementClick ? 'cursor-pointer transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.4)]' : ''}`}
                               style={getSectionBadgeStyle(colors.accent)}
-                              {...(onElementClick ? { role: 'button' as const, tabIndex: 0, onClick: () => onElementClick(row.sIdx, -1, 'sectionName') } : {})}
+                              {...(onElementClick ? { role: 'button' as const, tabIndex: 0, onClick: (event: React.MouseEvent<HTMLElement>) => emitElementClick(event, row.sIdx, -1, 'sectionName') } : {})}
                             >
                               {hasManualLineBreak ? (
                                 <div className="w-full whitespace-pre-line break-words px-[1px] text-center text-[10px] font-black tracking-[0.04em] leading-[1.15]">
@@ -1558,7 +1699,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         {hasPickupRhythm && (
                           <button
                             type="button"
-                            onClick={() => onElementClick?.(0, -1, 'rhythm')}
+                            onClick={(event) => emitElementClick(event, 0, -1, 'rhythm')}
                             className={`block w-full rounded-sm text-left transition-colors ${isPickupActive ? 'ring-1 ring-indigo-200' : ''}`}
                             style={{ boxShadow: isPickupActive ? `inset 0 0 0 1px ${activeTone.stroke}` : 'none' }}
                           >
@@ -1578,7 +1719,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         {hasPickupRiff && (
                           <button
                             type="button"
-                            onClick={() => onElementClick?.(0, -1, 'riff')}
+                            onClick={(event) => emitElementClick(event, 0, -1, 'riff')}
                             className={`block w-full rounded-sm text-left transition-colors ${isPickupActive ? 'ring-1 ring-indigo-200' : ''}`}
                             style={{ boxShadow: isPickupActive ? `inset 0 0 0 1px ${activeTone.stroke}` : 'none' }}
                           >
@@ -1899,7 +2040,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 style={getSectionBadgeStyle(colors.accent)}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'annotation');
+                                  emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'annotation');
                                 }}
                               >
                                 {formatBarAnnotation(bar.annotation)}
@@ -1932,7 +2073,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       return (
                                         <div
                                           className={`flex flex-1 items-center justify-center w-full h-full cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${contentLeftInsetClass}`}
-                                          onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                          onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           <div className="w-full max-w-full overflow-visible translate-y-[3px]">
 	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" />
@@ -1960,7 +2101,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       <div
                                         className={className}
                                         style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
-                                        onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                        onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                       >
                                         {(() => {
                                           const fullRenderedAnchors = occupiedChordAnchors.map((anchor) => {
@@ -2026,9 +2167,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                                key={`${row.sIdx}-${row.startBIdx + bIdx}-slot-${anchor.slotIndex}`}
 	                                                className="flex h-[24px] min-w-0 items-end px-[3px]"
 	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span 1` }}
-	                                                onClick={(event) => {
+	                                                  onClick={(event) => {
 	                                                  event.stopPropagation();
-	                                                  onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords');
+	                                                  emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords');
                                                 }}
                                               >
                                                 <AutoShrink
@@ -2063,7 +2204,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       return (
                                         <div
                                           className={`flex-1 flex items-center justify-center w-full h-full cursor-pointer ${contentLeftInsetClass}`}
-                                          onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                          onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           <FormattedChord
                                             chordString="%"
@@ -2080,7 +2221,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       return (
                                         <div
                                           className={`flex flex-1 h-full w-full items-center justify-center cursor-pointer rounded transition-colors hover:bg-indigo-50/50 ${contentLeftInsetClass}`}
-                                          onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
+                                          onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           <FormattedChord
                                             chordString={getDisplayedChordString(centeredWholeRestAnchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers, false, sectionWrittenKey)}
@@ -2114,7 +2255,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'label');
+                                            emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
                                           }}
                                         >
                                           <span className="text-[8px] font-bold text-black uppercase leading-none">
@@ -2130,7 +2271,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           className={`bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} flex-1`}
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'rhythm');
+                                            emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'rhythm');
                                           }}
                                         >
                                           <div className="w-full translate-y-[3px]">
@@ -2144,7 +2285,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           className={`bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass}`}
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'riff');
+                                            emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
                                           }}
                                         >
                                           <Jianpu
@@ -2167,7 +2308,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'label');
+                                          emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
                                         }}
                                       >
                                         <span className="text-[8px] font-bold text-black uppercase leading-none">
@@ -2181,7 +2322,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         className={`bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass}`}
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          onElementClick?.(row.sIdx, row.startBIdx + bIdx, showBottomRhythmLane ? 'rhythm' : 'riff');
+                                          emitElementClick(e, row.sIdx, row.startBIdx + bIdx, showBottomRhythmLane ? 'rhythm' : 'riff');
                                         }}
                                         >
                                           {showBottomRhythmLane ? (

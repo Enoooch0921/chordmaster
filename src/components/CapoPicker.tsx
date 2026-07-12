@@ -17,6 +17,7 @@ interface CapoPickerProps {
   showPlayKey?: boolean;
   triggerIconSize?: number;
   triggerDensity?: 'default' | 'compact';
+  autoOpen?: boolean;
 }
 
 const CapoPicker: React.FC<CapoPickerProps> = ({
@@ -30,7 +31,8 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   valueTextClassName = '',
   showPlayKey = true,
   triggerIconSize = 16,
-  triggerDensity = 'default'
+  triggerDensity = 'default',
+  autoOpen = false
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -42,6 +44,12 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   const closePanel = React.useCallback(() => {
     setIsOpen(false);
   }, []);
+
+  React.useEffect(() => {
+    if (autoOpen && !disabled) {
+      setIsOpen(true);
+    }
+  }, [autoOpen, disabled]);
 
   React.useEffect(() => {
     if (!isOpen) {

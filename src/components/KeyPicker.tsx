@@ -36,8 +36,12 @@ interface KeyPickerProps {
   buttonClassName?: string;
   valueTextClassName?: string;
   metaTextClassName?: string;
+  buttonStyle?: React.CSSProperties;
+  valueTextStyle?: React.CSSProperties;
   triggerIconSize?: number;
+  hideTriggerIcon?: boolean;
   triggerDensity?: 'default' | 'compact';
+  autoOpen?: boolean;
 }
 
 const findNextKey = (currentKey: Key, rowStep: number, columnStep: number): Key | null => {
@@ -75,8 +79,12 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   buttonClassName = '',
   valueTextClassName = '',
   metaTextClassName = '',
+  buttonStyle,
+  valueTextStyle,
   triggerIconSize = 16,
-  triggerDensity = 'default'
+  hideTriggerIcon = false,
+  triggerDensity = 'default',
+  autoOpen = false
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -88,6 +96,12 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   const closePanel = React.useCallback(() => {
     setIsOpen(false);
   }, []);
+
+  React.useEffect(() => {
+    if (autoOpen && !disabled) {
+      setIsOpen(true);
+    }
+  }, [autoOpen, disabled]);
 
   React.useEffect(() => {
     if (!isOpen) {
@@ -203,18 +217,22 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
               ? 'border-indigo-500 ring-2 ring-indigo-500'
               : 'text-gray-700 hover:border-gray-400'
         } ${buttonClassName}`}
+        style={buttonStyle}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
       >
         <span className="flex min-w-0 flex-1 items-center justify-between gap-1.5">
-          <span className={`truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold ${value ? 'text-gray-800' : 'text-gray-500'} ${valueTextClassName}`}>
+          <span
+            className={`truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold ${value ? 'text-gray-800' : 'text-gray-500'} ${valueTextClassName}`}
+            style={valueTextStyle}
+          >
             {triggerValueText}
           </span>
           {triggerMetaText ? (
             <span className={`truncate ${isCompactTrigger ? 'text-[10px]' : 'text-[11px]'} font-semibold text-gray-500 ${metaTextClassName}`}>{triggerMetaText}</span>
           ) : null}
         </span>
-        {!disabled ? (
+        {!disabled && !hideTriggerIcon ? (
           <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
         ) : null}
       </button>
