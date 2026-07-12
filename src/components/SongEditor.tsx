@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure } from '../types';
+import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure, AnnotationColorId } from '../types';
 import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpLeft, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, LayoutGroup, useDragControls } from 'motion/react';
 import Jianpu from './Jianpu';
@@ -11,6 +11,7 @@ import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
 import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, MAX_RELATIVE_OCTAVE_SHIFT, absoluteJianpuPartsToRelative, buildJianpuNoteFromMode, buildJianpuPlaceholder, clampRelativeOctave, convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 import { formatInitialCaps } from '../utils/textUtils';
+import { ANNOTATION_COLOR_OPTIONS, DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
 
 type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'marker';
 
@@ -100,6 +101,7 @@ interface BarPanelState {
   riff?: boolean;
   barTime?: boolean;
   rhythm?: boolean;
+  marks?: boolean;
   more?: boolean;
 }
 
@@ -1256,6 +1258,11 @@ const SongEditor: React.FC<Props> = ({
     getCanonicalJianpuNotation(notation, getBarTimeSignature(getEditorBar(sIdx, bIdx)), trimTrailingEmpty)
   );
   const getBarPanelKey = (bar: Bar, sIdx: number, bIdx: number) => bar.id || `${sIdx}-${bIdx}`;
+  const hasBarAnnotationMarks = (bar: Bar) => (
+    Object.keys(bar.chordMarks ?? {}).length > 0 ||
+    Boolean(bar.rhythmMark) ||
+    Boolean(bar.unisonMark?.enabled)
+  );
   const getBarPanelState = (bar: Bar, sIdx: number, bIdx: number) => {
     const state = barPanels[getBarPanelKey(bar, sIdx, bIdx)];
     const barLabel = getBarDisplayLabel(bar);
@@ -1263,6 +1270,7 @@ const SongEditor: React.FC<Props> = ({
       riff: state?.riff ?? Boolean(bar.riff || barLabel),
       barTime: state?.barTime ?? Boolean(bar.timeSignature),
       rhythm: state?.rhythm ?? Boolean(bar.rhythm),
+      marks: state?.marks ?? hasBarAnnotationMarks(bar),
       more: state?.more ?? Boolean(
         barLabel ||
         bar.annotation ||
@@ -1276,6 +1284,193 @@ const SongEditor: React.FC<Props> = ({
         bar.ending
       )
     };
+  };
+  const getCleanChordMarks = (marks: Bar['chordMarks']) => (
+    marks && Object.keys(marks).length > 0 ? marks : undefined
+  );
+  const pruneChordMarksForChordCount = (marks: Bar['chordMarks'], chordCount: number) => {
+    if (!marks || chordCount <= 0) return undefined;
+    const nextMarks = Object.entries(marks).reduce<NonNullable<Bar['chordMarks']>>((result, [rawIndex, mark]) => {
+      const index = Number(rawIndex);
+      if (Number.isInteger(index) && index >= 0 && index < chordCount && (mark.color || mark.special)) {
+        result[index] = mark;
+      }
+      return result;
+    }, {});
+    return getCleanChordMarks(nextMarks);
+  };
+  const renderAnnotationColorPicker = (
+    selectedColor: AnnotationColorId | undefined,
+    fallbackColor: AnnotationColorId,
+    disabled: boolean,
+    onSelect: (color: AnnotationColorId) => void
+  ) => {
+    const effectiveColor = selectedColor ?? fallbackColor;
+
+    return (
+      <div className="flex flex-wrap gap-1">
+        {ANNOTATION_COLOR_OPTIONS.map((option) => {
+          const selected = option.id === effectiveColor;
+          const title = language === 'zh' ? option.labelZh : option.label;
+
+          return (
+            <button
+              key={option.id}
+              type="button"
+              disabled={disabled}
+              onClick={() => onSelect(option.id)}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md border transition-transform disabled:cursor-not-allowed disabled:opacity-40"
+              style={{
+                backgroundColor: option.soft,
+                borderColor: selected ? option.text : option.border,
+                boxShadow: selected ? `0 0 0 2px ${option.soft}, inset 0 0 0 1px rgba(255,255,255,0.8)` : 'none',
+                transform: selected ? 'scale(1.04)' : 'scale(1)'
+              }}
+              title={title}
+              aria-label={title}
+            >
+              <span
+                className="h-3 w-3 rounded-full"
+                style={{ backgroundColor: option.text }}
+              />
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+  const renderAnnotationMarkControls = (bar: Bar, sIdx: number, bIdx: number) => {
+    const visibleChordEntries = normalizeBarChords(bar.chords)
+      .map((chord, index) => ({ chord: chord.trim(), index }))
+      .filter(({ chord }) => chord.length > 0);
+    const hasRhythm = Boolean(bar.rhythm?.trim());
+
+    const updateChordMark = (chordIndex: number, nextMark: NonNullable<Bar['chordMarks']>[number] | undefined) => {
+      const nextMarks = { ...(bar.chordMarks ?? {}) };
+      if (nextMark?.color || nextMark?.special) {
+        nextMarks[chordIndex] = nextMark;
+      } else {
+        delete nextMarks[chordIndex];
+      }
+      updateBar(sIdx, bIdx, { chordMarks: getCleanChordMarks(nextMarks) });
+    };
+
+    const setRhythmColor = (color: AnnotationColorId) => {
+      if (!hasRhythm) return;
+      updateBar(sIdx, bIdx, { rhythmMark: { color } });
+    };
+
+    const unisonEnabled = Boolean(bar.unisonMark?.enabled);
+    const setUnisonColor = (color: AnnotationColorId) => {
+      updateBar(sIdx, bIdx, { unisonMark: { enabled: true, color } });
+    };
+
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.colorMarks}</label>
+          <span className="text-[10px] font-semibold text-gray-400">{copy.editor.marks}</span>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <div className="mb-1 text-[10px] font-bold uppercase text-gray-400">{copy.editor.chordColors}</div>
+            {visibleChordEntries.length > 0 ? (
+              <div className="space-y-1.5">
+                {visibleChordEntries.map(({ chord, index }) => {
+                  const mark = bar.chordMarks?.[index];
+                  const color = mark?.color ?? (mark?.special ? DEFAULT_SPECIAL_CHORD_COLOR : undefined);
+
+                  return (
+                    <div key={`${index}-${chord}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1.5">
+                      <div className="min-w-0 truncate font-mono text-xs font-bold text-gray-800">{chord}</div>
+                      {renderAnnotationColorPicker(color, DEFAULT_SPECIAL_CHORD_COLOR, false, (nextColor) => {
+                        updateChordMark(index, { ...(mark ?? {}), color: nextColor });
+                      })}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateChordMark(index, mark?.special
+                              ? { color: mark.color }
+                              : { ...(mark ?? {}), color: mark?.color ?? DEFAULT_SPECIAL_CHORD_COLOR, special: true });
+                          }}
+                          className={`h-6 rounded-md border px-1.5 text-[10px] font-bold transition-colors ${
+                            mark?.special
+                              ? 'border-amber-300 bg-amber-100 text-amber-800'
+                              : 'border-gray-200 bg-white text-gray-400 hover:border-amber-200 hover:text-amber-700'
+                          }`}
+                          title={copy.editor.specialChord}
+                        >
+                          {language === 'zh' ? '特' : 'S'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateChordMark(index, undefined)}
+                          className="h-6 rounded-md border border-gray-200 bg-white px-1.5 text-[10px] font-bold text-gray-400 transition-colors hover:border-rose-200 hover:text-rose-600"
+                          title={copy.editor.clearMark}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-gray-200 bg-white px-2 py-2 text-[10px] text-gray-400">
+                {copy.editor.noChordsToMark}
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-md border border-gray-200 bg-white px-2 py-1.5">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold uppercase text-gray-400">{copy.editor.rhythmColor}</span>
+                {bar.rhythmMark && (
+                  <button
+                    type="button"
+                    onClick={() => updateBar(sIdx, bIdx, { rhythmMark: undefined })}
+                    className="text-[10px] font-bold text-gray-400 transition-colors hover:text-rose-600"
+                  >
+                    {copy.editor.clearMark}
+                  </button>
+                )}
+              </div>
+              {renderAnnotationColorPicker(bar.rhythmMark?.color, DEFAULT_RHYTHM_MARK_COLOR, !hasRhythm, setRhythmColor)}
+              {!hasRhythm && (
+                <div className="mt-1 text-[10px] leading-4 text-gray-400">{copy.editor.rhythmMarkNeedsRhythm}</div>
+              )}
+            </div>
+
+            <div className="rounded-md border border-gray-200 bg-white px-2 py-1.5">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold uppercase text-gray-400">{copy.editor.unison}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateBar(sIdx, bIdx, {
+                      unisonMark: unisonEnabled
+                        ? undefined
+                        : { enabled: true, color: bar.unisonMark?.color ?? DEFAULT_UNISON_MARK_COLOR }
+                    });
+                  }}
+                  className={`h-6 rounded-md border px-2 text-[10px] font-bold transition-colors ${
+                    unisonEnabled
+                      ? 'border-sky-300 bg-sky-100 text-sky-800'
+                      : 'border-gray-200 bg-white text-gray-400 hover:border-sky-200 hover:text-sky-700'
+                  }`}
+                >
+                  {unisonEnabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+              {renderAnnotationColorPicker(bar.unisonMark?.color, DEFAULT_UNISON_MARK_COLOR, !unisonEnabled, setUnisonColor)}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
   const updateBarPanelState = (bar: Bar, sIdx: number, bIdx: number, patch: BarPanelState) => {
     if (patch.riff !== undefined || patch.rhythm !== undefined) {
@@ -1542,6 +1737,7 @@ const SongEditor: React.FC<Props> = ({
         && !currentBar?.ending
         && !currentBar?.label
         && !currentBar?.annotation
+        && !hasBarAnnotationMarks(currentBar)
         && !currentBar?.leftMarker
         && !currentBar?.rightMarker
         && input.value.length === 0;
@@ -5085,7 +5281,7 @@ const SongEditor: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="mt-3 grid grid-cols-4 items-center gap-1">
+          <div className="mt-3 grid grid-cols-5 items-center gap-1">
             <button
               type="button"
               onClick={() => updateBarPanelState(bar, sIdx, bIdx, { riff: !panelState.riff })}
@@ -5123,6 +5319,18 @@ const SongEditor: React.FC<Props> = ({
               <span className="text-[11px] font-bold leading-none">
                 {bar.timeSignature || song.timeSignature || '4/4'}
               </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => updateBarPanelState(bar, sIdx, bIdx, { marks: !panelState.marks })}
+              title={copy.editor.marks}
+              className={`h-7 min-w-0 w-full overflow-hidden rounded-md border px-1 transition-colors flex items-center justify-center ${
+                panelState.marks
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                  : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <span className="text-[11px] font-bold leading-none">{language === 'zh' ? '標註' : 'Mark'}</span>
             </button>
             <button
               type="button"
@@ -5313,6 +5521,8 @@ const SongEditor: React.FC<Props> = ({
               </div>
             )}
 
+            {panelState.marks && renderAnnotationMarkControls(bar, sIdx, bIdx)}
+
             {panelState.rhythm && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                 <div className="mb-1.5">
@@ -5400,6 +5610,7 @@ const SongEditor: React.FC<Props> = ({
 	                            tieFromPrevious={getRhythmTieFromPrevious(sIdx, bIdx)}
 	                            nextNotationForCrossBar={getNextRhythmNotation(sIdx, bIdx)}
 	                            nextTimeSignatureForCrossBar={getNextRhythmTimeSignature(sIdx, bIdx)}
+	                            color={bar.rhythmMark ? getAnnotationColorOption(bar.rhythmMark.color ?? DEFAULT_RHYTHM_MARK_COLOR).text : undefined}
 	                            onInsertSelect={(cursorUnit) => setRhythmInsertSelection(sIdx, bIdx, bar.rhythm || '', cursorUnit)}
 	                          />
                         ) : (
@@ -6402,9 +6613,11 @@ const SongEditor: React.FC<Props> = ({
                                 isNashvilleMode ? token : normalizeChordEnharmonic(token)
                               ));
 
+                              const nextChords = hasVisibleChordTokens(chordTokens) ? chordTokens : [];
                               newBars[bIdx] = {
                                 ...bar,
-                                chords: hasVisibleChordTokens(chordTokens) ? chordTokens : []
+                                chords: nextChords,
+                                chordMarks: pruneChordMarksForChordCount(bar.chordMarks, nextChords.length)
                               };
                               updateSection(sIdx, { ...section, bars: newBars });
 
@@ -6633,9 +6846,11 @@ const SongEditor: React.FC<Props> = ({
                             isNashvilleMode ? token : normalizeChordEnharmonic(token)
                           ));
 
+                          const nextChords = hasVisibleChordTokens(chordTokens) ? chordTokens : [];
                           newBars[bIdx] = {
                             ...bar,
-                            chords: hasVisibleChordTokens(chordTokens) ? chordTokens : []
+                            chords: nextChords,
+                            chordMarks: pruneChordMarksForChordCount(bar.chordMarks, nextChords.length)
                           };
                           updateSection(sIdx, { ...section, bars: newBars });
 
@@ -6654,7 +6869,7 @@ const SongEditor: React.FC<Props> = ({
                       />
                     </div>
 
-                    <div className="grid grid-cols-4 items-center gap-1">
+                    <div className="grid grid-cols-5 items-center gap-1">
                       <button
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { riff: !panelState.riff })}
@@ -6692,6 +6907,18 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[11px] font-bold leading-none">
                           {bar.timeSignature || song.timeSignature || '4/4'}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateBarPanelState(bar, sIdx, bIdx, { marks: !panelState.marks })}
+                        title={copy.editor.marks}
+                        className={`h-7 min-w-0 w-full overflow-hidden px-1 rounded-md border transition-colors flex items-center justify-center ${
+                          panelState.marks
+                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                            : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+                        }`}
+                      >
+                        <span className="text-[11px] font-bold leading-none">{language === 'zh' ? '標註' : 'Mark'}</span>
                       </button>
                       <button
                         type="button"
@@ -6882,6 +7109,8 @@ const SongEditor: React.FC<Props> = ({
                     </div>
                     )}
 
+                    {panelState.marks && renderAnnotationMarkControls(bar, sIdx, bIdx)}
+
                     {/* Rhythm Section */}
                     {panelState.rhythm && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
@@ -6970,6 +7199,7 @@ const SongEditor: React.FC<Props> = ({
 	                                  tieFromPrevious={getRhythmTieFromPrevious(sIdx, bIdx)}
 	                                  nextNotationForCrossBar={getNextRhythmNotation(sIdx, bIdx)}
 	                                  nextTimeSignatureForCrossBar={getNextRhythmTimeSignature(sIdx, bIdx)}
+	                                  color={bar.rhythmMark ? getAnnotationColorOption(bar.rhythmMark.color ?? DEFAULT_RHYTHM_MARK_COLOR).text : undefined}
 	                                  onInsertSelect={(cursorUnit) => setRhythmInsertSelection(sIdx, bIdx, bar.rhythm || '', cursorUnit)}
 	                                />
                               ) : (

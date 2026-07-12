@@ -79,3 +79,22 @@ export const getChordDisplaySlots = (chords: string[], beatsPerBar: number) => {
 
   return slots;
 };
+
+export const getChordDisplaySlotEntries = (chords: string[], beatsPerBar: number) => {
+  const beatCount = Math.max(1, beatsPerBar);
+  const normalizedChords = normalizeBarChords(chords);
+  let lastVisibleIndex = normalizedChords.length - 1;
+  while (lastVisibleIndex >= 0 && !normalizedChords[lastVisibleIndex].trim()) {
+    lastVisibleIndex -= 1;
+  }
+  const visibleChords = normalizedChords.slice(0, lastVisibleIndex + 1).slice(0, beatCount);
+  const slotIndexes = getChordAnchorSlotIndexes(visibleChords, beatCount);
+  const slots = Array.from({ length: beatCount }, () => null as { chord: string; rawIndex: number } | null);
+
+  visibleChords.forEach((chord, rawIndex) => {
+    const slotIndex = slotIndexes[rawIndex] ?? Math.min(rawIndex, beatCount - 1);
+    slots[slotIndex] = { chord, rawIndex };
+  });
+
+  return slots;
+};

@@ -24,6 +24,7 @@ interface RhythmNotationProps {
   tieFromPrevious?: boolean;
   nextNotationForCrossBar?: string;
   nextTimeSignatureForCrossBar?: string;
+  color?: string;
   onEventSelect?: (eventIndex: number) => void;
   onInsertSelect?: (insertIndex: number) => void;
 }
@@ -51,6 +52,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   tieFromPrevious = false,
   nextNotationForCrossBar,
   nextTimeSignatureForCrossBar,
+  color,
   onEventSelect,
   onInsertSelect
 }) => {
@@ -73,7 +75,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
   const { beats, beatUnits, barUnits, overflow } = parsed;
   const baseMinHeight = (compact ? 16 : 58) * scale;
-  const stroke = overflow ? '#dc2626' : '#111827';
+  const hasRhythmError = overflow || parsed.invalidTokens.length > 0;
+  const stroke = hasRhythmError ? '#dc2626' : (color || '#111827');
   const guide = overflow ? 'rgba(220, 38, 38, 0.16)' : 'rgba(17, 24, 39, 0.08)';
   const crossBarMeasurementVersion = 5;
   const crossBarNoteheadOvershootPx = compact ? 0.6 : 1.4;

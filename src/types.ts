@@ -25,6 +25,21 @@ export type LibraryRole = 'owner' | 'editor' | 'setlist_manager' | 'viewer';
 // LibraryRole). A manager may edit the project's shared key + song order.
 export type ProjectMemberRole = 'viewer' | 'manager';
 export type SongReferenceKind = 'band' | 'vocal';
+export type AnnotationColorId = 'amber' | 'emerald' | 'sky' | 'rose' | 'violet' | 'slate';
+
+export interface ChordMark {
+  color?: AnnotationColorId;
+  special?: boolean;
+}
+
+export interface RhythmMark {
+  color?: AnnotationColorId;
+}
+
+export interface UnisonMark {
+  enabled: boolean;
+  color?: AnnotationColorId;
+}
 
 export interface SongReference {
   url?: string;
@@ -47,6 +62,9 @@ export interface Bar {
   riffLabel?: string; // e.g., "Riff", "Pno", "EG"
   rhythmLabel?: string; // e.g., "Dr", "Rhythm", "Clap"
   annotation?: string; // e.g., "Kick In", "8 beat build"
+  chordMarks?: Record<number, ChordMark>;
+  rhythmMark?: RhythmMark;
+  unisonMark?: UnisonMark;
   leftMarker?: NavigationMarker; // e.g., segno at bar start
   rightMarker?: NavigationMarker; // e.g., coda, D.S., D.C., Fine, or D.S. al Coda at bar end
   leftText?: string; // e.g., "Vocal only"

@@ -15,8 +15,9 @@ import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
-import { getChordDisplaySlots } from '../utils/chordSlots';
+import { getChordDisplaySlotEntries } from '../utils/chordSlots';
 import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
+import { DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
 
 interface FormattedChordProps {
   chordString: string;
@@ -25,6 +26,8 @@ interface FormattedChordProps {
   chordFontFamily?: string;
   compactSlashBass?: boolean;
   abbreviateMajorQuality?: boolean;
+  color?: string;
+  specialLabel?: string;
   // For the multi-measure rest symbol: how many bar columns it spans. >1 widens
   // the thick-bar glyph so it stretches across the absorbed empty bars.
   restSpan?: number;
@@ -237,6 +240,30 @@ const getSectionBadgeStyle = (accent: string): React.CSSProperties => {
   };
 };
 
+const getChordMarkTextColor = (bar: Bar | undefined, chordIndex: number) => {
+  const mark = bar?.chordMarks?.[chordIndex];
+  const colorId = mark?.color ?? (mark?.special ? DEFAULT_SPECIAL_CHORD_COLOR : undefined);
+  return colorId ? getAnnotationColorOption(colorId).text : undefined;
+};
+
+const getChordSpecialLabel = (bar: Bar | undefined, chordIndex: number, language: AppLanguage) => (
+  bar?.chordMarks?.[chordIndex]?.special ? (language === 'zh' ? '特' : 'S') : undefined
+);
+
+const getRhythmMarkTextColor = (bar: Bar | undefined) => (
+  bar?.rhythmMark ? getAnnotationColorOption(bar.rhythmMark.color ?? DEFAULT_RHYTHM_MARK_COLOR).text : undefined
+);
+
+const getUnisonMarkStyle = (bar: Bar | undefined): React.CSSProperties | undefined => {
+  if (!bar?.unisonMark?.enabled) return undefined;
+  const tone = getAnnotationColorOption(bar.unisonMark.color ?? DEFAULT_UNISON_MARK_COLOR);
+  return {
+    backgroundColor: tone.soft,
+    borderColor: tone.border,
+    color: tone.text
+  };
+};
+
 const FormattedChord: React.FC<FormattedChordProps> = ({
   chordString,
   compactModifier = false,
@@ -244,11 +271,33 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   chordFontFamily,
   compactSlashBass = false,
   abbreviateMajorQuality = false,
+  color,
+  specialLabel,
   restSpan = 1
 }) => {
+  const markStyle = color
+    ? ({ '--chord-mark-color': color } as React.CSSProperties)
+    : undefined;
+  const withChordMark = (content: React.ReactElement) => {
+    if (!color && !specialLabel) {
+      return content;
+    }
+
+    return (
+      <div className={`relative inline-flex min-w-0 ${color ? 'chord-colorized' : ''}`} style={markStyle}>
+        {content}
+        {specialLabel && (
+          <span className="pointer-events-none absolute -right-2.5 -top-3 z-30 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-amber-300 bg-amber-100 px-[3px] text-[8px] font-black leading-none text-amber-800 shadow-[0_1px_2px_rgba(146,64,14,0.16)]">
+            {specialLabel}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   const multiMeasureRestCount = getMultiMeasureRestCount(chordString);
   if (isMultiMeasureRestChord(chordString)) {
-    return (
+    return withChordMark(
       <div className="flex h-full w-full items-center justify-center">
         <div className={`flex flex-col items-center leading-none text-gray-900 ${restSpan > 1 ? 'w-4/5' : 'w-1/3 min-w-[42px]'}`}>
           {/* Always reserve the count row so the bar glyph lands at the same
@@ -272,7 +321,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   }
 
   if (chordString === '%') {
-    return (
+    return withChordMark(
       <div className="flex items-center justify-center w-full h-full">
         <svg viewBox="0 0 24 24" className="w-7 h-7 text-gray-400" fill="currentColor">
           <circle cx="9" cy="9" r="1.2" />
@@ -285,7 +334,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
 
   if (chordString === '/') {
     // Beat slash: keep its own glyph box so it aligns with chord content instead of sticking to the top edge.
-    return (
+    return withChordMark(
       <div className="relative inline-flex h-[1.02em] w-[0.92em] items-center justify-center translate-y-[1px]">
         <svg viewBox="0 0 16 16" className="h-[0.92em] w-[0.7em] text-gray-400" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
           <path d="M3 13L13 3" />
@@ -423,7 +472,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
           ? getRestGlyph('q')
           : getRestGlyph('e');
 
-    return (
+    return withChordMark(
       <div className="relative inline-flex items-center justify-center w-full h-full">
         <span
           className="font-rhythm text-[22px] text-gray-900 leading-none select-none whitespace-pre"
@@ -450,7 +499,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
         : undefined;
 
     return (
-      <div className="relative inline-block">
+      withChordMark(<div className="relative inline-block">
         <span className="inline-flex items-end gap-[0.02em] text-gray-900 font-bold font-serif whitespace-nowrap" style={slashOnlyTextStyle}>
           <span className="text-lg font-bold text-gray-900 leading-none">/</span>
           {isNumericBass
@@ -472,7 +521,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
               )}
         </span>
         {renderModifiers()}
-      </div>
+      </div>)
     );
   }
 
@@ -480,7 +529,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   const match = cleanChord.match(/^([b#]?)([A-G1-7])([#b]?)([^/]*)(?:\/([b#]?)([A-G1-7])([#b]?))?$/);
 
   if (!match) {
-    return (
+    return withChordMark(
       <div className="relative inline-block">
         <span className="text-lg font-bold font-serif tracking-tight text-gray-900" style={chordFontFamily ? { fontFamily: chordFontFamily } : undefined}>{cleanChord}</span>
         {renderModifiers()}
@@ -562,7 +611,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
       ...(nashvilleFontFamily ? { fontFamily: nashvilleFontFamily } : {})
     };
 
-    return (
+    return withChordMark(
       <div className={`relative inline-block ${numericChordOffsetClass}`}>
         <span
           className="relative inline-flex items-baseline text-gray-900 font-bold font-serif whitespace-nowrap"
@@ -641,7 +690,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
     );
   }
 
-  return (
+  return withChordMark(
     <div className="relative inline-block">
       <span className="inline-flex items-baseline text-gray-900 font-bold font-serif whitespace-nowrap" style={chordFontFamily ? { fontFamily: chordFontFamily } : undefined}>
         <span className="text-lg leading-none">{root}</span>
@@ -1612,7 +1661,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const hasBarLabel = Boolean(barLabel);
                     const globalBarNumber = (sectionBarOffsets[row.sIdx] ?? 0) + row.startBIdx + bIdx + 1;
                     const beatsPerBar = parseInt(effectiveTimeSignature.split('/')[0]) || 4;
-                    const displayChords = bar ? getChordDisplaySlots(bar.chords, beatsPerBar) : [];
+                    const displayChordEntries = bar ? getChordDisplaySlotEntries(bar.chords, beatsPerBar) : [];
+                    const rhythmMarkColor = getRhythmMarkTextColor(bar);
+                    const unisonMarkStyle = getUnisonMarkStyle(bar);
                     const hasRhythm = Boolean(bar?.rhythm);
                     const hasRiff = hasVisiblePreviewRiff(previewRiffNotation);
                     const previousRhythmBar = bIdx > 0
@@ -1854,6 +1905,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 {formatBarAnnotation(bar.annotation)}
                               </div>
                             )}
+                            {unisonMarkStyle && (
+                              <div
+                                className={`pointer-events-none absolute right-1 z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap ${
+                                  bar.annotation || showKeyChangeTag || bar.ending ? 'top-[2px]' : '-top-4'
+                                }`}
+                                style={unisonMarkStyle}
+                              >
+                                {language === 'zh' ? '齊奏' : 'Unison'}
+                              </div>
+                            )}
                             {bar.timeSignature && (
                               <div
                                 className={`absolute top-1/2 -translate-y-1/2 z-10 flex w-5 flex-col items-center justify-center text-[19px] font-semibold italic leading-[0.78] text-[#1e3a8a] pointer-events-none select-none ${bar.repeatStart ? 'left-2.5' : 'left-1.5'}`}
@@ -1874,16 +1935,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           <div className="w-full max-w-full overflow-visible translate-y-[3px]">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" />
                                           </div>
                                         </div>
                                       );
                                     }
 
                                       const occupiedChordAnchors = (() => {
-                                        const anchors = displayChords.flatMap((displayChord, slotIndex) => {
-                                          if (!displayChord) return [];
-                                          return [{ chord: displayChord, slotIndex, span: 1 }];
+                                        const anchors = displayChordEntries.flatMap((entry, slotIndex) => {
+                                          if (!entry?.chord) return [];
+                                          return [{ chord: entry.chord, chordIndex: entry.rawIndex, slotIndex, span: 1 }];
                                         });
                                         return anchors.map((anchor, index) => {
                                           const nextSlotIndex = anchors[index + 1]?.slotIndex ?? beatsPerBar;
@@ -1985,6 +2046,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                       abbreviateMajorQuality={shouldAbbreviateCrowdedQuality}
                                                       nashvilleFontFamily={nashvilleFontFamily}
                                                       chordFontFamily={chordFontFamily}
+                                                      color={getChordMarkTextColor(bar, anchor.chordIndex)}
+                                                      specialLabel={getChordSpecialLabel(bar, anchor.chordIndex, language)}
                                                     />
                                                   </div>
                                                 </AutoShrink>
@@ -2002,7 +2065,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           className={`flex-1 flex items-center justify-center w-full h-full cursor-pointer ${contentLeftInsetClass}`}
                                           onClick={() => onElementClick?.(row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
-                                          <FormattedChord chordString="%" nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />
+                                          <FormattedChord
+                                            chordString="%"
+                                            nashvilleFontFamily={nashvilleFontFamily}
+                                            chordFontFamily={chordFontFamily}
+                                            color={getChordMarkTextColor(bar, 0)}
+                                            specialLabel={getChordSpecialLabel(bar, 0, language)}
+                                          />
                                         </div>
                                       );
                                     }
@@ -2019,6 +2088,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             nashvilleFontFamily={nashvilleFontFamily}
                                             chordFontFamily={chordFontFamily}
                                             restSpan={isMultiMeasureRestChord(centeredWholeRestAnchor.chord) ? restSpan : 1}
+                                            color={getChordMarkTextColor(bar, centeredWholeRestAnchor.chordIndex)}
+                                            specialLabel={getChordSpecialLabel(bar, centeredWholeRestAnchor.chordIndex, language)}
                                           />
                                         </div>
                                       );
@@ -2063,7 +2134,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           }}
                                         >
                                           <div className="w-full translate-y-[3px]">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" />
                                           </div>
                                         </div>
                                       </div>
@@ -2112,10 +2183,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           e.stopPropagation();
                                           onElementClick?.(row.sIdx, row.startBIdx + bIdx, showBottomRhythmLane ? 'rhythm' : 'riff');
                                         }}
-                                      >
-                                        {showBottomRhythmLane ? (
-                                          <div className="w-full translate-y-[3px]">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} className="w-full" />
+                                        >
+                                          {showBottomRhythmLane ? (
+                                            <div className="w-full translate-y-[3px]">
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" />
                                           </div>
                                         ) : (
                                           <Jianpu

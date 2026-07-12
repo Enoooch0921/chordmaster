@@ -136,6 +136,12 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  .chord-colorized,
+  .chord-colorized .text-gray-900,
+  .chord-colorized .text-gray-400 {
+    color: var(--chord-mark-color, #111827) !important;
+  }
 }
 
 /* Force light tokens during PDF export, regardless of UI theme.

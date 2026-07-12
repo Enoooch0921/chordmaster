@@ -5,6 +5,7 @@ import { ALL_KEYS } from '../utils/musicUtils';
 import { getDefaultSectionOrder } from '../utils/setlistUtils';
 import { normalizeBarChords } from '../utils/barUtils';
 import { normalizeSongReferences } from '../utils/referenceUtils';
+import { isAnnotationColorId } from '../constants/annotationColors';
 
 export const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 export const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -97,6 +98,58 @@ const normalizeChordTokens = (value: unknown) => {
   return [];
 };
 
+const normalizeChordMarks = (value: unknown, chordCount: number) => {
+  if (!value || typeof value !== 'object' || chordCount <= 0) {
+    return undefined;
+  }
+
+  const marks = Object.entries(value as Record<string, unknown>).reduce<Record<number, NonNullable<Song['sections'][number]['bars'][number]['chordMarks']>[number]>>((nextMarks, [rawIndex, rawMark]) => {
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chordCount || !rawMark || typeof rawMark !== 'object') {
+      return nextMarks;
+    }
+
+    const mark = rawMark as Record<string, unknown>;
+    const normalizedMark = {
+      color: isAnnotationColorId(mark.color) ? mark.color : undefined,
+      special: mark.special === true ? true : undefined
+    };
+
+    if (normalizedMark.color || normalizedMark.special) {
+      nextMarks[index] = normalizedMark;
+    }
+
+    return nextMarks;
+  }, {});
+
+  return Object.keys(marks).length > 0 ? marks : undefined;
+};
+
+const normalizeRhythmMark = (value: unknown, rhythm: string | undefined) => {
+  if (!rhythm || !value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const mark = value as Record<string, unknown>;
+  return isAnnotationColorId(mark.color) ? { color: mark.color } : undefined;
+};
+
+const normalizeUnisonMark = (value: unknown) => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const mark = value as Record<string, unknown>;
+  if (mark.enabled !== true) {
+    return undefined;
+  }
+
+  return {
+    enabled: true,
+    color: isAnnotationColorId(mark.color) ? mark.color : undefined
+  };
+};
+
 export const normalizeSongBars = <T extends Song>(song: T): T => {
   const originalKey = typeof song.originalKey === 'string' && VALID_KEYS.has(song.originalKey) ? song.originalKey as Key : 'C';
   const currentKey = typeof song.currentKey === 'string' && VALID_KEYS.has(song.currentKey) ? song.currentKey as Key : originalKey;
@@ -114,17 +167,22 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
         : undefined,
       bars: rawBars.map((bar) => {
         const safeBar = (bar && typeof bar === 'object' ? bar : {}) as Partial<Song['sections'][number]['bars'][number]> & Record<string, unknown>;
+        const chords = normalizeChordTokens(safeBar.chords);
+        const rhythm = normalizeOptionalText(safeBar.rhythm);
         return {
           ...safeBar,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
-          chords: normalizeChordTokens(safeBar.chords),
+          chords,
           timeSignature: normalizeOptionalText(safeBar.timeSignature),
           riff: normalizeOptionalText(safeBar.riff),
-          rhythm: normalizeOptionalText(safeBar.rhythm),
+          rhythm,
           label: normalizeOptionalText(safeBar.label),
           riffLabel: normalizeOptionalText(safeBar.riffLabel),
           rhythmLabel: normalizeOptionalText(safeBar.rhythmLabel),
           annotation: normalizeOptionalText(safeBar.annotation),
+          chordMarks: normalizeChordMarks(safeBar.chordMarks, chords.length),
+          rhythmMark: normalizeRhythmMark(safeBar.rhythmMark, rhythm),
+          unisonMark: normalizeUnisonMark(safeBar.unisonMark),
           leftMarker: normalizeNavigationMarker(safeBar.leftMarker),
           rightMarker: normalizeNavigationMarker(safeBar.rightMarker),
           leftText: normalizeOptionalText(safeBar.leftText),
