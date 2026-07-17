@@ -81,16 +81,93 @@ describe('PreviewBarEditor', () => {
   });
 
   it('keeps one fixed main keyboard without a vertical scrolling surface', async () => {
-    const user = userEvent.setup();
     renderEditor({ deviceLayout: 'phone' });
     const dialog = screen.getByRole('dialog', { name: '預覽快捷編輯' });
     expect(dialog).toHaveAttribute('data-fixed-keyboard-height', '40dvh');
     expect(dialog.querySelector('[data-keyboard-mode="common"]')).not.toHaveClass('overflow-y-auto');
     expect(dialog.querySelector('[data-keyboard-view="main"]')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /切換鍵盤模式/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '更多和弦種類' }));
-    expect(dialog.querySelector('[data-keyboard-picker="quality"]')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'm13' })).toBeInTheDocument();
+    const roots = dialog.querySelector('[data-chord-key-row="roots"]');
+    expect(roots?.querySelectorAll('button')).toHaveLength(10);
+    expect(roots).toHaveTextContent('CDEFGAB♭♯m');
+    expect(roots).not.toHaveTextContent('♮');
+    expect(dialog.querySelector('[data-chord-key-row="suffixes"]')?.querySelectorAll('button')).toHaveLength(12);
+    expect(screen.getByRole('button', { name: '加入數字 8' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'maj7' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'm7' })).not.toBeInTheDocument();
+  });
+
+  it('composes minor, extended and altered qualities one fragment at a time', async () => {
+    const user = userEvent.setup();
+    const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: base, deviceLayout: 'phone' });
+    const applyAndRerender = async (buttonName: string | RegExp) => {
+      await user.click(screen.getByRole('button', { name: buttonName }));
+      const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+      rerenderSession({ ...base, draftSong: nextSong });
+      return nextSong;
+    };
+
+    await applyAndRerender(/^C$/);
+    await applyAndRerender('加入小和弦 m');
+    const minorSeven = await applyAndRerender('加入數字 7');
+    expect(minorSeven.sections[0].bars[0].chords[1]).toBe('Cm7');
+
+    const secondTarget = { ...target, slotIndex: 2, anchorKey: 'song-1|section-1|bar-1|chords|2' };
+    const secondBase = createPreviewEditSession({ song, target: secondTarget, inputMode: 'letters' });
+    rerenderSession(secondBase);
+    await user.click(screen.getByRole('button', { name: /^C$/ }));
+    let nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    rerenderSession({ ...secondBase, draftSong: nextSong });
+    await user.click(screen.getByRole('button', { name: '加入數字 1' }));
+    nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    rerenderSession({ ...secondBase, draftSong: nextSong });
+    await user.click(screen.getByRole('button', { name: '加入數字 1' }));
+    nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].chords[2]).toBe('C11');
+
+    rerenderSession({ ...secondBase, draftSong: nextSong });
+    await user.click(screen.getByRole('button', { name: '降記號' }));
+    nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    rerenderSession({ ...secondBase, draftSong: nextSong });
+    await user.click(screen.getByRole('button', { name: '加入數字 9' }));
+    nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].chords[2]).toBe('C11b9');
+  });
+
+  it('keeps a visual flat attached to the selected root', async () => {
+    const user = userEvent.setup();
+    const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: base, deviceLayout: 'phone' });
+    await user.click(screen.getByRole('button', { name: /^C$/ }));
+    const withC = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    rerenderSession({ ...base, draftSong: withC });
+    await user.click(screen.getByRole('button', { name: '降記號' }));
+    const withFlat = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(withFlat.sections[0].bars[0].chords[1]).toBe('Cb');
+  });
+
+  it('opens compact anchored popovers for time signatures and endings', async () => {
+    const user = userEvent.setup();
+    renderEditor({ deviceLayout: 'phone' });
+
+    await user.click(screen.getByRole('button', { name: '選擇小節拍號' }));
+    const timePicker = document.querySelector('[data-keyboard-picker="time"]');
+    expect(timePicker).toHaveAttribute('data-picker-placement', 'anchored');
+    expect(timePicker?.querySelector('[data-picker-layout="time-grid"]')).toBeInTheDocument();
+    expect(timePicker?.querySelector('[data-picker-arrow]')).toBeInTheDocument();
+    expect(timePicker?.querySelectorAll('[data-time-signature-glyph]')).toHaveLength(14);
+    expect(screen.getByRole('button', { name: '9/8' })).toBeInTheDocument();
+    expect(document.querySelector('[data-keyboard-view="main"]')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '選擇小節拍號' }));
+    await user.click(screen.getByRole('button', { name: '選擇房子記號' }));
+    const endingPicker = document.querySelector('[data-keyboard-picker="ending"]');
+    expect(endingPicker).toHaveAttribute('data-picker-placement', 'anchored');
+    expect(endingPicker?.querySelector('[data-picker-layout="ending-list"]')).toBeInTheDocument();
+    expect(endingPicker?.querySelector('[data-picker-arrow]')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ending 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清除房子記號' })).toBeInTheDocument();
   });
 
   it('opens notation pickers from small symbol keys and returns to the same keyboard', async () => {
