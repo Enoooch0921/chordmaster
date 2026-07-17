@@ -317,14 +317,20 @@ export default function PreviewWysiwygEditor({
   }, [song.composer, song.lyricist, song.tempo, song.timeSignature, song.title, song.translator, target.anchorKey, target.field]);
 
   React.useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
+    const focusInput = () => {
       const input = panelRef.current?.querySelector<HTMLInputElement>('input[data-wysiwyg-autofocus]');
       if (!input) return;
-      input.focus();
+      input.focus({ preventScroll: true });
       input.select();
-    });
-    return () => window.cancelAnimationFrame(frameId);
-  }, [target.field]);
+    };
+    focusInput();
+    const frameId = window.requestAnimationFrame(focusInput);
+    const timeoutId = window.setTimeout(focusInput, 80);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [target.anchorKey, target.field]);
 
   const closeWithoutCommit = () => {
     if (finishedRef.current) {
@@ -663,6 +669,7 @@ export default function PreviewWysiwygEditor({
           marginTop: -(TEMPO_STEP_BUTTON_SIZE / 2),
           width: TEMPO_STEP_BUTTON_SIZE
         }}
+        onPointerDown={(event) => event.preventDefault()}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => applyTempoDelta(-1)}
         aria-label={zh ? 'Tempo 減 1' : 'Decrease tempo'}
@@ -673,6 +680,11 @@ export default function PreviewWysiwygEditor({
         data-wysiwyg-autofocus
         type="text"
         inputMode="numeric"
+        pattern="[0-9]*"
+        enterKeyHint="done"
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
         value={tempoDraft}
         onChange={(event) => setTempoDraft(event.target.value.replace(/\D+/g, '').slice(0, 3))}
         onBlur={commitTempo}
@@ -706,6 +718,7 @@ export default function PreviewWysiwygEditor({
           marginTop: -(TEMPO_STEP_BUTTON_SIZE / 2),
           width: TEMPO_STEP_BUTTON_SIZE
         }}
+        onPointerDown={(event) => event.preventDefault()}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => applyTempoDelta(1)}
         aria-label={zh ? 'Tempo 加 1' : 'Increase tempo'}
@@ -734,7 +747,13 @@ export default function PreviewWysiwygEditor({
       >
         <input
           data-wysiwyg-autofocus
+          type="text"
           inputMode="numeric"
+          pattern="[0-9/]*"
+          enterKeyHint="done"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={timeDraft}
           onChange={(event) => setTimeDraft(sanitizeTimeSignatureText(event.target.value))}
           onKeyDown={(event) => {

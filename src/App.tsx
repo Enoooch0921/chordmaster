@@ -1997,6 +1997,7 @@ export default function App() {
   }>>({});
   const previewRef = React.useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
+  const mobileWysiwygKeyboardProxyInputRef = useRef<HTMLInputElement>(null);
   const setlistActionsMenuRef = useRef<HTMLDivElement>(null);
   const toolbarOverflowMenuRef = useRef<HTMLDivElement>(null);
   const googleAccountMenuRef = useRef<HTMLDivElement>(null);
@@ -7091,6 +7092,24 @@ export default function App() {
       return;
     }
 
+    // iOS only opens the software keyboard when focus happens inside the
+    // original touch/click gesture. The real WYSIWYG input mounts after state
+    // changes, so prime the keyboard with a tiny proxy input first and then let
+    // PreviewWysiwygEditor move focus to the actual field.
+    if (!hasFinePointer && (field === 'title' || field === 'credits' || field === 'tempo' || field === 'timeSignature')) {
+      const proxyInput = mobileWysiwygKeyboardProxyInputRef.current;
+      if (proxyInput) {
+        proxyInput.setAttribute('inputmode', field === 'tempo' || field === 'timeSignature' ? 'numeric' : 'text');
+        proxyInput.value = '';
+        proxyInput.focus({ preventScroll: true });
+        try {
+          proxyInput.setSelectionRange(0, 0);
+        } catch {
+          // Some mobile browsers reject selection changes on non-text modes.
+        }
+      }
+    }
+
     const previewIdentity = getPreviewIdentityForCurrentMode();
     const anchorKey = meta.anchorKey ?? getChordSheetMetaAnchorKey(previewIdentity, field);
     const anchorRect = meta.anchorRect ?? findPreviewAnchorRect(anchorKey);
@@ -7104,7 +7123,7 @@ export default function App() {
       anchorRect,
       previewIdentity
     });
-  }, [canOpenEditor, findPreviewAnchorRect, getPreviewIdentityForCurrentMode]);
+  }, [canOpenEditor, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, hasFinePointer]);
 
   // In setlist mode the preview stacks every song. Clicking a section/chord of a
   // song that isn't the currently focused one should (1) switch the focused
@@ -12424,12 +12443,23 @@ export default function App() {
                 </div>
               </div>
             </div>
+            <input
+              ref={mobileWysiwygKeyboardProxyInputRef}
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              tabIndex={-1}
+              aria-hidden="true"
+              className="fixed left-0 top-0 h-px w-px opacity-0 pointer-events-none"
+            />
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
               <PreviewWysiwygEditor
                 song={activeEditorSong}
                 language={language}
                 target={previewMetaEditTarget}
-                isMobile={isPhoneViewport}
+                isMobile={isPhoneViewport || !hasFinePointer}
                 currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                 currentCapo={isSetlistMode ? currentSetlistCapo : currentCapo}
                 originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
