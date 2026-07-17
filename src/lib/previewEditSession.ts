@@ -1,0 +1,125 @@
+import type { Song } from '../types';
+import type { ChordInputMode } from './songEditing';
+
+export interface PreviewEditAnchorRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export type PreviewEditField = 'chords' | 'symbols' | 'text';
+
+export interface PreviewEditTarget {
+  previewIdentity: string;
+  sectionId: string;
+  barId: string;
+  field: PreviewEditField;
+  slotIndex: number;
+  rawChordIndex: number | null;
+  anchorKey: string;
+  anchorRect: PreviewEditAnchorRect;
+}
+
+export interface PreviewEditSession {
+  previewIdentity: string;
+  baseSong: Song;
+  draftSong: Song;
+  target: PreviewEditTarget;
+  inputMode: ChordInputMode;
+  past: Song[];
+  future: Song[];
+  dirty: boolean;
+  lastMergeKey: string | null;
+  lastMutationAt: number;
+}
+
+export const createPreviewEditSession = ({
+  song,
+  target,
+  inputMode
+}: {
+  song: Song;
+  target: PreviewEditTarget;
+  inputMode: ChordInputMode;
+}): PreviewEditSession => ({
+  previewIdentity: target.previewIdentity,
+  baseSong: song,
+  draftSong: song,
+  target,
+  inputMode,
+  past: [],
+  future: [],
+  dirty: false,
+  lastMergeKey: null,
+  lastMutationAt: 0
+});
+
+export const retargetPreviewEditSession = (
+  session: PreviewEditSession,
+  target: PreviewEditTarget
+): PreviewEditSession => ({
+  ...session,
+  target,
+  lastMergeKey: null,
+  lastMutationAt: 0
+});
+
+export const setPreviewEditInputMode = (
+  session: PreviewEditSession,
+  inputMode: ChordInputMode
+): PreviewEditSession => ({ ...session, inputMode });
+
+export const applyPreviewDraft = (
+  session: PreviewEditSession,
+  draftSong: Song,
+  options: { mergeKey?: string; now?: number } = {}
+): PreviewEditSession => {
+  if (draftSong === session.draftSong) return session;
+  const now = options.now ?? Date.now();
+  const mergeKey = options.mergeKey ?? null;
+  const canMerge = Boolean(
+    mergeKey
+    && session.lastMergeKey === mergeKey
+    && now - session.lastMutationAt <= 500
+  );
+  return {
+    ...session,
+    draftSong,
+    past: canMerge ? session.past : [...session.past, session.draftSong],
+    future: [],
+    dirty: draftSong !== session.baseSong,
+    lastMergeKey: mergeKey,
+    lastMutationAt: now
+  };
+};
+
+export const undoPreviewDraft = (session: PreviewEditSession): PreviewEditSession => {
+  const previous = session.past.at(-1);
+  if (!previous) return session;
+  return {
+    ...session,
+    draftSong: previous,
+    past: session.past.slice(0, -1),
+    future: [session.draftSong, ...session.future],
+    dirty: previous !== session.baseSong,
+    lastMergeKey: null,
+    lastMutationAt: 0
+  };
+};
+
+export const redoPreviewDraft = (session: PreviewEditSession): PreviewEditSession => {
+  const next = session.future[0];
+  if (!next) return session;
+  return {
+    ...session,
+    draftSong: next,
+    past: [...session.past, session.draftSong],
+    future: session.future.slice(1),
+    dirty: next !== session.baseSong,
+    lastMergeKey: null,
+    lastMutationAt: 0
+  };
+};

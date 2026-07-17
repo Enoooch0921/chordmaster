@@ -803,6 +803,15 @@ export interface ChordSheetElementClickMeta {
   anchorRect: PreviewAnchorRect;
 }
 
+export interface ChordSheetElementTarget extends ChordSheetElementClickMeta {
+  previewIdentity: string | null;
+  sectionId: string | null;
+  barId: string | null;
+  field: ChordSheetElementField;
+  slotIndex: number | null;
+  rawChordIndex: number | null;
+}
+
 export const getChordSheetMetaAnchorKey = (
   previewIdentity: string | null | undefined,
   field: ChordSheetMetaField
@@ -827,12 +836,13 @@ interface ChordSheetProps {
   language: AppLanguage;
   currentKey: Key;
   transposeFromOriginal?: boolean;
-  onElementClick?: (sIdx: number, bIdx: number, field: ChordSheetElementField) => void;
+  onElementClick?: (sIdx: number, bIdx: number, field: ChordSheetElementField, target: ChordSheetElementTarget) => void;
   onMetaClick?: (field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => void;
   onAddBarClick?: (sIdx: number) => void;
   highlightedSectionIds?: string[];
   activeSectionId?: string | null;
   activeBar?: { sIdx: number; bIdx: number } | null;
+  activeChordSlot?: { sectionId: string; barId: string; slotIndex: number } | null;
   previewIdentity?: string | null;
 }
 
@@ -942,7 +952,7 @@ const NavigationMarkerIcon: React.FC<{
   marker: NavigationMarker;
   side: 'left' | 'right';
   offsetPx?: number;
-  onClick?: () => void;
+  onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }> = ({ marker, side, offsetPx = 0, onClick }) => {
   if (TEXT_ONLY_NAVIGATION_MARKERS.has(marker)) {
     return null;
@@ -960,7 +970,7 @@ const NavigationMarkerIcon: React.FC<{
         ? {
             role: 'button' as const,
             tabIndex: 0,
-            onClick: (event: React.MouseEvent) => { event.stopPropagation(); onClick?.(); }
+            onClick: (event: React.MouseEvent<HTMLDivElement>) => { event.stopPropagation(); onClick?.(event); }
           }
         : { 'aria-hidden': true })}
     >
@@ -991,7 +1001,7 @@ const NavigationTextTag: React.FC<{
   placement?: 'top' | 'inside-bottom' | 'outside-bottom' | 'outside-bottom-tight';
   className?: string;
   variant?: 'plain' | 'highlight';
-  onClick?: () => void;
+  onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }> = ({ text, side, placement = 'top', className = '', variant = 'plain', onClick }) => (
   <div
     className={`absolute z-20 max-w-[calc(100%-8px)] whitespace-nowrap ${onClick ? 'cursor-pointer pointer-events-auto' : ''} ${side === 'left' ? 'left-1' : 'right-1'} ${
@@ -1012,7 +1022,7 @@ const NavigationTextTag: React.FC<{
       ? {
           role: 'button' as const,
           tabIndex: 0,
-          onClick: (event: React.MouseEvent) => { event.stopPropagation(); onClick(); }
+          onClick: (event: React.MouseEvent<HTMLDivElement>) => { event.stopPropagation(); onClick(event); }
         }
       : {})}
   >
@@ -1226,7 +1236,7 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, previewIdentity = null }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activeChordSlot = null, previewIdentity = null }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   // Chords always use the sans-serif preset; the serif option was removed.
@@ -1239,10 +1249,38 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     event: React.MouseEvent<HTMLElement>,
     sIdx: number,
     bIdx: number,
-    field: ChordSheetElementField
+    field: ChordSheetElementField,
+    explicitSlotIndex?: number,
+    explicitRawChordIndex?: number
   ) => {
     event.stopPropagation();
-    onElementClick?.(sIdx, bIdx, field);
+    if (!onElementClick) return;
+    const section = song.sections[sIdx];
+    const bar = bIdx >= 0 ? section?.bars[bIdx] : undefined;
+    const beatCount = Math.max(1, Number.parseInt((bar?.timeSignature || song.timeSignature || '4/4').split('/')[0], 10) || 4);
+    const hitRect = event.currentTarget.getBoundingClientRect();
+    const calculatedSlotIndex = field === 'chords' && bIdx >= 0
+      ? Math.max(0, Math.min(beatCount - 1, Math.floor(((event.clientX - hitRect.left) / Math.max(1, hitRect.width)) * beatCount)))
+      : null;
+    const slotIndex = explicitSlotIndex ?? calculatedSlotIndex;
+    const slotEntry = slotIndex !== null && bar
+      ? getChordDisplaySlotEntries(bar.chords, beatCount)[slotIndex]
+      : null;
+    const rawChordIndex = explicitRawChordIndex ?? slotEntry?.rawIndex ?? null;
+    const anchorKey = `${previewIdentity || 'preview'}|${section?.id || sIdx}|${bar?.id || bIdx}|${field}|${slotIndex ?? 'all'}`;
+    const slotAnchor = slotIndex !== null
+      ? event.currentTarget.closest('.sheet-bar')?.querySelector<HTMLElement>(`[data-preview-slot-index="${slotIndex}"]`)
+      : null;
+    onElementClick(sIdx, bIdx, field, {
+      previewIdentity,
+      sectionId: section?.id ?? null,
+      barId: bar?.id ?? null,
+      field,
+      slotIndex,
+      rawChordIndex,
+      anchorKey,
+      anchorRect: getPreviewAnchorRect(slotAnchor ?? event.currentTarget)
+    });
   };
   const getMetaEditAnchorKey = (field: ChordSheetMetaField) => getChordSheetMetaAnchorKey(previewIdentity, field);
   const getMetaValueAnchorKey = (field: ChordSheetMetaField) => `${getMetaEditAnchorKey(field)}|value`;
@@ -1984,7 +2022,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           <NavigationMarkerIcon
                             marker={bar.leftMarker}
                             side="left"
-                            onClick={onElementClick ? () => onElementClick(row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
+                            onClick={onElementClick ? (event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
 
@@ -1992,7 +2030,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           <NavigationMarkerIcon
                             marker={bar.rightMarker}
                             side="right"
-                            onClick={onElementClick ? () => onElementClick(row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
+                            onClick={onElementClick ? (event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
 
@@ -2001,7 +2039,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             text={leftNavigationText}
                             side="left"
                             className={bar?.leftMarker ? 'left-5' : ''}
-                            onClick={onElementClick ? () => onElementClick(row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
+                            onClick={onElementClick ? (event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
 
@@ -2012,7 +2050,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             placement={isRightTextOnlyMarker ? 'outside-bottom-tight' : 'top'}
                             variant={isRightTextOnlyMarker ? 'highlight' : 'plain'}
                             className={isRightTextOnlyMarker ? 'right-0 text-[10px]' : bar?.rightMarker ? 'right-5' : ''}
-                            onClick={onElementClick ? () => onElementClick(row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
+                            onClick={onElementClick ? (event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
 
@@ -2103,6 +2141,25 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
                                         onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                       >
+                                        {Array.from({ length: beatsPerBar }, (_, slotIndex) => {
+                                          const isSelectedSlot = Boolean(
+                                            activeChordSlot
+                                            && activeChordSlot.sectionId === section?.id
+                                            && activeChordSlot.barId === bar.id
+                                            && activeChordSlot.slotIndex === slotIndex
+                                          );
+                                          return (
+                                            <div
+                                              key={`slot-hit-${slotIndex}`}
+                                              data-preview-slot-hit
+                                              data-preview-slot-index={slotIndex}
+                                              data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|chords|${slotIndex}`}
+                                              aria-hidden="true"
+                                              className={`pointer-events-none h-[26px] rounded-[4px] transition-shadow ${isSelectedSlot ? 'bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92),0_0_0_1px_rgba(255,255,255,0.88)]' : ''}`}
+                                              style={{ gridColumn: `${slotIndex + 1} / span 1`, gridRow: '1' }}
+                                            />
+                                          );
+                                        })}
                                         {(() => {
                                           const fullRenderedAnchors = occupiedChordAnchors.map((anchor) => {
                                             const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers, false, sectionWrittenKey);
@@ -2166,10 +2223,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                              <div
 	                                                key={`${row.sIdx}-${row.startBIdx + bIdx}-slot-${anchor.slotIndex}`}
 	                                                className="flex h-[24px] min-w-0 items-end px-[3px]"
-	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span 1` }}
+	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span 1`, gridRow: '1' }}
 	                                                  onClick={(event) => {
 	                                                  event.stopPropagation();
-	                                                  emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords');
+	                                                  emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords', anchor.slotIndex, anchor.chordIndex);
                                                 }}
                                               >
                                                 <AutoShrink

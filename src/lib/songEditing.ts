@@ -291,6 +291,38 @@ export const convertDisplayedChordToStoredChord = ({
     : storedLetterChord;
 };
 
+export const convertStoredChordToDisplayedChord = ({
+  chord,
+  storageMode,
+  outputMode,
+  storedKey,
+  displayedKey
+}: {
+  chord: string;
+  storageMode: ChordInputMode;
+  outputMode: ChordInputMode;
+  storedKey: Key;
+  displayedKey: Key;
+}): string => {
+  const trimmed = chord.trim();
+  if (!trimmed || ['%', '/', 'N.C.'].includes(trimmed) || /^\|\d*\|$/.test(trimmed) || /^0(?:_|h|w)?$/i.test(trimmed)) {
+    return trimmed;
+  }
+  const storedLetterChord = storageMode === 'nashville'
+    ? parseNashvilleToChord(trimmed, storedKey)
+    : normalizeChordEnharmonic(trimmed);
+  const displayedLetterChord = transposeChord(
+    storedLetterChord,
+    getTransposeOffset(storedKey, displayedKey),
+    displayedKey,
+    false,
+    storedKey
+  );
+  return outputMode === 'nashville'
+    ? getNashvilleNumber(displayedLetterChord, displayedKey)
+    : displayedLetterChord;
+};
+
 export const getSectionStoredKey = (song: Song, sectionId: string): Key => {
   let activeKey = song.originalKey;
   for (const section of song.sections) {

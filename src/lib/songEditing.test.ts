@@ -5,6 +5,7 @@ import { getTransposeOffset, parseNashvilleToChord, transposeChord } from '../ut
 import {
   clearChordAtBeatSlot,
   convertDisplayedChordToStoredChord,
+  convertStoredChordToDisplayedChord,
   deleteBar,
   duplicateBar,
   getChordBeatSlots,
@@ -135,5 +136,22 @@ describe('edit what you see conversion', () => {
     });
     expect(stored).toBe('1/3');
     expect(displayStoredAgain(parseNashvilleToChord(stored, 'C'), 'C', 'D')).toBe('D/F#');
+  });
+
+  it('renders stored Nashville chords in either input keyboard without rewriting storage', () => {
+    expect(convertStoredChordToDisplayedChord({
+      chord: '1/3',
+      storageMode: 'nashville',
+      outputMode: 'letters',
+      storedKey: 'C',
+      displayedKey: 'D'
+    })).toBe('D/F#');
+    expect(convertStoredChordToDisplayedChord({
+      chord: '1/3',
+      storageMode: 'nashville',
+      outputMode: 'nashville',
+      storedKey: 'C',
+      displayedKey: 'D'
+    })).toBe('1/3');
   });
 });
