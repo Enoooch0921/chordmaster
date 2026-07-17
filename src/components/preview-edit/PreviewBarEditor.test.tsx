@@ -84,11 +84,16 @@ describe('PreviewBarEditor', () => {
     renderEditor({ deviceLayout: 'phone' });
     const dialog = screen.getByRole('dialog', { name: '預覽快捷編輯' });
     expect(dialog).toHaveAttribute('data-fixed-keyboard-height', '40dvh');
+    expect(dialog.querySelector('[data-keyboard-mode="common"]')).toHaveAttribute('data-keyboard-surface', 'system');
     expect(dialog.querySelector('[data-keyboard-mode="common"]')).not.toHaveClass('overflow-y-auto');
     expect(dialog.querySelector('[data-keyboard-view="main"]')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /切換鍵盤模式/ })).not.toBeInTheDocument();
     const roots = dialog.querySelector('[data-chord-key-row="roots"]');
+    const modifiers = dialog.querySelector('[data-chord-key-row="modifiers"]');
+    expect(roots).toHaveAttribute('data-key-surface', 'character');
+    expect(modifiers).toHaveAttribute('data-key-surface', 'utility');
     expect(roots?.querySelectorAll('button')).toHaveLength(10);
+    expect(roots?.querySelector('button')).toHaveClass('rounded-[12px]');
     expect(roots).toHaveTextContent('CDEFGAB♭♯m');
     expect(roots).not.toHaveTextContent('♮');
     expect(dialog.querySelector('[data-chord-key-row="suffixes"]')?.querySelectorAll('button')).toHaveLength(12);
