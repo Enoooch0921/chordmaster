@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../../types';
@@ -57,11 +57,6 @@ const renderEditor = ({
   };
 };
 
-const openModeMenu = () => {
-  const modeButton = screen.getByRole('button', { name: /切換鍵盤模式/ });
-  fireEvent.contextMenu(modeButton);
-};
-
 describe('PreviewBarEditor', () => {
   it('auto-focuses the hidden desktop chord capture and expands visual keys on demand', async () => {
     const user = userEvent.setup();
@@ -85,49 +80,45 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: 'Next beat' })).toHaveTextContent('下一拍');
   });
 
-  it('switches fixed keyboard modes without a vertical scrolling surface', async () => {
+  it('keeps one fixed main keyboard without a vertical scrolling surface', async () => {
     const user = userEvent.setup();
     renderEditor({ deviceLayout: 'phone' });
     const dialog = screen.getByRole('dialog', { name: '預覽快捷編輯' });
     expect(dialog).toHaveAttribute('data-fixed-keyboard-height', '40dvh');
     expect(dialog.querySelector('[data-keyboard-mode="common"]')).not.toHaveClass('overflow-y-auto');
-
-    await user.click(screen.getByRole('button', { name: '切換鍵盤模式：常用' }));
-    expect(dialog.querySelector('[data-keyboard-mode="advanced"]')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '9' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '|: Repeat Start' })).not.toBeInTheDocument();
+    expect(dialog.querySelector('[data-keyboard-view="main"]')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /切換鍵盤模式/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '更多和弦種類' }));
+    expect(dialog.querySelector('[data-keyboard-picker="quality"]')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'm13' })).toBeInTheDocument();
   });
 
-  it('opens the direct mode chooser after a 350ms hold', () => {
-    vi.useFakeTimers();
-    try {
-      renderEditor({ deviceLayout: 'tablet' });
-      const modeButton = screen.getByRole('button', { name: '切換鍵盤模式：常用' });
-      fireEvent.pointerDown(modeButton, { pointerType: 'touch' });
-      act(() => vi.advanceTimersByTime(350));
-      expect(screen.getByRole('menu', { name: '選擇鍵盤模式' })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('menuitem', { name: '符號' }));
-      expect(document.querySelector('[data-symbol-page="all"]')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: '|: Repeat Start' })).toHaveTextContent('|:');
-      expect(screen.getByRole('button', { name: '|: Repeat Start' })).not.toHaveTextContent('Repeat Start');
-    } finally {
-      vi.useRealTimers();
-    }
+  it('opens notation pickers from small symbol keys and returns to the same keyboard', async () => {
+    const user = userEvent.setup();
+    const { onApplyDraft } = renderEditor({ deviceLayout: 'tablet' });
+    await user.click(screen.getByRole('button', { name: '選擇小節線與反覆' }));
+    expect(document.querySelector('[data-keyboard-picker="barline"]')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '|: Repeat Start' })).toHaveTextContent('|:');
+    expect(screen.getByRole('button', { name: '|: Repeat Start' })).not.toHaveTextContent('Repeat Start');
+    await user.click(screen.getByRole('button', { name: '|: Repeat Start' }));
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].repeatStart).toBe(true);
+    expect(document.querySelector('[data-keyboard-picker]')).not.toBeInTheDocument();
   });
 
   it('toggles a per-bar 4/4 override off and keeps complete symbol controls', async () => {
     const user = userEvent.setup();
     const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
     const { onApplyDraft, rerenderSession } = renderEditor({ session: base, deviceLayout: 'phone' });
-    openModeMenu();
-    await user.click(screen.getByRole('menuitem', { name: '符號' }));
+    await user.click(screen.getByRole('button', { name: '選擇小節線與反覆' }));
     await user.click(screen.getByRole('button', { name: '|: Repeat Start' }));
     expect((onApplyDraft.mock.calls[0][0] as Song).sections[0].bars[0].repeatStart).toBe(true);
 
+    await user.click(screen.getByRole('button', { name: '選擇小節拍號' }));
     await user.click(screen.getByRole('button', { name: '4/4' }));
     const withOverride = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
     expect(withOverride.sections[0].bars[0].timeSignature).toBe('4/4');
     rerenderSession({ ...base, draftSong: withOverride });
+    await user.click(screen.getByRole('button', { name: '選擇小節拍號' }));
     await user.click(screen.getByRole('button', { name: '4/4' }));
     const withoutOverride = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
     expect(withoutOverride.sections[0].bars[0].timeSignature).toBeUndefined();
@@ -142,8 +133,7 @@ describe('PreviewBarEditor', () => {
     const firstBeatTarget = { ...target, slotIndex: 0, anchorKey: 'song-1|section-1|bar-1|chords|0' };
     const emptySession = createPreviewEditSession({ song: emptySong, target: firstBeatTarget, inputMode: 'letters' });
     const { onApplyDraft, rerenderSession } = renderEditor({ session: emptySession, deviceLayout: 'phone' });
-    openModeMenu();
-    await user.click(screen.getByRole('menuitem', { name: '符號' }));
+    await user.click(screen.getByRole('button', { name: '休止與演奏符號' }));
 
     const countInput = screen.getByRole('textbox', { name: '多小節休止數量' });
     const applyRest = screen.getByRole('button', { name: '套用 4 小節休止' });
@@ -154,11 +144,13 @@ describe('PreviewBarEditor', () => {
 
     const wrongBeatSession = createPreviewEditSession({ song: emptySong, target, inputMode: 'letters' });
     rerenderSession(wrongBeatSession);
+    await user.click(screen.getByRole('button', { name: '休止與演奏符號' }));
     expect(screen.getByRole('button', { name: '套用 4 小節休止' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('只能放在第一拍');
 
     const occupiedFirstBeat = createPreviewEditSession({ song, target: firstBeatTarget, inputMode: 'letters' });
     rerenderSession(occupiedFirstBeat);
+    await user.click(screen.getByRole('button', { name: '休止與演奏符號' }));
     expect(screen.getByRole('button', { name: '套用 4 小節休止' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('請先清空');
   });
@@ -166,12 +158,13 @@ describe('PreviewBarEditor', () => {
   it('uses one active text field instead of a vertically stacked form', async () => {
     const user = userEvent.setup();
     renderEditor({ deviceLayout: 'phone' });
-    openModeMenu();
-    await user.click(screen.getByRole('menuitem', { name: '文字' }));
+    await user.click(screen.getByRole('button', { name: '文字與位置' }));
     expect(screen.getByRole('textbox', { name: '小節標籤' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '上方註記' }));
     expect(screen.getByRole('textbox', { name: '上方註記' })).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '小節標籤' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '返回和弦鍵盤' }));
+    expect(screen.getByRole('button', { name: '選擇小節拍號' })).toBeInTheDocument();
   });
 
   it('normalizes typed roots before writing the draft', () => {

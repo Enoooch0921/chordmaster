@@ -31,6 +31,7 @@ import {
 } from '../../lib/songEditing';
 
 type KeyboardMode = 'common' | 'advanced' | 'symbols' | 'text';
+type KeyboardPicker = 'quality' | 'time' | 'special' | 'ending' | 'navigation' | 'barline' | 'structure' | 'bar' | null;
 type TextField = 'label' | 'annotation' | 'leftText' | 'rightText';
 type StructureAction = 'insert-before' | 'insert-after' | 'duplicate' | 'delete';
 
@@ -52,9 +53,9 @@ interface PreviewBarEditorProps {
   onPanelHeightChange?: (height: number) => void;
 }
 
-const KEYBOARD_MODES: KeyboardMode[] = ['common', 'advanced', 'symbols', 'text'];
-const COMMON_QUALITIES = ['', 'm', '5', '6', 'm6', '7', 'maj7', 'm7', 'sus2', 'sus4', 'dim', 'dim7', 'aug', 'add9'];
+const MAIN_QUALITIES = ['', 'm', '5', '6', '7', 'maj7', 'm7', 'sus4', 'dim', 'add9'];
 const EXPANDED_QUALITIES = ['9', 'maj9', 'm9', '11', 'm11', '13', 'm13', 'mMaj7', 'm7b5', '7sus4', '7b5', '7#5', '7b9', '7#9', '7#11', '7b13', 'add2', 'add11'];
+const PICKER_QUALITIES = ['m6', 'sus2', 'dim7', 'aug', ...EXPANDED_QUALITIES];
 const TIME_SIGNATURES = ['2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '12/8'];
 const ENDINGS = ['1', '2', '3', '1,2'];
 
@@ -131,15 +132,12 @@ const SegnoGlyph: React.FC<{ className?: string }> = ({ className = 'h-5 w-5' })
 );
 
 const modeForField = (field: PreviewEditSession['target']['field']): KeyboardMode => (
-  field === 'symbols' ? 'symbols' : field === 'text' ? 'text' : 'common'
+  field === 'text' ? 'text' : 'common'
 );
 
-const getModeLabel = (mode: KeyboardMode, language: AppLanguage) => {
-  if (language !== 'zh') {
-    return mode === 'common' ? 'Chord' : mode === 'advanced' ? 'More' : mode === 'symbols' ? 'Symbols' : 'Text';
-  }
-  return mode === 'common' ? '常用' : mode === 'advanced' ? '進階' : mode === 'symbols' ? '符號' : '文字';
-};
+const pickerForField = (field: PreviewEditSession['target']['field']): KeyboardPicker => (
+  field === 'symbols' ? 'navigation' : null
+);
 
 const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   session,
@@ -159,13 +157,13 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   onPanelHeightChange
 }) => {
   const [mode, setMode] = React.useState<KeyboardMode>(() => modeForField(session.target.field));
+  const [activePicker, setActivePicker] = React.useState<KeyboardPicker>(() => pickerForField(session.target.field));
   const [activeTextField, setActiveTextField] = React.useState<TextField>('label');
   const [bassMode, setBassMode] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
   const [desktopKeysVisible, setDesktopKeysVisible] = React.useState(() => (
     deviceLayout !== 'desktop' || session.target.field !== 'chords'
   ));
-  const [modeMenuOpen, setModeMenuOpen] = React.useState(false);
   const [barText, setBarText] = React.useState('');
   const [barTextError, setBarTextError] = React.useState<string | null>(null);
   const [multiRestCount, setMultiRestCount] = React.useState('4');
@@ -174,8 +172,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const panelRef = React.useRef<HTMLElement>(null);
   const chordCaptureRef = React.useRef<HTMLInputElement>(null);
   const replaceChordOnNextHardwareKeyRef = React.useRef(true);
-  const modePressTimerRef = React.useRef<number | null>(null);
-  const longPressTriggeredRef = React.useRef(false);
 
   const located = findSongBar(session.draftSong, session.target);
   const bar = located?.bar;
@@ -199,10 +195,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const hasValidMultiRestCount = Number.isInteger(multiRestCountNumber) && multiRestCountNumber >= 1 && multiRestCountNumber <= 999;
 
   React.useEffect(() => {
-    const nextMode = modeForField(session.target.field);
-    setMode(nextMode);
+    setMode(modeForField(session.target.field));
+    setActivePicker(pickerForField(session.target.field));
     if (deviceLayout === 'desktop' && session.target.field !== 'chords') setDesktopKeysVisible(true);
-  }, [deviceLayout, session.target.field]);
+  }, [deviceLayout, session.target.barId, session.target.field, session.target.slotIndex]);
 
   React.useEffect(() => {
     setBassMode(false);
@@ -254,10 +250,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       viewport?.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
     };
-  }, []);
-
-  React.useEffect(() => () => {
-    if (modePressTimerRef.current !== null) window.clearTimeout(modePressTimerRef.current);
   }, []);
 
   function applyDisplayedChord(value: string, mergeKey?: string) {
@@ -368,13 +360,19 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     if (!bar) return;
     const result = setBarChordText(session.draftSong, session.target, barText);
     setBarTextError(result.error);
-    if (!result.error) onApplyDraft(result.song, { mergeKey: `bar-text:${bar.id}` });
+    if (!result.error) {
+      onApplyDraft(result.song, { mergeKey: `bar-text:${bar.id}` });
+      setActivePicker(null);
+    }
   };
 
   const applyMultiMeasureRest = () => {
     const result = setMultiMeasureRestAtBar(session.draftSong, session.target, multiRestCountNumber);
     setMultiRestActionError(result.error);
-    if (!result.error) onApplyDraft(result.song);
+    if (!result.error) {
+      onApplyDraft(result.song);
+      setActivePicker(null);
+    }
   };
 
   const updateFields = (patch: Parameters<typeof updateEditableBarFields>[2], mergeKey?: string) => {
@@ -382,42 +380,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       updateEditableBarFields(session.draftSong, session.target, patch),
       mergeKey ? { mergeKey } : undefined
     );
-  };
-
-  const selectMode = (nextMode: KeyboardMode) => {
-    setMode(nextMode);
-    setModeMenuOpen(false);
-    setCollapsed(false);
-  };
-
-  const cycleMode = () => {
-    const index = KEYBOARD_MODES.indexOf(mode);
-    selectMode(KEYBOARD_MODES[(index + 1) % KEYBOARD_MODES.length]);
-  };
-
-  const clearModePressTimer = () => {
-    if (modePressTimerRef.current !== null) {
-      window.clearTimeout(modePressTimerRef.current);
-      modePressTimerRef.current = null;
-    }
-  };
-
-  const handleModePointerDown = () => {
-    clearModePressTimer();
-    longPressTriggeredRef.current = false;
-    modePressTimerRef.current = window.setTimeout(() => {
-      longPressTriggeredRef.current = true;
-      setModeMenuOpen(true);
-      modePressTimerRef.current = null;
-    }, 350);
-  };
-
-  const handleModeClick = () => {
-    if (longPressTriggeredRef.current) {
-      longPressTriggeredRef.current = false;
-      return;
-    }
-    cycleMode();
   };
 
   const viewport = window.visualViewport;
@@ -446,7 +408,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         }
       : (() => {
           const width = Math.min(520, viewportWidth - 24);
-          const estimatedHeight = desktopKeysVisible ? Math.min(430, viewportHeight - 24) : 64;
+          const estimatedHeight = desktopKeysVisible ? Math.min(340, viewportHeight - 24) : 64;
           const preferredBelow = session.target.anchorRect.bottom + 10;
           const top = preferredBelow + estimatedHeight <= viewportTop + viewportHeight - 12
             ? preferredBelow
@@ -465,26 +427,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const buttonClass = 'inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 active:bg-indigo-100 disabled:opacity-40';
   const activeButtonClass = '!border-indigo-500 !bg-indigo-600 !text-white hover:!bg-indigo-600';
   const fieldClass = 'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100';
-
-  const modeMenu = modeMenuOpen && (
-    <div
-      role="menu"
-      aria-label={language === 'zh' ? '選擇鍵盤模式' : 'Choose keyboard mode'}
-      className="absolute bottom-full left-0 z-20 mb-2 grid min-w-36 gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
-    >
-      {KEYBOARD_MODES.map((value) => (
-        <button
-          key={value}
-          type="button"
-          role="menuitem"
-          className={`min-h-9 rounded-lg px-3 text-left text-xs font-black ${mode === value ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-slate-100'}`}
-          onClick={() => selectMode(value)}
-        >
-          {getModeLabel(value, language)}
-        </button>
-      ))}
-    </div>
-  );
 
   if (!bar || !section) {
     const fallbackStyle: React.CSSProperties = isDocked
@@ -524,31 +466,155 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     );
   }
 
+  const effectiveBarTimeSignature = bar.timeSignature || session.draftSong.timeSignature || '4/4';
+  const barlineGlyph = bar.repeatEnd ? ':|' : bar.finalBar ? '||' : bar.repeatStart ? '|:' : '|';
+  const pickerTitles: Record<Exclude<KeyboardPicker, null>, string> = {
+    quality: language === 'zh' ? '更多和弦種類' : 'More chord qualities',
+    time: language === 'zh' ? '小節拍號' : 'Time signature',
+    special: language === 'zh' ? '休止與演奏符號' : 'Rests and articulation',
+    ending: language === 'zh' ? '房子記號' : 'Ending',
+    navigation: language === 'zh' ? '導引記號' : 'Navigation',
+    barline: language === 'zh' ? '小節線與反覆' : 'Barline and repeat',
+    structure: language === 'zh' ? '小節操作' : 'Bar actions',
+    bar: language === 'zh' ? '整小節輸入' : 'Whole bar input'
+  };
+  const openPicker = (picker: Exclude<KeyboardPicker, null>) => {
+    setMode('common');
+    setActivePicker(picker);
+    setCollapsed(false);
+  };
+
   const keyboardContent = (
-    <div data-keyboard-mode={mode} className={`flex min-h-0 flex-1 flex-col overflow-hidden ${mode === 'symbols' ? 'gap-1 p-1.5' : 'gap-1.5 p-2'}`}>
+    <div data-keyboard-mode={mode} className={`relative flex min-h-0 flex-1 flex-col overflow-hidden ${mode === 'symbols' ? 'gap-1 p-1.5' : 'gap-1.5 p-2'}`}>
       {mode === 'common' && (
-        <>
-          <div className="grid grid-cols-7 gap-1">
-            {rootChoices.map((root) => <button key={root} type="button" className={`${buttonClass} px-0 text-sm ${chordParts.root === root && !bassMode ? activeButtonClass : ''}`} onClick={() => applyRoot(root)}>{root}</button>)}
+        <div className="grid min-h-0 flex-1 grid-rows-4 gap-1.5" data-keyboard-view="main">
+          <div className="grid min-h-0 grid-cols-10 gap-1">
+            {rootChoices.map((root) => <button key={root} type="button" className={`${buttonClass} min-h-0 px-0 text-sm ${chordParts.root === root && !bassMode ? activeButtonClass : ''}`} onClick={() => applyRoot(root)}>{root}</button>)}
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-base ${chordParts.accidental === 'b' ? activeButtonClass : ''}`} onClick={() => applyAccidental('b')}>♭</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-base ${chordParts.accidental === '' ? activeButtonClass : ''}`} onClick={() => applyAccidental('')}>♮</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-base ${chordParts.accidental === '#' ? activeButtonClass : ''}`} onClick={() => applyAccidental('#')}>♯</button>
           </div>
-          <div className="grid grid-cols-5 gap-1">
-            <button type="button" className={`${buttonClass} ${chordParts.accidental === 'b' ? activeButtonClass : ''}`} onClick={() => applyAccidental('b')}>♭</button>
-            <button type="button" className={`${buttonClass} ${chordParts.accidental === '' ? activeButtonClass : ''}`} onClick={() => applyAccidental('')}>♮</button>
-            <button type="button" className={`${buttonClass} ${chordParts.accidental === '#' ? activeButtonClass : ''}`} onClick={() => applyAccidental('#')}>♯</button>
-            <button type="button" className={`${buttonClass} ${bassMode ? activeButtonClass : ''}`} onClick={() => setBassMode((value) => !value)}>{bassMode ? (language === 'zh' ? '選 Bass' : 'Pick bass') : '/ Bass'}</button>
-            <button
-              type="button"
-              className={buttonClass}
-              aria-label={session.inputMode === 'letters' ? (language === 'zh' ? '切換為 Nashville' : 'Switch to Nashville') : (language === 'zh' ? '切換為字母和弦' : 'Switch to letter chords')}
-              onClick={() => onInputModeChange(session.inputMode === 'letters' ? 'nashville' : 'letters')}
-            >
-              {session.inputMode === 'letters' ? '123' : 'ABC'}
-            </button>
+
+          <div className="grid min-h-0 grid-cols-10 gap-1">
+            {MAIN_QUALITIES.map((quality) => (
+              <button
+                key={quality || 'major'}
+                type="button"
+                className={`${buttonClass} min-h-0 px-0 text-[10px] ${chordParts.quality === quality ? activeButtonClass : ''}`}
+                onClick={() => applyQuality(quality)}
+              >
+                {quality === '' ? '△' : quality === 'sus4' ? 'sus' : quality === 'add9' ? 'add' : quality}
+              </button>
+            ))}
           </div>
-          <div className="grid min-h-0 flex-1 grid-cols-7 gap-1">
-            {COMMON_QUALITIES.map((quality) => <button key={quality || 'major'} type="button" className={`${buttonClass} min-h-0 px-0.5 ${chordParts.quality === quality ? activeButtonClass : ''}`} onClick={() => applyQuality(quality)}>{quality || 'Major'}</button>)}
+
+          <div className="grid min-h-0 grid-cols-7 gap-1">
+            <button type="button" className={`${buttonClass} min-h-0 px-0 ${bar.timeSignature ? activeButtonClass : ''}`} onClick={() => openPicker('time')} aria-label={language === 'zh' ? '選擇小節拍號' : 'Choose time signature'}>{effectiveBarTimeSignature}</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => applyDisplayedChord('%')} aria-label={language === 'zh' ? '重複前一小節' : 'Repeat previous bar'}>%</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0`} onClick={() => applyDisplayedChord('N.C.')} aria-label="N.C.">N.C.</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 ${bassMode ? activeButtonClass : ''}`} onClick={() => setBassMode((value) => !value)} aria-label={language === 'zh' ? '選擇 Slash Bass' : 'Choose slash bass'}>/</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0`} onClick={() => onInputModeChange(session.inputMode === 'letters' ? 'nashville' : 'letters')} aria-label={session.inputMode === 'letters' ? (language === 'zh' ? '切換為 Nashville' : 'Switch to Nashville') : (language === 'zh' ? '切換為字母和弦' : 'Switch to letter chords')}>{session.inputMode === 'letters' ? '123' : 'ABC'}</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-lg`} onClick={() => openPicker('quality')} aria-label={language === 'zh' ? '更多和弦種類' : 'More chord qualities'}>+</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-lg`} onClick={() => applyDisplayedChord('')} aria-label={language === 'zh' ? '清除目前拍點' : 'Clear current beat'}>⌫</button>
           </div>
-        </>
+
+          <div className="grid min-h-0 grid-cols-7 gap-1">
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => { setMode('text'); setActivePicker(null); }} aria-label={language === 'zh' ? '文字與位置' : 'Text and placement'}>T</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0`} onClick={() => openPicker('special')} aria-label={language === 'zh' ? '休止與演奏符號' : 'Rests and articulation'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">{getRestGlyph('q')}</span></button>
+            <button type="button" className={`${buttonClass} min-h-0 overflow-hidden px-1 ${bar.ending ? activeButtonClass : ''}`} onClick={() => openPicker('ending')} aria-label={language === 'zh' ? '選擇房子記號' : 'Choose ending'}><EndingGlyph value={bar.ending || '1'} /></button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 ${bar.leftMarker || bar.rightMarker ? activeButtonClass : ''}`} onClick={() => openPicker('navigation')} aria-label={language === 'zh' ? '選擇導引記號' : 'Choose navigation marker'}><span className="flex items-center gap-0.5"><SegnoGlyph className="h-4 w-4" /><CodaGlyph className="h-4 w-4" /></span></button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-base ${bar.repeatStart || bar.repeatEnd || bar.finalBar ? activeButtonClass : ''}`} onClick={() => openPicker('barline')} aria-label={language === 'zh' ? '選擇小節線與反覆' : 'Choose barline and repeat'}>{barlineGlyph}</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => openPicker('structure')} aria-label={language === 'zh' ? '小節操作' : 'Bar actions'}>+│</button>
+            <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => openPicker('bar')} aria-label={language === 'zh' ? '整小節輸入' : 'Whole bar input'}>•••</button>
+          </div>
+
+          {activePicker && (
+            <div data-keyboard-picker={activePicker} className="absolute inset-1.5 z-20 flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-slate-100 p-1.5 shadow-[0_10px_35px_rgba(15,23,42,0.24)]">
+              <div className="mb-1 flex shrink-0 items-center justify-between px-1">
+                <span className="text-[10px] font-black text-slate-600">{pickerTitles[activePicker]}</span>
+                <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white text-slate-600" onClick={() => setActivePicker(null)} aria-label={language === 'zh' ? '關閉選擇盤' : 'Close picker'}><X size={14} /></button>
+              </div>
+
+              {activePicker === 'quality' && (
+                <div className="grid min-h-0 flex-1 grid-cols-6 gap-1">
+                  {PICKER_QUALITIES.map((quality) => <button key={quality} type="button" className={`${buttonClass} min-h-0 px-0.5 ${chordParts.quality === quality ? activeButtonClass : ''}`} onClick={() => { applyQuality(quality); setActivePicker(null); }}>{quality}</button>)}
+                </div>
+              )}
+
+              {activePicker === 'time' && (
+                <div className="grid min-h-0 flex-1 grid-cols-4 gap-1">
+                  <button type="button" className={`${buttonClass} min-h-0 px-1`} onClick={() => { updateFields({ timeSignature: undefined }); setActivePicker(null); }}>{language === 'zh' ? '繼承' : 'Inherit'}</button>
+                  {TIME_SIGNATURES.map((value) => <button key={value} type="button" className={`${buttonClass} min-h-0 px-0 ${bar.timeSignature === value ? activeButtonClass : ''}`} onClick={() => { updateFields({ timeSignature: bar.timeSignature === value ? undefined : value }); setActivePicker(null); }}>{value}</button>)}
+                  <input className="col-span-4 min-h-8 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-center text-xs font-bold outline-none focus:border-indigo-400" inputMode="numeric" value={TIME_SIGNATURES.includes(bar.timeSignature || '') ? '' : bar.timeSignature || ''} onChange={(event) => updateFields({ timeSignature: event.target.value || undefined }, `time:${bar.id}`)} placeholder={language === 'zh' ? '自訂拍號，例如 9/8；清空即繼承' : 'Custom, e.g. 9/8'} aria-label={language === 'zh' ? '自訂拍號' : 'Custom time signature'} />
+                </div>
+              )}
+
+              {activePicker === 'barline' && (
+                <div className="grid min-h-0 flex-1 grid-cols-4 gap-1.5">
+                  <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.repeatStart ? activeButtonClass : ''}`} onClick={() => { updateFields({ repeatStart: !bar.repeatStart }); setActivePicker(null); }} aria-label="|: Repeat Start">|:</button>
+                  <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.repeatEnd ? activeButtonClass : ''}`} onClick={() => { updateFields({ repeatEnd: !bar.repeatEnd }); setActivePicker(null); }} aria-label=":| Repeat End">:|</button>
+                  <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => { updateFields({ finalBar: !bar.finalBar }); setActivePicker(null); }} aria-label="|| Final">||</button>
+                  <button type="button" className={`${buttonClass} min-h-0 text-xl`} onClick={() => { updateFields({ repeatStart: false, repeatEnd: false, finalBar: false }); setActivePicker(null); }} aria-label={language === 'zh' ? '一般小節線' : 'Normal barline'}>|</button>
+                </div>
+              )}
+
+              {activePicker === 'ending' && (
+                <div className="grid min-h-0 flex-1 grid-cols-5 gap-1.5">
+                  <button type="button" className={`${buttonClass} min-h-0`} onClick={() => { updateFields({ ending: undefined }); setActivePicker(null); }}>{language === 'zh' ? '無' : 'None'}</button>
+                  {ENDINGS.map((ending) => <button key={ending} type="button" className={`${buttonClass} min-h-0 overflow-hidden px-1 ${bar.ending === ending ? activeButtonClass : ''}`} onClick={() => { updateFields({ ending: bar.ending === ending ? undefined : ending }); setActivePicker(null); }} aria-label={`Ending ${ending}`}><EndingGlyph value={ending} /></button>)}
+                  <input className="col-span-5 min-h-8 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-center text-xs font-bold outline-none focus:border-indigo-400" value={ENDINGS.includes(bar.ending || '') ? '' : bar.ending || ''} onChange={(event) => updateFields({ ending: event.target.value || undefined }, `ending:${bar.id}`)} placeholder={language === 'zh' ? '自訂房子記號' : 'Custom ending'} aria-label={language === 'zh' ? '自訂 Ending' : 'Custom ending'} />
+                </div>
+              )}
+
+              {activePicker === 'navigation' && (
+                <div className="grid min-h-0 flex-1 grid-cols-4 gap-1">
+                  {([['segno', 'Left Segno'], ['coda', 'Left Coda']] as const).map(([value, label]) => <button key={value} type="button" className={`${buttonClass} relative min-h-0 px-0 ${bar.leftMarker === value ? activeButtonClass : ''}`} onClick={() => { updateFields({ leftMarker: (bar.leftMarker === value ? undefined : value) as NavigationMarker | undefined }); setActivePicker(null); }} aria-label={label}><span className="absolute inset-y-1 left-0.5 border-l-2 border-current" aria-hidden="true" />{value === 'segno' ? <SegnoGlyph /> : <CodaGlyph />}</button>)}
+                  {([['coda', '', 'Right Coda'], ['ds', 'D.S.', 'D.S.'], ['dc', 'D.C.', 'D.C.'], ['fine', 'Fine', 'Fine'], ['ds-al-coda', 'D.S. al', 'D.S. al Coda'], ['ds-al-fine', 'D.S. al Fine', 'D.S. al Fine']] as const).map(([value, text, label]) => <button key={value} type="button" className={`${buttonClass} relative min-h-0 px-0 text-[9px] ${bar.rightMarker === value ? activeButtonClass : ''}`} onClick={() => { updateFields({ rightMarker: (bar.rightMarker === value ? undefined : value) as NavigationMarker | undefined }); setActivePicker(null); }} aria-label={label}>{value === 'coda' ? <CodaGlyph /> : value === 'ds-al-coda' ? <span className="flex items-center gap-0.5">{text}<CodaGlyph className="h-3.5 w-3.5" /></span> : text}<span className="absolute inset-y-1 right-0.5 border-r-2 border-current" aria-hidden="true" /></button>)}
+                  <button type="button" className={`${buttonClass} col-span-4 min-h-0`} onClick={() => { updateFields({ leftMarker: undefined, rightMarker: undefined }); setActivePicker(null); }}>{language === 'zh' ? '清除導引記號' : 'Clear navigation'}</button>
+                </div>
+              )}
+
+              {activePicker === 'special' && (
+                <div className="flex min-h-0 flex-1 flex-col gap-1">
+                  <div className="grid min-h-0 flex-1 grid-cols-6 gap-1">
+                    <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => { applyDisplayedChord('/'); setActivePicker(null); }} aria-label={language === 'zh' ? '拍點斜線' : 'Beat slash'}>/</button>
+                    <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => { applyDisplayedChord('%'); setActivePicker(null); }} aria-label={language === 'zh' ? '重複前一小節' : 'Repeat previous bar'}>%</button>
+                    <button type="button" className={`${buttonClass} min-h-0 px-0`} onClick={() => { applyDisplayedChord('N.C.'); setActivePicker(null); }} aria-label="N.C.">N.C.</button>
+                    {([['0', 'q', '四分休止'], ['0h', 'h', '二分休止'], ['0w', 'w', '全休止']] as const).map(([value, base, label]) => <button key={value} type="button" className={`${buttonClass} min-h-0 px-0`} onClick={() => { applyDisplayedChord(value); setActivePicker(null); }} aria-label={language === 'zh' ? label : `${base} rest`}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">{getRestGlyph(base)}</span></button>)}
+                  </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    <button type="button" className={`${buttonClass} min-h-8 ${trailingModifiers(displayedChord).includes('<') ? activeButtonClass : ''}`} onClick={() => toggleModifier('<')} aria-label={language === 'zh' ? '搶拍' : 'Push'}><DirectionGlyph direction="push" /></button>
+                    <button type="button" className={`${buttonClass} min-h-8 ${trailingModifiers(displayedChord).includes('>') ? activeButtonClass : ''}`} onClick={() => toggleModifier('>')} aria-label={language === 'zh' ? '拖拍' : 'Pull'}><DirectionGlyph direction="pull" /></button>
+                    <button type="button" className={`${buttonClass} min-h-8 text-xl ${trailingModifiers(displayedChord).includes('^') ? activeButtonClass : ''}`} onClick={() => toggleModifier('^')} aria-label={language === 'zh' ? '重音' : 'Accent'}>&gt;</button>
+                    <button type="button" className={`${buttonClass} min-h-8 ${trailingModifiers(displayedChord).includes('~') ? activeButtonClass : ''}`} onClick={() => toggleModifier('~')} aria-label={language === 'zh' ? '延長記號' : 'Fermata'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">ß</span></button>
+                    <div data-multi-rest-control className={`relative min-h-8 overflow-hidden rounded-lg border bg-white ${multiRestPlacementError || !hasValidMultiRestCount ? 'border-slate-200 opacity-45' : 'border-indigo-300'}`}>
+                      <button type="button" className="h-full w-full pt-2 text-slate-700 disabled:cursor-not-allowed" disabled={Boolean(multiRestPlacementError) || !hasValidMultiRestCount} onClick={applyMultiMeasureRest} aria-label={language === 'zh' ? `套用 ${multiRestCount || 0} 小節休止` : `Apply ${multiRestCount || 0}-bar rest`}><MultiMeasureRestGlyph /></button>
+                      <input value={multiRestCount} onChange={(event) => { setMultiRestCount(event.target.value.replace(/\D/g, '').slice(0, 3)); setMultiRestActionError(null); }} inputMode="numeric" disabled={Boolean(multiRestPlacementError)} className="absolute left-1/2 top-0 z-10 h-4 w-8 -translate-x-1/2 bg-white/95 text-center text-[10px] font-black tabular-nums outline-none disabled:bg-slate-100" aria-label={language === 'zh' ? '多小節休止數量' : 'Multi-measure rest count'} />
+                    </div>
+                  </div>
+                  {(multiRestPlacementError || multiRestActionError) && <p role="status" className="shrink-0 truncate text-[9px] font-bold text-amber-700">{multiRestActionError || multiRestPlacementError}</p>}
+                </div>
+              )}
+
+              {activePicker === 'structure' && (
+                <div className="grid min-h-0 flex-1 grid-cols-2 gap-1.5">
+                  <button type="button" className={`${buttonClass} min-h-0`} onClick={() => { onStructure('insert-before'); setActivePicker(null); }}><Plus size={14} className="mr-1" />{language === 'zh' ? '前方插入' : 'Insert before'}</button>
+                  <button type="button" className={`${buttonClass} min-h-0`} onClick={() => { onStructure('insert-after'); setActivePicker(null); }}><Plus size={14} className="mr-1" />{language === 'zh' ? '後方插入' : 'Insert after'}</button>
+                  <button type="button" className={`${buttonClass} min-h-0`} onClick={() => { onStructure('duplicate'); setActivePicker(null); }}><Copy size={14} className="mr-1" />{language === 'zh' ? '複製小節' : 'Duplicate'}</button>
+                  <button type="button" className={`${buttonClass} min-h-0 border-rose-200 text-rose-700`} onClick={() => { onStructure('delete'); setActivePicker(null); }}><Trash2 size={14} className="mr-1" />{language === 'zh' ? '刪除小節' : 'Delete'}</button>
+                </div>
+              )}
+
+              {activePicker === 'bar' && (
+                <div className="flex min-h-0 flex-1 flex-col justify-center gap-2 px-2">
+                  <input value={barText} onChange={(event) => setBarText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyBarText(); } }} className={fieldClass} placeholder={language === 'zh' ? `最多 ${beatCount} 個和弦` : `Up to ${beatCount} chords`} aria-label={language === 'zh' ? '整小節和弦' : 'Whole bar chords'} />
+                  <button type="button" className={`${buttonClass} !border-indigo-500 !bg-indigo-600 !text-white`} onClick={applyBarText}>{language === 'zh' ? '套用整小節' : 'Apply whole bar'}</button>
+                  {barTextError && <p role="alert" className="text-[10px] font-bold text-rose-600">{barTextError}</p>}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {mode === 'advanced' && (
@@ -635,7 +701,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
       {mode === 'text' && (
         <>
-          <div className="grid grid-cols-4 gap-1">
+          <div className="grid grid-cols-5 gap-1">
+            <button type="button" className={buttonClass} onClick={() => { setMode('common'); setActivePicker(null); }} aria-label={language === 'zh' ? '返回和弦鍵盤' : 'Back to chord keyboard'}>ABC</button>
             {([
               ['label', language === 'zh' ? '標籤' : 'Label'],
               ['annotation', language === 'zh' ? '上方註記' : 'Annotation'],
@@ -732,50 +799,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       {!collapsed && deviceLayout === 'desktop' && desktopKeysVisible && keyboardContent}
       {!collapsed && deviceLayout !== 'desktop' && keyboardContent}
 
-      {deviceLayout === 'desktop' && desktopKeysVisible && (
-        <footer className="relative flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-2 py-1.5">
-          <div className="relative">
-            {modeMenu}
-            <button
-              type="button"
-              className="min-h-8 rounded-lg bg-slate-200 px-3 text-[11px] font-black text-slate-700"
-              aria-label={`${language === 'zh' ? '切換鍵盤模式' : 'Switch keyboard mode'}：${getModeLabel(mode, language)}`}
-              aria-haspopup="menu"
-              aria-expanded={modeMenuOpen}
-              onPointerDown={handleModePointerDown}
-              onPointerUp={clearModePressTimer}
-              onPointerCancel={clearModePressTimer}
-              onPointerLeave={clearModePressTimer}
-              onContextMenu={(event) => { event.preventDefault(); clearModePressTimer(); setModeMenuOpen(true); }}
-              onClick={handleModeClick}
-            >
-              {getModeLabel(KEYBOARD_MODES[(KEYBOARD_MODES.indexOf(mode) + 1) % KEYBOARD_MODES.length], language)}
-            </button>
-          </div>
-          <span className="text-[10px] font-bold text-slate-400">{language === 'zh' ? '短按切換 · 長按選擇' : 'Tap to switch · hold to choose'}</span>
-        </footer>
-      )}
-
       {deviceLayout !== 'desktop' && (
         <footer className="relative flex shrink-0 items-stretch gap-1.5 border-t border-slate-200 bg-white px-2 py-1.5">
-          <div className="relative">
-            {modeMenu}
-            <button
-              type="button"
-              className="flex h-full min-w-14 items-center justify-center rounded-xl bg-slate-200 px-2 text-[11px] font-black text-slate-700 active:bg-slate-300"
-              aria-label={`${language === 'zh' ? '切換鍵盤模式' : 'Switch keyboard mode'}：${getModeLabel(mode, language)}`}
-              aria-haspopup="menu"
-              aria-expanded={modeMenuOpen}
-              onPointerDown={handleModePointerDown}
-              onPointerUp={clearModePressTimer}
-              onPointerCancel={clearModePressTimer}
-              onPointerLeave={clearModePressTimer}
-              onContextMenu={(event) => { event.preventDefault(); clearModePressTimer(); setModeMenuOpen(true); }}
-              onClick={handleModeClick}
-            >
-              {getModeLabel(KEYBOARD_MODES[(KEYBOARD_MODES.indexOf(mode) + 1) % KEYBOARD_MODES.length], language)}
-            </button>
-          </div>
           <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-xl bg-indigo-50 text-sm font-black text-indigo-700 active:bg-indigo-100" onClick={() => onNavigate('previous')} aria-label="Previous beat"><ChevronLeft size={20} className="mr-1" />{language === 'zh' ? '上一拍' : 'Previous'}</button>
           <div className="flex min-w-14 flex-col items-center justify-center rounded-xl bg-slate-100 px-1 text-center">
             <span className="text-[9px] font-black uppercase text-slate-400">{language === 'zh' ? '拍點' : 'Beat'}</span>
