@@ -34,7 +34,15 @@ export interface PreviewEditSession {
   dirty: boolean;
   lastMergeKey: string | null;
   lastMutationAt: number;
+  targetStatus: 'active' | 'deleted';
 }
+
+const songHasTarget = (song: Song, target: PreviewEditTarget) => (
+  song.sections.some((section) => (
+    section.id === target.sectionId
+    && section.bars.some((bar) => bar.id === target.barId)
+  ))
+);
 
 export const createPreviewEditSession = ({
   song,
@@ -54,7 +62,8 @@ export const createPreviewEditSession = ({
   future: [],
   dirty: false,
   lastMergeKey: null,
-  lastMutationAt: 0
+  lastMutationAt: 0,
+  targetStatus: 'active'
 });
 
 export const retargetPreviewEditSession = (
@@ -63,6 +72,16 @@ export const retargetPreviewEditSession = (
 ): PreviewEditSession => ({
   ...session,
   target,
+  lastMergeKey: null,
+  lastMutationAt: 0,
+  targetStatus: 'active'
+});
+
+export const markPreviewTargetDeleted = (
+  session: PreviewEditSession
+): PreviewEditSession => ({
+  ...session,
+  targetStatus: 'deleted',
   lastMergeKey: null,
   lastMutationAt: 0
 });
@@ -106,7 +125,8 @@ export const undoPreviewDraft = (session: PreviewEditSession): PreviewEditSessio
     future: [session.draftSong, ...session.future],
     dirty: previous !== session.baseSong,
     lastMergeKey: null,
-    lastMutationAt: 0
+    lastMutationAt: 0,
+    targetStatus: songHasTarget(previous, session.target) ? 'active' : 'deleted'
   };
 };
 
@@ -120,6 +140,7 @@ export const redoPreviewDraft = (session: PreviewEditSession): PreviewEditSessio
     future: session.future.slice(1),
     dirty: next !== session.baseSong,
     lastMergeKey: null,
-    lastMutationAt: 0
+    lastMutationAt: 0,
+    targetStatus: songHasTarget(next, session.target) ? 'active' : 'deleted'
   };
 };

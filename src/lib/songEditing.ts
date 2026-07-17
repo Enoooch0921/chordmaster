@@ -256,9 +256,53 @@ export const deleteBar = (song: Song, target: SongBarIdentity): Song => {
   return { ...song, sections };
 };
 
-export const detectSectionChordInputMode = (section: Section): ChordInputMode => (
-  section.bars.some((bar) => bar.chords.some((chord) => isNashville(chord))) ? 'nashville' : 'letters'
+const isFormatNeutralChord = (chord: string) => {
+  const trimmed = chord.trim();
+  return !trimmed
+    || ['%', '/', 'N.C.'].includes(trimmed)
+    || /^\|\d+\|$/.test(trimmed)
+    || /^0(?:_|h|w)?$/i.test(trimmed);
+};
+
+export const detectSectionChordInputMode = (section: Section): ChordInputMode => {
+  let letterCount = 0;
+  let nashvilleCount = 0;
+  section.bars.forEach((bar) => bar.chords.forEach((chord) => {
+    if (isFormatNeutralChord(chord)) return;
+    if (isNashville(chord.trim())) nashvilleCount += 1;
+    else letterCount += 1;
+  }));
+  return nashvilleCount > letterCount ? 'nashville' : 'letters';
+};
+
+export const detectChordStorageMode = (
+  chord: string,
+  fallback: ChordInputMode = 'letters'
+): ChordInputMode => (
+  isFormatNeutralChord(chord) ? fallback : isNashville(chord.trim()) ? 'nashville' : 'letters'
 );
+
+export const getChordStorageModeForTarget = (
+  song: Song,
+  target: SongChordTarget
+): ChordInputMode => {
+  const located = findSongBar(song, target);
+  if (!located) return 'letters';
+  const fallback = detectSectionChordInputMode(located.section);
+  const chord = getChordBeatSlots(located.bar, getBeatCount(song, located.bar))[target.slotIndex]?.chord ?? '';
+  return detectChordStorageMode(chord, fallback);
+};
+
+/** Normalize only chord roots while preserving user-defined quality text. */
+export const normalizeChordTextInput = (
+  input: string,
+  inputMode: ChordInputMode
+): string => {
+  if (inputMode !== 'letters') return input;
+  return input
+    .replace(/^([a-g])/, (_, root: string) => root.toUpperCase())
+    .replace(/\/([a-g])/g, (_, root: string) => `/${root.toUpperCase()}`);
+};
 
 export const convertDisplayedChordToStoredChord = ({
   input,
