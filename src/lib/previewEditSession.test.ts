@@ -3,6 +3,7 @@ import type { Song } from '../types';
 import {
   applyPreviewDraft,
   createPreviewEditSession,
+  markPreviewTargetDeleted,
   redoPreviewDraft,
   retargetPreviewEditSession,
   undoPreviewDraft
@@ -63,5 +64,16 @@ describe('preview edit session', () => {
     expect(moved.draftSong.title).toBe('Draft');
     expect(moved.past).toHaveLength(1);
     expect(moved.target.slotIndex).toBe(1);
+    expect(moved.targetStatus).toBe('active');
+  });
+
+  it('only preserves a deleted target state while the target is absent', () => {
+    const session = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const missing = { ...song, sections: [{ ...song.sections[0], bars: [] }] };
+    const deleted = markPreviewTargetDeleted(applyPreviewDraft(session, missing));
+    expect(deleted.targetStatus).toBe('deleted');
+    const restored = undoPreviewDraft(deleted);
+    expect(restored.targetStatus).toBe('active');
+    expect(redoPreviewDraft(restored).targetStatus).toBe('deleted');
   });
 });

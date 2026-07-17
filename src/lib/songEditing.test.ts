@@ -7,9 +7,12 @@ import {
   convertDisplayedChordToStoredChord,
   convertStoredChordToDisplayedChord,
   deleteBar,
+  detectSectionChordInputMode,
   duplicateBar,
+  getChordStorageModeForTarget,
   getChordBeatSlots,
   insertBar,
+  normalizeChordTextInput,
   parseChordBarText,
   serializeChordBeatSlots,
   setChordAtBeatSlot,
@@ -153,5 +156,32 @@ describe('edit what you see conversion', () => {
       storedKey: 'C',
       displayedKey: 'D'
     })).toBe('1/3');
+  });
+});
+
+describe('preview chord input mode', () => {
+  it.each([
+    ['bb', 'Bb'],
+    ['c#', 'C#'],
+    ['ebm7', 'Ebm7'],
+    ['bb/db', 'Bb/Db'],
+    ['cMystery', 'CMystery']
+  ])('normalizes letter roots in %s without rewriting quality text', (input, expected) => {
+    expect(normalizeChordTextInput(input, 'letters')).toBe(expected);
+  });
+
+  it('leaves Nashville input unchanged', () => {
+    expect(normalizeChordTextInput('b3m7', 'nashville')).toBe('b3m7');
+  });
+
+  it('uses the selected occupied slot format in a mixed section', () => {
+    const mixedSong = makeSong({ chords: ['1', '', 'C#m', ''] });
+    expect(detectSectionChordInputMode(mixedSong.sections[0])).toBe('letters');
+    expect(getChordStorageModeForTarget(mixedSong, {
+      sectionId: 'section-1', barId: 'bar-1', slotIndex: 0
+    })).toBe('nashville');
+    expect(getChordStorageModeForTarget(mixedSong, {
+      sectionId: 'section-1', barId: 'bar-1', slotIndex: 2
+    })).toBe('letters');
   });
 });
