@@ -144,7 +144,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [multiRestCount, setMultiRestCount] = React.useState('4');
   const [, forceViewportUpdate] = React.useReducer((value) => value + 1, 0);
   const panelRef = React.useRef<HTMLElement>(null);
-  const chordInputRef = React.useRef<HTMLInputElement>(null);
+  const chordCaptureRef = React.useRef<HTMLInputElement>(null);
   const modePressTimerRef = React.useRef<number | null>(null);
   const longPressTriggeredRef = React.useRef(false);
 
@@ -183,7 +183,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
   React.useEffect(() => {
     if (deviceLayout !== 'desktop' || session.target.field !== 'chords') return;
-    chordInputRef.current?.focus({ preventScroll: true });
+    chordCaptureRef.current?.focus({ preventScroll: true });
   }, [deviceLayout, session.previewIdentity, session.target.barId, session.target.field, session.target.slotIndex]);
 
   React.useEffect(() => {
@@ -385,7 +385,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         }
       : (() => {
           const width = Math.min(520, viewportWidth - 24);
-          const estimatedHeight = desktopKeysVisible ? Math.min(430, viewportHeight - 24) : 150;
+          const estimatedHeight = desktopKeysVisible ? Math.min(430, viewportHeight - 24) : 64;
           const preferredBelow = session.target.anchorRect.bottom + 10;
           const top = preferredBelow + estimatedHeight <= viewportTop + viewportHeight - 12
             ? preferredBelow
@@ -464,61 +464,26 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     );
   }
 
-  const chordInputRow = (
-    <div className="flex shrink-0 gap-1.5">
-      <input
-        ref={chordInputRef}
-        value={displayedChord}
-        onChange={(event) => applyDisplayedChord(event.target.value, `slot-text:${bar.id}:${session.target.slotIndex}`)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            onNavigate(event.shiftKey ? 'previous' : 'next');
-          } else if (event.key === 'ArrowLeft') {
-            event.preventDefault();
-            onNavigate('previous');
-          } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
-            onNavigate('next');
-          } else if (event.key === 'Backspace' && !displayedChord) {
-            event.preventDefault();
-            onNavigate('previous');
-          }
-        }}
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        className={`${fieldClass} min-w-0 flex-1`}
-        aria-label={language === 'zh' ? '目前和弦文字' : 'Current chord text'}
-        placeholder={language === 'zh' ? '點這裡使用文字輸入' : 'Tap to type a chord'}
-      />
-      <div className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5">
-        <button type="button" onClick={() => onInputModeChange('letters')} className={`rounded-md px-2 text-xs font-black ${session.inputMode === 'letters' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>ABC</button>
-        <button type="button" onClick={() => onInputModeChange('nashville')} className={`rounded-md px-2 text-xs font-black ${session.inputMode === 'nashville' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>123</button>
-      </div>
-      {deviceLayout === 'desktop' && (
-        <button type="button" className={buttonClass} onClick={() => setDesktopKeysVisible((value) => !value)}>
-          <Keyboard size={14} className="mr-1" />
-          {desktopKeysVisible ? (language === 'zh' ? '隱藏按鍵' : 'Hide keys') : (language === 'zh' ? '顯示按鍵' : 'Show keys')}
-        </button>
-      )}
-    </div>
-  );
-
   const keyboardContent = (
     <div data-keyboard-mode={mode} className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-2">
-      {deviceLayout !== 'desktop' && (mode === 'common' || mode === 'advanced') && chordInputRow}
-
       {mode === 'common' && (
         <>
           <div className="grid grid-cols-7 gap-1">
             {rootChoices.map((root) => <button key={root} type="button" className={`${buttonClass} px-0 text-sm ${chordParts.root === root && !bassMode ? activeButtonClass : ''}`} onClick={() => applyRoot(root)}>{root}</button>)}
           </div>
-          <div className="grid grid-cols-4 gap-1">
+          <div className="grid grid-cols-5 gap-1">
             <button type="button" className={`${buttonClass} ${chordParts.accidental === 'b' ? activeButtonClass : ''}`} onClick={() => applyAccidental('b')}>♭</button>
             <button type="button" className={`${buttonClass} ${chordParts.accidental === '' ? activeButtonClass : ''}`} onClick={() => applyAccidental('')}>♮</button>
             <button type="button" className={`${buttonClass} ${chordParts.accidental === '#' ? activeButtonClass : ''}`} onClick={() => applyAccidental('#')}>♯</button>
             <button type="button" className={`${buttonClass} ${bassMode ? activeButtonClass : ''}`} onClick={() => setBassMode((value) => !value)}>{bassMode ? (language === 'zh' ? '選 Bass' : 'Pick bass') : '/ Bass'}</button>
+            <button
+              type="button"
+              className={buttonClass}
+              aria-label={session.inputMode === 'letters' ? (language === 'zh' ? '切換為 Nashville' : 'Switch to Nashville') : (language === 'zh' ? '切換為字母和弦' : 'Switch to letter chords')}
+              onClick={() => onInputModeChange(session.inputMode === 'letters' ? 'nashville' : 'letters')}
+            >
+              {session.inputMode === 'letters' ? '123' : 'ABC'}
+            </button>
           </div>
           <div className="grid min-h-0 flex-1 grid-cols-7 gap-1">
             {COMMON_QUALITIES.map((quality) => <button key={quality || 'major'} type="button" className={`${buttonClass} min-h-0 px-0.5 ${chordParts.quality === quality ? activeButtonClass : ''}`} onClick={() => applyQuality(quality)}>{quality || 'Major'}</button>)}
@@ -655,18 +620,56 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           <div className="truncate text-xs font-black text-slate-900">{displayedChord || (language === 'zh' ? `第 ${session.target.slotIndex + 1} 拍 · 空白` : `Beat ${session.target.slotIndex + 1} · Empty`)}</div>
         </div>
         {deviceLayout === 'desktop' && <button type="button" className={buttonClass} onClick={() => onNavigate('next')} aria-label="Next beat"><ChevronRight size={16} /></button>}
+        {deviceLayout === 'desktop' && (
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => setDesktopKeysVisible((value) => !value)}
+            aria-label={desktopKeysVisible ? (language === 'zh' ? '隱藏按鍵' : 'Hide keys') : (language === 'zh' ? '顯示按鍵' : 'Show keys')}
+            title={desktopKeysVisible ? (language === 'zh' ? '隱藏按鍵' : 'Hide keys') : (language === 'zh' ? '顯示按鍵' : 'Show keys')}
+          >
+            <Keyboard size={14} />
+          </button>
+        )}
         <button type="button" className={buttonClass} disabled={session.past.length === 0} onClick={onUndo} aria-label="Undo"><Undo2 size={14} /></button>
         <button type="button" className={buttonClass} disabled={session.future.length === 0} onClick={onRedo} aria-label="Redo"><Redo2 size={14} /></button>
         <button type="button" className={`${buttonClass} border-rose-200 text-rose-700`} onClick={onCancel} aria-label="Cancel"><X size={15} /></button>
         <button type="button" className={`${buttonClass} !border-indigo-600 !bg-indigo-600 !text-white hover:!bg-indigo-500`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={15} /><span className={deviceLayout === 'phone' ? 'sr-only' : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
       </header>
 
-      {!collapsed && deviceLayout === 'desktop' && (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="shrink-0 p-2">{chordInputRow}</div>
-          {desktopKeysVisible && keyboardContent}
-        </div>
-      )}
+      <input
+        ref={chordCaptureRef}
+        data-preview-chord-capture
+        type="text"
+        value={displayedChord}
+        onChange={(event) => applyDisplayedChord(event.target.value, `slot-text:${bar.id}:${session.target.slotIndex}`)}
+        onFocus={() => {
+          if (isDocked) setCollapsed(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            onNavigate(event.shiftKey ? 'previous' : 'next');
+          } else if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            onNavigate('previous');
+          } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            onNavigate('next');
+          } else if (event.key === 'Backspace' && !displayedChord) {
+            event.preventDefault();
+            onNavigate('previous');
+          }
+        }}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        tabIndex={-1}
+        className="pointer-events-none fixed left-0 top-0 h-px w-px opacity-0"
+        aria-label={language === 'zh' ? '和弦直接輸入' : 'Direct chord input'}
+      />
+
+      {!collapsed && deviceLayout === 'desktop' && desktopKeysVisible && keyboardContent}
       {!collapsed && deviceLayout !== 'desktop' && keyboardContent}
 
       {deviceLayout === 'desktop' && desktopKeysVisible && (

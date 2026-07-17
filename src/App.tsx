@@ -2154,15 +2154,20 @@ export default function App() {
     viewportHeight / PREVIEW_PAGE_HEIGHT
   );
   const isPhoneViewport = viewportWidth < PHONE_VIEWPORT_BREAKPOINT;
+  const previewEditorUserAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent || '';
+  const previewEditorPlatform = typeof navigator === 'undefined' ? '' : navigator.platform || '';
+  const previewEditorTouchPoints = typeof navigator === 'undefined' ? 0 : navigator.maxTouchPoints || 0;
+  const previewEditorIsPhoneDevice = /iPhone|iPod|Android.*Mobile/i.test(previewEditorUserAgent);
   const previewEditorDeviceLayout = resolvePreviewEditorDeviceLayout({
     viewportWidth,
-    maxTouchPoints: typeof navigator === 'undefined' ? 0 : navigator.maxTouchPoints || 0,
+    maxTouchPoints: previewEditorTouchPoints,
     hasCoarsePointer: typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia('(pointer: coarse)').matches
       : false,
-    isPhoneDevice: typeof navigator !== 'undefined'
-      ? /iPhone|iPod|Android.*Mobile/i.test(navigator.userAgent || '')
-      : false
+    isPhoneDevice: previewEditorIsPhoneDevice,
+    isKnownTabletDevice: /iPad/i.test(previewEditorUserAgent)
+      || (/Macintosh/i.test(previewEditorUserAgent) && previewEditorPlatform === 'MacIntel' && previewEditorTouchPoints > 1)
+      || (Capacitor.getPlatform() === 'ios' && !previewEditorIsPhoneDevice && viewportWidth >= PHONE_VIEWPORT_BREAKPOINT)
   });
   const isSidebarExpanded = isPhoneViewport ? isMobileNavOpen : (isSidebarPinned || isSidebarHovered);
   const usesOverlaySidebar = viewportWidth < SIDEBAR_OVERLAY_BREAKPOINT;
@@ -7373,6 +7378,21 @@ export default function App() {
     if (isPreviewQuickEditEnabled && previewField && bIdx >= 0) {
       const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
       if (previewIdentity) {
+        const tappedSlotIndex = target?.slotIndex ?? 0;
+        const tappedSameChord = previewField === 'chords'
+          && activePreviewEditSession?.previewIdentity === previewIdentity
+          && (
+            (Boolean(target?.anchorKey) && target?.anchorKey === activePreviewEditSession.target.anchorKey)
+            || (
+              target?.sectionId === activePreviewEditSession.target.sectionId
+              && target?.barId === activePreviewEditSession.target.barId
+              && tappedSlotIndex === activePreviewEditSession.target.slotIndex
+            )
+          );
+        if (tappedSameChord && previewEditorDeviceLayout !== 'desktop') {
+          const chordCapture = document.querySelector('[data-preview-chord-capture]') as HTMLInputElement | null;
+          chordCapture?.focus({ preventScroll: true });
+        }
         setPreviewEditSession((current) => {
           const currentDraft = current?.previewIdentity === previewIdentity ? current : null;
           const editableSong = currentDraft ? currentDraft.draftSong : ensureSongEditingIds(editorSong);
@@ -7392,7 +7412,7 @@ export default function App() {
             : null;
           if (!actualSection?.id || !editableBar?.id) return current;
 
-          const slotIndex = target?.slotIndex ?? 0;
+          const slotIndex = tappedSlotIndex;
           const anchorKey = makePreviewTargetAnchorKey(previewIdentity, actualSection.id, editableBar.id, slotIndex);
           const nextTarget = {
             previewIdentity,
@@ -7432,7 +7452,7 @@ export default function App() {
     } else {
       focusEditorField(nextSectionIndex, bIdx, field);
     }
-  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, canOpenEditor, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, isEditing, isPreviewQuickEditEnabled, makePreviewTargetAnchorKey]);
+  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, canOpenEditor, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, isEditing, isPreviewQuickEditEnabled, makePreviewTargetAnchorKey, previewEditorDeviceLayout]);
 
   const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
     if (!canOpenEditor) {

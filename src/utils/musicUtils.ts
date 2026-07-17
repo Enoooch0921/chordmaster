@@ -420,6 +420,14 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key, i
   return normalizeChordEnharmonic(newRoot + rest);
 }
 
+/** Preserve the user's chord spelling when preview does not actually change key. */
+export function transposeChordForDisplay(chord: string, offset: number, targetKey: Key, sourceKey?: Key): string {
+  const normalizedOffset = ((offset % 12) + 12) % 12;
+  return normalizedOffset === 0 && sourceKey === targetKey
+    ? chord
+    : transposeChord(chord, offset, targetKey, false, sourceKey);
+}
+
 function normalizeSequentialSectionToken(title: string): string {
   return title
     .trim()

@@ -319,10 +319,17 @@ export const convertDisplayedChordToStoredChord = ({
 }): string => {
   const trimmed = input.trim();
   if (!trimmed || ['%', '/', 'N.C.'].includes(trimmed) || /^\|\d+\|$/.test(trimmed)) return trimmed;
-  const displayedLetterChord = inputMode === 'nashville'
-    ? parseNashvilleToChord(trimmed, displayedKey)
-    : normalizeChordEnharmonic(trimmed);
+  const normalizedInput = normalizeChordTextInput(trimmed, inputMode);
   const inverseOffset = getTransposeOffset(displayedKey, storedKey);
+  // When no inverse transposition is needed, preserve the spelling the user
+  // explicitly entered (Cb, Fb, B#, E#) instead of collapsing it to an
+  // enharmonic pitch such as B or E.
+  if (inputMode === 'letters' && storageMode === 'letters' && inverseOffset === 0) {
+    return normalizedInput;
+  }
+  const displayedLetterChord = inputMode === 'nashville'
+    ? parseNashvilleToChord(normalizedInput, displayedKey)
+    : normalizeChordEnharmonic(normalizedInput);
   const storedLetterChord = transposeChord(
     displayedLetterChord,
     inverseOffset,
@@ -352,12 +359,16 @@ export const convertStoredChordToDisplayedChord = ({
   if (!trimmed || ['%', '/', 'N.C.'].includes(trimmed) || /^\|\d*\|$/.test(trimmed) || /^0(?:_|h|w)?$/i.test(trimmed)) {
     return trimmed;
   }
+  const displayOffset = getTransposeOffset(storedKey, displayedKey);
+  if (storageMode === 'letters' && outputMode === 'letters' && displayOffset === 0) {
+    return normalizeChordTextInput(trimmed, 'letters');
+  }
   const storedLetterChord = storageMode === 'nashville'
     ? parseNashvilleToChord(trimmed, storedKey)
     : normalizeChordEnharmonic(trimmed);
   const displayedLetterChord = transposeChord(
     storedLetterChord,
-    getTransposeOffset(storedKey, displayedKey),
+    displayOffset,
     displayedKey,
     false,
     storedKey

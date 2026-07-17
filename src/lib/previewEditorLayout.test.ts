@@ -7,7 +7,8 @@ describe('preview editor device layout', () => {
       viewportWidth: 1024,
       maxTouchPoints: 5,
       hasCoarsePointer: false,
-      isPhoneDevice: false
+      isPhoneDevice: false,
+      isKnownTabletDevice: true
     })).toBe('tablet');
   });
 
@@ -16,7 +17,8 @@ describe('preview editor device layout', () => {
       viewportWidth: 844,
       maxTouchPoints: 5,
       hasCoarsePointer: false,
-      isPhoneDevice: true
+      isPhoneDevice: true,
+      isKnownTabletDevice: false
     })).toBe('phone');
   });
 
@@ -25,7 +27,18 @@ describe('preview editor device layout', () => {
       viewportWidth: 1024,
       maxTouchPoints: 0,
       hasCoarsePointer: false,
-      isPhoneDevice: false
+      isPhoneDevice: false,
+      isKnownTabletDevice: false
     })).toBe('desktop');
+  });
+
+  it('keeps a known iPad Air docked even when touch signals are missing', () => {
+    expect(resolvePreviewEditorDeviceLayout({
+      viewportWidth: 1366,
+      maxTouchPoints: 0,
+      hasCoarsePointer: false,
+      isPhoneDevice: false,
+      isKnownTabletDevice: true
+    })).toBe('tablet');
   });
 });

@@ -63,10 +63,11 @@ const openModeMenu = () => {
 };
 
 describe('PreviewBarEditor', () => {
-  it('auto-focuses the compact desktop text field and expands visual keys on demand', async () => {
+  it('auto-focuses the hidden desktop chord capture and expands visual keys on demand', async () => {
     const user = userEvent.setup();
     renderEditor();
-    expect(screen.getByRole('textbox', { name: '目前和弦文字' })).toHaveFocus();
+    expect(screen.queryByPlaceholderText('點這裡使用文字輸入')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '和弦直接輸入' })).toHaveFocus();
     expect(screen.queryByRole('button', { name: /^G$/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '顯示按鍵' }));
     expect(screen.getByRole('button', { name: /^G$/ })).toBeInTheDocument();
@@ -75,7 +76,8 @@ describe('PreviewBarEditor', () => {
   it('keeps touch input unfocused and writes a visual chord into the selected beat', async () => {
     const user = userEvent.setup();
     const { onApplyDraft } = renderEditor({ deviceLayout: 'phone' });
-    expect(screen.getByRole('textbox', { name: '目前和弦文字' })).not.toHaveFocus();
+    expect(screen.queryByPlaceholderText('點這裡使用文字輸入')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '和弦直接輸入' })).not.toHaveFocus();
     await user.click(screen.getByRole('button', { name: /^G$/ }));
     const nextSong = onApplyDraft.mock.calls[0][0] as Song;
     expect(nextSong.sections[0].bars[0].chords).toEqual(['C', 'G', '', '']);
@@ -142,7 +144,7 @@ describe('PreviewBarEditor', () => {
 
   it('normalizes typed roots before writing the draft', () => {
     const { onApplyDraft } = renderEditor();
-    fireEvent.change(screen.getByRole('textbox', { name: '目前和弦文字' }), { target: { value: 'bb/db' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '和弦直接輸入' }), { target: { value: 'bb/db' } });
     const nextSong = onApplyDraft.mock.calls[0][0] as Song;
     expect(nextSong.sections[0].bars[0].chords[1]).toBe('Bb/Db');
   });

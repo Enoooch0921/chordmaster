@@ -6,7 +6,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker } from '../types';
-import { getTransposeOffset, transposeChord, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
+import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
@@ -1078,7 +1078,7 @@ const getDisplayedChordString = (
     return chord.trim();
   }
 
-  const transposed = transposeChord(chord, sectionOffset, sectionPlayKey, false, sectionWrittenKey);
+  const transposed = transposeChordForDisplay(chord, sectionOffset, sectionPlayKey, sectionWrittenKey);
   const displayedChord = useNashvilleNumbers
     ? isNashville(transposed) ? transposed : getNashvilleNumber(transposed, sectionPlayKey)
     : isNashville(transposed) ? parseNashvilleToChord(transposed, sectionPlayKey) : transposed;

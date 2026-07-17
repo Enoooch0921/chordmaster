@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Bar, Key, Song } from '../types';
 import { getChordDisplaySlots, getTwoChordSplitSlotIndex } from '../utils/chordSlots';
-import { getTransposeOffset, parseNashvilleToChord, transposeChord } from '../utils/musicUtils';
+import { getTransposeOffset, parseNashvilleToChord, transposeChord, transposeChordForDisplay } from '../utils/musicUtils';
 import {
   clearChordAtBeatSlot,
   convertDisplayedChordToStoredChord,
@@ -127,6 +127,29 @@ describe('edit what you see conversion', () => {
     });
     expect(stored).toBe('C/E');
     expect(displayStoredAgain(stored, 'C', 'D')).toBe('D/F#');
+  });
+
+  it.each(['Cb', 'Fb', 'B#', 'E#'])('preserves the explicit %s spelling when no transposition is needed', (chord) => {
+    const stored = convertDisplayedChordToStoredChord({
+      input: chord,
+      inputMode: 'letters',
+      storageMode: 'letters',
+      displayedKey: 'C',
+      storedKey: 'C'
+    });
+    expect(stored).toBe(chord);
+    expect(convertStoredChordToDisplayedChord({
+      chord: stored,
+      storageMode: 'letters',
+      outputMode: 'letters',
+      storedKey: 'C',
+      displayedKey: 'C'
+    })).toBe(chord);
+    expect(transposeChordForDisplay(chord, 0, 'C', 'C')).toBe(chord);
+  });
+
+  it('still respells an enharmonic key change with a zero semitone offset', () => {
+    expect(transposeChordForDisplay('C#', 0, 'Db', 'C#')).toBe('Db');
   });
 
   it('preserves Nashville storage while accepting the displayed chord', () => {

@@ -5,6 +5,7 @@ export interface PreviewEditorDeviceSignals {
   maxTouchPoints: number;
   hasCoarsePointer: boolean;
   isPhoneDevice: boolean;
+  isKnownTabletDevice: boolean;
 }
 
 /**
@@ -16,9 +17,11 @@ export const resolvePreviewEditorDeviceLayout = ({
   viewportWidth,
   maxTouchPoints,
   hasCoarsePointer,
-  isPhoneDevice
+  isPhoneDevice,
+  isKnownTabletDevice
 }: PreviewEditorDeviceSignals): PreviewEditorDeviceLayout => {
   if (isPhoneDevice || viewportWidth < 640) return 'phone';
-  if ((maxTouchPoints > 0 || hasCoarsePointer) && viewportWidth <= 1366) return 'tablet';
+  if (isKnownTabletDevice) return 'tablet';
+  if ((maxTouchPoints > 0 || hasCoarsePointer) && viewportWidth <= 1536) return 'tablet';
   return 'desktop';
 };
