@@ -7620,21 +7620,6 @@ export default function App() {
         const tappedSlotIndex = previewField === 'chords' && previewBar
           ? resolvePreviewChordSlotIndex(previewBar, getBeatCount(navigationSong, previewBar), requestedSlotIndex)
           : requestedSlotIndex;
-        const tappedSameChord = previewField === 'chords'
-          && activePreviewEditSession?.previewIdentity === previewIdentity
-          && (
-            (Boolean(target?.anchorKey) && target?.anchorKey === activePreviewEditSession.target.anchorKey)
-            || (
-              target?.sectionId === activePreviewEditSession.target.sectionId
-              && target?.barId === activePreviewEditSession.target.barId
-              && tappedSlotIndex === activePreviewEditSession.target.slotIndex
-            )
-          );
-        if (tappedSameChord && previewEditorDeviceLayout !== 'desktop') {
-          const chordCapture = document.querySelector('[data-preview-chord-capture]') as HTMLInputElement | null;
-          chordCapture?.focus({ preventScroll: true });
-          chordCapture?.select();
-        }
         setPreviewEditSession((current) => {
           const currentDraft = current?.previewIdentity === previewIdentity ? current : null;
           const editableSong = currentDraft ? currentDraft.draftSong : ensureSongEditingIds(editorSong);
@@ -8029,6 +8014,31 @@ export default function App() {
     setActiveSectionId(located.section.id ?? null);
     setActiveBar({ sIdx: located.sectionIndex, bIdx: located.barIndex });
   }, [activePreviewEditSession?.target.barId, activePreviewEditSession?.target.kind, activePreviewEditSession?.target.sectionId]);
+
+  useEffect(() => {
+    if (
+      !activePreviewEditSession
+      || activePreviewEditSession.target.kind !== 'bar'
+      || activePreviewEditSession.target.field !== 'chords'
+      || previewEditorDeviceLayout === 'desktop'
+    ) {
+      return;
+    }
+
+    // Touch chord entry is handled entirely by the visual keyboard. Clear any
+    // previous text-field focus so iPadOS cannot stack its software keyboard
+    // underneath the custom dock.
+    mobileWysiwygKeyboardProxyInputRef.current?.blur();
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLInputElement
+      || activeElement instanceof HTMLTextAreaElement
+      || activeElement instanceof HTMLSelectElement
+      || (activeElement instanceof HTMLElement && activeElement.isContentEditable)
+    ) {
+      activeElement.blur();
+    }
+  }, [activePreviewEditSession?.previewIdentity, activePreviewEditSession?.target.barId, activePreviewEditSession?.target.field, activePreviewEditSession?.target.kind, previewEditorDeviceLayout]);
 
   useEffect(() => {
     if (!activePreviewEditSession) return;

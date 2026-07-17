@@ -75,12 +75,20 @@ describe('PreviewBarEditor', () => {
     const user = userEvent.setup();
     const { onApplyDraft } = renderEditor({ deviceLayout: 'phone' });
     expect(screen.queryByPlaceholderText('點這裡使用文字輸入')).not.toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: '和弦直接輸入' })).not.toHaveFocus();
+    expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^G$/ }));
     const nextSong = onApplyDraft.mock.calls[0][0] as Song;
     expect(nextSong.sections[0].bars[0].chords).toEqual(['C', 'G', '', '']);
     expect(screen.getByRole('button', { name: 'Previous beat' })).toHaveTextContent('上一拍');
     expect(screen.getByRole('button', { name: 'Next beat' })).toHaveTextContent('下一拍');
+  });
+
+  it('docks the iPad keyboard across the full visual viewport without a native chord input', () => {
+    renderEditor({ deviceLayout: 'tablet' });
+    const dialog = screen.getByRole('dialog', { name: '預覽快捷編輯' });
+    expect(dialog).toHaveStyle({ left: '0px', width: '1024px' });
+    expect(dialog.style.transform).toBe('');
+    expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
   });
 
   it('keeps one fixed main keyboard without a vertical scrolling surface', async () => {

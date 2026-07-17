@@ -462,10 +462,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     : deviceLayout === 'tablet'
       ? {
           position: 'fixed',
-          left: viewportLeft + viewportWidth / 2,
-          transform: 'translateX(-50%)',
+          left: viewportLeft,
           bottom: keyboardOffset,
-          width: 'min(820px, 100vw)',
+          width: viewportWidth,
           height: collapsed ? 'auto' : 'min(40dvh, 420px)'
         }
       : (() => {
@@ -501,11 +500,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     const fallbackStyle: React.CSSProperties = isDocked
       ? {
           position: 'fixed',
-          left: deviceLayout === 'phone' ? 0 : '50%',
-          right: deviceLayout === 'phone' ? 0 : undefined,
+          left: 0,
+          right: 0,
           bottom: 0,
-          width: deviceLayout === 'tablet' ? 'min(820px, 100vw)' : undefined,
-          transform: deviceLayout === 'tablet' ? 'translateX(-50%)' : undefined
+          width: '100vw'
         }
       : { position: 'fixed', left: '50%', top: '50%', width: 'min(520px, calc(100vw - 24px))', transform: 'translate(-50%, -50%)' };
     const isDeleted = session.targetStatus === 'deleted';
@@ -914,37 +912,36 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-600 !text-white hover:!bg-indigo-500`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={15} /><span className={deviceLayout === 'phone' ? 'sr-only' : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
       </header>
 
-      <input
-        ref={chordCaptureRef}
-        data-preview-chord-capture
-        type="text"
-        value={displayedChord}
-        onChange={(event) => applyDisplayedChord(event.target.value, `slot-text:${bar.id}:${session.target.slotIndex}`)}
-        onFocus={() => {
-          if (isDocked) setCollapsed(true);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            onNavigate(event.shiftKey ? 'previous' : 'next');
-          } else if (event.key === 'ArrowLeft') {
-            event.preventDefault();
-            onNavigate('previous');
-          } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
-            onNavigate('next');
-          } else if (event.key === 'Backspace' && !displayedChord) {
-            event.preventDefault();
-            onNavigate('previous');
-          }
-        }}
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        tabIndex={-1}
-        className="pointer-events-none fixed left-0 top-0 h-px w-px opacity-0"
-        aria-label={language === 'zh' ? '和弦直接輸入' : 'Direct chord input'}
-      />
+      {deviceLayout === 'desktop' && (
+        <input
+          ref={chordCaptureRef}
+          data-preview-chord-capture
+          type="text"
+          value={displayedChord}
+          onChange={(event) => applyDisplayedChord(event.target.value, `slot-text:${bar.id}:${session.target.slotIndex}`)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onNavigate(event.shiftKey ? 'previous' : 'next');
+            } else if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              onNavigate('previous');
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              onNavigate('next');
+            } else if (event.key === 'Backspace' && !displayedChord) {
+              event.preventDefault();
+              onNavigate('previous');
+            }
+          }}
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          tabIndex={-1}
+          className="pointer-events-none fixed left-0 top-0 h-px w-px opacity-0"
+          aria-label={language === 'zh' ? '和弦直接輸入' : 'Direct chord input'}
+        />
+      )}
 
       {!collapsed && deviceLayout === 'desktop' && keyboardContent}
       {!collapsed && deviceLayout !== 'desktop' && keyboardContent}
