@@ -18,6 +18,7 @@ const song: Song = {
 };
 
 const target = {
+  kind: 'bar' as const,
   previewIdentity: 'song-1',
   sectionId: 'section-1',
   barId: 'bar-1',

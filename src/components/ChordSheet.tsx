@@ -4,18 +4,19 @@
  */
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker } from '../types';
 import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
-import { Repeat, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { Repeat, ArrowUpRight, ArrowDownRight, SlidersHorizontal } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
-import { getChordDisplaySlotEntries } from '../utils/chordSlots';
+import { getChordDisplaySlotEntries, getChordDisplaySlotOwnership } from '../utils/chordSlots';
 import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 import { DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
 
@@ -787,7 +788,7 @@ const FormattedKeySequence: React.FC<{
 );
 
 export type ChordSheetElementField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'sectionName' | 'marker';
-export type ChordSheetMetaField = 'title' | 'credits' | 'key' | 'tempo' | 'timeSignature' | 'capo' | 'groove';
+export type ChordSheetMetaField = 'title' | 'credits' | 'key' | 'tempo' | 'timeSignature' | 'capo' | 'groove' | 'metadata';
 
 export interface PreviewAnchorRect {
   left: number;
@@ -844,6 +845,27 @@ interface ChordSheetProps {
   activeBar?: { sIdx: number; bIdx: number } | null;
   activeChordSlot?: { sectionId: string; barId: string; slotIndex: number } | null;
   previewIdentity?: string | null;
+  onSectionReorder?: (sourceSectionId: string, targetSectionId: string, placement: 'before' | 'after') => void;
+}
+
+interface PreviewSectionDragState {
+  sourceSectionId: string;
+  title: string;
+  clientX: number;
+  clientY: number;
+  targetSectionId: string;
+  placement: 'before' | 'after';
+}
+
+interface PreviewSectionDragCandidate {
+  pointerId: number;
+  pointerType: string;
+  sourceSectionId: string;
+  title: string;
+  startX: number;
+  startY: number;
+  active: boolean;
+  scrollRoot: HTMLElement | null;
 }
 
 const ShuffleSymbol: React.FC<{ className?: string }> = ({ className = '' }) => (
@@ -1244,15 +1266,160 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activeChordSlot = null, previewIdentity = null }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activeChordSlot = null, previewIdentity = null, onSectionReorder }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   // Chords always use the sans-serif preset; the serif option was removed.
   const chordFontFamily = getChordFontFamily('stage-sans');
   const previousPreviewIdentityRef = React.useRef(previewIdentity);
   const [keepTransitionsSuppressed, setKeepTransitionsSuppressed] = React.useState(false);
+  const [sectionDrag, setSectionDrag] = React.useState<PreviewSectionDragState | null>(null);
+  const sectionDragRef = React.useRef<PreviewSectionDragState | null>(null);
+  const sectionDragCandidateRef = React.useRef<PreviewSectionDragCandidate | null>(null);
+  const sectionDragLongPressTimerRef = React.useRef<number | null>(null);
+  const sectionDragAutoScrollFrameRef = React.useRef<number | null>(null);
+  const sectionDragPointerYRef = React.useRef(0);
+  const suppressSectionTitleClickRef = React.useRef(false);
   const isPreviewIdentityChanged = previousPreviewIdentityRef.current !== previewIdentity;
   const suppressSectionTransitions = isPreviewIdentityChanged || keepTransitionsSuppressed;
+  const clearSectionDragLongPress = () => {
+    if (sectionDragLongPressTimerRef.current !== null) {
+      window.clearTimeout(sectionDragLongPressTimerRef.current);
+      sectionDragLongPressTimerRef.current = null;
+    }
+  };
+  const updateSectionDrag = (next: PreviewSectionDragState | null) => {
+    sectionDragRef.current = next;
+    setSectionDrag(next);
+  };
+  const activateSectionDrag = (candidate: PreviewSectionDragCandidate, clientX: number, clientY: number) => {
+    candidate.active = true;
+    sectionDragPointerYRef.current = clientY;
+    suppressSectionTitleClickRef.current = true;
+    updateSectionDrag({
+      sourceSectionId: candidate.sourceSectionId,
+      title: candidate.title,
+      clientX,
+      clientY,
+      targetSectionId: candidate.sourceSectionId,
+      placement: 'before'
+    });
+    startSectionDragAutoScroll();
+  };
+  const locateSectionDropTarget = (clientX: number, clientY: number) => {
+    const elements = typeof document.elementsFromPoint === 'function'
+      ? document.elementsFromPoint(clientX, clientY)
+      : [document.elementFromPoint(clientX, clientY)].filter(Boolean) as Element[];
+    const target = elements
+      .map((element) => element.closest<HTMLElement>('[data-preview-section-drop-target]'))
+      .find(Boolean);
+    if (!target?.dataset.previewSectionDropTarget) return null;
+    const rect = target.getBoundingClientRect();
+    return {
+      sectionId: target.dataset.previewSectionDropTarget,
+      placement: clientY < rect.top + rect.height / 2 ? 'before' as const : 'after' as const
+    };
+  };
+  const autoScrollSectionDrag = (candidate: PreviewSectionDragCandidate, clientY: number) => {
+    const scrollRoot = candidate.scrollRoot;
+    if (!scrollRoot) return;
+    const rect = scrollRoot.getBoundingClientRect();
+    const edge = Math.min(72, rect.height * 0.18);
+    if (clientY < rect.top + edge) scrollRoot.scrollTop -= 22;
+    if (clientY > rect.bottom - edge) scrollRoot.scrollTop += 22;
+  };
+  const stopSectionDragAutoScroll = () => {
+    if (sectionDragAutoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(sectionDragAutoScrollFrameRef.current);
+      sectionDragAutoScrollFrameRef.current = null;
+    }
+  };
+  const startSectionDragAutoScroll = () => {
+    stopSectionDragAutoScroll();
+    const tick = () => {
+      const candidate = sectionDragCandidateRef.current;
+      if (!candidate?.active) {
+        sectionDragAutoScrollFrameRef.current = null;
+        return;
+      }
+      autoScrollSectionDrag(candidate, sectionDragPointerYRef.current);
+      sectionDragAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
+    };
+    sectionDragAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
+  };
+  const handleSectionTitlePointerDown = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    sectionId: string,
+    title: string
+  ) => {
+    if (!onSectionReorder || event.button !== 0) return;
+    clearSectionDragLongPress();
+    const candidate: PreviewSectionDragCandidate = {
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      sourceSectionId: sectionId,
+      title,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      scrollRoot: event.currentTarget.closest<HTMLElement>('[data-print-preview-container]')
+    };
+    sectionDragCandidateRef.current = candidate;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    if (event.pointerType !== 'mouse') {
+      sectionDragLongPressTimerRef.current = window.setTimeout(() => {
+        if (sectionDragCandidateRef.current === candidate) {
+          activateSectionDrag(candidate, candidate.startX, candidate.startY);
+        }
+      }, 350);
+    }
+  };
+  const handleSectionTitlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const candidate = sectionDragCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - candidate.startX, event.clientY - candidate.startY);
+    if (!candidate.active) {
+      if (candidate.pointerType === 'mouse' && distance > 4) {
+        activateSectionDrag(candidate, event.clientX, event.clientY);
+      } else if (candidate.pointerType !== 'mouse' && distance > 8) {
+        clearSectionDragLongPress();
+        suppressSectionTitleClickRef.current = true;
+        sectionDragCandidateRef.current = null;
+        return;
+      }
+    }
+    if (!candidate.active) return;
+    event.preventDefault();
+    event.stopPropagation();
+    sectionDragPointerYRef.current = event.clientY;
+    autoScrollSectionDrag(candidate, event.clientY);
+    const dropTarget = locateSectionDropTarget(event.clientX, event.clientY);
+    const current = sectionDragRef.current;
+    if (!current) return;
+    updateSectionDrag({
+      ...current,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      targetSectionId: dropTarget?.sectionId ?? current.targetSectionId,
+      placement: dropTarget?.placement ?? current.placement
+    });
+  };
+  const finishSectionTitlePointer = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const candidate = sectionDragCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    clearSectionDragLongPress();
+    stopSectionDragAutoScroll();
+    const completedDrag = sectionDragRef.current;
+    if (candidate.active && completedDrag && completedDrag.sourceSectionId !== completedDrag.targetSectionId) {
+      onSectionReorder?.(completedDrag.sourceSectionId, completedDrag.targetSectionId, completedDrag.placement);
+    }
+    sectionDragCandidateRef.current = null;
+    updateSectionDrag(null);
+  };
+  React.useEffect(() => () => {
+    clearSectionDragLongPress();
+    stopSectionDragAutoScroll();
+  }, []);
   const emitElementClick = (
     event: React.MouseEvent<HTMLElement>,
     sIdx: number,
@@ -1275,7 +1442,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       ? getChordDisplaySlotEntries(bar.chords, beatCount)[slotIndex]
       : null;
     const rawChordIndex = explicitRawChordIndex ?? slotEntry?.rawIndex ?? null;
-    const anchorKey = `${previewIdentity || 'preview'}|${section?.id || sIdx}|${bar?.id || bIdx}|${field}|${slotIndex ?? 'all'}`;
+    const anchorKey = field === 'sectionName'
+      ? `${previewIdentity || 'preview'}|${section?.id || sIdx}|section|sectionName|${bar?.id || 'title'}`
+      : `${previewIdentity || 'preview'}|${section?.id || sIdx}|${bar?.id || bIdx}|${field}|${slotIndex ?? 'all'}`;
     const slotAnchor = slotIndex !== null
       ? event.currentTarget.closest('.sheet-bar')?.querySelector<HTMLElement>(`[data-preview-slot-index="${slotIndex}"]`)
       : null;
@@ -1472,6 +1641,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
   return (
     <div className="flex flex-col gap-8 print:gap-0">
+      {sectionDrag && typeof document !== 'undefined' && createPortal(
+        <div
+          data-preview-section-drag-ghost
+          className="pointer-events-none fixed z-[6000] max-w-48 -translate-x-1/2 -translate-y-[calc(100%+14px)] rounded-xl border border-indigo-300 bg-white/95 px-3 py-2 text-sm font-black text-indigo-800 shadow-[0_14px_34px_rgba(30,41,59,0.26)] backdrop-blur"
+          style={{ left: sectionDrag.clientX, top: sectionDrag.clientY }}
+        >
+          {sectionDrag.title.trim() || (language === 'zh' ? '未命名段落' : 'Untitled section')}
+        </div>,
+        document.body
+      )}
       {pages.map((pageRows, pIdx) => {
         const currentSectionRow = pageRows.find((row) => row.sectionTitle) ?? pageRows[0] ?? null;
         const currentSectionIndex = currentSectionRow ? currentSectionRow.sIdx + 1 : 0;
@@ -1520,6 +1699,19 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                   </AutoShrink>
                   {pageBadge}
                 </div>
+                {onMetaClick ? (
+                  <button
+                    type="button"
+                    {...getMetaAnchorProps('metadata')}
+                    data-preview-only-control
+                    aria-label={language === 'zh' ? '編輯歌曲資訊' : 'Edit song information'}
+                    title={language === 'zh' ? '歌曲資訊' : 'Song information'}
+                    className="absolute right-0 top-[42px] z-10 inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white/95 px-2.5 text-[10px] font-bold tracking-normal text-indigo-700 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                  >
+                    <SlidersHorizontal size={13} aria-hidden="true" />
+                    <span>{language === 'zh' ? '歌曲資訊' : 'Song info'}</span>
+                  </button>
+                ) : null}
                 {(hasCredits || onMetaClick) && (
                   <div
                     {...getMetaAnchorProps('credits')}
@@ -1684,6 +1876,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 <motion.div 
                   key={`${section?.id || row.sIdx}-${row.startBIdx}`}
                   data-preview-section-id={section?.id || ''}
+                  data-preview-section-drop-target={row.startBIdx === 0 ? section?.id || '' : undefined}
                   layout={!suppressSectionTransitions}
                   initial={false}
                   animate={{ 
@@ -1701,35 +1894,73 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     backgroundColor: { duration: suppressSectionTransitions ? 0 : (isHighlighted ? 0.2 : 0.25) },
                     boxShadow: { duration: suppressSectionTransitions ? 0 : 0.2 }
                   }}
-                  className="flex-1 flex w-full min-h-0 rounded-lg transition-all"
+                  className="relative flex-1 flex w-full min-h-0 rounded-lg transition-all"
                 >
+                  {row.startBIdx === 0 && sectionDrag?.targetSectionId === section?.id && (
+                    <span
+                      data-preview-section-drop-line={sectionDrag.placement}
+                      className={`pointer-events-none absolute left-0 right-0 z-50 h-1 rounded-full bg-indigo-500 shadow-[0_0_0_2px_rgba(255,255,255,0.9)] ${sectionDrag.placement === 'before' ? '-top-1.5' : '-bottom-1.5'}`}
+                    />
+                  )}
                   {/* Left Column: Section Title */}
                 <div className="relative w-16 sm:w-20 shrink-0 flex flex-col items-center justify-start pr-2 pt-1 overflow-visible">
-                    {row.sectionTitle && (() => {
-                      const colors = getSectionColor(row.sectionTitle, true);
-                      const hasManualLineBreak = row.sectionTitle.includes('\n');
+                    {(row.startBIdx === 0 || (onElementClick && row.startBIdx > 0 && Boolean(row.bars[0]))) && (() => {
+                      const isSectionStartRow = row.startBIdx === 0;
+                      const title = isSectionStartRow ? section?.title ?? '' : '';
+                      const colors = getSectionColor(title, true);
+                      const hasManualLineBreak = title.includes('\n');
+                      const sectionAnchorKey = `${previewIdentity || 'preview'}|${section?.id || row.sIdx}|section|sectionName|${isSectionStartRow ? 'title' : row.bars[0]?.id || 'row'}`;
                       return (
                         <div className={`w-full flex justify-center transition-all ${isActiveSection ? 'scale-[1.02]' : ''}`}>
                           <div className="relative flex w-full justify-center">
-                            <div
-                              className={`flex w-full items-center justify-center rounded-sm border px-1 py-1 min-h-[24px] overflow-visible ${onElementClick ? 'cursor-pointer transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.4)]' : ''}`}
-                              style={getSectionBadgeStyle(colors.accent)}
-                              {...(onElementClick ? { role: 'button' as const, tabIndex: 0, onClick: (event: React.MouseEvent<HTMLElement>) => emitElementClick(event, row.sIdx, -1, 'sectionName') } : {})}
+                            <button
+                              type="button"
+                              data-preview-edit-anchor={sectionAnchorKey}
+                              data-preview-section-title={isSectionStartRow ? section?.id : undefined}
+                              data-preview-section-split={isSectionStartRow ? undefined : row.bars[0]?.id}
+                              className={`group/section-title flex w-full items-center justify-center rounded-sm px-1 py-1 min-h-[24px] overflow-visible ${isSectionStartRow && title ? 'border' : 'border border-dashed border-transparent'} ${onElementClick ? 'cursor-text transition-all hover:border-indigo-300 hover:bg-indigo-50/55 hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)]' : ''} ${isSectionStartRow && onSectionReorder ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
+                              style={isSectionStartRow && title ? getSectionBadgeStyle(colors.accent) : undefined}
+                              disabled={!onElementClick}
+                              aria-label={isSectionStartRow
+                                ? (language === 'zh' ? `編輯段落名稱 ${title || '未命名段落'}` : `Edit section title ${title || 'Untitled section'}`)
+                                : (language === 'zh' ? '從本行第一小節拆成新段落' : 'Start a new section from this row')}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onTouchStart={(event) => event.stopPropagation()}
+                              onPointerDown={isSectionStartRow && section?.id ? (event) => handleSectionTitlePointerDown(event, section.id!, title) : undefined}
+                              onPointerMove={isSectionStartRow ? handleSectionTitlePointerMove : undefined}
+                              onPointerUp={isSectionStartRow ? finishSectionTitlePointer : undefined}
+                              onPointerCancel={isSectionStartRow ? () => {
+                                clearSectionDragLongPress();
+                                stopSectionDragAutoScroll();
+                                sectionDragCandidateRef.current = null;
+                                updateSectionDrag(null);
+                              } : undefined}
+                              onClick={onElementClick ? (event) => {
+                                if (suppressSectionTitleClickRef.current) {
+                                  suppressSectionTitleClickRef.current = false;
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  return;
+                                }
+                                emitElementClick(event, row.sIdx, isSectionStartRow ? -1 : row.startBIdx, 'sectionName');
+                              } : undefined}
                             >
-                              {hasManualLineBreak ? (
+                              {!title ? (
+                                <span className="text-[9px] font-black text-transparent transition-colors group-hover/section-title:text-indigo-400" aria-hidden="true">＋</span>
+                              ) : hasManualLineBreak ? (
                                 <div className="w-full whitespace-pre-line break-words px-[1px] text-center text-[10px] font-black tracking-[0.04em] leading-[1.15]">
-                                  {localizeSectionTitle(row.sectionTitle, language)}
+                                  {localizeSectionTitle(title, language)}
                                 </div>
                               ) : (
                                 <div className="w-full px-[1px]">
                                   <AutoShrink align="center" minScale={0.52} className="overflow-visible">
                                     <div className="text-[11px] font-black tracking-[0.04em] leading-none">
-                                      {localizeSectionTitle(row.sectionTitle, language)}
+                                      {localizeSectionTitle(title, language)}
                                     </div>
                                   </AutoShrink>
                                 </div>
                               )}
-                            </div>
+                            </button>
                           </div>
                         </div>
                       );
@@ -2128,15 +2359,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       );
                                     }
 
+                                      const chordSlotOwnership = getChordDisplaySlotOwnership(bar.chords, beatsPerBar);
                                       const occupiedChordAnchors = (() => {
-                                        const anchors = displayChordEntries.flatMap((entry, slotIndex) => {
-                                          if (!entry?.chord) return [];
-                                          return [{ chord: entry.chord, chordIndex: entry.rawIndex, slotIndex, span: 1 }];
+                                        const anchors = chordSlotOwnership.flatMap((entry, slotIndex) => {
+                                          if (!entry?.chord || entry.covered) return [];
+                                          return [{ chord: entry.chord, chordIndex: entry.rawIndex, slotIndex, span: entry.span }];
                                         });
                                         return anchors.map((anchor, index) => {
                                           const nextSlotIndex = anchors[index + 1]?.slotIndex ?? beatsPerBar;
                                           const slotsUntilNext = Math.max(1, nextSlotIndex - anchor.slotIndex);
-                                          return { ...anchor, span: 1, slotsUntilNext };
+                                          return { ...anchor, slotsUntilNext };
                                         });
                                       })();
                                     const centeredWholeRestAnchor = occupiedChordAnchors.length === 1
@@ -2150,6 +2382,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                       >
                                         {Array.from({ length: beatsPerBar }, (_, slotIndex) => {
+                                          const ownership = chordSlotOwnership[slotIndex];
+                                          if (ownership?.covered) return null;
                                           const isSelectedSlot = Boolean(
                                             activeChordSlot
                                             && activeChordSlot.sectionId === section?.id
@@ -2157,6 +2391,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             && activeChordSlot.slotIndex === slotIndex
                                           );
                                           const slotHasChord = Boolean(displayChordEntries[slotIndex]?.chord);
+                                          const slotSpan = ownership?.span ?? 1;
                                           return (
                                             <div
                                               key={`slot-hit-${slotIndex}`}
@@ -2165,7 +2400,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|chords|${slotIndex}`}
                                               aria-hidden="true"
                                               className={`pointer-events-none relative h-[26px] rounded-[4px] transition-shadow ${isSelectedSlot ? 'bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92),0_0_0_1px_rgba(255,255,255,0.88)]' : ''}`}
-                                              style={{ gridColumn: `${slotIndex + 1} / span 1`, gridRow: '1' }}
+                                              style={{ gridColumn: `${slotIndex + 1} / span ${slotSpan}`, gridRow: '1' }}
                                             >
                                               {isSelectedSlot && !slotHasChord && <PreviewChordInputCaret className="absolute bottom-[4px] left-[5px]" />}
                                             </div>
@@ -2239,8 +2474,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                            return (
 	                                              <div
 	                                                key={`${row.sIdx}-${row.startBIdx + bIdx}-slot-${anchor.slotIndex}`}
+	                                                data-preview-token-span={anchor.span}
+	                                                data-preview-owner-slot={anchor.slotIndex}
 	                                                className="flex h-[24px] min-w-0 items-end px-[3px]"
-	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span 1`, gridRow: '1' }}
+	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span ${anchor.span}`, gridRow: '1' }}
 	                                                  onClick={(event) => {
 	                                                  event.stopPropagation();
 	                                                  emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords', anchor.slotIndex, anchor.chordIndex);
@@ -2273,12 +2510,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         })()}
                                       </div>
                                     );
-                                    const hasCenteredPercentRepeat = hasVisibleChordTokens(bar.chords) && bar.chords.length === 1 && bar.chords[0] === '%';
+                                    const hasCenteredPercentRepeat = occupiedChordAnchors.length === 1 && occupiedChordAnchors[0].chord.trim() === '%';
 
                                     if (hasCenteredPercentRepeat) {
                                       return (
                                         <div
-                                          className={`flex-1 flex items-center justify-center w-full h-full cursor-pointer ${contentLeftInsetClass}`}
+                                          data-preview-token-span={beatsPerBar}
+                                          data-preview-owner-slot="0"
+                                          className={`flex-1 flex items-center justify-center w-full h-full cursor-pointer rounded ${contentLeftInsetClass} ${activeChordSlot?.sectionId === section?.id && activeChordSlot.barId === bar.id && activeChordSlot.slotIndex === 0 ? 'bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92)]' : ''}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           <FormattedChord
@@ -2295,7 +2534,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                     if (centeredWholeRestAnchor) {
                                       return (
                                         <div
-                                          className={`flex flex-1 h-full w-full items-center justify-center cursor-pointer rounded transition-colors hover:bg-indigo-50/50 ${contentLeftInsetClass}`}
+                                          data-preview-token-span={beatsPerBar}
+                                          data-preview-owner-slot="0"
+                                          className={`flex flex-1 h-full w-full items-center justify-center cursor-pointer rounded transition-colors hover:bg-indigo-50/50 ${contentLeftInsetClass} ${activeChordSlot?.sectionId === section?.id && activeChordSlot.barId === bar.id && activeChordSlot.slotIndex === 0 ? 'bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92)]' : ''}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           <FormattedChord

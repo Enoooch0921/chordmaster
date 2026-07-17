@@ -15,6 +15,7 @@ const song: Song = {
 };
 
 const target = {
+  kind: 'bar' as const,
   previewIdentity: 'song-1',
   sectionId: 'section-1',
   barId: 'bar-1',
@@ -223,6 +224,18 @@ describe('PreviewBarEditor', () => {
     expect(document.querySelector('[data-keyboard-picker]')).not.toBeInTheDocument();
   });
 
+  it('keeps all five structure operations in one fixed picker', async () => {
+    const user = userEvent.setup();
+    const { onStructure } = renderEditor({ deviceLayout: 'phone' });
+    await user.click(screen.getByRole('button', { name: '小節操作' }));
+    const actions = document.querySelector('[data-structure-actions]');
+    expect(actions).toBeInTheDocument();
+    expect(actions?.querySelectorAll('button')).toHaveLength(5);
+    expect(actions).not.toHaveClass('overflow-y-auto');
+    await user.click(screen.getByRole('button', { name: '拆分段落' }));
+    expect(onStructure).toHaveBeenCalledWith('split-section');
+  });
+
   it('toggles a per-bar 4/4 override off and keeps complete symbol controls', async () => {
     const user = userEvent.setup();
     const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
@@ -289,6 +302,22 @@ describe('PreviewBarEditor', () => {
     await user.click(screen.getByRole('button', { name: '休止符與整小節符號' }));
     expect(screen.getByRole('button', { name: '輸入多小節休止數量' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('請先清空');
+  });
+
+  it('disables 0h on the final beat and explains that it needs two beats', async () => {
+    const user = userEvent.setup();
+    const emptySong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['', '', '', ''] }] }]
+    };
+    const lastBeatTarget = { ...target, slotIndex: 3, anchorKey: 'song-1|section-1|bar-1|chords|3' };
+    renderEditor({
+      session: createPreviewEditSession({ song: emptySong, target: lastBeatTarget, inputMode: 'letters' }),
+      deviceLayout: 'phone'
+    });
+    await user.click(screen.getByRole('button', { name: '休止符與整小節符號' }));
+    expect(screen.getByRole('button', { name: '二分休止' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('需要連續兩拍');
   });
 
   it('shows all four text positions together without nested tabs', async () => {

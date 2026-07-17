@@ -10,18 +10,35 @@ export interface PreviewEditAnchorRect {
   height: number;
 }
 
-export type PreviewEditField = 'chords' | 'symbols' | 'text';
+export type PreviewBarEditField = 'chords' | 'symbols' | 'text';
+export type PreviewEditField = PreviewBarEditField | 'sectionName';
 
-export interface PreviewEditTarget {
+interface PreviewEditTargetBase {
   previewIdentity: string;
   sectionId: string;
-  barId: string;
-  field: PreviewEditField;
-  slotIndex: number;
-  rawChordIndex: number | null;
   anchorKey: string;
   anchorRect: PreviewEditAnchorRect;
 }
+
+export interface PreviewBarEditTarget extends PreviewEditTargetBase {
+  kind: 'bar';
+  barId: string;
+  field: PreviewBarEditField;
+  slotIndex: number;
+  rawChordIndex: number | null;
+}
+
+export interface PreviewSectionEditTarget extends PreviewEditTargetBase {
+  kind: 'section';
+  field: 'sectionName';
+  // Kept as context for focus restoration after a split. Section targets do
+  // not use beat-slot semantics.
+  barId: string;
+  slotIndex: 0;
+  rawChordIndex: null;
+}
+
+export type PreviewEditTarget = PreviewBarEditTarget | PreviewSectionEditTarget;
 
 export interface PreviewEditSession {
   previewIdentity: string;
@@ -40,7 +57,7 @@ export interface PreviewEditSession {
 const songHasTarget = (song: Song, target: PreviewEditTarget) => (
   song.sections.some((section) => (
     section.id === target.sectionId
-    && section.bars.some((bar) => bar.id === target.barId)
+    && (target.kind === 'section' || section.bars.some((bar) => bar.id === target.barId))
   ))
 );
 

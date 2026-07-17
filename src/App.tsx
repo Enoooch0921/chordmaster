@@ -52,6 +52,7 @@ import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
 import PreviewWysiwygEditor, { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
 import PreviewBarEditor from './components/preview-edit/PreviewBarEditor';
+import PreviewSectionTitleEditor from './components/preview-edit/PreviewSectionTitleEditor';
 import SongEditor from './components/SongEditor';
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
@@ -60,7 +61,14 @@ import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
-import { applySetlistSongOverrides, getDefaultSectionOrder, getEffectiveSetlistSongCapo, resolveSetlistSongCapo } from './utils/setlistUtils';
+import {
+  applySetlistSongOverrides,
+  getDefaultSectionOrder,
+  getEffectiveSetlistSongCapo,
+  insertNewSetlistSectionsAfterSources,
+  reorderSetlistSectionOrder,
+  resolveSetlistSongCapo
+} from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
 import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -85,15 +93,20 @@ import {
   deleteBar,
   duplicateBar,
   ensureSongEditingIds,
+  finalizeSectionTitleEdit,
   findSongBar,
   getBeatCount,
   getChordBeatSlots,
   getChordStorageModeForTarget,
   getSectionStoredKey,
   insertBar,
-  resolvePreviewChordSlotIndex
+  reorderSection,
+  resolvePreviewChordSlotIndex,
+  splitSectionAtBar,
+  updateSectionTitle
 } from './lib/songEditing';
 import { resolvePreviewEditorDeviceLayout } from './lib/previewEditorLayout';
+import { getChordDisplaySlotOwnership } from './utils/chordSlots';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -1059,6 +1072,16 @@ interface SongHistoryState {
   future: Song[];
 }
 
+interface SetlistSongHistorySnapshot {
+  song: Song;
+  sectionOrder: string[];
+}
+
+interface SetlistSongHistoryState {
+  past: SetlistSongHistorySnapshot[];
+  future: SetlistSongHistorySnapshot[];
+}
+
 type AppView = 'sheet' | 'about' | 'help';
 type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics' | 'sectionName' | 'marker';
 
@@ -1913,7 +1936,7 @@ export default function App() {
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistId);
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistSongId);
   const [songHistories, setSongHistories] = useState<Record<string, SongHistoryState>>({});
-  const [setlistSongHistories, setSetlistSongHistories] = useState<Record<string, SongHistoryState>>({});
+  const [setlistSongHistories, setSetlistSongHistories] = useState<Record<string, SetlistSongHistoryState>>({});
   const [selectedSongIdsForBulkDelete, setSelectedSongIdsForBulkDelete] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [isLyricsMode, setIsLyricsMode] = useState(false);
@@ -3334,13 +3357,16 @@ export default function App() {
     );
   };
 
-  const pushSetlistSongHistory = (setlistSongId: string, previousSong: Song) => {
+  const pushSetlistSongHistory = (setlistSongId: string, previousSong: Song, sectionOrder: string[]) => {
     setSetlistSongHistories((currentHistory) => {
       const entry = currentHistory[setlistSongId] ?? { past: [], future: [] };
       return {
         ...currentHistory,
         [setlistSongId]: {
-          past: [...entry.past.slice(-29), cloneSong(previousSong)],
+          past: [...entry.past.slice(-29), {
+            song: cloneSong(previousSong),
+            sectionOrder: [...sectionOrder]
+          }],
           future: []
         }
       };
@@ -3357,7 +3383,10 @@ export default function App() {
       return getDefaultSectionOrder(nextSong);
     }
 
-    return sanitizeSetlistSectionOrder(normalizedCurrentOrder, nextSong);
+    return sanitizeSetlistSectionOrder(
+      insertNewSetlistSectionsAfterSources(normalizedCurrentOrder, previousSong, nextSong),
+      nextSong
+    );
   };
 
   const handleSetlistSongContentChange = (nextSong: Song) => {
@@ -3373,7 +3402,7 @@ export default function App() {
     // editing other content (chords, lyrics, etc.) does not reset the key.
     const keyChangedInEdit = nextSong.currentKey !== activeSetlistEditableSong.currentKey;
 
-    pushSetlistSongHistory(selectedSetlistSong.id, activeSetlistEditableSong);
+    pushSetlistSongHistory(selectedSetlistSong.id, activeSetlistEditableSong, selectedSetlistSong.sectionOrder);
     handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
       ...currentSetlistSong,
       overrideKey: keyChangedInEdit
@@ -5875,14 +5904,18 @@ export default function App() {
       return;
     }
 
-    const previousSong = currentSetlistSongHistory.past[currentSetlistSongHistory.past.length - 1];
+    const previousSnapshot = currentSetlistSongHistory.past[currentSetlistSongHistory.past.length - 1];
+    const previousSong = previousSnapshot.song;
     const newPast = currentSetlistSongHistory.past.slice(0, currentSetlistSongHistory.past.length - 1);
 
     setSetlistSongHistories((currentHistory) => ({
       ...currentHistory,
       [selectedSetlistSong.id]: {
         past: newPast,
-        future: [cloneSong(activeSetlistEditableSong ?? previousSong), ...currentSetlistSongHistory.future]
+        future: [{
+          song: cloneSong(activeSetlistEditableSong ?? previousSong),
+          sectionOrder: [...selectedSetlistSong.sectionOrder]
+        }, ...currentSetlistSongHistory.future]
       }
     }));
 
@@ -5890,7 +5923,7 @@ export default function App() {
       ...currentSetlistSong,
       overrideKey: previousSong.currentKey,
       capo: previousSong.capo ?? 0,
-      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong ?? previousSong, previousSong),
+      sectionOrder: sanitizeSetlistSectionOrder(previousSnapshot.sectionOrder, previousSong),
       songData: cloneSong(normalizeSongBars(previousSong))
     }));
   };
@@ -5900,13 +5933,17 @@ export default function App() {
       return;
     }
 
-    const nextSong = currentSetlistSongHistory.future[0];
+    const nextSnapshot = currentSetlistSongHistory.future[0];
+    const nextSong = nextSnapshot.song;
     const newFuture = currentSetlistSongHistory.future.slice(1);
 
     setSetlistSongHistories((currentHistory) => ({
       ...currentHistory,
       [selectedSetlistSong.id]: {
-        past: [...currentSetlistSongHistory.past, cloneSong(activeSetlistEditableSong ?? nextSong)],
+        past: [...currentSetlistSongHistory.past, {
+          song: cloneSong(activeSetlistEditableSong ?? nextSong),
+          sectionOrder: [...selectedSetlistSong.sectionOrder]
+        }],
         future: newFuture
       }
     }));
@@ -5915,7 +5952,7 @@ export default function App() {
       ...currentSetlistSong,
       overrideKey: nextSong.currentKey,
       capo: nextSong.capo ?? 0,
-      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong ?? nextSong, nextSong),
+      sectionOrder: sanitizeSetlistSectionOrder(nextSnapshot.sectionOrder, nextSong),
       songData: cloneSong(normalizeSongBars(nextSong))
     }));
   };
@@ -6234,7 +6271,7 @@ export default function App() {
         previewClone.style.maxWidth = '794px';
         previewClone.style.margin = '0';
 
-        previewClone.querySelectorAll('[data-preview-slot-hit], [data-preview-input-caret]').forEach((node) => node.remove());
+        previewClone.querySelectorAll('[data-preview-slot-hit], [data-preview-input-caret], [data-preview-only-control]').forEach((node) => node.remove());
 
         previewClone.querySelectorAll<HTMLElement>('[data-print-page]').forEach((node) => {
           node.style.boxShadow = 'none';
@@ -7223,7 +7260,7 @@ export default function App() {
   }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode, previewEditSession, selectedSetlistSong?.id, song?.id]);
 
   React.useEffect(() => {
-    if (!activePreviewEditSession) return;
+    if (!activePreviewEditSession || activePreviewEditSession.target.field === 'sectionName') return;
     const finishOnPreviewBlankClick = (event: MouseEvent) => {
       if (suppressPreviewClickRef.current || !(event.target instanceof Element)) return;
       if (!event.target.closest('[data-print-preview-container]')) return;
@@ -7237,8 +7274,26 @@ export default function App() {
   }, [activePreviewEditSession, commitPreviewEditSession]);
 
   const applyPreviewEditDraft = React.useCallback((nextSong: Song, options?: { mergeKey?: string }) => {
-    setPreviewEditSession((current) => current ? applyPreviewDraft(current, nextSong, options) : current);
-  }, []);
+    setPreviewEditSession((current) => {
+      if (!current) return current;
+      const nextSession = applyPreviewDraft(current, nextSong, options);
+      if (current.target.kind !== 'bar' || current.target.field !== 'chords') return nextSession;
+      const located = findSongBar(nextSong, current.target);
+      if (!located) return nextSession;
+      const beatCount = getBeatCount(nextSong, located.bar);
+      const ownerSlotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[current.target.slotIndex]?.ownerSlotIndex;
+      if (ownerSlotIndex === undefined || ownerSlotIndex === current.target.slotIndex) return nextSession;
+      const anchorKey = `${current.previewIdentity}|${current.target.sectionId}|${current.target.barId}|chords|${ownerSlotIndex}`;
+      return retargetPreviewEditSession(nextSession, {
+        ...current.target,
+        slotIndex: ownerSlotIndex,
+        rawChordIndex: getChordBeatSlots(located.bar, beatCount)[ownerSlotIndex]?.rawChordIndex ?? null,
+        anchorKey,
+        anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+      });
+    });
+    window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+  }, [findPreviewAnchorRect, refreshPreviewEditAnchorRect]);
 
   const handleActiveEditorSongChange = React.useCallback((nextSong: Song) => {
     if (activePreviewEditSession) {
@@ -7250,18 +7305,44 @@ export default function App() {
     }
   }, [activePreviewEditSession, applyPreviewEditDraft, handleSetlistSongContentChange, handleSongChange, isSetlistMode]);
 
+  const handlePreviewSectionTitleChange = React.useCallback((title: string) => {
+    setPreviewEditSession((current) => {
+      if (!current || current.target.field !== 'sectionName') return current;
+      const nextSong = updateSectionTitle(current.draftSong, current.target.sectionId, title);
+      return applyPreviewDraft(current, nextSong, {
+        mergeKey: `section-title:${current.target.sectionId}`
+      });
+    });
+  }, []);
+
+  const finishPreviewSectionTitleEdit = React.useCallback((title: string) => {
+    const session = previewEditSession;
+    if (!session || session.target.field !== 'sectionName') return;
+    const nextSong = finalizeSectionTitleEdit({
+      baseSong: session.baseSong,
+      draftSong: session.draftSong,
+      sectionId: session.target.sectionId,
+      title
+    });
+
+    const nextSession = applyPreviewDraft(session, nextSong);
+    commitPreviewEditSession(nextSession);
+  }, [commitPreviewEditSession, previewEditSession]);
+
   const makePreviewTargetAnchorKey = React.useCallback((previewIdentity: string, sectionId: string, barId: string, slotIndex: number) => (
     `${previewIdentity}|${sectionId}|${barId}|chords|${slotIndex}`
   ), []);
 
   const handlePreviewEditNavigate = React.useCallback((direction: 'previous' | 'next') => {
     setPreviewEditSession((current) => {
-      if (!current) return current;
+      if (!current || current.target.kind !== 'bar') return current;
       const located = findSongBar(current.draftSong, current.target);
       if (!located) return current;
       const beatCount = getBeatCount(current.draftSong, located.bar);
       if (direction === 'previous' && current.target.slotIndex > 0) {
-        const slotIndex = current.target.slotIndex - 1;
+        const requestedSlotIndex = current.target.slotIndex - 1;
+        const slotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[requestedSlotIndex]?.ownerSlotIndex
+          ?? requestedSlotIndex;
         const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, slotIndex);
         return retargetPreviewEditSession(current, {
           ...current.target,
@@ -7271,8 +7352,11 @@ export default function App() {
           anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
         });
       }
-      if (direction === 'next' && current.target.slotIndex + 1 < beatCount) {
-        const slotIndex = current.target.slotIndex + 1;
+      const currentOwnership = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[current.target.slotIndex];
+      const nextSlotIndex = current.target.slotIndex + (currentOwnership?.span ?? 1);
+      if (direction === 'next' && nextSlotIndex < beatCount) {
+        const slotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[nextSlotIndex]?.ownerSlotIndex
+          ?? nextSlotIndex;
         const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, slotIndex);
         return retargetPreviewEditSession(current, {
           ...current.target,
@@ -7284,13 +7368,20 @@ export default function App() {
       }
 
       if (direction === 'previous') {
-        const previousBar = located.section.bars[located.barIndex - 1];
+        const previousSection = current.draftSong.sections[located.sectionIndex - 1];
+        const previousBar = located.section.bars[located.barIndex - 1]
+          ?? previousSection?.bars.at(-1);
         if (!previousBar?.id) return current;
+        const previousSectionId = located.barIndex > 0 ? current.target.sectionId : previousSection?.id;
+        if (!previousSectionId) return current;
         const previousBeatCount = getBeatCount(current.draftSong, previousBar);
-        const slotIndex = previousBeatCount - 1;
-        const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, previousBar.id, slotIndex);
+        const lastSlotIndex = previousBeatCount - 1;
+        const slotIndex = getChordDisplaySlotOwnership(previousBar.chords, previousBeatCount)[lastSlotIndex]?.ownerSlotIndex
+          ?? lastSlotIndex;
+        const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, previousSectionId, previousBar.id, slotIndex);
         return retargetPreviewEditSession(current, {
           ...current.target,
+          sectionId: previousSectionId,
           barId: previousBar.id,
           slotIndex,
           rawChordIndex: null,
@@ -7300,19 +7391,26 @@ export default function App() {
       }
 
       let draftSong = current.draftSong;
+      const followingSection = current.draftSong.sections[located.sectionIndex + 1];
+      let nextSectionId = current.target.sectionId;
       let nextBar = located.section.bars[located.barIndex + 1];
+      if (!nextBar && followingSection?.bars[0]) {
+        nextBar = followingSection.bars[0];
+        nextSectionId = followingSection.id ?? nextSectionId;
+      }
       if (!nextBar) {
         nextBar = createEmptyBar();
         draftSong = insertBar(draftSong, current.target, 'after', nextBar);
       }
       if (!nextBar.id) return current;
-      const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, nextBar.id, 0);
+      const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, nextSectionId, nextBar.id, 0);
       const withDraft = draftSong === current.draftSong ? current : applyPreviewDraft(current, draftSong);
       return retargetPreviewEditSession(withDraft, {
         ...current.target,
+        sectionId: nextSectionId,
         barId: nextBar.id,
-        slotIndex: 0,
-        rawChordIndex: null,
+        slotIndex: 0 as const,
+        rawChordIndex: null as null,
         anchorKey,
         anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
       });
@@ -7322,9 +7420,41 @@ export default function App() {
     });
   }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
 
-  const handlePreviewEditStructure = React.useCallback((action: 'insert-before' | 'insert-after' | 'duplicate' | 'delete') => {
+  const handlePreviewEditStructure = React.useCallback((action: 'insert-before' | 'insert-after' | 'duplicate' | 'delete' | 'split-section') => {
+    if (action === 'split-section') {
+      const current = previewEditSession;
+      if (!current || current.target.kind !== 'bar') return;
+      const located = findSongBar(current.draftSong, current.target);
+      if (!located) return;
+
+      const settledSong = current.draftSong;
+      if (current.dirty) commitPreviewEditSession(current);
+      const result = splitSectionAtBar(settledSong, current.target);
+      const sectionId = result.sectionId;
+      const section = result.song.sections.find((candidate) => candidate.id === sectionId);
+      if (!section?.id) return;
+      const anchorKey = `${current.previewIdentity}|${section.id}|section|sectionName|title`;
+      const sectionTarget = {
+        kind: 'section' as const,
+        previewIdentity: current.previewIdentity,
+        sectionId: section.id,
+        barId: result.firstBarId ?? section.bars[0]?.id ?? '',
+        field: 'sectionName' as const,
+        slotIndex: 0 as const,
+        rawChordIndex: null as null,
+        anchorKey,
+        anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+      };
+      let nextSession = createPreviewEditSession({ song: settledSong, target: sectionTarget, inputMode: 'letters' });
+      if (result.created) nextSession = applyPreviewDraft(nextSession, result.song);
+      setPreviewEditSession(nextSession);
+      setActiveSectionId(section.id);
+      window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+      return;
+    }
+
     setPreviewEditSession((current) => {
-      if (!current) return current;
+      if (!current || current.target.kind !== 'bar') return current;
       const located = findSongBar(current.draftSong, current.target);
       if (!located) return current;
       let draftSong = current.draftSong;
@@ -7354,14 +7484,50 @@ export default function App() {
         ...current.target,
         sectionId: targetSection.id,
         barId: targetBarId,
-        slotIndex: 0,
-        rawChordIndex: null,
+        slotIndex: 0 as const,
+        rawChordIndex: null as null,
         anchorKey,
         anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
       });
     });
     window.requestAnimationFrame(refreshPreviewEditAnchorRect);
-  }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
+  }, [commitPreviewEditSession, findPreviewAnchorRect, makePreviewTargetAnchorKey, previewEditSession, refreshPreviewEditAnchorRect]);
+
+  const handlePreviewSectionReorder = React.useCallback((
+    sourceSectionId: string,
+    targetSectionId: string,
+    placement: 'before' | 'after'
+  ) => {
+    const editableSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
+    if (!editableSong) return;
+
+    if (isSetlistMode) {
+      if (!canEditSelectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) return;
+      const displayedSong = activeDraftNavigationPreviewSong ?? activeNavigationPreviewSong ?? editableSong;
+      const displayedOrder = getDefaultSectionOrder(displayedSong);
+      const nextOrder = reorderSetlistSectionOrder(displayedOrder, sourceSectionId, targetSectionId, placement);
+      if (nextOrder === displayedOrder || nextOrder.every((sectionId, index) => sectionId === displayedOrder[index])) return;
+
+      pushSetlistSongHistory(selectedSetlistSong.id, activeSetlistEditableSong, selectedSetlistSong.sectionOrder);
+      handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
+        ...currentSetlistSong,
+        overrideKey: currentSetlistSong.overrideKey ?? editableSong.currentKey,
+        capo: editableSong.capo ?? 0,
+        sectionOrder: nextOrder,
+        songData: cloneSong(normalizeSongBars(editableSong))
+      }));
+      setPreviewEditSession(null);
+      setActiveSectionId(sourceSectionId);
+      return;
+    }
+
+    if (!canEditTeamSongs) return;
+    const nextSong = reorderSection(editableSong, sourceSectionId, targetSectionId, placement);
+    if (nextSong === editableSong) return;
+    handleSongChange(nextSong);
+    setPreviewEditSession(null);
+    setActiveSectionId(sourceSectionId);
+  }, [activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSetlistEditableSong, canEditSelectedSetlist, canEditTeamSongs, handleSongChange, handleUpdateSetlistSong, isSetlistMode, selectedSetlistSong]);
 
   const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: ChordSheetElementField, target?: ChordSheetElementTarget) => {
     const editorSong = activeDraftEditorSong ?? activeEditorSong;
@@ -7381,6 +7547,61 @@ export default function App() {
     setActiveBar({ sIdx: nextSectionIndex, bIdx });
     setPreviewMetaEditTarget(null);
     if (!canOpenEditor) {
+      return;
+    }
+
+    if (isPreviewQuickEditEnabled && field === 'sectionName') {
+      const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
+      if (!previewIdentity) return;
+      if (!hasFinePointer) {
+        const proxyInput = mobileWysiwygKeyboardProxyInputRef.current;
+        if (proxyInput) {
+          proxyInput.setAttribute('inputmode', 'text');
+          proxyInput.focus({ preventScroll: true });
+        }
+      }
+
+      if (activePreviewEditSession) commitPreviewEditSession(activePreviewEditSession);
+      const editableSong = ensureSongEditingIds(editorSong);
+      const sourceSection = (target?.sectionId
+        ? editableSong.sections.find((section) => section.id === target.sectionId)
+        : null) ?? editableSong.sections[nextSectionIndex];
+      if (!sourceSection?.id) return;
+      const splitBar = bIdx >= 0
+        ? (target?.barId ? sourceSection.bars.find((bar) => bar.id === target.barId) : null)
+          ?? sourceSection.bars[bIdx]
+        : null;
+      const baseTarget = {
+        kind: 'section' as const,
+        previewIdentity,
+        sectionId: sourceSection.id,
+        barId: splitBar?.id ?? sourceSection.bars[0]?.id ?? '',
+        field: 'sectionName' as const,
+        slotIndex: 0 as const,
+        rawChordIndex: null as null,
+        anchorKey: target?.anchorKey ?? `${previewIdentity}|${sourceSection.id}|section|sectionName|title`,
+        anchorRect: target?.anchorRect ?? { left: 16, top: 16, right: 136, bottom: 50, width: 120, height: 34 }
+      };
+      let nextSession = createPreviewEditSession({ song: editableSong, target: baseTarget, inputMode: 'letters' });
+
+      if (splitBar?.id) {
+        const result = splitSectionAtBar(editableSong, { sectionId: sourceSection.id, barId: splitBar.id });
+        if (result.created) {
+          nextSession = applyPreviewDraft(nextSession, result.song);
+          const anchorKey = `${previewIdentity}|${result.sectionId}|section|sectionName|title`;
+          nextSession = retargetPreviewEditSession(nextSession, {
+            ...baseTarget,
+            sectionId: result.sectionId,
+            barId: result.firstBarId ?? '',
+            anchorKey,
+            anchorRect: findPreviewAnchorRect(anchorKey) ?? baseTarget.anchorRect
+          });
+          setActiveSectionId(result.sectionId);
+        }
+      }
+
+      setPreviewEditSession(nextSession);
+      window.requestAnimationFrame(refreshPreviewEditAnchorRect);
       return;
     }
 
@@ -7439,6 +7660,7 @@ export default function App() {
             : tappedSlotIndex;
           const anchorKey = makePreviewTargetAnchorKey(previewIdentity, actualSection.id, editableBar.id, slotIndex);
           const nextTarget = {
+            kind: 'bar' as const,
             previewIdentity,
             sectionId: actualSection.id,
             barId: editableBar.id,
@@ -7478,7 +7700,7 @@ export default function App() {
     } else {
       focusEditorField(nextSectionIndex, bIdx, field);
     }
-  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, canOpenEditor, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, isEditing, isPreviewQuickEditEnabled, makePreviewTargetAnchorKey, previewEditorDeviceLayout]);
+  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, canOpenEditor, commitPreviewEditSession, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, hasFinePointer, isEditing, isPreviewQuickEditEnabled, makePreviewTargetAnchorKey, previewEditorDeviceLayout, refreshPreviewEditAnchorRect]);
 
   const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
     if (!canOpenEditor) {
@@ -7698,11 +7920,12 @@ export default function App() {
         highlightedSectionIds={highlightedSectionIds}
         activeSectionId={isEditing || activePreviewEditSession ? activeSectionId : null}
         activeBar={isEditing || activePreviewEditSession ? activeBar : null}
-        activeChordSlot={activePreviewEditSession?.target ?? null}
+        activeChordSlot={activePreviewEditSession?.target.kind === 'bar' ? activePreviewEditSession.target : null}
         previewIdentity={song.id}
+        onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       />
     );
-  }, [activeBar, activeDraftNavigationPreviewSong, activePreviewEditSession, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, handleMetaClick, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
+  }, [activeBar, activeDraftNavigationPreviewSong, activePreviewEditSession, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -7774,14 +7997,15 @@ export default function App() {
               highlightedSectionIds={isSelected ? highlightedSectionIds : []}
               activeSectionId={isSelected && (isEditing || activePreviewEditSession) ? activeSectionId : null}
               activeBar={isSelected && (isEditing || activePreviewEditSession) ? activeBar : null}
-              activeChordSlot={isSelected ? activePreviewEditSession?.target ?? null : null}
+              activeChordSlot={isSelected && activePreviewEditSession?.target.kind === 'bar' ? activePreviewEditSession.target : null}
               previewIdentity={item.id}
+              onSectionReorder={isSelected && canEditSelectedSetlist ? handlePreviewSectionReorder : undefined}
             />
           </div>
         ))}
       </div>
     );
-  }, [activeBar, activePreviewEditSession, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleMetaClick, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activePreviewEditSession, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -7796,11 +8020,15 @@ export default function App() {
 
   useEffect(() => {
     if (!activePreviewEditSession) return;
+    if (activePreviewEditSession.target.kind === 'section') {
+      setActiveSectionId(activePreviewEditSession.target.sectionId);
+      return;
+    }
     const located = findSongBar(activePreviewEditSession.draftSong, activePreviewEditSession.target);
     if (!located) return;
     setActiveSectionId(located.section.id ?? null);
     setActiveBar({ sIdx: located.sectionIndex, bIdx: located.barIndex });
-  }, [activePreviewEditSession?.target.barId, activePreviewEditSession?.target.sectionId]);
+  }, [activePreviewEditSession?.target.barId, activePreviewEditSession?.target.kind, activePreviewEditSession?.target.sectionId]);
 
   useEffect(() => {
     if (!activePreviewEditSession) return;
@@ -12790,7 +13018,12 @@ export default function App() {
                             song={activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong}
                             language={language}
                             isPhoneViewport={isPhoneViewport}
-                            history={activePreviewEditSession ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future } : currentSetlistSongHistory}
+                            history={activePreviewEditSession
+                              ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future }
+                              : {
+                                  past: currentSetlistSongHistory.past.map((snapshot) => snapshot.song),
+                                  future: currentSetlistSongHistory.future.map((snapshot) => snapshot.song)
+                                }}
                             onUndo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : handleSetlistUndo}
                             onRedo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : handleSetlistRedo}
                             onChange={handleActiveEditorSongChange}
@@ -12941,7 +13174,7 @@ export default function App() {
               aria-hidden="true"
               className="fixed left-0 top-0 h-px w-px opacity-0 pointer-events-none"
             />
-            {activePreviewEditSession && activeDraftNavigationPreviewSong && canOpenEditor && !isLyricsMode && (() => {
+            {activePreviewEditSession && activePreviewEditSession.target.field !== 'sectionName' && activeDraftNavigationPreviewSong && canOpenEditor && !isLyricsMode && (() => {
               const storedKey = getSectionStoredKey(activePreviewEditSession.draftSong, activePreviewEditSession.target.sectionId);
               const globalOffset = getTransposeOffset(activePreviewEditSession.draftSong.originalKey, activeDraftNavigationPreviewSong.currentKey);
               const displayedChartKey = transposeKeyWithPreference(storedKey, globalOffset, activeDraftNavigationPreviewSong.currentKey);
@@ -12970,12 +13203,22 @@ export default function App() {
                 />
               );
             })()}
+            {activePreviewEditSession?.target.field === 'sectionName' && canOpenEditor && !isLyricsMode && (
+              <PreviewSectionTitleEditor
+                session={activePreviewEditSession}
+                language={language}
+                isMobile={isPhoneViewport || !hasFinePointer}
+                onChange={handlePreviewSectionTitleChange}
+                onDone={finishPreviewSectionTitleEdit}
+                onCancel={() => setPreviewEditSession(null)}
+              />
+            )}
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
               <PreviewWysiwygEditor
                 song={activeEditorSong}
                 language={language}
                 target={previewMetaEditTarget}
-                isMobile={isPhoneViewport || !hasFinePointer}
+                deviceLayout={previewEditorDeviceLayout}
                 currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                 currentCapo={isSetlistMode ? currentSetlistCapo : currentCapo}
                 originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}

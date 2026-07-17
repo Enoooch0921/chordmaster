@@ -9,6 +9,7 @@ import {
   Keyboard,
   Plus,
   Redo2,
+  Scissors,
   Trash2,
   Undo2,
   X
@@ -23,6 +24,7 @@ import {
   findSongBar,
   getBeatCount,
   getChordBeatSlots,
+  getChordPlacementError,
   getMultiMeasureRestPlacementError,
   normalizeChordTextInput,
   setBarChordText,
@@ -33,7 +35,7 @@ import {
 
 type KeyboardMode = 'common' | 'advanced' | 'symbols' | 'text';
 type KeyboardPicker = 'quality' | 'time' | 'special' | 'articulation' | 'ending' | 'navigation' | 'barline' | 'structure' | 'bar' | null;
-type StructureAction = 'insert-before' | 'insert-after' | 'duplicate' | 'delete';
+type StructureAction = 'insert-before' | 'insert-after' | 'duplicate' | 'delete' | 'split-section';
 
 interface PickerAnchor {
   left: number;
@@ -204,6 +206,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     ? ['C', 'D', 'E', 'F', 'G', 'A', 'B']
     : ['1', '2', '3', '4', '5', '6', '7'];
   const multiRestPlacementError = getMultiMeasureRestPlacementError(session.draftSong, session.target);
+  const halfRestPlacementError = getChordPlacementError(session.draftSong, session.target, '0h');
   const multiRestCountNumber = Number.parseInt(multiRestCount, 10);
   const hasValidMultiRestCount = Number.isInteger(multiRestCountNumber) && multiRestCountNumber >= 1 && multiRestCountNumber <= 999;
 
@@ -289,7 +292,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       displayedKey,
       storedKey
     });
+    const placementError = getChordPlacementError(session.draftSong, session.target, stored);
+    if (placementError) {
+      setMultiRestActionError(placementError);
+      return false;
+    }
+    setMultiRestActionError(null);
     onApplyDraft(setChordAtBeatSlot(session.draftSong, session.target, stored), mergeKey ? { mergeKey } : undefined);
+    return true;
   }
 
   React.useEffect(() => {
@@ -316,6 +326,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       } else if (session.target.field === 'chords' && event.key === 'Delete') {
         event.preventDefault();
         applyDisplayedChord('');
+      } else if (session.target.field === 'chords' && event.key === '%') {
+        event.preventDefault();
+        applyDisplayedChord('%');
       } else if (session.target.field === 'chords' && event.key.length === 1 && event.key.trim()) {
         event.preventDefault();
         const nextChord = replaceChordOnNextHardwareKeyRef.current
@@ -688,7 +701,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
                     <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => { applyDisplayedChord('/'); setActivePicker(null); }} aria-label={language === 'zh' ? '拍點斜線' : 'Beat slash'}>/</button>
                     <button type="button" className={`${buttonClass} min-h-0 px-0 text-base`} onClick={() => { applyDisplayedChord('%'); setActivePicker(null); }} aria-label={language === 'zh' ? '重複前一小節' : 'Repeat previous bar'}>%</button>
                     <button type="button" className={`${buttonClass} min-h-0 px-0`} onClick={() => { applyDisplayedChord('N.C.'); setActivePicker(null); }} aria-label="N.C.">N.C.</button>
-                    {([['0', 'q', '四分休止'], ['0h', 'h', '二分休止'], ['0w', 'w', '全休止']] as const).map(([value, base, label]) => <button key={value} type="button" className={`${buttonClass} min-h-0 px-0`} onClick={() => { applyDisplayedChord(value); setActivePicker(null); }} aria-label={language === 'zh' ? label : `${base} rest`}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">{getRestGlyph(base)}</span></button>)}
+                    {([['0', 'q', '四分休止'], ['0h', 'h', '二分休止'], ['0w', 'w', '全休止']] as const).map(([value, base, label]) => {
+                      const disabled = value === '0h' && Boolean(halfRestPlacementError);
+                      return <button key={value} type="button" disabled={disabled} title={disabled ? halfRestPlacementError ?? undefined : undefined} className={`${buttonClass} min-h-0 px-0 disabled:cursor-not-allowed disabled:opacity-40`} onClick={() => { if (applyDisplayedChord(value)) setActivePicker(null); }} aria-label={language === 'zh' ? label : `${base} rest`}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">{getRestGlyph(base)}</span></button>;
+                    })}
                     <div data-multi-rest-control className={`relative min-h-0 overflow-hidden rounded-[11px] border bg-white/95 shadow-[0_1px_0_rgba(15,23,42,0.18),0_2px_5px_rgba(15,23,42,0.10)] ${multiRestPlacementError ? 'border-slate-200 opacity-45' : 'border-indigo-300'}`}>
                       <button type="button" className="h-full w-full pt-2 text-slate-700 disabled:cursor-not-allowed" disabled={Boolean(multiRestPlacementError)} onClick={() => { multiRestInputRef.current?.focus(); multiRestInputRef.current?.select(); }} aria-label={language === 'zh' ? '輸入多小節休止數量' : 'Enter multi-measure rest count'}><MultiMeasureRestGlyph /></button>
                       <input
@@ -712,7 +728,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
                       />
                     </div>
                   </div>
-                  {(multiRestPlacementError || multiRestActionError) && <p role="status" className="shrink-0 truncate text-[9px] font-bold text-amber-700">{multiRestActionError || multiRestPlacementError}</p>}
+                  {(halfRestPlacementError || multiRestPlacementError || multiRestActionError) && <p role="status" className="shrink-0 truncate text-[9px] font-bold text-amber-700">{multiRestActionError || halfRestPlacementError || multiRestPlacementError}</p>}
                 </div>
               )}
 
@@ -726,11 +742,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               )}
 
               {activePicker === 'structure' && (
-                <div className="grid min-h-0 flex-1 grid-cols-2 gap-1.5">
-                  <button type="button" className={`${buttonClass} min-h-0`} onClick={() => { onStructure('insert-before'); setActivePicker(null); }}><Plus size={14} className="mr-1" />{language === 'zh' ? '前方插入' : 'Insert before'}</button>
-                  <button type="button" className={`${buttonClass} min-h-0`} onClick={() => { onStructure('insert-after'); setActivePicker(null); }}><Plus size={14} className="mr-1" />{language === 'zh' ? '後方插入' : 'Insert after'}</button>
-                  <button type="button" className={`${buttonClass} min-h-0`} onClick={() => { onStructure('duplicate'); setActivePicker(null); }}><Copy size={14} className="mr-1" />{language === 'zh' ? '複製小節' : 'Duplicate'}</button>
-                  <button type="button" className={`${buttonClass} min-h-0 border-rose-200 text-rose-700`} onClick={() => { onStructure('delete'); setActivePicker(null); }}><Trash2 size={14} className="mr-1" />{language === 'zh' ? '刪除小節' : 'Delete'}</button>
+                <div data-structure-actions className="grid min-h-0 flex-1 grid-cols-5 gap-1 overflow-hidden">
+                  <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('insert-before'); setActivePicker(null); }}><Plus size={14} />{language === 'zh' ? '前方插入' : 'Before'}</button>
+                  <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('insert-after'); setActivePicker(null); }}><Plus size={14} />{language === 'zh' ? '後方插入' : 'After'}</button>
+                  <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('duplicate'); setActivePicker(null); }}><Copy size={14} />{language === 'zh' ? '複製' : 'Duplicate'}</button>
+                  <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('split-section'); setActivePicker(null); }}><Scissors size={14} />{language === 'zh' ? '拆分段落' : 'Split'}</button>
+                  <button type="button" className={`${buttonClass} min-h-0 flex-col border-rose-200 px-1 text-[9px] leading-tight text-rose-700`} onClick={() => { onStructure('delete'); setActivePicker(null); }}><Trash2 size={14} />{language === 'zh' ? '刪除' : 'Delete'}</button>
                 </div>
               )}
 
@@ -821,11 +838,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <input className="min-h-7 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-center text-[10px] font-bold outline-none focus:border-indigo-400" inputMode="numeric" value={TIME_SIGNATURES.includes(bar.timeSignature || '') ? '' : bar.timeSignature || ''} onChange={(event) => updateFields({ timeSignature: event.target.value || undefined }, `time:${bar.id}`)} placeholder="…" aria-label={language === 'zh' ? '自訂拍號' : 'Custom time signature'} />
           </div>
 
-          <div className="grid grid-cols-5 gap-1">
+          <div className="grid grid-cols-6 gap-1">
             <input className="min-h-7 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-center text-[10px] font-bold outline-none focus:border-indigo-400" value={ENDINGS.includes(bar.ending || '') ? '' : bar.ending || ''} onChange={(event) => updateFields({ ending: event.target.value || undefined }, `ending:${bar.id}`)} placeholder="⌜…" aria-label={language === 'zh' ? '自訂 Ending' : 'Custom ending'} />
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base`} onClick={() => onStructure('insert-before')} aria-label={language === 'zh' ? '前方插入小節' : 'Insert bar before'}>+│</button>
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base`} onClick={() => onStructure('insert-after')} aria-label={language === 'zh' ? '後方插入小節' : 'Insert bar after'}>│+</button>
             <button type="button" className={`${buttonClass} !min-h-7 px-0`} onClick={() => onStructure('duplicate')} aria-label={language === 'zh' ? '複製小節' : 'Duplicate bar'}><Copy size={15} /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0`} onClick={() => onStructure('split-section')} aria-label={language === 'zh' ? '從這裡拆分段落' : 'Split section here'}><Scissors size={15} /></button>
             <button type="button" className={`${buttonClass} !min-h-7 border-rose-200 px-0 text-rose-700`} onClick={() => onStructure('delete')} aria-label={language === 'zh' ? '刪除小節' : 'Delete bar'}><Trash2 size={15} /></button>
           </div>
 
