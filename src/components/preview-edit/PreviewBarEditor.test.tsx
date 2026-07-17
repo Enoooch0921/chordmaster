@@ -94,7 +94,8 @@ describe('PreviewBarEditor', () => {
 
     await user.click(screen.getByRole('button', { name: '切換鍵盤模式：常用' }));
     expect(dialog.querySelector('[data-keyboard-mode="advanced"]')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Quality' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '9' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '|: Repeat Start' })).not.toBeInTheDocument();
   });
 
   it('opens the direct mode chooser after a 350ms hold', () => {
@@ -106,7 +107,9 @@ describe('PreviewBarEditor', () => {
       act(() => vi.advanceTimersByTime(350));
       expect(screen.getByRole('menu', { name: '選擇鍵盤模式' })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('menuitem', { name: '符號' }));
-      expect(screen.getByRole('button', { name: '反覆' })).toBeInTheDocument();
+      expect(document.querySelector('[data-symbol-page="all"]')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '|: Repeat Start' })).toHaveTextContent('|:');
+      expect(screen.getByRole('button', { name: '|: Repeat Start' })).not.toHaveTextContent('Repeat Start');
     } finally {
       vi.useRealTimers();
     }
@@ -121,7 +124,6 @@ describe('PreviewBarEditor', () => {
     await user.click(screen.getByRole('button', { name: '|: Repeat Start' }));
     expect((onApplyDraft.mock.calls[0][0] as Song).sections[0].bars[0].repeatStart).toBe(true);
 
-    await user.click(screen.getByRole('button', { name: '拍號' }));
     await user.click(screen.getByRole('button', { name: '4/4' }));
     const withOverride = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
     expect(withOverride.sections[0].bars[0].timeSignature).toBe('4/4');
@@ -129,6 +131,36 @@ describe('PreviewBarEditor', () => {
     await user.click(screen.getByRole('button', { name: '4/4' }));
     const withoutOverride = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
     expect(withoutOverride.sections[0].bars[0].timeSignature).toBeUndefined();
+  });
+
+  it('links the multi-measure count to its glyph and only enables it on beat one of an empty bar', async () => {
+    const user = userEvent.setup();
+    const emptySong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [] }] }]
+    };
+    const firstBeatTarget = { ...target, slotIndex: 0, anchorKey: 'song-1|section-1|bar-1|chords|0' };
+    const emptySession = createPreviewEditSession({ song: emptySong, target: firstBeatTarget, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: emptySession, deviceLayout: 'phone' });
+    openModeMenu();
+    await user.click(screen.getByRole('menuitem', { name: '符號' }));
+
+    const countInput = screen.getByRole('textbox', { name: '多小節休止數量' });
+    const applyRest = screen.getByRole('button', { name: '套用 4 小節休止' });
+    expect(countInput.closest('[data-multi-rest-control]')).not.toBeNull();
+    expect(applyRest).toBeEnabled();
+    await user.click(applyRest);
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].chords).toEqual(['|4|', '', '', '']);
+
+    const wrongBeatSession = createPreviewEditSession({ song: emptySong, target, inputMode: 'letters' });
+    rerenderSession(wrongBeatSession);
+    expect(screen.getByRole('button', { name: '套用 4 小節休止' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('只能放在第一拍');
+
+    const occupiedFirstBeat = createPreviewEditSession({ song, target: firstBeatTarget, inputMode: 'letters' });
+    rerenderSession(occupiedFirstBeat);
+    expect(screen.getByRole('button', { name: '套用 4 小節休止' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('請先清空');
   });
 
   it('uses one active text field instead of a vertically stacked form', async () => {

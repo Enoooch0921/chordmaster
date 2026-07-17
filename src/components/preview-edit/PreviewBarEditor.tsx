@@ -15,21 +15,22 @@ import {
 import type { AppLanguage, Key, NavigationMarker, Song } from '../../types';
 import type { PreviewEditSession } from '../../lib/previewEditSession';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
+import { getRestGlyph } from '../../utils/rhythmUtils';
 import {
   convertDisplayedChordToStoredChord,
   convertStoredChordToDisplayedChord,
   findSongBar,
   getBeatCount,
   getChordBeatSlots,
+  getMultiMeasureRestPlacementError,
   normalizeChordTextInput,
   setBarChordText,
   setChordAtBeatSlot,
+  setMultiMeasureRestAtBar,
   updateEditableBarFields
 } from '../../lib/songEditing';
 
 type KeyboardMode = 'common' | 'advanced' | 'symbols' | 'text';
-type AdvancedCategory = 'qualities' | 'tokens' | 'bar';
-type SymbolCategory = 'repeats' | 'markers' | 'time' | 'structure';
 type TextField = 'label' | 'annotation' | 'leftText' | 'rightText';
 type StructureAction = 'insert-before' | 'insert-after' | 'duplicate' | 'delete';
 
@@ -56,20 +57,6 @@ const COMMON_QUALITIES = ['', 'm', '5', '6', 'm6', '7', 'maj7', 'm7', 'sus2', 's
 const EXPANDED_QUALITIES = ['9', 'maj9', 'm9', '11', 'm11', '13', 'm13', 'mMaj7', 'm7b5', '7sus4', '7b5', '7#5', '7b9', '7#9', '7#11', '7b13', 'add2', 'add11'];
 const TIME_SIGNATURES = ['2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '12/8'];
 const ENDINGS = ['1', '2', '3', '1,2'];
-const LEFT_MARKERS: Array<{ value: NavigationMarker | undefined; label: string }> = [
-  { value: undefined, label: '—' },
-  { value: 'segno', label: 'Segno' },
-  { value: 'coda', label: 'Coda' }
-];
-const RIGHT_MARKERS: Array<{ value: NavigationMarker | undefined; label: string }> = [
-  { value: undefined, label: '—' },
-  { value: 'coda', label: 'Coda' },
-  { value: 'ds', label: 'D.S.' },
-  { value: 'dc', label: 'D.C.' },
-  { value: 'fine', label: 'Fine' },
-  { value: 'ds-al-coda', label: 'D.S. al Coda' },
-  { value: 'ds-al-fine', label: 'D.S. al Fine' }
-];
 
 const trailingModifiers = (value: string) => value.match(/[<>^~]+$/)?.[0] ?? '';
 const withoutModifiers = (value: string) => value.replace(/[<>^~]+$/, '');
@@ -101,6 +88,48 @@ const buildChord = ({
   return `${main}${bass ? `/${bass}` : ''}${modifiers}`;
 };
 
+const EndingGlyph: React.FC<{ value: string }> = ({ value }) => (
+  <span data-ending-glyph className="relative block h-6 w-full border-l-2 border-t-2 border-current">
+    <span className="absolute left-1 top-0.5 text-[10px] font-black leading-none">
+      {value.split(',').map((part) => `${part.trim()}.`).join(' ')}
+    </span>
+  </span>
+);
+
+const DirectionGlyph: React.FC<{ direction: 'push' | 'pull' }> = ({ direction }) => (
+  <svg viewBox="0 0 32 24" className="h-6 w-8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {direction === 'push'
+      ? <><path d="M16 20c0-8 4-10 12-10" /><path d="M25 7l3 3-3 3" /></>
+      : <><path d="M16 20c0-8-4-10-12-10" /><path d="M7 7l-3 3 3 3" /></>}
+  </svg>
+);
+
+const MultiMeasureRestGlyph: React.FC = () => (
+  <span className="flex w-full items-center justify-center leading-none" aria-hidden="true">
+    <svg viewBox="0 0 100 20" preserveAspectRatio="none" className="h-3.5 w-12">
+      <line x1="3" y1="1" x2="3" y2="19" stroke="currentColor" strokeWidth="2" />
+      <line x1="97" y1="1" x2="97" y2="19" stroke="currentColor" strokeWidth="2" />
+      <rect x="3" y="7" width="94" height="6" fill="currentColor" />
+    </svg>
+  </span>
+);
+
+const CodaGlyph: React.FC<{ className?: string }> = ({ className = 'h-5 w-5' }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <circle cx="12" cy="12" r="6" />
+    <path d="M12 2v20M2 12h20" />
+  </svg>
+);
+
+const SegnoGlyph: React.FC<{ className?: string }> = ({ className = 'h-5 w-5' }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M7 7.5C7 4.8 9.2 3 12.1 3c2.7 0 4.7 1.3 5.4 3.5M16.9 16.3c0 2.8-2.2 4.7-5.2 4.7-2.8 0-4.8-1.4-5.4-3.7" />
+    <path d="M7 7.5c0 2.7 2.5 3.5 5.1 4.3 2.5.8 4.8 1.7 4.8 4.5M5 20L19 4" />
+    <circle cx="5.2" cy="8.2" r="1" fill="currentColor" stroke="none" />
+    <circle cx="18.8" cy="15.8" r="1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 const modeForField = (field: PreviewEditSession['target']['field']): KeyboardMode => (
   field === 'symbols' ? 'symbols' : field === 'text' ? 'text' : 'common'
 );
@@ -130,8 +159,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   onPanelHeightChange
 }) => {
   const [mode, setMode] = React.useState<KeyboardMode>(() => modeForField(session.target.field));
-  const [advancedCategory, setAdvancedCategory] = React.useState<AdvancedCategory>('qualities');
-  const [symbolCategory, setSymbolCategory] = React.useState<SymbolCategory>('repeats');
   const [activeTextField, setActiveTextField] = React.useState<TextField>('label');
   const [bassMode, setBassMode] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
@@ -142,6 +169,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [barText, setBarText] = React.useState('');
   const [barTextError, setBarTextError] = React.useState<string | null>(null);
   const [multiRestCount, setMultiRestCount] = React.useState('4');
+  const [multiRestActionError, setMultiRestActionError] = React.useState<string | null>(null);
   const [, forceViewportUpdate] = React.useReducer((value) => value + 1, 0);
   const panelRef = React.useRef<HTMLElement>(null);
   const chordCaptureRef = React.useRef<HTMLInputElement>(null);
@@ -166,6 +194,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const rootChoices = session.inputMode === 'letters'
     ? ['C', 'D', 'E', 'F', 'G', 'A', 'B']
     : ['1', '2', '3', '4', '5', '6', '7'];
+  const multiRestPlacementError = getMultiMeasureRestPlacementError(session.draftSong, session.target);
+  const multiRestCountNumber = Number.parseInt(multiRestCount, 10);
+  const hasValidMultiRestCount = Number.isInteger(multiRestCountNumber) && multiRestCountNumber >= 1 && multiRestCountNumber <= 999;
 
   React.useEffect(() => {
     const nextMode = modeForField(session.target.field);
@@ -180,6 +211,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   React.useEffect(() => {
     setBarText(bar?.chords.filter((token) => token.trim()).join(' ') ?? '');
     setBarTextError(null);
+    setMultiRestActionError(null);
+    const existingCount = bar?.chords.find((token) => /^\|\d{1,3}\|$/.test(token.trim()))?.match(/\d+/)?.[0];
+    if (existingCount) setMultiRestCount(existingCount);
   }, [bar?.id, bar?.chords]);
 
   React.useEffect(() => {
@@ -337,6 +371,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     if (!result.error) onApplyDraft(result.song, { mergeKey: `bar-text:${bar.id}` });
   };
 
+  const applyMultiMeasureRest = () => {
+    const result = setMultiMeasureRestAtBar(session.draftSong, session.target, multiRestCountNumber);
+    setMultiRestActionError(result.error);
+    if (!result.error) onApplyDraft(result.song);
+  };
+
   const updateFields = (patch: Parameters<typeof updateEditableBarFields>[2], mergeKey?: string) => {
     onApplyDraft(
       updateEditableBarFields(session.draftSong, session.target, patch),
@@ -425,7 +465,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const buttonClass = 'inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 active:bg-indigo-100 disabled:opacity-40';
   const activeButtonClass = '!border-indigo-500 !bg-indigo-600 !text-white hover:!bg-indigo-600';
   const fieldClass = 'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100';
-  const categoryButtonClass = 'min-h-7 rounded-lg px-2 text-[10px] font-black';
 
   const modeMenu = modeMenuOpen && (
     <div
@@ -486,7 +525,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }
 
   const keyboardContent = (
-    <div data-keyboard-mode={mode} className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-2">
+    <div data-keyboard-mode={mode} className={`flex min-h-0 flex-1 flex-col overflow-hidden ${mode === 'symbols' ? 'gap-1 p-1.5' : 'gap-1.5 p-2'}`}>
       {mode === 'common' && (
         <>
           <div className="grid grid-cols-7 gap-1">
@@ -514,84 +553,84 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
       {mode === 'advanced' && (
         <>
-          <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-200/70 p-0.5">
-            {([
-              ['qualities', language === 'zh' ? 'Quality' : 'Quality'],
-              ['tokens', language === 'zh' ? '特殊' : 'Tokens'],
-              ['bar', language === 'zh' ? '整節輸入' : 'Whole bar']
-            ] as const).map(([value, label]) => <button key={value} type="button" className={`${categoryButtonClass} ${advancedCategory === value ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`} onClick={() => setAdvancedCategory(value)}>{label}</button>)}
+          <div className="grid min-h-0 flex-1 grid-cols-6 gap-1">
+            {EXPANDED_QUALITIES.map((quality) => <button key={quality} type="button" className={`${buttonClass} min-h-0 px-0.5 ${chordParts.quality === quality ? activeButtonClass : ''}`} onClick={() => applyQuality(quality)}>{quality}</button>)}
           </div>
-          {advancedCategory === 'qualities' && (
-            <div className="grid min-h-0 flex-1 grid-cols-6 gap-1">
-              {EXPANDED_QUALITIES.map((quality) => <button key={quality} type="button" className={`${buttonClass} min-h-0 px-0.5 ${chordParts.quality === quality ? activeButtonClass : ''}`} onClick={() => applyQuality(quality)}>{quality}</button>)}
-            </div>
-          )}
-          {advancedCategory === 'tokens' && (
-            <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-              <div className="grid min-h-0 flex-1 grid-cols-4 gap-1">
-                {([['%', '%'], ['N.C.', 'N.C.'], ['0', '¼ Rest'], ['0h', '½ Rest'], ['0w', 'Whole Rest'], ['/', '/']] as const).map(([value, label]) => <button key={value} type="button" className={`${buttonClass} min-h-0`} onClick={() => applyDisplayedChord(value)}>{label}</button>)}
-                <button type="button" className={`${buttonClass} min-h-0`} onClick={() => applyDisplayedChord(`|${Math.max(1, Number.parseInt(multiRestCount, 10) || 1)}|`)}>|N|</button>
-                <input value={multiRestCount} onChange={(event) => setMultiRestCount(event.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" className={`${fieldClass} h-auto min-h-0 text-center`} aria-label="Multi measure rest count" />
-              </div>
-              <div className="grid grid-cols-4 gap-1">
-                {([['<', 'Push'], ['>', 'Pull'], ['^', 'Accent'], ['~', 'Fermata']] as const).map(([value, label]) => <button key={value} type="button" className={`${buttonClass} ${trailingModifiers(displayedChord).includes(value) ? activeButtonClass : ''}`} onClick={() => toggleModifier(value)}>{label}</button>)}
-              </div>
-            </div>
-          )}
-          {advancedCategory === 'bar' && (
-            <div className="flex min-h-0 flex-1 flex-col justify-center gap-2">
-              <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">{language === 'zh' ? `整小節和弦（最多 ${beatCount} 個）` : `Whole bar chords (max ${beatCount})`}</label>
-              <div className="flex gap-1.5"><input value={barText} onChange={(event) => setBarText(event.target.value)} onBlur={applyBarText} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyBarText(); } }} className={fieldClass} /><button type="button" className={buttonClass} onClick={applyBarText}>{language === 'zh' ? '套用' : 'Apply'}</button></div>
-              {barTextError && <p role="alert" className="text-xs font-bold text-rose-600">{barTextError}</p>}
-            </div>
-          )}
+          <div className="flex shrink-0 gap-1">
+            <input value={barText} onChange={(event) => setBarText(event.target.value)} onBlur={applyBarText} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyBarText(); } }} className={`${fieldClass} min-w-0 flex-1`} placeholder={language === 'zh' ? `整節輸入 · 最多 ${beatCount} 個` : `Whole bar · max ${beatCount}`} aria-label={language === 'zh' ? '整小節和弦' : 'Whole bar chords'} />
+            <button type="button" className={buttonClass} onClick={applyBarText} aria-label={language === 'zh' ? '套用整節和弦' : 'Apply whole bar'}><Check size={15} /></button>
+          </div>
+          {barTextError && <p role="alert" className="shrink-0 text-[10px] font-bold text-rose-600">{barTextError}</p>}
         </>
       )}
 
       {mode === 'symbols' && (
-        <>
-          <div className="grid grid-cols-4 gap-1 rounded-lg bg-slate-200/70 p-0.5">
-            {([
-              ['repeats', language === 'zh' ? '反覆' : 'Repeats'],
-              ['markers', language === 'zh' ? '記號' : 'Markers'],
-              ['time', language === 'zh' ? '拍號' : 'Time'],
-              ['structure', language === 'zh' ? '小節' : 'Bar']
-            ] as const).map(([value, label]) => <button key={value} type="button" className={`${categoryButtonClass} ${symbolCategory === value ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`} onClick={() => setSymbolCategory(value)}>{label}</button>)}
+        <div className="flex min-h-0 flex-1 flex-col justify-between gap-1" data-symbol-page="all">
+          <div className="grid grid-cols-8 gap-1">
+            <button type="button" className={`${buttonClass} !min-h-8 px-0 text-base`} onClick={() => applyDisplayedChord('%')} aria-label={language === 'zh' ? '重複前一小節' : 'Repeat previous bar'}>%</button>
+            <button type="button" className={`${buttonClass} !min-h-8 px-0`} onClick={() => applyDisplayedChord('N.C.')} aria-label="N.C.">N.C.</button>
+            <button type="button" className={`${buttonClass} !min-h-8 px-0 text-lg`} onClick={() => applyDisplayedChord('/')} aria-label={language === 'zh' ? '拍點斜線' : 'Beat slash'}>/</button>
+            {([['0', 'q', '四分休止'], ['0h', 'h', '二分休止'], ['0w', 'w', '全休止']] as const).map(([value, base, label]) => (
+              <button key={value} type="button" className={`${buttonClass} !min-h-8 px-0`} onClick={() => applyDisplayedChord(value)} aria-label={language === 'zh' ? label : `${base} rest`}>
+                <span className="font-rhythm text-[22px] leading-none" aria-hidden="true">{getRestGlyph(base)}</span>
+              </button>
+            ))}
+            <div
+              data-multi-rest-control
+              className={`relative col-span-2 min-h-8 overflow-hidden rounded-lg border bg-white ${multiRestPlacementError || !hasValidMultiRestCount ? 'border-slate-200 opacity-45' : 'border-indigo-300'}`}
+              title={multiRestPlacementError || (hasValidMultiRestCount ? (language === 'zh' ? '套用多小節休止' : 'Apply multi-measure rest') : (language === 'zh' ? '輸入 1–999' : 'Enter 1–999'))}
+            >
+              <button type="button" className="h-full w-full pt-2 text-slate-700 disabled:cursor-not-allowed" disabled={Boolean(multiRestPlacementError) || !hasValidMultiRestCount} onClick={applyMultiMeasureRest} aria-label={language === 'zh' ? `套用 ${multiRestCount || 0} 小節休止` : `Apply ${multiRestCount || 0}-bar rest`}>
+                <MultiMeasureRestGlyph />
+              </button>
+              <input
+                value={multiRestCount}
+                onChange={(event) => { setMultiRestCount(event.target.value.replace(/\D/g, '').slice(0, 3)); setMultiRestActionError(null); }}
+                inputMode="numeric"
+                disabled={Boolean(multiRestPlacementError)}
+                className="absolute left-1/2 top-0 z-10 h-4 w-8 -translate-x-1/2 bg-white/95 text-center text-[10px] font-black tabular-nums text-slate-800 outline-none disabled:bg-slate-100"
+                aria-label={language === 'zh' ? '多小節休止數量' : 'Multi-measure rest count'}
+              />
+              <span className="pointer-events-none absolute right-0.5 top-0.5 text-[8px] font-black text-slate-400" aria-hidden="true">①</span>
+            </div>
           </div>
-          {symbolCategory === 'repeats' && (
-            <div className="flex min-h-0 flex-1 flex-col justify-center gap-2">
-              <div className="grid grid-cols-3 gap-1">
-                <button type="button" className={`${buttonClass} ${bar.repeatStart ? activeButtonClass : ''}`} onClick={() => updateFields({ repeatStart: !bar.repeatStart })}>|: Repeat Start</button>
-                <button type="button" className={`${buttonClass} ${bar.repeatEnd ? activeButtonClass : ''}`} onClick={() => updateFields({ repeatEnd: !bar.repeatEnd })}>:| Repeat End</button>
-                <button type="button" className={`${buttonClass} ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => updateFields({ finalBar: !bar.finalBar })}>|| Final</button>
-              </div>
-              <div className="grid grid-cols-5 gap-1">
-                {ENDINGS.map((ending) => <button key={ending} type="button" className={`${buttonClass} ${bar.ending === ending ? activeButtonClass : ''}`} onClick={() => updateFields({ ending: bar.ending === ending ? undefined : ending })}>{ending}</button>)}
-                <input className={fieldClass} value={ENDINGS.includes(bar.ending || '') ? '' : bar.ending || ''} onChange={(event) => updateFields({ ending: event.target.value || undefined }, `ending:${bar.id}`)} placeholder={language === 'zh' ? '自訂' : 'Custom'} aria-label={language === 'zh' ? '自訂 Ending' : 'Custom ending'} />
-              </div>
-            </div>
+
+          <div className="grid grid-cols-4 gap-1">
+            <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('<') ? activeButtonClass : ''}`} onClick={() => toggleModifier('<')} aria-label={language === 'zh' ? '搶拍' : 'Push'}><DirectionGlyph direction="push" /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('>') ? activeButtonClass : ''}`} onClick={() => toggleModifier('>')} aria-label={language === 'zh' ? '拖拍' : 'Pull'}><DirectionGlyph direction="pull" /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 text-xl ${trailingModifiers(displayedChord).includes('^') ? activeButtonClass : ''}`} onClick={() => toggleModifier('^')} aria-label={language === 'zh' ? '重音' : 'Accent'}>&gt;</button>
+            <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('~') ? activeButtonClass : ''}`} onClick={() => toggleModifier('~')} aria-label={language === 'zh' ? '延長記號' : 'Fermata'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">ß</span></button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.repeatStart ? activeButtonClass : ''}`} onClick={() => updateFields({ repeatStart: !bar.repeatStart })} aria-label="|: Repeat Start">|:</button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.repeatEnd ? activeButtonClass : ''}`} onClick={() => updateFields({ repeatEnd: !bar.repeatEnd })} aria-label=":| Repeat End">:|</button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => updateFields({ finalBar: !bar.finalBar })} aria-label="|| Final">||</button>
+            {ENDINGS.map((ending) => <button key={ending} type="button" className={`${buttonClass} !min-h-7 overflow-hidden px-1 ${bar.ending === ending ? activeButtonClass : ''}`} onClick={() => updateFields({ ending: bar.ending === ending ? undefined : ending })} aria-label={`Ending ${ending}`}><EndingGlyph value={ending} /></button>)}
+          </div>
+
+          <div className="grid grid-cols-8 gap-1">
+            {([['segno', 'Left Segno'], ['coda', 'Left Coda']] as const).map(([value, label]) => <button key={value} type="button" className={`${buttonClass} relative !min-h-7 px-0 ${bar.leftMarker === value ? activeButtonClass : ''}`} onClick={() => updateFields({ leftMarker: (bar.leftMarker === value ? undefined : value) as NavigationMarker | undefined })} aria-label={label}><span className="absolute inset-y-1 left-0.5 border-l-2 border-current" aria-hidden="true" />{value === 'segno' ? <SegnoGlyph /> : <CodaGlyph />}</button>)}
+            {([['coda', '', 'Right Coda'], ['ds', 'D.S.', 'D.S.'], ['dc', 'D.C.', 'D.C.'], ['fine', 'Fine', 'Fine'], ['ds-al-coda', 'D.S. al', 'D.S. al Coda'], ['ds-al-fine', 'D.S. al Fine', 'D.S. al Fine']] as const).map(([value, text, label]) => <button key={value} type="button" className={`${buttonClass} relative !min-h-7 px-0 text-[9px] ${bar.rightMarker === value ? activeButtonClass : ''}`} onClick={() => updateFields({ rightMarker: (bar.rightMarker === value ? undefined : value) as NavigationMarker | undefined })} aria-label={label}>{value === 'coda' ? <CodaGlyph /> : value === 'ds-al-coda' ? <span className="flex items-center gap-0.5">{text}<CodaGlyph className="h-3.5 w-3.5" /></span> : text}<span className="absolute inset-y-1 right-0.5 border-r-2 border-current" aria-hidden="true" /></button>)}
+          </div>
+
+          <div className="grid grid-cols-8 gap-1">
+            {TIME_SIGNATURES.map((value) => <button key={value} type="button" className={`${buttonClass} !min-h-7 px-0 ${bar.timeSignature === value ? activeButtonClass : ''}`} onClick={() => updateFields({ timeSignature: bar.timeSignature === value ? undefined : value })}>{value}</button>)}
+            <input className="min-h-7 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-center text-[10px] font-bold outline-none focus:border-indigo-400" inputMode="numeric" value={TIME_SIGNATURES.includes(bar.timeSignature || '') ? '' : bar.timeSignature || ''} onChange={(event) => updateFields({ timeSignature: event.target.value || undefined }, `time:${bar.id}`)} placeholder="…" aria-label={language === 'zh' ? '自訂拍號' : 'Custom time signature'} />
+          </div>
+
+          <div className="grid grid-cols-5 gap-1">
+            <input className="min-h-7 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-center text-[10px] font-bold outline-none focus:border-indigo-400" value={ENDINGS.includes(bar.ending || '') ? '' : bar.ending || ''} onChange={(event) => updateFields({ ending: event.target.value || undefined }, `ending:${bar.id}`)} placeholder="⌜…" aria-label={language === 'zh' ? '自訂 Ending' : 'Custom ending'} />
+            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base`} onClick={() => onStructure('insert-before')} aria-label={language === 'zh' ? '前方插入小節' : 'Insert bar before'}>+│</button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base`} onClick={() => onStructure('insert-after')} aria-label={language === 'zh' ? '後方插入小節' : 'Insert bar after'}>│+</button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0`} onClick={() => onStructure('duplicate')} aria-label={language === 'zh' ? '複製小節' : 'Duplicate bar'}><Copy size={15} /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 border-rose-200 px-0 text-rose-700`} onClick={() => onStructure('delete')} aria-label={language === 'zh' ? '刪除小節' : 'Delete bar'}><Trash2 size={15} /></button>
+          </div>
+
+          {(multiRestPlacementError || multiRestActionError) && (
+            <p role="status" className="shrink-0 truncate text-[9px] font-bold text-amber-700">{multiRestActionError || multiRestPlacementError}</p>
           )}
-          {symbolCategory === 'markers' && (
-            <div className="grid min-h-0 flex-1 grid-cols-2 content-center gap-2">
-              <label className="text-xs font-bold text-slate-600">{language === 'zh' ? '左側 Marker' : 'Left marker'}<select className={`${fieldClass} mt-1`} value={bar.leftMarker || ''} onChange={(event) => updateFields({ leftMarker: (event.target.value || undefined) as NavigationMarker | undefined })}>{LEFT_MARKERS.map((option) => <option key={option.label} value={option.value || ''}>{option.label}</option>)}</select></label>
-              <label className="text-xs font-bold text-slate-600">{language === 'zh' ? '右側 Marker' : 'Right marker'}<select className={`${fieldClass} mt-1`} value={bar.rightMarker || ''} onChange={(event) => updateFields({ rightMarker: (event.target.value || undefined) as NavigationMarker | undefined })}>{RIGHT_MARKERS.map((option) => <option key={option.label} value={option.value || ''}>{option.label}</option>)}</select></label>
-            </div>
-          )}
-          {symbolCategory === 'time' && (
-            <div className="grid min-h-0 flex-1 grid-cols-4 gap-1">
-              {TIME_SIGNATURES.map((value) => <button key={value} type="button" className={`${buttonClass} min-h-0 ${bar.timeSignature === value ? activeButtonClass : ''}`} onClick={() => updateFields({ timeSignature: bar.timeSignature === value ? undefined : value })}>{value}</button>)}
-              <input className={`${fieldClass} h-auto min-h-0`} inputMode="numeric" value={TIME_SIGNATURES.includes(bar.timeSignature || '') ? '' : bar.timeSignature || ''} onChange={(event) => updateFields({ timeSignature: event.target.value || undefined }, `time:${bar.id}`)} placeholder={language === 'zh' ? '自訂' : 'Custom'} aria-label={language === 'zh' ? '自訂拍號' : 'Custom time signature'} />
-            </div>
-          )}
-          {symbolCategory === 'structure' && (
-            <div className="grid min-h-0 flex-1 grid-cols-2 gap-2">
-              <button type="button" className={`${buttonClass} min-h-0`} onClick={() => onStructure('insert-before')}><Plus size={14} className="mr-1" />{language === 'zh' ? '前方插入' : 'Insert before'}</button>
-              <button type="button" className={`${buttonClass} min-h-0`} onClick={() => onStructure('insert-after')}><Plus size={14} className="mr-1" />{language === 'zh' ? '後方插入' : 'Insert after'}</button>
-              <button type="button" className={`${buttonClass} min-h-0`} onClick={() => onStructure('duplicate')}><Copy size={14} className="mr-1" />{language === 'zh' ? '複製小節' : 'Duplicate'}</button>
-              <button type="button" className={`${buttonClass} min-h-0 border-rose-200 text-rose-700`} onClick={() => onStructure('delete')}><Trash2 size={14} className="mr-1" />{language === 'zh' ? '刪除小節' : 'Delete'}</button>
-            </div>
-          )}
-        </>
+        </div>
       )}
 
       {mode === 'text' && (

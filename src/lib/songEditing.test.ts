@@ -11,11 +11,13 @@ import {
   duplicateBar,
   getChordStorageModeForTarget,
   getChordBeatSlots,
+  getMultiMeasureRestPlacementError,
   insertBar,
   normalizeChordTextInput,
   parseChordBarText,
   serializeChordBeatSlots,
   setChordAtBeatSlot,
+  setMultiMeasureRestAtBar,
   updateEditableBarFields
 } from './songEditing';
 
@@ -79,6 +81,31 @@ describe('chord beat slots', () => {
       chords: [],
       error: '此小節最多可放 4 個和弦，目前輸入 5 個。'
     });
+  });
+});
+
+describe('multi-measure rest placement', () => {
+  const firstBeat = { sectionId: 'section-1', barId: 'bar-1', slotIndex: 0 };
+
+  it('writes the token at beat one of an empty bar', () => {
+    const song = makeSong({ chords: [] });
+    const result = setMultiMeasureRestAtBar(song, firstBeat, 4);
+    expect(result.error).toBeNull();
+    expect(result.song.sections[0].bars[0].chords).toEqual(['|4|', '', '', '']);
+  });
+
+  it('rejects non-first beats and bars containing any other chord', () => {
+    const emptySong = makeSong({ chords: [] });
+    expect(getMultiMeasureRestPlacementError(emptySong, { ...firstBeat, slotIndex: 1 })).toContain('第一拍');
+    const occupiedSong = makeSong({ chords: ['C'] });
+    const result = setMultiMeasureRestAtBar(occupiedSong, firstBeat, 4);
+    expect(result.error).toContain('清空');
+    expect(result.song).toBe(occupiedSong);
+  });
+
+  it('allows changing the count of an existing multi-measure rest', () => {
+    const song = makeSong({ chords: ['|4|', '', '', ''] });
+    expect(setMultiMeasureRestAtBar(song, firstBeat, 8).song.sections[0].bars[0].chords[0]).toBe('|8|');
   });
 });
 

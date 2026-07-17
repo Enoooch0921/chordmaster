@@ -180,6 +180,40 @@ export const clearChordAtBeatSlot = (song: Song, target: SongChordTarget): Song 
   setChordAtBeatSlot(song, target, '')
 );
 
+const MULTI_MEASURE_REST_TOKEN = /^\|\d{1,3}\|$/;
+
+export const getMultiMeasureRestPlacementError = (
+  song: Song,
+  target: SongChordTarget
+): string | null => {
+  if (target.slotIndex !== 0) return '多小節休止只能放在第一拍。';
+  const located = findSongBar(song, target);
+  if (!located) return '找不到要編輯的小節。';
+  const slots = getChordBeatSlots(located.bar, getBeatCount(song, located.bar));
+  const hasOtherContent = slots.some((slot, slotIndex) => {
+    const chord = slot.chord.trim();
+    if (!chord) return false;
+    return slotIndex !== 0 || !MULTI_MEASURE_REST_TOKEN.test(chord);
+  });
+  return hasOtherContent ? '請先清空這個小節的其他和弦。' : null;
+};
+
+export const setMultiMeasureRestAtBar = (
+  song: Song,
+  target: SongChordTarget,
+  count: number
+): { song: Song; error: string | null } => {
+  const placementError = getMultiMeasureRestPlacementError(song, target);
+  if (placementError) return { song, error: placementError };
+  if (!Number.isInteger(count) || count < 1 || count > 999) {
+    return { song, error: '多小節休止數量必須是 1–999。' };
+  }
+  return {
+    song: setChordAtBeatSlot(song, { ...target, slotIndex: 0 }, `|${count}|`),
+    error: null
+  };
+};
+
 export const parseChordBarText = (value: string, beatCount: number): ChordTextParseResult => {
   const normalized = value
     .replace(/，/g, ',')
