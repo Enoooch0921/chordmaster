@@ -72,6 +72,7 @@ import { hasSupabaseConfig } from './lib/supabase';
 import {
   applyPreviewDraft,
   createPreviewEditSession,
+  markPreviewTargetDeleted,
   PreviewEditField,
   PreviewEditSession,
   redoPreviewDraft,
@@ -82,14 +83,15 @@ import {
 import {
   createEmptyBar,
   deleteBar,
-  detectSectionChordInputMode,
   duplicateBar,
   ensureSongEditingIds,
   findSongBar,
   getBeatCount,
+  getChordStorageModeForTarget,
   getSectionStoredKey,
   insertBar
 } from './lib/songEditing';
+import { resolvePreviewEditorDeviceLayout } from './lib/previewEditorLayout';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -1880,6 +1882,7 @@ export default function App() {
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
   const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
   const [previewEditSession, setPreviewEditSession] = useState<PreviewEditSession | null>(null);
+  const [previewEditorPanelHeight, setPreviewEditorPanelHeight] = useState(0);
   const [isPreviewEditExitPromptOpen, setIsPreviewEditExitPromptOpen] = useState(false);
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
@@ -2151,6 +2154,16 @@ export default function App() {
     viewportHeight / PREVIEW_PAGE_HEIGHT
   );
   const isPhoneViewport = viewportWidth < PHONE_VIEWPORT_BREAKPOINT;
+  const previewEditorDeviceLayout = resolvePreviewEditorDeviceLayout({
+    viewportWidth,
+    maxTouchPoints: typeof navigator === 'undefined' ? 0 : navigator.maxTouchPoints || 0,
+    hasCoarsePointer: typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(pointer: coarse)').matches
+      : false,
+    isPhoneDevice: typeof navigator !== 'undefined'
+      ? /iPhone|iPod|Android.*Mobile/i.test(navigator.userAgent || '')
+      : false
+  });
   const isSidebarExpanded = isPhoneViewport ? isMobileNavOpen : (isSidebarPinned || isSidebarHovered);
   const usesOverlaySidebar = viewportWidth < SIDEBAR_OVERLAY_BREAKPOINT;
   const collapsedSidebarWidth = isPhoneViewport ? 0 : COLLAPSED_SIDEBAR_WIDTH;
@@ -7314,7 +7327,7 @@ export default function App() {
 
       const nextSession = applyPreviewDraft(current, draftSong);
       const targetSection = draftSong.sections.find((section) => section.bars.some((candidate) => candidate.id === targetBarId));
-      if (!targetSection?.id || !targetBarId) return nextSession;
+      if (!targetSection?.id || !targetBarId) return markPreviewTargetDeleted(nextSession);
       const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, targetSection.id, targetBarId, 0);
       return retargetPreviewEditSession(nextSession, {
         ...current.target,
@@ -7330,18 +7343,20 @@ export default function App() {
   }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
 
   const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: ChordSheetElementField, target?: ChordSheetElementTarget) => {
-    if (!activeEditorSong || !activeNavigationPreviewSong) {
+    const editorSong = activeDraftEditorSong ?? activeEditorSong;
+    const navigationSong = activeDraftNavigationPreviewSong ?? activeNavigationPreviewSong;
+    if (!editorSong || !navigationSong) {
       return;
     }
 
-    const previewSection = activeNavigationPreviewSong.sections[sIdx] ?? null;
+    const previewSection = navigationSong.sections[sIdx] ?? null;
     const nextSectionId = previewSection?.id ?? null;
     const mappedSectionIndex = nextSectionId
-      ? activeEditorSong.sections.findIndex((section) => section.id === nextSectionId)
+      ? editorSong.sections.findIndex((section) => section.id === nextSectionId)
       : sIdx;
     const nextSectionIndex = mappedSectionIndex >= 0 ? mappedSectionIndex : sIdx;
 
-    setActiveSectionId(nextSectionId ?? activeEditorSong.sections[nextSectionIndex]?.id ?? null);
+    setActiveSectionId(nextSectionId ?? editorSong.sections[nextSectionIndex]?.id ?? null);
     setActiveBar({ sIdx: nextSectionIndex, bIdx });
     setPreviewMetaEditTarget(null);
     if (!canOpenEditor) {
@@ -7356,35 +7371,49 @@ export default function App() {
           ? 'text'
           : null;
     if (isPreviewQuickEditEnabled && previewField && bIdx >= 0) {
-      const editableSong = ensureSongEditingIds(activeEditorSong);
-      const editableSection = editableSong.sections[nextSectionIndex];
-      const editableBar = editableSection?.bars[bIdx];
       const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
-      if (editableSection?.id && editableBar?.id && previewIdentity) {
-        const slotIndex = target?.slotIndex ?? 0;
-        const anchorKey = target?.anchorKey
-          ?? makePreviewTargetAnchorKey(previewIdentity, editableSection.id, editableBar.id, slotIndex);
-        const nextTarget = {
-          previewIdentity,
-          sectionId: editableSection.id,
-          barId: editableBar.id,
-          field: previewField,
-          slotIndex,
-          rawChordIndex: target?.rawChordIndex ?? null,
-          anchorKey,
-          anchorRect: target?.anchorRect ?? findPreviewAnchorRect(anchorKey) ?? {
-            left: 16, top: 16, right: 32, bottom: 32, width: 16, height: 16
-          }
-        };
-        setPreviewEditSession((current) => (
-          current?.previewIdentity === previewIdentity
-            ? retargetPreviewEditSession(current, nextTarget)
+      if (previewIdentity) {
+        setPreviewEditSession((current) => {
+          const currentDraft = current?.previewIdentity === previewIdentity ? current : null;
+          const editableSong = currentDraft ? currentDraft.draftSong : ensureSongEditingIds(editorSong);
+          const sectionById = target?.sectionId
+            ? editableSong.sections.find((section) => section.id === target.sectionId)
+            : null;
+          const editableSection = sectionById
+            ?? editableSong.sections.find((section) => section.id === nextSectionId)
+            ?? editableSong.sections[nextSectionIndex];
+          const editableBar = (target?.barId
+            ? editableSection?.bars.find((bar) => bar.id === target.barId)
+              ?? editableSong.sections.flatMap((section) => section.bars).find((bar) => bar.id === target.barId)
+            : null)
+            ?? editableSection?.bars[bIdx];
+          const actualSection = editableBar
+            ? editableSong.sections.find((section) => section.bars.some((bar) => bar.id === editableBar.id))
+            : null;
+          if (!actualSection?.id || !editableBar?.id) return current;
+
+          const slotIndex = target?.slotIndex ?? 0;
+          const anchorKey = makePreviewTargetAnchorKey(previewIdentity, actualSection.id, editableBar.id, slotIndex);
+          const nextTarget = {
+            previewIdentity,
+            sectionId: actualSection.id,
+            barId: editableBar.id,
+            field: previewField,
+            slotIndex,
+            rawChordIndex: target?.rawChordIndex ?? null,
+            anchorKey,
+            anchorRect: findPreviewAnchorRect(anchorKey) ?? target?.anchorRect ?? {
+              left: 16, top: 16, right: 32, bottom: 32, width: 16, height: 16
+            }
+          };
+          return currentDraft
+            ? retargetPreviewEditSession(currentDraft, nextTarget)
             : createPreviewEditSession({
                 song: editableSong,
                 target: nextTarget,
-                inputMode: detectSectionChordInputMode(editableSection)
-              })
-        ));
+                inputMode: getChordStorageModeForTarget(editableSong, nextTarget)
+              });
+        });
         return;
       }
     }
@@ -7403,7 +7432,7 @@ export default function App() {
     } else {
       focusEditorField(nextSectionIndex, bIdx, field);
     }
-  }, [activeEditorSong, activeNavigationPreviewSong, canOpenEditor, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, isEditing, isPreviewQuickEditEnabled, makePreviewTargetAnchorKey]);
+  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, canOpenEditor, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, isEditing, isPreviewQuickEditEnabled, makePreviewTargetAnchorKey]);
 
   const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
     if (!canOpenEditor) {
@@ -7740,10 +7769,25 @@ export default function App() {
         }
       });
       selectedAnchor?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+      window.requestAnimationFrame(() => {
+        const anchor = selectedAnchor as HTMLElement | null;
+        const preview = previewRef.current;
+        if (anchor && preview && previewEditorDeviceLayout !== 'desktop') {
+          const anchorRect = anchor.getBoundingClientRect();
+          const previewRect = preview.getBoundingClientRect();
+          const safeTop = previewRect.top + 16;
+          const safeBottom = previewRect.bottom - previewEditorPanelHeight - 16;
+          if (anchorRect.bottom > safeBottom) {
+            preview.scrollBy({ top: anchorRect.bottom - safeBottom, behavior: 'smooth' });
+          } else if (anchorRect.top < safeTop) {
+            preview.scrollBy({ top: anchorRect.top - safeTop, behavior: 'smooth' });
+          }
+        }
+        refreshPreviewEditAnchorRect();
+      });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activePreviewEditSession?.target.anchorKey, refreshPreviewEditAnchorRect]);
+  }, [activePreviewEditSession?.target.anchorKey, previewEditorDeviceLayout, previewEditorPanelHeight, refreshPreviewEditAnchorRect]);
 
   useEffect(() => {
     if (isLyricsMode) {
@@ -12808,6 +12852,11 @@ export default function App() {
               onTouchCancel={handlePreviewTouchEnd}
               onClickCapture={handlePreviewClickCapture}
               onScroll={handlePreviewScroll}
+              style={{
+                scrollPaddingBottom: activePreviewEditSession && previewEditorDeviceLayout !== 'desktop'
+                  ? `${previewEditorPanelHeight + 16}px`
+                  : undefined
+              }}
               className={`h-full overflow-auto p-3 sm:p-4 lg:p-8 xl:p-12 [scrollbar-gutter:stable_both-edges] [touch-action:pan-x_pan-y] ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
             >
               <div
@@ -12852,13 +12901,15 @@ export default function App() {
               const globalOffset = getTransposeOffset(activePreviewEditSession.draftSong.originalKey, activeDraftNavigationPreviewSong.currentKey);
               const displayedChartKey = transposeKeyWithPreference(storedKey, globalOffset, activeDraftNavigationPreviewSong.currentKey);
               const displayedKey = getPlayKey(displayedChartKey, activeDraftNavigationPreviewSong.capo ?? 0);
-              const section = activePreviewEditSession.draftSong.sections.find((candidate) => candidate.id === activePreviewEditSession.target.sectionId);
-              const storageMode = section ? detectSectionChordInputMode(section) : 'letters';
+              const storageMode = getChordStorageModeForTarget(
+                activePreviewEditSession.draftSong,
+                activePreviewEditSession.target
+              );
               return (
                 <PreviewBarEditor
                   session={activePreviewEditSession}
                   language={language}
-                  deviceLayout={isPhoneViewport ? 'phone' : hasFinePointer ? 'desktop' : 'tablet'}
+                  deviceLayout={previewEditorDeviceLayout}
                   storedKey={storedKey}
                   displayedKey={displayedKey}
                   storageMode={storageMode}
@@ -12870,6 +12921,7 @@ export default function App() {
                   onRedo={() => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current)}
                   onDone={() => commitPreviewEditSession()}
                   onCancel={() => setPreviewEditSession(null)}
+                  onPanelHeightChange={(height) => setPreviewEditorPanelHeight(Math.round(height))}
                 />
               );
             })()}
