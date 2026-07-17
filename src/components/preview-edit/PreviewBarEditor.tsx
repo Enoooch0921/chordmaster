@@ -145,6 +145,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [, forceViewportUpdate] = React.useReducer((value) => value + 1, 0);
   const panelRef = React.useRef<HTMLElement>(null);
   const chordCaptureRef = React.useRef<HTMLInputElement>(null);
+  const replaceChordOnNextHardwareKeyRef = React.useRef(true);
   const modePressTimerRef = React.useRef<number | null>(null);
   const longPressTriggeredRef = React.useRef(false);
 
@@ -183,8 +184,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
   React.useEffect(() => {
     if (deviceLayout !== 'desktop' || session.target.field !== 'chords') return;
-    chordCaptureRef.current?.focus({ preventScroll: true });
+    const capture = chordCaptureRef.current;
+    capture?.focus({ preventScroll: true });
+    capture?.select();
   }, [deviceLayout, session.previewIdentity, session.target.barId, session.target.field, session.target.slotIndex]);
+
+  React.useEffect(() => {
+    replaceChordOnNextHardwareKeyRef.current = true;
+  }, [session.previewIdentity, session.target.barId, session.target.field, session.target.slotIndex]);
 
   React.useEffect(() => {
     const node = panelRef.current;
@@ -220,6 +227,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }, []);
 
   function applyDisplayedChord(value: string, mergeKey?: string) {
+    replaceChordOnNextHardwareKeyRef.current = false;
     const normalizedInput = normalizeChordTextInput(value, session.inputMode);
     const stored = convertDisplayedChordToStoredChord({
       input: normalizedInput,
@@ -234,26 +242,39 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const element = event.target as HTMLElement | null;
-      const isTyping = element?.tagName === 'INPUT' || element?.tagName === 'TEXTAREA' || element?.isContentEditable;
+      const isTyping = element?.tagName === 'INPUT' || element?.tagName === 'TEXTAREA' || element?.tagName === 'SELECT' || element?.isContentEditable;
+      const isButtonActivation = element?.tagName === 'BUTTON' && (event.key === 'Enter' || event.key === ' ');
       const meta = event.metaKey || event.ctrlKey;
       if (meta && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         if (event.shiftKey) onRedo(); else onUndo();
         return;
       }
-      if (isTyping || event.altKey || meta) return;
+      if (isTyping || isButtonActivation || event.altKey || meta) return;
       if (event.key === 'ArrowLeft' || (event.key === 'Enter' && event.shiftKey)) {
         event.preventDefault();
         onNavigate('previous');
       } else if (event.key === 'ArrowRight' || event.key === 'Enter') {
         event.preventDefault();
         onNavigate('next');
-      } else if (event.key === 'Backspace') {
+      } else if (session.target.field === 'chords' && event.key === 'Backspace') {
         event.preventDefault();
         if (displayedChord) applyDisplayedChord(''); else onNavigate('previous');
-      } else if (event.key === 'Delete') {
+      } else if (session.target.field === 'chords' && event.key === 'Delete') {
         event.preventDefault();
         applyDisplayedChord('');
+      } else if (session.target.field === 'chords' && event.key.length === 1 && event.key.trim()) {
+        event.preventDefault();
+        const nextChord = replaceChordOnNextHardwareKeyRef.current
+          ? event.key
+          : `${displayedChord}${event.key}`;
+        applyDisplayedChord(nextChord, `slot-hardware:${bar?.id ?? session.target.barId}:${session.target.slotIndex}`);
+        window.requestAnimationFrame(() => {
+          const capture = chordCaptureRef.current;
+          if (!capture) return;
+          capture.focus({ preventScroll: true });
+          capture.setSelectionRange(capture.value.length, capture.value.length);
+        });
       }
     };
     window.addEventListener('keydown', handleKeyDown);

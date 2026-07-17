@@ -6232,7 +6232,7 @@ export default function App() {
         previewClone.style.maxWidth = '794px';
         previewClone.style.margin = '0';
 
-        previewClone.querySelectorAll('[data-preview-slot-hit]').forEach((node) => node.remove());
+        previewClone.querySelectorAll('[data-preview-slot-hit], [data-preview-input-caret]').forEach((node) => node.remove());
 
         previewClone.querySelectorAll<HTMLElement>('[data-print-page]').forEach((node) => {
           node.style.boxShadow = 'none';
@@ -7392,6 +7392,7 @@ export default function App() {
         if (tappedSameChord && previewEditorDeviceLayout !== 'desktop') {
           const chordCapture = document.querySelector('[data-preview-chord-capture]') as HTMLInputElement | null;
           chordCapture?.focus({ preventScroll: true });
+          chordCapture?.select();
         }
         setPreviewEditSession((current) => {
           const currentDraft = current?.previewIdentity === previewIdentity ? current : null;

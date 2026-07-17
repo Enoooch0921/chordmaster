@@ -149,6 +149,20 @@ describe('PreviewBarEditor', () => {
     expect(nextSong.sections[0].bars[0].chords[1]).toBe('Bb/Db');
   });
 
+  it('keeps hardware chord typing active after a visual key takes focus', async () => {
+    const user = userEvent.setup();
+    const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: base, deviceLayout: 'tablet' });
+    const cButton = screen.getByRole('button', { name: /^C$/ });
+    await user.click(cButton);
+    const withC = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    rerenderSession({ ...base, draftSong: withC });
+
+    fireEvent.keyDown(screen.getByRole('button', { name: /^C$/ }), { key: 'b' });
+    const withFlat = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(withFlat.sections[0].bars[0].chords[1]).toBe('Cb');
+  });
+
   it('keeps outside clicks from implicitly completing or cancelling', async () => {
     const user = userEvent.setup();
     const { onDone, onCancel } = renderEditor();

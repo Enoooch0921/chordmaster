@@ -3,6 +3,27 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@keyframes preview-chord-caret-blink {
+  0%, 46% { opacity: 1; }
+  47%, 100% { opacity: 0; }
+}
+
+.preview-chord-input-caret {
+  animation: preview-chord-caret-blink 1s steps(1, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-chord-input-caret {
+    animation: none;
+  }
+}
+
+@media print {
+  [data-preview-input-caret] {
+    display: none !important;
+  }
+}
+
 @font-face {
   font-family: 'JianpuASCII';
   src: url('https://cdn.jsdelivr.net/gh/RobertWinslow/jianpu-ascii-font@main/JianpuASCII.ttf') format('truetype');

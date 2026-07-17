@@ -1066,6 +1066,14 @@ const hasCrowdedAbbreviatableChordQuality = (chord: string) => (
   /maj\d*/i.test(chord) || /dim/i.test(chord)
 );
 
+const PreviewChordInputCaret: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <span
+    data-preview-input-caret
+    aria-hidden="true"
+    className={`preview-chord-input-caret inline-block h-[18px] w-[2px] shrink-0 rounded-full bg-indigo-600 ${className}`}
+  />
+);
+
 const getDisplayedChordString = (
   chord: string,
   sectionOffset: number,
@@ -2148,6 +2156,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             && activeChordSlot.barId === bar.id
                                             && activeChordSlot.slotIndex === slotIndex
                                           );
+                                          const slotHasChord = Boolean(displayChordEntries[slotIndex]?.chord);
                                           return (
                                             <div
                                               key={`slot-hit-${slotIndex}`}
@@ -2155,9 +2164,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               data-preview-slot-index={slotIndex}
                                               data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|chords|${slotIndex}`}
                                               aria-hidden="true"
-                                              className={`pointer-events-none h-[26px] rounded-[4px] transition-shadow ${isSelectedSlot ? 'bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92),0_0_0_1px_rgba(255,255,255,0.88)]' : ''}`}
+                                              className={`pointer-events-none relative h-[26px] rounded-[4px] transition-shadow ${isSelectedSlot ? 'bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92),0_0_0_1px_rgba(255,255,255,0.88)]' : ''}`}
                                               style={{ gridColumn: `${slotIndex + 1} / span 1`, gridRow: '1' }}
-                                            />
+                                            >
+                                              {isSelectedSlot && !slotHasChord && <PreviewChordInputCaret className="absolute bottom-[4px] left-[5px]" />}
+                                            </div>
                                           );
                                         })}
                                         {(() => {
@@ -2201,6 +2212,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
                                           return renderedAnchors.map((anchor) => {
                                             const { renderedChord, trimmedChord } = anchor;
+                                            const isSelectedChord = Boolean(
+                                              activeChordSlot
+                                              && activeChordSlot.sectionId === section?.id
+                                              && activeChordSlot.barId === bar.id
+                                              && activeChordSlot.slotIndex === anchor.slotIndex
+                                            );
                                             const isSlashPlaceholder = trimmedChord === '/';
                                             const isLongChord = !isSlashPlaceholder && (renderedChord.includes('/') || renderedChord.length >= 6);
                                             const hasRoomToBreathe = !isSlashPlaceholder && (anchor.slotsUntilNext ?? 1) >= 2;
@@ -2237,7 +2254,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                                  shrinkAxis="x-only"
 	                                                  className="h-[24px] items-end"
 	                                                >
-	                                                  <div className="min-w-0 origin-center leading-none">
+	                                                  <div className="inline-flex min-w-0 origin-center items-end leading-none">
 	                                                    <FormattedChord
 	                                                      chordString={renderedChord}
 	                                                      compactModifier={compactModifier}
@@ -2247,6 +2264,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                       color={getChordMarkTextColor(bar, anchor.chordIndex)}
                                                       specialLabel={getChordSpecialLabel(bar, anchor.chordIndex, language)}
                                                     />
+                                                    {isSelectedChord && <PreviewChordInputCaret className="mb-px ml-px" />}
                                                   </div>
                                                 </AutoShrink>
                                               </div>
