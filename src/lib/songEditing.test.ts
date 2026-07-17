@@ -15,6 +15,7 @@ import {
   insertBar,
   normalizeChordTextInput,
   parseChordBarText,
+  resolvePreviewChordSlotIndex,
   serializeChordBeatSlots,
   setChordAtBeatSlot,
   setMultiMeasureRestAtBar,
@@ -109,11 +110,32 @@ describe('multi-measure rest placement', () => {
   });
 });
 
+describe('preview beat targeting', () => {
+  it('starts an empty bar at beat one regardless of the tapped area', () => {
+    expect(resolvePreviewChordSlotIndex({ chords: [] }, 4, 3)).toBe(0);
+  });
+
+  it.each(['0h', '0w', '|8|'])('keeps %s focused on the slot that owns the whole-bar token', (token) => {
+    expect(resolvePreviewChordSlotIndex({ chords: [token, '', '', ''] }, 4, 3)).toBe(0);
+    expect(resolvePreviewChordSlotIndex({ chords: ['', '', token, ''] }, 4, 0)).toBe(2);
+  });
+
+  it('does not redirect an empty beat to an ordinary chord', () => {
+    expect(resolvePreviewChordSlotIndex({ chords: ['C', '', '', ''] }, 4, 3)).toBe(3);
+  });
+});
+
 describe('bar commands', () => {
   it('keeps repeat end and final bar mutually exclusive', () => {
     const song = makeSong({ chords: [], repeatEnd: true });
     const edited = updateEditableBarFields(song, { sectionId: 'section-1', barId: 'bar-1' }, { finalBar: true });
     expect(edited.sections[0].bars[0]).toMatchObject({ finalBar: true, repeatEnd: false });
+  });
+
+  it('allows repeat start and repeat end on the same bar', () => {
+    const song = makeSong({ chords: [], repeatStart: true });
+    const edited = updateEditableBarFields(song, { sectionId: 'section-1', barId: 'bar-1' }, { repeatEnd: true });
+    expect(edited.sections[0].bars[0]).toMatchObject({ repeatStart: true, repeatEnd: true, finalBar: false });
   });
 
   it('inserts, duplicates, and deletes bars immutably', () => {

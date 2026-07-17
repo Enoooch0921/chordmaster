@@ -130,6 +130,28 @@ export const getChordBeatSlots = (bar: Bar, beatCount: number): ChordBeatSlot[] 
   }))
 );
 
+const BAR_WIDE_PREVIEW_TOKEN = /^(?:0h|0w|\|\d{1,3}\|)$/i;
+
+/**
+ * Empty bars begin at beat one. Whole-bar style rests keep focus on the slot
+ * that owns their token even when the user taps the visual span beside it.
+ */
+export const resolvePreviewChordSlotIndex = (
+  bar: Bar,
+  beatCount: number,
+  requestedSlotIndex: number
+): number => {
+  const slots = getChordBeatSlots(bar, beatCount);
+  const safeRequestedSlot = Math.max(0, Math.min(beatCount - 1, requestedSlotIndex));
+  const occupiedSlots = slots
+    .map((slot, slotIndex) => ({ chord: slot.chord.trim(), slotIndex }))
+    .filter((slot) => Boolean(slot.chord));
+  if (occupiedSlots.length === 0) return 0;
+  if (slots[safeRequestedSlot]?.chord.trim()) return safeRequestedSlot;
+  return occupiedSlots.find((slot) => BAR_WIDE_PREVIEW_TOKEN.test(slot.chord))?.slotIndex
+    ?? safeRequestedSlot;
+};
+
 /**
  * Edited bars use a beat-count-wide array. This is still the existing chords
  * JSON array, but its trailing empty strings distinguish explicit positioning

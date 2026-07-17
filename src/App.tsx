@@ -87,9 +87,11 @@ import {
   ensureSongEditingIds,
   findSongBar,
   getBeatCount,
+  getChordBeatSlots,
   getChordStorageModeForTarget,
   getSectionStoredKey,
-  insertBar
+  insertBar,
+  resolvePreviewChordSlotIndex
 } from './lib/songEditing';
 import { resolvePreviewEditorDeviceLayout } from './lib/previewEditorLayout';
 
@@ -7392,7 +7394,11 @@ export default function App() {
     if (isPreviewQuickEditEnabled && previewField && bIdx >= 0) {
       const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
       if (previewIdentity) {
-        const tappedSlotIndex = target?.slotIndex ?? 0;
+        const requestedSlotIndex = target?.slotIndex ?? 0;
+        const previewBar = previewSection?.bars[bIdx];
+        const tappedSlotIndex = previewField === 'chords' && previewBar
+          ? resolvePreviewChordSlotIndex(previewBar, getBeatCount(navigationSong, previewBar), requestedSlotIndex)
+          : requestedSlotIndex;
         const tappedSameChord = previewField === 'chords'
           && activePreviewEditSession?.previewIdentity === previewIdentity
           && (
@@ -7427,7 +7433,10 @@ export default function App() {
             : null;
           if (!actualSection?.id || !editableBar?.id) return current;
 
-          const slotIndex = tappedSlotIndex;
+          const editableBeatCount = getBeatCount(editableSong, editableBar);
+          const slotIndex = previewField === 'chords'
+            ? resolvePreviewChordSlotIndex(editableBar, editableBeatCount, tappedSlotIndex)
+            : tappedSlotIndex;
           const anchorKey = makePreviewTargetAnchorKey(previewIdentity, actualSection.id, editableBar.id, slotIndex);
           const nextTarget = {
             previewIdentity,
@@ -7435,7 +7444,9 @@ export default function App() {
             barId: editableBar.id,
             field: previewField,
             slotIndex,
-            rawChordIndex: target?.rawChordIndex ?? null,
+            rawChordIndex: previewField === 'chords'
+              ? getChordBeatSlots(editableBar, editableBeatCount)[slotIndex]?.rawChordIndex ?? null
+              : target?.rawChordIndex ?? null,
             anchorKey,
             anchorRect: findPreviewAnchorRect(anchorKey) ?? target?.anchorRect ?? {
               left: 16, top: 16, right: 32, bottom: 32, width: 16, height: 16

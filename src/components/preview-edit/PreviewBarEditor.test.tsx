@@ -64,7 +64,9 @@ describe('PreviewBarEditor', () => {
     expect(screen.queryByPlaceholderText('點這裡使用文字輸入')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '和弦直接輸入' })).toHaveFocus();
     expect(screen.queryByRole('button', { name: /^G$/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '顯示按鍵' }));
+    expect(screen.getByRole('button', { name: '選擇小節拍號' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '文字欄位' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '顯示字母數字鍵' }));
     expect(screen.getByRole('button', { name: /^G$/ })).toBeInTheDocument();
   });
 
@@ -175,11 +177,45 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: '清除房子記號' })).toBeInTheDocument();
   });
 
+  it('keeps articulation in its own picker between rests and endings', async () => {
+    const user = userEvent.setup();
+    renderEditor({ deviceLayout: 'phone' });
+    const restTrigger = screen.getByRole('button', { name: '休止符與整小節符號' }) as HTMLButtonElement;
+    const articulationTrigger = screen.getByRole('button', { name: '選擇演奏記號' }) as HTMLButtonElement;
+    const endingTrigger = screen.getByRole('button', { name: '選擇房子記號' }) as HTMLButtonElement;
+    const utilityButtons = Array.from(restTrigger.parentElement?.querySelectorAll('button') ?? []);
+    expect(utilityButtons.indexOf(articulationTrigger)).toBe(utilityButtons.indexOf(restTrigger) + 1);
+    expect(utilityButtons.indexOf(endingTrigger)).toBe(utilityButtons.indexOf(articulationTrigger) + 1);
+
+    await user.click(restTrigger);
+    expect(screen.queryByRole('button', { name: '搶拍' })).not.toBeInTheDocument();
+    await user.click(restTrigger);
+    await user.click(articulationTrigger);
+    expect(document.querySelector('[data-keyboard-picker="articulation"]')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '搶拍' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '拖拍' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重音' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '延長記號' })).toBeInTheDocument();
+  });
+
+  it('deletes one character from the current chord instead of clearing it', async () => {
+    const user = userEvent.setup();
+    const chordSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C', 'C11', '', ''] }] }]
+    };
+    const chordSession = createPreviewEditSession({ song: chordSong, target, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: chordSession, deviceLayout: 'phone' });
+    await user.click(screen.getByRole('button', { name: '刪除最後一個字元' }));
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].chords[1]).toBe('C1');
+  });
+
   it('opens notation pickers from small symbol keys and returns to the same keyboard', async () => {
     const user = userEvent.setup();
     const { onApplyDraft } = renderEditor({ deviceLayout: 'tablet' });
     await user.click(screen.getByRole('button', { name: '選擇小節線與反覆' }));
     expect(document.querySelector('[data-keyboard-picker="barline"]')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '一般小節線' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '|: Repeat Start' })).toHaveTextContent('|:');
     expect(screen.getByRole('button', { name: '|: Repeat Start' })).not.toHaveTextContent('Repeat Start');
     await user.click(screen.getByRole('button', { name: '|: Repeat Start' }));
@@ -206,7 +242,21 @@ describe('PreviewBarEditor', () => {
     expect(withoutOverride.sections[0].bars[0].timeSignature).toBeUndefined();
   });
 
-  it('links the multi-measure count to its glyph and only enables it on beat one of an empty bar', async () => {
+  it('allows repeat start and repeat end together without a normal-barline option', async () => {
+    const user = userEvent.setup();
+    const repeatSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], repeatStart: true }] }]
+    };
+    const repeatSession = createPreviewEditSession({ song: repeatSong, target, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: repeatSession, deviceLayout: 'phone' });
+    await user.click(screen.getByRole('button', { name: '選擇小節線與反覆' }));
+    expect(screen.queryByRole('button', { name: '一般小節線' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: ':| Repeat End' }));
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0]).toMatchObject({ repeatStart: true, repeatEnd: true });
+  });
+
+  it('opens numeric input from the multi-measure glyph and only enables it on beat one of an empty bar', async () => {
     const user = userEvent.setup();
     const emptySong: Song = {
       ...song,
@@ -215,36 +265,41 @@ describe('PreviewBarEditor', () => {
     const firstBeatTarget = { ...target, slotIndex: 0, anchorKey: 'song-1|section-1|bar-1|chords|0' };
     const emptySession = createPreviewEditSession({ song: emptySong, target: firstBeatTarget, inputMode: 'letters' });
     const { onApplyDraft, rerenderSession } = renderEditor({ session: emptySession, deviceLayout: 'phone' });
-    await user.click(screen.getByRole('button', { name: '休止與演奏符號' }));
+    await user.click(screen.getByRole('button', { name: '休止符與整小節符號' }));
 
     const countInput = screen.getByRole('textbox', { name: '多小節休止數量' });
-    const applyRest = screen.getByRole('button', { name: '套用 4 小節休止' });
+    const openCountInput = screen.getByRole('button', { name: '輸入多小節休止數量' });
     expect(countInput.closest('[data-multi-rest-control]')).not.toBeNull();
-    expect(applyRest).toBeEnabled();
-    await user.click(applyRest);
-    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].chords).toEqual(['|4|', '', '', '']);
+    expect(countInput).toHaveAttribute('inputmode', 'numeric');
+    expect(openCountInput).toBeEnabled();
+    await user.click(openCountInput);
+    expect(countInput).toHaveFocus();
+    await user.clear(countInput);
+    await user.type(countInput, '8');
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].chords).toEqual(['|8|', '', '', '']);
 
     const wrongBeatSession = createPreviewEditSession({ song: emptySong, target, inputMode: 'letters' });
     rerenderSession(wrongBeatSession);
-    await user.click(screen.getByRole('button', { name: '休止與演奏符號' }));
-    expect(screen.getByRole('button', { name: '套用 4 小節休止' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '休止符與整小節符號' }));
+    expect(screen.getByRole('button', { name: '輸入多小節休止數量' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('只能放在第一拍');
 
     const occupiedFirstBeat = createPreviewEditSession({ song, target: firstBeatTarget, inputMode: 'letters' });
     rerenderSession(occupiedFirstBeat);
-    await user.click(screen.getByRole('button', { name: '休止與演奏符號' }));
-    expect(screen.getByRole('button', { name: '套用 4 小節休止' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '休止符與整小節符號' }));
+    expect(screen.getByRole('button', { name: '輸入多小節休止數量' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('請先清空');
   });
 
-  it('uses one active text field instead of a vertically stacked form', async () => {
+  it('shows all four text positions together without nested tabs', async () => {
     const user = userEvent.setup();
     renderEditor({ deviceLayout: 'phone' });
-    await user.click(screen.getByRole('button', { name: '文字與位置' }));
+    await user.click(screen.getByRole('button', { name: '文字欄位' }));
     expect(screen.getByRole('textbox', { name: '小節標籤' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '上方註記' }));
     expect(screen.getByRole('textbox', { name: '上方註記' })).toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: '小節標籤' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '左側文字' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '右側文字' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '上方註記' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '返回和弦鍵盤' }));
     expect(screen.getByRole('button', { name: '選擇小節拍號' })).toBeInTheDocument();
   });
