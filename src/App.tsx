@@ -47,10 +47,11 @@ import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
-import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetMetaField, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
+import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
 import PreviewWysiwygEditor, { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
+import PreviewBarEditor from './components/preview-edit/PreviewBarEditor';
 import SongEditor from './components/SongEditor';
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
@@ -68,6 +69,27 @@ import { createCloudRepository } from './lib/repository';
 import { loadPendingSync, markMigrationCompleted, hasCompletedMigration, savePendingSync } from './lib/workspace';
 import { mergeWorkspaceByUpdatedAt, syncWorkspaceDiff } from './lib/sync';
 import { hasSupabaseConfig } from './lib/supabase';
+import {
+  applyPreviewDraft,
+  createPreviewEditSession,
+  PreviewEditField,
+  PreviewEditSession,
+  redoPreviewDraft,
+  retargetPreviewEditSession,
+  setPreviewEditInputMode,
+  undoPreviewDraft
+} from './lib/previewEditSession';
+import {
+  createEmptyBar,
+  deleteBar,
+  detectSectionChordInputMode,
+  duplicateBar,
+  ensureSongEditingIds,
+  findSongBar,
+  getBeatCount,
+  getSectionStoredKey,
+  insertBar
+} from './lib/songEditing';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -81,6 +103,7 @@ const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
 const LIBRARY_SORT_STORAGE_KEY = 'chordmaster.library-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const GUITARIST_MODE_STORAGE_KEY = 'chordmaster.guitarist-mode.v1';
+const PREVIEW_QUICK_EDIT_STORAGE_KEY = 'chordmaster.preview-quick-edit.v1';
 const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
 const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
@@ -1582,6 +1605,11 @@ const loadGuitaristMode = (): boolean => {
   return window.localStorage.getItem(GUITARIST_MODE_STORAGE_KEY) === 'true';
 };
 
+const loadPreviewQuickEditPreference = (): boolean => {
+  if (typeof window === 'undefined') return true;
+  return window.localStorage.getItem(PREVIEW_QUICK_EDIT_STORAGE_KEY) !== 'false';
+};
+
 const loadSetlistSortPreference = (): SetlistSortMode => {
   if (typeof window === 'undefined') {
     return 'updated-desc';
@@ -1850,6 +1878,9 @@ export default function App() {
   );
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
+  const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
+  const [previewEditSession, setPreviewEditSession] = useState<PreviewEditSession | null>(null);
+  const [isPreviewEditExitPromptOpen, setIsPreviewEditExitPromptOpen] = useState(false);
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
   const toast = useToast();
@@ -2015,6 +2046,7 @@ export default function App() {
   const mobileLongPressTriggeredRef = useRef(false);
   const editorFocusTimeoutRef = useRef<number | null>(null);
   const editorFocusRequestIdRef = useRef(0);
+  const pendingPreviewTransitionRef = useRef<(() => void) | null>(null);
   // When a section/chord of a *non-selected* setlist song is clicked in the
   // preview, we first switch the focused setlist song (async) and stash the
   // desired editor target here so it can be applied once that song is active.
@@ -2024,6 +2056,7 @@ export default function App() {
     sIdx: number;
     bIdx: number;
     field: ChordSheetElementField;
+    target?: ChordSheetElementTarget;
   } | null>(null);
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
   const previewPinchStateRef = useRef<PreviewPinchState | null>(null);
@@ -2284,6 +2317,22 @@ export default function App() {
   const activeNavigationPreviewSong = isSetlistMode
     ? (activeSetlistPreviewSong ?? activeEditorSong)
     : song;
+  const activePreviewIdentity = isSetlistMode ? selectedSetlistSong?.id ?? null : song?.id ?? null;
+  const activePreviewEditSession = previewEditSession?.previewIdentity === activePreviewIdentity
+    ? previewEditSession
+    : null;
+  const activeDraftEditorSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
+  const activeDraftNavigationPreviewSong = isSetlistMode
+    ? (activeDraftEditorSong && selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
+        ? {
+            ...applySetlistSongOverrides(activeDraftEditorSong, effectiveSelectedSetlist, selectedSetlistSong, guitaristMode),
+            references: selectedSetlistSourceSong.references,
+            ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
+              ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+              : {})
+          }
+        : activeNavigationPreviewSong)
+    : activeDraftEditorSong;
   const activeAppViewLabel = activeAppView === 'about'
     ? copy.about
     : activeAppView === 'help'
@@ -2446,6 +2495,36 @@ export default function App() {
         <Save size={14} />
         <span>{isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}</span>
       </button>
+
+      {isSheetView && canOpenEditor && (
+        <button
+          type="button"
+          onClick={() => {
+            const nextEnabled = !isPreviewQuickEditEnabled;
+            if (!nextEnabled && previewEditSession?.dirty) {
+              pendingPreviewTransitionRef.current = () => {
+                setPreviewEditSession(null);
+                setIsPreviewQuickEditEnabled(false);
+              };
+              setIsPreviewEditExitPromptOpen(true);
+            } else {
+              if (!nextEnabled) setPreviewEditSession(null);
+              setIsPreviewQuickEditEnabled(nextEnabled);
+            }
+            setIsToolbarOverflowMenuOpen(false);
+          }}
+          className={`mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+            isPreviewQuickEditEnabled
+              ? 'bg-indigo-50 text-indigo-700'
+              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]'
+          }`}
+          role="menuitemcheckbox"
+          aria-checked={isPreviewQuickEditEnabled}
+        >
+          <span className="flex items-center gap-2"><Edit3 size={14} /><span>{language === 'zh' ? '預覽快捷編輯' : 'Preview quick edit'}</span></span>
+          <span className="text-[11px] font-bold">{isPreviewQuickEditEnabled ? copy.on : copy.off}</span>
+        </button>
+      )}
 
       {isAuthenticated ? (
         <>
@@ -3303,19 +3382,31 @@ export default function App() {
   };
 
   const runSelectionChange = async (applySelection: () => void) => {
-    setActiveAppView('sheet');
+    const performSelectionChange = async () => {
+      setActiveAppView('sheet');
 
-    // Always persist silently in the background when switching songs so the user
-    // is never interrupted by a save prompt (changes are never lost).
-    if (workspaceIsDirty) {
-      try {
-        await persistWorkspace(songs, setlists);
-      } catch {
-        // Keep edits in memory and still switch; the next save will retry.
+      // Always persist silently in the background when switching songs so the user
+      // is never interrupted by a save prompt (changes are never lost).
+      if (workspaceIsDirty) {
+        try {
+          await persistWorkspace(songs, setlists);
+        } catch {
+          // Keep edits in memory and still switch; the next save will retry.
+        }
       }
-    }
 
-    applySelection();
+      applySelection();
+    };
+
+    if (previewEditSession?.dirty) {
+      pendingPreviewTransitionRef.current = () => { void performSelectionChange(); };
+      setIsPreviewEditExitPromptOpen(true);
+      return;
+    }
+    if (previewEditSession) {
+      setPreviewEditSession(null);
+    }
+    await performSelectionChange();
   };
 
   const handleSaveLibrary = async () => {
@@ -3327,6 +3418,15 @@ export default function App() {
   };
 
   const handleAppViewChange = (nextView: AppView) => {
+    if (previewEditSession?.dirty) {
+      pendingPreviewTransitionRef.current = () => {
+        setPreviewEditSession(null);
+        setActiveAppView((currentView) => currentView === nextView ? 'sheet' : nextView);
+      };
+      setIsPreviewEditExitPromptOpen(true);
+      return;
+    }
+    if (previewEditSession) setPreviewEditSession(null);
     setActiveAppView((currentView) => currentView === nextView ? 'sheet' : nextView);
   };
 
@@ -3632,6 +3732,15 @@ export default function App() {
   };
 
   const handleToggleLyricsMode = () => {
+    if (previewEditSession?.dirty) {
+      pendingPreviewTransitionRef.current = () => {
+        setPreviewEditSession(null);
+        setIsLyricsMode((current) => !current);
+      };
+      setIsPreviewEditExitPromptOpen(true);
+      return;
+    }
+    if (previewEditSession) setPreviewEditSession(null);
     // Pure local view toggle between the chord chart and the lyrics formatter.
     setIsLyricsMode((current) => !current);
   };
@@ -6105,6 +6214,8 @@ export default function App() {
         previewClone.style.maxWidth = '794px';
         previewClone.style.margin = '0';
 
+        previewClone.querySelectorAll('[data-preview-slot-hit]').forEach((node) => node.remove());
+
         previewClone.querySelectorAll<HTMLElement>('[data-print-page]').forEach((node) => {
           node.style.boxShadow = 'none';
           node.style.borderColor = 'transparent';
@@ -6178,6 +6289,17 @@ export default function App() {
   }, []);
 
   const handleEnterPerformanceMode = () => {
+    if (previewEditSession?.dirty) {
+      pendingPreviewTransitionRef.current = () => {
+        setPreviewEditSession(null);
+        performancePageIndexRef.current = 0;
+        setPerformancePageIndex(0);
+        setIsPerformanceMode(true);
+      };
+      setIsPreviewEditExitPromptOpen(true);
+      return;
+    }
+    if (previewEditSession) setPreviewEditSession(null);
     performancePageIndexRef.current = 0;
     setPerformancePageIndex(0);
     setIsPerformanceMode(true);
@@ -6755,6 +6877,14 @@ export default function App() {
 
   useEffect(() => {
     try {
+      window.localStorage.setItem(PREVIEW_QUICK_EDIT_STORAGE_KEY, isPreviewQuickEditEnabled ? 'true' : 'false');
+    } catch {
+      // Preference persistence is optional; editing remains usable in memory.
+    }
+  }, [isPreviewQuickEditEnabled]);
+
+  useEffect(() => {
+    try {
       if (selectedSetlistId) {
         window.localStorage.setItem(SELECTED_SETLIST_STORAGE_KEY, selectedSetlistId);
       } else {
@@ -7046,13 +7176,160 @@ export default function App() {
       if (!anchorRect) return null;
       return { ...current, anchorRect };
     });
+    setPreviewEditSession((current) => {
+      if (!current) return current;
+      const anchorRect = findPreviewAnchorRect(current.target.anchorKey);
+      return anchorRect
+        ? { ...current, target: { ...current.target, anchorRect } }
+        : current;
+    });
   }, [findPreviewAnchorRect]);
 
   const getPreviewIdentityForCurrentMode = React.useCallback(() => (
     isSetlistMode ? (selectedSetlistSong?.id ?? null) : (song?.id ?? null)
   ), [isSetlistMode, selectedSetlistSong?.id, song?.id]);
 
-  const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: ChordSheetElementField) => {
+  const commitPreviewEditSession = React.useCallback((session: PreviewEditSession | null = previewEditSession) => {
+    if (!session?.dirty) {
+      setPreviewEditSession(null);
+      return;
+    }
+    if (isSetlistMode && session.previewIdentity === selectedSetlistSong?.id) {
+      handleSetlistSongContentChange(session.draftSong);
+    } else if (!isSetlistMode && session.previewIdentity === song?.id) {
+      handleSongChange(session.draftSong);
+    }
+    setPreviewEditSession(null);
+  }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode, previewEditSession, selectedSetlistSong?.id, song?.id]);
+
+  const applyPreviewEditDraft = React.useCallback((nextSong: Song, options?: { mergeKey?: string }) => {
+    setPreviewEditSession((current) => current ? applyPreviewDraft(current, nextSong, options) : current);
+  }, []);
+
+  const handleActiveEditorSongChange = React.useCallback((nextSong: Song) => {
+    if (activePreviewEditSession) {
+      applyPreviewEditDraft(nextSong);
+    } else if (isSetlistMode) {
+      handleSetlistSongContentChange(nextSong);
+    } else {
+      handleSongChange(nextSong);
+    }
+  }, [activePreviewEditSession, applyPreviewEditDraft, handleSetlistSongContentChange, handleSongChange, isSetlistMode]);
+
+  const makePreviewTargetAnchorKey = React.useCallback((previewIdentity: string, sectionId: string, barId: string, slotIndex: number) => (
+    `${previewIdentity}|${sectionId}|${barId}|chords|${slotIndex}`
+  ), []);
+
+  const handlePreviewEditNavigate = React.useCallback((direction: 'previous' | 'next') => {
+    setPreviewEditSession((current) => {
+      if (!current) return current;
+      const located = findSongBar(current.draftSong, current.target);
+      if (!located) return current;
+      const beatCount = getBeatCount(current.draftSong, located.bar);
+      if (direction === 'previous' && current.target.slotIndex > 0) {
+        const slotIndex = current.target.slotIndex - 1;
+        const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, slotIndex);
+        return retargetPreviewEditSession(current, {
+          ...current.target,
+          slotIndex,
+          rawChordIndex: null,
+          anchorKey,
+          anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+        });
+      }
+      if (direction === 'next' && current.target.slotIndex + 1 < beatCount) {
+        const slotIndex = current.target.slotIndex + 1;
+        const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, slotIndex);
+        return retargetPreviewEditSession(current, {
+          ...current.target,
+          slotIndex,
+          rawChordIndex: null,
+          anchorKey,
+          anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+        });
+      }
+
+      if (direction === 'previous') {
+        const previousBar = located.section.bars[located.barIndex - 1];
+        if (!previousBar?.id) return current;
+        const previousBeatCount = getBeatCount(current.draftSong, previousBar);
+        const slotIndex = previousBeatCount - 1;
+        const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, previousBar.id, slotIndex);
+        return retargetPreviewEditSession(current, {
+          ...current.target,
+          barId: previousBar.id,
+          slotIndex,
+          rawChordIndex: null,
+          anchorKey,
+          anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+        });
+      }
+
+      let draftSong = current.draftSong;
+      let nextBar = located.section.bars[located.barIndex + 1];
+      if (!nextBar) {
+        nextBar = createEmptyBar();
+        draftSong = insertBar(draftSong, current.target, 'after', nextBar);
+      }
+      if (!nextBar.id) return current;
+      const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, nextBar.id, 0);
+      const withDraft = draftSong === current.draftSong ? current : applyPreviewDraft(current, draftSong);
+      return retargetPreviewEditSession(withDraft, {
+        ...current.target,
+        barId: nextBar.id,
+        slotIndex: 0,
+        rawChordIndex: null,
+        anchorKey,
+        anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+      });
+    });
+    window.requestAnimationFrame(() => {
+      refreshPreviewEditAnchorRect();
+    });
+  }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
+
+  const handlePreviewEditStructure = React.useCallback((action: 'insert-before' | 'insert-after' | 'duplicate' | 'delete') => {
+    setPreviewEditSession((current) => {
+      if (!current) return current;
+      const located = findSongBar(current.draftSong, current.target);
+      if (!located) return current;
+      let draftSong = current.draftSong;
+      let targetBarId = current.target.barId;
+
+      if (action === 'insert-before' || action === 'insert-after') {
+        const newBar = createEmptyBar();
+        draftSong = insertBar(draftSong, current.target, action === 'insert-before' ? 'before' : 'after', newBar);
+        targetBarId = newBar.id!;
+      } else if (action === 'duplicate') {
+        draftSong = duplicateBar(draftSong, current.target);
+        const nextLocated = findSongBar(draftSong, current.target);
+        targetBarId = nextLocated?.section.bars[nextLocated.barIndex + 1]?.id ?? targetBarId;
+      } else {
+        draftSong = deleteBar(draftSong, current.target);
+        const sameSection = draftSong.sections.find((section) => section.id === current.target.sectionId);
+        targetBarId = sameSection?.bars[Math.max(0, Math.min(located.barIndex - 1, sameSection.bars.length - 1))]?.id
+          ?? draftSong.sections.flatMap((section) => section.bars).find((candidate) => candidate.id)?.id
+          ?? targetBarId;
+      }
+
+      const nextSession = applyPreviewDraft(current, draftSong);
+      const targetSection = draftSong.sections.find((section) => section.bars.some((candidate) => candidate.id === targetBarId));
+      if (!targetSection?.id || !targetBarId) return nextSession;
+      const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, targetSection.id, targetBarId, 0);
+      return retargetPreviewEditSession(nextSession, {
+        ...current.target,
+        sectionId: targetSection.id,
+        barId: targetBarId,
+        slotIndex: 0,
+        rawChordIndex: null,
+        anchorKey,
+        anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+      });
+    });
+    window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+  }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
+
+  const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: ChordSheetElementField, target?: ChordSheetElementTarget) => {
     if (!activeEditorSong || !activeNavigationPreviewSong) {
       return;
     }
@@ -7071,6 +7348,47 @@ export default function App() {
       return;
     }
 
+    const previewField: PreviewEditField | null = field === 'chords'
+      ? 'chords'
+      : field === 'marker'
+        ? 'symbols'
+        : field === 'label' || field === 'annotation'
+          ? 'text'
+          : null;
+    if (isPreviewQuickEditEnabled && previewField && bIdx >= 0) {
+      const editableSong = ensureSongEditingIds(activeEditorSong);
+      const editableSection = editableSong.sections[nextSectionIndex];
+      const editableBar = editableSection?.bars[bIdx];
+      const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
+      if (editableSection?.id && editableBar?.id && previewIdentity) {
+        const slotIndex = target?.slotIndex ?? 0;
+        const anchorKey = target?.anchorKey
+          ?? makePreviewTargetAnchorKey(previewIdentity, editableSection.id, editableBar.id, slotIndex);
+        const nextTarget = {
+          previewIdentity,
+          sectionId: editableSection.id,
+          barId: editableBar.id,
+          field: previewField,
+          slotIndex,
+          rawChordIndex: target?.rawChordIndex ?? null,
+          anchorKey,
+          anchorRect: target?.anchorRect ?? findPreviewAnchorRect(anchorKey) ?? {
+            left: 16, top: 16, right: 32, bottom: 32, width: 16, height: 16
+          }
+        };
+        setPreviewEditSession((current) => (
+          current?.previewIdentity === previewIdentity
+            ? retargetPreviewEditSession(current, nextTarget)
+            : createPreviewEditSession({
+                song: editableSong,
+                target: nextTarget,
+                inputMode: detectSectionChordInputMode(editableSection)
+              })
+        ));
+        return;
+      }
+    }
+
     if (editorFocusTimeoutRef.current !== null) {
       window.clearTimeout(editorFocusTimeoutRef.current);
       editorFocusTimeoutRef.current = null;
@@ -7085,11 +7403,31 @@ export default function App() {
     } else {
       focusEditorField(nextSectionIndex, bIdx, field);
     }
-  }, [activeEditorSong, activeNavigationPreviewSong, canOpenEditor, focusEditorField, isEditing]);
+  }, [activeEditorSong, activeNavigationPreviewSong, canOpenEditor, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, isEditing, isPreviewQuickEditEnabled, makePreviewTargetAnchorKey]);
 
   const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
     if (!canOpenEditor) {
       return;
+    }
+
+    if (previewEditSession?.dirty) {
+      pendingPreviewTransitionRef.current = () => {
+        const previewIdentity = getPreviewIdentityForCurrentMode();
+        const anchorKey = meta.anchorKey ?? getChordSheetMetaAnchorKey(previewIdentity, field);
+        const anchorRect = meta.anchorRect ?? findPreviewAnchorRect(anchorKey);
+        if (!anchorRect) return;
+        if (!hasFinePointer && (field === 'title' || field === 'credits' || field === 'tempo' || field === 'timeSignature')) {
+          const proxyInput = mobileWysiwygKeyboardProxyInputRef.current;
+          proxyInput?.focus({ preventScroll: true });
+        }
+        setPreviewEditSession(null);
+        setPreviewMetaEditTarget({ field, anchorKey, anchorRect, previewIdentity });
+      };
+      setIsPreviewEditExitPromptOpen(true);
+      return;
+    }
+    if (previewEditSession) {
+      setPreviewEditSession(null);
     }
 
     // iOS only opens the software keyboard when focus happens inside the
@@ -7123,7 +7461,7 @@ export default function App() {
       anchorRect,
       previewIdentity
     });
-  }, [canOpenEditor, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, hasFinePointer]);
+  }, [canOpenEditor, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, hasFinePointer, previewEditSession]);
 
   // In setlist mode the preview stacks every song. Clicking a section/chord of a
   // song that isn't the currently focused one should (1) switch the focused
@@ -7135,10 +7473,11 @@ export default function App() {
     previewSong: Song,
     sIdx: number,
     bIdx: number,
-    field: ChordSheetElementField
+    field: ChordSheetElementField,
+    target?: ChordSheetElementTarget
   ) => {
     if (itemId === selectedSetlistSong?.id) {
-      handleElementClick(sIdx, bIdx, field);
+      handleElementClick(sIdx, bIdx, field, target);
       return;
     }
 
@@ -7147,14 +7486,15 @@ export default function App() {
       sectionId: previewSong.sections[sIdx]?.id ?? null,
       sIdx,
       bIdx,
-      field
+      field,
+      target
     };
     setPreviewMetaEditTarget(null);
-    if (canOpenEditor) {
+    if (canOpenEditor && !isPreviewQuickEditEnabled) {
       setIsEditing(true);
     }
     handleSelectSetlistSong(itemId);
-  }, [canOpenEditor, handleElementClick, handleSelectSetlistSong, selectedSetlistSong?.id]);
+  }, [canOpenEditor, handleElementClick, handleSelectSetlistSong, isPreviewQuickEditEnabled, selectedSetlistSong?.id]);
 
   const handleScrollPreviewToTop = React.useCallback(() => {
     const scrollRoot = previewRef.current;
@@ -7268,21 +7608,26 @@ export default function App() {
       return <LyricsSheet song={song} language={language} />;
     }
 
+    const renderedSong = (activePreviewEditSession && activeDraftNavigationPreviewSong
+      ? activeDraftNavigationPreviewSong
+      : song) as StoredSong;
+
     return (
       <ChordSheet
-        song={song}
+        song={renderedSong}
         language={language}
-        currentKey={song.currentKey}
-        onElementClick={handleElementClick}
+        currentKey={renderedSong.currentKey}
+        onElementClick={canOpenEditor ? handleElementClick : undefined}
         onMetaClick={canOpenEditor ? handleMetaClick : undefined}
-        onAddBarClick={canEditTeamSongs ? handleAddBarToSection : undefined}
+        onAddBarClick={canEditTeamSongs && !activePreviewEditSession ? handleAddBarToSection : undefined}
         highlightedSectionIds={highlightedSectionIds}
-        activeSectionId={isEditing ? activeSectionId : null}
-        activeBar={isEditing ? activeBar : null}
+        activeSectionId={isEditing || activePreviewEditSession ? activeSectionId : null}
+        activeBar={isEditing || activePreviewEditSession ? activeBar : null}
+        activeChordSlot={activePreviewEditSession?.target ?? null}
         previewIdentity={song.id}
       />
     );
-  }, [activeBar, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, handleMetaClick, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
+  }, [activeBar, activeDraftNavigationPreviewSong, activePreviewEditSession, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, handleMetaClick, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -7291,8 +7636,8 @@ export default function App() {
 
     return setlistSongsWithSource.map(({ item, sourceSong }) => {
       const isSelected = item.id === selectedSetlistSong?.id;
-      const previewSong = isSelected && activeSetlistPreviewSong
-        ? activeSetlistPreviewSong
+      const previewSong = isSelected && activeDraftNavigationPreviewSong
+        ? activeDraftNavigationPreviewSong
         : {
             ...applySetlistSongOverrides(sourceSong, effectiveSelectedSetlist, item, guitaristMode),
             references: sourceSong.references,
@@ -7308,7 +7653,7 @@ export default function App() {
       };
     });
   }, [
-    activeSetlistPreviewSong,
+    activeDraftNavigationPreviewSong,
     effectiveSelectedSetlist,
     guitaristMode,
     isJoinedSetlist,
@@ -7348,19 +7693,20 @@ export default function App() {
               song={previewSong}
               language={language}
               currentKey={previewSong.currentKey}
-              onElementClick={(sIdx, bIdx, field) => handleSetlistElementClick(item.id, previewSong, sIdx, bIdx, field)}
+              onElementClick={canOpenEditor ? (sIdx, bIdx, field, target) => handleSetlistElementClick(item.id, previewSong, sIdx, bIdx, field, target) : undefined}
               onMetaClick={isSelected && canOpenEditor ? handleMetaClick : undefined}
-              onAddBarClick={isSelected && canEditSelectedSetlist ? handleAddBarToSection : undefined}
+              onAddBarClick={isSelected && canEditSelectedSetlist && !activePreviewEditSession ? handleAddBarToSection : undefined}
               highlightedSectionIds={isSelected ? highlightedSectionIds : []}
-              activeSectionId={isSelected && isEditing ? activeSectionId : null}
-              activeBar={isSelected && isEditing ? activeBar : null}
+              activeSectionId={isSelected && (isEditing || activePreviewEditSession) ? activeSectionId : null}
+              activeBar={isSelected && (isEditing || activePreviewEditSession) ? activeBar : null}
+              activeChordSlot={isSelected ? activePreviewEditSession?.target ?? null : null}
               previewIdentity={item.id}
             />
           </div>
         ))}
       </div>
     );
-  }, [activeBar, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleMetaClick, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activePreviewEditSession, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleMetaClick, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -7372,6 +7718,32 @@ export default function App() {
     setPreviewMetaEditTarget(null);
     setActiveSectionId(activeEditorSong?.sections[0]?.id ?? null);
   }, [currentPreviewIdentity]);
+
+  useEffect(() => {
+    if (!activePreviewEditSession) return;
+    const located = findSongBar(activePreviewEditSession.draftSong, activePreviewEditSession.target);
+    if (!located) return;
+    setActiveSectionId(located.section.id ?? null);
+    setActiveBar({ sIdx: located.sectionIndex, bIdx: located.barIndex });
+  }, [activePreviewEditSession?.target.barId, activePreviewEditSession?.target.sectionId]);
+
+  useEffect(() => {
+    if (!activePreviewEditSession) return;
+    const frame = window.requestAnimationFrame(() => {
+      const root = sheetRef.current;
+      if (!root) return;
+      const anchors = root.querySelectorAll('[data-preview-edit-anchor]') as NodeListOf<HTMLElement>;
+      let selectedAnchor: HTMLElement | null = null;
+      anchors.forEach((candidate) => {
+        if (candidate.dataset.previewEditAnchor === activePreviewEditSession.target.anchorKey) {
+          selectedAnchor = candidate;
+        }
+      });
+      selectedAnchor?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activePreviewEditSession?.target.anchorKey, refreshPreviewEditAnchorRect]);
 
   useEffect(() => {
     if (isLyricsMode) {
@@ -7399,6 +7771,27 @@ export default function App() {
       : -1;
     const targetIndex = sectionIndexById >= 0 ? sectionIndexById : pending.sIdx;
 
+    if (isPreviewQuickEditEnabled && pending.target) {
+      const section = activeEditorSong.sections[targetIndex];
+      const bar = section?.bars[pending.bIdx];
+      if (section?.id && bar?.id) {
+        const slotIndex = pending.target.slotIndex ?? 0;
+        const anchorKey = makePreviewTargetAnchorKey(pending.itemId, section.id, bar.id, slotIndex);
+        window.requestAnimationFrame(() => {
+          handleElementClick(targetIndex, pending.bIdx, pending.field, {
+            ...pending.target!,
+            previewIdentity: pending.itemId,
+            sectionId: section.id!,
+            barId: bar.id!,
+            slotIndex,
+            anchorKey,
+            anchorRect: findPreviewAnchorRect(anchorKey) ?? pending.target!.anchorRect
+          });
+        });
+        return;
+      }
+    }
+
     if (editorFocusTimeoutRef.current !== null) {
       window.clearTimeout(editorFocusTimeoutRef.current);
     }
@@ -7408,7 +7801,7 @@ export default function App() {
       focusEditorField(targetIndex, pending.bIdx, pending.field, true);
       editorFocusTimeoutRef.current = null;
     }, 520);
-  }, [activeEditorSong, focusEditorField, isSetlistMode, selectedSetlistSongId]);
+  }, [activeEditorSong, findPreviewAnchorRect, focusEditorField, handleElementClick, isPreviewQuickEditEnabled, isSetlistMode, makePreviewTargetAnchorKey, selectedSetlistSongId]);
 
   useEffect(() => {
     if (isPerformanceMode || !isSetlistMode || !selectedSetlistSongId || setlistPreviewSongs.length === 0) {
@@ -7452,7 +7845,7 @@ export default function App() {
     // narrow and any reflow/scroll (including the auto-scroll-to-selected
     // effect itself) would otherwise ping-pong the selection between two
     // adjacent songs and re-mount the editor on each swap.
-    if (isPerformanceMode || !isSetlistMode || isEditing || setlistPreviewSongs.length === 0) {
+    if (isPerformanceMode || !isSetlistMode || isEditing || previewEditSession || setlistPreviewSongs.length === 0) {
       return;
     }
 
@@ -7512,7 +7905,7 @@ export default function App() {
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [isPerformanceMode, isSetlistMode, isEditing, selectedSetlistSongId, setlistPreviewSongs.length]);
+  }, [isPerformanceMode, isSetlistMode, isEditing, previewEditSession, selectedSetlistSongId, setlistPreviewSongs.length]);
 
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
     const clampedScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, nextScale));
@@ -8118,13 +8511,13 @@ export default function App() {
         <SongMetadataPanel
           song={isJoinedSetlist
             ? {
-                ...(activeSetlistEditableSong ?? selectedSetlistSourceSong),
+                ...(activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong),
                 barNumberMode: joinedSetlistDisplayPreference.barNumberMode
                   ?? activeSetlistPreviewSong?.barNumberMode
-                  ?? (activeSetlistEditableSong ?? selectedSetlistSourceSong).barNumberMode
+                  ?? (activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong).barNumberMode
                   ?? 'none'
               }
-            : activeSetlistEditableSong ?? selectedSetlistSourceSong}
+            : activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong}
           language={language}
           metadataSuggestions={metadataSuggestions}
           title={copy.setlistEditor.instanceSettings}
@@ -8136,7 +8529,7 @@ export default function App() {
               return;
             }
 
-            handleSetlistSongContentChange(nextSong);
+            handleActiveEditorSongChange(nextSong);
           }}
           keyValue={currentSetlistKey}
           capoValue={currentSetlistCapo}
@@ -8156,16 +8549,16 @@ export default function App() {
       ) : null)
     : hasSongs ? (
         <SongMetadataPanel
-          song={song}
+          song={(activeDraftEditorSong ?? song) as StoredSong}
           language={language}
           metadataSuggestions={metadataSuggestions}
           title={language === 'zh' ? '編輯歌曲' : 'Edit Song'}
-          onChange={handleSongChange}
-          jianpuInputAbsolute={song.jianpuInputAbsolute ?? false}
-          onJianpuInputAbsoluteChange={(value) => handleSongChange(
-            value === Boolean(song.jianpuInputAbsolute)
-              ? { ...song, jianpuInputAbsolute: value }
-              : reinterpretSongJianpuInput({ ...song, jianpuInputAbsolute: value }, value)
+          onChange={handleActiveEditorSongChange}
+          jianpuInputAbsolute={(activeDraftEditorSong ?? song).jianpuInputAbsolute ?? false}
+          onJianpuInputAbsoluteChange={(value) => handleActiveEditorSongChange(
+            value === Boolean((activeDraftEditorSong ?? song).jianpuInputAbsolute)
+              ? { ...(activeDraftEditorSong ?? song), jianpuInputAbsolute: value }
+              : reinterpretSongJianpuInput({ ...(activeDraftEditorSong ?? song), jianpuInputAbsolute: value }, value)
           )}
         />
       ) : null;
@@ -12305,13 +12698,13 @@ export default function App() {
                         ) : (
                           <SongEditor
                             key={`${selectedSetlistSong.id}-song`}
-                            song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
+                            song={activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong}
                             language={language}
                             isPhoneViewport={isPhoneViewport}
-                            history={currentSetlistSongHistory}
-                            onUndo={handleSetlistUndo}
-                            onRedo={handleSetlistRedo}
-                            onChange={handleSetlistSongContentChange}
+                            history={activePreviewEditSession ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future } : currentSetlistSongHistory}
+                            onUndo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : handleSetlistUndo}
+                            onRedo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : handleSetlistRedo}
+                            onChange={handleActiveEditorSongChange}
                             metadataMode="setlist"
                             hideMetadataPanel
                             hideBarNumberControls
@@ -12349,13 +12742,13 @@ export default function App() {
                         ) : (
                           <SongEditor
                             key={song.id}
-                            song={song}
+                            song={(activeDraftEditorSong ?? song) as StoredSong}
                             language={language}
                             isPhoneViewport={isPhoneViewport}
-                            history={currentSongHistory}
-                            onUndo={handleUndo}
-                            onRedo={handleRedo}
-                            onChange={handleSongChange}
+                            history={activePreviewEditSession ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future } : currentSongHistory}
+                            onUndo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : handleUndo}
+                            onRedo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : handleRedo}
+                            onChange={handleActiveEditorSongChange}
                             hideMetadataPanel
                             showInlineAddSectionButton
                             activeSectionId={activeSectionId}
@@ -12382,16 +12775,16 @@ export default function App() {
                       <ChevronUp size={18} />
                     </button>
                     <button
-                      onClick={isSetlistMode ? handleSetlistUndo : handleUndo}
-                      disabled={isSetlistMode ? currentSetlistSongHistory.past.length === 0 : currentSongHistory.past.length === 0}
+                      onClick={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : isSetlistMode ? handleSetlistUndo : handleUndo}
+                      disabled={activePreviewEditSession ? activePreviewEditSession.past.length === 0 : isSetlistMode ? currentSetlistSongHistory.past.length === 0 : currentSongHistory.past.length === 0}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
                       title={copy.undo}
                     >
                       <Undo2 size={18} />
                     </button>
                     <button
-                      onClick={isSetlistMode ? handleSetlistRedo : handleRedo}
-                      disabled={isSetlistMode ? currentSetlistSongHistory.future.length === 0 : currentSongHistory.future.length === 0}
+                      onClick={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : isSetlistMode ? handleSetlistRedo : handleRedo}
+                      disabled={activePreviewEditSession ? activePreviewEditSession.future.length === 0 : isSetlistMode ? currentSetlistSongHistory.future.length === 0 : currentSongHistory.future.length === 0}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
                       title={copy.redo}
                     >
@@ -12454,6 +12847,32 @@ export default function App() {
               aria-hidden="true"
               className="fixed left-0 top-0 h-px w-px opacity-0 pointer-events-none"
             />
+            {activePreviewEditSession && activeDraftNavigationPreviewSong && canOpenEditor && !isLyricsMode && (() => {
+              const storedKey = getSectionStoredKey(activePreviewEditSession.draftSong, activePreviewEditSession.target.sectionId);
+              const globalOffset = getTransposeOffset(activePreviewEditSession.draftSong.originalKey, activeDraftNavigationPreviewSong.currentKey);
+              const displayedChartKey = transposeKeyWithPreference(storedKey, globalOffset, activeDraftNavigationPreviewSong.currentKey);
+              const displayedKey = getPlayKey(displayedChartKey, activeDraftNavigationPreviewSong.capo ?? 0);
+              const section = activePreviewEditSession.draftSong.sections.find((candidate) => candidate.id === activePreviewEditSession.target.sectionId);
+              const storageMode = section ? detectSectionChordInputMode(section) : 'letters';
+              return (
+                <PreviewBarEditor
+                  session={activePreviewEditSession}
+                  language={language}
+                  deviceLayout={isPhoneViewport ? 'phone' : hasFinePointer ? 'desktop' : 'tablet'}
+                  storedKey={storedKey}
+                  displayedKey={displayedKey}
+                  storageMode={storageMode}
+                  onApplyDraft={applyPreviewEditDraft}
+                  onInputModeChange={(mode) => setPreviewEditSession((current) => current ? setPreviewEditInputMode(current, mode) : current)}
+                  onNavigate={handlePreviewEditNavigate}
+                  onStructure={handlePreviewEditStructure}
+                  onUndo={() => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current)}
+                  onRedo={() => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current)}
+                  onDone={() => commitPreviewEditSession()}
+                  onCancel={() => setPreviewEditSession(null)}
+                />
+              );
+            })()}
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
               <PreviewWysiwygEditor
                 song={activeEditorSong}
@@ -13355,6 +13774,69 @@ export default function App() {
                   className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
                 >
                   {isRevokingSetlistShare ? copy.cloudSyncSyncing : copy.setlistSharingCancel}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isPreviewEditExitPromptOpen && previewEditSession?.dirty && (
+          <motion.div
+            className="fixed inset-0 z-[6000] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-[2px]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              role="alertdialog"
+              aria-modal="true"
+              aria-label={language === 'zh' ? '預覽編輯尚未完成' : 'Preview edit is unfinished'}
+              initial={{ y: 10, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 8, opacity: 0 }}
+              className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_28px_80px_rgba(15,23,42,0.3)]"
+            >
+              <h2 className="text-lg font-black text-slate-900">{language === 'zh' ? '預覽編輯尚未完成' : 'Preview edit is unfinished'}</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{language === 'zh' ? '要先完成這次修改、捨棄草稿，還是留在目前位置繼續編輯？' : 'Finish this edit, discard the draft, or stay here and keep editing?'}</p>
+              <div className="mt-5 grid gap-2 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    pendingPreviewTransitionRef.current = null;
+                    pendingSetlistElementFocusRef.current = null;
+                    setIsPreviewEditExitPromptOpen(false);
+                  }}
+                  className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  {language === 'zh' ? '繼續編輯' : 'Keep editing'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const action = pendingPreviewTransitionRef.current;
+                    pendingPreviewTransitionRef.current = null;
+                    setPreviewEditSession(null);
+                    setIsPreviewEditExitPromptOpen(false);
+                    action?.();
+                  }}
+                  className="rounded-xl border border-rose-200 px-3 py-2.5 text-sm font-bold text-rose-700 hover:bg-rose-50"
+                >
+                  {language === 'zh' ? '捨棄草稿' : 'Discard'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const action = pendingPreviewTransitionRef.current;
+                    pendingPreviewTransitionRef.current = null;
+                    commitPreviewEditSession(previewEditSession);
+                    setIsPreviewEditExitPromptOpen(false);
+                    action?.();
+                  }}
+                  className="rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-indigo-500"
+                >
+                  {language === 'zh' ? '完成' : 'Finish'}
                 </button>
               </div>
             </motion.div>
