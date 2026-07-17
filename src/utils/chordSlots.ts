@@ -21,6 +21,14 @@ export const getTwoChordSplitSlotIndex = (beatsPerBar: number) => {
 export const getChordAnchorSlotIndexes = (chords: string[], beatsPerBar: number) => {
   const visibleChords = normalizeBarChords(chords);
   const beatCount = Math.max(1, beatsPerBar);
+  // A beat-count-wide array is an explicitly positioned beat grid. Older
+  // songs commonly store only the visible tokens (for example ["C", "G"]),
+  // which keeps the existing automatic two-chord distribution. Preview-first
+  // editing pads edited bars to the full beat count so an empty beat remains a
+  // real, addressable slot without changing the persisted JSON shape.
+  if (visibleChords.length >= beatCount) {
+    return visibleChords.slice(0, beatCount).map((_, index) => index);
+  }
   let lastVisibleIndex = visibleChords.length - 1;
   while (lastVisibleIndex >= 0 && !visibleChords[lastVisibleIndex].trim()) {
     lastVisibleIndex -= 1;
@@ -64,8 +72,9 @@ export const getChordAnchorSlotIndexes = (chords: string[], beatsPerBar: number)
 export const getChordDisplaySlots = (chords: string[], beatsPerBar: number) => {
   const beatCount = Math.max(1, beatsPerBar);
   const normalizedChords = normalizeBarChords(chords);
+  const hasExplicitBeatGrid = normalizedChords.length >= beatCount;
   let lastVisibleIndex = normalizedChords.length - 1;
-  while (lastVisibleIndex >= 0 && !normalizedChords[lastVisibleIndex].trim()) {
+  while (!hasExplicitBeatGrid && lastVisibleIndex >= 0 && !normalizedChords[lastVisibleIndex].trim()) {
     lastVisibleIndex -= 1;
   }
   const visibleChords = normalizedChords.slice(0, lastVisibleIndex + 1).slice(0, beatCount);
@@ -83,8 +92,9 @@ export const getChordDisplaySlots = (chords: string[], beatsPerBar: number) => {
 export const getChordDisplaySlotEntries = (chords: string[], beatsPerBar: number) => {
   const beatCount = Math.max(1, beatsPerBar);
   const normalizedChords = normalizeBarChords(chords);
+  const hasExplicitBeatGrid = normalizedChords.length >= beatCount;
   let lastVisibleIndex = normalizedChords.length - 1;
-  while (lastVisibleIndex >= 0 && !normalizedChords[lastVisibleIndex].trim()) {
+  while (!hasExplicitBeatGrid && lastVisibleIndex >= 0 && !normalizedChords[lastVisibleIndex].trim()) {
     lastVisibleIndex -= 1;
   }
   const visibleChords = normalizedChords.slice(0, lastVisibleIndex + 1).slice(0, beatCount);
@@ -92,6 +102,7 @@ export const getChordDisplaySlotEntries = (chords: string[], beatsPerBar: number
   const slots = Array.from({ length: beatCount }, () => null as { chord: string; rawIndex: number } | null);
 
   visibleChords.forEach((chord, rawIndex) => {
+    if (!chord.trim()) return;
     const slotIndex = slotIndexes[rawIndex] ?? Math.min(rawIndex, beatCount - 1);
     slots[slotIndex] = { chord, rawIndex };
   });
