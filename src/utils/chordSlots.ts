@@ -1,5 +1,26 @@
 import { normalizeBarChords } from './barUtils';
 
+const FULL_BAR_CHORD_TOKEN = /^(?:%|0w|\|\d{1,3}\|)$/i;
+const HALF_REST_CHORD_TOKEN = /^0h$/i;
+
+export const getChordTokenBeatSpan = (chord: string, beatsPerBar: number) => {
+  const beatCount = Math.max(1, beatsPerBar);
+  const token = chord.trim();
+  if (FULL_BAR_CHORD_TOKEN.test(token)) return beatCount;
+  if (HALF_REST_CHORD_TOKEN.test(token)) return 2;
+  return 1;
+};
+
+export const isFullBarChordToken = (chord: string) => FULL_BAR_CHORD_TOKEN.test(chord.trim());
+
+export interface ChordDisplaySlotOwnership {
+  chord: string;
+  rawIndex: number;
+  ownerSlotIndex: number;
+  span: number;
+  covered: boolean;
+}
+
 // Chord slot-placement helpers: given a bar's chords and its beats-per-bar,
 // work out which beat slot each chord sits in for the chord-sheet grid. These
 // are purely about chord layout (no lyrics involved).
@@ -108,4 +129,45 @@ export const getChordDisplaySlotEntries = (chords: string[], beatsPerBar: number
   });
 
   return slots;
+};
+
+export const getChordDisplaySlotOwnership = (chords: string[], beatsPerBar: number) => {
+  const beatCount = Math.max(1, beatsPerBar);
+  const entries = getChordDisplaySlotEntries(chords, beatCount);
+  const fullBarEntry = entries.find((entry) => entry && isFullBarChordToken(entry.chord));
+
+  if (fullBarEntry) {
+    return Array.from({ length: beatCount }, (_, slotIndex): ChordDisplaySlotOwnership => ({
+      chord: fullBarEntry.chord,
+      rawIndex: fullBarEntry.rawIndex,
+      ownerSlotIndex: 0,
+      span: beatCount,
+      covered: slotIndex > 0
+    }));
+  }
+
+  const ownership = Array.from({ length: beatCount }, () => null as ChordDisplaySlotOwnership | null);
+  entries.forEach((entry, slotIndex) => {
+    if (!entry) return;
+    const span = Math.min(getChordTokenBeatSpan(entry.chord, beatCount), beatCount - slotIndex);
+    ownership[slotIndex] = {
+      chord: entry.chord,
+      rawIndex: entry.rawIndex,
+      ownerSlotIndex: slotIndex,
+      span,
+      covered: false
+    };
+  });
+
+  entries.forEach((entry, slotIndex) => {
+    if (!entry) return;
+    const owner = ownership[slotIndex];
+    if (!owner || owner.covered || owner.ownerSlotIndex !== slotIndex || owner.span <= 1) return;
+    for (let offset = 1; offset < owner.span; offset += 1) {
+      const coveredSlotIndex = slotIndex + offset;
+      ownership[coveredSlotIndex] = { ...owner, covered: true };
+    }
+  });
+
+  return ownership;
 };

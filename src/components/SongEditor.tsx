@@ -12,6 +12,12 @@ import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, Jia
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 import { formatInitialCaps } from '../utils/textUtils';
 import { ANNOTATION_COLOR_OPTIONS, DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
+import {
+  mergeSectionToPrevious as mergeSongSectionToPrevious,
+  normalizeChordBeatTokens,
+  reorderSongSections,
+  splitSectionAtBar as splitSongSectionAtBar
+} from '../lib/songEditing';
 
 type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'marker';
 
@@ -968,30 +974,10 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const realignSectionsForCurrentOrder = (sections: Section[]) => {
-    const previousWrittenKeys = new Map<string, Key>();
-    let inheritedOldKey = song.originalKey;
-
-    song.sections.forEach((section, index) => {
-      if (section.keyChangeTo) {
-        inheritedOldKey = section.keyChangeTo;
-      }
-      previousWrittenKeys.set(section.id || `section-${index}`, inheritedOldKey);
-    });
-
-    let inheritedNewKey = song.originalKey;
-    const alignedSections = sections.map((section, index) => {
-      const identity = section.id || `section-${index}`;
-      const previousWrittenKey = previousWrittenKeys.get(identity) || inheritedNewKey;
-
-      if (section.keyChangeTo) {
-        inheritedNewKey = section.keyChangeTo;
-        return section;
-      }
-
-      return transposeSectionChordsToKey(section, previousWrittenKey, inheritedNewKey);
-    });
-
-    return normalizeSectionKeyChanges(alignedSections);
+    const orderedIds = sections.map((section) => section.id).filter((id): id is string => Boolean(id));
+    return orderedIds.length === sections.length
+      ? reorderSongSections(song, orderedIds).sections
+      : sections;
   };
 
   const applySectionKeyChangeFromIndex = (startIndex: number, nextWrittenKey?: Key) => {
@@ -4632,11 +4618,22 @@ const SongEditor: React.FC<Props> = ({
       if (hasPull) transformed += '>';
       if (hasAccent) transformed += '^';
       if (hasFermata) transformed += '~';
-      
-      newChords[targetChordIdx] = transformed;
+      if (type === 'rest1') {
+        newChords.splice(0, newChords.length, transformed);
+        targetChordIdx = 0;
+      } else {
+        newChords[targetChordIdx] = transformed;
+      }
+
+      const normalizedResult = normalizeChordBeatTokens(
+        newChords,
+        parseTimeSignature(bar.timeSignature || song.timeSignature).beats
+      );
+      if (normalizedResult.error) return;
+      const committedChords = normalizedResult.chords;
       
       const newBars = [...song.sections[sIdx].bars];
-      newBars[bIdx] = { ...bar, chords: newChords };
+      newBars[bIdx] = { ...bar, chords: committedChords };
       const newSections = [...song.sections];
       newSections[sIdx] = { ...song.sections[sIdx], bars: newBars };
       notifyChange({ ...song, sections: newSections });
@@ -4644,7 +4641,7 @@ const SongEditor: React.FC<Props> = ({
       // Update selection to keep the toolbar visible and correctly positioned
       let newCurrentPos = 0;
       for (let i = 0; i < targetChordIdx; i++) {
-        newCurrentPos += newChords[i].length + 1;
+        newCurrentPos += (committedChords[i]?.length ?? 0) + 1;
       }
       
       setSelection({
@@ -4796,46 +4793,29 @@ const SongEditor: React.FC<Props> = ({
 
   const splitSectionAtBar = (sIdx: number, bIdx: number) => {
     const section = song.sections[sIdx];
-    if (!section || bIdx <= 0 || bIdx >= section.bars.length) return;
-
-    const leadingBars = section.bars.slice(0, bIdx);
-    const trailingBars = section.bars.slice(bIdx);
-    if (leadingBars.length === 0 || trailingBars.length === 0) return;
-
-    const newSectionId = createSectionId();
-    const newSections = [...song.sections];
-    newSections[sIdx] = { ...section, bars: leadingBars };
-    newSections.splice(sIdx + 1, 0, {
-      id: newSectionId,
-      title: '',
-      bars: trailingBars
-    });
+    const bar = section?.bars[bIdx];
+    if (!section?.id || !bar?.id) return;
+    const result = splitSongSectionAtBar(song, { sectionId: section.id, barId: bar.id });
+    if (!result.created) return;
 
     clearEditorSelectionState();
-    notifyChange({ ...song, sections: newSections });
-    queueSectionTitleFocus(sIdx + 1, newSectionId);
+    notifyChange(result.song);
+    queueSectionTitleFocus(sIdx + 1, result.sectionId);
   };
 
   const mergeSectionToPrevious = (sIdx: number) => {
     if (sIdx <= 0) return;
 
-    const previousSection = song.sections[sIdx - 1];
     const section = song.sections[sIdx];
-    if (!previousSection || !section || section.bars.length === 0) return;
-
+    const previousSection = song.sections[sIdx - 1];
+    if (!previousSection || !section?.id || section.bars.length === 0) return;
     const mergedBarIndex = previousSection.bars.length;
-    const updatedPreviousSection = {
-      ...previousSection,
-      bars: [...previousSection.bars, ...section.bars]
-    };
-
-    const newSections = [...song.sections];
-    newSections[sIdx - 1] = updatedPreviousSection;
-    newSections.splice(sIdx, 1);
+    const result = mergeSongSectionToPrevious(song, section.id);
+    if (result.song === song) return;
 
     clearEditorSelectionState();
-    notifyChange({ ...song, sections: newSections });
-    queueChordInputFocus(sIdx - 1, mergedBarIndex, updatedPreviousSection.id ?? null);
+    notifyChange(result.song);
+    queueChordInputFocus(sIdx - 1, mergedBarIndex, result.sectionId);
   };
 
   const removeSection = (sIdx: number) => {
@@ -6612,8 +6592,12 @@ const SongEditor: React.FC<Props> = ({
                               const chordTokens = processedVal.split(' ').map((token) => (
                                 isNashvilleMode ? token : normalizeChordEnharmonic(token)
                               ));
-
-                              const nextChords = hasVisibleChordTokens(chordTokens) ? chordTokens : [];
+                              const parsedChords = normalizeChordBeatTokens(
+                                chordTokens,
+                                parseTimeSignature(bar.timeSignature || song.timeSignature).beats
+                              );
+                              if (parsedChords.error) return;
+                              const nextChords = hasVisibleChordTokens(parsedChords.chords) ? parsedChords.chords : [];
                               newBars[bIdx] = {
                                 ...bar,
                                 chords: nextChords,
@@ -6845,8 +6829,12 @@ const SongEditor: React.FC<Props> = ({
                           const chordTokens = processedVal.split(' ').map((token) => (
                             isNashvilleMode ? token : normalizeChordEnharmonic(token)
                           ));
-
-                          const nextChords = hasVisibleChordTokens(chordTokens) ? chordTokens : [];
+                          const parsedChords = normalizeChordBeatTokens(
+                            chordTokens,
+                            parseTimeSignature(bar.timeSignature || song.timeSignature).beats
+                          );
+                          if (parsedChords.error) return;
+                          const nextChords = hasVisibleChordTokens(parsedChords.chords) ? parsedChords.chords : [];
                           newBars[bIdx] = {
                             ...bar,
                             chords: nextChords,

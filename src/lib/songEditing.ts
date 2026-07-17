@@ -4,7 +4,12 @@
  * module.
  */
 import type { Bar, ChordMark, Key, Section, Song } from '../types';
-import { getChordDisplaySlotEntries } from '../utils/chordSlots';
+import {
+  getChordDisplaySlotEntries,
+  getChordDisplaySlotOwnership,
+  getChordTokenBeatSpan,
+  isFullBarChordToken
+} from '../utils/chordSlots';
 import {
   getNashvilleNumber,
   getTransposeOffset,
@@ -23,6 +28,17 @@ export interface SongBarIdentity {
 
 export interface SongChordTarget extends SongBarIdentity {
   slotIndex: number;
+}
+
+export interface SongSectionIdentity {
+  sectionId: string;
+}
+
+export interface SectionMutationResult {
+  song: Song;
+  sectionId: string;
+  firstBarId: string | null;
+  created: boolean;
 }
 
 export interface LocatedSongBar {
@@ -69,6 +85,12 @@ export const createEmptyBar = (): Bar => ({
   chords: []
 });
 
+export const createEmptySection = (title = ''): Section => ({
+  id: createId('section'),
+  title,
+  bars: [createEmptyBar()]
+});
+
 export const cloneBarForInsert = (bar: Bar): Bar => ({
   ...structuredClone(bar),
   id: createId('bar')
@@ -104,6 +126,13 @@ export const findSongBar = (song: Song, target: SongBarIdentity): LocatedSongBar
   return { sectionIndex, barIndex, section, bar: section.bars[barIndex] };
 };
 
+export const findSongSection = (song: Song, sectionId: string) => {
+  const sectionIndex = song.sections.findIndex((section) => section.id === sectionId);
+  return sectionIndex >= 0
+    ? { sectionIndex, section: song.sections[sectionIndex] }
+    : null;
+};
+
 const replaceLocatedBar = (song: Song, located: LocatedSongBar, bar: Bar): Song => {
   const bars = [...located.section.bars];
   bars[located.barIndex] = bar;
@@ -130,8 +159,6 @@ export const getChordBeatSlots = (bar: Bar, beatCount: number): ChordBeatSlot[] 
   }))
 );
 
-const BAR_WIDE_PREVIEW_TOKEN = /^(?:0h|0w|\|\d{1,3}\|)$/i;
-
 /**
  * Empty bars begin at beat one. Whole-bar style rests keep focus on the slot
  * that owns their token even when the user taps the visual span beside it.
@@ -141,15 +168,10 @@ export const resolvePreviewChordSlotIndex = (
   beatCount: number,
   requestedSlotIndex: number
 ): number => {
-  const slots = getChordBeatSlots(bar, beatCount);
   const safeRequestedSlot = Math.max(0, Math.min(beatCount - 1, requestedSlotIndex));
-  const occupiedSlots = slots
-    .map((slot, slotIndex) => ({ chord: slot.chord.trim(), slotIndex }))
-    .filter((slot) => Boolean(slot.chord));
-  if (occupiedSlots.length === 0) return 0;
-  if (slots[safeRequestedSlot]?.chord.trim()) return safeRequestedSlot;
-  return occupiedSlots.find((slot) => BAR_WIDE_PREVIEW_TOKEN.test(slot.chord))?.slotIndex
-    ?? safeRequestedSlot;
+  const ownership = getChordDisplaySlotOwnership(bar.chords, beatCount);
+  if (!ownership.some(Boolean)) return 0;
+  return ownership[safeRequestedSlot]?.ownerSlotIndex ?? safeRequestedSlot;
 };
 
 /**
@@ -187,16 +209,55 @@ export const setChordAtBeatSlot = (song: Song, target: SongChordTarget, chord: s
   updateBarById(song, target, (bar) => {
     const beatCount = getBeatCount(song, bar);
     if (target.slotIndex < 0 || target.slotIndex >= beatCount) return bar;
+    const normalizedChord = chord.trim();
+    const ownership = getChordDisplaySlotOwnership(bar.chords, beatCount);
+    const requestedOwnership = ownership[target.slotIndex];
+    const targetSlotIndex = isFullBarChordToken(normalizedChord)
+      ? 0
+      : requestedOwnership?.ownerSlotIndex ?? target.slotIndex;
+    const tokenSpan = getChordTokenBeatSpan(normalizedChord, beatCount);
+    if (/^0h$/i.test(normalizedChord) && targetSlotIndex + tokenSpan > beatCount) return bar;
+
     const slots = getChordBeatSlots(bar, beatCount).map((slot) => slot.chord);
-    slots[target.slotIndex] = chord.trim();
+    if (isFullBarChordToken(normalizedChord)) {
+      slots.fill('');
+      slots[0] = normalizedChord;
+    } else {
+      if (requestedOwnership) {
+        const existingEntries = getChordDisplaySlotEntries(bar.chords, beatCount);
+        const existingAnchorIndex = existingEntries.findIndex((entry) => entry?.rawIndex === requestedOwnership.rawIndex);
+        if (existingAnchorIndex >= 0) slots[existingAnchorIndex] = '';
+      }
+      for (let offset = 0; offset < tokenSpan; offset += 1) {
+        slots[targetSlotIndex + offset] = '';
+      }
+      slots[targetSlotIndex] = normalizedChord;
+    }
     const chords = serializeChordBeatSlots(slots, beatCount);
     return {
       ...bar,
       chords,
-      chordMarks: remapChordMarksByBeat(bar, chords, beatCount)
+      chordMarks: isFullBarChordToken(normalizedChord)
+        ? undefined
+        : remapChordMarksByBeat(bar, chords, beatCount)
     };
   })
 );
+
+export const getChordPlacementError = (
+  song: Song,
+  target: SongChordTarget,
+  chord: string
+): string | null => {
+  if (!/^0h$/i.test(chord.trim())) return null;
+  const located = findSongBar(song, target);
+  if (!located) return '找不到要編輯的小節。';
+  const beatCount = getBeatCount(song, located.bar);
+  const safeTargetSlot = Math.max(0, Math.min(beatCount - 1, target.slotIndex));
+  const slotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[safeTargetSlot]?.ownerSlotIndex
+    ?? safeTargetSlot;
+  return slotIndex + 2 > beatCount ? '二分休止需要連續兩拍。' : null;
+};
 
 export const clearChordAtBeatSlot = (song: Song, target: SongChordTarget): Song => (
   setChordAtBeatSlot(song, target, '')
@@ -236,19 +297,45 @@ export const setMultiMeasureRestAtBar = (
   };
 };
 
+export const normalizeChordBeatTokens = (
+  tokens: string[],
+  beatCount: number
+): ChordTextParseResult => {
+  const safeBeatCount = Math.max(1, beatCount);
+  const visibleTokens = tokens.map((token) => token.trim()).filter(Boolean);
+  const fullBarTokens = visibleTokens.filter((token) => isFullBarChordToken(token));
+  if (fullBarTokens.length > 0 && visibleTokens.length > 1) {
+    return {
+      chords: [],
+      error: '整小節符號不能和其他和弦放在同一小節。'
+    };
+  }
+  const occupiedBeatCount = visibleTokens.reduce((total, token) => total + getChordTokenBeatSpan(token, safeBeatCount), 0);
+  if (occupiedBeatCount > safeBeatCount) {
+    return {
+      chords: [],
+      error: `此小節最多可使用 ${safeBeatCount} 拍，目前內容需要 ${occupiedBeatCount} 拍。`
+    };
+  }
+  if (visibleTokens.some((token) => getChordTokenBeatSpan(token, safeBeatCount) > 1)) {
+    const positioned = Array.from({ length: safeBeatCount }, () => '');
+    let slotIndex = 0;
+    visibleTokens.forEach((token) => {
+      positioned[slotIndex] = token;
+      slotIndex += getChordTokenBeatSpan(token, safeBeatCount);
+    });
+    return { chords: positioned, error: null };
+  }
+  return { chords: tokens, error: null };
+};
+
 export const parseChordBarText = (value: string, beatCount: number): ChordTextParseResult => {
   const normalized = value
     .replace(/，/g, ',')
     .replace(/、/g, '/')
     .trim();
   const chords = normalized ? normalized.split(/\s+/).map((token) => token.trim()).filter(Boolean) : [];
-  if (chords.length > beatCount) {
-    return {
-      chords: [],
-      error: `此小節最多可放 ${beatCount} 個和弦，目前輸入 ${chords.length} 個。`
-    };
-  }
-  return { chords, error: null };
+  return normalizeChordBeatTokens(chords, beatCount);
 };
 
 export const setBarChordText = (song: Song, target: SongBarIdentity, value: string): ChordTextParseResult & { song: Song } => {
@@ -261,11 +348,12 @@ export const setBarChordText = (song: Song, target: SongBarIdentity, value: stri
     isNashville(token) ? token : normalizeChordEnharmonic(token)
   ));
   const chords = normalized.length === 0 ? [] : normalized;
+  const hasFullBarToken = chords.some((token) => isFullBarChordToken(token));
   return {
     song: replaceLocatedBar(song, located, {
       ...located.bar,
       chords,
-      chordMarks: remapChordMarksByBeat(located.bar, chords, beatCount)
+      chordMarks: hasFullBarToken ? undefined : remapChordMarksByBeat(located.bar, chords, beatCount)
     }),
     chords,
     error: null
@@ -318,6 +406,199 @@ const isFormatNeutralChord = (chord: string) => {
     || ['%', '/', 'N.C.'].includes(trimmed)
     || /^\|\d+\|$/.test(trimmed)
     || /^0(?:_|h|w)?$/i.test(trimmed);
+};
+
+const getSectionActiveKeys = (song: Song) => {
+  const activeKeys: Key[] = [];
+  let activeKey = song.originalKey;
+  song.sections.forEach((section) => {
+    if (section.keyChangeTo) activeKey = section.keyChangeTo;
+    activeKeys.push(activeKey);
+  });
+  return activeKeys;
+};
+
+const transposeSectionLetterChords = (
+  section: Section,
+  fromKey: Key,
+  toKey: Key
+): Section => {
+  if (fromKey === toKey) return section;
+  const offset = getTransposeOffset(fromKey, toKey);
+  return {
+    ...section,
+    bars: section.bars.map((bar) => ({
+      ...bar,
+      chords: bar.chords.map((token) => (
+        isFormatNeutralChord(token) || isNashville(token.trim())
+          ? token
+          : transposeChord(token, offset, toKey, false, fromKey)
+      ))
+    }))
+  };
+};
+
+const normalizeSectionKeyChanges = (song: Song, sections: Section[]) => {
+  let inheritedKey = song.originalKey;
+  return sections.map((section) => {
+    const keyChangeTo = section.keyChangeTo && section.keyChangeTo !== inheritedKey
+      ? section.keyChangeTo
+      : undefined;
+    inheritedKey = keyChangeTo ?? inheritedKey;
+    return keyChangeTo === section.keyChangeTo ? section : { ...section, keyChangeTo };
+  });
+};
+
+export const updateSectionTitle = (song: Song, sectionId: string, title: string): Song => {
+  const located = findSongSection(song, sectionId);
+  if (!located || located.section.title === title) return song;
+  const sections = [...song.sections];
+  sections[located.sectionIndex] = { ...located.section, title };
+  return { ...song, sections };
+};
+
+export const splitSectionAtBar = (
+  song: Song,
+  target: SongBarIdentity
+): SectionMutationResult => {
+  const located = findSongBar(song, target);
+  if (!located || located.barIndex === 0) {
+    return {
+      song,
+      sectionId: located?.section.id ?? target.sectionId,
+      firstBarId: located?.section.bars[0]?.id ?? null,
+      created: false
+    };
+  }
+  const sectionId = createId('section');
+  const leadingBars = located.section.bars.slice(0, located.barIndex);
+  const trailingBars = located.section.bars.slice(located.barIndex);
+  const sections = [...song.sections];
+  sections[located.sectionIndex] = { ...located.section, bars: leadingBars };
+  sections.splice(located.sectionIndex + 1, 0, {
+    id: sectionId,
+    title: '',
+    bars: trailingBars
+  });
+  return {
+    song: { ...song, sections },
+    sectionId,
+    firstBarId: trailingBars[0]?.id ?? null,
+    created: true
+  };
+};
+
+export const mergeSectionToPrevious = (
+  song: Song,
+  sectionId: string
+): SectionMutationResult => {
+  const located = findSongSection(song, sectionId);
+  if (!located || located.sectionIndex <= 0) {
+    return {
+      song,
+      sectionId,
+      firstBarId: located?.section.bars[0]?.id ?? null,
+      created: false
+    };
+  }
+
+  const activeKeys = getSectionActiveKeys(song);
+  const sourceKey = activeKeys[located.sectionIndex] ?? song.originalKey;
+  const destinationKey = activeKeys[located.sectionIndex - 1] ?? song.originalKey;
+  const nextExplicitKeyIndex = song.sections.findIndex((section, index) => (
+    index > located.sectionIndex && Boolean(section.keyChangeTo)
+  ));
+  const conversionEnd = nextExplicitKeyIndex < 0 ? song.sections.length : nextExplicitKeyIndex;
+  const convertedSections = song.sections.map((section, index) => (
+    index >= located.sectionIndex && index < conversionEnd
+      ? transposeSectionLetterChords(section, sourceKey, destinationKey)
+      : section
+  ));
+  const previousSection = convertedSections[located.sectionIndex - 1];
+  const convertedSource = convertedSections[located.sectionIndex];
+  const firstBarId = convertedSource.bars[0]?.id ?? null;
+  const sections = [...convertedSections];
+  sections[located.sectionIndex - 1] = {
+    ...previousSection,
+    bars: [...previousSection.bars, ...convertedSource.bars]
+  };
+  sections.splice(located.sectionIndex, 1);
+
+  return {
+    song: { ...song, sections: normalizeSectionKeyChanges(song, sections) },
+    sectionId: previousSection.id ?? '',
+    firstBarId,
+    created: false
+  };
+};
+
+export const finalizeSectionTitleEdit = ({
+  baseSong,
+  draftSong,
+  sectionId,
+  title
+}: {
+  baseSong: Song;
+  draftSong: Song;
+  sectionId: string;
+  title: string;
+}): Song => {
+  const normalizedTitle = title.trim();
+  const sectionIndex = draftSong.sections.findIndex((section) => section.id === sectionId);
+  const baseSection = baseSong.sections.find((section) => section.id === sectionId);
+  let nextSong = updateSectionTitle(draftSong, sectionId, normalizedTitle);
+  if (!baseSection?.title.trim() || normalizedTitle) return nextSong;
+  return sectionIndex === 0
+    ? updateSectionTitle(nextSong, sectionId, baseSection.title)
+    : mergeSectionToPrevious(nextSong, sectionId).song;
+};
+
+export const reorderSection = (
+  song: Song,
+  sourceSectionId: string,
+  targetSectionId: string,
+  placement: 'before' | 'after'
+): Song => {
+  if (sourceSectionId === targetSectionId) return song;
+  const sourceIndex = song.sections.findIndex((section) => section.id === sourceSectionId);
+  const targetIndex = song.sections.findIndex((section) => section.id === targetSectionId);
+  if (sourceIndex < 0 || targetIndex < 0) return song;
+
+  const sectionIds = song.sections.map((section) => section.id).filter((id): id is string => Boolean(id));
+  if (sectionIds.length !== song.sections.length) return song;
+  const reorderedIds = [...sectionIds];
+  reorderedIds.splice(sourceIndex, 1);
+  const targetIndexAfterRemoval = reorderedIds.indexOf(targetSectionId);
+  reorderedIds.splice(targetIndexAfterRemoval + (placement === 'after' ? 1 : 0), 0, sourceSectionId);
+  return reorderSongSections(song, reorderedIds);
+};
+
+export const reorderSongSections = (
+  song: Song,
+  orderedSectionIds: string[]
+): Song => {
+  if (orderedSectionIds.length !== song.sections.length) return song;
+  const sectionsById = new Map(song.sections.map((section) => [section.id, section]));
+  const reordered = orderedSectionIds.map((sectionId) => sectionsById.get(sectionId));
+  if (reordered.some((section) => !section)) return song;
+  if (reordered.every((section, index) => section === song.sections[index])) return song;
+
+  const activeKeys = getSectionActiveKeys(song);
+  const previousKeys = new Map<string, Key>();
+  song.sections.forEach((section, index) => {
+    if (section.id) previousKeys.set(section.id, activeKeys[index] ?? song.originalKey);
+  });
+
+  let inheritedKey = song.originalKey;
+  const aligned = (reordered as Section[]).map((section) => {
+    const previousKey = section.id ? previousKeys.get(section.id) ?? inheritedKey : inheritedKey;
+    if (section.keyChangeTo) {
+      inheritedKey = section.keyChangeTo;
+      return section;
+    }
+    return transposeSectionLetterChords(section, previousKey, inheritedKey);
+  });
+  return { ...song, sections: normalizeSectionKeyChanges(song, aligned) };
 };
 
 export const detectSectionChordInputMode = (section: Section): ChordInputMode => {
