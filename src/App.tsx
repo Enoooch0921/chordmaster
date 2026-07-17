@@ -7220,6 +7220,20 @@ export default function App() {
     setPreviewEditSession(null);
   }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode, previewEditSession, selectedSetlistSong?.id, song?.id]);
 
+  React.useEffect(() => {
+    if (!activePreviewEditSession) return;
+    const finishOnPreviewBlankClick = (event: MouseEvent) => {
+      if (suppressPreviewClickRef.current || !(event.target instanceof Element)) return;
+      if (!event.target.closest('[data-print-preview-container]')) return;
+      const keepsEditing = event.target.closest(
+        '.sheet-bar, [data-preview-edit-anchor], [data-preview-edit-hit], button, a, input, textarea, select, [role="button"]'
+      );
+      if (!keepsEditing) commitPreviewEditSession(activePreviewEditSession);
+    };
+    document.addEventListener('click', finishOnPreviewBlankClick, true);
+    return () => document.removeEventListener('click', finishOnPreviewBlankClick, true);
+  }, [activePreviewEditSession, commitPreviewEditSession]);
+
   const applyPreviewEditDraft = React.useCallback((nextSong: Song, options?: { mergeKey?: string }) => {
     setPreviewEditSession((current) => current ? applyPreviewDraft(current, nextSong, options) : current);
   }, []);
@@ -8175,17 +8189,16 @@ export default function App() {
   };
 
   const handlePreviewClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!suppressPreviewClickRef.current) {
+    if (suppressPreviewClickRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressPreviewClickRef.current = false;
+
+      if (previewSuppressClickTimeoutRef.current !== null) {
+        window.clearTimeout(previewSuppressClickTimeoutRef.current);
+        previewSuppressClickTimeoutRef.current = null;
+      }
       return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    suppressPreviewClickRef.current = false;
-
-    if (previewSuppressClickTimeoutRef.current !== null) {
-      window.clearTimeout(previewSuppressClickTimeoutRef.current);
-      previewSuppressClickTimeoutRef.current = null;
     }
   };
 
@@ -12995,6 +13008,33 @@ export default function App() {
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
                 <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
+                  {canOpenEditor && !activePreviewEditSession && !isLyricsMode && (
+                    <>
+                      <button
+                        type="button"
+                        data-preview-undo
+                        onClick={isSetlistMode ? handleSetlistUndo : handleUndo}
+                        disabled={isSetlistMode ? currentSetlistSongHistory.past.length === 0 : currentSongHistory.past.length === 0}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35 sm:h-9 sm:w-9"
+                        title={copy.undo}
+                        aria-label={copy.undo}
+                      >
+                        <Undo2 size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        data-preview-redo
+                        onClick={isSetlistMode ? handleSetlistRedo : handleRedo}
+                        disabled={isSetlistMode ? currentSetlistSongHistory.future.length === 0 : currentSongHistory.future.length === 0}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35 sm:h-9 sm:w-9"
+                        title={copy.redo}
+                        aria-label={copy.redo}
+                      >
+                        <Redo2 size={16} />
+                      </button>
+                      <span className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden="true" />
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={handleZoomOutPreview}
