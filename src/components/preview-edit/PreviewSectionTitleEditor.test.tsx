@@ -24,17 +24,21 @@ const target = {
   anchorRect: { left: 20, top: 30, right: 100, bottom: 58, width: 80, height: 28 }
 };
 
-const renderEditor = () => {
+const renderEditor = (sourceSong = song) => {
   const callbacks = { onChange: vi.fn(), onDone: vi.fn(), onCancel: vi.fn() };
-  render(
+  const renderWithSong = (nextSong: Song) => (
     <PreviewSectionTitleEditor
-      session={createPreviewEditSession({ song, target, inputMode: 'letters' })}
+      session={createPreviewEditSession({ song: nextSong, target, inputMode: 'letters' })}
       language="zh"
       isMobile={false}
       {...callbacks}
     />
   );
-  return callbacks;
+  const result = render(renderWithSong(sourceSong));
+  return {
+    ...callbacks,
+    rerenderSong: (nextSong: Song) => result.rerender(renderWithSong(nextSong))
+  };
 };
 
 describe('PreviewSectionTitleEditor', () => {
@@ -63,5 +67,60 @@ describe('PreviewSectionTitleEditor', () => {
     const input = screen.getByRole('textbox', { name: '段落名稱' });
     fireEvent.blur(input, { relatedTarget: null });
     expect(onDone).toHaveBeenCalledWith('Verse');
+  });
+
+  it('suggests common section names from a partial prefix and accepts the active option with Enter', () => {
+    const { onChange, onDone } = renderEditor();
+    const input = screen.getByRole('textbox', { name: '段落名稱' });
+    fireEvent.change(input, { target: { value: 'in' } });
+
+    expect(screen.getByRole('listbox', { name: '段落名稱建議' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Intro' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('option', { name: 'Interlude' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Instrumental' })).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenLastCalledWith('Intro');
+    expect(onDone).toHaveBeenCalledWith('Intro');
+  });
+
+  it('matches contained text and lets touch or mouse selection choose Pre-Chorus', () => {
+    const { onChange, onDone } = renderEditor();
+    const input = screen.getByRole('textbox', { name: '段落名稱' });
+    fireEvent.change(input, { target: { value: 'cho' } });
+
+    expect(screen.getByRole('option', { name: 'Chorus' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Pre-Chorus' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Post-Chorus' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Pre-Chorus' }));
+
+    expect(onChange).toHaveBeenLastCalledWith('Pre-Chorus');
+    expect(onDone).toHaveBeenCalledWith('Pre-Chorus');
+  });
+
+  it('includes section names already used by the current song', () => {
+    renderEditor({
+      ...song,
+      sections: [
+        ...song.sections,
+        { id: 'section-2', title: 'Custom Build', bars: [{ id: 'bar-2', chords: ['F'] }] }
+      ]
+    });
+    const input = screen.getByRole('textbox', { name: '段落名稱' });
+    fireEvent.change(input, { target: { value: 'custom' } });
+    expect(screen.getByRole('option', { name: 'Custom Build' })).toBeInTheDocument();
+  });
+
+  it('keeps suggestions open while the parent mirrors the typed section title', () => {
+    const { rerenderSong } = renderEditor();
+    const input = screen.getByRole('textbox', { name: '段落名稱' });
+    fireEvent.change(input, { target: { value: 'in' } });
+    rerenderSong({
+      ...song,
+      sections: [{ ...song.sections[0], title: 'in' }]
+    });
+    expect(screen.getByRole('listbox', { name: '段落名稱建議' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'in' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Intro' })).toHaveAttribute('aria-selected', 'true');
   });
 });
