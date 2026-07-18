@@ -85,12 +85,13 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-06-04',
-        title: 'Setlist zoom and capo automation fixes',
+        date: '2026-07-18',
+        title: 'Preview-first editing and importable song sharing',
         bullets: [
-          'The setlist preview zoom button now preserves the current viewport instead of jumping back to the first song.',
-          'Setlist row key pickers now use the same capo recalculation behavior as the main toolbar and metadata panel.',
-          'When a setlist item already has Capo > 0, changing key recalculates the smallest capo that lands on C, D, E, G, or A; Capo 0 remains unchanged.'
+          'Edit chords, song information, and section structure directly from the chart preview with adaptive desktop, iPhone, and iPad controls.',
+          'Section actions now support rename, duplicate-after, and protected deletion while preserving unique IDs, transposition meaning, Setlist order, and Undo history.',
+          'Select and share multiple songs with one link, preview every chart or lyric sheet, and import the whole bundle into a personal library.',
+          'Import conflicts are tracked by source song rather than title and can be resolved by creating a copy or overwriting the existing imported song.'
         ]
       },
       {
@@ -408,12 +409,13 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
-        date: '2026-06-04',
-        title: '歌單縮放與 Capo 自動調整修正',
+        date: '2026-07-18',
+        title: '預覽優先編輯與可導入的歌曲分享',
         bullets: [
-          '歌單預覽的 100% 縮放按鈕現在會保留目前視窗位置，不會再跳回第一首歌。',
-          '歌單列上的 Key 選擇器現在會使用與上方工具列、metadata 面板相同的 Capo 重算邏輯。',
-          '當歌單項目原本 Capo > 0 時，改 Key 會自動找最小 Capo，讓實際彈奏 Key 落在 C、D、E、G、A；Capo 0 會保持不變。'
+          '可直接在譜面預覽編輯和弦、歌曲資訊與段落結構，電腦、iPhone 與 iPad 會使用對應的操作版面。',
+          '段落選單支援重新命名、複製到後方與刪除保護，並維持唯一 ID、轉調語意、歌單順序與 Undo 歷史。',
+          '可批量選取多首歌曲產生同一條分享連結，逐首預覽和弦譜或歌詞，再一次導入到個人歌庫。',
+          '導入衝突改以來源歌曲追蹤，可選擇另存新副本，或保留現有 song ID 並覆蓋分享內容。'
         ]
       },
       {
