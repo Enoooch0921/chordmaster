@@ -7,6 +7,8 @@ import CapoPicker from './CapoPicker';
 import { getUiCopy } from '../constants/i18n';
 import { formatInitialCaps } from '../utils/textUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
+import SongMetadataPanel from './SongMetadataPanel';
+import type { PreviewEditorDeviceLayout } from '../lib/previewEditorLayout';
 
 export interface PreviewWysiwygTarget {
   field: ChordSheetMetaField;
@@ -26,7 +28,7 @@ interface PreviewWysiwygEditorProps {
   song: Song;
   language: AppLanguage;
   target: PreviewWysiwygTarget;
-  isMobile?: boolean;
+  deviceLayout: PreviewEditorDeviceLayout;
   currentKey: Key;
   currentCapo: number;
   originalKey: Key | null;
@@ -80,7 +82,9 @@ const getDesktopPosition = (anchorRect: PreviewAnchorRect, field: ChordSheetMeta
   }
 
   const margin = 12;
-  const minimumWidth = field === 'title'
+  const minimumWidth = field === 'metadata'
+    ? 520
+    : field === 'title'
     ? 280
     : field === 'credits'
       ? 520
@@ -90,14 +94,19 @@ const getDesktopPosition = (anchorRect: PreviewAnchorRect, field: ChordSheetMeta
     Math.max(minimumWidth, window.innerWidth - margin * 2)
   );
   const left = Math.min(
-    Math.max(margin, anchorRect.left),
+    Math.max(margin, field === 'metadata' ? anchorRect.right - width : anchorRect.left),
     Math.max(margin, window.innerWidth - width - margin)
   );
-  const estimatedHeight = field === 'credits' ? 170 : 150;
-  const top = Math.min(
-    Math.max(margin, anchorRect.top - 8),
-    Math.max(margin, window.innerHeight - estimatedHeight - margin)
-  );
+  const estimatedHeight = field === 'metadata' ? 410 : field === 'credits' ? 170 : 150;
+  const availableBelow = window.innerHeight - anchorRect.bottom - margin;
+  const top = field === 'metadata'
+    ? availableBelow >= estimatedHeight
+      ? anchorRect.bottom + 8
+      : Math.max(margin, Math.min(anchorRect.top - estimatedHeight - 8, window.innerHeight - estimatedHeight - margin))
+    : Math.min(
+        Math.max(margin, anchorRect.top - 8),
+        Math.max(margin, window.innerHeight - estimatedHeight - margin)
+      );
 
   return { left, top, width };
 };
@@ -283,7 +292,7 @@ export default function PreviewWysiwygEditor({
   song,
   language,
   target,
-  isMobile = false,
+  deviceLayout,
   currentKey,
   currentCapo,
   originalKey,
@@ -305,6 +314,14 @@ export default function PreviewWysiwygEditor({
   const [translatorDraft, setTranslatorDraft] = React.useState(song.translator ?? '');
   const [tempoDraft, setTempoDraft] = React.useState(typeof song.tempo === 'number' ? String(song.tempo) : '');
   const [timeDraft, setTimeDraft] = React.useState(song.timeSignature);
+  const usesMetadataPanel = target.field === 'metadata'
+    || target.field === 'groove'
+    || deviceLayout !== 'desktop';
+  const isTouchLayout = deviceLayout !== 'desktop';
+  const [visualViewportState, setVisualViewportState] = React.useState(() => ({
+    height: typeof window === 'undefined' ? 800 : window.innerHeight,
+    keyboardOffset: 0
+  }));
 
   React.useEffect(() => {
     cancelCloseRef.current = false;
@@ -317,6 +334,9 @@ export default function PreviewWysiwygEditor({
   }, [song.composer, song.lyricist, song.tempo, song.timeSignature, song.title, song.translator, target.anchorKey, target.field]);
 
   React.useEffect(() => {
+    if (usesMetadataPanel) {
+      return;
+    }
     const focusInput = () => {
       const input = panelRef.current?.querySelector<HTMLInputElement>('input[data-wysiwyg-autofocus]');
       if (!input) return;
@@ -330,7 +350,36 @@ export default function PreviewWysiwygEditor({
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(timeoutId);
     };
-  }, [target.anchorKey, target.field]);
+  }, [target.anchorKey, target.field, usesMetadataPanel]);
+
+  React.useEffect(() => {
+    if (!usesMetadataPanel || !isTouchLayout || typeof window === 'undefined') {
+      return;
+    }
+
+    const updateViewport = () => {
+      const viewport = window.visualViewport;
+      const height = viewport?.height ?? window.innerHeight;
+      const keyboardOffset = viewport
+        ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+        : 0;
+      setVisualViewportState((current) => (
+        Math.abs(current.height - height) < 1 && Math.abs(current.keyboardOffset - keyboardOffset) < 1
+          ? current
+          : { height, keyboardOffset }
+      ));
+    };
+
+    updateViewport();
+    window.visualViewport?.addEventListener('resize', updateViewport);
+    window.visualViewport?.addEventListener('scroll', updateViewport);
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', updateViewport);
+      window.visualViewport?.removeEventListener('scroll', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+    };
+  }, [isTouchLayout, usesMetadataPanel]);
 
   const closeWithoutCommit = () => {
     if (finishedRef.current) {
@@ -350,11 +399,11 @@ export default function PreviewWysiwygEditor({
   };
 
   React.useEffect(() => {
-    if (target.field !== 'key') {
+    if (target.field !== 'key' && !usesMetadataPanel) {
       return;
     }
 
-    const handlePointerDown = (event: MouseEvent) => {
+    const handlePointerDown = (event: PointerEvent) => {
       const targetNode = event.target as Node | null;
       if (!targetNode) {
         return;
@@ -368,9 +417,9 @@ export default function PreviewWysiwygEditor({
       closeWithoutCommit();
     };
 
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [target.field]);
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [target.field, usesMetadataPanel]);
 
   const commitTitle = () => {
     if (!markCommitted()) {
@@ -454,6 +503,9 @@ export default function PreviewWysiwygEditor({
 
   const handleEscape = (event: React.KeyboardEvent) => {
     if (event.key === 'Escape') {
+      if (event.target instanceof Element && event.target.closest('[data-placement]')) {
+        return;
+      }
       event.preventDefault();
       closeWithoutCommit();
     }
@@ -475,17 +527,27 @@ export default function PreviewWysiwygEditor({
   const versionListId = metadataSuggestions?.versions.length ? `${editorInputId}-versions` : undefined;
   const translatorListId = metadataSuggestions?.translators.length ? `${editorInputId}-translators` : undefined;
 
-  const chrome = (children: React.ReactNode, title: string) => (
+  const chrome = (children: React.ReactNode, title: string, fullMetadata = false) => (
     <div
       ref={panelRef}
-      className={`border border-gray-200 bg-white shadow-2xl ${isMobile ? 'rounded-2xl' : 'rounded-xl'}`}
+      role={fullMetadata ? 'dialog' : undefined}
+      aria-label={fullMetadata ? title : undefined}
+      className={`flex max-h-full flex-col border border-gray-200 bg-white shadow-2xl ${isTouchLayout ? 'rounded-t-[24px] sm:rounded-[24px]' : 'rounded-xl'}`}
+      onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
       onKeyDown={handleEscape}
     >
-      <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-2.5">
-        <div className="text-sm font-bold text-gray-900">{title}</div>
+      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 rounded-t-[inherit] border-b border-gray-100 bg-white px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="truncate text-sm font-bold text-gray-900">{title}</div>
+          {fullMetadata ? (
+            <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-500">
+              {copy.editor.originalKey}: {song.originalKey}
+            </span>
+          ) : null}
+        </div>
         <button
           type="button"
           onMouseDown={(event) => {
@@ -493,13 +555,17 @@ export default function PreviewWysiwygEditor({
             closeWithoutCommit();
           }}
           onClick={(event) => event.preventDefault()}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+          className={`${isTouchLayout ? 'h-11 min-w-11 px-3' : 'h-8 w-8'} inline-flex shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700`}
           title={zh ? '關閉' : 'Close'}
         >
-          <X size={16} />
+          {fullMetadata && isTouchLayout ? (
+            <span className="text-sm font-bold text-indigo-600">{zh ? '完成' : 'Done'}</span>
+          ) : (
+            <X size={16} />
+          )}
         </button>
       </div>
-      <div className="space-y-3 p-4">
+      <div className={`${fullMetadata ? 'overflow-y-auto overscroll-contain' : ''} space-y-3 p-4`}>
         {children}
       </div>
     </div>
@@ -794,26 +860,31 @@ export default function PreviewWysiwygEditor({
     'Capo'
   );
 
-  const renderGroove = () => chrome(
-    <label className="flex items-center justify-between gap-4 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700">
-      <span>{copy.editor.shuffle}</span>
-      <input
-        type="checkbox"
-        checked={song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle'}
-        onChange={(event) => {
-          onChange({ ...song, shuffle: event.target.checked, groove: undefined });
-          onClose();
-        }}
-      />
-    </label>,
-    copy.editor.shuffle
+  const renderMetadataPanel = () => chrome(
+    <SongMetadataPanel
+      song={song}
+      language={language}
+      onChange={onChange}
+      metadataSuggestions={metadataSuggestions}
+      keyValue={currentKey}
+      capoValue={currentCapo}
+      onKeyChange={onKeyChange}
+      onCapoChange={onCapoChange}
+      showReferenceFields={false}
+      variant="preview-header"
+      deviceLayout={deviceLayout}
+      initialFocusField={target.field === 'metadata' ? undefined : target.field}
+      canEditKey={canEditKey}
+    />,
+    zh ? '歌曲資訊' : 'Song information',
+    true
   );
 
-  const isInlineField = target.field === 'title'
+  const isInlineField = !usesMetadataPanel && (target.field === 'title'
     || target.field === 'credits'
     || target.field === 'key'
     || target.field === 'tempo'
-    || target.field === 'timeSignature';
+    || target.field === 'timeSignature');
   const desktopStyle = isInlineField
     ? getInlinePosition(
         target.anchorRect,
@@ -821,7 +892,7 @@ export default function PreviewWysiwygEditor({
         target.field === 'tempo' ? tempoDraft : target.field === 'timeSignature' ? timeDraft : currentKey,
         target.anchorKey
       )
-    : getDesktopPosition(target.anchorRect, target.field);
+    : getDesktopPosition(target.anchorRect, usesMetadataPanel ? 'metadata' : target.field);
   const tempoOverlayLayout = target.field === 'tempo' && typeof desktopStyle.left === 'number' && typeof desktopStyle.width === 'number'
     ? {
         containerLeft: desktopStyle.left,
@@ -830,7 +901,9 @@ export default function PreviewWysiwygEditor({
         valueWidth: getTempoValueWidth(target.anchorRect, tempoDraft)
       }
     : undefined;
-  const body = target.field === 'title'
+  const body = usesMetadataPanel
+    ? renderMetadataPanel()
+    : target.field === 'title'
     ? renderTitle()
     : target.field === 'credits'
       ? renderCredits()
@@ -840,14 +913,36 @@ export default function PreviewWysiwygEditor({
           ? renderTempo(tempoOverlayLayout)
           : target.field === 'timeSignature'
             ? renderTimeSignature()
-            : target.field === 'capo'
-              ? renderCapo()
-              : renderGroove();
+            : renderCapo();
+
+  if (usesMetadataPanel && isTouchLayout) {
+    const maxHeight = deviceLayout === 'phone'
+      ? Math.max(280, Math.min(680, visualViewportState.height * 0.82))
+      : Math.max(300, Math.min(480, visualViewportState.height * 0.5));
+    return (
+      <div
+        data-preview-metadata-backdrop
+        data-device-layout={deviceLayout}
+        className={`fixed inset-x-0 top-0 z-[82] flex items-end justify-center bg-slate-950/10 ${deviceLayout === 'phone' ? 'px-0' : 'px-4'} pb-[max(0.75rem,env(safe-area-inset-bottom))]`}
+        style={{ bottom: visualViewportState.keyboardOffset }}
+        onPointerDown={(event) => {
+          if (event.currentTarget === event.target) closeWithoutCommit();
+        }}
+      >
+        <div
+          className={deviceLayout === 'phone' ? 'w-full' : 'w-full max-w-[720px]'}
+          style={{ maxHeight }}
+        >
+          {body}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
-      className={isMobile && !isInlineField ? 'fixed inset-x-0 bottom-0 z-[82] px-3 pb-3' : 'fixed z-[82]'}
-      style={isMobile && !isInlineField ? undefined : desktopStyle}
+      className="fixed z-[82]"
+      style={usesMetadataPanel ? { ...desktopStyle, maxHeight: 'min(70vh, 520px)' } : desktopStyle}
     >
       {body}
     </div>

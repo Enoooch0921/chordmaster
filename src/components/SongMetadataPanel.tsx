@@ -6,6 +6,9 @@ import CapoPicker from './CapoPicker';
 import { CompactSegmentedControl, CompactToggleSwitch } from './SetlistCompactControls';
 import { parseYouTubeVideoId } from '../utils/referenceUtils';
 import { formatInitialCaps } from '../utils/textUtils';
+import type { PreviewEditorDeviceLayout } from '../lib/previewEditorLayout';
+
+type PreviewMetadataFocusField = 'title' | 'credits' | 'key' | 'tempo' | 'timeSignature' | 'capo' | 'groove';
 
 interface SongMetadataPanelProps {
   song: Song;
@@ -28,6 +31,10 @@ interface SongMetadataPanelProps {
   jianpuInputAbsolute?: boolean;
   onJianpuInputAbsoluteChange?: (value: boolean) => void;
   showReferenceFields?: boolean;
+  variant?: 'default' | 'preview-header';
+  deviceLayout?: PreviewEditorDeviceLayout;
+  initialFocusField?: PreviewMetadataFocusField;
+  canEditKey?: boolean;
 }
 
 const DISPLAY_MODE_OPTIONS: SetlistDisplayMode[] = [
@@ -296,7 +303,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   onDisplayModeChange,
   jianpuInputAbsolute,
   onJianpuInputAbsoluteChange,
-  showReferenceFields = true
+  showReferenceFields = true,
+  variant = 'default',
+  deviceLayout = 'desktop',
+  initialFocusField,
+  canEditKey = true
 }) => {
   const copy = getUiCopy(language);
   const panelRef = React.useRef<HTMLElement>(null);
@@ -317,13 +328,16 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const timeSignatureParts = splitTimeSignatureInput(song.timeSignature);
   const resolvedKey = keyValue ?? song.originalKey;
   const resolvedCapo = capoValue ?? (song.capo ?? 0);
+  const isPreviewHeader = variant === 'preview-header';
+  const isTouchOptimized = isPreviewHeader && deviceLayout !== 'desktop';
   const isWideLayout = layoutMode === 'wide';
   const isStackedLayout = layoutMode === 'stacked';
   const segmentedSize = isStackedLayout ? 'sm' : 'xs';
   const toggleSize = isStackedLayout ? 'sm' : 'xs';
-  const labelClassName = 'mb-1 block text-[9px] font-semibold uppercase tracking-[0.16em] text-gray-400';
+  const labelClassName = `${isTouchOptimized ? 'text-[11px]' : 'text-[9px]'} mb-1 block font-semibold uppercase tracking-[0.16em] text-gray-400`;
   const controlLabelClassName = 'mb-1 block text-[8px] font-semibold uppercase tracking-[0.16em] text-gray-400';
-  const fieldClassName = 'h-7 w-full rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500';
+  const fieldHeightClassName = isTouchOptimized ? 'h-11' : isPreviewHeader ? 'h-10' : 'h-7';
+  const fieldClassName = `${fieldHeightClassName} w-full rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500`;
   const controlFieldClassName = 'h-7 w-full rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500';
 
   React.useEffect(() => {
@@ -349,6 +363,33 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       observer.disconnect();
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!isPreviewHeader || !initialFocusField) {
+      return;
+    }
+
+    const focusField = () => {
+      const field = panelRef.current?.querySelector<HTMLElement>(`[data-song-metadata-field="${initialFocusField}"]`);
+      const control = field?.querySelector<HTMLElement>('input:not([type="hidden"]), button, select, textarea');
+      if (!control) return;
+      control.focus({ preventScroll: true });
+      if (control instanceof HTMLInputElement && control.type !== 'checkbox') {
+        control.select();
+      }
+      if (typeof field.scrollIntoView === 'function') {
+        field.scrollIntoView({ block: 'nearest' });
+      }
+    };
+
+    focusField();
+    const frameId = window.requestAnimationFrame(focusField);
+    const timeoutId = window.setTimeout(focusField, 80);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [initialFocusField, isPreviewHeader]);
 
   React.useEffect(() => {
     setTempoDraft(typeof song.tempo === 'number' ? String(song.tempo) : '');
@@ -404,9 +445,10 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
   const commitTempoDraft = React.useCallback(() => {
     const digitsOnly = tempoDraft.replace(/\D+/g, '').slice(0, 3);
+    const parsedTempo = digitsOnly ? Number(digitsOnly) : undefined;
     onChange({
       ...song,
-      tempo: digitsOnly ? Number(digitsOnly) : undefined
+      tempo: parsedTempo === undefined ? undefined : Math.min(400, Math.max(20, parsedTempo))
     });
   }, [onChange, song, tempoDraft]);
 
@@ -600,7 +642,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   }));
 
   const titleField = (
-    <div>
+    <div data-song-metadata-field="title">
       <label className={labelClassName}>{copy.editor.title}</label>
       <input
         type="text"
@@ -623,10 +665,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   );
 
   const keyField = (
-    <div>
+    <div data-song-metadata-field="key">
       <label className={labelClassName}>{copy.key}</label>
       <KeyPicker
         value={resolvedKey}
+        disabled={!canEditKey}
         onChange={(key) => {
           if (!key) {
             return;
@@ -644,7 +687,9 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         panelMetaText={song.originalKey === resolvedKey ? copy.original : song.originalKey}
         align="left"
         triggerDensity="compact"
-        buttonClassName="h-7 w-full min-w-0 rounded-lg px-2.5"
+        autoOpen={isPreviewHeader && initialFocusField === 'key'}
+        touchOptimized={isTouchOptimized}
+        buttonClassName={`${isTouchOptimized ? '!h-11' : isPreviewHeader ? '!h-10' : 'h-7'} w-full min-w-0 rounded-lg px-2.5`}
         valueTextClassName="text-[13px]"
         metaTextClassName={isWideLayout ? '' : 'hidden'}
         triggerIconSize={14}
@@ -653,7 +698,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   );
 
   const capoField = (
-    <div>
+    <div data-song-metadata-field="capo">
       <label className={labelClassName}>Capo</label>
       <CapoPicker
         value={resolvedCapo}
@@ -669,7 +714,9 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         label="Capo"
         align="left"
         triggerDensity="compact"
-        buttonClassName="h-7 w-full min-w-0 rounded-lg px-2.5"
+        autoOpen={isPreviewHeader && initialFocusField === 'capo'}
+        touchOptimized={isTouchOptimized}
+        buttonClassName={`${isTouchOptimized ? '!h-11' : isPreviewHeader ? '!h-10' : 'h-7'} w-full min-w-0 rounded-lg px-2.5`}
         valueTextClassName="text-[13px]"
         showPlayKey={isWideLayout}
         triggerIconSize={14}
@@ -678,10 +725,12 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   );
 
   const tempoField = (
-    <div>
+    <div data-song-metadata-field="tempo">
       <label className={labelClassName}>{copy.editor.tempo}</label>
       <input
-        type="number"
+        type={isPreviewHeader ? 'text' : 'number'}
+        inputMode="numeric"
+        pattern="[0-9]*"
         min={20}
         max={400}
         step={1}
@@ -700,16 +749,16 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   );
 
   const timeField = (
-    <div>
+    <div data-song-metadata-field="timeSignature">
       <label className={labelClassName}>{copy.editor.timeSignature}</label>
-      <div className="flex min-w-0 items-center rounded-lg border border-gray-300 bg-white px-2">
+      <div className={`flex min-w-0 items-center rounded-lg border border-gray-300 bg-white px-2 ${fieldHeightClassName}`}>
         <input
           type="text"
           inputMode="numeric"
           value={timeSignatureParts.numerator}
           onChange={(event) => updateField('timeSignature', buildTimeSignatureInput(event.target.value, timeSignatureParts.denominator))}
           placeholder="4"
-          className="h-7 w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
+          className="h-full w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
         />
         <span className="px-0.5 text-sm font-semibold text-gray-400">/</span>
         <input
@@ -718,29 +767,29 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           value={timeSignatureParts.denominator}
           onChange={(event) => updateField('timeSignature', buildTimeSignatureInput(timeSignatureParts.numerator, event.target.value))}
           placeholder="4"
-          className="h-7 w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
+          className="h-full w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
         />
       </div>
     </div>
   );
 
   const shuffleField = (
-    <div>
+    <div data-song-metadata-field="groove">
       <label className={labelClassName}>{copy.editor.shuffle}</label>
-      <label className="flex h-7 cursor-pointer items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-2.5">
+      <label className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-2.5 ${fieldHeightClassName}`}>
         <span className="truncate text-[12px] font-medium text-gray-600">{copy.editor.shuffle}</span>
         <input
           type="checkbox"
           checked={song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle'}
           onChange={(event) => onChange({ ...song, shuffle: event.target.checked, groove: undefined })}
-          className="h-3.5 w-3.5 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+          className={`${isTouchOptimized ? 'h-5 w-5' : 'h-3.5 w-3.5'} shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500`}
         />
       </label>
     </div>
   );
 
   const versionField = (
-    <div>
+    <div data-song-metadata-field="credits">
       <label className={labelClassName}>{copy.version}</label>
       <input
         type="text"
@@ -772,7 +821,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   );
 
   const translatorField = (
-    <div>
+    <div data-song-metadata-field="translator">
       <label className={labelClassName}>{copy.editor.translator}</label>
       <input
         type="text"
@@ -911,6 +960,27 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       </svg>
     </button>
   );
+
+  if (isPreviewHeader) {
+    const twoColumn = deviceLayout !== 'phone';
+    return (
+      <section
+        ref={panelRef}
+        data-song-metadata-panel
+        data-device-layout={deviceLayout}
+        className={twoColumn ? 'grid grid-cols-2 gap-x-3 gap-y-3' : 'space-y-3'}
+      >
+        <div className={twoColumn ? 'col-span-2' : undefined}>{titleField}</div>
+        {versionField}
+        {translatorField}
+        {keyField}
+        {capoField}
+        {tempoField}
+        {timeField}
+        <div className={twoColumn ? 'col-span-2' : undefined}>{shuffleField}</div>
+      </section>
+    );
+  }
 
   return (
     <section

@@ -42,6 +42,7 @@ interface KeyPickerProps {
   hideTriggerIcon?: boolean;
   triggerDensity?: 'default' | 'compact';
   autoOpen?: boolean;
+  touchOptimized?: boolean;
 }
 
 const findNextKey = (currentKey: Key, rowStep: number, columnStep: number): Key | null => {
@@ -84,7 +85,8 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   triggerIconSize = 16,
   hideTriggerIcon = false,
   triggerDensity = 'default',
-  autoOpen = false
+  autoOpen = false,
+  touchOptimized = false
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -240,7 +242,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
       {isOpen && typeof document !== 'undefined' && createPortal(
         <div
           ref={panelRef}
-          className="w-[184px] rounded-[20px] border border-gray-200 bg-white p-2.5 shadow-xl"
+          className={`${touchOptimized ? 'w-[216px] p-3' : 'w-[184px] p-2.5'} rounded-[20px] border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
           data-placement={placement}
         >
@@ -270,7 +272,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                     handleSelect(null);
                   }
                 }}
-                className={`flex h-[34px] w-full items-center justify-center rounded-xl border text-[12px] font-semibold tracking-tight transition-all ${
+                className={`flex ${touchOptimized ? 'h-11 text-sm' : 'h-[34px] text-[12px]'} w-full items-center justify-center rounded-xl border font-semibold tracking-tight transition-all ${
                   value === null
                     ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
                     : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
@@ -285,7 +287,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
             {KEY_PICKER_LAYOUT.flatMap((row, rowIndex) =>
               row.map((key, columnIndex) => {
                 if (!key) {
-                  return <div key={`empty-${rowIndex}-${columnIndex}`} className="h-[42px]" />;
+                  return <div key={`empty-${rowIndex}-${columnIndex}`} className={touchOptimized ? 'h-12' : 'h-[42px]'} />;
                 }
 
                 const isSelectedKey = value === key;
@@ -300,7 +302,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                     type="button"
                     onClick={() => handleSelect(key)}
                     onKeyDown={(event) => handleOptionKeyDown(event, key)}
-                    className={`relative flex h-[42px] items-center justify-center rounded-[12px] border text-[14px] font-semibold tracking-tight transition-all ${
+                    className={`relative flex ${touchOptimized ? 'h-12 text-[15px]' : 'h-[42px] text-[14px]'} items-center justify-center rounded-[12px] border font-semibold tracking-tight transition-all ${
                       isSelectedKey
                         ? isOriginalKey
                           ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'

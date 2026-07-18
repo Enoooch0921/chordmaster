@@ -18,6 +18,7 @@ interface CapoPickerProps {
   triggerIconSize?: number;
   triggerDensity?: 'default' | 'compact';
   autoOpen?: boolean;
+  touchOptimized?: boolean;
 }
 
 const CapoPicker: React.FC<CapoPickerProps> = ({
@@ -32,7 +33,8 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   showPlayKey = true,
   triggerIconSize = 16,
   triggerDensity = 'default',
-  autoOpen = false
+  autoOpen = false,
+  touchOptimized = false
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -161,14 +163,14 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
       {isOpen && typeof document !== 'undefined' && createPortal(
         <div
           ref={panelRef}
-          className="w-[132px] overflow-hidden rounded-[20px] border border-gray-200 bg-white p-2 shadow-xl"
+          className={`${touchOptimized ? 'w-[248px] p-3' : 'w-[132px] p-2'} overflow-hidden rounded-[20px] border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
           data-placement={placement}
         >
           <div className="mb-2 px-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
             {label}
           </div>
-          <div className={`space-y-0.5 transition-opacity ${isPositioned ? 'opacity-100' : 'opacity-0'}`}>
+          <div className={`${touchOptimized ? 'grid grid-cols-2 gap-1' : 'space-y-0.5'} transition-opacity ${isPositioned ? 'opacity-100' : 'opacity-0'}`}>
             {Array.from({ length: 12 }).map((_, capo) => {
               const optionPlayKey = getPlayKey(currentKey, capo);
               const isSelected = value === capo;
@@ -186,7 +188,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
                     closePanel();
                   }}
                   onKeyDown={(event) => handleOptionKeyDown(event, capo)}
-                  className={`flex w-full items-center rounded-xl px-2 py-1.5 text-left transition-colors ${
+                  className={`flex w-full items-center rounded-xl px-2 text-left transition-colors ${touchOptimized ? 'min-h-11 py-2' : 'py-1.5'} ${
                     isSelected
                       ? useIndigo
                         ? 'bg-indigo-50'
