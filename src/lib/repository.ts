@@ -13,7 +13,10 @@ import {
   SetlistShareStatus,
   SetlistSong,
   SharedResourcePayload,
+  SharedSongImportInspection,
+  SharedSongImportResult,
   ShareResourceType,
+  SongImportResolution,
   Song,
   StoredSong,
   TeamInvite,
@@ -30,7 +33,13 @@ import {
   persistLocalWorkspaceSnapshot,
   reindexSetlistSongs
 } from './workspace';
-import { createShareLink as createEdgeShareLink, resolveShareLink as resolveEdgeShareLink } from './sharing';
+import {
+  createShareLink as createEdgeShareLink,
+  createSongBundleShare as createEdgeSongBundleShare,
+  importSharedSongs as importEdgeSharedSongs,
+  inspectSharedSongImport as inspectEdgeSharedSongImport,
+  resolveShareLink as resolveEdgeShareLink
+} from './sharing';
 import { supabase } from './supabase';
 
 interface SongRow {
@@ -212,7 +221,10 @@ export interface WorkspaceRepository {
   deleteProject(id: string): Promise<void>;
   importLocalWorkspace(localWorkspace: WorkspaceSnapshot): Promise<WorkspaceSnapshot>;
   createShareLink(resourceType: ShareResourceType, resourceId: string): Promise<string>;
+  createSongBundleShare(songIds: string[]): Promise<string>;
   resolveShareLink(token: string): Promise<SharedResourcePayload>;
+  inspectSharedSongImport(token: string): Promise<SharedSongImportInspection>;
+  importSharedSongs(token: string, defaultResolution: SongImportResolution, perSongResolutions?: Record<string, SongImportResolution>): Promise<SharedSongImportResult>;
   joinSharedSetlist(token: string): Promise<string>;
   leaveSharedSetlist(setlistId: string): Promise<void>;
   getSetlistShareStatus(setlistId: string): Promise<SetlistShareStatus>;
@@ -563,8 +575,17 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   async createShareLink() {
     throw new Error('Please sign in before creating a share link.');
   },
+  async createSongBundleShare() {
+    throw new Error('Please sign in before creating a song bundle share.');
+  },
   async resolveShareLink(token) {
     return resolveEdgeShareLink(token);
+  },
+  async inspectSharedSongImport() {
+    throw new Error('Please sign in before importing shared songs.');
+  },
+  async importSharedSongs() {
+    throw new Error('Please sign in before importing shared songs.');
   },
   async joinSharedSetlist() {
     throw new Error('Please sign in to join a shared setlist.');
@@ -1479,8 +1500,20 @@ export const createCloudRepository = (params: {
       return createEdgeShareLink(resourceType, resourceId);
     },
 
+    async createSongBundleShare(songIds) {
+      return createEdgeSongBundleShare(songIds);
+    },
+
     async resolveShareLink(token) {
       return resolveEdgeShareLink(token);
+    },
+
+    async inspectSharedSongImport(token) {
+      return inspectEdgeSharedSongImport(token);
+    },
+
+    async importSharedSongs(token, defaultResolution, perSongResolutions = {}) {
+      return importEdgeSharedSongs(token, defaultResolution, perSongResolutions);
     },
 
     async joinSharedSetlist(token) {

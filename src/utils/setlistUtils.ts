@@ -27,13 +27,27 @@ export const insertNewSetlistSectionsAfterSources = (
   previousSong: Song,
   nextSong: Song
 ) => {
+  const getDuplicateSignature = (section: Section) => JSON.stringify({
+    ...section,
+    id: undefined,
+    // A duplicated key-change section can omit a now-redundant keyChangeTo
+    // while retaining the same written musical content.
+    keyChangeTo: undefined,
+    bars: section.bars.map((bar) => ({ ...bar, id: undefined }))
+  });
   const previousIds = new Set(getDefaultSectionOrder(previousSong));
   const nextIds = getDefaultSectionOrder(nextSong);
   const nextIdSet = new Set(nextIds);
   const result = currentOrder.filter((sectionId) => nextIdSet.has(sectionId));
   const previousSectionByBarId = new Map<string, string>();
+  const previousSectionIdsBySignature = new Map<string, string[]>();
   previousSong.sections.forEach((section, sectionIndex) => {
     const sectionId = getSectionReferenceId(section, sectionIndex);
+    const signature = getDuplicateSignature(section);
+    previousSectionIdsBySignature.set(signature, [
+      ...(previousSectionIdsBySignature.get(signature) ?? []),
+      sectionId
+    ]);
     section.bars.forEach((bar) => {
       if (bar.id) previousSectionByBarId.set(bar.id, sectionId);
     });
@@ -42,7 +56,18 @@ export const insertNewSetlistSectionsAfterSources = (
   nextSong.sections.forEach((section, sectionIndex) => {
     const sectionId = getSectionReferenceId(section, sectionIndex);
     if (previousIds.has(sectionId) || result.includes(sectionId)) return;
-    const sourceId = section.bars.map((bar) => bar.id && previousSectionByBarId.get(bar.id)).find(Boolean);
+    const splitSourceId = section.bars.map((bar) => bar.id && previousSectionByBarId.get(bar.id)).find(Boolean);
+    const previousNextSection = nextSong.sections[sectionIndex - 1];
+    const previousNextSectionId = previousNextSection
+      ? getSectionReferenceId(previousNextSection, sectionIndex - 1)
+      : null;
+    const immediateDuplicateSourceId = previousNextSectionId
+      && previousIds.has(previousNextSectionId)
+      && getDuplicateSignature(previousNextSection) === getDuplicateSignature(section)
+      ? previousNextSectionId
+      : null;
+    const matchingDuplicateSourceId = previousSectionIdsBySignature.get(getDuplicateSignature(section))?.[0];
+    const sourceId = splitSourceId ?? immediateDuplicateSourceId ?? matchingDuplicateSourceId;
     if (!sourceId) return;
     const sourceIndex = result.lastIndexOf(sourceId);
     if (sourceIndex >= 0) result.splice(sourceIndex + 1, 0, sectionId);

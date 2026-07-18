@@ -3,9 +3,15 @@ import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
 import LyricsSheet from '../components/LyricsSheet';
 import { APP_NAME } from '../constants/appMeta';
-import { AppLanguage, SharedResourcePayload } from '../types';
+import {
+  AppLanguage,
+  SharedResourcePayload,
+  SharedSongImportInspection,
+  SharedSongImportResult,
+  SongImportResolution
+} from '../types';
 import { signInWithGoogleRedirect } from '../lib/auth';
-import { resolveShareLink } from '../lib/sharing';
+import { importSharedSongs, inspectSharedSongImport, resolveShareLink } from '../lib/sharing';
 import { supabase } from '../lib/supabase';
 
 export default function SharedChartPage() {
@@ -22,6 +28,11 @@ export default function SharedChartPage() {
   const [joinError, setJoinError] = useState<string | null>(null);
   const [showSharedLyrics, setShowSharedLyrics] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [selectedBundleSongId, setSelectedBundleSongId] = useState<string | null>(null);
+  const [importInspection, setImportInspection] = useState<SharedSongImportInspection | null>(null);
+  const [defaultImportResolution, setDefaultImportResolution] = useState<SongImportResolution>('duplicate');
+  const [perSongResolutions, setPerSongResolutions] = useState<Record<string, SongImportResolution>>({});
+  const [songImportResult, setSongImportResult] = useState<SharedSongImportResult | null>(null);
 
   // In-app browsers (LINE, Facebook, Instagram) block Google OAuth as "unsafe".
   // Detect them so we can prompt the user to open the page in a real browser.
@@ -88,6 +99,16 @@ export default function SharedChartPage() {
       isCancelled = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    const firstBundleSongId = payload?.songBundle?.songs[0]?.id ?? null;
+    setSelectedBundleSongId((current) => (
+      current && payload?.songBundle?.songs.some((item) => item.id === current)
+        ? current
+        : firstBundleSongId
+    ));
+    setShowSharedLyrics(false);
+  }, [payload?.songBundle?.id]);
 
   useEffect(() => {
     if (!supabase || !authUserId || !payload?.setlist) return;
@@ -167,6 +188,73 @@ export default function SharedChartPage() {
     }
   };
 
+  const retryAfterFreshSession = async <T,>(operation: () => Promise<T>) => {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0 && supabase) {
+          await supabase.auth.getSession();
+          await new Promise((resolve) => setTimeout(resolve, 700));
+        }
+      }
+    }
+    throw lastError;
+  };
+
+  const completeSongImport = async (
+    defaultResolution: SongImportResolution,
+    resolutions: Record<string, SongImportResolution>
+  ) => {
+    setIsJoining(true);
+    setJoinError(null);
+    try {
+      const result = await retryAfterFreshSession(() => (
+        importSharedSongs(token, defaultResolution, resolutions)
+      ));
+      setSongImportResult(result);
+      setImportInspection(null);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      setJoinError(
+        reason
+          ? (language === 'zh' ? `無法導入歌曲：${reason}` : `Unable to import songs: ${reason}`)
+          : (language === 'zh' ? '無法導入歌曲，請稍後再試。' : 'Unable to import songs. Please try again.')
+      );
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
+  const handleSongImport = async () => {
+    if (!supabase || !token) return;
+    setIsJoining(true);
+    setJoinError(null);
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) throw new Error('Please sign in first.');
+      const inspection = await retryAfterFreshSession(() => inspectSharedSongImport(token));
+      if (inspection.conflictCount > 0) {
+        setDefaultImportResolution('duplicate');
+        setPerSongResolutions({});
+        setImportInspection(inspection);
+        setIsJoining(false);
+        return;
+      }
+      await completeSongImport('duplicate', {});
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : '';
+      setJoinError(
+        reason
+          ? (language === 'zh' ? `無法檢查歌曲：${reason}` : `Unable to check songs: ${reason}`)
+          : (language === 'zh' ? '無法檢查歌曲，請稍後再試。' : 'Unable to check songs. Please try again.')
+      );
+      setIsJoining(false);
+    }
+  };
+
   const handleSignIn = async () => {
     setIsSigningIn(true);
     setJoinError(null);
@@ -183,7 +271,133 @@ export default function SharedChartPage() {
     }
   };
 
-  const isSongShare = !isLoading && !errorMessage && Boolean(payload?.song);
+  const isSongShare = !isLoading && !errorMessage && Boolean(payload?.song || payload?.songBundle);
+  const selectedBundleSong = payload?.songBundle?.songs.find((item) => item.id === selectedBundleSongId)
+    ?? payload?.songBundle?.songs[0]
+    ?? null;
+  const conflictingSongs = importInspection?.songs.filter((item) => item.existingSongId) ?? [];
+
+  const renderSongImportControls = () => {
+    if (songImportResult) {
+      const firstSongId = songImportResult.songs[0]?.songId;
+      return (
+        <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-5 text-center">
+          <div className="text-base font-black text-emerald-800">
+            {language === 'zh' ? '歌曲已導入個人歌庫' : 'Songs imported to your personal library'}
+          </div>
+          <p className="mt-2 text-sm font-semibold text-emerald-700">
+            {language === 'zh'
+              ? `新增 ${songImportResult.createdCount} 首、另存副本 ${songImportResult.duplicatedCount} 首、覆蓋 ${songImportResult.overwrittenCount} 首`
+              : `${songImportResult.createdCount} added, ${songImportResult.duplicatedCount} duplicated, ${songImportResult.overwrittenCount} overwritten`}
+          </p>
+          {firstSongId && (
+            <button
+              type="button"
+              onClick={() => navigate(`/?song=${encodeURIComponent(firstSongId)}`)}
+              className="mt-4 inline-flex items-center justify-center rounded-xl bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-emerald-800"
+            >
+              {language === 'zh' ? '打開我的歌庫' : 'Open My Library'}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    if (importInspection && conflictingSongs.length > 0) {
+      return (
+        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
+          <div className="text-base font-black text-amber-900">
+            {language === 'zh' ? `發現 ${conflictingSongs.length} 首已導入歌曲` : `${conflictingSongs.length} previously imported song(s)`}
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-amber-700">
+            {language === 'zh' ? '先選整批預設，再視需要逐首調整。' : 'Choose a default for the batch, then adjust individual songs if needed.'}
+          </p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {(['duplicate', 'overwrite'] as SongImportResolution[]).map((resolution) => (
+              <button
+                key={resolution}
+                type="button"
+                onClick={() => {
+                  setDefaultImportResolution(resolution);
+                  setPerSongResolutions({});
+                }}
+                className={`rounded-xl border px-3 py-3 text-left text-sm font-bold transition-colors ${defaultImportResolution === resolution ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-amber-200 bg-white text-stone-700 hover:border-indigo-300'}`}
+              >
+                {resolution === 'duplicate'
+                  ? (language === 'zh' ? '保留我的版本，另存新副本' : 'Keep mine and create a copy')
+                  : (language === 'zh' ? '使用分享版本覆蓋' : 'Overwrite with shared version')}
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
+            {conflictingSongs.map((item) => {
+              const resolution = perSongResolutions[item.sourceSongId] ?? defaultImportResolution;
+              return (
+                <label key={item.sourceSongId} className="flex flex-col gap-2 rounded-xl border border-amber-100 bg-white px-3 py-3 sm:flex-row sm:items-center">
+                  <span className="min-w-0 flex-1 truncate text-sm font-bold text-stone-800">{item.title}</span>
+                  <select
+                    value={resolution}
+                    onChange={(event) => setPerSongResolutions((current) => ({
+                      ...current,
+                      [item.sourceSongId]: event.target.value as SongImportResolution
+                    }))}
+                    className="rounded-lg border border-stone-200 bg-white px-2 py-2 text-xs font-bold text-stone-700"
+                  >
+                    <option value="duplicate">{language === 'zh' ? '另存新副本' : 'Create copy'}</option>
+                    <option value="overwrite">{language === 'zh' ? '覆蓋既有歌曲' : 'Overwrite existing'}</option>
+                  </select>
+                </label>
+              );
+            })}
+          </div>
+          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => setImportInspection(null)} className="rounded-xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-bold text-stone-600">
+              {language === 'zh' ? '取消' : 'Cancel'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void completeSongImport(defaultImportResolution, perSongResolutions)}
+              disabled={isJoining}
+              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+            >
+              {isJoining ? (language === 'zh' ? '導入中...' : 'Importing...') : (language === 'zh' ? '確認並導入' : 'Confirm Import')}
+            </button>
+          </div>
+          {joinError && <p className="mt-3 text-center text-xs text-rose-600">{joinError}</p>}
+        </div>
+      );
+    }
+
+    if (authUserId) {
+      return (
+        <div className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={() => void handleSongImport()}
+            disabled={isJoining}
+            className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 sm:w-auto sm:min-w-64"
+          >
+            {isJoining
+              ? (language === 'zh' ? '檢查中...' : 'Checking...')
+              : (language === 'zh' ? '導入到我的個人歌庫' : 'Import to My Personal Library')}
+          </button>
+          {joinError && <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>}
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-6 rounded-xl border border-stone-100 bg-stone-50 px-4 py-4 text-center">
+        <p className="mb-3 text-sm text-stone-500">
+          {language === 'zh' ? '登入後即可導入到你的個人歌庫' : 'Sign in to import these songs to your personal library'}
+        </p>
+        <button type="button" onClick={() => void handleSignIn()} disabled={isSigningIn} className="rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+          {isSigningIn ? (language === 'zh' ? '登入中...' : 'Signing in...') : (language === 'zh' ? '前往登入' : 'Sign In')}
+        </button>
+        {joinError && <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(191,219,254,0.45),_transparent_36%),linear-gradient(180deg,_#fafaf9_0%,_#f5f5f4_100%)] px-4 py-8 sm:px-6 lg:px-8">
@@ -406,6 +620,67 @@ export default function SharedChartPage() {
                 </div>
               )}
             </>
+          ) : payload?.songBundle && selectedBundleSong ? (
+            <>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                {language === 'zh' ? '歌曲分享' : 'Shared Songs'}
+              </div>
+              <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h1 className="text-3xl font-bold tracking-tight text-stone-900">
+                    {language === 'zh' ? `${payload.songBundle.songs.length} 首歌曲` : `${payload.songBundle.songs.length} Songs`}
+                  </h1>
+                  <p className="mt-1 text-sm text-stone-500">
+                    {language === 'zh' ? '點選歌曲即可先預覽，再一次導入全部。' : 'Select a song to preview, then import the whole bundle.'}
+                  </p>
+                </div>
+                {(selectedBundleSong.song.lyricsDoc?.chinese?.trim() || selectedBundleSong.song.lyricsDoc?.english?.trim()) ? (
+                  <div className="inline-flex rounded-xl border border-stone-200 bg-white p-1 text-sm font-semibold shadow-sm">
+                    <button type="button" onClick={() => setShowSharedLyrics(false)} className={`rounded-lg px-3 py-1.5 ${!showSharedLyrics ? 'bg-stone-900 text-white' : 'text-stone-600'}`}>
+                      {language === 'zh' ? '和弦譜' : 'Chart'}
+                    </button>
+                    <button type="button" onClick={() => setShowSharedLyrics(true)} className={`rounded-lg px-3 py-1.5 ${showSharedLyrics ? 'bg-stone-900 text-white' : 'text-stone-600'}`}>
+                      {language === 'zh' ? '歌詞' : 'Lyrics'}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
+                <div className="max-h-[70vh] space-y-2 overflow-y-auto rounded-2xl border border-stone-200 bg-stone-50 p-2">
+                  {payload.songBundle.songs.map((item, index) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedBundleSongId(item.id);
+                        setShowSharedLyrics(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors ${item.id === selectedBundleSong.id ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-stone-800 hover:bg-indigo-50'}`}
+                    >
+                      <span className={`w-5 shrink-0 text-right text-xs font-black ${item.id === selectedBundleSong.id ? 'text-indigo-200' : 'text-stone-400'}`}>{index + 1}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-bold">{item.title}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="min-w-0">
+                  <h2 className="mb-3 text-xl font-black text-stone-900">{selectedBundleSong.title}</h2>
+                  <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
+                    {showSharedLyrics ? (
+                      <LyricsSheet song={selectedBundleSong.song} language={language} />
+                    ) : (
+                      <ChordSheet
+                        song={selectedBundleSong.song}
+                        language={language}
+                        currentKey={selectedBundleSong.song.currentKey}
+                        previewIdentity={selectedBundleSong.id}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+              {renderSongImportControls()}
+            </>
           ) : payload?.song ? (
             <>
               <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -443,6 +718,7 @@ export default function SharedChartPage() {
                   />
                 )}
               </div>
+              {renderSongImportControls()}
             </>
           ) : null}
 

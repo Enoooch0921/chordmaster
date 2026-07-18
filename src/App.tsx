@@ -52,6 +52,7 @@ import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
 import PreviewWysiwygEditor, { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
 import PreviewBarEditor from './components/preview-edit/PreviewBarEditor';
+import PreviewSectionActionMenu from './components/preview-edit/PreviewSectionActionMenu';
 import PreviewSectionTitleEditor from './components/preview-edit/PreviewSectionTitleEditor';
 import SongEditor from './components/SongEditor';
 import KeyPicker from './components/KeyPicker';
@@ -90,8 +91,10 @@ import {
 } from './lib/previewEditSession';
 import {
   createEmptyBar,
+  deleteSection,
   deleteBar,
   duplicateBar,
+  duplicateSection,
   ensureSongEditingIds,
   finalizeSectionTitleEdit,
   findSongBar,
@@ -668,6 +671,24 @@ const copyShareUrlToClipboard = async (shareUrl: string) => {
   }
 };
 
+const openSystemShareSheet = async (shareUrl: string, title: string) => {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      await Share.share({ title, text: title, url: shareUrl });
+      return true;
+    }
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      await navigator.share({ title, text: title, url: shareUrl });
+      return true;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/cancel|abort/i.test(message)) return true;
+    return false;
+  }
+  return false;
+};
+
 // On native iPad (Capacitor WKWebView), jsPDF's `.save()` relies on an
 // `<a download>` click that WKWebView silently ignores, so nothing happens.
 // Instead, write the PDF to the cache directory and hand it to the iOS share
@@ -1084,6 +1105,14 @@ interface SetlistSongHistoryState {
 
 type AppView = 'sheet' | 'about' | 'help';
 type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics' | 'sectionName' | 'marker';
+
+interface PreviewSectionActionTarget {
+  previewIdentity: string;
+  sectionId: string;
+  title: string;
+  anchorKey: string;
+  anchorRect: PreviewAnchorRect;
+}
 
 interface EditorFocusRequest {
   sIdx: number;
@@ -1907,6 +1936,7 @@ export default function App() {
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
   const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
   const [previewEditSession, setPreviewEditSession] = useState<PreviewEditSession | null>(null);
+  const [previewSectionActionTarget, setPreviewSectionActionTarget] = useState<PreviewSectionActionTarget | null>(null);
   const [previewEditorPanelHeight, setPreviewEditorPanelHeight] = useState(0);
   const [isPreviewEditExitPromptOpen, setIsPreviewEditExitPromptOpen] = useState(false);
   const [language, setLanguage] = useState<AppLanguage>('zh');
@@ -1937,7 +1967,7 @@ export default function App() {
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistSongId);
   const [songHistories, setSongHistories] = useState<Record<string, SongHistoryState>>({});
   const [setlistSongHistories, setSetlistSongHistories] = useState<Record<string, SetlistSongHistoryState>>({});
-  const [selectedSongIdsForBulkDelete, setSelectedSongIdsForBulkDelete] = useState<string[]>([]);
+  const [selectedLibrarySongIds, setSelectedLibrarySongIds] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [isLyricsMode, setIsLyricsMode] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -2027,6 +2057,7 @@ export default function App() {
   const [pendingRevokeShareSetlistId, setPendingRevokeShareSetlistId] = useState<string | null>(null);
   const [isRevokingSetlistShare, setIsRevokingSetlistShare] = useState(false);
   const [pendingShareUrl, setPendingShareUrl] = useState<string | null>(null);
+  const [isCreatingSongShare, setIsCreatingSongShare] = useState(false);
   const [shareDialogContext, setShareDialogContext] = useState<{ resourceType: NotificationResourceType; resourceId: string } | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [shareContacts, setShareContacts] = useState<ShareContact[]>([]);
@@ -3541,7 +3572,7 @@ export default function App() {
     setLastSavedAt(workspace.lastSavedAt);
     setSongHistories({});
     setSetlistSongHistories({});
-    setSelectedSongIdsForBulkDelete([]);
+    setSelectedLibrarySongIds([]);
     setIsLibraryEditing(false);
     setIsSetlistAddSongsOpen(false);
     setSelectedSongId(pickAvailableSongId(workspace.songs, [
@@ -4975,7 +5006,7 @@ export default function App() {
 
   const handleMobileSongLongPress = (songId: string) => {
     setIsLibraryEditing(true);
-    setSelectedSongIdsForBulkDelete([songId]);
+    setSelectedLibrarySongIds([songId]);
   };
 
   const handleMobileSetlistLongPress = (setlistId: string) => {
@@ -5222,7 +5253,7 @@ export default function App() {
     if (selectedSongId && remap.has(selectedSongId)) {
       setSelectedSongId(remap.get(selectedSongId) as string);
     }
-    setSelectedSongIdsForBulkDelete([]);
+    setSelectedLibrarySongIds([]);
     toast.success(
       language === 'zh'
         ? `已移除 ${removed} 首重複歌曲`
@@ -5532,7 +5563,7 @@ export default function App() {
         ? currentId
         : null);
       setSongHistories({});
-      setSelectedSongIdsForBulkDelete([]);
+      setSelectedLibrarySongIds([]);
       setIsLibraryEditing(false);
       await persistWorkspace(nextSongs, nextSetlists);
     } catch (error) {
@@ -5586,7 +5617,7 @@ export default function App() {
         setSelectedSongId(importedSongs[0].id);
       }
       setSongHistories({});
-      setSelectedSongIdsForBulkDelete([]);
+      setSelectedLibrarySongIds([]);
       setIsLibraryEditing(false);
       await persistWorkspace(nextSongs, setlists);
       toast.error(
@@ -5769,7 +5800,7 @@ export default function App() {
       setSelectedSetlistSongId(null);
       setSelectedSongId(replacementSong.id);
       setSongHistories({});
-      setSelectedSongIdsForBulkDelete([]);
+      setSelectedLibrarySongIds([]);
       setIsEditing(true);
       void persistWorkspace([replacementSong], []).catch(() => {
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -5782,7 +5813,7 @@ export default function App() {
     setSongHistories((currentHistory) =>
       Object.fromEntries(Object.entries(currentHistory).filter(([id]) => id !== songId))
     );
-    setSelectedSongIdsForBulkDelete((currentIds) => currentIds.filter((id) => id !== songId));
+    setSelectedLibrarySongIds((currentIds) => currentIds.filter((id) => id !== songId));
 
     if (selectedSongId === songId) {
       setSelectedSongId(remainingSongs[0].id);
@@ -5794,11 +5825,23 @@ export default function App() {
   };
 
   const handleToggleSongBulkSelection = (songId: string) => {
-    setSelectedSongIdsForBulkDelete((currentIds) =>
+    setSelectedLibrarySongIds((currentIds) =>
       currentIds.includes(songId)
         ? currentIds.filter((id) => id !== songId)
         : [...currentIds, songId]
     );
+  };
+
+  const handleToggleSelectAllFilteredSongs = () => {
+    const filteredIds = filteredSongs.map((item) => item.id);
+    const allSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedLibrarySongIds.includes(id));
+    setSelectedLibrarySongIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      filteredIds.forEach((id) => {
+        if (allSelected) nextIds.delete(id); else nextIds.add(id);
+      });
+      return Array.from(nextIds);
+    });
   };
 
   const handleDeleteSelectedSongs = () => {
@@ -5806,20 +5849,20 @@ export default function App() {
       toast.error(language === 'zh' ? '你沒有刪除這些團隊歌曲的權限。' : 'You do not have permission to delete these team songs.');
       return;
     }
-    if (selectedSongIdsForBulkDelete.length === 0) {
+    if (selectedLibrarySongIds.length === 0) {
       return;
     }
 
     const confirmed = window.confirm(
       language === 'zh'
-        ? `要刪除選取的 ${selectedSongIdsForBulkDelete.length} 首歌曲嗎？`
-        : `Delete ${selectedSongIdsForBulkDelete.length} selected songs?`
+        ? `要刪除選取的 ${selectedLibrarySongIds.length} 首歌曲嗎？`
+        : `Delete ${selectedLibrarySongIds.length} selected songs?`
     );
     if (!confirmed) {
       return;
     }
 
-    const selectedIdSet = new Set(selectedSongIdsForBulkDelete);
+    const selectedIdSet = new Set(selectedLibrarySongIds);
     const remainingSongs = songs.filter((item) => !selectedIdSet.has(item.id));
     const remainingSetlists = setlists.map((setlist) => ({
       ...setlist,
@@ -5837,7 +5880,7 @@ export default function App() {
       setSelectedSetlistSongId(null);
       setSelectedSongId(replacementSong.id);
       setSongHistories({});
-      setSelectedSongIdsForBulkDelete([]);
+      setSelectedLibrarySongIds([]);
       setIsEditing(true);
       void persistWorkspace([replacementSong], []).catch(() => {
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -5850,7 +5893,7 @@ export default function App() {
     setSongHistories((currentHistory) =>
       Object.fromEntries(Object.entries(currentHistory).filter(([id]) => !selectedIdSet.has(id)))
     );
-    setSelectedSongIdsForBulkDelete([]);
+    setSelectedLibrarySongIds([]);
 
     if (selectedIdSet.has(selectedSongId)) {
       setSelectedSongId(remainingSongs[0].id);
@@ -6678,7 +6721,11 @@ export default function App() {
           // the repository ref was assigned).
           void refreshNotificationsAndContacts();
           const storedSelectedSongId = getStoredSelectedSongId(targetLibrary?.id ?? null);
+          const requestedSongId = typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).get('song')
+            : null;
           setSelectedSongId((currentId) => pickAvailableSongId(nextSongs, [
+            requestedSongId,
             storedSelectedSongId,
             currentId
           ]));
@@ -6961,7 +7008,7 @@ export default function App() {
   }, [selectedSetlistId, selectedSetlistSongId, workspaceMode]);
 
   useEffect(() => {
-    setSelectedSongIdsForBulkDelete((currentIds) =>
+    setSelectedLibrarySongIds((currentIds) =>
       currentIds.filter((id) => songs.some((item) => item.id === id))
     );
   }, [songs]);
@@ -7012,10 +7059,10 @@ export default function App() {
   }, [googleUser]);
 
   useEffect(() => {
-    if (!isLibraryEditing && selectedSongIdsForBulkDelete.length > 0) {
-      setSelectedSongIdsForBulkDelete([]);
+    if (!isLibraryEditing && selectedLibrarySongIds.length > 0) {
+      setSelectedLibrarySongIds([]);
     }
-  }, [isLibraryEditing, selectedSongIdsForBulkDelete.length]);
+  }, [isLibraryEditing, selectedLibrarySongIds.length]);
 
   useEffect(() => {
     if (isEditing && !canOpenEditor) {
@@ -7240,6 +7287,11 @@ export default function App() {
         ? { ...current, target: { ...current.target, anchorRect } }
         : current;
     });
+    setPreviewSectionActionTarget((current) => {
+      if (!current) return current;
+      const anchorRect = findPreviewAnchorRect(current.anchorKey);
+      return anchorRect ? { ...current, anchorRect } : null;
+    });
   }, [findPreviewAnchorRect]);
 
   const getPreviewIdentityForCurrentMode = React.useCallback(() => (
@@ -7258,6 +7310,91 @@ export default function App() {
     }
     setPreviewEditSession(null);
   }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode, previewEditSession, selectedSetlistSong?.id, song?.id]);
+
+  const openPreviewSectionTitleEditor = React.useCallback((target: PreviewSectionActionTarget) => {
+    const editorSong = activeEditorSong;
+    if (!editorSong || target.previewIdentity !== activePreviewIdentity) return;
+    const editableSong = ensureSongEditingIds(editorSong);
+    const section = editableSong.sections.find((candidate) => candidate.id === target.sectionId);
+    if (!section?.id) return;
+
+    if (!hasFinePointer) {
+      const proxyInput = mobileWysiwygKeyboardProxyInputRef.current;
+      if (proxyInput) {
+        proxyInput.setAttribute('inputmode', 'text');
+        proxyInput.focus({ preventScroll: true });
+      }
+    }
+
+    const nextSession = createPreviewEditSession({
+      song: editableSong,
+      target: {
+        kind: 'section',
+        previewIdentity: target.previewIdentity,
+        sectionId: section.id,
+        barId: section.bars[0]?.id ?? '',
+        field: 'sectionName',
+        slotIndex: 0,
+        rawChordIndex: null,
+        anchorKey: target.anchorKey,
+        anchorRect: findPreviewAnchorRect(target.anchorKey) ?? target.anchorRect
+      },
+      inputMode: 'letters'
+    });
+    setPreviewSectionActionTarget(null);
+    setPreviewEditSession(nextSession);
+    window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+  }, [activeEditorSong, activePreviewIdentity, findPreviewAnchorRect, hasFinePointer, refreshPreviewEditAnchorRect]);
+
+  const finishPreviewSectionAction = React.useCallback((action: 'duplicate' | 'delete') => {
+    const target = previewSectionActionTarget;
+    const editorSong = activeEditorSong;
+    if (!target || !editorSong || target.previewIdentity !== activePreviewIdentity) return;
+    if (action === 'delete' && editorSong.sections.length <= 1) return;
+    if (action === 'delete') {
+      const confirmed = window.confirm(
+        language === 'zh'
+          ? `要刪除「${target.title.trim() || '未命名段落'}」嗎？`
+          : `Delete "${target.title.trim() || 'Untitled section'}"?`
+      );
+      if (!confirmed) return;
+    }
+
+    const editableSong = ensureSongEditingIds(editorSong);
+    const result = action === 'duplicate'
+      ? duplicateSection(editableSong, target.sectionId)
+      : null;
+    const nextSong = result?.song ?? deleteSection(editableSong, target.sectionId);
+    if (nextSong === editableSong) return;
+
+    if (isSetlistMode) {
+      handleSetlistSongContentChange(nextSong);
+    } else {
+      handleSongChange(nextSong);
+    }
+
+    const nextActiveSectionId = result?.sectionId
+      ?? nextSong.sections.find((section) => section.id === target.sectionId)?.id
+      ?? nextSong.sections[Math.max(0, editorSong.sections.findIndex((section) => section.id === target.sectionId) - 1)]?.id
+      ?? nextSong.sections[0]?.id
+      ?? null;
+    setPreviewSectionActionTarget(null);
+    setPreviewEditSession(null);
+    setActiveSectionId(nextActiveSectionId);
+    if (nextActiveSectionId) {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        sheetRef.current
+          ?.querySelector<HTMLElement>(`[data-preview-section-id="${CSS.escape(nextActiveSectionId)}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }));
+    }
+  }, [activeEditorSong, activePreviewIdentity, handleSetlistSongContentChange, handleSongChange, isSetlistMode, language, previewSectionActionTarget]);
+
+  React.useEffect(() => {
+    if (previewSectionActionTarget && previewSectionActionTarget.previewIdentity !== activePreviewIdentity) {
+      setPreviewSectionActionTarget(null);
+    }
+  }, [activePreviewIdentity, previewSectionActionTarget]);
 
   React.useEffect(() => {
     if (!activePreviewEditSession || activePreviewEditSession.target.field === 'sectionName') return;
@@ -7553,6 +7690,20 @@ export default function App() {
     if (isPreviewQuickEditEnabled && field === 'sectionName') {
       const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
       if (!previewIdentity) return;
+      if (bIdx < 0 && target?.sectionId) {
+        if (activePreviewEditSession) commitPreviewEditSession(activePreviewEditSession);
+        const section = editorSong.sections.find((candidate) => candidate.id === target.sectionId)
+          ?? editorSong.sections[nextSectionIndex];
+        if (!section?.id) return;
+        setPreviewSectionActionTarget({
+          previewIdentity,
+          sectionId: section.id,
+          title: section.title,
+          anchorKey: target.anchorKey,
+          anchorRect: target.anchorRect
+        });
+        return;
+      }
       if (!hasFinePointer) {
         const proxyInput = mobileWysiwygKeyboardProxyInputRef.current;
         if (proxyInput) {
@@ -8691,14 +8842,8 @@ export default function App() {
 
       const token = await cloudRepositoryRef.current.createShareLink(resourceType, resourceId);
       const shareUrl = buildShareUrl(token);
-      const didCopy = await copyShareUrlToClipboard(shareUrl);
-
-      if (didCopy) {
-        toast.success(copy.shareCopied);
-        return;
-      }
-
       setPendingShareUrl(shareUrl);
+      setShareDialogContext(null);
     } catch (error) {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       const reason = error instanceof Error ? error.message.trim() : '';
@@ -8714,6 +8859,52 @@ export default function App() {
       toast.error(copy.shareFailedWithReason.replace('{reason}', localizedReason));
     }
 	  };
+
+  const handleShareSelectedSongs = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || selectedLibrarySongIds.length === 0 || isCreatingSongShare) return;
+    if (isTeamWorkspace && !canEditTeamSongs) {
+      toast.error(language === 'zh' ? '你沒有分享團隊歌曲的權限。' : 'You do not have permission to share team songs.');
+      return;
+    }
+    if (!navigator.onLine) {
+      toast.error(language === 'zh' ? '目前離線，無法建立分享連結。' : 'You are offline. Share links cannot be created right now.');
+      return;
+    }
+
+    const selectedIds = new Set(selectedLibrarySongIds);
+    const orderedSongs = filteredSongs.filter((item) => selectedIds.has(item.id));
+    if (orderedSongs.length === 0) return;
+
+    try {
+      setIsCreatingSongShare(true);
+      setSyncStatus('syncing');
+      await Promise.all(orderedSongs.map((item) => repository.saveSong(item)));
+      setSavedSongs((current) => {
+        const synced = new Map(orderedSongs.map((item) => [item.id, cloneSong(item)] as const));
+        const merged = current.map((item) => synced.get(item.id) ?? item);
+        const existingIds = new Set(merged.map((item) => item.id));
+        return [
+          ...merged,
+          ...orderedSongs.filter((item) => !existingIds.has(item.id)).map((item) => cloneSong(item))
+        ];
+      });
+      const token = orderedSongs.length === 1
+        ? await repository.createShareLink('song', orderedSongs[0].id)
+        : await repository.createSongBundleShare(orderedSongs.map((item) => item.id));
+      setPendingShareUrl(buildShareUrl(token));
+      setShareDialogContext(null);
+      setSyncStatus('saved');
+      setSelectedLibrarySongIds([]);
+      setIsLibraryEditing(false);
+    } catch (error) {
+      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      const reason = error instanceof Error && error.message.trim() ? error.message.trim() : copy.shareFailed;
+      toast.error(copy.shareFailedWithReason.replace('{reason}', reason));
+    } finally {
+      setIsCreatingSongShare(false);
+    }
+  };
 
   const handleCopyActiveSetlistShareLink = async () => {
     if (!selectedSetlistShareStatus?.activeToken) return;
@@ -11671,14 +11862,44 @@ export default function App() {
                   />
                   {isLibraryEditing && (
                     <>
+                      <div className="mt-2 flex items-center justify-between gap-2 text-xs font-bold text-gray-500">
+                        <span>{language === 'zh' ? `已選 ${selectedLibrarySongIds.length} 首` : `${selectedLibrarySongIds.length} selected`}</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={handleToggleSelectAllFilteredSongs}
+                            className="rounded-lg px-2 py-1 text-indigo-600 transition-colors hover:bg-indigo-50"
+                          >
+                            {filteredSongs.length > 0 && filteredSongs.every((item) => selectedLibrarySongIds.includes(item.id))
+                              ? (language === 'zh' ? '取消全選' : 'Deselect all')
+                              : (language === 'zh' ? '全選目前結果' : 'Select results')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsLibraryEditing(false)}
+                            className="rounded-lg px-2 py-1 text-gray-500 transition-colors hover:bg-gray-100"
+                          >
+                            {copy.cancel}
+                          </button>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleShareSelectedSongs()}
+                        disabled={selectedLibrarySongIds.length === 0 || isCreatingSongShare}
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-100 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {isCreatingSongShare ? <LoaderCircle size={16} className="animate-spin" /> : <Share2 size={16} />}
+                        <span>{language === 'zh' ? `分享所選 (${selectedLibrarySongIds.length})` : `Share selected (${selectedLibrarySongIds.length})`}</span>
+                      </button>
                       <button
                         type="button"
                         onClick={handleDeleteSelectedSongs}
-                        disabled={selectedSongIdsForBulkDelete.length === 0}
+                        disabled={selectedLibrarySongIds.length === 0}
                         className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Trash2 size={16} />
-                        <span>{`${copy.deleteSelected} (${selectedSongIdsForBulkDelete.length})`}</span>
+                        <span>{`${copy.deleteSelected} (${selectedLibrarySongIds.length})`}</span>
                       </button>
                       <button
                         type="button"
@@ -11748,7 +11969,7 @@ export default function App() {
                             <div className="flex items-start gap-3">
                               <input
                                 type="checkbox"
-                                checked={selectedSongIdsForBulkDelete.includes(item.id)}
+                                checked={selectedLibrarySongIds.includes(item.id)}
                                 onChange={() => handleToggleSongBulkSelection(item.id)}
                                 className="mt-2 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                               />
@@ -13223,6 +13444,19 @@ export default function App() {
                 onCancel={() => setPreviewEditSession(null)}
               />
             )}
+            {previewSectionActionTarget && canOpenEditor && !isLyricsMode && activeEditorSong && (
+              <PreviewSectionActionMenu
+                language={language}
+                deviceLayout={previewEditorDeviceLayout}
+                title={previewSectionActionTarget.title}
+                anchorRect={previewSectionActionTarget.anchorRect}
+                canDelete={activeEditorSong.sections.length > 1}
+                onRename={() => openPreviewSectionTitleEditor(previewSectionActionTarget)}
+                onDuplicate={() => finishPreviewSectionAction('duplicate')}
+                onDelete={() => finishPreviewSectionAction('delete')}
+                onClose={() => setPreviewSectionActionTarget(null)}
+              />
+            )}
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
               <PreviewWysiwygEditor
                 song={activeEditorSong}
@@ -14073,7 +14307,9 @@ export default function App() {
               className="w-full max-w-lg rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
               <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{APP_NAME}</div>
-              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">{shareDialogContext ? copy.shareDialogTitle : copy.shareManualCopyPrompt}</h2>
+              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">
+                {shareDialogContext ? copy.shareDialogTitle : (language === 'zh' ? '分享歌曲' : 'Share Songs')}
+              </h2>
               <input
                 type="text"
                 readOnly
@@ -14095,6 +14331,25 @@ export default function App() {
                 >
                   {copy.done}
                 </button>
+                {(Capacitor.isNativePlatform() || (typeof navigator !== 'undefined' && typeof navigator.share === 'function')) && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const didShare = await openSystemShareSheet(
+                        pendingShareUrl,
+                        language === 'zh' ? `來自 ${APP_NAME} 的歌曲` : `Songs from ${APP_NAME}`
+                      );
+                      if (didShare) {
+                        setPendingShareUrl(null);
+                        setShareDialogContext(null);
+                      }
+                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
+                  >
+                    <Share2 size={14} />
+                    <span>{language === 'zh' ? '系統分享' : 'Share'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={async () => {
@@ -14108,7 +14363,7 @@ export default function App() {
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800"
                 >
                   <Copy size={14} />
-                  <span>{copy.duplicate}</span>
+                  <span>{language === 'zh' ? '複製連結' : 'Copy Link'}</span>
                 </button>
               </div>
             </motion.div>

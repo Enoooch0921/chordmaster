@@ -202,7 +202,7 @@ export interface AuthenticatedUser {
   picture?: string;
 }
 
-export type ShareResourceType = 'song' | 'setlist' | 'project';
+export type ShareResourceType = 'song' | 'song_bundle' | 'setlist' | 'project';
 
 export interface SharedSongPayload {
   id: string;
@@ -221,6 +221,11 @@ export interface SharedSetlistPayload {
   }>;
 }
 
+export interface SharedSongBundlePayload {
+  id: string;
+  songs: SharedSongPayload[];
+}
+
 export interface SharedProjectPayload {
   id: string;
   name: string;
@@ -230,8 +235,36 @@ export interface SharedProjectPayload {
 export interface SharedResourcePayload {
   resourceType: ShareResourceType;
   song?: SharedSongPayload;
+  songBundle?: SharedSongBundlePayload;
   setlist?: SharedSetlistPayload;
   project?: SharedProjectPayload;
+}
+
+export type SongImportResolution = 'duplicate' | 'overwrite';
+
+export interface SharedSongImportInspectionItem {
+  sourceSongId: string;
+  title: string;
+  existingSongId: string | null;
+  existingTitle: string | null;
+}
+
+export interface SharedSongImportInspection {
+  songs: SharedSongImportInspectionItem[];
+  conflictCount: number;
+}
+
+export interface SharedSongImportResultItem {
+  sourceSongId: string;
+  songId: string;
+  action: 'created' | 'duplicated' | 'overwritten';
+}
+
+export interface SharedSongImportResult {
+  createdCount: number;
+  duplicatedCount: number;
+  overwrittenCount: number;
+  songs: SharedSongImportResultItem[];
 }
 
 export interface ShareParticipant {

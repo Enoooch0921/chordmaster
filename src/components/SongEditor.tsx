@@ -13,6 +13,8 @@ import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normaliz
 import { formatInitialCaps } from '../utils/textUtils';
 import { ANNOTATION_COLOR_OPTIONS, DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
 import {
+  deleteSection as deleteSongSection,
+  duplicateSection as duplicateSongSection,
   mergeSectionToPrevious as mergeSongSectionToPrevious,
   normalizeChordBeatTokens,
   reorderSongSections,
@@ -4763,19 +4765,12 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const duplicateSection = (sIdx: number) => {
-    const sectionToCopy = song.sections[sIdx];
-    const sourceWrittenKey = sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
-    let newSection = {
-      ...JSON.parse(JSON.stringify(sectionToCopy)),
-      id: createSectionId()
-    };
-    const newSections = [...song.sections];
-    newSections.splice(sIdx + 1, 0, newSection);
-    const destinationBaseKey = getInheritedKeyBeforeSection(newSections, sIdx + 1);
-    newSection = adaptSectionForDestination(newSection, sourceWrittenKey, destinationBaseKey);
-    newSections[sIdx + 1] = newSection;
+    const sectionId = song.sections[sIdx]?.id;
+    if (!sectionId) return;
+    const result = duplicateSongSection(song, sectionId);
+    if (!result.created) return;
     clearEditorSelectionState();
-    notifyChange({ ...song, sections: normalizeSectionKeyChanges(newSections) });
+    notifyChange(result.song);
   };
 
   const addSection = () => {
@@ -4819,9 +4814,12 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const removeSection = (sIdx: number) => {
-    const newSections = song.sections.filter((_, i) => i !== sIdx);
+    const sectionId = song.sections[sIdx]?.id;
+    if (!sectionId) return;
+    const nextSong = deleteSongSection(song, sectionId);
+    if (nextSong === song) return;
     clearEditorSelectionState();
-    notifyChange({ ...song, sections: newSections });
+    notifyChange(nextSong);
   };
 
   const moveSection = (sIdx: number, direction: -1 | 1) => {

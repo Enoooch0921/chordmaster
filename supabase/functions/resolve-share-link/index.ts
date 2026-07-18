@@ -73,6 +73,55 @@ Deno.serve(async (request) => {
       });
     }
 
+    if (shareLink.resource_type === 'song_bundle') {
+      const { data: bundle, error: bundleError } = await supabase
+        .from('song_share_bundles')
+        .select('id')
+        .eq('id', shareLink.resource_id)
+        .maybeSingle();
+      if (bundleError || !bundle) {
+        return jsonResponse({ error: 'Song bundle not found.' }, 404);
+      }
+
+      const { data: bundleItems, error: bundleItemsError } = await supabase
+        .from('song_share_bundle_items')
+        .select('song_id, order_index')
+        .eq('bundle_id', bundle.id)
+        .order('order_index', { ascending: true });
+      if (bundleItemsError) {
+        return jsonResponse({ error: bundleItemsError.message }, 500);
+      }
+
+      const songIds = (bundleItems ?? []).map((item) => item.song_id);
+      const { data: songs, error: songsError } = songIds.length > 0
+        ? await supabase
+          .from('songs')
+          .select('id, title, content_json')
+          .in('id', songIds)
+        : { data: [], error: null };
+      if (songsError) {
+        return jsonResponse({ error: songsError.message }, 500);
+      }
+
+      const songsById = new Map((songs ?? []).map((song) => [song.id, song] as const));
+      const payloadSongs = songIds
+        .map((songId) => songsById.get(songId))
+        .filter(Boolean)
+        .map((song) => ({
+          id: song.id,
+          title: song.title,
+          song: song.content_json
+        }));
+
+      return jsonResponse({
+        resourceType: 'song_bundle',
+        songBundle: {
+          id: bundle.id,
+          songs: payloadSongs
+        }
+      });
+    }
+
     if (shareLink.resource_type === 'project') {
       const { data: project, error: projectError } = await supabase
         .from('projects')

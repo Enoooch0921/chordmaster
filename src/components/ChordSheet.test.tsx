@@ -107,7 +107,7 @@ describe('ChordSheet preview input caret', () => {
         onSectionReorder={onSectionReorder}
       />
     );
-    const verseButton = screen.getByRole('button', { name: /編輯段落名稱 Verse/ });
+    const verseButton = screen.getByRole('button', { name: /開啟段落操作 Verse/ });
     fireEvent.click(verseButton);
     expect(onElementClick).toHaveBeenCalledTimes(1);
 

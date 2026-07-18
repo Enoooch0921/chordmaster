@@ -96,6 +96,12 @@ export const cloneBarForInsert = (bar: Bar): Bar => ({
   id: createId('bar')
 });
 
+const cloneSectionForInsert = (section: Section): Section => ({
+  ...structuredClone(section),
+  id: createId('section'),
+  bars: section.bars.map(cloneBarForInsert)
+});
+
 export const ensureSongEditingIds = (song: Song): Song => {
   let changed = false;
   const sections = song.sections.map((section, sectionIndex) => {
@@ -454,6 +460,55 @@ export const updateSectionTitle = (song: Song, sectionId: string, title: string)
   if (!located || located.section.title === title) return song;
   const sections = [...song.sections];
   sections[located.sectionIndex] = { ...located.section, title };
+  return { ...song, sections };
+};
+
+export const duplicateSection = (
+  song: Song,
+  sectionId: string
+): SectionMutationResult => {
+  const located = findSongSection(song, sectionId);
+  if (!located) {
+    return {
+      song,
+      sectionId,
+      firstBarId: null,
+      created: false
+    };
+  }
+
+  const duplicate = cloneSectionForInsert(located.section);
+  const sections = [...song.sections];
+  sections.splice(located.sectionIndex + 1, 0, duplicate);
+  return {
+    song: { ...song, sections: normalizeSectionKeyChanges(song, sections) },
+    sectionId: duplicate.id ?? sectionId,
+    firstBarId: duplicate.bars[0]?.id ?? null,
+    created: true
+  };
+};
+
+export const deleteSection = (song: Song, sectionId: string): Song => {
+  if (song.sections.length <= 1) return song;
+  const located = findSongSection(song, sectionId);
+  if (!located) return song;
+
+  const previousKeys = new Map<string, Key>();
+  const activeKeys = getSectionActiveKeys(song);
+  song.sections.forEach((section, index) => {
+    if (section.id) previousKeys.set(section.id, activeKeys[index] ?? song.originalKey);
+  });
+
+  let inheritedKey = song.originalKey;
+  const sections = song.sections
+    .filter((section) => section.id !== sectionId)
+    .map((section) => {
+      const activeKey = section.id ? previousKeys.get(section.id) ?? inheritedKey : inheritedKey;
+      const keyChangeTo = activeKey !== inheritedKey ? activeKey : undefined;
+      inheritedKey = activeKey;
+      return keyChangeTo === section.keyChangeTo ? section : { ...section, keyChangeTo };
+    });
+
   return { ...song, sections };
 };
 

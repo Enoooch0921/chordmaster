@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Song } from '../types';
+import { duplicateSection } from '../lib/songEditing';
 import {
   insertNewSetlistSectionsAfterSources,
   reorderSetlistSectionOrder
@@ -42,5 +43,16 @@ describe('setlist section order editing', () => {
       previousSong,
       nextSong
     )).toEqual(['chorus', 'verse', 'verse-2', 'bridge']);
+  });
+
+  it('inserts a duplicated section immediately after its source in a custom order', () => {
+    const duplicated = duplicateSection(previousSong, 'verse');
+    expect(duplicated.created).toBe(true);
+
+    expect(insertNewSetlistSectionsAfterSources(
+      ['chorus', 'verse', 'bridge'],
+      previousSong,
+      duplicated.song
+    )).toEqual(['chorus', 'verse', duplicated.sectionId, 'bridge']);
   });
 });

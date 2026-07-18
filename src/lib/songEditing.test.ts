@@ -9,6 +9,8 @@ import {
   deleteBar,
   detectSectionChordInputMode,
   duplicateBar,
+  duplicateSection,
+  deleteSection,
   finalizeSectionTitleEdit,
   getChordStorageModeForTarget,
   getChordBeatSlots,
@@ -269,6 +271,43 @@ describe('section commands', () => {
     const reordered = reorderSection(split, secondId, 'section-a', 'before');
     expect(reordered.sections.map((section) => section.id)).toEqual([secondId, 'section-a']);
     expect(reordered.sections[0].bars.map((bar) => bar.id)).toEqual(['bar-a2', 'bar-a3']);
+  });
+
+  it('duplicates a full section after the source with fresh section and bar ids', () => {
+    const original = structuredClone(sectionSong);
+    const result = duplicateSection(sectionSong, 'section-a');
+
+    expect(result.created).toBe(true);
+    expect(result.song.sections).toHaveLength(2);
+    expect(result.song.sections[1]).toMatchObject({ title: 'Verse' });
+    expect(result.song.sections[1].id).not.toBe('section-a');
+    expect(result.song.sections[1].bars.map((bar) => bar.id)).not.toEqual(
+      sectionSong.sections[0].bars.map((bar) => bar.id)
+    );
+    expect(result.song.sections[1].bars.map((bar) => bar.chords)).toEqual(
+      sectionSong.sections[0].bars.map((bar) => bar.chords)
+    );
+    expect(sectionSong).toEqual(original);
+  });
+
+  it('keeps the inherited key when duplicating or deleting a key-change section', () => {
+    const song: Song = {
+      title: 'Key sections', originalKey: 'C', currentKey: 'C', timeSignature: '4/4',
+      sections: [
+        { id: 'a', title: 'Verse', bars: [{ id: 'a1', chords: ['C'] }] },
+        { id: 'b', title: 'Bridge', keyChangeTo: 'D', bars: [{ id: 'b1', chords: ['D'] }] },
+        { id: 'c', title: 'Chorus', bars: [{ id: 'c1', chords: ['D'] }] }
+      ]
+    };
+
+    const duplicated = duplicateSection(song, 'b').song;
+    expect(duplicated.sections[2].keyChangeTo).toBeUndefined();
+    expect(duplicated.sections[2].bars[0].chords).toEqual(['D']);
+
+    const deleted = deleteSection(song, 'b');
+    expect(deleted.sections.map((section) => section.id)).toEqual(['a', 'c']);
+    expect(deleted.sections[1].keyChangeTo).toBe('D');
+    expect(deleted.sections[1].bars[0].chords).toEqual(['D']);
   });
 
   it('merges only a previously named non-first section when its title is cleared', () => {

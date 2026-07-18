@@ -1918,11 +1918,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               data-preview-edit-anchor={sectionAnchorKey}
                               data-preview-section-title={isSectionStartRow ? section?.id : undefined}
                               data-preview-section-split={isSectionStartRow ? undefined : row.bars[0]?.id}
-                              className={`group/section-title flex w-full items-center justify-center rounded-sm px-1 py-1 min-h-[24px] overflow-visible ${isSectionStartRow && title ? 'border' : 'border border-dashed border-transparent'} ${onElementClick ? 'cursor-text transition-all hover:border-indigo-300 hover:bg-indigo-50/55 hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)]' : ''} ${isSectionStartRow && onSectionReorder ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
+                              className={`group/section-title flex w-full items-center justify-center rounded-sm px-1 py-1 min-h-[24px] overflow-visible ${isSectionStartRow && title ? 'border' : 'border border-dashed border-transparent'} ${onElementClick ? `${isSectionStartRow ? 'cursor-pointer' : 'cursor-text'} transition-all hover:border-indigo-300 hover:bg-indigo-50/55 hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)]` : ''} ${isSectionStartRow && onSectionReorder ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
                               style={isSectionStartRow && title ? getSectionBadgeStyle(colors.accent) : undefined}
                               disabled={!onElementClick}
                               aria-label={isSectionStartRow
-                                ? (language === 'zh' ? `編輯段落名稱 ${title || '未命名段落'}` : `Edit section title ${title || 'Untitled section'}`)
+                                ? (language === 'zh' ? `開啟段落操作 ${title || '未命名段落'}` : `Open section actions ${title || 'Untitled section'}`)
                                 : (language === 'zh' ? '從本行第一小節拆成新段落' : 'Start a new section from this row')}
                               onMouseDown={(event) => event.stopPropagation()}
                               onTouchStart={(event) => event.stopPropagation()}

@@ -1,4 +1,10 @@
-import { SharedResourcePayload, ShareResourceType } from '../types';
+import {
+  SharedResourcePayload,
+  SharedSongImportInspection,
+  SharedSongImportResult,
+  ShareResourceType,
+  SongImportResolution
+} from '../types';
 import { supabase } from './supabase';
 
 const SHARE_AUTH_REQUIRED_MESSAGE = 'Please sign in again to create a share link.';
@@ -97,7 +103,10 @@ const getShareAccessToken = async (forceRefresh = false) => {
   throw new Error(SHARE_AUTH_REQUIRED_MESSAGE);
 };
 
-const invokeCreateShareLink = async (resourceType: ShareResourceType, resourceId: string, accessToken: string) => {
+const invokeCreateShareLink = async (
+  payload: { resourceType: ShareResourceType; resourceId?: string; songIds?: string[] },
+  accessToken: string
+) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
@@ -106,10 +115,7 @@ const invokeCreateShareLink = async (resourceType: ShareResourceType, resourceId
     headers: {
       Authorization: `Bearer ${accessToken}`
     },
-    body: {
-      resourceType,
-      resourceId
-    }
+    body: payload
   });
 
   if (error) {
@@ -131,7 +137,7 @@ export const createShareLink = async (resourceType: ShareResourceType, resourceI
   const accessToken = await getShareAccessToken();
 
   try {
-    return await invokeCreateShareLink(resourceType, resourceId, accessToken);
+    return await invokeCreateShareLink({ resourceType, resourceId }, accessToken);
   } catch (error) {
     const normalizedError = error instanceof Error
       ? error
@@ -146,7 +152,25 @@ export const createShareLink = async (resourceType: ShareResourceType, resourceI
       throw normalizedError;
     }
 
-    return invokeCreateShareLink(resourceType, resourceId, refreshedAccessToken);
+    return invokeCreateShareLink({ resourceType, resourceId }, refreshedAccessToken);
+  }
+};
+
+export const createSongBundleShare = async (songIds: string[]) => {
+  const uniqueSongIds = Array.from(new Set(songIds.filter(Boolean)));
+  if (uniqueSongIds.length < 2) {
+    throw new Error('A song bundle requires at least two songs.');
+  }
+  const accessToken = await getShareAccessToken();
+  try {
+    return await invokeCreateShareLink({ resourceType: 'song_bundle', songIds: uniqueSongIds }, accessToken);
+  } catch (error) {
+    const normalizedError = error instanceof Error
+      ? error
+      : await normalizeFunctionError(error, SHARE_CREATE_FAILED_MESSAGE);
+    if (normalizedError.message !== SHARE_AUTH_REQUIRED_MESSAGE) throw normalizedError;
+    const refreshedAccessToken = await getShareAccessToken(true);
+    return invokeCreateShareLink({ resourceType: 'song_bundle', songIds: uniqueSongIds }, refreshedAccessToken);
   }
 };
 
@@ -170,4 +194,26 @@ export const resolveShareLink = async (token: string) => {
   }
 
   return data;
+};
+
+export const inspectSharedSongImport = async (token: string) => {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.rpc('inspect_shared_song_import', { p_token: token });
+  if (error) throw error;
+  return data as SharedSongImportInspection;
+};
+
+export const importSharedSongs = async (
+  token: string,
+  defaultResolution: SongImportResolution,
+  perSongResolutions: Record<string, SongImportResolution> = {}
+) => {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.rpc('import_shared_songs', {
+    p_token: token,
+    p_default_resolution: defaultResolution,
+    p_resolutions: perSongResolutions
+  });
+  if (error) throw error;
+  return data as SharedSongImportResult;
 };

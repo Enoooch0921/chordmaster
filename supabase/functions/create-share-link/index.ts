@@ -72,8 +72,83 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: 'Unauthorized.' }, 401);
     }
 
-    const { resourceType, resourceId } = await request.json();
-    if (!resourceType || !resourceId || !['song', 'setlist', 'project'].includes(resourceType)) {
+    const { resourceType, resourceId, songIds } = await request.json();
+    if (!resourceType || !['song', 'song_bundle', 'setlist', 'project'].includes(resourceType)) {
+      return jsonResponse({ error: 'Invalid resource payload.' }, 400);
+    }
+
+    if (resourceType === 'song_bundle') {
+      const uniqueSongIds = Array.from(new Set(
+        Array.isArray(songIds) ? songIds.filter((id) => typeof id === 'string' && id.trim()) : []
+      ));
+      if (uniqueSongIds.length < 2 || uniqueSongIds.length > 100) {
+        return jsonResponse({ error: 'A song bundle must contain between 2 and 100 songs.' }, 400);
+      }
+
+      const { data: bundleSongs, error: bundleSongsError } = await supabase
+        .from('songs')
+        .select('id, library_id')
+        .in('id', uniqueSongIds);
+      if (bundleSongsError || (bundleSongs ?? []).length !== uniqueSongIds.length) {
+        return jsonResponse({ error: 'One or more songs were not found or are not accessible.' }, 404);
+      }
+
+      const libraryIds = Array.from(new Set((bundleSongs ?? []).map((song) => song.library_id)));
+      if (libraryIds.length !== 1) {
+        return jsonResponse({ error: 'All shared songs must belong to the same library.' }, 400);
+      }
+      const libraryId = libraryIds[0];
+      const { data: canWriteBundle, error: canWriteBundleError } = await supabase
+        .rpc('can_write_library', { target_library_id: libraryId });
+      if (canWriteBundleError) {
+        return jsonResponse({ error: canWriteBundleError.message }, 400);
+      }
+      if (canWriteBundle !== true) {
+        return jsonResponse({ error: 'You do not have permission to share these songs.' }, 403);
+      }
+
+      const bundleId = crypto.randomUUID();
+      const token = crypto.randomUUID().replaceAll('-', '');
+      const { error: bundleError } = await adminSupabase
+        .from('song_share_bundles')
+        .insert({
+          id: bundleId,
+          library_id: libraryId,
+          created_by: authData.user.id
+        });
+      if (bundleError) {
+        return jsonResponse({ error: bundleError.message }, 400);
+      }
+
+      const { error: itemError } = await adminSupabase
+        .from('song_share_bundle_items')
+        .insert(uniqueSongIds.map((songId, orderIndex) => ({
+          bundle_id: bundleId,
+          song_id: songId,
+          order_index: orderIndex
+        })));
+      if (itemError) {
+        await adminSupabase.from('song_share_bundles').delete().eq('id', bundleId);
+        return jsonResponse({ error: itemError.message }, 400);
+      }
+
+      const { error: shareError } = await adminSupabase
+        .from('share_links')
+        .insert({
+          resource_type: 'song_bundle',
+          resource_id: bundleId,
+          token,
+          created_by: authData.user.id
+        });
+      if (shareError) {
+        await adminSupabase.from('song_share_bundles').delete().eq('id', bundleId);
+        return jsonResponse({ error: shareError.message }, 400);
+      }
+
+      return jsonResponse({ token });
+    }
+
+    if (!resourceId) {
       return jsonResponse({ error: 'Invalid resource payload.' }, 400);
     }
 
