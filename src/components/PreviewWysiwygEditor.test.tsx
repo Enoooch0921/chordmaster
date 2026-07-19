@@ -79,13 +79,18 @@ describe('PreviewWysiwygEditor song information panel', () => {
     expect(dialog).toBeInTheDocument();
   });
 
-  it('uses a single-column phone sheet and focuses the tapped field', async () => {
+  it('uses a compact phone grid and focuses the tapped field', async () => {
     const { container } = render(<StatefulEditor deviceLayout="phone" field="title" />);
     const panel = container.querySelector<HTMLElement>('[data-song-metadata-panel]');
     const titleInput = container.querySelector<HTMLInputElement>('[data-song-metadata-field="title"] input');
+    const keyField = container.querySelector<HTMLElement>('[data-song-metadata-field="key"]');
+    const shuffleField = container.querySelector<HTMLElement>('[data-song-metadata-field="groove"]');
 
     expect(panel?.dataset.deviceLayout).toBe('phone');
-    expect(panel).toHaveClass('space-y-3');
+    expect(panel).toHaveClass('grid', 'grid-cols-6', 'gap-y-2');
+    expect(titleInput?.closest('[data-song-metadata-field]')?.parentElement).toHaveClass('col-span-6');
+    expect(keyField?.parentElement).toHaveClass('col-span-3');
+    expect(shuffleField?.parentElement).toHaveClass('col-span-2');
     await waitFor(() => expect(document.activeElement).toBe(titleInput));
     expect(titleInput).toHaveClass('h-11');
   });

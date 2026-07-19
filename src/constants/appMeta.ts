@@ -85,6 +85,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-07-19',
+        title: 'iPad-first setlists and smoother touch editing',
+        bullets: [
+          'Unified setlist overview, detail, add-songs, and project-management navigation with remembered filters for owned and shared content.',
+          'Kept the chart position stable while zooming and compacted phone song information without letting the bottom keyboard cover the last bar.',
+          'Repaired duplicated legacy bar IDs and preserved additional accidentals so entries such as E#b and Eb#5 remain intact.',
+          'Made split-and-name actions visible on continuation rows and fixed touch section reordering so long-press dragging no longer pans the page.'
+        ]
+      },
+      {
+        version: '0.9.0',
         date: '2026-07-18',
         title: 'Preview-first editing and importable song sharing',
         bullets: [
@@ -409,6 +420,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-07-19',
+        title: 'iPad 優先歌單與更順暢的觸控編輯',
+        bullets: [
+          '統一歌單總覽、曲目內容、加入歌曲與專案管理導覽，並記住自有與共享內容的篩選選擇。',
+          '預覽縮放會維持目前譜面位置，手機歌曲資訊也改為緊湊排列，底部鍵盤不再遮住最後小節。',
+          '自動修復舊資料的重複小節 ID，連續升降記號也會完整保留，可輸入 E#b、Eb#5 等和弦。',
+          '續行顯示可見的分段命名入口，手機長按拖曳段落時不再帶動整張譜面滑動。'
+        ]
+      },
+      {
+        version: '0.9.0',
         date: '2026-07-18',
         title: '預覽優先編輯與可導入的歌曲分享',
         bullets: [

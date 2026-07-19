@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
+import { ensureSongEditingIds } from '../lib/songEditing';
 import ChordSheet from './ChordSheet';
 
 vi.stubGlobal('ResizeObserver', class {
@@ -44,6 +45,34 @@ describe('ChordSheet preview input caret', () => {
     expect(caret?.closest('[data-preview-slot-index="1"]')).not.toBeNull();
   });
 
+  it('shows only one caret after repairing ids from a legacy duplicated section', () => {
+    const legacySong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [
+          { id: 'shared-bar', chords: ['C'] },
+          { id: 'shared-bar', chords: ['Gm'] }
+        ]
+      }]
+    };
+    const repairedSong = ensureSongEditingIds(legacySong);
+    const repairedTargetId = repairedSong.sections[0].bars[1].id!;
+    const { container } = render(
+      <ChordSheet
+        song={repairedSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        activeChordSlot={{ sectionId: 'section-1', barId: repairedTargetId, slotIndex: 0 }}
+      />
+    );
+
+    expect(repairedTargetId).not.toBe('shared-bar');
+    expect(container.querySelectorAll('[data-preview-input-caret]')).toHaveLength(1);
+    expect(container.querySelector('[data-preview-input-caret]')?.closest('.sheet-bar')?.textContent).toContain('Gm');
+  });
+
   it.each([
     ['%', 4],
     ['0h', 2]
@@ -80,11 +109,13 @@ describe('ChordSheet preview input caret', () => {
     const { rerender } = render(
       <ChordSheet song={longSong} language="zh" currentKey="C" previewIdentity="song-1" onElementClick={onElementClick} />
     );
-    fireEvent.click(screen.getByRole('button', { name: '從本行第一小節拆成新段落' }));
+    const splitButton = screen.getByRole('button', { name: '從本行分段並命名' });
+    expect(splitButton).toHaveTextContent('＋ 分段');
+    fireEvent.click(splitButton);
     expect(onElementClick).toHaveBeenCalledWith(0, 4, 'sectionName', expect.objectContaining({ barId: 'bar-5' }));
 
     rerender(<ChordSheet song={longSong} language="zh" currentKey="C" previewIdentity="song-1" />);
-    expect(screen.queryByRole('button', { name: '從本行第一小節拆成新段落' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '從本行分段並命名' })).not.toBeInTheDocument();
   });
 
   it('keeps a short section-title press as edit and turns mouse movement into reorder', () => {
@@ -121,6 +152,48 @@ describe('ChordSheet preview input caret', () => {
     fireEvent.pointerMove(verseButton, { pointerId: 1, pointerType: 'mouse', clientX: 20, clientY: 175 });
     fireEvent.pointerUp(verseButton, { pointerId: 1, pointerType: 'mouse', clientX: 20, clientY: 175 });
     expect(onSectionReorder).toHaveBeenCalledWith('section-1', 'section-2', 'after');
+  });
+
+  it('captures a touch long-press on a section title and reorders without native page panning', () => {
+    vi.useFakeTimers();
+    try {
+      const dragSong: Song = {
+        ...song,
+        sections: [
+          song.sections[0],
+          { id: 'section-2', title: 'Chorus', bars: [{ id: 'bar-2', chords: ['G'] }] }
+        ]
+      };
+      const onSectionReorder = vi.fn();
+      const { container } = render(
+        <ChordSheet
+          song={dragSong}
+          language="zh"
+          currentKey="C"
+          previewIdentity="song-1"
+          onElementClick={vi.fn()}
+          onSectionReorder={onSectionReorder}
+        />
+      );
+      const verseButton = screen.getByRole('button', { name: /開啟段落操作 Verse/ });
+      expect(verseButton).toHaveStyle({ touchAction: 'none' });
+
+      const chorusTarget = container.querySelector<HTMLElement>('[data-preview-section-drop-target="section-2"]')!;
+      chorusTarget.getBoundingClientRect = () => ({ left: 0, top: 100, right: 400, bottom: 200, width: 400, height: 100, x: 0, y: 100, toJSON: () => ({}) });
+      Object.defineProperty(document, 'elementsFromPoint', {
+        configurable: true,
+        value: vi.fn(() => [chorusTarget])
+      });
+
+      fireEvent.pointerDown(verseButton, { pointerId: 2, pointerType: 'touch', button: 0, clientX: 10, clientY: 10 });
+      act(() => vi.advanceTimersByTime(350));
+      expect(document.querySelector('[data-preview-section-drag-ghost]')).toHaveTextContent('Verse');
+      fireEvent.pointerMove(verseButton, { pointerId: 2, pointerType: 'touch', clientX: 20, clientY: 175 });
+      fireEvent.pointerUp(verseButton, { pointerId: 2, pointerType: 'touch', clientX: 20, clientY: 175 });
+      expect(onSectionReorder).toHaveBeenCalledWith('section-1', 'section-2', 'after');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps a persistent song-information entry when optional metadata is hidden', () => {

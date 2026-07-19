@@ -539,7 +539,7 @@ export default function PreviewWysiwygEditor({
       onTouchStart={(event) => event.stopPropagation()}
       onKeyDown={handleEscape}
     >
-      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 rounded-t-[inherit] border-b border-gray-100 bg-white px-4 py-3">
+      <div className={`sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 rounded-t-[inherit] border-b border-gray-100 bg-white ${deviceLayout === 'phone' && fullMetadata ? 'px-3 py-2' : 'px-4 py-3'}`}>
         <div className="flex min-w-0 items-center gap-2">
           <div className="truncate text-sm font-bold text-gray-900">{title}</div>
           {fullMetadata ? (
@@ -565,7 +565,7 @@ export default function PreviewWysiwygEditor({
           )}
         </button>
       </div>
-      <div className={`${fullMetadata ? 'overflow-y-auto overscroll-contain' : ''} space-y-3 p-4`}>
+      <div className={`${fullMetadata ? 'overflow-y-auto overscroll-contain' : ''} ${deviceLayout === 'phone' && fullMetadata ? 'p-3' : 'space-y-3 p-4'}`}>
         {children}
       </div>
     </div>

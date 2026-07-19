@@ -163,6 +163,34 @@ describe('PreviewBarEditor', () => {
     expect(withFlat.sections[0].bars[0].chords[1]).toBe('Cb');
   });
 
+  it('appends additional accidentals instead of replacing the first one', async () => {
+    const user = userEvent.setup();
+    const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: base, deviceLayout: 'phone' });
+    let currentSession = base;
+    const applyAndRerender = async (buttonName: string | RegExp) => {
+      await user.click(screen.getByRole('button', { name: buttonName }));
+      const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+      currentSession = { ...currentSession, draftSong: nextSong };
+      rerenderSession(currentSession);
+      return nextSong;
+    };
+
+    await applyAndRerender(/^E$/);
+    await applyAndRerender('升記號');
+    const sharpThenFlat = await applyAndRerender('降記號');
+    expect(sharpThenFlat.sections[0].bars[0].chords[1]).toBe('E#b');
+
+    const secondTarget = { ...target, slotIndex: 2, anchorKey: 'song-1|section-1|bar-1|chords|2' };
+    currentSession = createPreviewEditSession({ song, target: secondTarget, inputMode: 'letters' });
+    rerenderSession(currentSession);
+    await applyAndRerender(/^E$/);
+    await applyAndRerender('降記號');
+    await applyAndRerender('升記號');
+    const flatSharpFive = await applyAndRerender('加入數字 5');
+    expect(flatSharpFive.sections[0].bars[0].chords[2]).toBe('Eb#5');
+  });
+
   it('opens compact anchored popovers for time signatures and endings', async () => {
     const user = userEvent.setup();
     renderEditor({ deviceLayout: 'phone' });

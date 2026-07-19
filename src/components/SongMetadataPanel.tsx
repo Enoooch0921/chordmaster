@@ -330,11 +330,14 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const resolvedCapo = capoValue ?? (song.capo ?? 0);
   const isPreviewHeader = variant === 'preview-header';
   const isTouchOptimized = isPreviewHeader && deviceLayout !== 'desktop';
+  const isPhonePreviewHeader = isPreviewHeader && deviceLayout === 'phone';
   const isWideLayout = layoutMode === 'wide';
   const isStackedLayout = layoutMode === 'stacked';
   const segmentedSize = isStackedLayout ? 'sm' : 'xs';
   const toggleSize = isStackedLayout ? 'sm' : 'xs';
-  const labelClassName = `${isTouchOptimized ? 'text-[11px]' : 'text-[9px]'} mb-1 block font-semibold uppercase tracking-[0.16em] text-gray-400`;
+  const labelClassName = isPhonePreviewHeader
+    ? 'mb-0.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400'
+    : `${isTouchOptimized ? 'text-[11px]' : 'text-[9px]'} mb-1 block font-semibold uppercase tracking-[0.16em] text-gray-400`;
   const controlLabelClassName = 'mb-1 block text-[8px] font-semibold uppercase tracking-[0.16em] text-gray-400';
   const fieldHeightClassName = isTouchOptimized ? 'h-11' : isPreviewHeader ? 'h-10' : 'h-7';
   const fieldClassName = `${fieldHeightClassName} w-full rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500`;
@@ -962,6 +965,26 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   );
 
   if (isPreviewHeader) {
+    if (isPhonePreviewHeader) {
+      return (
+        <section
+          ref={panelRef}
+          data-song-metadata-panel
+          data-device-layout={deviceLayout}
+          className="grid grid-cols-6 gap-x-2 gap-y-2"
+        >
+          <div className="col-span-6">{titleField}</div>
+          <div className="col-span-3">{versionField}</div>
+          <div className="col-span-3">{translatorField}</div>
+          <div className="col-span-3">{keyField}</div>
+          <div className="col-span-3">{capoField}</div>
+          <div className="col-span-2">{tempoField}</div>
+          <div className="col-span-2">{timeField}</div>
+          <div className="col-span-2">{shuffleField}</div>
+        </section>
+      );
+    }
+
     const twoColumn = deviceLayout !== 'phone';
     return (
       <section

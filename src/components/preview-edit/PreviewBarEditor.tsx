@@ -97,6 +97,15 @@ const buildChord = ({
   return `${main}${bass ? `/${bass}` : ''}${modifiers}`;
 };
 
+const appendAccidental = (
+  parts: ReturnType<typeof parseChordParts>,
+  accidental: 'b' | '#'
+) => (
+  parts.accidental || parts.quality
+    ? { ...parts, quality: `${parts.quality}${accidental}` }
+    : { ...parts, accidental }
+);
+
 const EndingGlyph: React.FC<{ value: string }> = ({ value }) => (
   <span data-ending-glyph className="relative block h-6 w-full border-l-2 border-t-2 border-current">
     <span className="absolute left-1 top-0.5 text-[10px] font-black leading-none">
@@ -368,23 +377,19 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       const [main, currentBass = rootChoices[0]] = withoutModifiers(displayedChord).split('/');
       const parsedBass = parseChordParts(currentBass, session.inputMode);
       const root = parsedBass.root || rootChoices[0];
-      const bass = session.inputMode === 'letters' ? `${root}${accidental}` : `${accidental}${root}`;
+      const bass = buildChord({
+        ...appendAccidental(parsedBass, accidental),
+        root,
+        bass: '',
+        modifiers: '',
+        mode: session.inputMode
+      });
       applyDisplayedChord(`${main || rootChoices[0]}/${bass}${trailingModifiers(displayedChord)}`);
       return;
     }
-    if (chordParts.quality) {
-      applyDisplayedChord(buildChord({
-        ...chordParts,
-        root: chordParts.root || rootChoices[0],
-        quality: `${chordParts.quality}${accidental}`,
-        mode: session.inputMode
-      }));
-      return;
-    }
     applyDisplayedChord(buildChord({
-      ...chordParts,
+      ...appendAccidental(chordParts, accidental),
       root: chordParts.root || rootChoices[0],
-      accidental,
       mode: session.inputMode
     }));
   };

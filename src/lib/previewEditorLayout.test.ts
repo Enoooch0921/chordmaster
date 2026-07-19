@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePreviewEditorDeviceLayout } from './previewEditorLayout';
+import { getPreviewEditorBottomInset, resolvePreviewEditorDeviceLayout } from './previewEditorLayout';
 
 describe('preview editor device layout', () => {
   it('keeps an iPad with a Magic Keyboard in the tablet dock layout', () => {
@@ -40,5 +40,11 @@ describe('preview editor device layout', () => {
       isPhoneDevice: false,
       isKnownTabletDevice: true
     })).toBe('tablet');
+  });
+
+  it('reserves the docked keyboard height plus a readable gap on touch layouts', () => {
+    expect(getPreviewEditorBottomInset('phone', 337.4)).toBe(353);
+    expect(getPreviewEditorBottomInset('tablet', 420, 20)).toBe(440);
+    expect(getPreviewEditorBottomInset('desktop', 340)).toBe(0);
   });
 });

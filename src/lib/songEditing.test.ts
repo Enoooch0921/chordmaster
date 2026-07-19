@@ -11,6 +11,7 @@ import {
   duplicateBar,
   duplicateSection,
   deleteSection,
+  ensureSongEditingIds,
   finalizeSectionTitleEdit,
   getChordStorageModeForTarget,
   getChordBeatSlots,
@@ -139,6 +140,37 @@ describe('preview beat targeting', () => {
 });
 
 describe('bar commands', () => {
+  it('repairs duplicated legacy bar ids before preview editing', () => {
+    const legacySong: Song = {
+      title: 'Legacy duplicate',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [{
+        id: 'section-1',
+        title: 'Intro',
+        bars: [
+          { id: 'bar-1', chords: ['C'] },
+          { id: 'bar-2', chords: ['G'] },
+          { id: 'bar-1', chords: ['C'] },
+          { id: 'bar-2', chords: ['G'] }
+        ]
+      }]
+    };
+
+    const repaired = ensureSongEditingIds(legacySong);
+    const repairedIds = repaired.sections[0].bars.map((bar) => bar.id);
+
+    expect(repairedIds[0]).toBe('bar-1');
+    expect(repairedIds[1]).toBe('bar-2');
+    expect(new Set(repairedIds).size).toBe(4);
+    expect(repaired.sections[0].bars.map((bar) => bar.chords)).toEqual([
+      ['C'], ['G'], ['C'], ['G']
+    ]);
+    expect(legacySong.sections[0].bars.map((bar) => bar.id)).toEqual(['bar-1', 'bar-2', 'bar-1', 'bar-2']);
+    expect(ensureSongEditingIds(repaired)).toBe(repaired);
+  });
+
   it('keeps repeat end and final bar mutually exclusive', () => {
     const song = makeSong({ chords: [], repeatEnd: true });
     const edited = updateEditableBarFields(song, { sectionId: 'section-1', barId: 'bar-1' }, { finalBar: true });

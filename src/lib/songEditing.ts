@@ -104,16 +104,25 @@ const cloneSectionForInsert = (section: Section): Section => ({
 
 export const ensureSongEditingIds = (song: Song): Song => {
   let changed = false;
+  const seenBarIds = new Set<string>();
   const sections = song.sections.map((section, sectionIndex) => {
     const sectionId = section.id || `s-init-${sectionIndex}`;
     const bars = section.bars.map((bar) => {
-      if (bar.id) return bar;
+      const barId = bar.id?.trim();
+      if (barId && !seenBarIds.has(barId)) {
+        seenBarIds.add(barId);
+        return bar;
+      }
+
       changed = true;
-      return { ...bar, id: createId('bar') };
+      const nextBarId = createId('bar');
+      seenBarIds.add(nextBarId);
+      return { ...bar, id: nextBarId };
     });
-    if (section.id && bars === section.bars) return section;
     if (!section.id) changed = true;
-    return { ...section, id: sectionId, bars };
+    return section.id && bars.every((bar, barIndex) => bar === section.bars[barIndex])
+      ? section
+      : { ...section, id: sectionId, bars };
   });
   return changed ? { ...song, sections } : song;
 };

@@ -1918,14 +1918,18 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               data-preview-edit-anchor={sectionAnchorKey}
                               data-preview-section-title={isSectionStartRow ? section?.id : undefined}
                               data-preview-section-split={isSectionStartRow ? undefined : row.bars[0]?.id}
-                              className={`group/section-title flex w-full items-center justify-center rounded-sm px-1 py-1 min-h-[24px] overflow-visible ${isSectionStartRow && title ? 'border' : 'border border-dashed border-transparent'} ${onElementClick ? `${isSectionStartRow ? 'cursor-pointer' : 'cursor-text'} transition-all hover:border-indigo-300 hover:bg-indigo-50/55 hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)]` : ''} ${isSectionStartRow && onSectionReorder ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
-                              style={isSectionStartRow && title ? getSectionBadgeStyle(colors.accent) : undefined}
+                              className={`group/section-title flex w-full select-none items-center justify-center rounded-sm px-1 py-1 min-h-[24px] overflow-visible ${isSectionStartRow && title ? 'border' : 'border border-dashed border-transparent'} ${onElementClick ? `${isSectionStartRow ? 'cursor-pointer' : 'cursor-text'} transition-all hover:border-indigo-300 hover:bg-indigo-50/55 hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)]` : ''} ${isSectionStartRow && onSectionReorder ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
+                              style={{
+                                ...(isSectionStartRow && title ? getSectionBadgeStyle(colors.accent) : undefined),
+                                ...(isSectionStartRow && onSectionReorder ? { touchAction: 'none', WebkitUserSelect: 'none' } : undefined)
+                              }}
                               disabled={!onElementClick}
                               aria-label={isSectionStartRow
                                 ? (language === 'zh' ? `開啟段落操作 ${title || '未命名段落'}` : `Open section actions ${title || 'Untitled section'}`)
-                                : (language === 'zh' ? '從本行第一小節拆成新段落' : 'Start a new section from this row')}
+                                : (language === 'zh' ? '從本行分段並命名' : 'Split and name a new section from this row')}
                               onMouseDown={(event) => event.stopPropagation()}
                               onTouchStart={(event) => event.stopPropagation()}
+                              onContextMenu={isSectionStartRow && onSectionReorder ? (event) => event.preventDefault() : undefined}
                               onPointerDown={isSectionStartRow && section?.id ? (event) => handleSectionTitlePointerDown(event, section.id!, title) : undefined}
                               onPointerMove={isSectionStartRow ? handleSectionTitlePointerMove : undefined}
                               onPointerUp={isSectionStartRow ? finishSectionTitlePointer : undefined}
@@ -1946,7 +1950,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               } : undefined}
                             >
                               {!title ? (
-                                <span className="text-[9px] font-black text-transparent transition-colors group-hover/section-title:text-indigo-400" aria-hidden="true">＋</span>
+                                <span
+                                  className="inline-flex whitespace-nowrap rounded-full border border-indigo-400 bg-indigo-50 px-1 py-0.5 text-[9px] font-black leading-none tracking-[-0.03em] text-indigo-700 shadow-[0_1px_2px_rgba(79,70,229,0.12)] transition-colors group-hover/section-title:border-indigo-500 group-hover/section-title:bg-indigo-100"
+                                  aria-hidden="true"
+                                >
+                                  {isSectionStartRow
+                                    ? (language === 'zh' ? '＋ 命名' : '+ Name')
+                                    : (language === 'zh' ? '＋ 分段' : '+ Split')}
+                                </span>
                               ) : hasManualLineBreak ? (
                                 <div className="w-full whitespace-pre-line break-words px-[1px] text-center text-[10px] font-black tracking-[0.04em] leading-[1.15]">
                                   {localizeSectionTitle(title, language)}

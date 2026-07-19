@@ -8,6 +8,14 @@ export interface PreviewEditorDeviceSignals {
   isKnownTabletDevice: boolean;
 }
 
+export const getPreviewEditorBottomInset = (
+  deviceLayout: PreviewEditorDeviceLayout,
+  panelHeight: number,
+  gap = 16
+) => deviceLayout === 'desktop'
+  ? 0
+  : Math.max(0, Math.round(panelHeight)) + gap;
+
 /**
  * iPadOS can expose a fine pointer whenever a Magic Keyboard or mouse is
  * connected. Touch capability and the device class are therefore more stable
