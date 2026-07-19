@@ -1951,7 +1951,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             >
                               {!title ? (
                                 <span
-                                  className="inline-flex whitespace-nowrap rounded-full border border-indigo-400 bg-indigo-50 px-1 py-0.5 text-[9px] font-black leading-none tracking-[-0.03em] text-indigo-700 shadow-[0_1px_2px_rgba(79,70,229,0.12)] transition-colors group-hover/section-title:border-indigo-500 group-hover/section-title:bg-indigo-100"
+                                  className="inline-flex whitespace-nowrap rounded-full border border-gray-200 bg-gray-50/80 px-1 py-0.5 text-[9px] font-black leading-none tracking-[-0.03em] text-gray-400 transition-colors group-hover/section-title:border-gray-300 group-hover/section-title:bg-gray-100 group-hover/section-title:text-gray-500"
                                   aria-hidden="true"
                                 >
                                   {isSectionStartRow

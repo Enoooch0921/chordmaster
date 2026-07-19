@@ -30,7 +30,6 @@ interface KeyPickerProps {
   label: string;
   originalKey?: Key | null;
   triggerMetaText?: string;
-  triggerPrefixText?: string;
   panelMetaText?: string;
   clearLabel?: string;
   align?: PanelAlign;
@@ -75,7 +74,6 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   label,
   originalKey = null,
   triggerMetaText,
-  triggerPrefixText,
   panelMetaText,
   clearLabel,
   align = 'center',
@@ -230,7 +228,6 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
             className={`truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold ${value ? 'text-gray-800' : 'text-gray-500'} ${valueTextClassName}`}
             style={valueTextStyle}
           >
-            {triggerPrefixText ? <span className="mr-1 text-gray-500">{triggerPrefixText}</span> : null}
             {triggerValueText}
           </span>
           {triggerMetaText ? (

@@ -16,7 +16,6 @@ interface CapoPickerProps {
   valueTextClassName?: string;
   showPlayKey?: boolean;
   triggerIconSize?: number;
-  triggerPrefixText?: string;
   triggerDensity?: 'default' | 'compact';
   autoOpen?: boolean;
   touchOptimized?: boolean;
@@ -33,7 +32,6 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   valueTextClassName = '',
   showPlayKey = true,
   triggerIconSize = 16,
-  triggerPrefixText,
   triggerDensity = 'default',
   autoOpen = false,
   touchOptimized = false
@@ -157,7 +155,6 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         aria-expanded={isOpen}
       >
         <span className={`min-w-0 truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold text-gray-800 ${valueTextClassName}`}>
-          {triggerPrefixText ? <span className="mr-1 text-gray-500">{triggerPrefixText}</span> : null}
           {value}{showPlayKey ? <> <span className="text-gray-400">({playKey})</span></> : null}
         </span>
         <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />

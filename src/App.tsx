@@ -11780,7 +11780,6 @@ export default function App() {
 
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                    triggerPrefixText={isSetlistMode ? (language === 'zh' ? '目前歌曲 Key' : 'Current song Key') : undefined}
                     onChange={(key) => {
                       if (!key) {
                         return;
@@ -11797,14 +11796,13 @@ export default function App() {
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
                     disabled={isSetlistMode && !canEditSelectedSetlistKey}
-                    buttonClassName={`${isSetlistMode ? 'min-w-[140px]' : 'min-w-[58px]'} h-10 shrink-0 rounded-xl px-2.5 disabled:!cursor-default disabled:!opacity-100`}
+                    buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
                   />
 
                   <CapoPicker
                     value={isSetlistMode ? currentSetlistCapo : currentCapo}
-                    triggerPrefixText={isSetlistMode ? (language === 'zh' ? '目前歌曲 Capo' : 'Current song Capo') : undefined}
                     currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(capo) => {
                       if (isSetlistMode) {
@@ -11815,7 +11813,7 @@ export default function App() {
                     }}
                     label="Capo"
                     triggerDensity="compact"
-                    buttonClassName={`${isSetlistMode ? 'min-w-[148px]' : 'min-w-[58px]'} h-10 shrink-0 rounded-xl px-2.5`}
+                    buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5"
                     showPlayKey={false}
                     triggerIconSize={14}
                   />
@@ -11921,7 +11919,6 @@ export default function App() {
 
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                    triggerPrefixText={isSetlistMode ? (language === 'zh' ? '目前歌曲 Key' : 'Current song Key') : undefined}
                     onChange={(key) => {
                       if (!key) {
                         return;
@@ -11938,14 +11935,13 @@ export default function App() {
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
                     disabled={isSetlistMode && !canEditSelectedSetlistKey}
-                    buttonClassName={`${isSetlistMode ? 'min-w-[136px]' : denseToolbarShowsLabels ? 'min-w-[60px]' : 'min-w-[56px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100`}
+                    buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[60px]' : 'min-w-[56px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100`}
                     metaTextClassName="hidden"
                     triggerIconSize={14}
                   />
 
                   <CapoPicker
                     value={isSetlistMode ? currentSetlistCapo : currentCapo}
-                    triggerPrefixText={isSetlistMode ? (language === 'zh' ? '目前歌曲 Capo' : 'Current song Capo') : undefined}
                     currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(capo) => {
                       if (isSetlistMode) {
@@ -11956,7 +11952,7 @@ export default function App() {
                     }}
                     label="Capo"
                     triggerDensity="compact"
-                    buttonClassName={`${isSetlistMode ? 'min-w-[144px]' : denseToolbarShowsLabels ? 'min-w-[70px]' : 'min-w-[58px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5`}
+                    buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[70px]' : 'min-w-[58px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5`}
                     showPlayKey={denseToolbarShowsLabels && mainViewportWidth >= 1820}
                     triggerIconSize={14}
                   />
@@ -12179,7 +12175,6 @@ export default function App() {
 
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                    triggerPrefixText={isSetlistMode ? (language === 'zh' ? '目前歌曲 Key' : 'Current song Key') : undefined}
                     onChange={(key) => {
                       if (!key) {
                         return;
@@ -12196,14 +12191,13 @@ export default function App() {
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
                     disabled={isSetlistMode && !canEditSelectedSetlistKey}
-                    buttonClassName={`${isSetlistMode ? 'min-w-[136px]' : 'min-w-[60px]'} h-9 shrink-0 rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100`}
+                    buttonClassName="h-9 min-w-[60px] shrink-0 rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
                   />
 
                   <CapoPicker
                     value={isSetlistMode ? currentSetlistCapo : currentCapo}
-                    triggerPrefixText={isSetlistMode ? (language === 'zh' ? '目前歌曲 Capo' : 'Current song Capo') : undefined}
                     currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(capo) => {
                       if (isSetlistMode) {
@@ -12214,7 +12208,7 @@ export default function App() {
                     }}
                     label="Capo"
                     triggerDensity="compact"
-                    buttonClassName={`${isSetlistMode ? 'min-w-[144px]' : 'min-w-[62px]'} h-9 shrink-0 rounded-lg px-2.5`}
+                    buttonClassName="h-9 min-w-[62px] shrink-0 rounded-lg px-2.5"
                     showPlayKey={mainViewportWidth >= 1080}
                     triggerIconSize={14}
                   />
@@ -12529,7 +12523,6 @@ export default function App() {
 
                     <KeyPicker
                       value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                      triggerPrefixText={isSetlistMode ? (language === 'zh' ? '目前歌曲 Key' : 'Current song Key') : undefined}
                       onChange={(key) => {
                         if (!key) {
                           return;
@@ -12551,7 +12544,6 @@ export default function App() {
 
                     <CapoPicker
                     value={isSetlistMode ? currentSetlistCapo : currentCapo}
-                    triggerPrefixText={isSetlistMode ? (language === 'zh' ? '目前歌曲 Capo' : 'Current song Capo') : undefined}
                     currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                     onChange={(capo) => {
                       if (isSetlistMode) {
