@@ -911,6 +911,9 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
       .sort((a, b) => a.order_index - b.order_index)
       .map((s, i): SetlistSong => {
         const songRow = songRowById.get(s.song_id);
+        const overrideSongData = s.override_json?.songData
+          ? normalizeSongBars(cloneValue(s.override_json.songData))
+          : undefined;
         const userCapo = capoByItemId.get(s.id);
         return {
           id: s.id,
@@ -920,7 +923,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
           overrideKey: s.override_json?.overrideKey,
           capo: userCapo ?? s.override_json?.capo,
           sectionOrder: Array.isArray(s.override_json?.sectionOrder) ? s.override_json.sectionOrder : [],
-          songData: songRow ? normalizeSongBars(cloneValue(songRow.content_json)) : undefined
+          songData: overrideSongData ?? (songRow ? normalizeSongBars(cloneValue(songRow.content_json)) : undefined)
         };
       });
 

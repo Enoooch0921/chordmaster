@@ -86,6 +86,14 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-07-27',
+        title: 'Shared setlist section sync fix',
+        bullets: [
+          'Shared setlists and shared projects now prefer the per-setlist song copy when loading song data, so section additions and deletions made inside a setlist are visible to people it is shared with.'
+        ]
+      },
+      {
+        version: '0.9.4',
+        date: '2026-07-27',
         title: 'Rhythm lane click fix',
         bullets: [
           'Fixed clicks on existing rhythm lanes so the rhythm notation passes the click event back to the preview editor and reliably opens the rhythm keyboard.'
@@ -447,6 +455,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-07-27',
+        title: '分享歌單段落同步修正',
+        bullets: [
+          '分享歌單與共享專案載入歌曲時，現在會優先使用歌單內的歌曲副本，因此在歌單中新增或刪除段落後，分享對象也會看到同一份段落結構。'
+        ]
+      },
+      {
+        version: '0.9.4',
         date: '2026-07-27',
         title: '節奏 lane 點擊修正',
         bullets: [
