@@ -79,7 +79,11 @@ import {
   applySetlistSongOverrides,
   getDefaultSectionOrder,
   getEffectiveSetlistSongCapo,
+  getJoinedProjectSetlists,
   insertNewSetlistSectionsAfterSources,
+  pickAvailableSetlist,
+  pickAvailableSetlistSongId,
+  reorderSetlistSongs,
   reorderSetlistSectionOrder,
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
@@ -1501,6 +1505,26 @@ const getStoredSelectedSongId = (libraryId: string | null | undefined) => {
   }
 };
 
+const getStoredSelectedSetlistId = () => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    return window.localStorage.getItem(SELECTED_SETLIST_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const getStoredSelectedSetlistSongId = () => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    return window.localStorage.getItem(SELECTED_SETLIST_SONG_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+};
+
 const pickAvailableSongId = (songs: StoredSong[], preferredIds: Array<string | null | undefined>) => {
   for (const preferredId of preferredIds) {
     if (preferredId && songs.some((song) => song.id === preferredId)) {
@@ -1584,8 +1608,8 @@ const loadSetlists = (songs: StoredSong[]) => {
 
   try {
     const storedSetlists = window.localStorage.getItem(SETLIST_STORAGE_KEY);
-    const storedSelectedSetlistId = window.localStorage.getItem(SELECTED_SETLIST_STORAGE_KEY);
-    const storedSelectedSetlistSongId = window.localStorage.getItem(SELECTED_SETLIST_SONG_STORAGE_KEY);
+    const storedSelectedSetlistId = getStoredSelectedSetlistId();
+    const storedSelectedSetlistSongId = getStoredSelectedSetlistSongId();
 
     if (!storedSetlists) {
       return {
@@ -1606,10 +1630,8 @@ const loadSetlists = (songs: StoredSong[]) => {
 
     const songsById = new Map(songs.map((song) => [song.id, song] as const));
     const setlists = parsedSetlists.map((setlist, index) => normalizeStoredSetlist(setlist, songsById, index));
-    const selectedSetlist = setlists.find((setlist) => setlist.id === storedSelectedSetlistId) ?? setlists[0] ?? null;
-    const selectedSetlistSongId = selectedSetlist?.songs.some((item) => item.id === storedSelectedSetlistSongId)
-      ? storedSelectedSetlistSongId
-      : selectedSetlist?.songs[0]?.id ?? null;
+    const selectedSetlist = pickAvailableSetlist(setlists, [], [], [storedSelectedSetlistId]);
+    const selectedSetlistSongId = pickAvailableSetlistSongId(selectedSetlist, [storedSelectedSetlistSongId]);
 
     return {
       setlists,
@@ -2171,6 +2193,7 @@ export default function App() {
   const setlistSongPointerDragRef = useRef<{
     sourceId: string;
     pointerId: number;
+    pointerType: string;
     lastTargetId: string | null;
     previousUserSelect: string;
     startX: number;
@@ -2336,9 +2359,7 @@ export default function App() {
       : 'grid-cols-7';
   const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
   const allJoinedProjectSetlists: JoinedSetlist[] = React.useMemo(
-    () => joinedProjects.flatMap((project) =>
-      project.setlists.map((sl) => ({ ...sl, isJoined: true } as JoinedSetlist))
-    ),
+    () => getJoinedProjectSetlists(joinedProjects),
     [joinedProjects]
   );
   const firstAvailableSetlist = setlists[0] ?? joinedSetlists[0] ?? allJoinedProjectSetlists[0] ?? null;
@@ -3657,17 +3678,26 @@ export default function App() {
       getStoredSelectedSongId(libraryId),
       selectedSongId
     ]));
-    const nextJoinedProject = workspace.joinedProjects?.find((project) => project.setlists.length > 0) ?? null;
-    const nextJoinedProjectSetlist = nextJoinedProject?.setlists[0] ?? null;
-    const nextSetlist = workspace.setlists[0] ?? workspace.joinedSetlists[0] ?? nextJoinedProjectSetlist ?? null;
+    const nextSetlist = pickAvailableSetlist(
+      workspace.setlists,
+      workspace.joinedSetlists,
+      workspace.joinedProjects ?? [],
+      [
+        getStoredSelectedSetlistId(),
+        selectedSetlistId
+      ]
+    );
     setSelectedSetlistId(nextSetlist?.id ?? null);
-    setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+    setSelectedSetlistSongId(pickAvailableSetlistSongId(nextSetlist, [
+      getStoredSelectedSetlistSongId(),
+      selectedSetlistSongId
+    ]));
     setSetlistProjectFilter((currentFilter) => validateSetlistProjectFilter(
       currentFilter,
       workspace.projects,
       workspace.joinedProjects ?? []
     ));
-    setWorkspaceMode(workspace.setlists.length > 0 || workspace.joinedSetlists.length > 0 || Boolean(nextJoinedProjectSetlist) ? 'setlists' : 'songs');
+    setWorkspaceMode(nextSetlist ? 'setlists' : 'songs');
   };
 
   const handleSwitchCloudLibrary = async (libraryId: string) => {
@@ -5393,13 +5423,8 @@ export default function App() {
         ...jp,
         setlists: jp.setlists.map((sl) => {
           if (sl.id !== selectedSetlistId) return sl;
-          const nextSongs = [...sl.songs];
-          const sourceIndex = nextSongs.findIndex((item) => item.id === sourceId);
-          const targetIndex = nextSongs.findIndex((item) => item.id === targetId);
-          if (sourceIndex === -1 || targetIndex === -1) return sl;
-          const [moved] = nextSongs.splice(sourceIndex, 1);
-          nextSongs.splice(targetIndex, 0, moved);
-          const reindexed = reindexSetlistSongs(nextSongs);
+          const reindexed = reorderSetlistSongs(sl.songs, sourceId, targetId);
+          if (reindexed === sl.songs) return sl;
           orderedIds = reindexed.map((item) => item.id);
           return { ...sl, songs: reindexed };
         })
@@ -5421,19 +5446,14 @@ export default function App() {
     }
 
     replaceSetlist(selectedSetlist.id, (currentSetlist) => {
-      const nextSongs = [...currentSetlist.songs];
-      const sourceIndex = nextSongs.findIndex((item) => item.id === sourceId);
-      const targetIndex = nextSongs.findIndex((item) => item.id === targetId);
-      if (sourceIndex === -1 || targetIndex === -1) {
+      const nextSongs = reorderSetlistSongs(currentSetlist.songs, sourceId, targetId);
+      if (nextSongs === currentSetlist.songs) {
         return currentSetlist;
       }
 
-      const [moved] = nextSongs.splice(sourceIndex, 1);
-      nextSongs.splice(targetIndex, 0, moved);
-
       return {
         ...currentSetlist,
-        songs: reindexSetlistSongs(nextSongs)
+        songs: nextSongs
       };
     });
   };
@@ -5444,28 +5464,30 @@ export default function App() {
       return;
     }
 
+    setlistSongPointerDragRef.current = null;
+
     if (dragState.holdTimeoutId !== null) {
       window.clearTimeout(dragState.holdTimeoutId);
     }
 
+    try {
+      dragState.element.releasePointerCapture(dragState.pointerId);
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+
     if (dragState.activated) {
-      try {
-        dragState.element.releasePointerCapture(dragState.pointerId);
-      } catch {
-        // Pointer capture may already be released by the browser.
-      }
       document.body.style.userSelect = dragState.previousUserSelect;
     }
 
-    setlistSongPointerDragRef.current = null;
     setDraggingSetlistSongId(null);
     setDragOverSetlistSongId(null);
   };
 
-  // Press-and-hold before the handle starts dragging, so flicking through the
-  // setlist to scroll doesn't accidentally grab a song and reorder it.
-  const SETLIST_DRAG_HOLD_MS = 160;
-  const SETLIST_DRAG_CANCEL_THRESHOLD = 10;
+  // Touch/pen input needs a short hold before the handle starts dragging, while
+  // mouse users expect the row to move as soon as the pointer meaningfully moves.
+  const SETLIST_DRAG_HOLD_MS = 180;
+  const SETLIST_MOUSE_DRAG_THRESHOLD = 4;
 
   const activateSetlistSongPointerDrag = () => {
     const dragState = setlistSongPointerDragRef.current;
@@ -5494,14 +5516,26 @@ export default function App() {
       return;
     }
 
+    event.preventDefault();
+    event.stopPropagation();
+
     const element = event.currentTarget;
-    const holdTimeoutId = window.setTimeout(() => {
-      activateSetlistSongPointerDrag();
-    }, SETLIST_DRAG_HOLD_MS);
+    try {
+      element.setPointerCapture(event.pointerId);
+    } catch {
+      // Older WebKit builds can throw if capture is unavailable for the event.
+    }
+
+    const holdTimeoutId = event.pointerType === 'mouse'
+      ? null
+      : window.setTimeout(() => {
+        activateSetlistSongPointerDrag();
+      }, SETLIST_DRAG_HOLD_MS);
 
     setlistSongPointerDragRef.current = {
       sourceId: setlistSongId,
       pointerId: event.pointerId,
+      pointerType: event.pointerType,
       lastTargetId: setlistSongId,
       previousUserSelect: document.body.style.userSelect,
       startX: event.clientX,
@@ -5518,18 +5552,17 @@ export default function App() {
       return;
     }
 
-    // Before the hold elapses, a noticeable move means the user is scrolling,
-    // not reordering — abandon the pending drag and let the list scroll.
     if (!dragState.activated) {
+      event.preventDefault();
+      event.stopPropagation();
       const movedFar = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY)
-        >= SETLIST_DRAG_CANCEL_THRESHOLD;
-      if (movedFar) {
-        if (dragState.holdTimeoutId !== null) {
-          window.clearTimeout(dragState.holdTimeoutId);
-        }
-        setlistSongPointerDragRef.current = null;
+        >= SETLIST_MOUSE_DRAG_THRESHOLD;
+      if (dragState.pointerType === 'mouse' && movedFar) {
+        activateSetlistSongPointerDrag();
       }
-      return;
+      if (!dragState.activated) {
+        return;
+      }
     }
 
     event.preventDefault();
@@ -6727,6 +6760,8 @@ export default function App() {
       try {
         setIsLoadingCloudWorkspace(true);
         const repository = cloudRepositoryRef.current!;
+        const storedSelectedSetlistId = getStoredSelectedSetlistId();
+        const storedSelectedSetlistSongId = getStoredSelectedSetlistSongId();
         let libraries: CloudLibrarySummary[] = [];
         let libraryListError: string | null = null;
         try {
@@ -6779,13 +6814,20 @@ export default function App() {
           const requestedSetlistId = typeof window !== 'undefined'
             ? new URLSearchParams(window.location.search).get('setlist')
             : null;
-          const requestedSetlist = requestedSetlistId
-            ? nextSetlists.find((item) => item.id === requestedSetlistId) ?? nextJoinedSetlists.find((item) => item.id === requestedSetlistId) ?? null
-            : null;
           const nextProjects = cloudWorkspace.projects;
           const nextJoinedProjects = cloudWorkspace.joinedProjects ?? [];
-          const firstJoinedProject = nextJoinedProjects.find((project) => project.setlists.length > 0) ?? null;
-          const firstJoinedProjectSetlist = firstJoinedProject?.setlists[0] ?? null;
+          const requestedSetlistCandidate = requestedSetlistId
+            ? pickAvailableSetlist(nextSetlists, nextJoinedSetlists, nextJoinedProjects, [requestedSetlistId])
+            : null;
+          const requestedSetlist = requestedSetlistCandidate?.id === requestedSetlistId
+            ? requestedSetlistCandidate
+            : null;
+          const nextSelectedSetlist = requestedSetlist ?? pickAvailableSetlist(
+            nextSetlists,
+            nextJoinedSetlists,
+            nextJoinedProjects,
+            [storedSelectedSetlistId]
+          );
           setSongs(nextSongs);
           setSavedSongs(cloneSong(nextSongs));
           setSetlists(nextSetlists);
@@ -6821,13 +6863,7 @@ export default function App() {
               // Ignore local cache failures; the cloud workspace is already loaded in memory.
             }
           }
-          setSelectedSetlistId((currentId) => {
-            if (requestedSetlist) return requestedSetlist.id;
-            if (nextSetlists.some((item) => item.id === currentId)) return currentId;
-            if (nextJoinedSetlists.some((item) => item.id === currentId)) return currentId;
-            if (nextJoinedProjects.some((project) => project.setlists.some((item) => item.id === currentId))) return currentId;
-            return nextSetlists[0]?.id ?? nextJoinedSetlists[0]?.id ?? firstJoinedProjectSetlist?.id ?? null;
-          });
+          setSelectedSetlistId(nextSelectedSetlist?.id ?? null);
           setSetlistProjectFilter((currentFilter) => validateSetlistProjectFilter(
             currentFilter,
             nextProjects,
@@ -6838,11 +6874,14 @@ export default function App() {
             setWorkspaceMode('setlists');
             setSelectedSetlistSongId(requestedSetlist.songs[0]?.id ?? null);
             window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
-          } else if (requestedTeam) {
-            setWorkspaceMode(nextSetlists.length > 0 ? 'setlists' : 'songs');
-            window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
-          } else if (nextSetlists.length === 0 && (nextJoinedSetlists.length > 0 || firstJoinedProjectSetlist)) {
-            setWorkspaceMode('setlists');
+          } else {
+            setSelectedSetlistSongId(pickAvailableSetlistSongId(nextSelectedSetlist, [storedSelectedSetlistSongId]));
+            if (requestedTeam) {
+              setWorkspaceMode(nextSelectedSetlist ? 'setlists' : 'songs');
+              window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
+            } else if (nextSetlists.length === 0 && nextSelectedSetlist) {
+              setWorkspaceMode('setlists');
+            }
           }
         }
 
@@ -7069,6 +7108,17 @@ export default function App() {
 
   useEffect(() => {
     try {
+      window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, workspaceMode);
+
+      const shouldPreservePendingCloudSetlistSelection = isAuthConfigured
+        && !activeLibraryId
+        && (authStatus === 'loading' || Boolean(authenticatedUser))
+        && !selectedSetlistId
+        && !selectedSetlistSongId;
+      if (shouldPreservePendingCloudSetlistSelection) {
+        return;
+      }
+
       if (selectedSetlistId) {
         window.localStorage.setItem(SELECTED_SETLIST_STORAGE_KEY, selectedSetlistId);
       } else {
@@ -7080,12 +7130,18 @@ export default function App() {
       } else {
         window.localStorage.removeItem(SELECTED_SETLIST_SONG_STORAGE_KEY);
       }
-
-      window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, workspaceMode);
     } catch {
       // Ignore storage failures and keep the app usable.
     }
-  }, [selectedSetlistId, selectedSetlistSongId, workspaceMode]);
+  }, [
+    activeLibraryId,
+    authenticatedUser,
+    authStatus,
+    isAuthConfigured,
+    selectedSetlistId,
+    selectedSetlistSongId,
+    workspaceMode
+  ]);
 
   useEffect(() => {
     setSelectedLibrarySongIds((currentIds) =>
@@ -7735,6 +7791,12 @@ export default function App() {
       if (!current || current.target.kind !== 'bar') return current;
       const located = findSongBar(current.draftSong, current.target);
       if (!located) return current;
+      const shouldInsertNextBarInCurrentPartialRow = Boolean(
+        options?.bar
+        && direction === 'next'
+        && located.barIndex === located.section.bars.length - 1
+        && located.section.bars.length % 4 !== 0
+      );
       if (current.notationMode !== 'chords') {
         const mode = current.notationMode;
         let draftSong = current.draftSong;
@@ -7751,7 +7813,7 @@ export default function App() {
             targetBar = candidate;
             break;
           }
-        } else if (!targetBar && direction === 'next') {
+        } else if (!targetBar && direction === 'next' && !shouldInsertNextBarInCurrentPartialRow) {
           for (let sectionIndex = located.sectionIndex + 1; sectionIndex < current.draftSong.sections.length; sectionIndex += 1) {
             targetSectionIndex = sectionIndex;
             targetBar = current.draftSong.sections[sectionIndex]?.bars[0];
@@ -7895,7 +7957,7 @@ export default function App() {
       const followingSection = current.draftSong.sections[located.sectionIndex + 1];
       let nextSectionId = current.target.sectionId;
       let nextBar = located.section.bars[located.barIndex + 1];
-      if (!nextBar && followingSection?.bars[0]) {
+      if (!nextBar && !shouldInsertNextBarInCurrentPartialRow && followingSection?.bars[0]) {
         nextBar = followingSection.bars[0];
         nextSectionId = followingSection.id ?? nextSectionId;
       }
@@ -8882,6 +8944,11 @@ export default function App() {
       skipNextSetlistPreviewAutoScrollRef.current = false;
       return;
     }
+
+    preserveSetlistPreviewSelectionUntilRef.current = Math.max(
+      preserveSetlistPreviewSelectionUntilRef.current,
+      performance.now() + 1200
+    );
 
     let frameId = window.requestAnimationFrame(() => {
       frameId = window.requestAnimationFrame(() => {
@@ -11201,7 +11268,10 @@ export default function App() {
                             onPointerMove={handleSetlistSongDragHandlePointerMove}
                             onPointerUp={finishSetlistSongPointerDrag}
                             onPointerCancel={finishSetlistSongPointerDrag}
-                            className="touch-pan-y cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing"
+                            onLostPointerCapture={finishSetlistSongPointerDrag}
+                            onContextMenu={(event) => event.preventDefault()}
+                            className="touch-none cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing"
+                            style={{ WebkitUserSelect: 'none' }}
                             title={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
                             aria-label={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
                           >
@@ -11489,7 +11559,9 @@ export default function App() {
         initial={false}
         animate={isPhoneViewport ? { width: phoneSidebarShellWidth } : { width: sidebarShellWidth }}
         transition={isSidebarResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.32 }}
-        className={isPhoneViewport ? 'absolute inset-y-0 left-0 z-50 overflow-hidden' : 'relative z-50 flex-shrink-0 overflow-visible'}
+        className={isPhoneViewport
+          ? 'absolute inset-y-0 left-0 z-50 overflow-hidden'
+          : `relative z-50 flex-shrink-0 ${usesOverlaySidebar && !isSidebarExpanded ? 'overflow-hidden' : 'overflow-visible'}`}
         style={isPhoneViewport ? { pointerEvents: isMobileNavOpen ? 'auto' : 'none' } : undefined}
       >
         <motion.div

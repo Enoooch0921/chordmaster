@@ -1,9 +1,71 @@
-import { Key, Section, Setlist, SetlistSong, Song } from '../types';
+import { JoinedProject, JoinedSetlist, Key, Section, Setlist, SetlistSong, Song } from '../types';
 import { getSuggestedGuitarCapo } from './musicUtils';
 
 export const getSectionReferenceId = (section: Section, index: number) => section.id || `section-${index}`;
 
 export const getDefaultSectionOrder = (song: Song) => song.sections.map((section, index) => getSectionReferenceId(section, index));
+
+export const reorderSetlistSongs = (
+  setlistSongs: SetlistSong[],
+  sourceId: string,
+  targetId: string
+) => {
+  if (sourceId === targetId) return setlistSongs;
+  const sourceIndex = setlistSongs.findIndex((item) => item.id === sourceId);
+  const targetIndex = setlistSongs.findIndex((item) => item.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return setlistSongs;
+  const next = [...setlistSongs];
+  const [moved] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, moved);
+  return next.map((item, index) => ({
+    ...item,
+    order: index
+  }));
+};
+
+export const getJoinedProjectSetlists = (
+  joinedProjects: Array<Pick<JoinedProject, 'setlists'>>
+): JoinedSetlist[] => (
+  joinedProjects.flatMap((project) =>
+    project.setlists.map((setlist) => ({ ...setlist, isJoined: true }))
+  )
+);
+
+export const pickAvailableSetlist = (
+  ownedSetlists: Setlist[],
+  joinedSetlists: JoinedSetlist[],
+  joinedProjects: Array<Pick<JoinedProject, 'setlists'>>,
+  preferredIds: Array<string | null | undefined>
+): Setlist | JoinedSetlist | null => {
+  const availableSetlists = [
+    ...ownedSetlists,
+    ...joinedSetlists,
+    ...getJoinedProjectSetlists(joinedProjects)
+  ];
+  for (const preferredId of preferredIds) {
+    const match = preferredId
+      ? availableSetlists.find((setlist) => setlist.id === preferredId)
+      : null;
+    if (match) return match;
+  }
+
+  return availableSetlists[0] ?? null;
+};
+
+export const pickAvailableSetlistSongId = (
+  setlist: Pick<Setlist, 'songs'> | null | undefined,
+  preferredIds: Array<string | null | undefined>
+) => {
+  if (!setlist) return null;
+
+  for (const preferredId of preferredIds) {
+    if (preferredId && setlist.songs.some((song) => song.id === preferredId)) {
+      return preferredId;
+    }
+  }
+
+  return setlist.songs[0]?.id ?? null;
+};
 
 export const reorderSetlistSectionOrder = (
   order: string[],
