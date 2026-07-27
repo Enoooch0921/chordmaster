@@ -90,7 +90,6 @@ interface SetlistSongRow {
   order_index: number;
   override_json: {
     overrideKey?: SetlistSong['overrideKey'];
-    capo?: number;
     sectionOrder?: string[];
     songData?: Song;
   } | null;
@@ -117,7 +116,6 @@ interface JoinedSetlistRpcSong {
   songId?: unknown;
   order?: unknown;
   overrideKey?: unknown;
-  capo?: unknown;
   sectionOrder?: unknown;
   songData?: unknown;
 }
@@ -287,7 +285,6 @@ const mapSetlistRows = (
           songId: item.song_id,
           order: orderIndex,
           overrideKey: item.override_json?.overrideKey,
-          capo: item.override_json?.capo,
           personalCapoOverride: personalCapoBySetlistSongId.get(item.id),
           sectionOrder: Array.isArray(item.override_json?.sectionOrder) ? item.override_json.sectionOrder : [],
           songData: item.override_json?.songData ? normalizeSongBars(item.override_json.songData) : undefined
@@ -371,7 +368,6 @@ const normalizeJoinedSetlistRpcPayload = (payload: unknown): JoinedSetlist[] => 
             songId,
             order: typeof song.order === 'number' && Number.isFinite(song.order) ? song.order : songIndex,
             overrideKey: typeof song.overrideKey === 'string' ? song.overrideKey as SetlistSong['overrideKey'] : undefined,
-            capo: typeof song.capo === 'number' && Number.isFinite(song.capo) ? song.capo : rawSongData.capo ?? 0,
             sectionOrder: Array.isArray(song.sectionOrder)
               ? song.sectionOrder.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
               : [],
@@ -921,7 +917,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
           songId: s.song_id,
           order: i,
           overrideKey: s.override_json?.overrideKey,
-          capo: userCapo ?? s.override_json?.capo,
+          personalCapoOverride: userCapo,
           sectionOrder: Array.isArray(s.override_json?.sectionOrder) ? s.override_json.sectionOrder : [],
           songData: overrideSongData ?? (songRow ? normalizeSongBars(cloneValue(songRow.content_json)) : undefined)
         };
@@ -941,10 +937,10 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
   });
 };
 
-// Stable signature used to decide whether to re-upload setlist_songs. Excludes
-// per-user fields (personalCapoOverride) so they don't trigger spurious writes.
+// Stable signature used to decide whether to re-upload setlist_songs. Capo is
+// per-user, so both local personal overrides and legacy shared capos are ignored.
 const setlistSongsSignature = (songs: SetlistSong[]) => JSON.stringify(
-  reindexSetlistSongs(songs).map(({ personalCapoOverride: _ignored, ...rest }) => rest)
+  reindexSetlistSongs(songs).map(({ capo: _sharedCapo, personalCapoOverride: _personalCapo, ...rest }) => rest)
 );
 
 const persistSetlistSongs = async (setlist: Setlist) => {
@@ -972,7 +968,6 @@ const persistSetlistSongs = async (setlist: Setlist) => {
     order_index: index,
     override_json: {
       overrideKey: song.overrideKey,
-      capo: song.capo,
       sectionOrder: song.sectionOrder,
       songData: song.songData
     }

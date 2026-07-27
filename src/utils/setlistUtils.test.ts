@@ -4,10 +4,12 @@ import { duplicateSection } from '../lib/songEditing';
 import {
   getJoinedProjectSetlists,
   insertNewSetlistSectionsAfterSources,
+  resolveSetlistSongCapo,
   pickAvailableSetlist,
   pickAvailableSetlistSongId,
   reorderSetlistSongs,
-  reorderSetlistSectionOrder
+  reorderSetlistSectionOrder,
+  applySetlistSongOverrides
 } from './setlistUtils';
 
 const previousSong: Song = {
@@ -90,6 +92,49 @@ describe('setlist selection restore', () => {
     expect(pickAvailableSetlistSongId(setlist, ['item-b'])).toBe('item-b');
     expect(pickAvailableSetlistSongId(setlist, ['missing'])).toBe('item-a');
     expect(pickAvailableSetlistSongId(null, ['item-b'])).toBeNull();
+  });
+});
+
+describe('setlist capo resolution', () => {
+  const sourceSong: Song = {
+    title: 'Capo Source',
+    originalKey: 'C',
+    currentKey: 'Eb',
+    timeSignature: '4/4',
+    capo: 3,
+    sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'v1', chords: ['Eb'] }] }]
+  };
+  const setlist = makeSetlist('capo-setlist');
+
+  it('uses shared capo values only when shared capo resolution is enabled', () => {
+    const setlistSong = { ...makeSetlistSong('capo-item', 0), overrideKey: 'Eb' as const, capo: 5 };
+
+    expect(resolveSetlistSongCapo(setlistSong, sourceSong, false, { includeSharedCapo: true })).toBe(5);
+    expect(resolveSetlistSongCapo(setlistSong, sourceSong, false, { includeSharedCapo: false })).toBe(0);
+  });
+
+  it('lets personal capo override shared and source capo values', () => {
+    const setlistSong = {
+      ...makeSetlistSong('capo-item', 0),
+      overrideKey: 'Eb' as const,
+      capo: 5,
+      personalCapoOverride: 2
+    };
+
+    expect(resolveSetlistSongCapo(setlistSong, sourceSong, false, { includeSharedCapo: false })).toBe(2);
+  });
+
+  it('keeps guitarist mode as a personal overlay when no personal capo is set', () => {
+    const setlistSong = { ...makeSetlistSong('capo-item', 0), overrideKey: 'Eb' as const, capo: 5 };
+
+    expect(resolveSetlistSongCapo(setlistSong, sourceSong, true, { includeSharedCapo: false })).toBe(1);
+    expect(applySetlistSongOverrides(
+      sourceSong,
+      setlist,
+      setlistSong,
+      false,
+      { includeSharedCapo: false }
+    ).capo).toBe(0);
   });
 });
 

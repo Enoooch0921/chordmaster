@@ -161,10 +161,18 @@ export const getSectionShortLabel = (title: string, fallbackIndex: number) => {
   return trimmedTitle.slice(0, 2).toUpperCase();
 };
 
-export const getEffectiveSetlistSongCapo = (setlistSong: SetlistSong, fallbackCapo?: number) => (
+export type SetlistCapoResolutionOptions = {
+  includeSharedCapo?: boolean;
+};
+
+export const getEffectiveSetlistSongCapo = (
+  setlistSong: SetlistSong,
+  fallbackCapo?: number,
+  options: SetlistCapoResolutionOptions = {}
+) => (
   typeof setlistSong.personalCapoOverride === 'number'
     ? setlistSong.personalCapoOverride
-    : typeof setlistSong.capo === 'number'
+    : options.includeSharedCapo !== false && typeof setlistSong.capo === 'number'
       ? setlistSong.capo
       : fallbackCapo
 );
@@ -175,9 +183,11 @@ export const getEffectiveSetlistSongCapo = (setlistSong: SetlistSong, fallbackCa
 export const resolveSetlistSongCapo = (
   setlistSong: SetlistSong,
   sourceSong: Pick<Song, 'capo' | 'currentKey'>,
-  guitaristMode: boolean
+  guitaristMode: boolean,
+  options: SetlistCapoResolutionOptions = {}
 ): number => {
-  const base = getEffectiveSetlistSongCapo(setlistSong, sourceSong.capo ?? 0) ?? 0;
+  const fallbackCapo = options.includeSharedCapo === false ? 0 : sourceSong.capo ?? 0;
+  const base = getEffectiveSetlistSongCapo(setlistSong, fallbackCapo, options) ?? 0;
   if (!guitaristMode || base > 0) {
     return base;
   }
@@ -185,7 +195,13 @@ export const resolveSetlistSongCapo = (
   return getSuggestedGuitarCapo(effectiveKey);
 };
 
-export const applySetlistSongOverrides = (song: Song, setlist: Setlist, setlistSong: SetlistSong, guitaristMode = false): Song => {
+export const applySetlistSongOverrides = (
+  song: Song,
+  setlist: Setlist,
+  setlistSong: SetlistSong,
+  guitaristMode = false,
+  capoOptions: SetlistCapoResolutionOptions = {}
+): Song => {
   const sectionMap = new Map<string, Section>();
   song.sections.forEach((section, index) => {
     sectionMap.set(getSectionReferenceId(section, index), section);
@@ -202,7 +218,7 @@ export const applySetlistSongOverrides = (song: Song, setlist: Setlist, setlistS
   return {
     ...JSON.parse(JSON.stringify(song)) as Song,
     currentKey: (setlistSong.overrideKey ?? song.currentKey) as Key,
-    capo: resolveSetlistSongCapo(setlistSong, song, guitaristMode),
+    capo: resolveSetlistSongCapo(setlistSong, song, guitaristMode, capoOptions),
     showNashvilleNumbers: setlist.displayMode === 'nashville-number-system',
     showAbsoluteJianpu: setlist.displayMode === 'chord-fixed-key',
     sections: orderedSections

@@ -2231,6 +2231,10 @@ export default function App() {
   const showGoogleAuth = false;
   const isAuthenticated = Boolean(session && authenticatedUser);
   const isCloudMode = isAuthenticated && Boolean(cloudRepositoryRef.current || authenticatedUser);
+  const setlistCapoResolutionOptions = React.useMemo(
+    () => ({ includeSharedCapo: !isCloudMode }),
+    [isCloudMode]
+  );
   const activeCloudLibrary = cloudLibraries.find((library) => library.id === activeLibraryId)
     ?? cloudLibraries.find((library) => library.kind === 'personal')
     ?? null;
@@ -2447,7 +2451,13 @@ export default function App() {
   ), [song]);
   const activeSetlistPreviewSong = selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
     ? {
-        ...applySetlistSongOverrides(activeSetlistEditableSong ?? selectedSetlistSourceSong, effectiveSelectedSetlist, selectedSetlistSong, guitaristMode),
+        ...applySetlistSongOverrides(
+          activeSetlistEditableSong ?? selectedSetlistSourceSong,
+          effectiveSelectedSetlist,
+          selectedSetlistSong,
+          guitaristMode,
+          setlistCapoResolutionOptions
+        ),
         references: selectedSetlistSourceSong.references,
         ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
           ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
@@ -2479,7 +2489,13 @@ export default function App() {
   const activeDraftNavigationPreviewSong = isSetlistMode
     ? (activeDraftEditorSong && selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
         ? {
-            ...applySetlistSongOverrides(activeDraftEditorSong, effectiveSelectedSetlist, selectedSetlistSong, guitaristMode),
+            ...applySetlistSongOverrides(
+              activeDraftEditorSong,
+              effectiveSelectedSetlist,
+              selectedSetlistSong,
+              guitaristMode,
+              setlistCapoResolutionOptions
+            ),
             references: selectedSetlistSourceSong.references,
             ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
               ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
@@ -2811,8 +2827,13 @@ export default function App() {
   const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
   const currentSetlistKey = activeSetlistPreviewSong?.currentKey ?? selectedSetlistSourceSong?.currentKey ?? 'C';
   const currentSetlistCapo = selectedSetlistSong
-    ? resolveSetlistSongCapo(selectedSetlistSong, selectedSetlistSourceSong ?? { capo: 0, currentKey: currentSetlistKey }, guitaristMode)
-    : (selectedSetlistSourceSong?.capo ?? 0);
+    ? resolveSetlistSongCapo(
+      selectedSetlistSong,
+      selectedSetlistSourceSong ?? { capo: 0, currentKey: currentSetlistKey },
+      guitaristMode,
+      setlistCapoResolutionOptions
+    )
+    : (setlistCapoResolutionOptions.includeSharedCapo === false ? 0 : selectedSetlistSourceSong?.capo ?? 0);
   const currentSetlistPlayKey = getPlayKey(currentSetlistKey, currentSetlistCapo);
   const exportProgressPercent = pdfExportProgress && pdfExportProgress.totalPages > 0
     ? Math.max(0, Math.min(100, (pdfExportProgress.completedPages / pdfExportProgress.totalPages) * 100))
@@ -2925,7 +2946,7 @@ export default function App() {
   };
   const getSetlistSongInfoSummary = (item: SetlistSong, sourceSong: Song) => {
     const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-    const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode);
+    const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode, setlistCapoResolutionOptions);
     const displaySong = item.songData ?? sourceSong;
     const versionSummary = getSongVersionSummary(displaySong);
     const translator = displaySong.translator?.trim();
@@ -3539,7 +3560,7 @@ export default function App() {
       overrideKey: keyChangedInEdit
         ? nextSong.currentKey
         : (currentSetlistSong.overrideKey ?? nextSong.currentKey),
-      capo: nextSong.capo ?? 0,
+      ...(!isCloudMode ? { capo: nextSong.capo ?? 0 } : {}),
       sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong, nextSong),
       songData: cloneSong(normalizeSongBars(nextSong))
     }));
@@ -4555,7 +4576,7 @@ export default function App() {
     setJoinedSetlists((current) => current.map((sl) =>
       sl.id !== selectedSetlistId ? sl : {
         ...sl,
-        songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, capo } : s)
+        songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, personalCapoOverride: capo } : s)
       }
     ));
     // Joined-project setlists live inside joinedProjects, not joinedSetlists.
@@ -4566,7 +4587,7 @@ export default function App() {
         setlists: jp.setlists.map((sl) =>
           sl.id !== selectedSetlistId ? sl : {
             ...sl,
-            songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, capo } : s)
+            songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, personalCapoOverride: capo } : s)
           }
         )
       };
@@ -6077,7 +6098,7 @@ export default function App() {
     handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
       ...currentSetlistSong,
       overrideKey: previousSong.currentKey,
-      capo: previousSong.capo ?? 0,
+      ...(!isCloudMode ? { capo: previousSong.capo ?? 0 } : {}),
       sectionOrder: sanitizeSetlistSectionOrder(previousSnapshot.sectionOrder, previousSong),
       songData: cloneSong(normalizeSongBars(previousSong))
     }));
@@ -6106,7 +6127,7 @@ export default function App() {
     handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
       ...currentSetlistSong,
       overrideKey: nextSong.currentKey,
-      capo: nextSong.capo ?? 0,
+      ...(!isCloudMode ? { capo: nextSong.capo ?? 0 } : {}),
       sectionOrder: sanitizeSetlistSectionOrder(nextSnapshot.sectionOrder, nextSong),
       songData: cloneSong(normalizeSongBars(nextSong))
     }));
@@ -6392,7 +6413,13 @@ export default function App() {
           exportRoot?.render(
             <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
               {setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
-                const derivedSong = applySetlistSongOverrides(sourceSong, selectedSetlist, item, guitaristMode);
+                const derivedSong = applySetlistSongOverrides(
+                  sourceSong,
+                  selectedSetlist,
+                  item,
+                  guitaristMode,
+                  setlistCapoResolutionOptions
+                );
                 return (
                   <div
                     key={item.id}
@@ -8132,7 +8159,7 @@ export default function App() {
       handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
         ...currentSetlistSong,
         overrideKey: currentSetlistSong.overrideKey ?? editableSong.currentKey,
-        capo: editableSong.capo ?? 0,
+        ...(!isCloudMode ? { capo: editableSong.capo ?? 0 } : {}),
         sectionOrder: nextOrder,
         songData: cloneSong(normalizeSongBars(editableSong))
       }));
@@ -8695,7 +8722,13 @@ export default function App() {
       const previewSong = isSelected && activeDraftNavigationPreviewSong
         ? activeDraftNavigationPreviewSong
         : {
-            ...applySetlistSongOverrides(sourceSong, effectiveSelectedSetlist, item, guitaristMode),
+            ...applySetlistSongOverrides(
+              sourceSong,
+              effectiveSelectedSetlist,
+              item,
+              guitaristMode,
+              setlistCapoResolutionOptions
+            ),
             references: sourceSong.references,
             ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
               ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
@@ -8715,6 +8748,7 @@ export default function App() {
     isJoinedSetlist,
     joinedSetlistDisplayPreference.barNumberMode,
     selectedSetlistSong?.id,
+    setlistCapoResolutionOptions,
     setlistSongsWithSource
   ]);
 
@@ -11235,7 +11269,7 @@ export default function App() {
             {setlistSongsWithSource.map(({ item, sourceSong }, index) => {
               const isActive = item.id === selectedSetlistSong?.id;
               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-              const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode);
+              const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode, setlistCapoResolutionOptions);
               const displaySong = item.songData ?? sourceSong;
               const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
               const isDropTarget = dragOverSetlistSongId === item.id;
