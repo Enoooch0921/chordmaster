@@ -8276,10 +8276,15 @@ export default function App() {
                   slotIndex,
                   rawChordIndex
                 };
+          const fallbackNotationAnchorKey = requestedNotationMode && requestedNotationMode !== 'chords'
+            ? `${previewIdentity}|${actualSection.id}|${editableBar.id}|${requestedNotationMode}|all`
+            : null;
+          const incomingAnchorIsLowerLane = Boolean(target?.anchorKey.includes('|lower|'));
           const anchorKey = requestedNotationMode === 'chords'
             ? makePreviewTargetAnchorKey(previewIdentity, actualSection.id, editableBar.id, slotIndex)
-            : target?.anchorKey
-              ?? `${previewIdentity}|${actualSection.id}|${editableBar.id}|${requestedNotationMode}|all`;
+            : !incomingAnchorIsLowerLane && target?.anchorKey
+              ? target.anchorKey
+              : fallbackNotationAnchorKey ?? `${previewIdentity}|${actualSection.id}|${editableBar.id}|${requestedNotationMode}|all`;
           const initialCursorByMode = {
             chords: cursor.kind === 'chord'
               ? cursor

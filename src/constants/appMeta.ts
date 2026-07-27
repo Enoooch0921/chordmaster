@@ -86,6 +86,14 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-07-27',
+        title: 'Rhythm keyboard reopen fix',
+        bullets: [
+          'Fixed the preview editor reopening path so tapping back into rhythm after Done targets the rhythm lane instead of reusing the lower-lane fallback anchor.'
+        ]
+      },
+      {
+        version: '0.9.2',
+        date: '2026-07-27',
         title: 'Preview notation editing polish',
         bullets: [
           'Added preview keyboard copy and paste for chord bars, jianpu riffs, and rhythm patterns, with clearer color separation between copy and paste actions.',
@@ -431,6 +439,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-07-27',
+        title: '節奏鍵盤重新開啟修正',
+        bullets: [
+          '修正完成預覽輸入後重新點回節奏時，會沿用 lower lane 目標導致節奏鍵盤無法重新打開的問題。'
+        ]
+      },
+      {
+        version: '0.9.2',
         date: '2026-07-27',
         title: '預覽記譜編輯細節更新',
         bullets: [
