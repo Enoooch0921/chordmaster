@@ -85,6 +85,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-07-27',
+        title: 'Preview notation editing polish',
+        bullets: [
+          'Added preview keyboard copy and paste for chord bars, jianpu riffs, and rhythm patterns, with clearer color separation between copy and paste actions.',
+          'Updated chord hardware shortcuts: Space moves to the next beat, Enter moves to the next bar, Shift+Space inserts a beat before the current beat, and Shift+Enter inserts a bar before the current bar.',
+          'Fixed jianpu dotted-note and cross-beat capacity checks so patterns such as eighth-quarter-eighth can fill two beats exactly.',
+          'Improved jianpu slur targeting, section-title manual line breaks, title casing, and zoomed preview text clarity.'
+        ]
+      },
+      {
+        version: '0.9.1',
         date: '2026-07-19',
         title: 'iPad-first setlists and smoother touch editing',
         bullets: [
@@ -420,6 +431,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-07-27',
+        title: '預覽記譜編輯細節更新',
+        bullets: [
+          '新增預覽鍵盤的小節和弦、簡譜與節奏複製／貼上操作，並用更清楚的顏色區分複製與貼上。',
+          '更新和弦硬體快捷鍵：Space 到下一拍、Enter 到下一小節、Shift+Space 在目前拍前插入一拍、Shift+Enter 在目前小節前插入小節。',
+          '修正簡譜附點與跨拍容量判斷，八分＋四分＋八分現在可以剛好填滿兩拍。',
+          '改善簡譜連接線目標、段落標題手動換行與首字母大寫，以及放大預覽時的文字清晰度。'
+        ]
+      },
+      {
+        version: '0.9.1',
         date: '2026-07-19',
         title: 'iPad 優先歌單與更順暢的觸控編輯',
         bullets: [
