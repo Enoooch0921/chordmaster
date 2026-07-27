@@ -1,5 +1,13 @@
 import type { Song } from '../types';
-import type { ChordInputMode } from './songEditing';
+import { getDefaultJianpuCursor } from './jianpuEditing';
+import { getDefaultRhythmCursor } from './rhythmEditing';
+import {
+  findSongBar,
+  getBeatCount,
+  getChordBeatSlots,
+  type ChordInputMode,
+  type SongBarIdentity
+} from './songEditing';
 
 export interface PreviewEditAnchorRect {
   left: number;
@@ -10,7 +18,42 @@ export interface PreviewEditAnchorRect {
   height: number;
 }
 
-export type PreviewBarEditField = 'chords' | 'symbols' | 'text';
+export const PREVIEW_NOTATION_MODES = ['chords', 'rhythm', 'jianpu'] as const;
+
+export type PreviewNotationMode = typeof PREVIEW_NOTATION_MODES[number];
+
+export interface PreviewChordCursor {
+  kind: 'chord';
+  slotIndex: number;
+  rawChordIndex: number | null;
+}
+
+export interface PreviewRhythmCursor {
+  kind: 'rhythm';
+  cursorUnit: number;
+}
+
+export interface PreviewJianpuCursor {
+  kind: 'jianpu';
+  beatIndex: number;
+  unitIndex: number;
+  noteIndex?: number | null;
+}
+
+export type PreviewNotationCursor = PreviewChordCursor | PreviewRhythmCursor | PreviewJianpuCursor;
+
+export interface PreviewCursorByMode {
+  chords: PreviewChordCursor;
+  rhythm: PreviewRhythmCursor;
+  jianpu: PreviewJianpuCursor;
+}
+
+export type PreviewNotationCursorForMode<Mode extends PreviewNotationMode> = Extract<
+  PreviewNotationCursor,
+  { kind: Mode extends 'chords' ? 'chord' : Mode }
+>;
+
+export type PreviewBarEditField = PreviewNotationMode | 'symbols' | 'text';
 export type PreviewEditField = PreviewBarEditField | 'sectionName';
 
 interface PreviewEditTargetBase {
@@ -26,6 +69,11 @@ export interface PreviewBarEditTarget extends PreviewEditTargetBase {
   field: PreviewBarEditField;
   slotIndex: number;
   rawChordIndex: number | null;
+  /**
+   * Semantic notation position. `slotIndex` and `rawChordIndex` remain above
+   * while callers migrate from chord-only preview targets.
+   */
+  cursor?: PreviewNotationCursor;
 }
 
 export interface PreviewSectionEditTarget extends PreviewEditTargetBase {
@@ -45,6 +93,10 @@ export interface PreviewEditSession {
   baseSong: Song;
   draftSong: Song;
   target: PreviewEditTarget;
+  notationMode: PreviewNotationMode;
+  cursorByMode: PreviewCursorByMode;
+  chordInputMode: ChordInputMode;
+  /** @deprecated Use `chordInputMode`. Kept in sync for staged migration. */
   inputMode: ChordInputMode;
   past: Song[];
   future: Song[];
@@ -53,6 +105,104 @@ export interface PreviewEditSession {
   lastMutationAt: number;
   targetStatus: 'active' | 'deleted';
 }
+
+export const isPreviewNotationMode = (value: string): value is PreviewNotationMode => (
+  PREVIEW_NOTATION_MODES.some((mode) => mode === value)
+);
+
+export const getNextPreviewNotationMode = (mode: PreviewNotationMode): PreviewNotationMode => {
+  const currentIndex = PREVIEW_NOTATION_MODES.indexOf(mode);
+  return PREVIEW_NOTATION_MODES[(currentIndex + 1) % PREVIEW_NOTATION_MODES.length];
+};
+
+export const getPreviewNotationModeForCursor = (
+  cursor: PreviewNotationCursor
+): PreviewNotationMode => (cursor.kind === 'chord' ? 'chords' : cursor.kind);
+
+export const getDefaultPreviewNotationCursor = <Mode extends PreviewNotationMode>(
+  mode: Mode
+): PreviewNotationCursorForMode<Mode> => {
+  const cursor = mode === 'chords'
+    ? { kind: 'chord' as const, slotIndex: 0, rawChordIndex: null }
+    : mode === 'rhythm'
+      ? { kind: 'rhythm' as const, cursorUnit: 0 }
+      : { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null };
+  return cursor as PreviewNotationCursorForMode<Mode>;
+};
+
+export const getDefaultPreviewCursorByMode = (): PreviewCursorByMode => ({
+  chords: getDefaultPreviewNotationCursor('chords'),
+  rhythm: getDefaultPreviewNotationCursor('rhythm'),
+  jianpu: getDefaultPreviewNotationCursor('jianpu')
+});
+
+const setCursorForMode = (
+  cursorByMode: PreviewCursorByMode,
+  cursor: PreviewNotationCursor
+): PreviewCursorByMode => {
+  switch (cursor.kind) {
+    case 'chord':
+      return { ...cursorByMode, chords: cursor };
+    case 'rhythm':
+      return { ...cursorByMode, rhythm: cursor };
+    case 'jianpu':
+      return { ...cursorByMode, jianpu: cursor };
+  }
+};
+
+/**
+ * Rebuild every mode cursor when the active bar identity changes. This keeps a
+ * cursor remembered in (for example) a 6/8 bar from becoming invalid after
+ * navigation into a 3/4 bar, while preserving the exact cursor supplied for
+ * the mode that initiated the navigation.
+ */
+export const getPreviewCursorByModeForBar = (
+  song: Song,
+  target: SongBarIdentity,
+  activeCursor?: PreviewNotationCursor
+): PreviewCursorByMode => {
+  const located = findSongBar(song, target);
+  const beatCount = located ? getBeatCount(song, located.bar) : 4;
+  const cursors: PreviewCursorByMode = {
+    chords: {
+      kind: 'chord',
+      slotIndex: 0,
+      rawChordIndex: located
+        ? getChordBeatSlots(located.bar, beatCount)[0]?.rawChordIndex ?? null
+        : null
+    },
+    rhythm: { kind: 'rhythm', ...getDefaultRhythmCursor(song, target) },
+    jianpu: { kind: 'jianpu', ...getDefaultJianpuCursor(song, target) }
+  };
+  return activeCursor ? setCursorForMode(cursors, activeCursor) : cursors;
+};
+
+const getTargetNotationCursor = (target: PreviewEditTarget): PreviewNotationCursor | null => {
+  if (target.kind !== 'bar') return null;
+  if (target.cursor) return target.cursor;
+  if (target.field === 'chords') {
+    return {
+      kind: 'chord',
+      slotIndex: target.slotIndex,
+      rawChordIndex: target.rawChordIndex
+    };
+  }
+  if (target.field === 'rhythm') return getDefaultPreviewNotationCursor('rhythm');
+  if (target.field === 'jianpu') return getDefaultPreviewNotationCursor('jianpu');
+  return null;
+};
+
+export const getPreviewNotationModeForTarget = (
+  target: PreviewEditTarget,
+  fallback: PreviewNotationMode = 'chords'
+): PreviewNotationMode => {
+  const cursor = getTargetNotationCursor(target);
+  if (cursor) return getPreviewNotationModeForCursor(cursor);
+  if (target.kind !== 'bar') return fallback;
+  if (isPreviewNotationMode(target.field)) return target.field;
+  // Symbols and text are legacy chord-keyboard tools, not notation modes.
+  return 'chords';
+};
 
 const songHasTarget = (song: Song, target: PreviewEditTarget) => (
   song.sections.some((section) => (
@@ -64,35 +214,61 @@ const songHasTarget = (song: Song, target: PreviewEditTarget) => (
 export const createPreviewEditSession = ({
   song,
   target,
-  inputMode
+  inputMode,
+  chordInputMode,
+  notationMode,
+  cursorByMode
 }: {
   song: Song;
   target: PreviewEditTarget;
-  inputMode: ChordInputMode;
-}): PreviewEditSession => ({
-  previewIdentity: target.previewIdentity,
-  baseSong: song,
-  draftSong: song,
-  target,
-  inputMode,
-  past: [],
-  future: [],
-  dirty: false,
-  lastMergeKey: null,
-  lastMutationAt: 0,
-  targetStatus: 'active'
-});
+  /** @deprecated Prefer `chordInputMode`. */
+  inputMode?: ChordInputMode;
+  chordInputMode?: ChordInputMode;
+  notationMode?: PreviewNotationMode;
+  cursorByMode?: Partial<PreviewCursorByMode>;
+}): PreviewEditSession => {
+  const resolvedChordInputMode = chordInputMode ?? inputMode ?? 'letters';
+  const targetCursor = getTargetNotationCursor(target);
+  const initialCursorByMode: PreviewCursorByMode = {
+    ...getDefaultPreviewCursorByMode(),
+    ...cursorByMode
+  };
+  const resolvedCursorByMode = targetCursor
+    ? setCursorForMode(initialCursorByMode, targetCursor)
+    : initialCursorByMode;
+  return {
+    previewIdentity: target.previewIdentity,
+    baseSong: song,
+    draftSong: song,
+    target,
+    notationMode: notationMode ?? getPreviewNotationModeForTarget(target),
+    cursorByMode: resolvedCursorByMode,
+    chordInputMode: resolvedChordInputMode,
+    inputMode: resolvedChordInputMode,
+    past: [],
+    future: [],
+    dirty: false,
+    lastMergeKey: null,
+    lastMutationAt: 0,
+    targetStatus: 'active'
+  };
+};
 
 export const retargetPreviewEditSession = (
   session: PreviewEditSession,
   target: PreviewEditTarget
-): PreviewEditSession => ({
-  ...session,
-  target,
-  lastMergeKey: null,
-  lastMutationAt: 0,
-  targetStatus: 'active'
-});
+): PreviewEditSession => {
+  const cursor = getTargetNotationCursor(target);
+  return {
+    ...session,
+    target,
+    notationMode: getPreviewNotationModeForTarget(target, session.notationMode),
+    cursorByMode: cursor ? setCursorForMode(session.cursorByMode, cursor) : session.cursorByMode,
+    lastMergeKey: null,
+    lastMutationAt: 0,
+    targetStatus: 'active'
+  };
+};
 
 export const markPreviewTargetDeleted = (
   session: PreviewEditSession
@@ -103,10 +279,45 @@ export const markPreviewTargetDeleted = (
   lastMutationAt: 0
 });
 
-export const setPreviewEditInputMode = (
+export const setPreviewEditChordInputMode = (
   session: PreviewEditSession,
-  inputMode: ChordInputMode
-): PreviewEditSession => ({ ...session, inputMode });
+  chordInputMode: ChordInputMode
+): PreviewEditSession => ({
+  ...session,
+  chordInputMode,
+  inputMode: chordInputMode
+});
+
+/** @deprecated Use `setPreviewEditChordInputMode`. */
+export const setPreviewEditInputMode = setPreviewEditChordInputMode;
+
+export const setPreviewNotationCursor = (
+  session: PreviewEditSession,
+  cursor: PreviewNotationCursor
+): PreviewEditSession => ({
+  ...session,
+  notationMode: getPreviewNotationModeForCursor(cursor),
+  cursorByMode: setCursorForMode(session.cursorByMode, cursor)
+});
+
+export const setPreviewNotationMode = <Mode extends PreviewNotationMode>(
+  session: PreviewEditSession,
+  notationMode: Mode,
+  cursor?: PreviewNotationCursorForMode<Mode>
+): PreviewEditSession => ({
+  ...session,
+  notationMode,
+  cursorByMode: cursor
+    ? setCursorForMode(session.cursorByMode, cursor)
+    : session.cursorByMode
+});
+
+export const cyclePreviewNotationMode = (
+  session: PreviewEditSession
+): PreviewEditSession => setPreviewNotationMode(
+  session,
+  getNextPreviewNotationMode(session.notationMode)
+);
 
 export const applyPreviewDraft = (
   session: PreviewEditSession,

@@ -20,6 +20,18 @@ import {
   reorderSongSections,
   splitSectionAtBar as splitSongSectionAtBar
 } from '../lib/songEditing';
+import { applyRhythmEdit, type RhythmEditAction } from '../lib/rhythmEditing';
+import {
+  applyJianpuCommand,
+  buildJianpuPitchContext,
+  getJianpuBarLayout,
+  getJianpuCursorForNote,
+  getJianpuInputAvailability,
+  getJianpuInputModeAtCursor,
+  type JianpuAction,
+  type JianpuPitch,
+  type JianpuPitchContext
+} from '../lib/jianpuEditing';
 
 type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'marker';
 
@@ -54,6 +66,7 @@ interface Props {
   onActiveBarChange?: (bar: { sIdx: number; bIdx: number } | null) => void;
   focusRequest?: FocusRequest | null;
   onFocusRequestHandled?: (requestId: number) => void;
+  jianpuPitchContext?: JianpuPitchContext;
 }
 
 interface SelectionInfo {
@@ -130,6 +143,7 @@ const MOBILE_SECTION_REORDER_LONG_PRESS_MS = 360;
 
 const SECTION_TITLE_PRESETS = [
   'Intro',
+  'Intro 2',
   'Count-In',
   'Verse',
   'Verse 1',
@@ -181,6 +195,16 @@ const normalizeSectionTitleQuery = (value: string) => (
 const tokenizeSectionTitleQuery = (value: string) => (
   normalizeSectionTitleQuery(value).split(' ').filter(Boolean)
 );
+
+const isCompactSectionTitleSubsequence = (query: string, title: string) => {
+  if (!query) return true;
+  let queryIndex = 0;
+  for (const char of title) {
+    if (char === query[queryIndex]) queryIndex += 1;
+    if (queryIndex >= query.length) return true;
+  }
+  return false;
+};
 
 const formatSectionTitleCase = (value: string) => (
   value
@@ -311,6 +335,8 @@ const getSectionTitleSuggestions = (value: string) => {
           score = 520;
         } else if (compactQuery && compactTitle.includes(compactQuery)) {
           score = 420;
+        } else if (compactQuery && isCompactSectionTitleSubsequence(compactQuery, compactTitle)) {
+          score = 340;
         }
       }
 
@@ -607,7 +633,8 @@ const SongEditor: React.FC<Props> = ({
   activeBar = null,
   onActiveBarChange,
   focusRequest = null,
-  onFocusRequestHandled
+  onFocusRequestHandled,
+  jianpuPitchContext
 }) => {
   const copy = getUiCopy(language);
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
@@ -663,11 +690,20 @@ const SongEditor: React.FC<Props> = ({
 
   const { baseKeys: sectionBaseKeys, activeKeys: sectionActiveKeys } = getSectionKeyStates(song);
   const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
+  const effectiveJianpuPitchContext = jianpuPitchContext ?? buildJianpuPitchContext(song);
 
   // Sounding key used to render/interpret absolute (1=C) jianpu for a section,
   // matching ChordSheet's sectionPlayKey (written key → current key → capo) so the
   // editor's absolute view is WYSIWYG-identical to the read-only chart.
-  const getSectionPlayKeyForJianpu = (sIdx: number): Key => {
+  const getSectionPlayKeyForJianpu = (sIdx: number, bIdx = 0): Key => {
+    if (sIdx === PICKUP_SECTION_INDEX && bIdx === PICKUP_BAR_INDEX && effectiveJianpuPitchContext.pickupPlayKey) {
+      return effectiveJianpuPitchContext.pickupPlayKey;
+    }
+    const sectionId = song.sections[sIdx]?.id;
+    const overriddenKey = sectionId
+      ? effectiveJianpuPitchContext.playKeyBySectionId?.[sectionId]
+      : undefined;
+    if (overriddenKey) return overriddenKey;
     const writtenKey = sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
     const currentKey = transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey);
     return getPlayKey(currentKey, song.capo || 0);
@@ -679,9 +715,9 @@ const SongEditor: React.FC<Props> = ({
 
   // When absolute input is on, swap the displayed beat tokens to their absolute
   // spelling. Storage/editing stay relative; this only changes the rendered glyphs.
-  const toDisplayBeatTokens = (beatTokens: string[], sIdx: number): string[] => {
+  const toDisplayBeatTokens = (beatTokens: string[], sIdx: number, bIdx: number): string[] => {
     if (!jianpuInputAbsolute) return beatTokens;
-    const key = getSectionPlayKeyForJianpu(sIdx);
+    const key = getSectionPlayKeyForJianpu(sIdx, bIdx);
     return beatTokens.map((token) => (
       token.trim() ? (convertRelativeJianpuToAbsoluteNotation(token, key) ?? token) : token
     ));
@@ -693,10 +729,11 @@ const SongEditor: React.FC<Props> = ({
     pitch: string,
     accidental: JianpuAccidental,
     octave: JianpuOctave,
-    sIdx: number
+    sIdx: number,
+    bIdx: number
   ): { pitch: string; accidental: JianpuAccidental; octave: JianpuOctave } => (
     jianpuInputAbsolute
-      ? absoluteJianpuPartsToRelative(pitch, accidental, octave, getSectionPlayKeyForJianpu(sIdx))
+      ? absoluteJianpuPartsToRelative(pitch, accidental, octave, getSectionPlayKeyForJianpu(sIdx, bIdx))
       : { pitch, accidental, octave }
   );
 
@@ -1050,6 +1087,23 @@ const SongEditor: React.FC<Props> = ({
     const newSections = [...song.sections];
     newSections[sIdx] = { ...section, bars: newBars };
     notifyChange({ ...song, sections: newSections });
+  };
+
+  const getSharedSongBarTarget = (sIdx: number, bIdx: number) => {
+    if (isPickupTarget(sIdx, bIdx)) return null;
+    const sectionId = song.sections[sIdx]?.id?.trim();
+    const barId = song.sections[sIdx]?.bars[bIdx]?.id?.trim();
+    return sectionId && barId ? { sectionId, barId } : null;
+  };
+
+  const getSongBarIndexesByIdentity = (
+    sourceSong: Song,
+    target: { sectionId: string; barId: string }
+  ) => {
+    const sIdx = sourceSong.sections.findIndex((section) => section.id === target.sectionId);
+    if (sIdx < 0) return null;
+    const bIdx = sourceSong.sections[sIdx].bars.findIndex((bar) => bar.id === target.barId);
+    return bIdx >= 0 ? { sIdx, bIdx } : null;
   };
 
   useEffect(() => {
@@ -2418,8 +2472,35 @@ const SongEditor: React.FC<Props> = ({
     return solve(targetSixthUnits, 0) || [];
   };
 
+  const applySharedRhythmAction = (action: RhythmEditAction): boolean => {
+    if (!selection || selection.type !== 'rhythm') return false;
+    const target = getSharedSongBarTarget(selection.sIdx, selection.bIdx);
+    const activeCursor = getActiveRhythmCursor(selection);
+    if (!target || !activeCursor) return false;
+
+    const result = applyRhythmEdit(
+      song,
+      target,
+      { cursorUnit: activeCursor.cursorUnit },
+      action
+    );
+    const indexes = getSongBarIndexesByIdentity(result.song, target);
+    if (!indexes) return false;
+
+    if (result.changed) notifyChange(result.song);
+    const nextRhythm = result.song.sections[indexes.sIdx].bars[indexes.bIdx].rhythm || '';
+    setRhythmInsertSelection(
+      indexes.sIdx,
+      indexes.bIdx,
+      nextRhythm,
+      result.cursor.cursorUnit
+    );
+    return true;
+  };
+
 
   const insertRhythmToken = (token: string) => {
+    if (applySharedRhythmAction({ type: 'insert', token })) return;
     if (!selection || selection.type !== 'rhythm') return;
 
     const activeCursor = getActiveRhythmCursor(selection);
@@ -2471,6 +2552,7 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const toggleRhythmDot = () => {
+    if (applySharedRhythmAction({ type: 'toggle-dot' })) return;
     if (!selection || selection.type !== 'rhythm') return;
 
     const events = getRhythmEditorEvents(selection.sIdx, selection.bIdx);
@@ -2505,6 +2587,9 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const toggleRhythmModifier = (modifier: '^' | '~') => {
+    if (applySharedRhythmAction({
+      type: modifier === '^' ? 'toggle-accent' : 'toggle-tie'
+    })) return;
     if (!selection || selection.type !== 'rhythm') return;
 
     const events = getRhythmEditorEvents(selection.sIdx, selection.bIdx);
@@ -2530,6 +2615,7 @@ const SongEditor: React.FC<Props> = ({
   const toggleRhythmTie = () => toggleRhythmModifier('~');
 
   const clearRhythmSelection = (mode: 'backspace' | 'delete' = 'delete') => {
+    if (applySharedRhythmAction({ type: 'delete', mode })) return;
     if (!selection || selection.type !== 'rhythm') return;
 
     const events = getRhythmEditorEvents(selection.sIdx, selection.bIdx);
@@ -2819,6 +2905,79 @@ const SongEditor: React.FC<Props> = ({
     )) || null;
   };
 
+  const getDisplayJianpuNote = (
+    note: JianpuNoteRange,
+    sIdx: number,
+    bIdx: number
+  ): JianpuNoteRange => {
+    if (!jianpuInputAbsolute || note.pitch === '0' || note.pitch === '-') return note;
+    const displayed = convertRelativeJianpuToAbsoluteNotation(
+      note.text,
+      getSectionPlayKeyForJianpu(sIdx, bIdx)
+    );
+    return findJianpuNoteRanges(displayed ?? note.text)[0] ?? note;
+  };
+
+  const rebuildJianpuNoteFromDisplay = (
+    note: JianpuNoteRange,
+    sIdx: number,
+    bIdx: number,
+    overrides: Partial<Pick<JianpuNoteRange, 'accidental' | 'pitch' | 'duration' | 'octave' | 'dotted' | 'slurStart' | 'slurEnd'>>
+  ) => {
+    const display = getDisplayJianpuNote(note, sIdx, bIdx);
+    const displayPitch = overrides.pitch ?? display.pitch;
+    const displayAccidental = normalizeEditableJianpuAccidental(overrides.accidental ?? display.accidental);
+    const displayOctave = overrides.octave ?? display.octave;
+    const resolved = resolveJianpuInputParts(
+      displayPitch,
+      displayAccidental,
+      displayOctave,
+      sIdx,
+      bIdx
+    );
+    return rebuildJianpuNote(note, {
+      ...overrides,
+      pitch: resolved.pitch,
+      accidental: resolved.accidental,
+      octave: resolved.octave
+    });
+  };
+
+  const getSelectedJianpuDisplayInputMode = (
+    targetSelection: SelectionInfo | null = selection
+  ): JianpuInputMode | null => {
+    if (!targetSelection || targetSelection.type !== 'riff') return null;
+    const riff = getRiffValue(targetSelection.sIdx, targetSelection.bIdx);
+    const selected = getSelectedJianpuNote(targetSelection, riff);
+    if (!selected) return null;
+
+    const target = getSharedSongBarTarget(targetSelection.sIdx, targetSelection.bIdx);
+    if (target) {
+      const beat = getBeatNoteRanges(riff, targetSelection.sIdx, targetSelection.bIdx)
+        .find((entry) => entry.notes.some((note) => (
+          note.start === selected.start && note.end === selected.end
+        )));
+      const noteIndex = beat?.notes.findIndex((note) => (
+        note.start === selected.start && note.end === selected.end
+      )) ?? -1;
+      const cursor = beat && noteIndex >= 0
+        ? getJianpuCursorForNote(song, target, beat.beatIndex, noteIndex)
+        : null;
+      const mode = cursor
+        ? getJianpuInputModeAtCursor(song, target, cursor, effectiveJianpuPitchContext)
+        : null;
+      if (mode) return mode;
+    }
+
+    const display = getDisplayJianpuNote(selected, targetSelection.sIdx, targetSelection.bIdx);
+    return {
+      duration: display.duration,
+      octave: display.octave,
+      dotted: display.dotted,
+      accidental: normalizeEditableJianpuAccidental(display.accidental)
+    };
+  };
+
   type JianpuNoteRef = {
     sIdx: number;
     bIdx: number;
@@ -2859,6 +3018,112 @@ const SongEditor: React.FC<Props> = ({
       orderIndex
     };
   };
+
+  const applySharedJianpuAction = (action: JianpuAction, selectedOnly = false): boolean => {
+    if (!selection || selection.type !== 'riff') return false;
+    const target = getSharedSongBarTarget(selection.sIdx, selection.bIdx);
+    const noteRef = getJianpuNoteRefAtSelection(selection);
+    if (!target || (selectedOnly && !noteRef)) return false;
+
+    const cursor = (() => {
+      if (noteRef) {
+        const beat = getBeatNoteRanges(noteRef.riff, noteRef.sIdx, noteRef.bIdx)[noteRef.beatIndex];
+        const noteIndex = beat?.notes.findIndex((note) => (
+          note.start === noteRef.note.start && note.end === noteRef.note.end
+        )) ?? -1;
+        return noteIndex < 0
+          ? null
+          : getJianpuCursorForNote(song, target, noteRef.beatIndex, noteIndex);
+      }
+
+      const riff = getRiffValue(selection.sIdx, selection.bIdx);
+      const beatIndex = (jianpuCursor && jianpuCursor.sIdx === selection.sIdx && jianpuCursor.bIdx === selection.bIdx)
+        ? jianpuCursor.beatIndex
+        : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
+      const insertSlot = getJianpuInsertSlotInfo(
+        selection.sIdx,
+        selection.bIdx,
+        riff,
+        beatIndex,
+        selection.start
+      );
+      const { beatUnits } = getJianpuBarTiming(selection.sIdx, selection.bIdx);
+      if (action.type === 'insert-pitch') {
+        const layout = getJianpuBarLayout(song, target);
+        const requestedUnit = insertSlot?.slotIndex ?? 0;
+        const nextWritableBeat = (() => {
+          if (!layout) return null;
+          for (const beat of layout.beats.slice(beatIndex)) {
+            const minimumUnit = beat.beatIndex === beatIndex ? requestedUnit : 0;
+            for (let unitIndex = minimumUnit; unitIndex < beat.beatUnits; unitIndex += 1) {
+              const candidate = { beatIndex: beat.beatIndex, unitIndex, noteIndex: null as null };
+              if (getJianpuInputAvailability(song, target, candidate, jianpuInputMode).remainingUnits > 0) {
+                return candidate;
+              }
+            }
+          }
+          return null;
+        })();
+        return nextWritableBeat;
+      }
+      return {
+        beatIndex,
+        unitIndex: insertSlot?.slotIndex ?? Math.max(0, beatUnits - 1),
+        noteIndex: null
+      };
+    })();
+    if (!cursor) return false;
+
+    const result = applyJianpuCommand(
+      song,
+      target,
+      cursor,
+      action,
+      jianpuInputMode,
+      effectiveJianpuPitchContext
+    );
+    if (result.error) {
+      setJianpuDurationBlockedHint(result.error);
+      return true;
+    }
+
+    if (result.song !== song) notifyChange(result.song);
+    setJianpuInputMode(result.inputMode);
+
+    const indexes = getSongBarIndexesByIdentity(result.song, result.target);
+    if (!indexes) return true;
+    const nextBar = result.song.sections[indexes.sIdx].bars[indexes.bIdx];
+    if (!getBarPanelState(nextBar, indexes.sIdx, indexes.bIdx).riff) {
+      updateBarPanelState(nextBar, indexes.sIdx, indexes.bIdx, { riff: true });
+    }
+    const nextRiff = getCanonicalJianpuNotation(
+      nextBar.riff,
+      getEffectiveTimeSignature(nextBar.timeSignature, result.song.timeSignature),
+      true
+    );
+    const nextBeat = getBeatNoteRanges(nextRiff, indexes.sIdx, indexes.bIdx)[result.cursor.beatIndex];
+    const nextNote = result.cursor.noteIndex === null
+      ? null
+      : nextBeat?.notes[result.cursor.noteIndex] ?? null;
+
+    if (nextNote) {
+      setRiffSelectionRange(indexes.sIdx, indexes.bIdx, nextRiff, nextNote.start, nextNote.end);
+    } else {
+      const nextCaret = getRiffCaretForBeatSlot(
+        indexes.sIdx,
+        indexes.bIdx,
+        nextRiff,
+        result.cursor.beatIndex,
+        result.cursor.unitIndex
+      );
+      setRiffCaretSelection(indexes.sIdx, indexes.bIdx, nextRiff, nextCaret);
+    }
+    return true;
+  };
+
+  const applySharedSelectedJianpuAction = (action: JianpuAction): boolean => (
+    applySharedJianpuAction(action, true)
+  );
 
   const getAdjacentJianpuNoteRef = (
     noteRef: JianpuNoteRef,
@@ -3673,18 +3938,26 @@ const SongEditor: React.FC<Props> = ({
 
   const insertOrReplaceJianpuPitch = (pitch: string) => {
     if (!selection || selection.type !== 'riff') return;
+    if (applySharedJianpuAction({ type: 'insert-pitch', pitch: pitch as JianpuPitch })) return;
 
     const riff = getRiffValue(selection.sIdx, selection.bIdx);
     const selectedNote = getSelectedJianpuNote(selection, riff);
-    const selectedAccidental = normalizeEditableJianpuAccidental(selectedNote?.accidental);
+    const selectedDisplayMode = getSelectedJianpuDisplayInputMode(selection);
+    const selectedAccidental = normalizeEditableJianpuAccidental(selectedDisplayMode?.accidental);
 
     if (selectedNote) {
-      const rel = resolveJianpuInputParts(pitch, selectedAccidental || jianpuInputMode.accidental, jianpuInputMode.octave, selection.sIdx);
+      const rel = resolveJianpuInputParts(
+        pitch,
+        selectedDisplayMode ? selectedAccidental : jianpuInputMode.accidental,
+        selectedDisplayMode?.octave ?? jianpuInputMode.octave,
+        selection.sIdx,
+        selection.bIdx
+      );
       const replacement = rebuildJianpuNote(selectedNote, {
         accidental: rel.accidental,
         pitch: rel.pitch,
-        duration: jianpuInputMode.duration,
-        dotted: selectedNote.dotted && canUseDottedJianpuDuration(jianpuInputMode.duration),
+        duration: selectedNote.duration,
+        dotted: selectedNote.dotted,
         octave: rel.octave
       });
       updateSelectedJianpuNote(() => replacement);
@@ -3711,7 +3984,7 @@ const SongEditor: React.FC<Props> = ({
         placeholderAtCaret.start
       );
       const insertionMode = fitJianpuInputModeToUnits(jianpuInputMode, placeholderCapacity.currentBeatUnits);
-      const rel = resolveJianpuInputParts(pitch, insertionMode.accidental, insertionMode.octave, selection.sIdx);
+      const rel = resolveJianpuInputParts(pitch, insertionMode.accidental, insertionMode.octave, selection.sIdx, selection.bIdx);
       const replacement = buildJianpuNoteFromMode(rel.pitch, { ...insertionMode, accidental: rel.accidental, octave: rel.octave });
       const replacementNote = findJianpuNoteRanges(replacement)[0];
       if (!replacementNote) return;
@@ -3751,7 +4024,7 @@ const SongEditor: React.FC<Props> = ({
       ? currentBeatRemainingUnits
       : beatUnits;
     const insertionMode = fitJianpuInputModeToUnits(jianpuInputMode, initialAvailableUnits);
-    const rel = resolveJianpuInputParts(pitch, insertionMode.accidental, insertionMode.octave, selection.sIdx);
+    const rel = resolveJianpuInputParts(pitch, insertionMode.accidental, insertionMode.octave, selection.sIdx, selection.bIdx);
     const replacement = buildJianpuNoteFromMode(rel.pitch, { ...insertionMode, accidental: rel.accidental, octave: rel.octave });
     const replacementNote = findJianpuNoteRanges(replacement)[0];
     if (!replacementNote) return;
@@ -3811,6 +4084,8 @@ const SongEditor: React.FC<Props> = ({
     const desiredDotted = selectedJianpuNote?.dotted ?? jianpuInputMode.dotted;
     const nextDotted = desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
+    if (applySharedJianpuAction({ type: 'set-duration', duration: nextDuration })) return;
+
     if (!canApplyJianpuDurationChoice(duration)) {
       if (selectedJianpuNote && nextDuration === 'quarter') {
         setJianpuDurationBlockedHint(copy.editor.cannotChangeToQuarter);
@@ -3866,33 +4141,60 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const setSelectedJianpuOctave = (dir: -1 | 1) => {
+    const currentOctave = selectedJianpuDisplayMode?.octave ?? jianpuInputMode.octave;
+    const nextOctave = cycleJianpuOctave(currentOctave, dir);
+    if (applySharedJianpuAction({ type: 'set-octave', octave: nextOctave })) return;
+
     setJianpuInputMode((current) => ({ ...current, octave: cycleJianpuOctave(current.octave, dir) }));
-    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
-      octave: cycleJianpuOctave(note.octave, dir)
-    }));
+    if (selection?.type === 'riff') {
+      updateSelectedJianpuNote((note) => rebuildJianpuNoteFromDisplay(
+        note,
+        selection.sIdx,
+        selection.bIdx,
+        { octave: nextOctave }
+      ));
+    }
   };
 
   const stepSelectedJianpuOctave = (direction: -1 | 1) => {
-    const currentOctave = selectedJianpuNote?.octave ?? jianpuInputMode.octave;
+    const currentOctave = selectedJianpuDisplayMode?.octave ?? jianpuInputMode.octave;
     const nextOctave = clampRelativeOctave(currentOctave + direction);
 
     if (nextOctave === currentOctave) return;
 
+    if (applySharedJianpuAction({ type: 'set-octave', octave: nextOctave })) return;
+
     setJianpuInputMode((current) => ({ ...current, octave: nextOctave }));
 
     if (!selectedJianpuNote) return;
-    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, { octave: nextOctave }));
+    if (selection?.type === 'riff') {
+      updateSelectedJianpuNote((note) => rebuildJianpuNoteFromDisplay(
+        note,
+        selection.sIdx,
+        selection.bIdx,
+        { octave: nextOctave }
+      ));
+    }
   };
 
   const setSelectedJianpuAccidental = (accidental: JianpuAccidental) => {
-    const currentAccidental = normalizeEditableJianpuAccidental(selectedJianpuNote?.accidental ?? jianpuInputMode.accidental);
+    const currentAccidental = normalizeEditableJianpuAccidental(selectedJianpuDisplayMode?.accidental ?? jianpuInputMode.accidental);
     const nextAccidental: JianpuAccidental = currentAccidental === accidental ? '' : accidental;
+
+    if (applySharedJianpuAction({ type: 'set-accidental', accidental: nextAccidental })) return;
 
     setJianpuInputMode((current) => ({ ...current, accidental: nextAccidental }));
 
     if (!selectedJianpuNote) return;
     if (selectedJianpuNote.pitch === '0' || selectedJianpuNote.pitch === '-') return;
-    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, { accidental: nextAccidental }));
+    if (selection?.type === 'riff') {
+      updateSelectedJianpuNote((note) => rebuildJianpuNoteFromDisplay(
+        note,
+        selection.sIdx,
+        selection.bIdx,
+        { accidental: nextAccidental }
+      ));
+    }
   };
 
   const toggleSelectedJianpuDot = () => {
@@ -3901,6 +4203,8 @@ const SongEditor: React.FC<Props> = ({
     if (nextDotted && !canUseDottedJianpuDuration(currentDuration)) {
       return;
     }
+
+    if (applySharedJianpuAction({ type: 'toggle-dot' })) return;
 
     if (!selectedJianpuNote && selection?.type === 'riff') {
       const riff = getRiffValue(selection.sIdx, selection.bIdx);
@@ -3921,6 +4225,7 @@ const SongEditor: React.FC<Props> = ({
 
   const toggleSelectedJianpuSlur = () => {
     if (!selection || selection.type !== 'riff') return;
+    if (applySharedSelectedJianpuAction({ type: 'toggle-slur' })) return;
 
     const context = getSelectedJianpuNoteContext(selection);
     if (!context) return;
@@ -4021,19 +4326,28 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const clearSelectedJianpuFormatting = () => {
-    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
-      accidental: '',
-      duration: 'quarter',
-      octave: 0,
-      dotted: false,
-      slurStart: false,
-      slurEnd: false
-    }));
+    if (applySharedSelectedJianpuAction({ type: 'clear-formatting' })) return;
+    if (selection?.type === 'riff') {
+      updateSelectedJianpuNote((note) => rebuildJianpuNoteFromDisplay(
+        note,
+        selection.sIdx,
+        selection.bIdx,
+        {
+          accidental: '',
+          duration: 'quarter',
+          octave: 0,
+          dotted: false,
+          slurStart: false,
+          slurEnd: false
+        }
+      ));
+    }
     setJianpuInputMode((current) => ({ ...current, accidental: '', duration: 'quarter', octave: 0, dotted: false }));
   };
 
   const removeSelectedJianpuNote = () => {
     if (!selection || selection.type !== 'riff') return;
+    if (applySharedSelectedJianpuAction({ type: 'delete', direction: 'backward' })) return;
 
     const riff = getRiffValue(selection.sIdx, selection.bIdx);
     const note = getSelectedJianpuNote(selection, riff);
@@ -4064,18 +4378,23 @@ const SongEditor: React.FC<Props> = ({
       beat.beatIndex,
       currentEntry.unitStart
     );
+    const displayNote = getDisplayJianpuNote(note, selection.sIdx, selection.bIdx);
     setJianpuInputMode((current) => ({
       ...current,
-      accidental: normalizeEditableJianpuAccidental(note.accidental),
-      duration: note.duration,
-      octave: note.octave,
-      dotted: note.dotted
+      accidental: normalizeEditableJianpuAccidental(displayNote.accidental),
+      duration: displayNote.duration,
+      octave: displayNote.octave,
+      dotted: displayNote.dotted
     }));
     setRiffCaretSelection(selection.sIdx, selection.bIdx, sanitizedRiff, nextCaret);
   };
 
   const removeJianpuNoteNearCaret = (mode: 'backspace' | 'delete') => {
     if (!selection || selection.type !== 'riff') return false;
+    if (applySharedJianpuAction({
+      type: 'delete',
+      direction: mode === 'backspace' ? 'backward' : 'forward'
+    })) return true;
 
     const riff = getRiffValue(selection.sIdx, selection.bIdx);
     const beatData = getBeatNoteRanges(riff, selection.sIdx, selection.bIdx);
@@ -4172,6 +4491,7 @@ const SongEditor: React.FC<Props> = ({
 
   const insertJianpuSustainBeat = () => {
     if (!selection || selection.type !== 'riff') return;
+    if (applySharedJianpuAction({ type: 'insert-hold' })) return;
 
     const riff = getRiffValue(selection.sIdx, selection.bIdx);
     const beatTokens = getCanonicalBeatTokens(riff, selection.sIdx, selection.bIdx);
@@ -4662,6 +4982,9 @@ const SongEditor: React.FC<Props> = ({
     ? getSelectedJianpuNoteContext(selection)
     : null;
   const selectedJianpuNote = selectedJianpuNoteContext?.note ?? null;
+  const selectedJianpuDisplayMode = selection?.type === 'riff'
+    ? getSelectedJianpuDisplayInputMode(selection)
+    : null;
   const jianpuInsertAvailability = (() => {
     if (!selection || selection.type !== 'riff' || selectedJianpuNote) return null;
     const riff = getRiffValue(selection.sIdx, selection.bIdx);
@@ -4670,10 +4993,10 @@ const SongEditor: React.FC<Props> = ({
       : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
     return getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
   })();
-  const effectiveJianpuAccidental = normalizeEditableJianpuAccidental(selectedJianpuNote?.accidental ?? jianpuInputMode.accidental);
-  const effectiveJianpuOctave = selectedJianpuNote?.octave ?? jianpuInputMode.octave;
-  const effectiveJianpuDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
-  const effectiveJianpuDotted = selectedJianpuNote?.dotted ?? jianpuInputMode.dotted;
+  const effectiveJianpuAccidental = normalizeEditableJianpuAccidental(selectedJianpuDisplayMode?.accidental ?? jianpuInputMode.accidental);
+  const effectiveJianpuOctave = selectedJianpuDisplayMode?.octave ?? jianpuInputMode.octave;
+  const effectiveJianpuDuration = selectedJianpuDisplayMode?.duration ?? jianpuInputMode.duration;
+  const effectiveJianpuDotted = selectedJianpuDisplayMode?.dotted ?? jianpuInputMode.dotted;
   const effectiveJianpuTied = Boolean(selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd);
   const canUseEighthDuration = canApplyJianpuDurationChoice('eighth');
   const canUseSixteenthDuration = canApplyJianpuDurationChoice('sixteenth');
@@ -5418,7 +5741,7 @@ const SongEditor: React.FC<Props> = ({
 
                       <div className="min-h-[62px] flex items-center justify-center overflow-visible px-3 py-2">
                         <Jianpu
-                          tokens={toDisplayBeatTokens(beatTokens, sIdx)}
+                          tokens={toDisplayBeatTokens(beatTokens, sIdx, bIdx)}
                           renderMode="editor"
                           activeTokenIndex={activeInsertBeatIndex}
                           activeInsertPosition={activeInsertPosition}
@@ -6039,7 +6362,7 @@ const SongEditor: React.FC<Props> = ({
                         />
                         <div className="min-h-[62px] px-3 py-2 flex items-center justify-center overflow-visible">
                           <Jianpu
-                            tokens={toDisplayBeatTokens(beatTokens, sIdx)}
+                            tokens={toDisplayBeatTokens(beatTokens, sIdx, bIdx)}
                             renderMode="editor"
                             activeTokenIndex={activeInsertBeatIndex}
                             activeInsertPosition={activeInsertPosition}
@@ -7014,7 +7337,7 @@ const SongEditor: React.FC<Props> = ({
 
                             <div className="min-h-[62px] px-3 py-2 flex items-center justify-center overflow-visible">
                               <Jianpu
-                                tokens={toDisplayBeatTokens(beatTokens, sIdx)}
+                                tokens={toDisplayBeatTokens(beatTokens, sIdx, bIdx)}
                                 renderMode="editor"
                                 activeTokenIndex={activeInsertBeatIndex}
                                 activeInsertPosition={activeInsertPosition}

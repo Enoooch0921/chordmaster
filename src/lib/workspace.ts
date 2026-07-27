@@ -6,6 +6,7 @@ import { getDefaultSectionOrder } from '../utils/setlistUtils';
 import { normalizeBarChords } from '../utils/barUtils';
 import { normalizeSongReferences } from '../utils/referenceUtils';
 import { isAnnotationColorId } from '../constants/annotationColors';
+import { repairSongStructure } from './songEditing';
 
 export const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 export const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -207,7 +208,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
       }
     : undefined;
 
-  return {
+  return repairSongStructure({
     ...song,
     title: normalizeText(song.title),
     lyricist: normalizeOptionalText(song.lyricist),
@@ -240,7 +241,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
         bars: [{ chords: [] }]
       }
     ]
-  } as T;
+  } as T);
 };
 
 const sanitizeSetlistSectionOrder = (order: string[], song: Song) => {

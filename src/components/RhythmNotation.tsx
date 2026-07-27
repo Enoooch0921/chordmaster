@@ -25,8 +25,8 @@ interface RhythmNotationProps {
   nextNotationForCrossBar?: string;
   nextTimeSignatureForCrossBar?: string;
   color?: string;
-  onEventSelect?: (eventIndex: number) => void;
-  onInsertSelect?: (insertIndex: number) => void;
+  onEventSelect?: (eventIndex: number, event?: React.MouseEvent<HTMLElement>) => void;
+  onInsertSelect?: (insertIndex: number, event?: React.MouseEvent<HTMLElement>) => void;
 }
 
 const RhythmNotation: React.FC<RhythmNotationProps> = ({
@@ -793,6 +793,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       {selectionMode === 'insert' && selectedSlotVisual && (
         selectedSlotVisual.kind === 'event' ? (
           <div
+            data-preview-edit-ui
             className="absolute top-0 bottom-0 z-[1] pointer-events-none"
             style={{ left: unitToPercent(selectedSlotVisual.centerUnit), width: 0 }}
           >
@@ -814,6 +815,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
           </div>
         ) : (
           <div
+            data-preview-edit-ui
             className="absolute top-0 bottom-0 z-[1] pointer-events-none"
             style={{
               left: unitToPercent(selectedSlotVisual.startUnit),
@@ -852,6 +854,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             return (
               <button
                 key={`insert-slot-${insertIndex}`}
+                data-preview-edit-ui
                 type="button"
                 className="group absolute top-0 bottom-0 z-[2]"
                 style={{
@@ -861,7 +864,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onInsertSelect(unit);
+                  onInsertSelect(unit, e);
                 }}
                 aria-label={`Insert rhythm note at position ${insertIndex + 1}`}
               >
@@ -872,14 +875,15 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         </>
       )}
 
-      {onEventSelect && parsed.events.filter((event) => !event.isHidden).map((event) => {
+      {(onEventSelect || (selectionMode === 'insert' && onInsertSelect)) && parsed.events.filter((event) => !event.isHidden).map((event) => {
         const isSelected = selectedEventIndex === event.index;
         const isSixteenth = event.base === 's';
         return (
           <button
             key={`event-hit-${event.index}`}
+            data-preview-edit-ui
             type="button"
-            className="absolute top-0 bottom-0 z-[1] rounded-[6px] transition-colors"
+            className="absolute top-0 bottom-0 z-[3] rounded-[6px] transition-colors"
             style={{
               left: unitToPercent(event.startUnit),
               width: unitToPercent(event.durationUnits),
@@ -890,9 +894,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             onClick={(e) => {
               e.stopPropagation();
               if (selectionMode === 'insert') {
-                onInsertSelect?.(event.startUnit);
+                onInsertSelect?.(event.startUnit, e);
               } else {
-                onEventSelect(event.index);
+                onEventSelect(event.index, e);
               }
             }}
             aria-label={`Select rhythm note ${event.index + 1}`}

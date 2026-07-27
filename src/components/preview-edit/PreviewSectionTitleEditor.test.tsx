@@ -98,6 +98,36 @@ describe('PreviewSectionTitleEditor', () => {
     expect(onDone).toHaveBeenCalledWith('Pre-Chorus');
   });
 
+  it('includes the full editor section presets such as Refrain', () => {
+    renderEditor();
+    const input = screen.getByRole('textbox', { name: '段落名稱' });
+    fireEvent.change(input, { target: { value: 'ref' } });
+
+    expect(screen.getByRole('option', { name: 'Refrain' })).toBeInTheDocument();
+  });
+
+  it('supports fuzzy shorthand such as ver2 for Verse 2', () => {
+    renderEditor();
+    const input = screen.getByRole('textbox', { name: '段落名稱' });
+    fireEvent.change(input, { target: { value: 'ver2' } });
+
+    expect(screen.getByRole('option', { name: 'Verse 2' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens the full preset list from a blank title with ArrowDown', () => {
+    renderEditor({
+      ...song,
+      sections: [{ ...song.sections[0], title: '' }]
+    });
+    const input = screen.getByRole('textbox', { name: '段落名稱' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+    expect(screen.getByRole('option', { name: 'Count-In' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Intro 2' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Refrain' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Rap' })).toBeInTheDocument();
+  });
+
   it('includes section names already used by the current song', () => {
     renderEditor({
       ...song,

@@ -14,22 +14,34 @@ interface PreviewSectionTitleEditorProps {
 
 const COMMON_SECTION_TITLES = [
   'Intro',
+  'Intro 2',
+  'Count-In',
   'Verse',
   'Verse 1',
   'Verse 2',
+  'Verse 3',
+  'Verse 4',
   'Pre-Chorus',
+  'Pre-Chorus 1',
+  'Pre-Chorus 2',
   'Chorus',
+  'Chorus 1',
+  'Chorus 2',
   'Post-Chorus',
+  'Refrain',
+  'Turnaround',
+  'Breakdown',
   'Bridge',
+  'Bridge 1',
+  'Bridge 2',
   'Interlude',
   'Instrumental',
   'Instrumental Break',
   'Solo',
-  'Breakdown',
   'Build',
-  'Vamp',
   'Tag',
-  'Turnaround',
+  'Vamp',
+  'Rap',
   'Outro',
   'Ending'
 ] as const;
@@ -38,6 +50,26 @@ const normalizeSectionTitleSearch = (value: string) => value
   .trim()
   .toLocaleLowerCase()
   .replace(/[\s_-]+/g, '');
+
+const isFuzzySectionTitleSearchMatch = (query: string, title: string) => {
+  if (!query) return true;
+  let queryIndex = 0;
+  for (const char of title) {
+    if (char === query[queryIndex]) queryIndex += 1;
+    if (queryIndex >= query.length) return true;
+  }
+  return false;
+};
+
+const getSectionTitleSearchScore = (title: string, query: string) => {
+  if (!query) return 0;
+  const normalizedTitle = normalizeSectionTitleSearch(title);
+  if (normalizedTitle === query) return 1000;
+  if (normalizedTitle.startsWith(query)) return 900;
+  if (normalizedTitle.includes(query)) return 700;
+  if (isFuzzySectionTitleSearchMatch(query, normalizedTitle)) return 520;
+  return -1;
+};
 
 const PreviewSectionTitleEditor: React.FC<PreviewSectionTitleEditorProps> = ({
   session,
@@ -57,26 +89,25 @@ const PreviewSectionTitleEditor: React.FC<PreviewSectionTitleEditorProps> = ({
 
   const suggestions = React.useMemo(() => {
     const query = normalizeSectionTitleSearch(draft);
-    if (!query) return [];
     const songTitles = session.draftSong.sections
       .filter((candidate) => candidate.id !== session.target.sectionId)
       .map((candidate) => candidate.title?.trim() ?? '')
       .filter(Boolean);
     const seen = new Set<string>();
-    return [...songTitles, ...COMMON_SECTION_TITLES]
+    const candidates = [...songTitles, ...COMMON_SECTION_TITLES]
       .filter((title) => {
         const key = title.toLocaleLowerCase();
         if (seen.has(key)) return false;
         seen.add(key);
-        return normalizeSectionTitleSearch(title).includes(query);
+        return getSectionTitleSearchScore(title, query) >= 0;
       })
       .sort((a, b) => {
-        const aStarts = normalizeSectionTitleSearch(a).startsWith(query);
-        const bStarts = normalizeSectionTitleSearch(b).startsWith(query);
-        if (aStarts !== bStarts) return aStarts ? -1 : 1;
-        return 0;
-      })
-      .slice(0, 8);
+        if (!query) return 0;
+        const scoreDifference = getSectionTitleSearchScore(b, query) - getSectionTitleSearchScore(a, query);
+        if (scoreDifference !== 0) return scoreDifference;
+        return normalizeSectionTitleSearch(a).length - normalizeSectionTitleSearch(b).length;
+      });
+    return query ? candidates.slice(0, 8) : candidates;
   }, [draft, session.draftSong.sections, session.target.sectionId]);
 
   React.useEffect(() => {

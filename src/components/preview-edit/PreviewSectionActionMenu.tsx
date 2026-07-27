@@ -1,5 +1,5 @@
 import React from 'react';
-import { Copy, Pencil, Trash2, X } from 'lucide-react';
+import { Copy, CornerUpLeft, Pencil, Trash2, X } from 'lucide-react';
 import type { AppLanguage } from '../../types';
 import type { PreviewAnchorRect } from '../ChordSheet';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
@@ -10,8 +10,10 @@ interface PreviewSectionActionMenuProps {
   title: string;
   anchorRect: PreviewAnchorRect;
   canDelete: boolean;
+  canMergePrevious: boolean;
   onRename: () => void;
   onDuplicate: () => void;
+  onMergePrevious: () => void;
   onDelete: () => void;
   onClose: () => void;
 }
@@ -22,8 +24,10 @@ const PreviewSectionActionMenu: React.FC<PreviewSectionActionMenuProps> = ({
   title,
   anchorRect,
   canDelete,
+  canMergePrevious,
   onRename,
   onDuplicate,
+  onMergePrevious,
   onDelete,
   onClose
 }) => {
@@ -60,6 +64,15 @@ const PreviewSectionActionMenu: React.FC<PreviewSectionActionMenuProps> = ({
       >
         <Copy size={17} />
         <span>{language === 'zh' ? '複製到後方' : 'Duplicate After'}</span>
+      </button>
+      <button
+        type="button"
+        onClick={onMergePrevious}
+        disabled={!canMergePrevious}
+        className={`${isTouchLayout ? 'min-h-12 px-4 text-sm' : 'min-h-10 px-3 text-xs'} flex w-full items-center gap-3 rounded-xl text-left font-bold text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-800 disabled:cursor-not-allowed disabled:opacity-35`}
+      >
+        <CornerUpLeft size={17} />
+        <span>{language === 'zh' ? '合併到前方' : 'Merge Into Previous'}</span>
       </button>
       <button
         type="button"
@@ -108,7 +121,7 @@ const PreviewSectionActionMenu: React.FC<PreviewSectionActionMenuProps> = ({
     Math.max(margin, anchorRect.left),
     Math.max(margin, window.innerWidth - width - margin)
   );
-  const estimatedHeight = 176;
+  const estimatedHeight = 220;
   const opensAbove = anchorRect.bottom + estimatedHeight + margin > window.innerHeight
     && anchorRect.top > estimatedHeight + margin;
   const top = opensAbove

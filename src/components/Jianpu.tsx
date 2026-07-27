@@ -17,8 +17,8 @@ interface JianpuProps {
   gridSlotCount?: number;
   leadingOccupiedSlots?: number[];
   activeNote?: { tokenIndex: number; noteIndex: number } | null;
-  onTokenClick?: (tokenIndex: number, slotIndex: number) => void;
-  onNoteClick?: (tokenIndex: number, noteIndex: number) => void;
+  onTokenClick?: (tokenIndex: number, slotIndex: number, event?: React.MouseEvent<HTMLElement>) => void;
+  onNoteClick?: (tokenIndex: number, noteIndex: number, event?: React.MouseEvent<HTMLElement>) => void;
   showPlaceholders?: boolean;
 }
 
@@ -590,6 +590,7 @@ const Jianpu: React.FC<JianpuProps> = ({
 
             {isActive && (
               <span
+                data-preview-edit-ui
                 className="absolute bg-indigo-200/45 ring-1 ring-indigo-300/90"
                 style={{
                   left: insertLeft,
@@ -698,6 +699,7 @@ const Jianpu: React.FC<JianpuProps> = ({
           <React.Fragment key={`note-ui-${note.tokenIndex}-${note.noteIndex}-${note.start}`}>
             {isSelectedNote && (
               <span
+                data-preview-edit-ui
                 className="absolute bg-indigo-200/60 ring-1 ring-indigo-300/90"
                 style={{
                   left: renderMode === 'editor' && selectionVisibleSpanUnits > 0
@@ -719,6 +721,7 @@ const Jianpu: React.FC<JianpuProps> = ({
             {onNoteClick && (
               <button
                 type="button"
+                data-preview-edit-ui
                 className="absolute z-30 bg-transparent"
                 style={{
                   left: centerLeft,
@@ -730,7 +733,7 @@ const Jianpu: React.FC<JianpuProps> = ({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onNoteClick(note.tokenIndex, note.noteIndex);
+                  onNoteClick(note.tokenIndex, note.noteIndex, event);
                 }}
                 aria-label={`Select jianpu note ${note.noteIndex + 1} in beat ${note.tokenIndex + 1}`}
               />
@@ -1004,6 +1007,7 @@ const Jianpu: React.FC<JianpuProps> = ({
         return (
           <button
             key={`hit-${tokenIndex}`}
+            data-preview-edit-ui
             type="button"
             className="absolute inset-y-0 z-10 bg-transparent"
             style={{
@@ -1024,7 +1028,7 @@ const Jianpu: React.FC<JianpuProps> = ({
                   Math.floor(relativeX * gridSlotCount)
                 )
               );
-              onTokenClick(tokenIndex, slotIndex);
+              onTokenClick(tokenIndex, slotIndex, event);
             }}
             aria-label={`Select jianpu beat ${tokenIndex + 1}`}
           />

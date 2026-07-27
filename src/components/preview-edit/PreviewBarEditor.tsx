@@ -5,7 +5,11 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ClipboardPaste,
   Copy,
+  Delete,
+  Eraser,
+  Globe2,
   Keyboard,
   Plus,
   Redo2,
@@ -15,9 +19,27 @@ import {
   X
 } from 'lucide-react';
 import type { AppLanguage, Key, NavigationMarker, Song } from '../../types';
-import type { PreviewEditSession } from '../../lib/previewEditSession';
+import {
+  getNextPreviewNotationMode,
+  type PreviewEditSession,
+  type PreviewNotationCursor,
+  type PreviewNotationMode
+} from '../../lib/previewEditSession';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
-import { getRestGlyph } from '../../utils/rhythmUtils';
+import { getRestGlyph, parseTimeSignature } from '../../utils/rhythmUtils';
+import type { JianpuInputMode } from '../../utils/jianpuUtils';
+import {
+  applyJianpuCommand,
+  DEFAULT_JIANPU_INPUT_MODE,
+  getJianpuInputModeAtCursor,
+  type JianpuPitchContext,
+  type JianpuAction
+} from '../../lib/jianpuEditing';
+import {
+  applyRhythmEdit,
+  getRhythmEventAtCursor,
+  type RhythmEditAction
+} from '../../lib/rhythmEditing';
 import {
   convertDisplayedChordToStoredChord,
   convertStoredChordToDisplayedChord,
@@ -26,16 +48,22 @@ import {
   getChordBeatSlots,
   getChordPlacementError,
   getMultiMeasureRestPlacementError,
+  insertChordBeatBeforeSlot,
+  isBarCompletelyEmpty,
   normalizeChordTextInput,
   setBarChordText,
   setChordAtBeatSlot,
   setMultiMeasureRestAtBar,
   updateEditableBarFields
 } from '../../lib/songEditing';
+import {
+  JianpuInputGlyph,
+  RhythmStaffKeyGlyph
+} from './NotationKeyGlyphs';
 
 type KeyboardMode = 'common' | 'advanced' | 'symbols' | 'text';
 type KeyboardPicker = 'quality' | 'time' | 'special' | 'articulation' | 'ending' | 'navigation' | 'barline' | 'structure' | 'bar' | null;
-type StructureAction = 'insert-before' | 'insert-after' | 'duplicate' | 'delete' | 'split-section';
+type StructureAction = 'insert-before' | 'insert-after' | 'duplicate' | 'copy-bar' | 'paste-bar-after' | 'delete' | 'split-section' | 'insert-section-after';
 
 interface PickerAnchor {
   left: number;
@@ -52,8 +80,23 @@ interface PreviewBarEditorProps {
   storageMode: 'letters' | 'nashville';
   onApplyDraft: (song: Song, options?: { mergeKey?: string }) => void;
   onInputModeChange: (mode: 'letters' | 'nashville') => void;
-  onNavigate: (direction: 'previous' | 'next') => void;
+  onNotationModeChange: (mode: PreviewNotationMode) => void;
+  onNotationCursorChange: (cursor: PreviewNotationCursor) => void;
+  onJianpuInputAbsoluteChange: (value: boolean) => void;
+  jianpuPitchContext?: JianpuPitchContext;
+  onNavigate: (
+    direction: 'previous' | 'next',
+    cursor?: PreviewNotationCursor,
+    options?: { bar: boolean }
+  ) => void;
   onStructure: (action: StructureAction) => void;
+  hasCopiedBar?: boolean;
+  hasCopiedJianpu?: boolean;
+  onCopyJianpu?: () => void;
+  onPasteJianpu?: () => void;
+  hasCopiedRhythm?: boolean;
+  onCopyRhythm?: () => void;
+  onPasteRhythm?: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onDone: () => void;
@@ -171,8 +214,19 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   storageMode,
   onApplyDraft,
   onInputModeChange,
+  onNotationModeChange,
+  onNotationCursorChange,
+  onJianpuInputAbsoluteChange,
+  jianpuPitchContext,
   onNavigate,
   onStructure,
+  hasCopiedBar = false,
+  hasCopiedJianpu = false,
+  onCopyJianpu,
+  onPasteJianpu,
+  hasCopiedRhythm = false,
+  onCopyRhythm,
+  onPasteRhythm,
   onUndo,
   onRedo,
   onDone,
@@ -191,63 +245,88 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [barTextError, setBarTextError] = React.useState<string | null>(null);
   const [multiRestCount, setMultiRestCount] = React.useState('4');
   const [multiRestActionError, setMultiRestActionError] = React.useState<string | null>(null);
+  const [notationActionError, setNotationActionError] = React.useState<string | null>(null);
+  const [jianpuInputMode, setJianpuInputMode] = React.useState<JianpuInputMode>(() => ({
+    ...DEFAULT_JIANPU_INPUT_MODE
+  }));
   const [, forceViewportUpdate] = React.useReducer((value) => value + 1, 0);
   const panelRef = React.useRef<HTMLElement>(null);
   const chordCaptureRef = React.useRef<HTMLInputElement>(null);
   const multiRestInputRef = React.useRef<HTMLInputElement>(null);
-  const replaceChordOnNextHardwareKeyRef = React.useRef(true);
 
   const located = findSongBar(session.draftSong, session.target);
   const bar = located?.bar;
   const section = located?.section
     ?? session.draftSong.sections.find((candidate) => candidate.id === session.target.sectionId);
   const beatCount = bar ? getBeatCount(session.draftSong, bar) : 4;
+  const notationMode = session.notationMode;
+  const chordInputMode = session.chordInputMode;
+  const rhythmCursor = session.cursorByMode.rhythm;
+  const jianpuCursor = session.cursorByMode.jianpu;
   const storedChord = bar ? getChordBeatSlots(bar, beatCount)[session.target.slotIndex]?.chord ?? '' : '';
   const displayedChord = convertStoredChordToDisplayedChord({
     chord: storedChord,
     storageMode,
-    outputMode: session.inputMode,
+    outputMode: chordInputMode,
     storedKey,
     displayedKey
   });
-  const chordParts = parseChordParts(displayedChord, session.inputMode);
-  const rootChoices = session.inputMode === 'letters'
+  const chordParts = parseChordParts(displayedChord, chordInputMode);
+  const rootChoices = chordInputMode === 'letters'
     ? ['C', 'D', 'E', 'F', 'G', 'A', 'B']
     : ['1', '2', '3', '4', '5', '6', '7'];
   const multiRestPlacementError = getMultiMeasureRestPlacementError(session.draftSong, session.target);
   const halfRestPlacementError = getChordPlacementError(session.draftSong, session.target, '0h');
   const multiRestCountNumber = Number.parseInt(multiRestCount, 10);
   const hasValidMultiRestCount = Number.isInteger(multiRestCountNumber) && multiRestCountNumber >= 1 && multiRestCountNumber <= 999;
+  const selectedRhythmEvent = bar
+    ? getRhythmEventAtCursor(session.draftSong, session.target, rhythmCursor)
+    : null;
 
   React.useEffect(() => {
     setMode(modeForField(session.target.field));
     setActivePicker(null);
     setPickerAnchor(null);
-    if (deviceLayout === 'desktop' && session.target.field !== 'chords') setDesktopKeysVisible(true);
-  }, [deviceLayout, session.target.barId, session.target.field, session.target.slotIndex]);
+    setNotationActionError(null);
+    if (deviceLayout === 'desktop' && (notationMode !== 'chords' || session.target.field !== 'chords')) {
+      setDesktopKeysVisible(true);
+    }
+  }, [deviceLayout, notationMode, session.target.barId, session.target.field, session.target.slotIndex]);
 
   React.useEffect(() => {
     setBassMode(false);
   }, [session.target.barId, session.target.slotIndex]);
 
   React.useEffect(() => {
+    if (notationMode !== 'jianpu' || !bar) return;
+    const selectedMode = getJianpuInputModeAtCursor(
+      session.draftSong,
+      session.target,
+      {
+        beatIndex: jianpuCursor.beatIndex,
+        unitIndex: jianpuCursor.unitIndex,
+        noteIndex: jianpuCursor.noteIndex ?? null
+      },
+      jianpuPitchContext
+    );
+    if (selectedMode) setJianpuInputMode(selectedMode);
+  }, [bar, jianpuCursor.beatIndex, jianpuCursor.noteIndex, jianpuCursor.unitIndex, jianpuPitchContext, notationMode, session.draftSong, session.target]);
+
+  React.useEffect(() => {
     setBarText(bar?.chords.filter((token) => token.trim()).join(' ') ?? '');
     setBarTextError(null);
     setMultiRestActionError(null);
+    setNotationActionError(null);
     const existingCount = bar?.chords.find((token) => /^\|\d{1,3}\|$/.test(token.trim()))?.match(/\d+/)?.[0];
     if (existingCount) setMultiRestCount(existingCount);
   }, [bar?.id, bar?.chords]);
 
   React.useEffect(() => {
-    if (deviceLayout !== 'desktop' || session.target.field !== 'chords') return;
+    if (deviceLayout !== 'desktop' || notationMode !== 'chords' || session.target.field !== 'chords') return;
     const capture = chordCaptureRef.current;
     capture?.focus({ preventScroll: true });
-    capture?.select();
-  }, [deviceLayout, session.previewIdentity, session.target.barId, session.target.field, session.target.slotIndex]);
-
-  React.useEffect(() => {
-    replaceChordOnNextHardwareKeyRef.current = true;
-  }, [session.previewIdentity, session.target.barId, session.target.field, session.target.slotIndex]);
+    capture?.setSelectionRange(capture.value.length, capture.value.length);
+  }, [deviceLayout, notationMode, session.previewIdentity, session.target.barId, session.target.field, session.target.slotIndex]);
 
   React.useEffect(() => {
     const node = panelRef.current;
@@ -292,11 +371,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }, [activePicker]);
 
   function applyDisplayedChord(value: string, mergeKey?: string) {
-    replaceChordOnNextHardwareKeyRef.current = false;
-    const normalizedInput = normalizeChordTextInput(value, session.inputMode);
+    const normalizedInput = normalizeChordTextInput(value, chordInputMode);
     const stored = convertDisplayedChordToStoredChord({
       input: normalizedInput,
-      inputMode: session.inputMode,
+      inputMode: chordInputMode,
       storageMode,
       displayedKey,
       storedKey
@@ -311,39 +389,248 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     return true;
   }
 
+  function applyRhythmAction(action: RhythmEditAction) {
+    const result = applyRhythmEdit(session.draftSong, session.target, rhythmCursor, action);
+    setNotationActionError(result.error);
+    onNotationCursorChange({ kind: 'rhythm', cursorUnit: result.cursor.cursorUnit });
+    if (result.changed) onApplyDraft(result.song);
+    return result;
+  }
+
+  function applyJianpuAction(action: JianpuAction) {
+    const result = applyJianpuCommand(session.draftSong, session.target, {
+      beatIndex: jianpuCursor.beatIndex,
+      unitIndex: jianpuCursor.unitIndex,
+      noteIndex: jianpuCursor.noteIndex ?? null
+    }, action, jianpuInputMode, jianpuPitchContext);
+    setNotationActionError(result.error);
+    setJianpuInputMode(result.inputMode);
+    const movedToAnotherBar = result.target.sectionId !== session.target.sectionId
+      || result.target.barId !== session.target.barId;
+    if (movedToAnotherBar) {
+      const direction = action.type === 'move'
+        ? action.direction < 0 ? 'previous' : 'next'
+        : action.type === 'delete' && action.direction === 'backward'
+          ? 'previous'
+          : 'next';
+      onNavigate(direction, {
+        kind: 'jianpu',
+        beatIndex: result.cursor.beatIndex,
+        unitIndex: result.cursor.unitIndex,
+        noteIndex: result.cursor.noteIndex
+      });
+    } else {
+      onNotationCursorChange({
+        kind: 'jianpu',
+        beatIndex: result.cursor.beatIndex,
+        unitIndex: result.cursor.unitIndex,
+        noteIndex: result.cursor.noteIndex
+      });
+    }
+    if (result.song !== session.draftSong) onApplyDraft(result.song);
+    return result;
+  }
+
+  function toggleJianpuDuration(duration: 'eighth' | 'sixteenth') {
+    applyJianpuAction({
+      type: 'set-duration',
+      duration: jianpuInputMode.duration === duration ? 'quarter' : duration
+    });
+  }
+
+  function applyChordBarMarkerShortcut(key: string, code: string) {
+    if (key === '[' || code === 'BracketLeft') {
+      updateFields({ repeatStart: !bar?.repeatStart });
+      return true;
+    }
+    if (key === ']' || code === 'BracketRight') {
+      const nextRepeatEnd = !bar?.repeatEnd;
+      updateFields({
+        repeatEnd: nextRepeatEnd,
+        finalBar: nextRepeatEnd ? false : bar?.finalBar
+      });
+      return true;
+    }
+    if (key === '\\' || code === 'Backslash') {
+      const nextFinalBar = !bar?.finalBar;
+      updateFields({
+        finalBar: nextFinalBar,
+        repeatEnd: nextFinalBar ? false : bar?.repeatEnd
+      });
+      return true;
+    }
+    return false;
+  }
+
+  function changeNotationMode(nextMode: PreviewNotationMode) {
+    setMode('common');
+    setActivePicker(null);
+    setPickerAnchor(null);
+    setBassMode(false);
+    setNotationActionError(null);
+    setCollapsed(false);
+    onNotationModeChange(nextMode);
+  }
+
+  function cycleNotationMode() {
+    changeNotationMode(getNextPreviewNotationMode(notationMode));
+  }
+
+  function navigateNotation(direction: 'previous' | 'next') {
+    if (notationMode === 'rhythm') {
+      const result = applyRhythmAction({ type: 'move', direction: direction === 'previous' ? -1 : 1 });
+      if (result.cursor.cursorUnit === rhythmCursor.cursorUnit) onNavigate(direction);
+      return;
+    }
+    if (notationMode === 'jianpu') {
+      const result = applyJianpuAction({ type: 'move', direction: direction === 'previous' ? -1 : 1 });
+      const movedToAnotherBar = result.target.sectionId !== session.target.sectionId
+        || result.target.barId !== session.target.barId;
+      if (movedToAnotherBar) return;
+      const didMove = result.cursor.beatIndex !== jianpuCursor.beatIndex
+        || result.cursor.unitIndex !== jianpuCursor.unitIndex
+        || result.cursor.noteIndex !== (jianpuCursor.noteIndex ?? null);
+      if (!didMove) onNavigate(direction);
+      return;
+    }
+    onNavigate(direction);
+  }
+
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const element = event.target as HTMLElement | null;
       const isTyping = element?.tagName === 'INPUT' || element?.tagName === 'TEXTAREA' || element?.tagName === 'SELECT' || element?.isContentEditable;
       const isButtonActivation = element?.tagName === 'BUTTON' && (event.key === 'Enter' || event.key === ' ');
       const meta = event.metaKey || event.ctrlKey;
+      const isChordEditing = notationMode === 'chords' && session.target.field === 'chords';
+      if (event.defaultPrevented) return;
       if (meta && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         if (event.shiftKey) onRedo(); else onUndo();
         return;
       }
-      if (isTyping || isButtonActivation || event.altKey || meta) return;
-      if (event.key === 'ArrowLeft' || (event.key === 'Enter' && event.shiftKey)) {
+      if (event.key === 'Escape') {
         event.preventDefault();
-        onNavigate('previous');
-      } else if (event.key === 'ArrowRight' || event.key === 'Enter') {
+        onDone();
+        return;
+      }
+      if (meta && event.key === 'Enter') {
+        event.preventDefault();
+        return;
+      }
+      if (isTyping || isButtonActivation || event.altKey || meta) return;
+      if (isChordEditing && event.shiftKey && event.key === ' ') {
+        event.preventDefault();
+        onApplyDraft(
+          insertChordBeatBeforeSlot(session.draftSong, session.target),
+          { mergeKey: `insert-beat-before:${bar?.id ?? session.target.barId}:${session.target.slotIndex}` }
+        );
+      } else if (isChordEditing && event.shiftKey && event.key === 'Enter') {
+        event.preventDefault();
+        onStructure('insert-before');
+      } else if (isChordEditing && !event.shiftKey && event.key === 'Enter') {
+        event.preventDefault();
+        onNavigate('next', undefined, { bar: true });
+      } else if (isChordEditing && !event.shiftKey && event.key === ' ') {
         event.preventDefault();
         onNavigate('next');
-      } else if (session.target.field === 'chords' && event.key === 'Backspace') {
+      } else if (isChordEditing && event.shiftKey && event.key === 'ArrowLeft') {
         event.preventDefault();
-        if (displayedChord) applyDisplayedChord(''); else onNavigate('previous');
-      } else if (session.target.field === 'chords' && event.key === 'Delete') {
+        onNavigate('previous', undefined, { bar: true });
+      } else if (isChordEditing && event.shiftKey && event.key === 'ArrowRight') {
         event.preventDefault();
-        applyDisplayedChord('');
-      } else if (session.target.field === 'chords' && event.key === '%') {
+        onNavigate('next', undefined, { bar: true });
+      } else if (isChordEditing && !event.shiftKey && applyChordBarMarkerShortcut(event.key, event.code)) {
+        event.preventDefault();
+      } else if (event.key === 'ArrowLeft' || (event.key === 'Enter' && event.shiftKey)) {
+        event.preventDefault();
+        navigateNotation('previous');
+      } else if (event.key === 'ArrowRight' || event.key === 'Enter') {
+        event.preventDefault();
+        navigateNotation('next');
+      } else if (notationMode === 'rhythm' && (event.key === 'Home' || event.key === 'End')) {
+        event.preventDefault();
+        applyRhythmAction({ type: event.key === 'Home' ? 'home' : 'end' });
+      } else if (notationMode === 'rhythm' && (event.key === 'Backspace' || event.key === 'Delete')) {
+        event.preventDefault();
+        if (!deleteEmptyBarIfPossible()) {
+          applyRhythmAction({ type: 'delete', mode: event.key === 'Backspace' ? 'backspace' : 'delete' });
+        }
+      } else if (notationMode === 'rhythm' && ['w', 'h', 'q', 'e', 's'].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        applyRhythmAction({ type: 'insert', token: event.key.toLowerCase() });
+      } else if (notationMode === 'rhythm' && event.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        applyRhythmAction({ type: 'insert', token: 'qr' });
+      } else if (notationMode === 'rhythm' && event.key === '3') {
+        event.preventDefault();
+        applyRhythmAction({ type: 'insert', token: 'q3' });
+      } else if (notationMode === 'rhythm' && event.key === '.') {
+        event.preventDefault();
+        applyRhythmAction({ type: 'toggle-dot' });
+      } else if (notationMode === 'rhythm' && event.key === '^') {
+        event.preventDefault();
+        applyRhythmAction({ type: 'toggle-accent' });
+      } else if (notationMode === 'rhythm' && (event.key === '~' || event.key.toLowerCase() === 't')) {
+        event.preventDefault();
+        applyRhythmAction({ type: 'toggle-tie' });
+      } else if (notationMode === 'jianpu' && (event.key === 'Backspace' || event.key === 'Delete')) {
+        event.preventDefault();
+        if (!deleteEmptyBarIfPossible()) {
+          applyJianpuAction({ type: 'delete', direction: event.key === 'Backspace' ? 'backward' : 'forward' });
+        }
+      } else if (notationMode === 'jianpu' && /^[1-7]$/.test(event.key)) {
+        event.preventDefault();
+        applyJianpuAction({ type: 'insert-pitch', pitch: event.key as '1' | '2' | '3' | '4' | '5' | '6' | '7' });
+      } else if (notationMode === 'jianpu' && event.key === '0') {
+        event.preventDefault();
+        applyJianpuAction({ type: 'insert-rest' });
+      } else if (notationMode === 'jianpu' && event.key === '-') {
+        event.preventDefault();
+        applyJianpuAction({ type: 'insert-hold' });
+      } else if (notationMode === 'jianpu' && ['q', 'e', 's'].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        if (event.key.toLowerCase() === 'q') {
+          applyJianpuAction({ type: 'set-duration', duration: 'quarter' });
+        } else {
+          toggleJianpuDuration(event.key.toLowerCase() === 'e' ? 'eighth' : 'sixteenth');
+        }
+      } else if (notationMode === 'jianpu' && (event.key === 'ArrowDown' || event.key.toLowerCase() === 'l')) {
+        event.preventDefault();
+        applyJianpuAction({ type: 'set-octave', octave: jianpuInputMode.octave < 0 ? 0 : -1 });
+      } else if (notationMode === 'jianpu' && (event.key === 'ArrowUp' || event.key.toLowerCase() === 'h')) {
+        event.preventDefault();
+        applyJianpuAction({ type: 'set-octave', octave: jianpuInputMode.octave > 0 ? 0 : 1 });
+      } else if (notationMode === 'jianpu' && (event.key === '#' || event.key.toLowerCase() === 'b')) {
+        event.preventDefault();
+        const accidental = event.key === '#' ? '#' : 'b';
+        applyJianpuAction({
+          type: 'set-accidental',
+          accidental: jianpuInputMode.accidental === accidental ? '' : accidental
+        });
+      } else if (notationMode === 'jianpu' && event.key === '.') {
+        event.preventDefault();
+        applyJianpuAction({ type: 'toggle-dot' });
+      } else if (notationMode === 'jianpu' && event.key.toLowerCase() === 't') {
+        event.preventDefault();
+        applyJianpuAction({ type: 'toggle-slur' });
+      } else if (isChordEditing && event.key === 'Backspace') {
+        event.preventDefault();
+        if (displayedChord) deleteLastChordCharacter();
+        else if (!deleteEmptyBarIfPossible()) onNavigate('previous');
+      } else if (isChordEditing && event.key === 'Delete') {
+        event.preventDefault();
+        if (displayedChord) deleteLastChordCharacter();
+        else deleteEmptyBarIfPossible();
+      } else if (isChordEditing && event.key === '%') {
         event.preventDefault();
         applyDisplayedChord('%');
-      } else if (session.target.field === 'chords' && event.key.length === 1 && event.key.trim()) {
+      } else if (isChordEditing && event.key.length === 1 && event.key.trim()) {
         event.preventDefault();
-        const nextChord = replaceChordOnNextHardwareKeyRef.current
-          ? event.key
-          : `${displayedChord}${event.key}`;
-        applyDisplayedChord(nextChord, `slot-hardware:${bar?.id ?? session.target.barId}:${session.target.slotIndex}`);
+        applyDisplayedChord(
+          `${displayedChord}${event.key}`,
+          `slot-hardware:${bar?.id ?? session.target.barId}:${session.target.slotIndex}`
+        );
         window.requestAnimationFrame(() => {
           const capture = chordCaptureRef.current;
           if (!capture) return;
@@ -358,7 +645,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
   const applyRoot = (root: string) => {
     if (bassMode) {
-      const main = withoutModifiers(displayedChord).split('/')[0] || (session.inputMode === 'letters' ? 'C' : '1');
+      const main = withoutModifiers(displayedChord).split('/')[0] || (chordInputMode === 'letters' ? 'C' : '1');
       applyDisplayedChord(`${main}/${root}${trailingModifiers(displayedChord)}`);
       setBassMode(false);
       return;
@@ -368,21 +655,21 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       root,
       accidental: '',
       quality: chordParts.root ? chordParts.quality : '',
-      mode: session.inputMode
+      mode: chordInputMode
     }));
   };
 
   const applyAccidental = (accidental: 'b' | '#') => {
     if (bassMode) {
       const [main, currentBass = rootChoices[0]] = withoutModifiers(displayedChord).split('/');
-      const parsedBass = parseChordParts(currentBass, session.inputMode);
+      const parsedBass = parseChordParts(currentBass, chordInputMode);
       const root = parsedBass.root || rootChoices[0];
       const bass = buildChord({
         ...appendAccidental(parsedBass, accidental),
         root,
         bass: '',
         modifiers: '',
-        mode: session.inputMode
+        mode: chordInputMode
       });
       applyDisplayedChord(`${main || rootChoices[0]}/${bass}${trailingModifiers(displayedChord)}`);
       return;
@@ -390,7 +677,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     applyDisplayedChord(buildChord({
       ...appendAccidental(chordParts, accidental),
       root: chordParts.root || rootChoices[0],
-      mode: session.inputMode
+      mode: chordInputMode
     }));
   };
 
@@ -398,14 +685,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     ...chordParts,
     root: chordParts.root || rootChoices[0],
     quality: `${chordParts.quality}${fragment}`,
-    mode: session.inputMode
+    mode: chordInputMode
   }));
 
   const applyQuality = (quality: string) => applyDisplayedChord(buildChord({
     ...chordParts,
     root: chordParts.root || rootChoices[0],
     quality,
-    mode: session.inputMode
+    mode: chordInputMode
   }));
 
   const toggleModifier = (modifier: '<' | '>' | '^' | '~') => {
@@ -441,6 +728,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     applyDisplayedChord(characters.slice(0, -1).join(''), `slot-backspace:${bar?.id ?? session.target.barId}:${session.target.slotIndex}`);
   };
 
+  const deleteEmptyBarIfPossible = () => {
+    if (!isBarCompletelyEmpty(bar)) return false;
+    onStructure('delete');
+    return true;
+  };
+
   const updateFields = (patch: Parameters<typeof updateEditableBarFields>[2], mergeKey?: string) => {
     onApplyDraft(
       updateEditableBarFields(session.draftSong, session.target, patch),
@@ -455,7 +748,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const viewportLeft = viewport?.offsetLeft ?? 0;
   const keyboardOffset = Math.max(0, window.innerHeight - viewportHeight - viewportTop);
   const isDocked = deviceLayout !== 'desktop';
-  const compactHardwareMode = deviceLayout === 'desktop' && !desktopKeysVisible && mode === 'common';
+  const compactHardwareMode = notationMode === 'chords' && deviceLayout === 'desktop' && !desktopKeysVisible && mode === 'common';
   const panelStyle: React.CSSProperties = deviceLayout === 'phone'
     ? {
         position: 'fixed',
@@ -497,6 +790,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const buttonClass = 'inline-flex min-h-8 items-center justify-center rounded-[11px] border border-white/80 bg-white/95 px-2 text-[11px] font-semibold text-slate-700 shadow-[0_1px_0_rgba(15,23,42,0.18),0_2px_5px_rgba(15,23,42,0.10)] transition-[transform,background-color,box-shadow,border-color,color] duration-75 hover:bg-white active:translate-y-px active:scale-[0.98] active:bg-slate-50 active:shadow-none disabled:shadow-none disabled:opacity-40';
   const characterKeyClass = `${buttonClass} rounded-[12px] border-white/90 bg-white/95 font-semibold text-slate-900`;
   const utilityKeyClass = `${buttonClass} border-white/40 bg-slate-300/75 text-slate-700`;
+  const copyKeyClass = `${utilityKeyClass} !border-sky-300/80 !bg-sky-100/90 !text-sky-800 hover:!bg-sky-100`;
+  const pasteKeyClass = `${utilityKeyClass} !border-emerald-300/80 !bg-emerald-100/90 !text-emerald-800 hover:!bg-emerald-100`;
+  const destructiveKeyClass = `${utilityKeyClass} !border-rose-300/80 !bg-rose-100/90 !text-rose-700 !shadow-[0_1px_0_rgba(159,18,57,0.18),0_3px_8px_rgba(190,24,93,0.12)] hover:!bg-rose-100`;
   const toolbarButtonClass = 'inline-flex min-h-8 min-w-8 items-center justify-center rounded-[11px] border border-white/80 bg-white/85 px-2 text-[11px] font-semibold text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.09)] transition-[transform,background-color,box-shadow] duration-75 hover:bg-white active:translate-y-px active:scale-[0.97] active:bg-slate-100 disabled:shadow-none disabled:opacity-35';
   const activeButtonClass = '!border-indigo-500/70 !bg-indigo-600 !text-white !shadow-[0_1px_0_rgba(49,46,129,0.8),0_3px_8px_rgba(79,70,229,0.28)] hover:!bg-indigo-600';
   const fieldClass = 'h-9 w-full rounded-xl border border-white/90 bg-white/95 px-3 text-sm font-semibold text-slate-800 shadow-inner outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200/70';
@@ -516,6 +812,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       <section
         ref={panelRef}
         data-preview-bar-editor
+        data-preview-edit-ui
         role="dialog"
         aria-label={language === 'zh' ? '預覽快捷編輯' : 'Preview quick editor'}
         className="z-[5000] rounded-t-[26px] border border-white/80 bg-slate-100/95 p-3 shadow-[0_24px_70px_rgba(15,23,42,0.24)] backdrop-blur-xl"
@@ -598,9 +895,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     ? Math.max(viewportTop + 8, pickerAnchor.top - pickerHeight - 8)
     : viewportTop + 8;
 
+  const keyboardSurfaceMode = notationMode === 'chords' ? mode : notationMode;
   const keyboardContent = (
-    <div data-keyboard-mode={mode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
-      {mode === 'common' && (
+    <div data-keyboard-mode={keyboardSurfaceMode} data-notation-mode={notationMode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
+      {notationMode === 'chords' && mode === 'common' && (
         <div className={`grid min-h-0 flex-1 ${compactHardwareMode ? 'grid-rows-2' : 'grid-rows-4'} gap-2`} data-keyboard-view="main" data-desktop-compact={compactHardwareMode ? 'true' : undefined}>
           {!compactHardwareMode && (
             <>
@@ -629,17 +927,19 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => appendQualityFragment('alt')}>alt</button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 text-lg`} onClick={() => appendQualityFragment('aug')} aria-label={language === 'zh' ? '加入增和弦' : 'Append augmented'}>+</button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${bassMode ? activeButtonClass : ''}`} onClick={() => setBassMode((value) => !value)} aria-label={language === 'zh' ? '選擇 Slash Bass' : 'Choose slash bass'}>/</button>
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => onInputModeChange(session.inputMode === 'letters' ? 'nashville' : 'letters')} aria-label={session.inputMode === 'letters' ? (language === 'zh' ? '切換為 Nashville' : 'Switch to Nashville') : (language === 'zh' ? '切換為字母和弦' : 'Switch to letter chords')}>{session.inputMode === 'letters' ? '123' : 'ABC'}</button>
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 text-lg`} onClick={deleteLastChordCharacter} disabled={!displayedChord} aria-label={language === 'zh' ? '刪除最後一個字元' : 'Delete last character'}>⌫</button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => onInputModeChange(chordInputMode === 'letters' ? 'nashville' : 'letters')} aria-label={chordInputMode === 'letters' ? (language === 'zh' ? '切換為 Nashville' : 'Switch to Nashville') : (language === 'zh' ? '切換為字母和弦' : 'Switch to letter chords')}>{chordInputMode === 'letters' ? '123' : 'ABC'}</button>
+            <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 px-0`} onClick={deleteLastChordCharacter} disabled={!displayedChord} aria-label={language === 'zh' ? '刪除最後一個字元' : 'Delete last character'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
           </div>
 
-          <div className="grid min-h-0 grid-cols-8 gap-1.5" data-key-surface="utility">
+          <div className="grid min-h-0 grid-cols-10 gap-1.5" data-key-surface="utility">
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 text-[11px]`} onClick={() => { setMode('text'); setActivePicker(null); }} aria-label={language === 'zh' ? '文字欄位' : 'Text fields'}>{language === 'zh' ? '文字' : 'Text'}</button>
             <button type="button" data-picker-trigger="special" className={`${utilityKeyClass} min-h-0 px-0`} onClick={(event) => openPicker('special', event.currentTarget)} aria-label={language === 'zh' ? '休止符與整小節符號' : 'Rests and whole-bar symbols'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">{getRestGlyph('q')}</span></button>
             <button type="button" data-picker-trigger="articulation" className={`${utilityKeyClass} min-h-0 px-0 ${trailingModifiers(displayedChord) ? activeButtonClass : ''}`} onClick={(event) => openPicker('articulation', event.currentTarget)} aria-label={language === 'zh' ? '選擇演奏記號' : 'Choose articulation'}><DirectionGlyph direction="push" /></button>
             <button type="button" data-picker-trigger="ending" className={`${utilityKeyClass} min-h-0 overflow-hidden px-1 ${bar.ending ? activeButtonClass : ''}`} onClick={(event) => openPicker('ending', event.currentTarget)} aria-label={language === 'zh' ? '選擇房子記號' : 'Choose ending'}><EndingGlyph value={bar.ending || '1'} /></button>
             <button type="button" data-picker-trigger="navigation" className={`${utilityKeyClass} min-h-0 px-0 ${bar.leftMarker || bar.rightMarker ? activeButtonClass : ''}`} onClick={(event) => openPicker('navigation', event.currentTarget)} aria-label={language === 'zh' ? '選擇導引記號' : 'Choose navigation marker'}><span className="flex items-center gap-0.5"><SegnoGlyph className="h-4 w-4" /><CodaGlyph className="h-4 w-4" /></span></button>
             <button type="button" data-picker-trigger="barline" className={`${utilityKeyClass} min-h-0 px-0 text-base ${bar.repeatStart || bar.repeatEnd || bar.finalBar ? activeButtonClass : ''}`} onClick={(event) => openPicker('barline', event.currentTarget)} aria-label={language === 'zh' ? '選擇小節線與反覆' : 'Choose barline and repeat'}>{barlineGlyph}</button>
+            <button type="button" className={`${copyKeyClass} min-h-0 px-0`} onClick={() => onStructure('copy-bar')} aria-label={language === 'zh' ? '複製小節' : 'Copy bar'}><Copy size={17} aria-hidden="true" /></button>
+            <button type="button" disabled={!hasCopiedBar} className={`${pasteKeyClass} min-h-0 px-0 disabled:cursor-not-allowed disabled:opacity-40`} onClick={() => onStructure('paste-bar-after')} aria-label={language === 'zh' ? '貼上小節' : 'Paste bar'}><ClipboardPaste size={17} aria-hidden="true" /></button>
             <button type="button" data-picker-trigger="structure" className={`${utilityKeyClass} min-h-0 px-0 text-base`} onClick={(event) => openPicker('structure', event.currentTarget)} aria-label={language === 'zh' ? '小節操作' : 'Bar actions'}>+│</button>
             <button type="button" data-picker-trigger="bar" className={`${utilityKeyClass} min-h-0 px-0 text-base`} onClick={(event) => openPicker('bar', event.currentTarget)} aria-label={language === 'zh' ? '整小節輸入' : 'Whole bar input'}>•••</button>
           </div>
@@ -745,10 +1045,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               )}
 
               {activePicker === 'structure' && (
-                <div data-structure-actions className="grid min-h-0 flex-1 grid-cols-5 gap-1 overflow-hidden">
+                <div data-structure-actions className="grid min-h-0 flex-1 grid-cols-7 gap-1 overflow-hidden">
                   <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('insert-before'); setActivePicker(null); }}><Plus size={14} />{language === 'zh' ? '前方插入' : 'Before'}</button>
                   <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('insert-after'); setActivePicker(null); }}><Plus size={14} />{language === 'zh' ? '後方插入' : 'After'}</button>
-                  <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('duplicate'); setActivePicker(null); }}><Copy size={14} />{language === 'zh' ? '複製' : 'Duplicate'}</button>
+                  <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('duplicate'); setActivePicker(null); }} aria-label={language === 'zh' ? '複製到後方' : 'Duplicate after'}><Copy size={14} />{language === 'zh' ? '複製到後' : 'Duplicate'}</button>
+                  <button type="button" className={`${copyKeyClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('copy-bar'); setActivePicker(null); }} aria-label={language === 'zh' ? '複製小節' : 'Copy bar'}><Copy size={14} />{language === 'zh' ? '複製小節' : 'Copy bar'}</button>
+                  <button type="button" disabled={!hasCopiedBar} className={`${pasteKeyClass} min-h-0 flex-col px-1 text-[9px] leading-tight disabled:cursor-not-allowed disabled:opacity-40`} onClick={() => { onStructure('paste-bar-after'); setActivePicker(null); }} aria-label={language === 'zh' ? '貼上小節' : 'Paste bar'}><ClipboardPaste size={14} />{language === 'zh' ? '貼上小節' : 'Paste bar'}</button>
                   <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('split-section'); setActivePicker(null); }}><Scissors size={14} />{language === 'zh' ? '拆分段落' : 'Split'}</button>
                   <button type="button" className={`${buttonClass} min-h-0 flex-col border-rose-200 px-1 text-[9px] leading-tight text-rose-700`} onClick={() => { onStructure('delete'); setActivePicker(null); }}><Trash2 size={14} />{language === 'zh' ? '刪除' : 'Delete'}</button>
                 </div>
@@ -773,7 +1075,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </div>
       )}
 
-      {mode === 'advanced' && (
+      {notationMode === 'chords' && mode === 'advanced' && (
         <>
           <div className="grid min-h-0 flex-1 grid-cols-6 gap-1">
             {EXPANDED_QUALITIES.map((quality) => <button key={quality} type="button" className={`${buttonClass} min-h-0 px-0.5 ${chordParts.quality === quality ? activeButtonClass : ''}`} onClick={() => applyQuality(quality)}>{quality}</button>)}
@@ -786,7 +1088,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </>
       )}
 
-      {mode === 'symbols' && (
+      {notationMode === 'chords' && mode === 'symbols' && (
         <div className="flex min-h-0 flex-1 flex-col justify-between gap-1" data-symbol-page="all">
           <div className="grid grid-cols-8 gap-1">
             <button type="button" className={`${buttonClass} !min-h-8 px-0 text-base`} onClick={() => applyDisplayedChord('%')} aria-label={language === 'zh' ? '重複前一小節' : 'Repeat previous bar'}>%</button>
@@ -841,11 +1143,13 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <input className="min-h-7 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-center text-[10px] font-bold outline-none focus:border-indigo-400" inputMode="numeric" value={TIME_SIGNATURES.includes(bar.timeSignature || '') ? '' : bar.timeSignature || ''} onChange={(event) => updateFields({ timeSignature: event.target.value || undefined }, `time:${bar.id}`)} placeholder="…" aria-label={language === 'zh' ? '自訂拍號' : 'Custom time signature'} />
           </div>
 
-          <div className="grid grid-cols-6 gap-1">
+          <div className="grid grid-cols-8 gap-1">
             <input className="min-h-7 min-w-0 rounded-lg border border-slate-200 bg-white px-1 text-center text-[10px] font-bold outline-none focus:border-indigo-400" value={ENDINGS.includes(bar.ending || '') ? '' : bar.ending || ''} onChange={(event) => updateFields({ ending: event.target.value || undefined }, `ending:${bar.id}`)} placeholder="⌜…" aria-label={language === 'zh' ? '自訂 Ending' : 'Custom ending'} />
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base`} onClick={() => onStructure('insert-before')} aria-label={language === 'zh' ? '前方插入小節' : 'Insert bar before'}>+│</button>
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base`} onClick={() => onStructure('insert-after')} aria-label={language === 'zh' ? '後方插入小節' : 'Insert bar after'}>│+</button>
-            <button type="button" className={`${buttonClass} !min-h-7 px-0`} onClick={() => onStructure('duplicate')} aria-label={language === 'zh' ? '複製小節' : 'Duplicate bar'}><Copy size={15} /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0`} onClick={() => onStructure('duplicate')} aria-label={language === 'zh' ? '複製到後方' : 'Duplicate after'}><Copy size={15} /></button>
+            <button type="button" className={`${copyKeyClass} !min-h-7 px-0`} onClick={() => onStructure('copy-bar')} aria-label={language === 'zh' ? '複製小節' : 'Copy bar'}><Copy size={15} /></button>
+            <button type="button" disabled={!hasCopiedBar} className={`${pasteKeyClass} !min-h-7 px-0 disabled:cursor-not-allowed disabled:opacity-40`} onClick={() => onStructure('paste-bar-after')} aria-label={language === 'zh' ? '貼上小節' : 'Paste bar'}><ClipboardPaste size={15} /></button>
             <button type="button" className={`${buttonClass} !min-h-7 px-0`} onClick={() => onStructure('split-section')} aria-label={language === 'zh' ? '從這裡拆分段落' : 'Split section here'}><Scissors size={15} /></button>
             <button type="button" className={`${buttonClass} !min-h-7 border-rose-200 px-0 text-rose-700`} onClick={() => onStructure('delete')} aria-label={language === 'zh' ? '刪除小節' : 'Delete bar'}><Trash2 size={15} /></button>
           </div>
@@ -856,7 +1160,80 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </div>
       )}
 
-      {mode === 'text' && (
+      {notationMode === 'rhythm' && (
+        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.52fr]'} gap-1.5`} data-keyboard-view="rhythm">
+          <div className="grid min-h-0 grid-cols-5 gap-1.5" data-rhythm-key-row="notes" data-key-surface="character">
+            {([['w', '全音符', 'Whole'], ['h', '二分音符', 'Half'], ['q', '四分音符', 'Quarter'], ['e', '八分音符', 'Eighth'], ['s', '十六分音符', 'Sixteenth']] as const).map(([token, zhLabel, enLabel]) => (
+              <button key={token} type="button" className={`${characterKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === token && !selectedRhythmEvent.isRest && !selectedRhythmEvent.triplet ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token })} aria-label={language === 'zh' ? zhLabel : `${enLabel} note`}>
+                <RhythmStaffKeyGlyph base={token} className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[35px]" />
+              </button>
+            ))}
+          </div>
+          <div className="grid min-h-0 grid-cols-5 gap-1.5" data-rhythm-key-row="rests" data-key-surface="character">
+            {([['w', '全休止', 'Whole rest'], ['h', '二分休止', 'Half rest'], ['q', '四分休止', 'Quarter rest'], ['e', '八分休止', 'Eighth rest'], ['s', '十六分休止', 'Sixteenth rest']] as const).map(([base, zhLabel, enLabel]) => (
+              <button key={base} type="button" className={`${characterKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === base && selectedRhythmEvent.isRest && !selectedRhythmEvent.triplet ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: `${base}r` })} aria-label={language === 'zh' ? zhLabel : enLabel}>
+                <RhythmStaffKeyGlyph base={base} isRest className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[35px]" />
+              </button>
+            ))}
+          </div>
+          <div className="grid min-h-0 grid-cols-8 gap-1.5" data-rhythm-key-row="modifiers" data-key-surface="utility">
+            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'q' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 'q3' })} aria-label={language === 'zh' ? '四分三連音' : 'Quarter-note triplet'}><RhythmStaffKeyGlyph base="q" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'e' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 'e3' })} aria-label={language === 'zh' ? '八分三連音' : 'Eighth-note triplet'}><RhythmStaffKeyGlyph base="e" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => applyRhythmAction({ type: 'insert', token: 'q3r' })} aria-label={language === 'zh' ? '四分三連休止' : 'Quarter-triplet rest'}><RhythmStaffKeyGlyph base="q" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => applyRhythmAction({ type: 'insert', token: 'e3r' })} aria-label={language === 'zh' ? '八分三連休止' : 'Eighth-triplet rest'}><RhythmStaffKeyGlyph base="e" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
+            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.triplet} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.dotted ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-dot' })} aria-label={language === 'zh' ? '切換節奏附點' : 'Toggle rhythm dot'}><span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" /></button>
+            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.isRest} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.accent ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-accent' })} aria-label={language === 'zh' ? '切換節奏重音' : 'Toggle rhythm accent'}><span className="text-[24px] font-black leading-none" aria-hidden="true">&gt;</span></button>
+            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.isRest} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.tieAfter ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-tie' })} aria-label={language === 'zh' ? '切換節奏連結' : 'Toggle rhythm tie'}><svg viewBox="0 0 32 16" className="h-5 w-7" fill="none" aria-hidden="true"><path d="M3 13C8 3 24 3 29 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></svg></button>
+            <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 px-0`} onClick={() => applyRhythmAction({ type: 'delete', mode: 'backspace' })} aria-label={language === 'zh' ? '刪除節奏事件' : 'Delete rhythm event'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
+          </div>
+          <div className="grid min-h-0 grid-cols-2 gap-1.5" data-rhythm-key-row="copy-paste" data-key-surface="utility">
+            <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyRhythm} aria-label={language === 'zh' ? '複製節奏' : 'Copy rhythm'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製節奏' : 'Copy rhythm'}</button>
+            <button type="button" disabled={!hasCopiedRhythm} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteRhythm} aria-label={language === 'zh' ? '貼上節奏' : 'Paste rhythm'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上節奏' : 'Paste rhythm'}</button>
+          </div>
+          {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
+        </div>
+      )}
+
+      {notationMode === 'jianpu' && (
+        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr]'} gap-1.5`} data-keyboard-view="jianpu">
+          <div className="grid min-h-0 grid-cols-7 gap-1.5" data-jianpu-key-row="pitches" data-key-surface="character">
+            {(['1', '2', '3', '4', '5', '6', '7'] as const).map((pitch) => (
+              <button key={pitch} type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-pitch', pitch })} aria-label={language === 'zh' ? `輸入簡譜 ${pitch}` : `Insert jianpu ${pitch}`}>
+                <JianpuInputGlyph
+                  pitch={pitch}
+                  duration={jianpuInputMode.duration}
+                  className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[24px] [&_[data-jianpu-pitch-symbol]]:!font-medium"
+                />
+              </button>
+            ))}
+          </div>
+          <div className="grid min-h-0 grid-cols-5 gap-1.5" data-jianpu-key-row="format" data-key-surface="utility">
+            <button type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-rest' })} aria-label={language === 'zh' ? '輸入簡譜休止 0' : 'Insert jianpu rest 0'}><span className="text-[23px] font-medium leading-none" aria-hidden="true">0</span></button>
+            <button type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-hold' })} aria-label={language === 'zh' ? '輸入簡譜延音' : 'Insert jianpu hold'}><span className="text-[26px] font-medium leading-none" aria-hidden="true">−</span></button>
+            {([['eighth', '八分', 'E'], ['sixteenth', '十六分', 'S']] as const).map(([duration, label, shortcut]) => (
+              <button key={duration} type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.duration === duration ? activeButtonClass : ''}`} onClick={() => toggleJianpuDuration(duration)} aria-label={language === 'zh' ? `切換簡譜${label}音符` : `Toggle jianpu ${duration} note`} aria-keyshortcuts={shortcut} title={language === 'zh' ? `${label}音符（${shortcut}）` : `${duration} note (${shortcut})`}><JianpuInputGlyph pitch="5" duration={duration} className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[23px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
+            ))}
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-1 ${session.draftSong.jianpuInputAbsolute ? activeButtonClass : ''}`} onClick={() => onJianpuInputAbsoluteChange(!Boolean(session.draftSong.jianpuInputAbsolute))} aria-label={session.draftSong.jianpuInputAbsolute ? (language === 'zh' ? '切換為首調簡譜輸入' : 'Switch to movable-do jianpu input') : (language === 'zh' ? '切換為固定調簡譜輸入' : 'Switch to fixed-do jianpu input')}><span className="text-xs font-bold leading-none">{session.draftSong.jianpuInputAbsolute ? (language === 'zh' ? '固定調' : 'Fixed') : (language === 'zh' ? '首調' : 'Movable')}</span></button>
+          </div>
+          <div className="grid min-h-0 grid-cols-8 gap-1.5" data-jianpu-key-row="modifiers" data-key-surface="utility">
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.octave < 0 ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-octave', octave: jianpuInputMode.octave < 0 ? 0 : -1 })} aria-label={language === 'zh' ? '切換低八度簡譜' : 'Toggle low-octave jianpu'} aria-keyshortcuts="ArrowDown L" title={language === 'zh' ? '低八度（↓ / L）' : 'Low octave (Down / L)'}><JianpuInputGlyph pitch="5" octave={-1} className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[21px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.octave > 0 ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-octave', octave: jianpuInputMode.octave > 0 ? 0 : 1 })} aria-label={language === 'zh' ? '切換高八度簡譜' : 'Toggle high-octave jianpu'} aria-keyshortcuts="ArrowUp H" title={language === 'zh' ? '高八度（↑ / H）' : 'High octave (Up / H)'}><JianpuInputGlyph pitch="5" octave={1} className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[21px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.accidental === '#' ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-accidental', accidental: jianpuInputMode.accidental === '#' ? '' : '#' })} aria-label={language === 'zh' ? '切換簡譜升記號' : 'Toggle jianpu sharp'}><span className="text-[22px] font-medium leading-none" aria-hidden="true">♯</span></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.accidental === 'b' ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-accidental', accidental: jianpuInputMode.accidental === 'b' ? '' : 'b' })} aria-label={language === 'zh' ? '切換簡譜降記號' : 'Toggle jianpu flat'}><span className="text-[22px] font-medium leading-none" aria-hidden="true">♭</span></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.dotted ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'toggle-dot' })} aria-label={language === 'zh' ? '切換簡譜附點' : 'Toggle jianpu dot'}><span className="h-2.5 w-2.5 rounded-full bg-current" aria-hidden="true" /></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'toggle-slur' })} aria-label={language === 'zh' ? '切換簡譜圓滑線' : 'Toggle jianpu slur'}><svg viewBox="0 0 32 16" className="h-6 w-7" fill="none" aria-hidden="true"><path d="M3 13C8 3 24 3 29 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></svg></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'clear-formatting' })} aria-label={language === 'zh' ? '清除簡譜輸入格式' : 'Clear jianpu input formatting'}><Eraser size={21} aria-hidden="true" /></button>
+            <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'delete', direction: 'backward' })} aria-label={language === 'zh' ? '刪除簡譜音符' : 'Delete jianpu note'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
+          </div>
+          <div className="grid min-h-0 grid-cols-2 gap-1.5" data-jianpu-key-row="bar-actions" data-key-surface="utility">
+            <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyJianpu} aria-label={language === 'zh' ? '複製簡譜' : 'Copy jianpu'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製簡譜' : 'Copy jianpu'}</button>
+            <button type="button" disabled={!hasCopiedJianpu} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteJianpu} aria-label={language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}</button>
+          </div>
+          {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
+        </div>
+      )}
+
+      {notationMode === 'chords' && mode === 'text' && (
         <div className="flex min-h-0 flex-1 flex-col gap-2" data-text-fields-view="all">
           <div className="flex shrink-0 items-center gap-2">
             <button type="button" className={utilityKeyClass} onClick={() => { setMode('common'); setActivePicker(null); }} aria-label={language === 'zh' ? '返回和弦鍵盤' : 'Back to chord keyboard'}>ABC</button>
@@ -880,11 +1257,46 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     </div>
   );
 
+  const notationLabels: Record<PreviewNotationMode, string> = language === 'zh'
+    ? { chords: '和弦', rhythm: '節奏', jianpu: '簡譜' }
+    : { chords: 'Chords', rhythm: 'Rhythm', jianpu: 'Jianpu' };
+  const nextNotationMode = getNextPreviewNotationMode(notationMode);
+  const notationMeter = parseTimeSignature(effectiveBarTimeSignature);
+  const rhythmBeatNumber = Math.min(
+    notationMeter.beats,
+    Math.floor(rhythmCursor.cursorUnit / notationMeter.beatUnits) + 1
+  );
+  const headerValue = notationMode === 'chords'
+    ? displayedChord || (language === 'zh' ? `第 ${session.target.slotIndex + 1} 拍 · 空白` : `Beat ${session.target.slotIndex + 1} · Empty`)
+    : notationMode === 'rhythm'
+      ? (language === 'zh' ? `節奏 · 第 ${rhythmBeatNumber} 拍` : `Rhythm · Beat ${rhythmBeatNumber}`)
+      : (language === 'zh' ? `簡譜 · 第 ${jianpuCursor.beatIndex + 1} 拍` : `Jianpu · Beat ${jianpuCursor.beatIndex + 1}`);
+  const footerBeatPosition = notationMode === 'chords'
+    ? session.target.slotIndex + 1
+    : notationMode === 'rhythm'
+      ? rhythmBeatNumber
+      : jianpuCursor.beatIndex + 1;
+  const footerBeatCount = notationMode === 'chords' ? beatCount : notationMeter.beats;
+  const footerPositionLabel = language === 'zh' ? `第 ${footerBeatPosition} 拍` : `Beat ${footerBeatPosition}`;
+  const footerPositionValue = language === 'zh' ? `共 ${footerBeatCount} 拍` : `of ${footerBeatCount}`;
+  const previousLabel = notationMode === 'chords'
+    ? (language === 'zh' ? '上一拍' : 'Previous beat')
+    : notationMode === 'rhythm'
+      ? (language === 'zh' ? '上一個節奏' : 'Previous rhythm')
+      : (language === 'zh' ? '上一音' : 'Previous note');
+  const nextLabel = notationMode === 'chords'
+    ? (language === 'zh' ? '下一拍' : 'Next beat')
+    : notationMode === 'rhythm'
+      ? (language === 'zh' ? '下一個節奏' : 'Next rhythm')
+      : (language === 'zh' ? '下一音' : 'Next note');
+
   return (
     <section
       ref={panelRef}
       data-preview-bar-editor
+      data-preview-edit-ui
       data-device-layout={deviceLayout}
+      data-notation-mode={notationMode}
       data-fixed-keyboard-height={isDocked ? '40dvh' : undefined}
       role="dialog"
       aria-label={language === 'zh' ? '預覽快捷編輯' : 'Preview quick editor'}
@@ -894,13 +1306,25 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       onTouchStart={(event) => event.stopPropagation()}
     >
       <header className="flex shrink-0 items-center gap-1.5 border-b border-white/70 bg-white/70 px-2.5 py-2 backdrop-blur-xl">
-        {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => onNavigate('previous')} aria-label="Previous beat"><ChevronLeft size={16} /></button>}
+        {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={16} /></button>}
+        <button
+          type="button"
+          className={`${toolbarButtonClass} shrink-0 gap-1 !px-1.5 ${notationMode !== 'chords' ? '!border-indigo-300 !bg-indigo-50 !text-indigo-700' : ''}`}
+          onClick={cycleNotationMode}
+          aria-label={language === 'zh'
+            ? `切換輸入法，目前${notationLabels[notationMode]}，下一個${notationLabels[nextNotationMode]}`
+            : `Switch input mode, current ${notationLabels[notationMode]}, next ${notationLabels[nextNotationMode]}`}
+          title={language === 'zh' ? `目前：${notationLabels[notationMode]}` : `Current: ${notationLabels[notationMode]}`}
+        >
+          <Globe2 size={14} />
+          <span className="text-[10px] font-black">{notationLabels[notationMode]}</span>
+        </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-indigo-500">{section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}</div>
-          <div className="truncate text-xs font-black text-slate-900">{displayedChord || (language === 'zh' ? `第 ${session.target.slotIndex + 1} 拍 · 空白` : `Beat ${session.target.slotIndex + 1} · Empty`)}</div>
+          <div className="truncate text-xs font-black text-slate-900">{headerValue}</div>
         </div>
-        {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => onNavigate('next')} aria-label="Next beat"><ChevronRight size={16} /></button>}
-        {deviceLayout === 'desktop' && (
+        {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('next')} aria-label="Next beat"><ChevronRight size={16} /></button>}
+        {deviceLayout === 'desktop' && notationMode === 'chords' && (
           <button
             type="button"
             className={toolbarButtonClass}
@@ -917,7 +1341,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-600 !text-white hover:!bg-indigo-500`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={15} /><span className={deviceLayout === 'phone' ? 'sr-only' : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
       </header>
 
-      {deviceLayout === 'desktop' && (
+      {deviceLayout === 'desktop' && notationMode === 'chords' && session.target.field === 'chords' && (
         <input
           ref={chordCaptureRef}
           data-preview-chord-capture
@@ -925,18 +1349,48 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           value={displayedChord}
           onChange={(event) => applyDisplayedChord(event.target.value, `slot-text:${bar.id}:${session.target.slotIndex}`)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') {
+            const meta = event.metaKey || event.ctrlKey;
+            if (meta && event.key === 'Enter') {
               event.preventDefault();
-              onNavigate(event.shiftKey ? 'previous' : 'next');
-            } else if (event.key === 'ArrowLeft') {
+              event.stopPropagation();
+            } else if (event.key === 'Escape') {
               event.preventDefault();
-              onNavigate('previous');
-            } else if (event.key === 'ArrowRight') {
+              event.stopPropagation();
+              onDone();
+            } else if (!meta && !event.altKey && !event.shiftKey && applyChordBarMarkerShortcut(event.key, event.code)) {
               event.preventDefault();
+              event.stopPropagation();
+            } else if (event.shiftKey && event.key === ' ') {
+              event.preventDefault();
+              event.stopPropagation();
+              onApplyDraft(
+                insertChordBeatBeforeSlot(session.draftSong, session.target),
+                { mergeKey: `insert-beat-before:${bar?.id ?? session.target.barId}:${session.target.slotIndex}` }
+              );
+            } else if (event.shiftKey && event.key === 'Enter') {
+              event.preventDefault();
+              event.stopPropagation();
+              onStructure('insert-before');
+            } else if (event.shiftKey && event.key === 'ArrowLeft') {
+              event.preventDefault();
+              event.stopPropagation();
+              onNavigate('previous', undefined, { bar: true });
+            } else if (event.shiftKey && event.key === 'ArrowRight') {
+              event.preventDefault();
+              event.stopPropagation();
+              onNavigate('next', undefined, { bar: true });
+            } else if (event.key === 'Enter') {
+              event.preventDefault();
+              event.stopPropagation();
+              onNavigate('next', undefined, { bar: true });
+            } else if (event.key === ' ') {
+              event.preventDefault();
+              event.stopPropagation();
               onNavigate('next');
             } else if (event.key === 'Backspace' && !displayedChord) {
               event.preventDefault();
-              onNavigate('previous');
+              event.stopPropagation();
+              if (!deleteEmptyBarIfPossible()) onNavigate('previous');
             }
           }}
           autoComplete="off"
@@ -953,12 +1407,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
       {deviceLayout !== 'desktop' && (
         <footer className="relative flex shrink-0 items-stretch gap-2 border-t border-white/70 bg-slate-200/90 px-2.5 py-2">
-          <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-white/80 bg-white/80 text-sm font-semibold text-indigo-700 shadow-[0_1px_0_rgba(15,23,42,0.16),0_3px_7px_rgba(15,23,42,0.10)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-white active:shadow-none" onClick={() => onNavigate('previous')} aria-label="Previous beat"><ChevronLeft size={20} className="mr-1" />{language === 'zh' ? '上一拍' : 'Previous'}</button>
+          <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-white/80 bg-white/80 text-sm font-semibold text-indigo-700 shadow-[0_1px_0_rgba(15,23,42,0.16),0_3px_7px_rgba(15,23,42,0.10)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-white active:shadow-none" onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={20} className="mr-1" />{previousLabel}</button>
           <div className="flex min-w-14 flex-col items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 px-1 text-center shadow-inner">
-            <span className="text-[9px] font-black uppercase text-slate-400">{language === 'zh' ? '拍點' : 'Beat'}</span>
-            <span className="text-xs font-black text-slate-800">{session.target.slotIndex + 1}/{beatCount}</span>
+            <span className="text-[9px] font-black uppercase text-slate-400">{footerPositionLabel}</span>
+            <span className="text-xs font-black text-slate-800">{footerPositionValue}</span>
           </div>
-          <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-indigo-500/60 bg-indigo-600 text-sm font-semibold text-white shadow-[0_1px_0_rgba(49,46,129,0.9),0_4px_10px_rgba(79,70,229,0.28)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-indigo-700 active:shadow-none" onClick={() => onNavigate('next')} aria-label="Next beat">{language === 'zh' ? '下一拍' : 'Next'}<ChevronRight size={20} className="ml-1" /></button>
+          <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-indigo-500/60 bg-indigo-600 text-sm font-semibold text-white shadow-[0_1px_0_rgba(49,46,129,0.9),0_4px_10px_rgba(79,70,229,0.28)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-indigo-700 active:shadow-none" onClick={() => navigateNotation('next')} aria-label="Next beat">{nextLabel}<ChevronRight size={20} className="ml-1" /></button>
           <button type="button" className="inline-flex min-w-10 items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 text-slate-600 shadow-[0_1px_3px_rgba(15,23,42,0.10)] transition-[transform,background-color] duration-75 active:translate-y-px active:bg-slate-300" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? (language === 'zh' ? '展開鍵盤' : 'Expand keyboard') : (language === 'zh' ? '收合鍵盤' : 'Collapse keyboard')}>
             {collapsed ? <Plus size={17} /> : <ChevronDown size={17} />}
           </button>

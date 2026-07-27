@@ -18,8 +18,11 @@ import {
   getChordPlacementError,
   getMultiMeasureRestPlacementError,
   insertBar,
+  insertChordBeatBeforeSlot,
+  insertSectionAfter,
   normalizeChordTextInput,
   parseChordBarText,
+  repairSongStructure,
   resolvePreviewChordSlotIndex,
   reorderSection,
   serializeChordBeatSlots,
@@ -84,6 +87,24 @@ describe('chord beat slots', () => {
     const bar = edited.sections[0].bars[0];
     expect(bar.chords).toEqual(['C', '', 'G', '']);
     expect(bar.chordMarks).toEqual({ 2: { color: 'sky' } });
+  });
+
+  it('inserts an empty beat before the selected slot and shifts later chords and marks', () => {
+    const song = makeSong({
+      chords: ['C', 'Dm', 'G', 'Am'],
+      chordMarks: { 1: { color: 'rose' }, 2: { color: 'sky' } }
+    });
+    const edited = insertChordBeatBeforeSlot(song, {
+      sectionId: 'section-1',
+      barId: 'bar-1',
+      slotIndex: 1
+    });
+    const bar = edited.sections[0].bars[0];
+    expect(bar.chords).toEqual(['C', '', 'Dm', 'G']);
+    expect(bar.chordMarks).toEqual({
+      2: { color: 'rose' },
+      3: { color: 'sky' }
+    });
   });
 
   it('rejects text input that exceeds the time-signature slot count', () => {
@@ -171,6 +192,66 @@ describe('bar commands', () => {
     expect(ensureSongEditingIds(repaired)).toBe(repaired);
   });
 
+  it('repairs duplicate section ids as well as duplicate bar ids', () => {
+    const corruptedSong: Song = {
+      title: 'Duplicate identities',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [
+        { id: 'duplicate-section', title: 'Verse', bars: [{ id: 'duplicate-bar', chords: ['1'] }] },
+        { id: 'duplicate-section', title: 'Chorus', bars: [{ id: 'duplicate-bar', chords: ['4'] }] }
+      ]
+    };
+
+    const repaired = ensureSongEditingIds(corruptedSong);
+
+    expect(new Set(repaired.sections.map((section) => section.id)).size).toBe(2);
+    expect(new Set(repaired.sections.flatMap((section) => section.bars.map((bar) => bar.id))).size).toBe(2);
+    expect(repaired.sections[0].id).toBe('duplicate-section');
+    expect(repaired.sections[1].id).not.toBe('duplicate-section');
+  });
+
+  it('removes failed empty sections while preserving named blank bars and unnamed music', () => {
+    const corruptedSong: Song = {
+      title: 'Repair sections',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [
+        { id: 'failed-zero', title: '', bars: [] },
+        { id: 'failed-empty', title: '  ', bars: [{ id: 'failed-bar', chords: [] }] },
+        { id: 'named-blank', title: 'Verse', bars: [{ id: 'intentional-blank', chords: [] }] },
+        { id: 'unnamed-music', title: '', bars: [{ id: 'music-bar', chords: ['1'] }] }
+      ]
+    };
+
+    const repaired = repairSongStructure(corruptedSong);
+
+    expect(repaired.sections.map((section) => section.id)).toEqual(['named-blank', 'unnamed-music']);
+    expect(repaired.sections[0].bars.map((bar) => bar.id)).toEqual(['intentional-blank']);
+    expect(repaired.sections[1].bars.map((bar) => bar.id)).toEqual(['music-bar']);
+  });
+
+  it('keeps one writable section when an entire song only contains failed drafts', () => {
+    const emptyDraftSong: Song = {
+      title: 'All empty',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [
+        { id: 'failed-a', title: '', bars: [] },
+        { id: 'failed-b', title: '', bars: [{ id: 'failed-b-bar', chords: [] }] }
+      ]
+    };
+
+    const repaired = repairSongStructure(emptyDraftSong);
+
+    expect(repaired.sections).toHaveLength(1);
+    expect(repaired.sections[0].bars).toHaveLength(1);
+    expect(repaired.sections[0].id).toBe('failed-a');
+  });
+
   it('keeps repeat end and final bar mutually exclusive', () => {
     const song = makeSong({ chords: [], repeatEnd: true });
     const edited = updateEditableBarFields(song, { sectionId: 'section-1', barId: 'bar-1' }, { finalBar: true });
@@ -192,6 +273,22 @@ describe('bar commands', () => {
     expect(duplicated.sections[0].bars).toHaveLength(3);
     expect(deleteBar(duplicated, { sectionId: 'section-1', barId: duplicateId! }).sections[0].bars).toHaveLength(2);
     expect(song.sections[0].bars).toHaveLength(1);
+  });
+
+  it('removes an empty section when its only bar is deleted but keeps the last section', () => {
+    const multiSectionSong: Song = {
+      title: 'Delete section bar',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [
+        { id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'] }] },
+        { id: 'section-2', title: '', bars: [{ id: 'bar-2', chords: [] }] }
+      ]
+    };
+
+    expect(deleteBar(multiSectionSong, { sectionId: 'section-2', barId: 'bar-2' }).sections.map((section) => section.id)).toEqual(['section-1']);
+    expect(deleteBar(makeSong({ chords: [] }), { sectionId: 'section-1', barId: 'bar-1' }).sections[0].bars).toHaveLength(0);
   });
 });
 
@@ -305,6 +402,36 @@ describe('section commands', () => {
     expect(reordered.sections[0].bars.map((bar) => bar.id)).toEqual(['bar-a2', 'bar-a3']);
   });
 
+  it('reorders sections without dropping or duplicating intentional blank bars', () => {
+    const songWithBlankBars: Song = {
+      ...sectionSong,
+      sections: [
+        {
+          id: 'section-a',
+          title: 'Verse',
+          bars: [
+            { id: 'a-1', chords: ['1'] },
+            { id: 'a-blank', chords: [] }
+          ]
+        },
+        {
+          id: 'section-b',
+          title: 'Chorus',
+          bars: [
+            { id: 'b-1', chords: ['4'] },
+            { id: 'b-blank', chords: [] }
+          ]
+        }
+      ]
+    };
+
+    const reordered = reorderSection(songWithBlankBars, 'section-b', 'section-a', 'before');
+
+    expect(reordered.sections.map((section) => section.id)).toEqual(['section-b', 'section-a']);
+    expect(reordered.sections[0].bars.map((bar) => bar.id)).toEqual(['b-1', 'b-blank']);
+    expect(reordered.sections[1].bars.map((bar) => bar.id)).toEqual(['a-1', 'a-blank']);
+  });
+
   it('duplicates a full section after the source with fresh section and bar ids', () => {
     const original = structuredClone(sectionSong);
     const result = duplicateSection(sectionSong, 'section-a');
@@ -320,6 +447,39 @@ describe('section commands', () => {
       sectionSong.sections[0].bars.map((bar) => bar.chords)
     );
     expect(sectionSong).toEqual(original);
+  });
+
+  it('inserts a new blank section after the source section', () => {
+    const result = insertSectionAfter(sectionSong, 'section-a');
+
+    expect(result.created).toBe(true);
+    expect(result.song.sections).toHaveLength(2);
+    expect(result.song.sections[0].id).toBe('section-a');
+    expect(result.song.sections[1]).toMatchObject({ title: '' });
+    expect(result.song.sections[1].id).not.toBe('section-a');
+    expect(result.song.sections[1].bars).toHaveLength(1);
+    expect(result.song.sections[1].bars[0]).toMatchObject({ chords: [] });
+    expect(result.firstBarId).toBe(result.song.sections[1].bars[0].id);
+  });
+
+  it('preserves intentionally blank source bars when inserting a new section', () => {
+    const songWithTrailingEmptyBars: Song = {
+      ...sectionSong,
+      sections: [
+        {
+          ...sectionSong.sections[0],
+          bars: [
+            ...sectionSong.sections[0].bars,
+            { id: 'empty-a', chords: [] },
+            { id: 'empty-b', chords: [''] }
+          ]
+        }
+      ]
+    };
+    const result = insertSectionAfter(songWithTrailingEmptyBars, 'section-a');
+
+    expect(result.song.sections[0].bars.map((bar) => bar.id)).toEqual(['bar-a1', 'bar-a2', 'bar-a3', 'empty-a', 'empty-b']);
+    expect(result.song.sections[1].id).toBe(result.sectionId);
   });
 
   it('keeps the inherited key when duplicating or deleting a key-change section', () => {
@@ -358,7 +518,7 @@ describe('section commands', () => {
     expect(restoredFirst.sections[0].title).toBe('Verse');
   });
 
-  it('keeps a newly split or originally blank section when its title stays blank', () => {
+  it('cancels a newly split section when its title stays blank', () => {
     const split = splitSectionAtBar(sectionSong, { sectionId: 'section-a', barId: 'bar-a2' });
     const finishedSplit = finalizeSectionTitleEdit({
       baseSong: sectionSong,
@@ -366,8 +526,23 @@ describe('section commands', () => {
       sectionId: split.sectionId,
       title: ''
     });
-    expect(finishedSplit.sections).toHaveLength(2);
+    expect(finishedSplit).toBe(sectionSong);
+    expect(finishedSplit.sections).toHaveLength(1);
+    expect(finishedSplit.sections[0].bars.map((bar) => bar.id)).toEqual(['bar-a1', 'bar-a2', 'bar-a3']);
+  });
 
+  it('cancels a newly inserted blank section when its title stays blank', () => {
+    const inserted = insertSectionAfter(sectionSong, 'section-a');
+    const finishedInsert = finalizeSectionTitleEdit({
+      baseSong: sectionSong,
+      draftSong: inserted.song,
+      sectionId: inserted.sectionId,
+      title: '   '
+    });
+    expect(finishedInsert).toBe(sectionSong);
+  });
+
+  it('keeps an originally blank section when its title stays blank', () => {
     const blankBase: Song = {
       ...sectionSong,
       sections: [{ ...sectionSong.sections[0], title: '' }]

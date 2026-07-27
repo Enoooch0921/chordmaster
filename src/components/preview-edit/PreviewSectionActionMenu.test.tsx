@@ -21,8 +21,10 @@ describe('PreviewSectionActionMenu', () => {
         title="Chorus"
         anchorRect={anchorRect}
         canDelete={false}
+        canMergePrevious={false}
         onRename={vi.fn()}
         onDuplicate={onDuplicate}
+        onMergePrevious={vi.fn()}
         onDelete={vi.fn()}
         onClose={vi.fn()}
       />
@@ -30,8 +32,31 @@ describe('PreviewSectionActionMenu', () => {
 
     expect(screen.getByText('Chorus')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刪除段落' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '合併到前方' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '複製到後方' }));
     expect(onDuplicate).toHaveBeenCalledOnce();
+  });
+
+  it('allows a non-first section to merge into the previous section', () => {
+    const onMergePrevious = vi.fn();
+    render(
+      <PreviewSectionActionMenu
+        language="zh"
+        deviceLayout="desktop"
+        title="Bridge"
+        anchorRect={anchorRect}
+        canDelete
+        canMergePrevious
+        onRename={vi.fn()}
+        onDuplicate={vi.fn()}
+        onMergePrevious={onMergePrevious}
+        onDelete={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '合併到前方' }));
+    expect(onMergePrevious).toHaveBeenCalledOnce();
   });
 
   it('uses the touch bottom sheet for phone and tablet layouts', () => {
@@ -42,8 +67,10 @@ describe('PreviewSectionActionMenu', () => {
         title="Verse"
         anchorRect={anchorRect}
         canDelete
+        canMergePrevious={false}
         onRename={vi.fn()}
         onDuplicate={vi.fn()}
+        onMergePrevious={vi.fn()}
         onDelete={vi.fn()}
         onClose={vi.fn()}
       />
@@ -57,8 +84,10 @@ describe('PreviewSectionActionMenu', () => {
         title="Bridge"
         anchorRect={anchorRect}
         canDelete
+        canMergePrevious
         onRename={vi.fn()}
         onDuplicate={vi.fn()}
+        onMergePrevious={vi.fn()}
         onDelete={vi.fn()}
         onClose={vi.fn()}
       />

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../../types';
@@ -28,13 +28,23 @@ const target = {
 
 const renderEditor = ({
   session = createPreviewEditSession({ song, target, inputMode: 'letters' }),
-  deviceLayout = 'desktop' as PreviewEditorDeviceLayout
+  deviceLayout = 'desktop' as PreviewEditorDeviceLayout,
+  hasCopiedBar = false,
+  hasCopiedJianpu = false,
+  hasCopiedRhythm = false
 } = {}) => {
   const callbacks = {
     onApplyDraft: vi.fn(),
     onInputModeChange: vi.fn(),
+    onNotationModeChange: vi.fn(),
+    onNotationCursorChange: vi.fn(),
+    onJianpuInputAbsoluteChange: vi.fn(),
     onNavigate: vi.fn(),
     onStructure: vi.fn(),
+    onCopyJianpu: vi.fn(),
+    onPasteJianpu: vi.fn(),
+    onCopyRhythm: vi.fn(),
+    onPasteRhythm: vi.fn(),
     onUndo: vi.fn(),
     onRedo: vi.fn(),
     onDone: vi.fn(),
@@ -48,6 +58,9 @@ const renderEditor = ({
       storedKey="C"
       displayedKey="C"
       storageMode="letters"
+      hasCopiedBar={hasCopiedBar}
+      hasCopiedJianpu={hasCopiedJianpu}
+      hasCopiedRhythm={hasCopiedRhythm}
       {...callbacks}
     />
   );
@@ -81,6 +94,314 @@ describe('PreviewBarEditor', () => {
     expect(nextSong.sections[0].bars[0].chords).toEqual(['C', 'G', '', '']);
     expect(screen.getByRole('button', { name: 'Previous beat' })).toHaveTextContent('上一拍');
     expect(screen.getByRole('button', { name: 'Next beat' })).toHaveTextContent('下一拍');
+  });
+
+  it('cycles the globe through the three notation modes without mutating the draft', async () => {
+    const user = userEvent.setup();
+    const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { onApplyDraft, onNotationModeChange, rerenderSession } = renderEditor({
+      session: base,
+      deviceLayout: 'phone'
+    });
+
+    await user.click(screen.getByRole('button', { name: '切換輸入法，目前和弦，下一個節奏' }));
+    expect(onNotationModeChange).toHaveBeenCalledWith('rhythm');
+    expect(onApplyDraft).not.toHaveBeenCalled();
+
+    rerenderSession({ ...base, notationMode: 'rhythm' });
+    await user.click(screen.getByRole('button', { name: '切換輸入法，目前節奏，下一個簡譜' }));
+    expect(onNotationModeChange).toHaveBeenLastCalledWith('jianpu');
+
+    rerenderSession({ ...base, notationMode: 'jianpu' });
+    await user.click(screen.getByRole('button', { name: '切換輸入法，目前簡譜，下一個和弦' }));
+    expect(onNotationModeChange).toHaveBeenLastCalledWith('chords');
+  });
+
+  it('writes rhythm notes and rests through semantic rhythm cursors', async () => {
+    const user = userEvent.setup();
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft, onNotationCursorChange } = renderEditor({
+      session: rhythmSession,
+      deviceLayout: 'phone'
+    });
+
+    expect(document.querySelector('[data-keyboard-view="rhythm"]')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '四分音符' }));
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].rhythm).toBe('q');
+    expect(onNotationCursorChange).toHaveBeenLastCalledWith({ kind: 'rhythm', cursorUnit: 4 });
+  });
+
+  it('shows clean rhythm symbols without staff lines, fractions or token labels', () => {
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song, target: rhythmTarget, inputMode: 'letters' });
+    renderEditor({ session: rhythmSession, deviceLayout: 'phone' });
+
+    const notes = document.querySelector('[data-rhythm-key-row="notes"]');
+    const rests = document.querySelector('[data-rhythm-key-row="rests"]');
+    const modifiers = document.querySelector('[data-rhythm-key-row="modifiers"]');
+    expect(notes?.querySelectorAll('[data-rhythm-staff-key-glyph]')).toHaveLength(5);
+    expect(rests?.querySelectorAll('[data-rhythm-staff-key-glyph]')).toHaveLength(5);
+    expect(modifiers?.querySelectorAll('[data-rhythm-triplet-mark]')).toHaveLength(4);
+    expect(document.querySelector('[data-rhythm-staff-line]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-rhythm-notation-label]')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '預覽快捷編輯' })).not.toHaveTextContent(/1\/2|1\/4|1\/8|1\/16/);
+    expect(notes).not.toHaveTextContent(/\b[whqes]\b/);
+  });
+
+  it('dispatches desktop hardware keys to the rhythm command layer', () => {
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: rhythmSession, deviceLayout: 'desktop' });
+    expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: 'e' });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].rhythm).toBe('e');
+  });
+
+  it('offers rhythm copy and paste from the rhythm keyboard', async () => {
+    const user = userEvent.setup();
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song, target: rhythmTarget, inputMode: 'letters' });
+    const { onCopyRhythm, onPasteRhythm } = renderEditor({
+      session: rhythmSession,
+      deviceLayout: 'phone',
+      hasCopiedRhythm: true
+    });
+
+    expect(document.querySelector('[data-rhythm-key-row="copy-paste"]')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '複製節奏' }));
+    expect(onCopyRhythm).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '貼上節奏' }));
+    expect(onPasteRhythm).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes jianpu with independent duration formatting and reports its semantic cursor', async () => {
+    const user = userEvent.setup();
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song, target: jianpuTarget, inputMode: 'letters' });
+    const { onApplyDraft, onNotationCursorChange } = renderEditor({
+      session: jianpuSession,
+      deviceLayout: 'phone'
+    });
+
+    expect(document.querySelector('[data-keyboard-view="jianpu"]')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '切換簡譜八分音符' }));
+    await user.click(screen.getByRole('button', { name: '輸入簡譜 5' }));
+    const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].riff).toMatch(/^5_/);
+    expect(onNotationCursorChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'jianpu',
+      beatIndex: 0
+    }));
+  });
+
+  it('offers jianpu copy and paste from the jianpu keyboard', async () => {
+    const user = userEvent.setup();
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song, target: jianpuTarget, inputMode: 'letters' });
+    const { onCopyJianpu, onPasteJianpu } = renderEditor({
+      session: jianpuSession,
+      deviceLayout: 'phone',
+      hasCopiedJianpu: true
+    });
+
+    expect(document.querySelector('[data-jianpu-key-row="bar-actions"]')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '複製簡譜' }));
+    expect(onCopyJianpu).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '貼上簡譜' }));
+    expect(onPasteJianpu).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the active duration beneath every jianpu pitch key and uses quarter as the unselected default', async () => {
+    const user = userEvent.setup();
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song, target: jianpuTarget, inputMode: 'letters' });
+    renderEditor({ session: jianpuSession, deviceLayout: 'phone' });
+
+    const formatRow = document.querySelector('[data-jianpu-key-row="format"]');
+    expect(formatRow).not.toHaveTextContent(/1\/4|1\/8|1\/16/);
+    expect(screen.queryByRole('button', { name: /四分音符/ })).not.toBeInTheDocument();
+    const pitchKey = screen.getByRole('button', { name: '輸入簡譜 1' });
+    const pitchGlyph = pitchKey.querySelector('[data-jianpu-input-glyph]');
+    expect(pitchGlyph).toHaveClass('[&_[data-jianpu-pitch-symbol]]:!text-[24px]', '[&_[data-jianpu-pitch-symbol]]:!font-medium');
+    expect(pitchGlyph).toHaveAttribute('data-jianpu-duration', 'quarter');
+
+    const eighthButton = screen.getByRole('button', { name: '切換簡譜八分音符' });
+    await user.click(eighthButton);
+    const pitchGlyphs = Array.from(document.querySelectorAll('[data-jianpu-key-row="pitches"] [data-jianpu-input-glyph]'));
+    expect(pitchGlyphs).toHaveLength(7);
+    pitchGlyphs.forEach((glyph) => {
+      expect(glyph).toHaveAttribute('data-jianpu-duration', 'eighth');
+      expect(glyph.querySelectorAll('[data-jianpu-duration-line]')).toHaveLength(1);
+    });
+    expect(eighthButton).toHaveClass('!bg-indigo-600');
+
+    await user.click(eighthButton);
+    Array.from(document.querySelectorAll('[data-jianpu-key-row="pitches"] [data-jianpu-input-glyph]')).forEach((glyph) => {
+      expect(glyph).toHaveAttribute('data-jianpu-duration', 'quarter');
+      expect(glyph.querySelectorAll('[data-jianpu-duration-line]')).toHaveLength(0);
+    });
+    expect(eighthButton).not.toHaveClass('!bg-indigo-600');
+
+    await user.click(screen.getByRole('button', { name: '切換簡譜十六分音符' }));
+    Array.from(document.querySelectorAll('[data-jianpu-key-row="pitches"] [data-jianpu-input-glyph]')).forEach((glyph) => {
+      expect(glyph).toHaveAttribute('data-jianpu-duration', 'sixteenth');
+      expect(glyph.querySelectorAll('[data-jianpu-duration-line]')).toHaveLength(2);
+    });
+    await user.click(eighthButton);
+    await user.click(screen.getByRole('button', { name: '切換簡譜升記號' }));
+    await user.click(screen.getByRole('button', { name: '切換高八度簡譜' }));
+    await user.click(screen.getByRole('button', { name: '切換簡譜附點' }));
+
+    expect(eighthButton).toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換簡譜升記號' })).toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換簡譜附點' })).toHaveClass('!bg-indigo-600');
+    expect(pitchKey).toHaveTextContent('1');
+    expect(document.querySelectorAll('[data-jianpu-input-glyph]')).toHaveLength(11);
+  });
+
+  it('keeps the jianpu movable/fixed input toggle separate from song mutation', async () => {
+    const user = userEvent.setup();
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song, target: jianpuTarget, inputMode: 'letters' });
+    const { onApplyDraft, onJianpuInputAbsoluteChange } = renderEditor({
+      session: jianpuSession,
+      deviceLayout: 'tablet'
+    });
+
+    await user.click(screen.getByRole('button', { name: '切換為固定調簡譜輸入' }));
+    expect(onJianpuInputAbsoluteChange).toHaveBeenCalledWith(true);
+    expect(onApplyDraft).not.toHaveBeenCalled();
+  });
+
+  it('dispatches desktop number keys to jianpu instead of chord input', () => {
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song, target: jianpuTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: jianpuSession, deviceLayout: 'desktop' });
+    expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: '3' });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].riff).toMatch(/^3/);
+  });
+
+  it('toggles jianpu duration and octave with compact hardware shortcuts', () => {
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song, target: jianpuTarget, inputMode: 'letters' });
+    renderEditor({ session: jianpuSession, deviceLayout: 'desktop' });
+
+    fireEvent.keyDown(document.body, { key: 'e' });
+    expect(screen.getByRole('button', { name: '切換簡譜八分音符' })).toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '輸入簡譜 4' }).querySelector('[data-jianpu-input-glyph]')).toHaveAttribute('data-jianpu-duration', 'eighth');
+    fireEvent.keyDown(document.body, { key: 'e' });
+    expect(screen.getByRole('button', { name: '切換簡譜八分音符' })).not.toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '輸入簡譜 4' }).querySelector('[data-jianpu-input-glyph]')).toHaveAttribute('data-jianpu-duration', 'quarter');
+
+    fireEvent.keyDown(document.body, { key: 's' });
+    expect(screen.getByRole('button', { name: '切換簡譜十六分音符' })).toHaveClass('!bg-indigo-600');
+    fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).toHaveClass('!bg-indigo-600');
+    fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).not.toHaveClass('!bg-indigo-600');
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+    expect(screen.getByRole('button', { name: '切換低八度簡譜' })).toHaveClass('!bg-indigo-600');
+  });
+
+  it('hands cross-bar jianpu navigation back to the App target navigator', async () => {
+    const user = userEvent.setup();
+    const twoBarSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: [] }, { id: 'bar-2', chords: [] }]
+      }]
+    };
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 3, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({
+      song: twoBarSong,
+      target: jianpuTarget,
+      inputMode: 'letters'
+    });
+    const { onNavigate, onNotationCursorChange } = renderEditor({
+      session: jianpuSession,
+      deviceLayout: 'phone'
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Next beat' }));
+    expect(onNavigate).toHaveBeenCalledWith('next', {
+      kind: 'jianpu',
+      beatIndex: 0,
+      unitIndex: 0,
+      noteIndex: null
+    });
+    expect(onNotationCursorChange).not.toHaveBeenCalled();
   });
 
   it('docks the iPad keyboard across the full visual viewport without a native chord input', () => {
@@ -260,16 +581,32 @@ describe('PreviewBarEditor', () => {
     expect(document.querySelector('[data-keyboard-picker]')).not.toBeInTheDocument();
   });
 
-  it('keeps all five structure operations in one fixed picker', async () => {
+  it('keeps all structure operations in one fixed picker', async () => {
     const user = userEvent.setup();
-    const { onStructure } = renderEditor({ deviceLayout: 'phone' });
+    const { onStructure } = renderEditor({ deviceLayout: 'phone', hasCopiedBar: true });
     await user.click(screen.getByRole('button', { name: '小節操作' }));
     const actions = document.querySelector('[data-structure-actions]');
     expect(actions).toBeInTheDocument();
-    expect(actions?.querySelectorAll('button')).toHaveLength(5);
+    expect(actions?.querySelectorAll('button')).toHaveLength(7);
     expect(actions).not.toHaveClass('overflow-y-auto');
+    await user.click(within(actions as HTMLElement).getByRole('button', { name: '複製小節' }));
+    expect(onStructure).toHaveBeenCalledWith('copy-bar');
+    await user.click(screen.getByRole('button', { name: '小節操作' }));
+    await user.click(within(document.querySelector('[data-structure-actions]') as HTMLElement).getByRole('button', { name: '貼上小節' }));
+    expect(onStructure).toHaveBeenCalledWith('paste-bar-after');
+    await user.click(screen.getByRole('button', { name: '小節操作' }));
     await user.click(screen.getByRole('button', { name: '拆分段落' }));
     expect(onStructure).toHaveBeenCalledWith('split-section');
+  });
+
+  it('shows direct bar copy and paste buttons on the chord keyboard', async () => {
+    const user = userEvent.setup();
+    const { onStructure } = renderEditor({ deviceLayout: 'phone', hasCopiedBar: true });
+
+    await user.click(screen.getByRole('button', { name: '複製小節' }));
+    expect(onStructure).toHaveBeenCalledWith('copy-bar');
+    await user.click(screen.getByRole('button', { name: '貼上小節' }));
+    expect(onStructure).toHaveBeenCalledWith('paste-bar-after');
   });
 
   it('toggles a per-bar 4/4 override off and keeps complete symbol controls', async () => {
@@ -374,6 +711,139 @@ describe('PreviewBarEditor', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '和弦直接輸入' }), { target: { value: 'bb/db' } });
     const nextSong = onApplyDraft.mock.calls[0][0] as Song;
     expect(nextSong.sections[0].bars[0].chords[1]).toBe('Bb/Db');
+  });
+
+  it('places the desktop text caret at the end and reserves plain arrows for chord text editing', () => {
+    const chordSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C', 'C11', '', ''] }] }]
+    };
+    const chordSession = createPreviewEditSession({ song: chordSong, target, inputMode: 'letters' });
+    const { onNavigate } = renderEditor({ session: chordSession, deviceLayout: 'desktop' });
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' }) as HTMLInputElement;
+
+    expect(capture.selectionStart).toBe(3);
+    expect(capture.selectionEnd).toBe(3);
+    fireEvent.keyDown(capture, { key: 'ArrowLeft' });
+    fireEvent.keyDown(capture, { key: 'ArrowRight' });
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it('uses Space, Enter, and Shift Enter for chord navigation without binding Cmd Enter', () => {
+    const { onNavigate, onDone, onStructure } = renderEditor();
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+
+    fireEvent.keyDown(capture, { key: 'ArrowLeft', shiftKey: true });
+    expect(onNavigate).toHaveBeenLastCalledWith('previous', undefined, { bar: true });
+    fireEvent.keyDown(capture, { key: 'ArrowRight', shiftKey: true });
+    expect(onNavigate).toHaveBeenLastCalledWith('next', undefined, { bar: true });
+    fireEvent.keyDown(capture, { key: ' ' });
+    expect(onNavigate).toHaveBeenLastCalledWith('next');
+    fireEvent.keyDown(capture, { key: 'Enter' });
+    expect(onNavigate).toHaveBeenLastCalledWith('next', undefined, { bar: true });
+    fireEvent.keyDown(capture, { key: 'Enter', shiftKey: true });
+    expect(onStructure).toHaveBeenCalledWith('insert-section-after');
+
+    fireEvent.keyDown(capture, { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(capture, { key: 'Enter', ctrlKey: true });
+    expect(onStructure).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it('finishes preview input with Escape', () => {
+    const { onDone } = renderEditor();
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+
+    fireEvent.keyDown(capture, { key: 'Escape' });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies the shared barline shortcuts while the chord capture owns focus', () => {
+    const finalSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], finalBar: true }] }]
+    };
+    const firstTarget = { ...target, slotIndex: 0, rawChordIndex: 0, anchorKey: 'song-1|section-1|bar-1|chords|0' };
+    const { onApplyDraft, rerenderSession } = renderEditor({
+      session: createPreviewEditSession({ song: finalSong, target: firstTarget, inputMode: 'letters' }),
+      deviceLayout: 'desktop'
+    });
+    let capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+
+    fireEvent.keyDown(capture, { key: '[', code: 'BracketLeft' });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].repeatStart).toBe(true);
+    fireEvent.keyDown(capture, { key: ']', code: 'BracketRight' });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0]).toMatchObject({ repeatEnd: true, finalBar: false });
+
+    const repeatEndSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], repeatEnd: true }] }]
+    };
+    rerenderSession(createPreviewEditSession({ song: repeatEndSong, target: firstTarget, inputMode: 'letters' }));
+    capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+    fireEvent.keyDown(capture, { key: '\\', code: 'Backslash' });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0]).toMatchObject({ finalBar: true, repeatEnd: false });
+  });
+
+  it('appends physical chord characters and backspaces one character on hardware layouts', () => {
+    const chordSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C', 'C11', '', ''] }] }]
+    };
+    const chordSession = createPreviewEditSession({ song: chordSong, target, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: chordSession, deviceLayout: 'tablet' });
+
+    fireEvent.keyDown(document.body, { key: '7' });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].chords[1]).toBe('C117');
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].chords[1]).toBe('C1');
+  });
+
+  it('deletes the selected bar on Backspace only when the whole bar is empty', () => {
+    const emptySong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [] }] }]
+    };
+    const { onStructure } = renderEditor({
+      session: createPreviewEditSession({ song: emptySong, target, inputMode: 'letters' })
+    });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '和弦直接輸入' }), { key: 'Backspace' });
+    expect(onStructure).toHaveBeenCalledWith('delete');
+  });
+
+  it('keeps Backspace navigation when the selected chord slot is empty but the bar has content', () => {
+    const { onNavigate, onStructure } = renderEditor();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '和弦直接輸入' }), { key: 'Backspace' });
+
+    expect(onStructure).not.toHaveBeenCalled();
+    expect(onNavigate).toHaveBeenCalledWith('previous');
+  });
+
+  it('emphasizes delete keys consistently across all notation keyboards', () => {
+    const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { rerenderSession } = renderEditor({ session: base, deviceLayout: 'phone' });
+    expect(screen.getByRole('button', { name: '刪除最後一個字元' })).toHaveAttribute('data-key-emphasis', 'delete');
+
+    rerenderSession(createPreviewEditSession({
+      song,
+      target: {
+        ...target,
+        field: 'rhythm',
+        cursor: { kind: 'rhythm', cursorUnit: 0 }
+      },
+      inputMode: 'letters'
+    }));
+    expect(screen.getByRole('button', { name: '刪除節奏事件' })).toHaveAttribute('data-key-emphasis', 'delete');
+    rerenderSession(createPreviewEditSession({
+      song,
+      target: {
+        ...target,
+        field: 'jianpu',
+        cursor: { kind: 'jianpu', beatIndex: 0, unitIndex: 0, noteIndex: null }
+      },
+      inputMode: 'letters'
+    }));
+    expect(screen.getByRole('button', { name: '刪除簡譜音符' })).toHaveAttribute('data-key-emphasis', 'delete');
   });
 
   it('keeps hardware chord typing active after a visual key takes focus', async () => {

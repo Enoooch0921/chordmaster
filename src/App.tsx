@@ -17,6 +17,7 @@ import {
   CloudLibrarySummary,
   LibraryRole,
   Song,
+  Bar,
   Key,
   AppLanguage,
   JoinedSetlist,
@@ -39,7 +40,7 @@ import {
 } from './types';
 import { ALL_KEYS, getPlayKey, getSuggestedGuitarCapo, getTransposeOffset, normalizeKeySpelling, transposeKeyPreferFlats, transposeKeyWithPreference } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
-import { convertAbsoluteJianpuToRelativeNotation, convertRelativeJianpuToAbsoluteNotation } from './utils/jianpuUtils';
+import { getEffectiveTimeSignature } from './utils/rhythmUtils';
 import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
 import { useThemeMode } from './hooks/useThemeMode';
 import { useToast } from './components/Toast';
@@ -93,12 +94,17 @@ import { hasSupabaseConfig } from './lib/supabase';
 import {
   applyPreviewDraft,
   createPreviewEditSession,
+  getPreviewCursorByModeForBar,
   markPreviewTargetDeleted,
-  PreviewEditField,
+  PreviewBarEditField,
   PreviewEditSession,
+  PreviewNotationCursor,
+  PreviewNotationMode,
   redoPreviewDraft,
   retargetPreviewEditSession,
-  setPreviewEditInputMode,
+  setPreviewEditChordInputMode,
+  setPreviewNotationCursor,
+  setPreviewNotationMode,
   undoPreviewDraft
 } from './lib/previewEditSession';
 import {
@@ -115,14 +121,33 @@ import {
   getChordStorageModeForTarget,
   getSectionStoredKey,
   insertBar,
+  insertSectionAfter,
+  mergeSectionToPrevious,
+  repairSongStructure,
   reorderSection,
   resolvePreviewChordSlotIndex,
   splitSectionAtBar,
   updateSectionTitle
 } from './lib/songEditing';
-import { getPreviewEditorBottomInset, resolvePreviewEditorDeviceLayout } from './lib/previewEditorLayout';
+import {
+  getPreviewEditorBottomInset,
+  resolvePreviewEditorDeviceLayout,
+  shouldAutoScrollPreviewEditTarget
+} from './lib/previewEditorLayout';
 import { getPreviewZoomContentRatio, resolvePreviewZoomScrollPosition } from './lib/previewZoom';
 import { getChordDisplaySlotOwnership } from './utils/chordSlots';
+import { getDefaultRhythmCursor, getRhythmCursorUnits } from './lib/rhythmEditing';
+import {
+  buildJianpuPitchContext,
+  getDefaultJianpuCursor,
+  getJianpuNavigationEdgeCursor,
+  reinterpretSongJianpuInput
+} from './lib/jianpuEditing';
+import {
+  loadPreviewLastNonChordMode,
+  savePreviewLastNonChordMode,
+  type PreviewNonChordMode
+} from './lib/previewNotationPreference';
 
 const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -1158,43 +1183,6 @@ interface PreviewPinchState {
 
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
-// Switching the jianpu input mode keeps the on-screen numbers identical and just
-// reinterprets them in the new mode (the user's "keep numbers" choice). Storage is
-// always relative, so we rewrite every riff using each section's sounding (play)
-// key — the same key the editor/chart use to render absolute jianpu — so the
-// displayed digits stay put while the stored pitches shift to the newly intended
-// reading. Fully reversible: switching back (or Undo) restores the original riffs.
-const reinterpretSongJianpuInput = (song: Song, toAbsolute: boolean): Song => {
-  const capo = song.capo || 0;
-  const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
-
-  // Written key in effect at each section (mirrors getSectionKeyStates' activeKeys).
-  let writtenKey = song.originalKey;
-  const sectionPlayKeys = song.sections.map((section) => {
-    if (section.keyChangeTo) writtenKey = section.keyChangeTo;
-    return getPlayKey(transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey), capo);
-  });
-  const pickupPlayKey = getPlayKey(transposeKeyWithPreference(song.originalKey, globalKeyShift, song.currentKey), capo);
-
-  const rewrite = (riff: string | undefined, key: Key): string | undefined => {
-    if (!riff?.trim()) return riff;
-    return toAbsolute
-      ? convertAbsoluteJianpuToRelativeNotation(riff, key)
-      : convertRelativeJianpuToAbsoluteNotation(riff, key);
-  };
-
-  return {
-    ...song,
-    pickup: song.pickup ? { ...song.pickup, riff: rewrite(song.pickup.riff, pickupPlayKey) } : song.pickup,
-    sections: song.sections.map((section, sIdx) => ({
-      ...section,
-      bars: section.bars.map((bar) => (
-        bar.riff?.trim() ? { ...bar, riff: rewrite(bar.riff, sectionPlayKeys[sIdx]) } : bar
-      ))
-    }))
-  };
-};
-
 const inactiveSetlistShareStatus: SetlistShareStatus = {
   activeToken: null,
   activeCreatedAt: null,
@@ -1263,7 +1251,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
       }
     : undefined;
 
-  return {
+  return repairSongStructure({
     ...song,
     title: normalizeText(song.title),
     lyricist: normalizeOptionalText(song.lyricist),
@@ -1296,7 +1284,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
         bars: [{ chords: [] }]
       }
     ]
-  } as T;
+  } as T);
 };
 
 const createStoredSong = (song: Song, id = createSongId()): StoredSong => ({
@@ -1565,6 +1553,10 @@ const loadSongLibrary = () => {
       id: song.id || `song-restored-${index + 1}`,
       updatedAt: typeof song.updatedAt === 'number' ? song.updatedAt : Date.now()
     }));
+    const repairedSerializedSongs = JSON.stringify(songs);
+    if (repairedSerializedSongs !== JSON.stringify(parsedSongs)) {
+      window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, repairedSerializedSongs);
+    }
     const selectedSongId = pickAvailableSongId(songs, [storedSelectedId]);
     const parsedLastSavedAt = storedLastSavedAt ? Number(storedLastSavedAt) : null;
 
@@ -1965,7 +1957,16 @@ export default function App() {
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
   const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
   const [previewEditSession, setPreviewEditSession] = useState<PreviewEditSession | null>(null);
+  const [previewCopiedBar, setPreviewCopiedBar] = useState<Bar | null>(null);
+  const [previewCopiedJianpu, setPreviewCopiedJianpu] = useState<string | null>(null);
+  const [previewCopiedRhythm, setPreviewCopiedRhythm] = useState<string | null>(null);
+  const [lastPreviewNonChordMode, setLastPreviewNonChordMode] = useState<PreviewNonChordMode>(loadPreviewLastNonChordMode);
+  const rememberPreviewNonChordMode = React.useCallback((mode: PreviewNonChordMode) => {
+    setLastPreviewNonChordMode(mode);
+    savePreviewLastNonChordMode(mode);
+  }, []);
   const [previewSectionActionTarget, setPreviewSectionActionTarget] = useState<PreviewSectionActionTarget | null>(null);
+  const previewSectionActionTimerRef = useRef<number | null>(null);
   const [previewEditorPanelHeight, setPreviewEditorPanelHeight] = useState(0);
   const handlePreviewEditorPanelHeightChange = React.useCallback((height: number) => {
     const roundedHeight = Math.max(0, Math.round(height));
@@ -2124,6 +2125,9 @@ export default function App() {
   const previewCanvasRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const previewZoomLabelRef = useRef<HTMLButtonElement>(null);
+  const lastPreviewAutoScrollBarKeyRef = useRef<string | null>(null);
+  const pendingPreviewAutoScrollBarKeyRef = useRef<string | null>(null);
+  const skipNextActiveSectionPreviewScrollRef = useRef(false);
   const mobileWysiwygKeyboardProxyInputRef = useRef<HTMLInputElement>(null);
   const setlistActionsMenuRef = useRef<HTMLDivElement>(null);
   const toolbarOverflowMenuRef = useRef<HTMLDivElement>(null);
@@ -2439,6 +2443,14 @@ export default function App() {
   const activePreviewEditSession = previewEditSession?.previewIdentity === activePreviewIdentity
     ? previewEditSession
     : null;
+  const activePreviewNotationTarget = activePreviewEditSession?.target.kind === 'bar'
+    ? {
+        sectionId: activePreviewEditSession.target.sectionId,
+        barId: activePreviewEditSession.target.barId,
+        notationMode: activePreviewEditSession.notationMode,
+        cursor: activePreviewEditSession.cursorByMode[activePreviewEditSession.notationMode]
+      }
+    : null;
   const previewEditorBottomInset = activePreviewEditSession
     ? getPreviewEditorBottomInset(previewEditorDeviceLayout, previewEditorPanelHeight)
     : 0;
@@ -2454,6 +2466,11 @@ export default function App() {
           }
         : activeNavigationPreviewSong)
     : activeDraftEditorSong;
+  const activeJianpuPitchContext = React.useMemo(() => (
+    activeDraftNavigationPreviewSong
+      ? buildJianpuPitchContext(activeDraftNavigationPreviewSong)
+      : undefined
+  ), [activeDraftNavigationPreviewSong]);
   const activeAppViewLabel = activeAppView === 'about'
     ? copy.about
     : activeAppView === 'help'
@@ -3302,6 +3319,10 @@ export default function App() {
   }, [authenticatedUser, isTeamWorkspace, linkedTeamSourceSignature, songs]);
 
   useEffect(() => {
+    if (skipNextActiveSectionPreviewScrollRef.current) {
+      skipNextActiveSectionPreviewScrollRef.current = false;
+      return;
+    }
     if (!isEditing || !activeSectionId) return;
 
     const scrollRoot = previewRef.current;
@@ -6372,7 +6393,7 @@ export default function App() {
         previewClone.style.maxWidth = '794px';
         previewClone.style.margin = '0';
 
-        previewClone.querySelectorAll('[data-preview-slot-hit], [data-preview-input-caret], [data-preview-only-control]').forEach((node) => node.remove());
+        previewClone.querySelectorAll('[data-preview-edit-ui], [data-preview-slot-hit], [data-preview-input-caret], [data-preview-only-control]').forEach((node) => node.remove());
 
         previewClone.querySelectorAll<HTMLElement>('[data-print-page]').forEach((node) => {
           node.style.boxShadow = 'none';
@@ -7370,6 +7391,14 @@ export default function App() {
     setPreviewEditSession(null);
   }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode, previewEditSession, selectedSetlistSong?.id, song?.id]);
 
+  const clearPendingPreviewSectionAction = React.useCallback(() => {
+    if (previewSectionActionTimerRef.current === null) return;
+    window.clearTimeout(previewSectionActionTimerRef.current);
+    previewSectionActionTimerRef.current = null;
+  }, []);
+
+  React.useEffect(() => () => clearPendingPreviewSectionAction(), [clearPendingPreviewSectionAction]);
+
   const openPreviewSectionTitleEditor = React.useCallback((target: PreviewSectionActionTarget) => {
     const editorSong = activeEditorSong;
     if (!editorSong || target.previewIdentity !== activePreviewIdentity) return;
@@ -7405,7 +7434,7 @@ export default function App() {
     window.requestAnimationFrame(refreshPreviewEditAnchorRect);
   }, [activeEditorSong, activePreviewIdentity, findPreviewAnchorRect, hasFinePointer, refreshPreviewEditAnchorRect]);
 
-  const finishPreviewSectionAction = React.useCallback((action: 'duplicate' | 'delete') => {
+  const finishPreviewSectionAction = React.useCallback((action: 'duplicate' | 'merge-previous' | 'delete') => {
     const target = previewSectionActionTarget;
     const editorSong = activeEditorSong;
     if (!target || !editorSong || target.previewIdentity !== activePreviewIdentity) return;
@@ -7422,8 +7451,12 @@ export default function App() {
     const editableSong = ensureSongEditingIds(editorSong);
     const result = action === 'duplicate'
       ? duplicateSection(editableSong, target.sectionId)
-      : null;
-    const nextSong = result?.song ?? deleteSection(editableSong, target.sectionId);
+      : action === 'merge-previous'
+        ? mergeSectionToPrevious(editableSong, target.sectionId)
+        : null;
+    const nextSong = action === 'delete'
+      ? deleteSection(editableSong, target.sectionId)
+      : result?.song ?? editableSong;
     if (nextSong === editableSong) return;
 
     if (isSetlistMode) {
@@ -7450,10 +7483,11 @@ export default function App() {
   }, [activeEditorSong, activePreviewIdentity, handleSetlistSongContentChange, handleSongChange, isSetlistMode, language, previewSectionActionTarget]);
 
   React.useEffect(() => {
-    if (previewSectionActionTarget && previewSectionActionTarget.previewIdentity !== activePreviewIdentity) {
-      setPreviewSectionActionTarget(null);
-    }
-  }, [activePreviewIdentity, previewSectionActionTarget]);
+    clearPendingPreviewSectionAction();
+    setPreviewSectionActionTarget((current) => (
+      current && current.previewIdentity !== activePreviewIdentity ? null : current
+    ));
+  }, [activePreviewIdentity, clearPendingPreviewSectionAction]);
 
   React.useEffect(() => {
     if (!activePreviewEditSession || activePreviewEditSession.target.field === 'sectionName') return;
@@ -7469,27 +7503,193 @@ export default function App() {
     return () => document.removeEventListener('click', finishOnPreviewBlankClick, true);
   }, [activePreviewEditSession, commitPreviewEditSession]);
 
+  const makePreviewTargetAnchorKey = React.useCallback((previewIdentity: string, sectionId: string, barId: string, slotIndex: number) => (
+    `${previewIdentity}|${sectionId}|${barId}|chords|${slotIndex}`
+  ), []);
+
   const applyPreviewEditDraft = React.useCallback((nextSong: Song, options?: { mergeKey?: string }) => {
     setPreviewEditSession((current) => {
       if (!current) return current;
-      const nextSession = applyPreviewDraft(current, nextSong, options);
-      if (current.target.kind !== 'bar' || current.target.field !== 'chords') return nextSession;
+      let nextSession = applyPreviewDraft(current, nextSong, options);
+      if (current.target.kind !== 'bar') return nextSession;
       const located = findSongBar(nextSong, current.target);
       if (!located) return nextSession;
+      const previousLocated = findSongBar(current.draftSong, current.target);
+      const previousTimeSignature = previousLocated
+        ? getEffectiveTimeSignature(previousLocated.bar.timeSignature, current.draftSong.timeSignature)
+        : null;
+      const nextTimeSignature = getEffectiveTimeSignature(located.bar.timeSignature, nextSong.timeSignature);
+      if (previousTimeSignature !== nextTimeSignature) {
+        const targetIdentity = {
+          sectionId: current.target.sectionId,
+          barId: current.target.barId
+        };
+        const cursorByMode = getPreviewCursorByModeForBar(nextSong, targetIdentity);
+        const cursor = cursorByMode[current.notationMode];
+        const hasNotation = current.notationMode === 'rhythm'
+          ? Boolean(located.bar.rhythm?.trim())
+          : current.notationMode === 'jianpu'
+            ? Boolean(located.bar.riff?.trim())
+            : true;
+        const anchorKey = cursor.kind === 'chord'
+          ? makePreviewTargetAnchorKey(
+              current.previewIdentity,
+              current.target.sectionId,
+              current.target.barId,
+              cursor.slotIndex
+            )
+          : `${current.previewIdentity}|${current.target.sectionId}|${current.target.barId}|${hasNotation ? current.notationMode : 'lower'}|all`;
+        nextSession = {
+          ...nextSession,
+          cursorByMode,
+          target: {
+            ...current.target,
+            slotIndex: cursor.kind === 'chord' ? cursor.slotIndex : 0,
+            rawChordIndex: cursor.kind === 'chord' ? cursor.rawChordIndex : null,
+            cursor,
+            anchorKey,
+            anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+          }
+        };
+      }
+      if (current.notationMode !== 'chords' || nextSession.target.kind !== 'bar') return nextSession;
       const beatCount = getBeatCount(nextSong, located.bar);
-      const ownerSlotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[current.target.slotIndex]?.ownerSlotIndex;
-      if (ownerSlotIndex === undefined || ownerSlotIndex === current.target.slotIndex) return nextSession;
-      const anchorKey = `${current.previewIdentity}|${current.target.sectionId}|${current.target.barId}|chords|${ownerSlotIndex}`;
+      const ownerSlotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[nextSession.target.slotIndex]?.ownerSlotIndex;
+      if (ownerSlotIndex === undefined || ownerSlotIndex === nextSession.target.slotIndex) return nextSession;
+      const anchorKey = `${current.previewIdentity}|${nextSession.target.sectionId}|${nextSession.target.barId}|chords|${ownerSlotIndex}`;
+      const rawChordIndex = getChordBeatSlots(located.bar, beatCount)[ownerSlotIndex]?.rawChordIndex ?? null;
       return retargetPreviewEditSession(nextSession, {
-        ...current.target,
+        ...nextSession.target,
         slotIndex: ownerSlotIndex,
-        rawChordIndex: getChordBeatSlots(located.bar, beatCount)[ownerSlotIndex]?.rawChordIndex ?? null,
+        rawChordIndex,
+        cursor: { kind: 'chord', slotIndex: ownerSlotIndex, rawChordIndex },
         anchorKey,
-        anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+        anchorRect: findPreviewAnchorRect(anchorKey) ?? nextSession.target.anchorRect
       });
     });
     window.requestAnimationFrame(refreshPreviewEditAnchorRect);
-  }, [findPreviewAnchorRect, refreshPreviewEditAnchorRect]);
+  }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
+
+  const handlePreviewNotationModeChange = React.useCallback((mode: PreviewNotationMode) => {
+    if (mode === 'rhythm' || mode === 'jianpu') rememberPreviewNonChordMode(mode);
+    setPreviewEditSession((current) => {
+      if (!current || current.target.kind !== 'bar') return current;
+      const withMode = setPreviewNotationMode(current, mode);
+      const cursor = withMode.cursorByMode[mode];
+      const located = findSongBar(current.draftSong, current.target);
+      const hasRequestedNotation = mode === 'rhythm'
+        ? Boolean(located?.bar.rhythm?.trim())
+        : mode === 'jianpu'
+          ? Boolean(located?.bar.riff?.trim())
+          : true;
+      const lowerAnchorKey = `${current.previewIdentity}|${current.target.sectionId}|${current.target.barId}|lower|all`;
+      const anchorKey = mode === 'chords' && cursor.kind === 'chord'
+        ? makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, cursor.slotIndex)
+        : hasRequestedNotation
+          ? `${current.previewIdentity}|${current.target.sectionId}|${current.target.barId}|${mode}|all`
+          : lowerAnchorKey;
+      return {
+        ...withMode,
+        target: {
+          ...current.target,
+          field: mode,
+          slotIndex: cursor.kind === 'chord' ? cursor.slotIndex : 0,
+          rawChordIndex: cursor.kind === 'chord' ? cursor.rawChordIndex : null,
+          cursor,
+          anchorKey,
+          anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+        }
+      };
+    });
+    window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+  }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect, rememberPreviewNonChordMode]);
+
+  const handlePreviewNotationCursorChange = React.useCallback((cursor: PreviewNotationCursor) => {
+    setPreviewEditSession((current) => {
+      if (!current || current.target.kind !== 'bar') return current;
+      const withCursor = setPreviewNotationCursor(current, cursor);
+      const mode: PreviewNotationMode = cursor.kind === 'chord' ? 'chords' : cursor.kind;
+      const keepLowerAnchor = current.target.anchorKey.includes('|lower|');
+      const anchorKey = cursor.kind === 'chord'
+        ? makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, cursor.slotIndex)
+        : keepLowerAnchor
+          ? current.target.anchorKey
+          : `${current.previewIdentity}|${current.target.sectionId}|${current.target.barId}|${mode}|all`;
+      return {
+        ...withCursor,
+        target: {
+          ...current.target,
+          field: mode,
+          slotIndex: cursor.kind === 'chord' ? cursor.slotIndex : 0,
+          rawChordIndex: cursor.kind === 'chord' ? cursor.rawChordIndex : null,
+          cursor,
+          anchorKey,
+          anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+        }
+      };
+    });
+    window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+  }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
+
+  const handlePreviewJianpuInputAbsoluteChange = React.useCallback((value: boolean) => {
+    setPreviewEditSession((current) => {
+      if (!current || current.target.kind !== 'bar') return current;
+      const currentValue = Boolean(current.draftSong.jianpuInputAbsolute);
+      if (currentValue === value) return current;
+      const nextSong = reinterpretSongJianpuInput(current.draftSong, value, activeJianpuPitchContext);
+      return applyPreviewDraft(current, nextSong);
+    });
+  }, [activeJianpuPitchContext]);
+
+  const handlePreviewCopyJianpu = React.useCallback(() => {
+    const current = previewEditSession;
+    if (!current || current.target.kind !== 'bar') return;
+    const located = findSongBar(current.draftSong, current.target);
+    if (!located) return;
+    setPreviewCopiedJianpu(located.bar.riff ?? '');
+  }, [previewEditSession]);
+
+  const handlePreviewPasteJianpu = React.useCallback(() => {
+    setPreviewEditSession((current) => {
+      if (!current || current.target.kind !== 'bar' || previewCopiedJianpu === null) return current;
+      const located = findSongBar(current.draftSong, current.target);
+      if (!located) return current;
+      const bars = [...located.section.bars];
+      bars[located.barIndex] = {
+        ...bars[located.barIndex],
+        riff: previewCopiedJianpu || undefined
+      };
+      const sections = [...current.draftSong.sections];
+      sections[located.sectionIndex] = { ...located.section, bars };
+      const draftSong = { ...current.draftSong, sections };
+      return applyPreviewDraft(current, draftSong);
+    });
+  }, [previewCopiedJianpu]);
+
+  const handlePreviewCopyRhythm = React.useCallback(() => {
+    const current = previewEditSession;
+    if (!current || current.target.kind !== 'bar') return;
+    const located = findSongBar(current.draftSong, current.target);
+    if (!located) return;
+    setPreviewCopiedRhythm(located.bar.rhythm ?? '');
+  }, [previewEditSession]);
+
+  const handlePreviewPasteRhythm = React.useCallback(() => {
+    setPreviewEditSession((current) => {
+      if (!current || current.target.kind !== 'bar' || previewCopiedRhythm === null) return current;
+      const located = findSongBar(current.draftSong, current.target);
+      if (!located) return current;
+      const bars = [...located.section.bars];
+      bars[located.barIndex] = {
+        ...bars[located.barIndex],
+        rhythm: previewCopiedRhythm || undefined
+      };
+      const sections = [...current.draftSong.sections];
+      sections[located.sectionIndex] = { ...located.section, bars };
+      const draftSong = { ...current.draftSong, sections };
+      return applyPreviewDraft(current, draftSong);
+    });
+  }, [previewCopiedRhythm]);
 
   const handleActiveEditorSongChange = React.useCallback((nextSong: Song) => {
     if (activePreviewEditSession) {
@@ -7525,42 +7725,134 @@ export default function App() {
     commitPreviewEditSession(nextSession);
   }, [commitPreviewEditSession, previewEditSession]);
 
-  const makePreviewTargetAnchorKey = React.useCallback((previewIdentity: string, sectionId: string, barId: string, slotIndex: number) => (
-    `${previewIdentity}|${sectionId}|${barId}|chords|${slotIndex}`
-  ), []);
-
-  const handlePreviewEditNavigate = React.useCallback((direction: 'previous' | 'next') => {
+  const handlePreviewEditNavigate = React.useCallback((
+    direction: 'previous' | 'next',
+    requestedCursor?: PreviewNotationCursor,
+    options?: { bar: boolean }
+  ) => {
+    pendingPreviewAutoScrollBarKeyRef.current = null;
     setPreviewEditSession((current) => {
       if (!current || current.target.kind !== 'bar') return current;
       const located = findSongBar(current.draftSong, current.target);
       if (!located) return current;
-      const beatCount = getBeatCount(current.draftSong, located.bar);
-      if (direction === 'previous' && current.target.slotIndex > 0) {
-        const requestedSlotIndex = current.target.slotIndex - 1;
-        const slotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[requestedSlotIndex]?.ownerSlotIndex
-          ?? requestedSlotIndex;
-        const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, slotIndex);
-        return retargetPreviewEditSession(current, {
+      if (current.notationMode !== 'chords') {
+        const mode = current.notationMode;
+        let draftSong = current.draftSong;
+        let targetSectionIndex = located.sectionIndex;
+        let targetBar = direction === 'previous'
+          ? located.section.bars[located.barIndex - 1]
+          : located.section.bars[located.barIndex + 1];
+
+        if (!targetBar && direction === 'previous') {
+          for (let sectionIndex = located.sectionIndex - 1; sectionIndex >= 0; sectionIndex -= 1) {
+            const candidate = current.draftSong.sections[sectionIndex]?.bars.at(-1);
+            if (!candidate) continue;
+            targetSectionIndex = sectionIndex;
+            targetBar = candidate;
+            break;
+          }
+        } else if (!targetBar && direction === 'next') {
+          for (let sectionIndex = located.sectionIndex + 1; sectionIndex < current.draftSong.sections.length; sectionIndex += 1) {
+            targetSectionIndex = sectionIndex;
+            targetBar = current.draftSong.sections[sectionIndex]?.bars[0];
+            // An empty adjacent section is itself the next destination; create
+            // its first bar below instead of pairing its id with the old bar.
+            break;
+          }
+        }
+
+        const targetSectionId = current.draftSong.sections[targetSectionIndex]?.id ?? current.target.sectionId;
+
+        if (!targetBar && direction === 'next') {
+          targetBar = createEmptyBar();
+          if (targetSectionIndex !== located.sectionIndex) {
+            const sections = [...draftSong.sections];
+            const targetSection = sections[targetSectionIndex];
+            if (!targetSection) return current;
+            sections[targetSectionIndex] = { ...targetSection, bars: [targetBar] };
+            draftSong = { ...draftSong, sections };
+          } else {
+            draftSong = insertBar(draftSong, current.target, 'after', targetBar);
+          }
+        }
+        if (!targetBar?.id) return current;
+
+        const targetIdentity = { sectionId: targetSectionId, barId: targetBar.id };
+        const cursor: PreviewNotationCursor = mode === 'rhythm'
+          ? requestedCursor?.kind === 'rhythm'
+            ? requestedCursor
+            : {
+                kind: 'rhythm',
+                cursorUnit: direction === 'next'
+                  ? getRhythmCursorUnits(draftSong, targetIdentity)[0] ?? 0
+                  : getDefaultRhythmCursor(draftSong, targetIdentity).cursorUnit
+              }
+          : requestedCursor?.kind === 'jianpu'
+            ? requestedCursor
+            : {
+                kind: 'jianpu',
+                ...getJianpuNavigationEdgeCursor(draftSong, targetIdentity, direction === 'next' ? 1 : -1)
+              };
+        const hasNotation = mode === 'rhythm'
+          ? Boolean(targetBar.rhythm?.trim())
+          : Boolean(targetBar.riff?.trim());
+        const anchorField = hasNotation ? mode : 'lower';
+        const anchorKey = `${current.previewIdentity}|${targetSectionId}|${targetBar.id}|${anchorField}|all`;
+        pendingPreviewAutoScrollBarKeyRef.current = [
+          current.previewIdentity,
+          targetSectionId,
+          targetBar.id
+        ].join('|');
+        const withDraft = draftSong === current.draftSong ? current : applyPreviewDraft(current, draftSong);
+        const retargeted = retargetPreviewEditSession(withDraft, {
           ...current.target,
-          slotIndex,
+          sectionId: targetSectionId,
+          barId: targetBar.id,
+          field: mode,
+          slotIndex: 0,
           rawChordIndex: null,
+          cursor,
           anchorKey,
           anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
         });
+        return {
+          ...retargeted,
+          cursorByMode: getPreviewCursorByModeForBar(draftSong, targetIdentity, cursor)
+        };
       }
-      const currentOwnership = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[current.target.slotIndex];
-      const nextSlotIndex = current.target.slotIndex + (currentOwnership?.span ?? 1);
-      if (direction === 'next' && nextSlotIndex < beatCount) {
-        const slotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[nextSlotIndex]?.ownerSlotIndex
-          ?? nextSlotIndex;
-        const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, slotIndex);
-        return retargetPreviewEditSession(current, {
-          ...current.target,
-          slotIndex,
-          rawChordIndex: null,
-          anchorKey,
-          anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
-        });
+      const beatCount = getBeatCount(current.draftSong, located.bar);
+      if (!options?.bar) {
+        if (direction === 'previous' && current.target.slotIndex > 0) {
+          const requestedSlotIndex = current.target.slotIndex - 1;
+          const slotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[requestedSlotIndex]?.ownerSlotIndex
+            ?? requestedSlotIndex;
+          const rawChordIndex = getChordBeatSlots(located.bar, beatCount)[slotIndex]?.rawChordIndex ?? null;
+          const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, slotIndex);
+          return retargetPreviewEditSession(current, {
+            ...current.target,
+            slotIndex,
+            rawChordIndex,
+            cursor: { kind: 'chord', slotIndex, rawChordIndex },
+            anchorKey,
+            anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+          });
+        }
+        const currentOwnership = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[current.target.slotIndex];
+        const nextSlotIndex = current.target.slotIndex + (currentOwnership?.span ?? 1);
+        if (direction === 'next' && nextSlotIndex < beatCount) {
+          const slotIndex = getChordDisplaySlotOwnership(located.bar.chords, beatCount)[nextSlotIndex]?.ownerSlotIndex
+            ?? nextSlotIndex;
+          const rawChordIndex = getChordBeatSlots(located.bar, beatCount)[slotIndex]?.rawChordIndex ?? null;
+          const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, current.target.sectionId, current.target.barId, slotIndex);
+          return retargetPreviewEditSession(current, {
+            ...current.target,
+            slotIndex,
+            rawChordIndex,
+            cursor: { kind: 'chord', slotIndex, rawChordIndex },
+            anchorKey,
+            anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
+          });
+        }
       }
 
       if (direction === 'previous') {
@@ -7574,16 +7866,29 @@ export default function App() {
         const lastSlotIndex = previousBeatCount - 1;
         const slotIndex = getChordDisplaySlotOwnership(previousBar.chords, previousBeatCount)[lastSlotIndex]?.ownerSlotIndex
           ?? lastSlotIndex;
+        const rawChordIndex = getChordBeatSlots(previousBar, previousBeatCount)[slotIndex]?.rawChordIndex ?? null;
         const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, previousSectionId, previousBar.id, slotIndex);
-        return retargetPreviewEditSession(current, {
+        const cursor: PreviewNotationCursor = { kind: 'chord', slotIndex, rawChordIndex };
+        const targetIdentity = { sectionId: previousSectionId, barId: previousBar.id };
+        pendingPreviewAutoScrollBarKeyRef.current = [
+          current.previewIdentity,
+          previousSectionId,
+          previousBar.id
+        ].join('|');
+        const retargeted = retargetPreviewEditSession(current, {
           ...current.target,
           sectionId: previousSectionId,
           barId: previousBar.id,
           slotIndex,
-          rawChordIndex: null,
+          rawChordIndex,
+          cursor,
           anchorKey,
           anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
         });
+        return {
+          ...retargeted,
+          cursorByMode: getPreviewCursorByModeForBar(current.draftSong, targetIdentity, cursor)
+        };
       }
 
       let draftSong = current.draftSong;
@@ -7601,23 +7906,35 @@ export default function App() {
       if (!nextBar.id) return current;
       const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, nextSectionId, nextBar.id, 0);
       const withDraft = draftSong === current.draftSong ? current : applyPreviewDraft(current, draftSong);
-      return retargetPreviewEditSession(withDraft, {
+      const cursor: PreviewNotationCursor = { kind: 'chord', slotIndex: 0, rawChordIndex: null };
+      const targetIdentity = { sectionId: nextSectionId, barId: nextBar.id };
+      pendingPreviewAutoScrollBarKeyRef.current = [
+        current.previewIdentity,
+        nextSectionId,
+        nextBar.id
+      ].join('|');
+      const retargeted = retargetPreviewEditSession(withDraft, {
         ...current.target,
         sectionId: nextSectionId,
         barId: nextBar.id,
         slotIndex: 0 as const,
         rawChordIndex: null as null,
+        cursor,
         anchorKey,
         anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
       });
+      return {
+        ...retargeted,
+        cursorByMode: getPreviewCursorByModeForBar(draftSong, targetIdentity, cursor)
+      };
     });
     window.requestAnimationFrame(() => {
       refreshPreviewEditAnchorRect();
     });
   }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
 
-  const handlePreviewEditStructure = React.useCallback((action: 'insert-before' | 'insert-after' | 'duplicate' | 'delete' | 'split-section') => {
-    if (action === 'split-section') {
+  const handlePreviewEditStructure = React.useCallback((action: 'insert-before' | 'insert-after' | 'duplicate' | 'copy-bar' | 'paste-bar-after' | 'delete' | 'split-section' | 'insert-section-after') => {
+    if (action === 'split-section' || action === 'insert-section-after') {
       const current = previewEditSession;
       if (!current || current.target.kind !== 'bar') return;
       const located = findSongBar(current.draftSong, current.target);
@@ -7625,7 +7942,9 @@ export default function App() {
 
       const settledSong = current.draftSong;
       if (current.dirty) commitPreviewEditSession(current);
-      const result = splitSectionAtBar(settledSong, current.target);
+      const result = action === 'split-section'
+        ? splitSectionAtBar(settledSong, current.target)
+        : insertSectionAfter(settledSong, located.section.id ?? current.target.sectionId);
       const sectionId = result.sectionId;
       const section = result.song.sections.find((candidate) => candidate.id === sectionId);
       if (!section?.id) return;
@@ -7656,6 +7975,11 @@ export default function App() {
       let draftSong = current.draftSong;
       let targetBarId = current.target.barId;
 
+      if (action === 'copy-bar') {
+        setPreviewCopiedBar(structuredClone(located.bar));
+        return current;
+      }
+
       if (action === 'insert-before' || action === 'insert-after') {
         const newBar = createEmptyBar();
         draftSong = insertBar(draftSong, current.target, action === 'insert-before' ? 'before' : 'after', newBar);
@@ -7664,6 +7988,17 @@ export default function App() {
         draftSong = duplicateBar(draftSong, current.target);
         const nextLocated = findSongBar(draftSong, current.target);
         targetBarId = nextLocated?.section.bars[nextLocated.barIndex + 1]?.id ?? targetBarId;
+      } else if (action === 'paste-bar-after') {
+        if (!previewCopiedBar) return current;
+        const bars = [...located.section.bars];
+        bars[located.barIndex] = {
+          ...structuredClone(previewCopiedBar),
+          id: located.bar.id
+        };
+        const sections = [...draftSong.sections];
+        sections[located.sectionIndex] = { ...located.section, bars };
+        draftSong = { ...draftSong, sections };
+        targetBarId = located.bar.id ?? targetBarId;
       } else {
         draftSong = deleteBar(draftSong, current.target);
         const sameSection = draftSong.sections.find((section) => section.id === current.target.sectionId);
@@ -7675,19 +8010,46 @@ export default function App() {
       const nextSession = applyPreviewDraft(current, draftSong);
       const targetSection = draftSong.sections.find((section) => section.bars.some((candidate) => candidate.id === targetBarId));
       if (!targetSection?.id || !targetBarId) return markPreviewTargetDeleted(nextSession);
-      const anchorKey = makePreviewTargetAnchorKey(current.previewIdentity, targetSection.id, targetBarId, 0);
-      return retargetPreviewEditSession(nextSession, {
+      const targetBar = targetSection.bars.find((candidate) => candidate.id === targetBarId);
+      if (!targetBar) return markPreviewTargetDeleted(nextSession);
+      const mode = current.notationMode;
+      const cursor: PreviewNotationCursor = mode === 'chords'
+        ? {
+            kind: 'chord',
+            slotIndex: 0,
+            rawChordIndex: getChordBeatSlots(targetBar, getBeatCount(draftSong, targetBar))[0]?.rawChordIndex ?? null
+          }
+        : mode === 'rhythm'
+          ? { kind: 'rhythm', ...getDefaultRhythmCursor(draftSong, { sectionId: targetSection.id, barId: targetBarId }) }
+          : { kind: 'jianpu', ...getDefaultJianpuCursor(draftSong, { sectionId: targetSection.id, barId: targetBarId }) };
+      const hasNotation = mode === 'rhythm'
+        ? Boolean(targetBar.rhythm?.trim())
+        : mode === 'jianpu'
+          ? Boolean(targetBar.riff?.trim())
+          : true;
+      const anchorField = mode === 'chords' ? 'chords' : hasNotation ? mode : 'lower';
+      const anchorKey = mode === 'chords'
+        ? makePreviewTargetAnchorKey(current.previewIdentity, targetSection.id, targetBarId, 0)
+        : `${current.previewIdentity}|${targetSection.id}|${targetBarId}|${anchorField}|all`;
+      const targetIdentity = { sectionId: targetSection.id, barId: targetBarId };
+      const retargeted = retargetPreviewEditSession(nextSession, {
         ...current.target,
         sectionId: targetSection.id,
         barId: targetBarId,
-        slotIndex: 0 as const,
-        rawChordIndex: null as null,
+        field: mode,
+        slotIndex: cursor.kind === 'chord' ? cursor.slotIndex : 0,
+        rawChordIndex: cursor.kind === 'chord' ? cursor.rawChordIndex : null,
+        cursor,
         anchorKey,
         anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
       });
+      return {
+        ...retargeted,
+        cursorByMode: getPreviewCursorByModeForBar(draftSong, targetIdentity, cursor)
+      };
     });
     window.requestAnimationFrame(refreshPreviewEditAnchorRect);
-  }, [commitPreviewEditSession, findPreviewAnchorRect, makePreviewTargetAnchorKey, previewEditSession, refreshPreviewEditAnchorRect]);
+  }, [commitPreviewEditSession, findPreviewAnchorRect, makePreviewTargetAnchorKey, previewCopiedBar, previewEditSession, refreshPreviewEditAnchorRect]);
 
   const handlePreviewSectionReorder = React.useCallback((
     sourceSectionId: string,
@@ -7714,6 +8076,10 @@ export default function App() {
       }));
       setPreviewEditSession(null);
       setActiveSectionId(sourceSectionId);
+      // activeBar is index-based while section reorder is identity-based.
+      // Keeping the old index selects a different section after the move and
+      // used to make empty/add-bar rows appear on the wrong section.
+      setActiveBar(null);
       return;
     }
 
@@ -7723,9 +8089,11 @@ export default function App() {
     handleSongChange(nextSong);
     setPreviewEditSession(null);
     setActiveSectionId(sourceSectionId);
+    setActiveBar(null);
   }, [activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSetlistEditableSong, canEditSelectedSetlist, canEditTeamSongs, handleSongChange, handleUpdateSetlistSong, isSetlistMode, selectedSetlistSong]);
 
   const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: ChordSheetElementField, target?: ChordSheetElementTarget) => {
+    clearPendingPreviewSectionAction();
     const editorSong = activeDraftEditorSong ?? activeEditorSong;
     const navigationSong = activeDraftNavigationPreviewSong ?? activeNavigationPreviewSong;
     if (!editorSong || !navigationSong) {
@@ -7739,7 +8107,12 @@ export default function App() {
       : sIdx;
     const nextSectionIndex = mappedSectionIndex >= 0 ? mappedSectionIndex : sIdx;
 
-    setActiveSectionId(nextSectionId ?? editorSong.sections[nextSectionIndex]?.id ?? null);
+    const clickedSectionId = nextSectionId ?? editorSong.sections[nextSectionIndex]?.id ?? null;
+    pendingPreviewAutoScrollBarKeyRef.current = null;
+    skipNextActiveSectionPreviewScrollRef.current = Boolean(
+      clickedSectionId && clickedSectionId !== activeSectionId
+    );
+    setActiveSectionId(clickedSectionId);
     setActiveBar({ sIdx: nextSectionIndex, bIdx });
     setPreviewMetaEditTarget(null);
     if (!canOpenEditor) {
@@ -7750,18 +8123,29 @@ export default function App() {
       const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
       if (!previewIdentity) return;
       if (bIdx < 0 && target?.sectionId) {
-        if (activePreviewEditSession) commitPreviewEditSession(activePreviewEditSession);
         const section = editorSong.sections.find((candidate) => candidate.id === target.sectionId)
           ?? editorSong.sections[nextSectionIndex];
         if (!section?.id) return;
-        setPreviewSectionActionTarget({
+        const sectionActionTarget: PreviewSectionActionTarget = {
           previewIdentity,
           sectionId: section.id,
           title: section.title,
           anchorKey: target.anchorKey,
           anchorRect: target.anchorRect
-        });
-        return;
+        };
+        const isClickingOpenSectionActionTarget = previewSectionActionTarget?.previewIdentity === previewIdentity
+          && previewSectionActionTarget.sectionId === section.id;
+        const shouldRenameSection = target.sectionTitleIntent === 'rename' || isClickingOpenSectionActionTarget;
+        setPreviewSectionActionTarget(null);
+        if (!shouldRenameSection) {
+          if (activePreviewEditSession) commitPreviewEditSession(activePreviewEditSession);
+          previewSectionActionTimerRef.current = window.setTimeout(() => {
+            previewSectionActionTimerRef.current = null;
+            setPreviewSectionActionTarget(sectionActionTarget);
+          }, 320);
+          return;
+        }
+        clearPendingPreviewSectionAction();
       }
       if (!hasFinePointer) {
         const proxyInput = mobileWysiwygKeyboardProxyInputRef.current;
@@ -7815,16 +8199,36 @@ export default function App() {
       return;
     }
 
-    const previewField: PreviewEditField | null = field === 'chords'
+    const requestedNotationMode: PreviewNotationMode | null = field === 'chords'
       ? 'chords'
-      : field === 'marker'
-        ? 'symbols'
-        : field === 'label' || field === 'annotation'
-          ? 'text'
-          : null;
+      : field === 'rhythm'
+        ? 'rhythm'
+        : field === 'riff'
+          ? 'jianpu'
+          : field === 'lower'
+            ? lastPreviewNonChordMode
+            : field === 'marker' || field === 'label' || field === 'annotation'
+              ? 'chords'
+              : null;
+    const previewField: PreviewBarEditField | null = field === 'chords'
+      ? 'chords'
+      : field === 'rhythm'
+        ? 'rhythm'
+        : field === 'riff'
+          ? 'jianpu'
+          : field === 'lower'
+            ? lastPreviewNonChordMode
+            : field === 'marker'
+              ? 'symbols'
+              : field === 'label' || field === 'annotation'
+                ? 'text'
+                : null;
     if (isPreviewQuickEditEnabled && previewField && bIdx >= 0) {
       const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
       if (previewIdentity) {
+        if (requestedNotationMode === 'rhythm' || requestedNotationMode === 'jianpu') {
+          rememberPreviewNonChordMode(requestedNotationMode);
+        }
         const requestedSlotIndex = target?.slotIndex ?? 0;
         const previewBar = previewSection?.bars[bIdx];
         const tappedSlotIndex = previewField === 'chords' && previewBar
@@ -7850,10 +8254,43 @@ export default function App() {
           if (!actualSection?.id || !editableBar?.id) return current;
 
           const editableBeatCount = getBeatCount(editableSong, editableBar);
-          const slotIndex = previewField === 'chords'
+          const slotIndex = requestedNotationMode === 'chords'
             ? resolvePreviewChordSlotIndex(editableBar, editableBeatCount, tappedSlotIndex)
-            : tappedSlotIndex;
-          const anchorKey = makePreviewTargetAnchorKey(previewIdentity, actualSection.id, editableBar.id, slotIndex);
+            : 0;
+          const rawChordIndex = requestedNotationMode === 'chords'
+            ? getChordBeatSlots(editableBar, editableBeatCount)[slotIndex]?.rawChordIndex ?? null
+            : null;
+          const cursor: PreviewNotationCursor = requestedNotationMode === 'rhythm'
+            ? target?.cursor?.kind === 'rhythm'
+              ? target.cursor
+              : { kind: 'rhythm', ...getDefaultRhythmCursor(editableSong, { sectionId: actualSection.id, barId: editableBar.id }) }
+            : requestedNotationMode === 'jianpu'
+              ? target?.cursor?.kind === 'jianpu'
+                ? target.cursor
+                : {
+                    kind: 'jianpu',
+                    ...getDefaultJianpuCursor(editableSong, { sectionId: actualSection.id, barId: editableBar.id })
+                  }
+              : {
+                  kind: 'chord',
+                  slotIndex,
+                  rawChordIndex
+                };
+          const anchorKey = requestedNotationMode === 'chords'
+            ? makePreviewTargetAnchorKey(previewIdentity, actualSection.id, editableBar.id, slotIndex)
+            : target?.anchorKey
+              ?? `${previewIdentity}|${actualSection.id}|${editableBar.id}|${requestedNotationMode}|all`;
+          const initialCursorByMode = {
+            chords: cursor.kind === 'chord'
+              ? cursor
+              : { kind: 'chord' as const, slotIndex: 0, rawChordIndex: getChordBeatSlots(editableBar, editableBeatCount)[0]?.rawChordIndex ?? null },
+            rhythm: cursor.kind === 'rhythm'
+              ? cursor
+              : { kind: 'rhythm' as const, ...getDefaultRhythmCursor(editableSong, { sectionId: actualSection.id, barId: editableBar.id }) },
+            jianpu: cursor.kind === 'jianpu'
+              ? cursor
+              : { kind: 'jianpu' as const, ...getDefaultJianpuCursor(editableSong, { sectionId: actualSection.id, barId: editableBar.id }) }
+          };
           const nextTarget = {
             kind: 'bar' as const,
             previewIdentity,
@@ -7861,20 +8298,26 @@ export default function App() {
             barId: editableBar.id,
             field: previewField,
             slotIndex,
-            rawChordIndex: previewField === 'chords'
-              ? getChordBeatSlots(editableBar, editableBeatCount)[slotIndex]?.rawChordIndex ?? null
-              : target?.rawChordIndex ?? null,
+            rawChordIndex,
+            cursor,
             anchorKey,
             anchorRect: findPreviewAnchorRect(anchorKey) ?? target?.anchorRect ?? {
               left: 16, top: 16, right: 32, bottom: 32, width: 16, height: 16
             }
           };
-          return currentDraft
-            ? retargetPreviewEditSession(currentDraft, nextTarget)
-            : createPreviewEditSession({
+          if (currentDraft) {
+            const sameBar = currentDraft.target.kind === 'bar'
+              && currentDraft.target.sectionId === actualSection.id
+              && currentDraft.target.barId === editableBar.id;
+            const retargeted = retargetPreviewEditSession(currentDraft, nextTarget);
+            return sameBar ? retargeted : { ...retargeted, cursorByMode: initialCursorByMode };
+          }
+          return createPreviewEditSession({
                 song: editableSong,
                 target: nextTarget,
-                inputMode: getChordStorageModeForTarget(editableSong, nextTarget)
+                notationMode: requestedNotationMode ?? 'chords',
+                chordInputMode: getChordStorageModeForTarget(editableSong, nextTarget),
+                cursorByMode: initialCursorByMode
               });
         });
         return;
@@ -7886,16 +8329,20 @@ export default function App() {
       editorFocusTimeoutRef.current = null;
     }
 
+    const fallbackField: EditorFocusField = field === 'lower'
+      ? (lastPreviewNonChordMode === 'rhythm' ? 'rhythm' : 'riff')
+      : field;
+
     if (!isEditing) {
       setIsEditing(true);
       editorFocusTimeoutRef.current = window.setTimeout(() => {
-        focusEditorField(nextSectionIndex, bIdx, field, true);
+        focusEditorField(nextSectionIndex, bIdx, fallbackField, true);
         editorFocusTimeoutRef.current = null;
       }, 500);
     } else {
-      focusEditorField(nextSectionIndex, bIdx, field);
+      focusEditorField(nextSectionIndex, bIdx, fallbackField);
     }
-  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, canOpenEditor, commitPreviewEditSession, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, hasFinePointer, isEditing, isPreviewQuickEditEnabled, makePreviewTargetAnchorKey, previewEditorDeviceLayout, refreshPreviewEditAnchorRect]);
+  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSectionId, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, hasFinePointer, isEditing, isPreviewQuickEditEnabled, lastPreviewNonChordMode, makePreviewTargetAnchorKey, previewEditorDeviceLayout, previewSectionActionTarget, refreshPreviewEditAnchorRect, rememberPreviewNonChordMode]);
 
   const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
     if (!canOpenEditor) {
@@ -8034,7 +8481,6 @@ export default function App() {
 
     setPreviewMetaEditTarget(null);
 
-    // Move focus to the freshly added bar so chords can be typed right away.
     setActiveSectionId(nextSectionId ?? targetSection.id ?? null);
     setActiveBar({ sIdx: targetIndex, bIdx: newBarIndex });
 
@@ -8043,19 +8489,68 @@ export default function App() {
       editorFocusTimeoutRef.current = null;
     }
 
-    const openedEditor = !isEditing;
+    // Adding from the preview must stay a lightweight structural action. Do
+    // not open the full editor just because it was closed; when the editor is
+    // already open, retain the convenient focus handoff to the new bar.
+    if (!isEditing) {
+      return;
+    }
+
     const focusNewBar = () => {
-      focusEditorField(targetIndex, newBarIndex, 'chords', openedEditor);
+      focusEditorField(targetIndex, newBarIndex, 'chords');
       editorFocusTimeoutRef.current = null;
     };
 
-    if (!isEditing) {
-      setIsEditing(true);
-      editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 500);
-    } else {
-      editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 60);
-    }
+    editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 60);
   }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlist, canEditTeamSongs, focusEditorField, handleSetlistSongContentChange, handleSongChange, isEditing, isSetlistMode]);
+
+  const handleAddSectionAfterPreviewSection = React.useCallback((previewSIdx: number) => {
+    const canEdit = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs;
+    const previewIdentity = getPreviewIdentityForCurrentMode();
+    if (!canEdit || !activeEditorSong || !activeNavigationPreviewSong || !previewIdentity) {
+      return;
+    }
+
+    const previewSection = activeNavigationPreviewSong.sections[previewSIdx] ?? null;
+    const sourceSectionId = previewSection?.id ?? null;
+    const editableSong = ensureSongEditingIds(activeEditorSong);
+    const targetIndex = sourceSectionId
+      ? editableSong.sections.findIndex((section) => section.id === sourceSectionId)
+      : previewSIdx;
+    const sourceSection = editableSong.sections[targetIndex >= 0 ? targetIndex : previewSIdx];
+    if (!sourceSection?.id) {
+      return;
+    }
+
+    const result = insertSectionAfter(editableSong, sourceSection.id);
+    if (!result.created) {
+      return;
+    }
+
+    const anchorKey = `${previewIdentity}|${result.sectionId}|section|sectionName|title`;
+    const sectionTarget = {
+      kind: 'section' as const,
+      previewIdentity,
+      sectionId: result.sectionId,
+      barId: result.firstBarId ?? '',
+      field: 'sectionName' as const,
+      slotIndex: 0 as const,
+      rawChordIndex: null as null,
+      anchorKey,
+      anchorRect: findPreviewAnchorRect(anchorKey) ?? { left: 16, top: 16, right: 136, bottom: 50, width: 120, height: 34 }
+    };
+    const nextSession = applyPreviewDraft(
+      createPreviewEditSession({ song: editableSong, target: sectionTarget, inputMode: 'letters' }),
+      result.song
+    );
+
+    setPreviewMetaEditTarget(null);
+    setPreviewSectionActionTarget(null);
+    setActiveSectionId(result.sectionId);
+    setActiveBar(null);
+    setPreviewEditSession(nextSession);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(refreshPreviewEditAnchorRect));
+  }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlist, canEditTeamSongs, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, isSetlistMode, refreshPreviewEditAnchorRect]);
 
   const handlePreviewWysiwygEditorChange = React.useCallback((nextSong: Song) => {
     if (isSetlistMode) {
@@ -8112,15 +8607,16 @@ export default function App() {
         onElementClick={canOpenEditor ? handleElementClick : undefined}
         onMetaClick={canOpenEditor ? handleMetaClick : undefined}
         onAddBarClick={canEditTeamSongs && !activePreviewEditSession ? handleAddBarToSection : undefined}
+        onAddSectionAfterClick={canEditTeamSongs && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
         highlightedSectionIds={highlightedSectionIds}
         activeSectionId={isEditing || activePreviewEditSession ? activeSectionId : null}
         activeBar={isEditing || activePreviewEditSession ? activeBar : null}
-        activeChordSlot={activePreviewEditSession?.target.kind === 'bar' ? activePreviewEditSession.target : null}
+        activePreviewNotationTarget={activePreviewNotationTarget}
         previewIdentity={song.id}
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       />
     );
-  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
+  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -8189,10 +8685,11 @@ export default function App() {
               onElementClick={canOpenEditor ? (sIdx, bIdx, field, target) => handleSetlistElementClick(item.id, previewSong, sIdx, bIdx, field, target) : undefined}
               onMetaClick={isSelected && canOpenEditor ? handleMetaClick : undefined}
               onAddBarClick={isSelected && canEditSelectedSetlist && !activePreviewEditSession ? handleAddBarToSection : undefined}
+              onAddSectionAfterClick={isSelected && canEditSelectedSetlist && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
               highlightedSectionIds={isSelected ? highlightedSectionIds : []}
               activeSectionId={isSelected && (isEditing || activePreviewEditSession) ? activeSectionId : null}
               activeBar={isSelected && (isEditing || activePreviewEditSession) ? activeBar : null}
-              activeChordSlot={isSelected && activePreviewEditSession?.target.kind === 'bar' ? activePreviewEditSession.target : null}
+              activePreviewNotationTarget={isSelected ? activePreviewNotationTarget : null}
               previewIdentity={item.id}
               onSectionReorder={isSelected && canEditSelectedSetlist ? handlePreviewSectionReorder : undefined}
             />
@@ -8200,7 +8697,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activePreviewEditSession, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -8229,13 +8726,12 @@ export default function App() {
     if (
       !activePreviewEditSession
       || activePreviewEditSession.target.kind !== 'bar'
-      || activePreviewEditSession.target.field !== 'chords'
       || previewEditorDeviceLayout === 'desktop'
     ) {
       return;
     }
 
-    // Touch chord entry is handled entirely by the visual keyboard. Clear any
+    // Touch notation entry is handled entirely by the visual keyboard. Clear any
     // previous text-field focus so iPadOS cannot stack its software keyboard
     // underneath the custom dock.
     mobileWysiwygKeyboardProxyInputRef.current?.blur();
@@ -8248,10 +8744,32 @@ export default function App() {
     ) {
       activeElement.blur();
     }
-  }, [activePreviewEditSession?.previewIdentity, activePreviewEditSession?.target.barId, activePreviewEditSession?.target.field, activePreviewEditSession?.target.kind, previewEditorDeviceLayout]);
+  }, [activePreviewEditSession?.notationMode, activePreviewEditSession?.previewIdentity, activePreviewEditSession?.target.barId, activePreviewEditSession?.target.kind, previewEditorDeviceLayout]);
 
   useEffect(() => {
+    const currentBarKey = activePreviewEditSession?.target.kind === 'bar'
+      ? [
+          activePreviewEditSession.previewIdentity,
+          activePreviewEditSession.target.sectionId,
+          activePreviewEditSession.target.barId
+        ].join('|')
+      : null;
+    const previousBarKey = lastPreviewAutoScrollBarKeyRef.current;
+    const requestedBarKey = pendingPreviewAutoScrollBarKeyRef.current;
+    lastPreviewAutoScrollBarKeyRef.current = currentBarKey;
+    pendingPreviewAutoScrollBarKeyRef.current = null;
+
     if (!activePreviewEditSession) return;
+    if (!shouldAutoScrollPreviewEditTarget(
+      previewEditorDeviceLayout,
+      previousBarKey,
+      currentBarKey,
+      requestedBarKey !== null && requestedBarKey === currentBarKey
+    )) {
+      const frame = window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+      return () => window.cancelAnimationFrame(frame);
+    }
+
     const frame = window.requestAnimationFrame(() => {
       const root = sheetRef.current;
       if (!root) return;
@@ -8318,7 +8836,9 @@ export default function App() {
       const bar = section?.bars[pending.bIdx];
       if (section?.id && bar?.id) {
         const slotIndex = pending.target.slotIndex ?? 0;
-        const anchorKey = makePreviewTargetAnchorKey(pending.itemId, section.id, bar.id, slotIndex);
+        const anchorKey = pending.target.notationMode === 'chords'
+          ? makePreviewTargetAnchorKey(pending.itemId, section.id, bar.id, slotIndex)
+          : `${pending.itemId}|${section.id}|${bar.id}|${pending.field === 'lower' ? 'lower' : pending.target.notationMode ?? pending.field}|all`;
         window.requestAnimationFrame(() => {
           handleElementClick(targetIndex, pending.bIdx, pending.field, {
             ...pending.target!,
@@ -8340,10 +8860,13 @@ export default function App() {
     editorFocusTimeoutRef.current = window.setTimeout(() => {
       setActiveSectionId(activeEditorSong.sections[targetIndex]?.id ?? null);
       setActiveBar({ sIdx: targetIndex, bIdx: pending.bIdx });
-      focusEditorField(targetIndex, pending.bIdx, pending.field, true);
+      const fallbackField: EditorFocusField = pending.field === 'lower'
+        ? (lastPreviewNonChordMode === 'rhythm' ? 'rhythm' : 'riff')
+        : pending.field;
+      focusEditorField(targetIndex, pending.bIdx, fallbackField, true);
       editorFocusTimeoutRef.current = null;
     }, 520);
-  }, [activeEditorSong, findPreviewAnchorRect, focusEditorField, handleElementClick, isPreviewQuickEditEnabled, isSetlistMode, makePreviewTargetAnchorKey, selectedSetlistSongId]);
+  }, [activeEditorSong, findPreviewAnchorRect, focusEditorField, handleElementClick, isPreviewQuickEditEnabled, isSetlistMode, lastPreviewNonChordMode, makePreviewTargetAnchorKey, selectedSetlistSongId]);
 
   useEffect(() => {
     if (isPerformanceMode || !isSetlistMode || !selectedSetlistSongId || setlistPreviewSongs.length === 0) {
@@ -9251,7 +9774,7 @@ export default function App() {
           onJianpuInputAbsoluteChange={(value) => handleActiveEditorSongChange(
             value === Boolean((activeDraftEditorSong ?? song).jianpuInputAbsolute)
               ? { ...(activeDraftEditorSong ?? song), jianpuInputAbsolute: value }
-              : reinterpretSongJianpuInput({ ...(activeDraftEditorSong ?? song), jianpuInputAbsolute: value }, value)
+              : reinterpretSongJianpuInput(activeDraftEditorSong ?? song, value)
           )}
         />
       ) : null;
@@ -12774,6 +13297,7 @@ export default function App() {
                             onUndo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : handleSetlistUndo}
                             onRedo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : handleSetlistRedo}
                             onChange={handleActiveEditorSongChange}
+                            jianpuPitchContext={activeJianpuPitchContext}
                             metadataMode="setlist"
                             hideMetadataPanel
                             hideBarNumberControls
@@ -12818,6 +13342,7 @@ export default function App() {
                             onUndo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : handleUndo}
                             onRedo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : handleRedo}
                             onChange={handleActiveEditorSongChange}
+                            jianpuPitchContext={activeJianpuPitchContext}
                             hideMetadataPanel
                             showInlineAddSectionButton
                             activeSectionId={activeSectionId}
@@ -12899,7 +13424,6 @@ export default function App() {
                     transformOrigin: 'top center',
                     width: `${sheetMetrics.width}px`,
                     minWidth: `${sheetMetrics.width}px`,
-                    willChange: 'transform',
                     marginLeft: 'auto',
                     marginRight: 'auto'
                   }}
@@ -12938,9 +13462,20 @@ export default function App() {
                   displayedKey={displayedKey}
                   storageMode={storageMode}
                   onApplyDraft={applyPreviewEditDraft}
-                  onInputModeChange={(mode) => setPreviewEditSession((current) => current ? setPreviewEditInputMode(current, mode) : current)}
+                  onInputModeChange={(mode) => setPreviewEditSession((current) => current ? setPreviewEditChordInputMode(current, mode) : current)}
+                  onNotationModeChange={handlePreviewNotationModeChange}
+                  onNotationCursorChange={handlePreviewNotationCursorChange}
+                  onJianpuInputAbsoluteChange={handlePreviewJianpuInputAbsoluteChange}
+                  jianpuPitchContext={activeJianpuPitchContext}
                   onNavigate={handlePreviewEditNavigate}
                   onStructure={handlePreviewEditStructure}
+                  hasCopiedBar={Boolean(previewCopiedBar)}
+                  hasCopiedJianpu={previewCopiedJianpu !== null}
+                  onCopyJianpu={handlePreviewCopyJianpu}
+                  onPasteJianpu={handlePreviewPasteJianpu}
+                  hasCopiedRhythm={previewCopiedRhythm !== null}
+                  onCopyRhythm={handlePreviewCopyRhythm}
+                  onPasteRhythm={handlePreviewPasteRhythm}
                   onUndo={() => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current)}
                   onRedo={() => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current)}
                   onDone={() => commitPreviewEditSession()}
@@ -12966,10 +13501,15 @@ export default function App() {
                 title={previewSectionActionTarget.title}
                 anchorRect={previewSectionActionTarget.anchorRect}
                 canDelete={activeEditorSong.sections.length > 1}
+                canMergePrevious={activeEditorSong.sections.findIndex((section) => section.id === previewSectionActionTarget.sectionId) > 0}
                 onRename={() => openPreviewSectionTitleEditor(previewSectionActionTarget)}
                 onDuplicate={() => finishPreviewSectionAction('duplicate')}
+                onMergePrevious={() => finishPreviewSectionAction('merge-previous')}
                 onDelete={() => finishPreviewSectionAction('delete')}
-                onClose={() => setPreviewSectionActionTarget(null)}
+                onClose={() => {
+                  clearPendingPreviewSectionAction();
+                  setPreviewSectionActionTarget(null);
+                }}
               />
             )}
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (

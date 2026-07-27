@@ -24,6 +24,27 @@
   }
 }
 
+/* Empty notation bars reserve a temporary lower hit row for switching between
+   rhythm and jianpu. Bars that already contain either notation use that content
+   as the hit target, so their ordinary chart geometry is never displaced. The
+   row also disappears from PDF clones. */
+.sheet-bar:has(> [data-preview-lower-hit]) > [data-preview-bottom-lane] {
+  bottom: 24px !important;
+  z-index: 3;
+}
+
+.sheet-bar[data-preview-lower-lanes="0"]:has(> [data-preview-lower-hit]) {
+  padding-bottom: 24px !important;
+}
+
+.sheet-bar[data-preview-lower-lanes="1"]:has(> [data-preview-lower-hit]) {
+  padding-bottom: 40px !important;
+}
+
+.sheet-bar[data-preview-lower-lanes="2"]:has(> [data-preview-lower-hit]) {
+  padding-bottom: 54px !important;
+}
+
 @font-face {
   font-family: 'JianpuASCII';
   src: url('https://cdn.jsdelivr.net/gh/RobertWinslow/jianpu-ascii-font@main/JianpuASCII.ttf') format('truetype');
@@ -218,6 +239,15 @@ body.exporting-pdf {
     min-width: 0 !important;
     overflow: visible !important;
     position: static !important;
+  }
+
+  [data-print-preview] {
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  [data-print-preview] svg {
+    shape-rendering: geometricPrecision;
   }
 
   body.exporting-pdf [data-print-preview-container] {

@@ -85,6 +85,31 @@ export const createEmptyBar = (): Bar => ({
   chords: []
 });
 
+const hasObjectEntries = (value?: object | null) => Boolean(value && Object.keys(value).length > 0);
+
+export const isBarCompletelyEmpty = (bar?: Bar | null) => {
+  if (!bar) return false;
+  return !bar.chords.some((chord) => chord.trim())
+    && !bar.riff?.trim()
+    && !bar.rhythm?.trim()
+    && !bar.label?.trim()
+    && !bar.riffLabel?.trim()
+    && !bar.rhythmLabel?.trim()
+    && !bar.annotation?.trim()
+    && !bar.leftText?.trim()
+    && !bar.rightText?.trim()
+    && !bar.timeSignature?.trim()
+    && !bar.leftMarker
+    && !bar.rightMarker
+    && !bar.repeatStart
+    && !bar.repeatEnd
+    && !bar.finalBar
+    && !bar.ending?.trim()
+    && !hasObjectEntries(bar.chordMarks)
+    && !hasObjectEntries(bar.rhythmMark)
+    && !bar.unisonMark?.enabled;
+};
+
 export const createEmptySection = (title = ''): Section => ({
   id: createId('section'),
   title,
@@ -104,9 +129,14 @@ const cloneSectionForInsert = (section: Section): Section => ({
 
 export const ensureSongEditingIds = (song: Song): Song => {
   let changed = false;
+  const seenSectionIds = new Set<string>();
   const seenBarIds = new Set<string>();
-  const sections = song.sections.map((section, sectionIndex) => {
-    const sectionId = section.id || `s-init-${sectionIndex}`;
+  const sections = song.sections.map((section) => {
+    const rawSectionId = section.id?.trim();
+    const sectionId = rawSectionId && !seenSectionIds.has(rawSectionId)
+      ? rawSectionId
+      : createId('section');
+    seenSectionIds.add(sectionId);
     const bars = section.bars.map((bar) => {
       const barId = bar.id?.trim();
       if (barId && !seenBarIds.has(barId)) {
@@ -119,12 +149,40 @@ export const ensureSongEditingIds = (song: Song): Song => {
       seenBarIds.add(nextBarId);
       return { ...bar, id: nextBarId };
     });
-    if (!section.id) changed = true;
-    return section.id && bars.every((bar, barIndex) => bar === section.bars[barIndex])
+    if (sectionId !== section.id) changed = true;
+    return sectionId === section.id && bars.every((bar, barIndex) => bar === section.bars[barIndex])
       ? section
       : { ...section, id: sectionId, bars };
   });
   return changed ? { ...song, sections } : song;
+};
+
+/**
+ * Canonical structural repair used at load boundaries and before section
+ * reordering. It fixes legacy duplicate identities and removes only failed
+ * section drafts (unnamed + completely empty). Blank bars inside a retained
+ * section are intentional writable chart space and must never be pruned.
+ */
+export const repairSongStructure = <T extends Song>(song: T): T => {
+  const identifiedSong = ensureSongEditingIds(song);
+  const retainedSections = identifiedSong.sections.filter((section) => (
+    Boolean(section.title.trim())
+    || section.bars.some((bar) => !isBarCompletelyEmpty(bar))
+  ));
+  const sourceSections = retainedSections.length > 0
+    ? retainedSections
+    : identifiedSong.sections.slice(0, 1);
+  const sections = sourceSections.length > 0
+    ? sourceSections.map((section) => (
+        section.bars.length > 0
+          ? section
+          : { ...section, bars: [createEmptyBar()] }
+      ))
+    : [createEmptySection('')];
+  const unchanged = identifiedSong === song
+    && sections.length === song.sections.length
+    && sections.every((section, index) => section === song.sections[index]);
+  return unchanged ? song : { ...identifiedSong, sections } as T;
 };
 
 export const getBeatCount = (song: Song, bar: Bar) => {
@@ -274,6 +332,35 @@ export const getChordPlacementError = (
   return slotIndex + 2 > beatCount ? '二分休止需要連續兩拍。' : null;
 };
 
+export const insertChordBeatBeforeSlot = (song: Song, target: SongChordTarget): Song => (
+  updateBarById(song, target, (bar) => {
+    const beatCount = getBeatCount(song, bar);
+    const slotIndex = Math.max(0, Math.min(beatCount - 1, target.slotIndex));
+    const oldEntries = getChordDisplaySlotEntries(bar.chords, beatCount);
+    const slots = getChordBeatSlots(bar, beatCount).map((slot) => slot.chord);
+    slots.splice(slotIndex, 0, '');
+    const chords = serializeChordBeatSlots(slots, beatCount);
+    const nextEntries = getChordDisplaySlotEntries(chords, beatCount);
+    const chordMarks: Record<number, ChordMark> = {};
+
+    oldEntries.forEach((oldEntry, oldSlotIndex) => {
+      if (!oldEntry) return;
+      const mark = bar.chordMarks?.[oldEntry.rawIndex];
+      if (!mark) return;
+      const nextSlotIndex = oldSlotIndex < slotIndex ? oldSlotIndex : oldSlotIndex + 1;
+      if (nextSlotIndex >= beatCount) return;
+      const nextEntry = nextEntries[nextSlotIndex];
+      if (nextEntry) chordMarks[nextEntry.rawIndex] = mark;
+    });
+
+    return {
+      ...bar,
+      chords,
+      chordMarks: Object.keys(chordMarks).length > 0 ? chordMarks : undefined
+    };
+  })
+);
+
 export const clearChordAtBeatSlot = (song: Song, target: SongChordTarget): Song => (
   setChordAtBeatSlot(song, target, '')
 );
@@ -410,6 +497,9 @@ export const deleteBar = (song: Song, target: SongBarIdentity): Song => {
   const located = findSongBar(song, target);
   if (!located) return song;
   const bars = located.section.bars.filter((_, index) => index !== located.barIndex);
+  if (bars.length === 0 && song.sections.length > 1) {
+    return deleteSection(song, located.section.id ?? target.sectionId);
+  }
   const sections = [...song.sections];
   sections[located.sectionIndex] = { ...located.section, bars };
   return { ...song, sections };
@@ -493,6 +583,32 @@ export const duplicateSection = (
     song: { ...song, sections: normalizeSectionKeyChanges(song, sections) },
     sectionId: duplicate.id ?? sectionId,
     firstBarId: duplicate.bars[0]?.id ?? null,
+    created: true
+  };
+};
+
+export const insertSectionAfter = (
+  song: Song,
+  sectionId: string,
+  title = ''
+): SectionMutationResult => {
+  const located = findSongSection(song, sectionId);
+  if (!located) {
+    return {
+      song,
+      sectionId,
+      firstBarId: null,
+      created: false
+    };
+  }
+
+  const section = createEmptySection(title);
+  const sections = [...song.sections];
+  sections.splice(located.sectionIndex + 1, 0, section);
+  return {
+    song: { ...song, sections: normalizeSectionKeyChanges(song, sections) },
+    sectionId: section.id ?? sectionId,
+    firstBarId: section.bars[0]?.id ?? null,
     created: true
   };
 };
@@ -610,6 +726,7 @@ export const finalizeSectionTitleEdit = ({
   const normalizedTitle = title.trim();
   const sectionIndex = draftSong.sections.findIndex((section) => section.id === sectionId);
   const baseSection = baseSong.sections.find((section) => section.id === sectionId);
+  if (!baseSection && !normalizedTitle) return baseSong;
   let nextSong = updateSectionTitle(draftSong, sectionId, normalizedTitle);
   if (!baseSection?.title.trim() || normalizedTitle) return nextSong;
   return sectionIndex === 0
@@ -623,18 +740,19 @@ export const reorderSection = (
   targetSectionId: string,
   placement: 'before' | 'after'
 ): Song => {
-  if (sourceSectionId === targetSectionId) return song;
-  const sourceIndex = song.sections.findIndex((section) => section.id === sourceSectionId);
-  const targetIndex = song.sections.findIndex((section) => section.id === targetSectionId);
-  if (sourceIndex < 0 || targetIndex < 0) return song;
+  const repairedSong = repairSongStructure(song);
+  if (sourceSectionId === targetSectionId) return repairedSong;
+  const sourceIndex = repairedSong.sections.findIndex((section) => section.id === sourceSectionId);
+  const targetIndex = repairedSong.sections.findIndex((section) => section.id === targetSectionId);
+  if (sourceIndex < 0 || targetIndex < 0) return repairedSong;
 
-  const sectionIds = song.sections.map((section) => section.id).filter((id): id is string => Boolean(id));
-  if (sectionIds.length !== song.sections.length) return song;
+  const sectionIds = repairedSong.sections.map((section) => section.id).filter((id): id is string => Boolean(id));
+  if (sectionIds.length !== repairedSong.sections.length) return repairedSong;
   const reorderedIds = [...sectionIds];
   reorderedIds.splice(sourceIndex, 1);
   const targetIndexAfterRemoval = reorderedIds.indexOf(targetSectionId);
   reorderedIds.splice(targetIndexAfterRemoval + (placement === 'after' ? 1 : 0), 0, sourceSectionId);
-  return reorderSongSections(song, reorderedIds);
+  return reorderSongSections(repairedSong, reorderedIds);
 };
 
 export const reorderSongSections = (
