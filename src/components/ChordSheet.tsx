@@ -864,6 +864,7 @@ interface ChordSheetProps {
   /** @deprecated Use activePreviewNotationTarget. */
   activeChordSlot?: { sectionId: string; barId: string; slotIndex: number } | null;
   previewIdentity?: string | null;
+  showPageBadges?: boolean;
   onSectionReorder?: (sourceSectionId: string, targetSectionId: string, placement: 'before' | 'after') => void;
 }
 
@@ -1287,7 +1288,7 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, previewIdentity = null, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   // Chords always use the sans-serif preset; the serif option was removed.
@@ -1769,7 +1770,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
         // Obvious top-of-page "page x of n" marker, only when the song spans more
         // than one page — a clear performance cue so it's hard to lose your place.
-        const isMultiPage = pages.length > 1;
+        const isMultiPage = showPageBadges && pages.length > 1;
         const pageBadge = isMultiPage ? (
           <div
             className="shrink-0 inline-flex items-baseline gap-1 rounded-lg border-2 border-indigo-500 bg-white px-2.5 py-1 leading-none shadow-sm"

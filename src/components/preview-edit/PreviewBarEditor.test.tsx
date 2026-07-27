@@ -729,7 +729,7 @@ describe('PreviewBarEditor', () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it('uses Space, Enter, and Shift Enter for chord navigation without binding Cmd Enter', () => {
+  it('uses Space for beat navigation and Enter for next-bar navigation without binding Cmd Enter', () => {
     const { onNavigate, onDone, onStructure } = renderEditor();
     const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
 
@@ -742,7 +742,7 @@ describe('PreviewBarEditor', () => {
     fireEvent.keyDown(capture, { key: 'Enter' });
     expect(onNavigate).toHaveBeenLastCalledWith('next', undefined, { bar: true });
     fireEvent.keyDown(capture, { key: 'Enter', shiftKey: true });
-    expect(onStructure).toHaveBeenCalledWith('insert-section-after');
+    expect(onStructure).toHaveBeenCalledWith('insert-before');
 
     fireEvent.keyDown(capture, { key: 'Enter', metaKey: true });
     fireEvent.keyDown(capture, { key: 'Enter', ctrlKey: true });

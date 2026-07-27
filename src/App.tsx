@@ -14780,6 +14780,7 @@ export default function App() {
                       language={language}
                       currentKey={activeSetlistPreviewSong.currentKey}
                       previewIdentity={selectedSetlistSong?.id ?? null}
+                      showPageBadges={false}
                     />
                   )
                 ) : (
@@ -14788,6 +14789,7 @@ export default function App() {
                     language={language}
                     currentKey={song.currentKey}
                     previewIdentity={song.id}
+                    showPageBadges={false}
                   />
                 )}
               </div>
@@ -14806,14 +14808,31 @@ export default function App() {
             )}
           </div>
 
-          {/* Exit button — top right */}
-          <button
-            type="button"
-            onClick={handleExitPerformanceMode}
-            className={`absolute top-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-stone-900/70 px-4 py-2 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-[opacity,background-color] duration-500 hover:bg-stone-900/85 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          <div
+            className="pointer-events-none absolute z-20 flex flex-col items-end gap-2"
+            style={{
+              top: 'max(16px, env(safe-area-inset-top, 0px))',
+              right: 'max(16px, env(safe-area-inset-right, 0px))'
+            }}
           >
-            {copy.exitPerformanceMode}
-          </button>
+            <div
+              className="inline-flex items-baseline gap-1.5 rounded-full bg-stone-900/80 px-3 py-1.5 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm"
+              aria-label={`${copy.performanceModePageIndicator} ${performancePageIndex + 1} / ${performanceTotalPages}`}
+            >
+              <span className="text-xs font-semibold text-stone-300">{copy.performanceModePageIndicator}</span>
+              <span className="tabular-nums">{performancePageIndex + 1}</span>
+              <span className="text-stone-400">/</span>
+              <span className="tabular-nums text-stone-200">{performanceTotalPages}</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExitPerformanceMode}
+              className={`pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-stone-900/70 px-4 py-2 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-[opacity,background-color] duration-500 hover:bg-stone-900/85 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            >
+              {copy.exitPerformanceMode}
+            </button>
+          </div>
 
           {/* Page / song indicator — bottom center, above safe-area */}
           <div className={`absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none rounded-2xl bg-stone-900/70 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0'}`} style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
