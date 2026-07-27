@@ -86,6 +86,14 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-07-27',
+        title: 'Rhythm lane click fix',
+        bullets: [
+          'Fixed clicks on existing rhythm lanes so the rhythm notation passes the click event back to the preview editor and reliably opens the rhythm keyboard.'
+        ]
+      },
+      {
+        version: '0.9.3',
+        date: '2026-07-27',
         title: 'Rhythm keyboard reopen fix',
         bullets: [
           'Fixed the preview editor reopening path so tapping back into rhythm after Done targets the rhythm lane instead of reusing the lower-lane fallback anchor.'
@@ -439,6 +447,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-07-27',
+        title: '節奏 lane 點擊修正',
+        bullets: [
+          '修正點擊已有節奏內容的灰色節奏 lane 時，節奏元件沒有把 click event 傳回預覽編輯器，導致節奏鍵盤沒有打開的問題。'
+        ]
+      },
+      {
+        version: '0.9.3',
         date: '2026-07-27',
         title: '節奏鍵盤重新開啟修正',
         bullets: [

@@ -456,7 +456,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     [editorBeamGroups]
   );
 
-  const selectNearestInsertSlot = (clientX: number) => {
+  const selectNearestInsertSlot = (clientX: number, event?: React.MouseEvent<HTMLElement>) => {
     if (!onInsertSelect || !rootRef.current) return;
 
     const rect = rootRef.current.getBoundingClientRect();
@@ -476,10 +476,10 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       }
     });
 
-    onInsertSelect(cursorUnits[nearestIndex] ?? 0);
+    onInsertSelect(cursorUnits[nearestIndex] ?? 0, event);
   };
 
-  const selectNearestEvent = (clientX: number) => {
+  const selectNearestEvent = (clientX: number, event?: React.MouseEvent<HTMLElement>) => {
     if (!onEventSelect || !rootRef.current || visibleSelectableEvents.length === 0) return;
 
     const rect = rootRef.current.getBoundingClientRect();
@@ -500,7 +500,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       }
     });
 
-    onEventSelect(nearestEvent.index);
+    onEventSelect(nearestEvent.index, event);
   };
 
   return (
@@ -519,9 +519,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         if (e.target !== e.currentTarget) return;
         e.stopPropagation();
         if (selectionMode === 'event') {
-          selectNearestEvent(e.clientX);
+          selectNearestEvent(e.clientX, e);
         } else {
-          selectNearestInsertSlot(e.clientX);
+          selectNearestInsertSlot(e.clientX, e);
         }
       }}
     >
