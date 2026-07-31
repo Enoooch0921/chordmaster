@@ -572,7 +572,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
     return qualityText.length;
   })();
   const numericQualityReserveEm = isNumericRoot && qualityText
-    ? Math.max(0.34, qualityVisualLength * 0.42)
+    ? Math.max(0.34, qualityVisualLength * 0.32)
     : 0;
   const numericBassReserveEm = isNumericRoot && bass
     ? Math.max(0.7, (bassRoot.length + (bassAccidental ? 1 : 0)) * 0.42 + 0.46)
@@ -675,7 +675,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
             {bass && (
               <span
                 className="absolute left-full bottom-0 translate-y-[0.28em] inline-flex items-end gap-[0.03em] whitespace-nowrap"
-                style={qualityText ? { marginLeft: `${numericQualityReserveEm + 0.04}em` } : { marginLeft: '0.02em' }}
+                style={qualityText ? { marginLeft: `${numericQualityReserveEm + 0.02}em` } : { marginLeft: '0.02em' }}
               >
                 <span className="text-lg font-bold text-gray-900 leading-none">/</span>
                 {renderNumericDegree({
@@ -1773,13 +1773,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         const isMultiPage = showPageBadges && pages.length > 1;
         const pageBadge = isMultiPage ? (
           <div
-            className="shrink-0 inline-flex items-baseline gap-1 rounded-lg border-2 border-indigo-500 bg-white px-2.5 py-1 leading-none shadow-sm"
+            className="shrink-0 inline-flex items-baseline gap-1 rounded-lg border-2 border-emerald-500 bg-white px-2.5 py-1 leading-none shadow-sm"
             aria-label={language === 'zh' ? `第 ${pIdx + 1} 頁，共 ${pages.length} 頁` : `Page ${pIdx + 1} of ${pages.length}`}
           >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">
               {language === 'zh' ? '頁' : 'P'}
             </span>
-            <span className="text-lg font-extrabold tabular-nums text-indigo-700">{pIdx + 1}</span>
+            <span className="text-lg font-extrabold tabular-nums text-emerald-700">{pIdx + 1}</span>
             <span className="text-sm font-bold text-gray-300">/</span>
             <span className="text-sm font-bold tabular-nums text-gray-400">{pages.length}</span>
           </div>

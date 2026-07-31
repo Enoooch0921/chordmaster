@@ -2193,11 +2193,8 @@ export default function App() {
   const setlistSongPointerDragRef = useRef<{
     sourceId: string;
     pointerId: number;
-    pointerType: string;
     lastTargetId: string | null;
     previousUserSelect: string;
-    startX: number;
-    startY: number;
     element: HTMLElement;
     activated: boolean;
     holdTimeoutId: number | null;
@@ -5506,9 +5503,8 @@ export default function App() {
   };
 
   // Touch/pen input needs a short hold before the handle starts dragging, while
-  // mouse users expect the row to move as soon as the pointer meaningfully moves.
+  // mouse users expect the row to enter drag mode immediately on the handle.
   const SETLIST_DRAG_HOLD_MS = 180;
-  const SETLIST_MOUSE_DRAG_THRESHOLD = 4;
 
   const activateSetlistSongPointerDrag = () => {
     const dragState = setlistSongPointerDragRef.current;
@@ -5547,24 +5543,26 @@ export default function App() {
       // Older WebKit builds can throw if capture is unavailable for the event.
     }
 
-    const holdTimeoutId = event.pointerType === 'mouse'
-      ? null
-      : window.setTimeout(() => {
+    const needsTouchHold = event.pointerType === 'touch' || event.pointerType === 'pen';
+    const holdTimeoutId = needsTouchHold
+      ? window.setTimeout(() => {
         activateSetlistSongPointerDrag();
-      }, SETLIST_DRAG_HOLD_MS);
+      }, SETLIST_DRAG_HOLD_MS)
+      : null;
 
     setlistSongPointerDragRef.current = {
       sourceId: setlistSongId,
       pointerId: event.pointerId,
-      pointerType: event.pointerType,
       lastTargetId: setlistSongId,
       previousUserSelect: document.body.style.userSelect,
-      startX: event.clientX,
-      startY: event.clientY,
       element,
       activated: false,
       holdTimeoutId
     };
+
+    if (!needsTouchHold) {
+      activateSetlistSongPointerDrag();
+    }
   };
 
   const handleSetlistSongDragHandlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -5576,14 +5574,7 @@ export default function App() {
     if (!dragState.activated) {
       event.preventDefault();
       event.stopPropagation();
-      const movedFar = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY)
-        >= SETLIST_MOUSE_DRAG_THRESHOLD;
-      if (dragState.pointerType === 'mouse' && movedFar) {
-        activateSetlistSongPointerDrag();
-      }
-      if (!dragState.activated) {
-        return;
-      }
+      return;
     }
 
     event.preventDefault();
@@ -6899,6 +6890,7 @@ export default function App() {
           if (requestedSetlist) {
             openedSharedSetlistFromLink = true;
             setWorkspaceMode('setlists');
+            setSetlistPanelView('detail');
             setSelectedSetlistSongId(requestedSetlist.songs[0]?.id ?? null);
             window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
           } else {
@@ -8288,6 +8280,12 @@ export default function App() {
       return;
     }
 
+    const previewBarForMode = previewSection?.bars[bIdx] ?? null;
+    const lowerNotationMode: PreviewNotationMode = field === 'lower' && previewBarForMode?.rhythm?.trim()
+      ? 'rhythm'
+      : field === 'lower' && previewBarForMode?.riff?.trim()
+        ? 'jianpu'
+        : lastPreviewNonChordMode;
     const requestedNotationMode: PreviewNotationMode | null = field === 'chords'
       ? 'chords'
       : field === 'rhythm'
@@ -8295,7 +8293,7 @@ export default function App() {
         : field === 'riff'
           ? 'jianpu'
           : field === 'lower'
-            ? lastPreviewNonChordMode
+            ? lowerNotationMode
             : field === 'marker' || field === 'label' || field === 'annotation'
               ? 'chords'
               : null;
@@ -8306,7 +8304,7 @@ export default function App() {
         : field === 'riff'
           ? 'jianpu'
           : field === 'lower'
-            ? lastPreviewNonChordMode
+            ? lowerNotationMode
             : field === 'marker'
               ? 'symbols'
               : field === 'label' || field === 'annotation'
@@ -14772,26 +14770,24 @@ export default function App() {
                 willChange: 'transform',
               }}
             >
-              <div ref={performanceSheetRef}>
-                {isSetlistMode ? (
-                  activeSetlistPreviewSong && (
-                    <ChordSheet
-                      song={activeSetlistPreviewSong}
-                      language={language}
-                      currentKey={activeSetlistPreviewSong.currentKey}
-                      previewIdentity={selectedSetlistSong?.id ?? null}
-                      showPageBadges={false}
-                    />
-                  )
-                ) : (
-                  <ChordSheet
-                    song={song}
-                    language={language}
-                    currentKey={song.currentKey}
-                    previewIdentity={song.id}
-                    showPageBadges={false}
-                  />
-                )}
+	              <div ref={performanceSheetRef}>
+	                {isSetlistMode ? (
+	                  activeSetlistPreviewSong && (
+	                    <ChordSheet
+	                      song={activeSetlistPreviewSong}
+	                      language={language}
+	                      currentKey={activeSetlistPreviewSong.currentKey}
+	                      previewIdentity={selectedSetlistSong?.id ?? null}
+	                    />
+	                  )
+	                ) : (
+	                  <ChordSheet
+	                    song={song}
+	                    language={language}
+	                    currentKey={song.currentKey}
+	                    previewIdentity={song.id}
+	                  />
+	                )}
               </div>
             </div>
           </div>
@@ -14808,48 +14804,37 @@ export default function App() {
             )}
           </div>
 
-          <div
-            className="pointer-events-none absolute z-20 flex flex-col items-end gap-2"
-            style={{
-              top: 'max(16px, env(safe-area-inset-top, 0px))',
-              right: 'max(16px, env(safe-area-inset-right, 0px))'
-            }}
-          >
-            <div
-              className="inline-flex items-baseline gap-1.5 rounded-full bg-stone-900/80 px-3 py-1.5 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm"
-              aria-label={`${copy.performanceModePageIndicator} ${performancePageIndex + 1} / ${performanceTotalPages}`}
-            >
-              <span className="text-xs font-semibold text-stone-300">{copy.performanceModePageIndicator}</span>
-              <span className="tabular-nums">{performancePageIndex + 1}</span>
-              <span className="text-stone-400">/</span>
-              <span className="tabular-nums text-stone-200">{performanceTotalPages}</span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleExitPerformanceMode}
+	          <div
+	            className="pointer-events-none absolute z-20"
+	            style={{
+	              top: 'max(16px, env(safe-area-inset-top, 0px))',
+	              right: 'max(16px, env(safe-area-inset-right, 0px))'
+	            }}
+	          >
+	            <button
+	              type="button"
+	              onClick={handleExitPerformanceMode}
               className={`pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-stone-900/70 px-4 py-2 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-[opacity,background-color] duration-500 hover:bg-stone-900/85 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             >
               {copy.exitPerformanceMode}
             </button>
           </div>
 
-          {/* Page / song indicator — bottom center, above safe-area */}
-          <div className={`absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none rounded-2xl bg-stone-900/70 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0'}`} style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
-            {isSetlistMode && activeSetlistPreviewSong && (
-              <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-stone-300">
-                {copy.performanceModeSongIndicator}{' '}
-                {setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSongId) + 1}
-                {' / '}
-                {setlistSongsWithSource.length}
-                {'  ·  '}
-                {activeSetlistPreviewSong.title}
-              </div>
-            )}
-            <div className="text-sm font-bold text-stone-50">
-              {copy.performanceModePageIndicator}{' '}{performancePageIndex + 1} / {performanceTotalPages}
-            </div>
-          </div>
+	          {/* Setlist song indicator — bottom center, above safe-area. Page numbers
+	              stay on the sheet itself so the performance overlay does not compete
+	              with the prominent page badge. */}
+	          {isSetlistMode && activeSetlistPreviewSong && (
+	            <div className={`absolute left-1/2 -translate-x-1/2 pointer-events-none rounded-2xl bg-stone-900/70 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0'}`} style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
+	              <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-stone-300">
+	                {copy.performanceModeSongIndicator}{' '}
+	                {setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSongId) + 1}
+	                {' / '}
+	                {setlistSongsWithSource.length}
+	                {'  ·  '}
+	                {activeSetlistPreviewSong.title}
+	              </div>
+	            </div>
+	          )}
 
           {/* Left tap area — the button stays clickable at all times so page turning
               is never blocked; only the arrow hint fades with the rest of the chrome. */}

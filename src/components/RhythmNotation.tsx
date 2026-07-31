@@ -18,6 +18,7 @@ interface RhythmNotationProps {
   renderMode?: 'preview' | 'editor';
   showSubdivisionGrid?: boolean;
   selectionMode?: 'insert' | 'event';
+  evenCompactSpacing?: boolean;
   className?: string;
   selectedEventIndex?: number | null;
   selectedInsertIndex?: number | null;
@@ -46,6 +47,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   renderMode = 'preview',
   showSubdivisionGrid = false,
   selectionMode = 'insert',
+  evenCompactSpacing = compact && renderMode === 'preview',
   className = '',
   selectedEventIndex = null,
   selectedInsertIndex = null,
@@ -93,6 +95,15 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const effectiveBeamTop = (renderMode === 'preview' ? editorBeamTop + (compact ? 0.5 : 1.2) : editorBeamTop) + beamVerticalOffset;
   const editorBeamStroke = { primary: compact ? 1.15 : 1.55, secondary: compact ? 1.05 : 1.45 };
   const visibleEvents = parsed.events.filter((event) => !event.isHidden);
+  const getCompactDisplayCenterUnit = React.useCallback((
+    event: typeof visibleEvents[number],
+    options?: { beamed?: boolean }
+  ) => {
+    if (evenCompactSpacing && compact && renderMode === 'preview' && !options?.beamed) {
+      return event.startUnit + (event.durationUnits / 2);
+    }
+    return event.isRest ? event.startUnit + (event.durationUnits / 2) : getHeadCenterUnit(event);
+  }, [compact, evenCompactSpacing, renderMode]);
   const tripletGroups = React.useMemo(() => {
     const groups: Array<{
       key: string;
@@ -167,9 +178,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         kind: 'event' as const,
         base: eventAtInsert.base,
         isRest: eventAtInsert.isRest,
-        centerUnit: eventAtInsert.isRest
-          ? eventAtInsert.startUnit + (eventAtInsert.durationUnits / 2)
-          : getHeadCenterUnit(eventAtInsert)
+        centerUnit: getCompactDisplayCenterUnit(eventAtInsert)
       };
     }
 
@@ -191,7 +200,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       durationUnits: Math.min(availableUnits, inferredUnits),
       base: inferredBase as 'q' | 'e' | 's'
     };
-  }, [barUnits, selectedCursorUnit, visibleEvents]);
+  }, [barUnits, getCompactDisplayCenterUnit, selectedCursorUnit, visibleEvents]);
   const hasSingleWholeEvent = visibleEvents.length === 1 && visibleEvents[0].base === 'w';
 
   const unitToPercent = (unit: number) => `${(unit * 100) / Math.max(1, barUnits)}%`;
@@ -928,13 +937,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
               const isEditorBeamed = editorBeamedEventIndices.has(event.index) && !event.isRest && (event.base === 'e' || event.base === 's');
               const isWholeDuration = event.durationUnits >= parsed.barUnits;
               const isHalfDuration = event.base === 'h';
-              const centerUnit = (
-                event.isRest
-                ? event.startUnit + (event.durationUnits / 2)
-                : isWholeDuration
-                  ? event.startUnit + (event.durationUnits / 2)
-                  : getHeadCenterUnit(event)
-              );
+              const centerUnit = getCompactDisplayCenterUnit(event, { beamed: isEditorBeamed });
               const glyphTranslateY = event.isRest
                 ? '-62%'
                 : isWholeDuration

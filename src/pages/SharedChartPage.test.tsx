@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SharedResourcePayload } from '../types';
 import SharedChartPage from './SharedChartPage';
@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   importSharedSongs: vi.fn(),
   signInWithGoogleRedirect: vi.fn(),
   getSession: vi.fn(),
-  onAuthStateChange: vi.fn()
+  onAuthStateChange: vi.fn(),
+  from: vi.fn(),
+  rpc: vi.fn()
 }));
 
 vi.mock('../lib/sharing', () => ({
@@ -29,8 +31,8 @@ vi.mock('../lib/supabase', () => ({
       getSession: mocks.getSession,
       onAuthStateChange: mocks.onAuthStateChange
     },
-    from: vi.fn(),
-    rpc: vi.fn()
+    from: mocks.from,
+    rpc: mocks.rpc
   }
 }));
 
@@ -50,11 +52,35 @@ const song = (title: string) => ({
   sections: [{ id: `section-${title}`, title: 'Verse', bars: [{ id: `bar-${title}`, chords: ['C'] }] }]
 });
 
+const LocationDisplay = () => {
+  const location = useLocation();
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
+};
+
+const installLocalStorageMock = () => {
+  const storage = new Map<string, string>();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: vi.fn((key: string) => storage.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        storage.set(key, String(value));
+      }),
+      removeItem: vi.fn((key: string) => {
+        storage.delete(key);
+      }),
+      clear: vi.fn(() => {
+        storage.clear();
+      })
+    }
+  });
+};
+
 const renderPage = () => render(
   <MemoryRouter initialEntries={['/share/test-token']}>
     <Routes>
       <Route path="/share/:token" element={<SharedChartPage />} />
-      <Route path="/" element={<div>Library</div>} />
+      <Route path="/" element={<LocationDisplay />} />
     </Routes>
   </MemoryRouter>
 );
@@ -62,8 +88,15 @@ const renderPage = () => render(
 describe('SharedChartPage song imports', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    installLocalStorageMock();
     mocks.getSession.mockResolvedValue({ data: { session: { user: { id: 'user-1' } } }, error: null });
     mocks.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } });
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null })
+    });
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
   });
 
   it('imports a shared single song into the personal library', async () => {
@@ -119,5 +152,31 @@ describe('SharedChartPage song imports', () => {
       'duplicate',
       { 'song-b': 'overwrite' }
     ));
+  });
+
+  it('opens the imported setlist directly after joining a shared setlist', async () => {
+    const payload: SharedResourcePayload = {
+      resourceType: 'setlist',
+      setlist: {
+        id: 'shared-setlist-1',
+        name: 'Sunday Setlist',
+        displayMode: 'chord-movable-key',
+        songs: [
+          { id: 'setlist-song-1', title: 'Alpha', song: song('Alpha') },
+          { id: 'setlist-song-2', title: 'Beta', song: song('Beta') }
+        ]
+      }
+    };
+    mocks.resolveShareLink.mockResolvedValue(payload);
+    mocks.rpc.mockResolvedValue({ data: 'shared-setlist-1', error: null });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: '導入到我的帳號' }));
+
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('join_shared_setlist', { p_token: 'test-token' }));
+    expect(await screen.findByTestId('location')).toHaveTextContent('/?setlist=shared-setlist-1');
+    expect(window.localStorage.getItem('chordmaster.workspace-mode.v1')).toBe('setlists');
+    expect(window.localStorage.getItem('chordmaster.selected-setlist-id.v1')).toBe('shared-setlist-1');
+    expect(window.localStorage.getItem('chordmaster.selected-setlist-song-id.v1')).toBe('setlist-song-1');
   });
 });

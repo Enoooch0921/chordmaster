@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../../types';
@@ -104,17 +104,41 @@ describe('PreviewBarEditor', () => {
       deviceLayout: 'phone'
     });
 
-    await user.click(screen.getByRole('button', { name: '切換輸入法，目前和弦，下一個節奏' }));
+    await user.click(screen.getByRole('button', { name: /切換輸入法，目前和弦，下一個節奏/ }));
     expect(onNotationModeChange).toHaveBeenCalledWith('rhythm');
     expect(onApplyDraft).not.toHaveBeenCalled();
 
     rerenderSession({ ...base, notationMode: 'rhythm' });
-    await user.click(screen.getByRole('button', { name: '切換輸入法，目前節奏，下一個簡譜' }));
+    await user.click(screen.getByRole('button', { name: /切換輸入法，目前節奏，下一個簡譜/ }));
     expect(onNotationModeChange).toHaveBeenLastCalledWith('jianpu');
 
     rerenderSession({ ...base, notationMode: 'jianpu' });
-    await user.click(screen.getByRole('button', { name: '切換輸入法，目前簡譜，下一個和弦' }));
+    await user.click(screen.getByRole('button', { name: /切換輸入法，目前簡譜，下一個和弦/ }));
     expect(onNotationModeChange).toHaveBeenLastCalledWith('chords');
+  });
+
+  it('opens a direct notation mode chooser from a long press on the mode button', () => {
+    vi.useFakeTimers();
+    try {
+      const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+      const { onNotationModeChange } = renderEditor({
+        session: base,
+        deviceLayout: 'phone'
+      });
+      const modeButton = screen.getByRole('button', { name: /切換輸入法，目前和弦，下一個節奏/ });
+
+      fireEvent.pointerDown(modeButton, { button: 0 });
+      act(() => {
+        vi.advanceTimersByTime(420);
+      });
+
+      const menu = screen.getByRole('menu', { name: '選擇輸入法' });
+      expect(within(menu).getByRole('menuitemradio', { name: '和弦' })).toHaveAttribute('aria-checked', 'true');
+      fireEvent.click(within(menu).getByRole('menuitemradio', { name: '簡譜' }));
+      expect(onNotationModeChange).toHaveBeenCalledWith('jianpu');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('writes rhythm notes and rests through semantic rhythm cursors', async () => {
@@ -175,6 +199,47 @@ describe('PreviewBarEditor', () => {
     expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: 'e' });
     expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].rhythm).toBe('e');
+  });
+
+  it('uses chord-like space and enter navigation in rhythm mode', () => {
+    const rhythmSong: Song = {
+      ...song,
+      sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'], rhythm: 'q' }] }]
+    };
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song: rhythmSong, target: rhythmTarget, inputMode: 'letters' });
+    const { onNavigate, onNotationCursorChange } = renderEditor({ session: rhythmSession, deviceLayout: 'desktop' });
+
+    fireEvent.keyDown(document.body, { key: ' ' });
+    expect(onNotationCursorChange).toHaveBeenLastCalledWith({ kind: 'rhythm', cursorUnit: 4 });
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(onNavigate).toHaveBeenCalledWith('next', undefined, { bar: true });
+  });
+
+  it('advances to the next bar after rhythm input fills the current bar', async () => {
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft, onNavigate } = renderEditor({ session: rhythmSession, deviceLayout: 'phone' });
+
+    fireEvent.click(screen.getByRole('button', { name: '全音符' }));
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].rhythm).toBe('w');
+    await waitFor(() => {
+      expect(onNavigate).toHaveBeenCalledWith('next', undefined, { bar: true });
+    });
   });
 
   it('offers rhythm copy and paste from the rhythm keyboard', async () => {

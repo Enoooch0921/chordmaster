@@ -14,6 +14,24 @@ import { signInWithGoogleRedirect } from '../lib/auth';
 import { importSharedSongs, inspectSharedSongImport, resolveShareLink } from '../lib/sharing';
 import { supabase } from '../lib/supabase';
 
+const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
+const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
+const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.v1';
+
+const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string | null) => {
+  try {
+    window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, 'setlists');
+    window.localStorage.setItem(SELECTED_SETLIST_STORAGE_KEY, setlistId);
+    if (firstSetlistSongId) {
+      window.localStorage.setItem(SELECTED_SETLIST_SONG_STORAGE_KEY, firstSetlistSongId);
+    } else {
+      window.localStorage.removeItem(SELECTED_SETLIST_SONG_STORAGE_KEY);
+    }
+  } catch {
+    // Landing still works through the URL query even if storage is unavailable.
+  }
+};
+
 export default function SharedChartPage() {
   const { token = '' } = useParams();
   const navigate = useNavigate();
@@ -163,6 +181,9 @@ export default function SharedChartPage() {
             navigate(projectId ? `/?project=${encodeURIComponent(projectId)}` : '/');
           } else {
             const setlistId = typeof data === 'string' ? data : payload?.setlist?.id;
+            if (setlistId) {
+              rememberSetlistLanding(setlistId, payload?.setlist?.songs[0]?.id ?? null);
+            }
             navigate(setlistId ? `/?setlist=${encodeURIComponent(setlistId)}` : '/');
           }
           return;
@@ -485,7 +506,10 @@ export default function SharedChartPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => navigate(`/?setlist=${encodeURIComponent(payload.setlist.id)}`)}
+                      onClick={() => {
+                        rememberSetlistLanding(payload.setlist!.id, payload.setlist!.songs[0]?.id ?? null);
+                        navigate(`/?setlist=${encodeURIComponent(payload.setlist!.id)}`);
+                      }}
                       className="mt-3 inline-flex items-center justify-center rounded-xl bg-green-700 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-green-800"
                     >
                       {language === 'zh' ? '打開歌單' : 'Open Setlist'}
