@@ -626,6 +626,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       } else if (notationMode === 'rhythm' && !event.shiftKey && event.key === ' ') {
         event.preventDefault();
         navigateNotation('next');
+      } else if (notationMode === 'jianpu' && !event.shiftKey && event.key === 'Enter') {
+        event.preventDefault();
+        onNavigate('next', undefined, { bar: true });
+      } else if (notationMode === 'jianpu' && !event.shiftKey && event.key === ' ') {
+        event.preventDefault();
+        navigateNotation('next');
       } else if (event.key === 'ArrowLeft' || (event.key === 'Enter' && event.shiftKey)) {
         event.preventDefault();
         navigateNotation('previous');

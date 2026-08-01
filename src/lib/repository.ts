@@ -3,6 +3,7 @@ import {
   CloudLibrarySummary,
   JoinedProject,
   JoinedSetlist,
+  LibraryChangeKind,
   LibraryRole,
   NotificationResourceType,
   Project,
@@ -10,6 +11,8 @@ import {
   ProjectShareStatus,
   ShareContact,
   Setlist,
+  SetlistAssignableMember,
+  SetlistEditorAssignmentSnapshot,
   SetlistShareStatus,
   SetlistSong,
   SharedResourcePayload,
@@ -21,6 +24,13 @@ import {
   StoredSong,
   TeamInvite,
   TeamManagementSnapshot,
+  TeamSongArchiveResult,
+  TeamSongDeleteResult,
+  TeamSongImportCandidate,
+  TeamSongImportInspection,
+  TeamSongImportRequestItem,
+  TeamSongImportResolution,
+  TeamSongImportResult,
   WorkspaceSnapshot
 } from '../types';
 import {
@@ -48,13 +58,20 @@ interface SongRow {
   title: string;
   content_json: Song;
   client_legacy_id: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
+  created_by: string;
+  updated_by: string;
   created_at: string;
   updated_at: string;
 }
 
+const SONG_SELECT = 'id, library_id, title, content_json, client_legacy_id, archived_at, archived_by, created_by, updated_by, created_at, updated_at';
+
 interface SongIdentityRow {
   id: string;
   library_id: string;
+  created_by: string;
 }
 
 interface SetlistRow {
@@ -101,6 +118,11 @@ interface UserSetlistCapoOverrideRow {
   updated_at?: string;
 }
 
+interface CurrentUserSetlistAssignmentRow {
+  setlist_id: string;
+  user_id: string;
+}
+
 interface LibraryRow {
   id: string;
   name: string;
@@ -116,6 +138,7 @@ interface JoinedSetlistRpcSong {
   songId?: unknown;
   order?: unknown;
   overrideKey?: unknown;
+  sourceArchivedAt?: unknown;
   sectionOrder?: unknown;
   songData?: unknown;
 }
@@ -196,6 +219,7 @@ const upsertProfile = async (userId: string, email: string, name: string, pictur
 export interface WorkspaceRepository {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   loadLibraryWorkspace(libraryId: string): Promise<WorkspaceSnapshot>;
+  loadLibrarySongs(libraryId: string): Promise<StoredSong[]>;
   loadPersonalWorkspace(): Promise<WorkspaceSnapshot>;
   listLibraries(): Promise<CloudLibrarySummary[]>;
   setActiveLibrary(libraryId: string | null): void;
@@ -207,6 +231,13 @@ export interface WorkspaceRepository {
   updateTeamMemberRole(libraryId: string, userId: string, role: Exclude<LibraryRole, 'owner'>): Promise<void>;
   removeTeamMember(libraryId: string, userId: string): Promise<void>;
   acceptTeamInvite(token: string): Promise<string>;
+  getSetlistEditorAssignments(setlistId: string): Promise<SetlistEditorAssignmentSnapshot>;
+  setSetlistEditorAssignment(setlistId: string, userId: string, enabled: boolean): Promise<SetlistEditorAssignmentSnapshot>;
+  inspectTeamSongImport(teamLibraryId: string, sourceSongIds: string[]): Promise<TeamSongImportInspection>;
+  importPersonalSongsToTeam(teamLibraryId: string, items: TeamSongImportRequestItem[]): Promise<TeamSongImportResult>;
+  archiveTeamSongs(libraryId: string, songIds: string[], archived: boolean): Promise<TeamSongArchiveResult>;
+  deleteTeamSongs(libraryId: string, songIds: string[]): Promise<TeamSongDeleteResult>;
+  subscribeToLibraryChanges(libraryId: string, onChange: (kind: LibraryChangeKind) => void): () => void;
   copySongToPersonal(song: StoredSong): Promise<StoredSong>;
   loadTeamSourceSong(song: StoredSong): Promise<StoredSong | null>;
   syncPersonalSongFromTeam(song: StoredSong): Promise<StoredSong>;
@@ -245,8 +276,31 @@ export interface WorkspaceRepository {
 const mapSongRow = (row: SongRow): StoredSong => ({
   ...cloneValue(normalizeSongBars(row.content_json)),
   id: row.id,
+  archivedAt: row.archived_at ? new Date(row.archived_at).getTime() : null,
+  archivedBy: row.archived_by,
+  createdBy: row.created_by,
+  updatedBy: row.updated_by,
+  createdAt: new Date(row.created_at).getTime(),
   updatedAt: new Date(row.updated_at).getTime()
 });
+
+const getLibrarySongs = async (libraryId: string): Promise<StoredSong[]> => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await supabase
+    .from('songs')
+    .select(SONG_SELECT)
+    .eq('library_id', libraryId)
+    .returns<SongRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapSongRow);
+};
 
 const assertSongIdIsWritableInLibrary = async (songId: string, libraryId: string) => {
   if (!supabase) {
@@ -255,7 +309,7 @@ const assertSongIdIsWritableInLibrary = async (songId: string, libraryId: string
 
   const { data, error } = await supabase
     .from('songs')
-    .select('id, library_id')
+    .select('id, library_id, created_by')
     .eq('id', songId)
     .maybeSingle<SongIdentityRow>();
 
@@ -266,13 +320,16 @@ const assertSongIdIsWritableInLibrary = async (songId: string, libraryId: string
   if (data && data.library_id !== libraryId) {
     throw new Error('This song belongs to another workspace. Import it as a copy before saving.');
   }
+
+  return data;
 };
 
 const mapSetlistRows = (
   rows: SetlistRow[],
   setlistSongs: SetlistSongRow[],
   songsById: Map<string, StoredSong>,
-  personalCapoBySetlistSongId = new Map<string, number>()
+  personalCapoBySetlistSongId = new Map<string, number>(),
+  assignedSetlistIds = new Set<string>()
 ) => (
   rows.map((row, index) => {
     const songs = reindexSetlistSongs(
@@ -286,13 +343,14 @@ const mapSetlistRows = (
           order: orderIndex,
           overrideKey: item.override_json?.overrideKey,
           personalCapoOverride: personalCapoBySetlistSongId.get(item.id),
+          sourceArchivedAt: songsById.get(item.song_id)?.archivedAt ?? null,
           sectionOrder: Array.isArray(item.override_json?.sectionOrder) ? item.override_json.sectionOrder : [],
           songData: item.override_json?.songData ? normalizeSongBars(item.override_json.songData) : undefined
         }))
         .filter((item) => songsById.has(item.songId) || Boolean(item.songData))
     );
 
-    return normalizeStoredSetlist({
+    const normalizedSetlist = normalizeStoredSetlist({
       id: row.id,
       name: row.name,
       displayMode: row.display_mode,
@@ -304,6 +362,11 @@ const mapSetlistRows = (
       updatedAt: new Date(row.updated_at).getTime(),
       songs
     }, songsById, index);
+
+    return {
+      ...normalizedSetlist,
+      assignedToCurrentUser: assignedSetlistIds.has(row.id)
+    };
   })
 );
 
@@ -340,6 +403,12 @@ const parseRemoteTimestamp = (value: unknown, fallback = Date.now()) => {
   return fallback;
 };
 
+const parseNullableRemoteTimestamp = (value: unknown): number | null => {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  const parsed = parseRemoteTimestamp(value, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const normalizeJoinedSetlistRpcPayload = (payload: unknown): JoinedSetlist[] => {
   if (!Array.isArray(payload)) return [];
 
@@ -368,6 +437,7 @@ const normalizeJoinedSetlistRpcPayload = (payload: unknown): JoinedSetlist[] => 
             songId,
             order: typeof song.order === 'number' && Number.isFinite(song.order) ? song.order : songIndex,
             overrideKey: typeof song.overrideKey === 'string' ? song.overrideKey as SetlistSong['overrideKey'] : undefined,
+            sourceArchivedAt: parseNullableRemoteTimestamp(song.sourceArchivedAt),
             sectionOrder: Array.isArray(song.sectionOrder)
               ? song.sectionOrder.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
               : [],
@@ -478,6 +548,172 @@ const normalizeTeamManagementSnapshot = (payload: unknown): TeamManagementSnapsh
   };
 };
 
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
+const readString = (value: unknown, fallback = '') => (
+  typeof value === 'string' ? value : fallback
+);
+
+const readNullableString = (value: unknown) => (
+  typeof value === 'string' ? value : null
+);
+
+const readNonNegativeInteger = (value: unknown, fallback = 0) => (
+  typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : fallback
+);
+
+const normalizeSetlistEditorAssignmentSnapshot = (
+  payload: unknown,
+  setlistId: string
+): SetlistEditorAssignmentSnapshot => {
+  const row = asRecord(payload);
+  const assignableMembers = Array.isArray(row.assignableMembers)
+    ? row.assignableMembers.flatMap((value) => {
+      const member = asRecord(value);
+      const userId = readString(member.userId);
+      if (!userId) return [];
+      const role: SetlistAssignableMember['role'] | null = member.role === 'editor' || member.role === 'setlist_manager'
+        ? member.role
+        : null;
+      if (!role) return [];
+      return [{
+        userId,
+        email: readString(member.email),
+        name: readString(member.name),
+        picture: typeof member.picture === 'string' ? member.picture : undefined,
+        role
+      }];
+    })
+    : [];
+  const assignments = Array.isArray(row.assignments)
+    ? row.assignments.flatMap((value) => {
+      const assignment = asRecord(value);
+      const userId = readString(assignment.userId);
+      if (!userId) return [];
+      return [{
+        userId,
+        assignedBy: readString(assignment.assignedBy),
+        assignedAt: readString(assignment.assignedAt)
+      }];
+    })
+    : [];
+
+  return {
+    setlistId: readString(row.setlistId, setlistId),
+    assignableMembers,
+    assignments
+  };
+};
+
+const TEAM_SONG_IMPORT_RESOLUTIONS = new Set<TeamSongImportResolution>([
+  'create',
+  'overwrite',
+  'duplicate'
+]);
+
+const normalizeTeamSongImportResolution = (value: unknown): TeamSongImportResolution => (
+  typeof value === 'string' && TEAM_SONG_IMPORT_RESOLUTIONS.has(value as TeamSongImportResolution)
+    ? value as TeamSongImportResolution
+    : 'create'
+);
+
+const normalizeTeamSongImportInspection = (payload: unknown): TeamSongImportInspection => {
+  const row = asRecord(payload);
+  const normalizeCandidate = (value: unknown): TeamSongImportCandidate | null => {
+    const candidate = asRecord(value);
+    const songId = readString(candidate.songId);
+    if (!songId) return null;
+    return {
+      songId,
+      title: readString(candidate.title),
+      currentKey: typeof candidate.currentKey === 'string' ? candidate.currentKey : undefined,
+      originalKey: typeof candidate.originalKey === 'string' ? candidate.originalKey : undefined,
+      version: typeof candidate.version === 'string' ? candidate.version : undefined,
+      lyricist: typeof candidate.lyricist === 'string' ? candidate.lyricist : undefined,
+      composer: typeof candidate.composer === 'string' ? candidate.composer : undefined
+    };
+  };
+  const songs = Array.isArray(row.songs)
+    ? row.songs.flatMap((value) => {
+      const item = asRecord(value);
+      const sourceSongId = readString(item.sourceSongId);
+      if (!sourceSongId) return [];
+      const possibleMatches = Array.isArray(item.possibleMatches)
+        ? item.possibleMatches.flatMap((matchValue) => {
+          const candidate = normalizeCandidate(matchValue);
+          return candidate ? [candidate] : [];
+        })
+        : [];
+      const existingSong = normalizeCandidate(item.existingSong);
+      return [{
+        sourceSongId,
+        title: readString(item.title),
+        existingSongId: existingSong?.songId ?? readNullableString(item.existingSongId),
+        existingTitle: existingSong?.title ?? readNullableString(item.existingTitle),
+        existingSong,
+        possibleMatches
+      }];
+    })
+    : [];
+
+  return { songs };
+};
+
+const normalizeTeamSongImportResult = (payload: unknown): TeamSongImportResult => {
+  const row = asRecord(payload);
+  const songs = Array.isArray(row.songs)
+    ? row.songs.flatMap((value) => {
+      const item = asRecord(value);
+      const sourceSongId = readString(item.sourceSongId);
+      const songId = readString(item.songId);
+      if (!sourceSongId || !songId) return [];
+      return [{
+        sourceSongId,
+        songId,
+        title: readString(item.title),
+        resolution: normalizeTeamSongImportResolution(item.resolution),
+        isPrimary: item.isPrimary === true
+      }];
+    })
+    : [];
+
+  return {
+    createdCount: readNonNegativeInteger(row.createdCount),
+    overwrittenCount: readNonNegativeInteger(row.overwrittenCount),
+    duplicateCount: readNonNegativeInteger(row.duplicateCount),
+    songs
+  };
+};
+
+const normalizeTeamSongArchiveResult = (payload: unknown, archived: boolean): TeamSongArchiveResult => {
+  const row = asRecord(payload);
+  const archivedCount = readNonNegativeInteger(row.archivedCount);
+  return {
+    archivedCount,
+    changedCount: readNonNegativeInteger(row.changedCount, archivedCount),
+    songIds: Array.isArray(row.songIds)
+      ? row.songIds.filter((songId): songId is string => typeof songId === 'string')
+      : [],
+    archived: typeof row.archived === 'boolean' ? row.archived : archived
+  };
+};
+
+const normalizeTeamSongDeleteResult = (payload: unknown): TeamSongDeleteResult => {
+  const row = asRecord(payload);
+  return {
+    deletedCount: readNonNegativeInteger(row.deletedCount),
+    songIds: Array.isArray(row.songIds)
+      ? row.songIds.filter((songId): songId is string => typeof songId === 'string')
+      : []
+  };
+};
+
 const buildPersonalCopyTitle = (personalSongs: StoredSong[], sourceTitle: string) => {
   const baseTitle = `${sourceTitle.trim() || 'Untitled Song'} (團隊轉存)`;
   const existingTitles = new Set(personalSongs.map((song) => normalizeMatchingTitle(song.title)));
@@ -501,6 +737,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async loadLibraryWorkspace() {
     return loadLocalWorkspaceSnapshot();
+  },
+  async loadLibrarySongs() {
+    return loadLocalWorkspaceSnapshot().songs;
   },
   async loadPersonalWorkspace() {
     return loadLocalWorkspaceSnapshot();
@@ -534,6 +773,27 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async acceptTeamInvite() {
     throw new Error('Please sign in before accepting a team invite.');
+  },
+  async getSetlistEditorAssignments(setlistId) {
+    return { setlistId, assignableMembers: [], assignments: [] };
+  },
+  async setSetlistEditorAssignment(setlistId) {
+    return { setlistId, assignableMembers: [], assignments: [] };
+  },
+  async inspectTeamSongImport() {
+    return { songs: [] };
+  },
+  async importPersonalSongsToTeam() {
+    return { createdCount: 0, overwrittenCount: 0, duplicateCount: 0, songs: [] };
+  },
+  async archiveTeamSongs(_libraryId, _songIds, archived) {
+    return { archivedCount: 0, changedCount: 0, songIds: [], archived };
+  },
+  async deleteTeamSongs() {
+    return { deletedCount: 0, songIds: [] };
+  },
+  subscribeToLibraryChanges() {
+    return () => undefined;
   },
   async copySongToPersonal(song) {
     return song;
@@ -699,7 +959,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
   ] = await Promise.all([
     supabase
       .from('songs')
-      .select('id, library_id, title, content_json, client_legacy_id, created_at, updated_at')
+      .select(SONG_SELECT)
       .eq('library_id', libraryId)
       .returns<SongRow[]>(),
     supabase
@@ -737,6 +997,19 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
     throw setlistSongError;
   }
 
+  const { data: assignmentRows, error: assignmentError } = userId && setlistIds.length > 0
+    ? await supabase
+      .from('setlist_editor_assignments')
+      .select('setlist_id, user_id')
+      .in('setlist_id', setlistIds)
+      .eq('user_id', userId)
+      .returns<CurrentUserSetlistAssignmentRow[]>()
+    : { data: [] as CurrentUserSetlistAssignmentRow[], error: null };
+
+  if (assignmentError) {
+    throw assignmentError;
+  }
+
   const setlistSongIds = (setlistSongRows ?? []).map((row) => row.id);
   const { data: personalCapoRows, error: personalCapoError } = userId && setlistSongIds.length > 0
     ? await supabase
@@ -752,9 +1025,16 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
   }
 
   const personalCapoBySetlistSongId = new Map((personalCapoRows ?? []).map((row) => [row.setlist_song_id, row.capo] as const));
+  const assignedSetlistIds = new Set((assignmentRows ?? []).map((row) => row.setlist_id));
   const songs = (songRows ?? []).map(mapSongRow);
   const songsById = new Map(songs.map((song) => [song.id, song] as const));
-  const setlists = mapSetlistRows(setlistRows ?? [], setlistSongRows ?? [], songsById, personalCapoBySetlistSongId);
+  const setlists = mapSetlistRows(
+    setlistRows ?? [],
+    setlistSongRows ?? [],
+    songsById,
+    personalCapoBySetlistSongId,
+    assignedSetlistIds
+  );
   const projects = mapProjectRows(projectRows ?? []);
   const lastSavedAt = Math.max(
     0,
@@ -801,6 +1081,7 @@ const getJoinedProjects = async (): Promise<JoinedProject[]> => {
             embeddedSongsById.set(songId, {
               ...cloneValue(normalizeSongBars(songData)),
               id: songId,
+              archivedAt: parseNullableRemoteTimestamp(ss.sourceArchivedAt),
               updatedAt: Date.now()
             });
           }
@@ -880,9 +1161,9 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
   const { data: songRows, error: songError } = songIds.length > 0
     ? await supabase
       .from('songs')
-      .select('id, title, content_json, updated_at')
+      .select('id, title, content_json, archived_at, updated_at')
       .in('id', songIds)
-    : { data: [] as { id: string; title: string; content_json: Song; updated_at: string }[], error: null };
+    : { data: [] as { id: string; title: string; content_json: Song; archived_at: string | null; updated_at: string }[], error: null };
 
   if (songError) throw songError;
 
@@ -918,6 +1199,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
           order: i,
           overrideKey: s.override_json?.overrideKey,
           personalCapoOverride: userCapo,
+          sourceArchivedAt: songRow?.archived_at ? new Date(songRow.archived_at).getTime() : null,
           sectionOrder: Array.isArray(s.override_json?.sectionOrder) ? s.override_json.sectionOrder : [],
           songData: overrideSongData ?? (songRow ? normalizeSongBars(cloneValue(songRow.content_json)) : undefined)
         };
@@ -1003,6 +1285,138 @@ export const createCloudRepository = (params: {
 
   const ensureLibraryId = async () => activeLibraryId ?? await ensurePersonalLibraryId();
 
+  const ensurePersonalImportLibraryId = async () => {
+    if (!supabase) {
+      throw new Error('Supabase is not configured.');
+    }
+
+    const selectedLibraryId = activeLibraryId;
+    if (selectedLibraryId) {
+      const { data: selectedLibrary, error } = await supabase
+        .from('libraries')
+        .select('id, kind')
+        .eq('id', selectedLibraryId)
+        .maybeSingle<Pick<LibraryRow, 'id' | 'kind'>>();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!selectedLibrary || selectedLibrary.kind !== 'personal') {
+        throw new Error('Local workspace imports are only allowed in your personal library. Switch to your personal library before importing.');
+      }
+    }
+
+    const personalLibraryId = await ensurePersonalLibraryId();
+    if (selectedLibraryId && selectedLibraryId !== personalLibraryId) {
+      throw new Error('Local workspace imports are only allowed in your personal library. Switch to your personal library before importing.');
+    }
+
+    return personalLibraryId;
+  };
+
+  const saveSongToLibrary = async (
+    song: StoredSong,
+    libraryId: string,
+    clientLegacyId?: string
+  ) => {
+    if (!supabase) {
+      throw new Error('Supabase is not configured.');
+    }
+
+    const existingSong = await assertSongIdIsWritableInLibrary(song.id, libraryId);
+    const createdBy = existingSong?.created_by ?? params.userId;
+    const now = new Date(song.updatedAt || Date.now()).toISOString();
+    const contentJson = {
+      ...normalizeSongBars(cloneValue(song)),
+      createdBy,
+      updatedBy: params.userId
+    };
+    const payload = {
+      id: song.id,
+      library_id: libraryId,
+      title: song.title,
+      content_json: contentJson,
+      ...(clientLegacyId ? { client_legacy_id: clientLegacyId } : {}),
+      created_by: createdBy,
+      updated_by: params.userId,
+      updated_at: now
+    };
+
+    const { error } = await supabase
+      .from('songs')
+      .upsert(payload, { onConflict: 'id' });
+
+    if (error) {
+      throw error;
+    }
+  };
+
+  const saveSetlistToLibrary = async (
+    setlist: Setlist,
+    libraryId: string,
+    previousSetlist?: Setlist
+  ) => {
+    if (!supabase) {
+      throw new Error('Supabase is not configured.');
+    }
+
+    const updatedAtIso = new Date(setlist.updatedAt || Date.now()).toISOString();
+    const payload = {
+      id: setlist.id,
+      library_id: libraryId,
+      name: setlist.name,
+      display_mode: setlist.displayMode,
+      archived: setlist.archived ?? false,
+      project_id: setlist.projectId ?? null,
+      created_by: setlist.createdBy ?? params.userId,
+      updated_by: params.userId,
+      updated_at: updatedAtIso
+    };
+
+    // Skip rewriting setlist_songs (delete-all + bulk upsert) when the songs
+    // haven't actually changed — this turns pure metadata edits (rename,
+    // archive, move-to-project) into a single round-trip instead of three.
+    const songsUnchanged = previousSetlist
+      && setlistSongsSignature(setlist.songs) === setlistSongsSignature(previousSetlist.songs);
+
+    const { error } = await supabase
+      .from('setlists')
+      .upsert(payload, { onConflict: 'id' });
+    if (error) {
+      throw error;
+    }
+
+    if (!songsUnchanged) {
+      await persistSetlistSongs(setlist);
+    }
+  };
+
+  const saveProjectToLibrary = async (project: Project, libraryId: string) => {
+    if (!supabase) {
+      throw new Error('Supabase is not configured.');
+    }
+
+    const updatedAtIso = new Date(project.updatedAt || Date.now()).toISOString();
+    const payload = {
+      id: project.id,
+      library_id: libraryId,
+      name: project.name,
+      archived: project.archived ?? false,
+      created_by: project.createdBy ?? params.userId,
+      updated_by: params.userId,
+      updated_at: updatedAtIso
+    };
+
+    const { error } = await supabase
+      .from('projects')
+      .upsert(payload, { onConflict: 'id' });
+
+    if (error) {
+      throw error;
+    }
+  };
+
   return {
     async loadWorkspace() {
       const libraryId = await ensureLibraryId();
@@ -1018,7 +1432,9 @@ export const createCloudRepository = (params: {
     },
 
     async loadLibraryWorkspace(libraryId) {
-      activeLibraryId = libraryId;
+      // Loading is intentionally side-effect free. A real workspace switch
+      // calls setActiveLibrary only after this complete snapshot succeeds;
+      // background Realtime/access reads must never redirect later writes.
       const workspace = await getLibraryWorkspace(libraryId, params.userId);
       const personalLibraryId = await ensurePersonalLibraryId();
       const isPersonal = libraryId === personalLibraryId;
@@ -1027,6 +1443,10 @@ export const createCloudRepository = (params: {
         isPersonal ? getJoinedProjects() : Promise.resolve([] as JoinedProject[])
       ]);
       return { ...workspace, joinedSetlists, joinedProjects };
+    },
+
+    async loadLibrarySongs(libraryId) {
+      return getLibrarySongs(libraryId);
     },
 
     async loadPersonalWorkspace() {
@@ -1112,15 +1532,138 @@ export const createCloudRepository = (params: {
       return data as string;
     },
 
+    async getSetlistEditorAssignments(setlistId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('get_setlist_editor_assignments', {
+        p_setlist_id: setlistId
+      });
+      if (error) throw error;
+      return normalizeSetlistEditorAssignmentSnapshot(data, setlistId);
+    },
+
+    async setSetlistEditorAssignment(setlistId, userId, enabled) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('set_setlist_editor_assignment', {
+        p_setlist_id: setlistId,
+        p_user_id: userId,
+        p_assigned: enabled
+      });
+      if (error) throw error;
+      return normalizeSetlistEditorAssignmentSnapshot(data, setlistId);
+    },
+
+    async inspectTeamSongImport(teamLibraryId, sourceSongIds) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      if (sourceSongIds.length === 0) return { songs: [] };
+      const { data, error } = await supabase.rpc('inspect_team_song_import', {
+        p_team_library_id: teamLibraryId,
+        p_source_song_ids: sourceSongIds
+      });
+      if (error) throw error;
+      return normalizeTeamSongImportInspection(data);
+    },
+
+    async importPersonalSongsToTeam(teamLibraryId, items) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      if (items.length === 0) {
+        return { createdCount: 0, overwrittenCount: 0, duplicateCount: 0, songs: [] };
+      }
+      const { data, error } = await supabase.rpc('import_personal_songs_to_team', {
+        p_team_library_id: teamLibraryId,
+        p_items: items.map((item) => ({
+          sourceSongId: item.sourceSongId,
+          resolution: item.resolution,
+          ...(item.targetSongId ? { targetSongId: item.targetSongId } : {})
+        }))
+      });
+      if (error) throw error;
+      return normalizeTeamSongImportResult(data);
+    },
+
+    async archiveTeamSongs(libraryId, songIds, archived) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      if (songIds.length === 0) {
+        return { archivedCount: 0, changedCount: 0, songIds: [], archived };
+      }
+      const { data, error } = await supabase.rpc('archive_team_songs', {
+        p_team_library_id: libraryId,
+        p_song_ids: songIds,
+        p_archived: archived
+      });
+      if (error) throw error;
+      return normalizeTeamSongArchiveResult(data, archived);
+    },
+
+    async deleteTeamSongs(libraryId, songIds) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      if (songIds.length === 0) return { deletedCount: 0, songIds: [] };
+      const { data, error } = await supabase.rpc('delete_team_songs', {
+        p_team_library_id: libraryId,
+        p_song_ids: songIds
+      });
+      if (error) throw error;
+      return normalizeTeamSongDeleteResult(data);
+    },
+
+    subscribeToLibraryChanges(libraryId, onChange) {
+      const client = supabase;
+      if (!client) return () => undefined;
+
+      const belongsToLibrary = (record: unknown) => asRecord(record).library_id === libraryId;
+      let subscribed = true;
+      const channel = client
+        .channel(`library-changes:${libraryId}:${crypto.randomUUID()}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'songs', filter: `library_id=eq.${libraryId}` },
+          () => {
+            // Do not suppress same-account events: another tab or device may
+            // legitimately update the team library with this same user id.
+            if (subscribed) onChange('songs');
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'setlist_editor_assignments', filter: `user_id=eq.${params.userId}` },
+          (payload) => {
+            if (subscribed && (belongsToLibrary(payload.new) || belongsToLibrary(payload.old))) {
+              onChange('assignments');
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'library_members', filter: `user_id=eq.${params.userId}` },
+          (payload) => {
+            if (subscribed && (belongsToLibrary(payload.new) || belongsToLibrary(payload.old))) {
+              onChange('membership');
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        if (!subscribed) return;
+        subscribed = false;
+        void client.removeChannel(channel);
+      };
+    },
+
     async copySongToPersonal(sourceSong) {
       if (!supabase) throw new Error('Supabase is not configured.');
       const personalLibraryId = await ensurePersonalLibraryId();
       const personalWorkspace = await getLibraryWorkspace(personalLibraryId, params.userId);
+      const copiedAt = Date.now();
       const copiedSong: StoredSong = {
         ...cloneValue(normalizeSongBars(sourceSong)),
         id: crypto.randomUUID(),
         title: buildPersonalCopyTitle(personalWorkspace.songs, sourceSong.title),
-        updatedAt: Date.now()
+        archivedAt: null,
+        archivedBy: null,
+        createdBy: params.userId,
+        updatedBy: params.userId,
+        createdAt: copiedAt,
+        updatedAt: copiedAt
       };
       const payload = {
         id: copiedSong.id,
@@ -1143,7 +1686,7 @@ export const createCloudRepository = (params: {
       if (!supabase || !song.teamSource) return null;
       const { data, error } = await supabase
         .from('songs')
-        .select('id, library_id, title, content_json, client_legacy_id, created_at, updated_at')
+        .select(SONG_SELECT)
         .eq('library_id', song.teamSource.libraryId)
         .eq('id', song.teamSource.songId)
         .maybeSingle<SongRow>();
@@ -1162,6 +1705,11 @@ export const createCloudRepository = (params: {
         id: song.id,
         title: song.title,
         capo: song.capo,
+        archivedAt: song.archivedAt ?? null,
+        archivedBy: song.archivedBy ?? null,
+        createdBy: song.createdBy,
+        updatedBy: params.userId,
+        createdAt: song.createdAt,
         updatedAt: Date.now(),
         teamSource: {
           ...song.teamSource,
@@ -1173,128 +1721,23 @@ export const createCloudRepository = (params: {
     },
 
     async savePersonalSong(song) {
-      if (!supabase) {
-        throw new Error('Supabase is not configured.');
-      }
-
       const personalLibraryId = await ensurePersonalLibraryId();
-      await assertSongIdIsWritableInLibrary(song.id, personalLibraryId);
-      const now = new Date(song.updatedAt || Date.now()).toISOString();
-      const payload = {
-        id: song.id,
-        library_id: personalLibraryId,
-        title: song.title,
-        content_json: normalizeSongBars(cloneValue(song)),
-        created_by: params.userId,
-        updated_by: params.userId,
-        updated_at: now
-      };
-
-      const { error } = await supabase
-        .from('songs')
-        .upsert(payload, { onConflict: 'id' });
-
-      if (error) {
-        throw error;
-      }
+      await saveSongToLibrary(song, personalLibraryId);
     },
 
     async saveSong(song) {
-      if (!supabase) {
-        throw new Error('Supabase is not configured.');
-      }
-
       const libraryId = await ensureLibraryId();
-      await assertSongIdIsWritableInLibrary(song.id, libraryId);
-      const now = new Date(song.updatedAt || Date.now()).toISOString();
-      const payload = {
-        id: song.id,
-        library_id: libraryId,
-        title: song.title,
-        content_json: normalizeSongBars(cloneValue(song)),
-        created_by: params.userId,
-        updated_by: params.userId,
-        updated_at: now
-      };
-
-      const { error } = await supabase
-        .from('songs')
-        .upsert(payload, { onConflict: 'id' });
-
-      if (error) {
-        throw error;
-      }
+      await saveSongToLibrary(song, libraryId);
     },
 
     async saveSetlist(setlist, previousSetlist) {
-      if (!supabase) {
-        throw new Error('Supabase is not configured.');
-      }
-
       const libraryId = await ensureLibraryId();
-      const updatedAtIso = new Date(setlist.updatedAt || Date.now()).toISOString();
-      const payload = {
-        id: setlist.id,
-        library_id: libraryId,
-        name: setlist.name,
-        display_mode: setlist.displayMode,
-        archived: setlist.archived ?? false,
-        project_id: setlist.projectId ?? null,
-        created_by: setlist.createdBy ?? params.userId,
-        updated_by: params.userId,
-        updated_at: updatedAtIso
-      };
-
-      // Skip rewriting setlist_songs (delete-all + bulk upsert) when the songs
-      // haven't actually changed — this turns pure metadata edits (rename,
-      // archive, move-to-project) into a single round-trip instead of three.
-      const songsUnchanged = previousSetlist
-        && setlistSongsSignature(setlist.songs) === setlistSongsSignature(previousSetlist.songs);
-
-      if (songsUnchanged) {
-        const { error } = await supabase
-          .from('setlists')
-          .upsert(payload, { onConflict: 'id' });
-        if (error) {
-          throw error;
-        }
-        return;
-      }
-
-      const { error } = await supabase
-        .from('setlists')
-        .upsert(payload, { onConflict: 'id' });
-      if (error) {
-        throw error;
-      }
-
-      await persistSetlistSongs(setlist);
+      await saveSetlistToLibrary(setlist, libraryId, previousSetlist);
     },
 
     async saveProject(project) {
-      if (!supabase) {
-        throw new Error('Supabase is not configured.');
-      }
-
       const libraryId = await ensureLibraryId();
-      const updatedAtIso = new Date(project.updatedAt || Date.now()).toISOString();
-      const payload = {
-        id: project.id,
-        library_id: libraryId,
-        name: project.name,
-        archived: project.archived ?? false,
-        created_by: project.createdBy ?? params.userId,
-        updated_by: params.userId,
-        updated_at: updatedAtIso
-      };
-
-      const { error } = await supabase
-        .from('projects')
-        .upsert(payload, { onConflict: 'id' });
-
-      if (error) {
-        throw error;
-      }
+      await saveProjectToLibrary(project, libraryId);
     },
 
     async deleteProject(id) {
@@ -1303,25 +1746,19 @@ export const createCloudRepository = (params: {
       }
 
       const libraryId = await ensureLibraryId();
-      // Detach any setlists pointing at this project so they fall back to
-      // "Ungrouped" rather than getting orphaned by the FK cascade.
-      const { error: detachError } = await supabase
-        .from('setlists')
-        .update({ project_id: null, updated_by: params.userId, updated_at: new Date().toISOString() })
-        .eq('project_id', id)
-        .eq('library_id', libraryId);
-      if (detachError) {
-        throw detachError;
-      }
-
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('projects')
         .delete()
         .eq('id', id)
-        .eq('library_id', libraryId);
+        .eq('library_id', libraryId)
+        .select('id')
+        .maybeSingle();
 
       if (error) {
         throw error;
+      }
+      if (!data?.id) {
+        throw new Error('Project deletion was not authorized, or the project no longer exists.');
       }
     },
 
@@ -1369,7 +1806,10 @@ export const createCloudRepository = (params: {
         throw new Error('Supabase is not configured.');
       }
 
-      const libraryId = await ensureLibraryId();
+      // Resolve and validate the destination before the first per-record write.
+      // The fixed personal-library id is then passed to every save helper so an
+      // active-workspace switch cannot redirect a running import into a team.
+      const libraryId = await ensurePersonalImportLibraryId();
       const remoteWorkspace = await getLibraryWorkspace(libraryId);
       const remoteByTitle = new Map<string, StoredSong[]>();
 
@@ -1394,7 +1834,7 @@ export const createCloudRepository = (params: {
             id: remoteSong.id,
             updatedAt: preferred.updatedAt
           };
-          await this.saveSong(mergedSong);
+          await saveSongToLibrary(mergedSong, libraryId);
           songIdMap.set(localSong.id, remoteSong.id);
           continue;
         }
@@ -1404,27 +1844,12 @@ export const createCloudRepository = (params: {
           ...cloneValue(normalizeSongBars(localSong)),
           id: importedId,
           title: matches.length > 1 ? `${localSong.title || 'Untitled'} (Imported)` : localSong.title,
+          createdBy: params.userId,
+          updatedBy: params.userId,
           updatedAt: localSong.updatedAt
         };
 
-        const payload = {
-          id: importedSong.id,
-          library_id: libraryId,
-          title: importedSong.title,
-          content_json: normalizeSongBars(cloneValue(importedSong)),
-          client_legacy_id: localSong.id,
-          created_by: params.userId,
-          updated_by: params.userId,
-          updated_at: new Date(importedSong.updatedAt).toISOString()
-        };
-
-        const { error } = await supabase
-          .from('songs')
-          .upsert(payload, { onConflict: 'id' });
-
-        if (error) {
-          throw error;
-        }
+        await saveSongToLibrary(importedSong, libraryId, localSong.id);
 
         songIdMap.set(localSong.id, importedSong.id);
       }
@@ -1444,9 +1869,11 @@ export const createCloudRepository = (params: {
           ...cloneValue(localProject),
           id: targetId,
           name: targetName,
+          createdBy: matches.length === 1 ? matches[0].createdBy ?? params.userId : params.userId,
+          updatedBy: params.userId,
           updatedAt: preferredTimestamp
         };
-        await this.saveProject(normalizedProject);
+        await saveProjectToLibrary(normalizedProject, libraryId);
         projectIdMap.set(localProject.id, targetId);
       }
 
@@ -1466,6 +1893,10 @@ export const createCloudRepository = (params: {
           ...cloneValue(localSetlist),
           id: targetSetlistId,
           name: targetName,
+          createdBy: existingMatches.length === 1
+            ? existingMatches[0].createdBy ?? params.userId
+            : params.userId,
+          updatedBy: params.userId,
           updatedAt: preferredTimestamp,
           projectId: mappedProjectId,
           songs: reindexSetlistSongs(localSetlist.songs
@@ -1488,10 +1919,16 @@ export const createCloudRepository = (params: {
             .filter((song): song is SetlistSong => Boolean(song)))
         };
 
-        await this.saveSetlist(normalizedSetlist);
+        await saveSetlistToLibrary(normalizedSetlist, libraryId);
       }
 
-      return this.loadWorkspace();
+      const [workspace, joinedSetlists, joinedProjects] = await Promise.all([
+        getLibraryWorkspace(libraryId, params.userId),
+        getJoinedSetlists(params.userId),
+        getJoinedProjects()
+      ]);
+      persistLocalWorkspaceSnapshot(workspace.songs, workspace.setlists, workspace.projects);
+      return { ...workspace, joinedSetlists, joinedProjects };
     },
 
     async createShareLink(resourceType, resourceId) {

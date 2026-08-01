@@ -165,11 +165,6 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: 'Resource not found or access denied.' }, 404);
     }
 
-    const existingToken = await getActiveShareToken(adminSupabase, resourceType, resourceId);
-    if (existingToken) {
-      return jsonResponse({ token: existingToken });
-    }
-
     const { data: canWrite, error: canWriteError } = await supabase
       .rpc('can_write_library', { target_library_id: resource.library_id });
     if (canWriteError) {
@@ -177,17 +172,39 @@ Deno.serve(async (request) => {
     }
 
     let canCreateNewShareLink = canWrite === true;
-    if (!canCreateNewShareLink && resourceType === 'project') {
+    if (resourceType === 'setlist') {
+      const { data: canWriteSetlist, error: canWriteSetlistError } = await supabase
+        .rpc('can_write_setlist', { target_setlist_id: resourceId });
+      if (canWriteSetlistError) {
+        return jsonResponse({ error: canWriteSetlistError.message }, 400);
+      }
+      // Team sharing remains limited to owners/library managers, and those
+      // managers must also own or be explicitly assigned to this setlist.
+      canCreateNewShareLink = canWrite === true && canWriteSetlist === true;
+    } else if (resourceType === 'project') {
+      const { data: canManageProject, error: canManageProjectError } = await supabase
+        .rpc('can_manage_project', { target_project_id: resourceId });
+      if (canManageProjectError) {
+        return jsonResponse({ error: canManageProjectError.message }, 400);
+      }
+
       const { data: isProjectManager, error: projectManagerError } = await supabase
         .rpc('has_project_manager_role', { target_project_id: resourceId });
       if (projectManagerError) {
         return jsonResponse({ error: projectManagerError.message }, 400);
       }
-      canCreateNewShareLink = isProjectManager === true;
+      canCreateNewShareLink = (canWrite === true && canManageProject === true) || isProjectManager === true;
     }
 
     if (!canCreateNewShareLink) {
       return jsonResponse({ error: 'You do not have permission to create a new share link.' }, 403);
+    }
+
+    // Never reveal an existing token before the caller has passed the same
+    // authorization required to create a new one.
+    const existingToken = await getActiveShareToken(adminSupabase, resourceType, resourceId);
+    if (existingToken) {
+      return jsonResponse({ token: existingToken });
     }
 
     const token = crypto.randomUUID().replaceAll('-', '');

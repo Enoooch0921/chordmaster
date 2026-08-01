@@ -55,7 +55,7 @@ Deno.serve(async (request) => {
     if (shareLink.resource_type === 'song') {
       const { data: song, error: songError } = await supabase
         .from('songs')
-        .select('id, title, content_json')
+        .select('id, title, content_json, archived_at')
         .eq('id', shareLink.resource_id)
         .maybeSingle();
 
@@ -68,7 +68,8 @@ Deno.serve(async (request) => {
         song: {
           id: song.id,
           title: song.title,
-          song: song.content_json
+          song: song.content_json,
+          archivedAt: song.archived_at ?? null
         }
       });
     }
@@ -96,7 +97,7 @@ Deno.serve(async (request) => {
       const { data: songs, error: songsError } = songIds.length > 0
         ? await supabase
           .from('songs')
-          .select('id, title, content_json')
+          .select('id, title, content_json, archived_at')
           .in('id', songIds)
         : { data: [], error: null };
       if (songsError) {
@@ -110,7 +111,8 @@ Deno.serve(async (request) => {
         .map((song) => ({
           id: song.id,
           title: song.title,
-          song: song.content_json
+          song: song.content_json,
+          archivedAt: song.archived_at ?? null
         }));
 
       return jsonResponse({
@@ -163,7 +165,7 @@ Deno.serve(async (request) => {
       const { data: projectSongs, error: projectSongsError } = projectSongIds.length > 0
         ? await supabase
           .from('songs')
-          .select('id, title, content_json')
+          .select('id, title, content_json, archived_at')
           .in('id', projectSongIds)
         : { data: [], error: null };
 
@@ -184,7 +186,8 @@ Deno.serve(async (request) => {
             return {
               id: item.id,
               title: baseSong?.title ?? '',
-              song: songContent
+              song: songContent,
+              archivedAt: baseSong?.archived_at ?? null
             };
           })
           .filter(Boolean);
@@ -232,7 +235,7 @@ Deno.serve(async (request) => {
     const { data: songs, error: songsError } = songIds.length > 0
       ? await supabase
         .from('songs')
-        .select('id, title, content_json')
+        .select('id, title, content_json, archived_at')
         .in('id', songIds)
       : { data: [], error: null };
 
@@ -251,7 +254,8 @@ Deno.serve(async (request) => {
         return {
           id: item.id,
           title: song.title,
-          song: item.override_json?.songData ?? song.content_json
+          song: item.override_json?.songData ?? song.content_json,
+          archivedAt: song.archived_at ?? null
         };
       })
       .filter(Boolean);

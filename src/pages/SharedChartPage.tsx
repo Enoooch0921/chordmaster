@@ -493,7 +493,12 @@ export default function SharedChartPage() {
                 {payload.setlist.songs.map((item, index) => (
                   <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
                     <span className="w-5 shrink-0 text-right text-xs font-bold text-stone-400">{index + 1}</span>
-                    <span className="text-sm font-semibold text-stone-800">{item.title}</span>
+                    <span className="min-w-0 flex-1 text-sm font-semibold text-stone-800">{item.title}</span>
+                    {item.archivedAt ? (
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                        {language === 'zh' ? '已封存' : 'Archived'}
+                      </span>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -582,7 +587,12 @@ export default function SharedChartPage() {
                           {sl.songs.map((item, index) => (
                             <div key={item.id} className="flex items-center gap-3 px-4 py-2">
                               <span className="w-5 shrink-0 text-right text-xs font-bold text-stone-400">{index + 1}</span>
-                              <span className="text-sm font-semibold text-stone-800">{item.title}</span>
+                              <span className="min-w-0 flex-1 text-sm font-semibold text-stone-800">{item.title}</span>
+                              {item.archivedAt ? (
+                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                                  {language === 'zh' ? '已封存' : 'Archived'}
+                                </span>
+                              ) : null}
                             </div>
                           ))}
                         </div>

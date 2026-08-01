@@ -26,6 +26,9 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 - 舊資料相容：匯入或載入較早版本歌譜時會先自動整理資料格式
 - 帳號系統：支援 Google OAuth 與 Email Magic Link
 - 雲端同步：登入後可同步個人歌曲庫與歌單
+- 團隊曲庫：支援擁有者、曲庫管理員、歌單編輯者與檢視者四級權限
+- 個人歌曲匯入團隊：保留原歌名，以來源 ID 處理覆蓋、同名副本與舊資料連結
+- 團隊歌單協作：擁有者或歌單建立者可明確指派可編輯成員
 - 公開唯讀分享：可產生歌曲 / 歌單分享連結，並支援受邀者加入 shared setlist
 
 ## 最近更新
@@ -265,7 +268,7 @@ VITE_PUBLIC_APP_URL=https://your-domain.example/chordmaster/
 
 - 未登入模式下，歌曲資料仍只保存在本機瀏覽器
 - Apple Sign-In 尚未實作
-- 團隊共享庫與多人協作尚未實作
+- 團隊即時協作會自動載入已儲存的歌曲變更；不合併多人同時編輯的未儲存內容
 - PDF 目前仍是圖片式輸出，不是向量文字 PDF
 - Reference v1 只支援 YouTube，不支援 Spotify、Apple Music、mp3 上傳或自動音訊分析
 - 內嵌 YouTube 播放器可調整播放速度，但不直接升降音高；若要改變 YouTube 音訊 key，需在 YouTube 頁面搭配瀏覽器插件
@@ -274,7 +277,7 @@ VITE_PUBLIC_APP_URL=https://your-domain.example/chordmaster/
 ## Roadmap
 
 - Apple Sign-In
-- 團隊共享庫與協作權限
+- 團隊歌單的更細粒度權限與審核記錄
 - ChordMaster companion 瀏覽器插件，用於更深度整合 YouTube 轉調、循環與練習控制
 - 更完整的簡譜 / 節奏排版邏輯
 - 更完整的分享控制與協作

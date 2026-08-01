@@ -1485,7 +1485,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     const bar = bIdx >= 0 ? section?.bars[bIdx] : undefined;
     const beatCount = Math.max(1, Number.parseInt((bar?.timeSignature || song.timeSignature || '4/4').split('/')[0], 10) || 4);
     const hitRect = event.currentTarget.getBoundingClientRect();
-    const calculatedSlotIndex = field === 'chords' && bIdx >= 0
+    const calculatedSlotIndex = (field === 'chords' || field === 'lower') && bIdx >= 0
       ? Math.max(0, Math.min(beatCount - 1, Math.floor(((event.clientX - hitRect.left) / Math.max(1, hitRect.width)) * beatCount)))
       : null;
     const slotIndex = explicitSlotIndex ?? calculatedSlotIndex;
@@ -2287,6 +2287,36 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       && resolvedActiveNotationTarget.cursor.kind === 'jianpu'
                       ? resolvedActiveNotationTarget.cursor
                       : null;
+                    const notationBeatUnits = Math.max(1, parseTimeSignature(effectiveTimeSignature).beatUnits);
+                    const renderActiveNotationCursor = () => {
+                      const cursorUnit = activeRhythmCursor
+                        ? activeRhythmCursor.cursorUnit
+                        : activeJianpuCursor
+                          ? (activeJianpuCursor.beatIndex * notationBeatUnits) + activeJianpuCursor.unitIndex
+                          : null;
+                      if (cursorUnit === null) return null;
+                      const beatIndex = Math.max(0, Math.min(beatsPerBar - 1, Math.floor(cursorUnit / notationBeatUnits)));
+                      const clampedCursorUnit = Math.max(0, Math.min(beatsPerBar * notationBeatUnits, cursorUnit));
+                      return (
+                        <>
+                          <span
+                            data-preview-edit-ui
+                            data-preview-notation-cursor-beat
+                            className="pointer-events-none absolute inset-y-0 z-[1] rounded-sm bg-emerald-100/55 ring-1 ring-inset ring-emerald-500/65"
+                            style={{
+                              left: `${(beatIndex / beatsPerBar) * 100}%`,
+                              width: `${100 / beatsPerBar}%`
+                            }}
+                          />
+                          <span
+                            data-preview-edit-ui
+                            data-preview-notation-cursor-caret
+                            className="pointer-events-none absolute top-1 bottom-1 z-[2] w-[2px] -translate-x-1/2 rounded-full bg-emerald-600 shadow-[0_0_0_2px_rgba(255,255,255,0.78)]"
+                            style={{ left: `${(clampedCursorUnit / (beatsPerBar * notationBeatUnits)) * 100}%` }}
+                          />
+                        </>
+                      );
+                    };
                     const emitRhythmSelection = (
                       cursorUnit: number,
                       event?: React.MouseEvent<HTMLElement>
@@ -2873,6 +2903,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           }}
                                         >
                                           {activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
+                                          {activeRhythmCursor && renderActiveNotationCursor()}
                                           <div className="w-full translate-y-[3px]">
 	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
                                           </div>
@@ -2889,12 +2920,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           }}
                                         >
                                           {activeJianpuCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
+                                          {activeJianpuCursor && renderActiveNotationCursor()}
                                           <Jianpu
                                             notation={previewRiffNotation}
                                             compact
                                             scale={previewJianpuScale}
                                             timeSignature={effectiveTimeSignature}
-                                            gridSlotCount={Math.max(1, parseTimeSignature(effectiveTimeSignature).beatUnits)}
+                                            gridSlotCount={notationBeatUnits}
                                             className="w-full min-w-0"
                                             previousNotationForCrossBar={previewPreviousRiffNotation}
                                             nextNotationForCrossBar={previewNextRiffNotation}
@@ -2902,7 +2934,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             activeInsertPosition={activeJianpuCursor && activeJianpuCursor.noteIndex == null ? {
                                               tokenIndex: activeJianpuCursor.beatIndex,
                                               slotIndex: activeJianpuCursor.unitIndex,
-                                              slotCount: Math.max(1, parseTimeSignature(effectiveTimeSignature).beatUnits)
+                                              slotCount: notationBeatUnits
                                             } : null}
                                             activeNote={activeJianpuCursor?.noteIndex != null ? {
                                               tokenIndex: activeJianpuCursor.beatIndex,
@@ -2942,6 +2974,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         >
                                           {showBottomRhythmLane && activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
                                           {!showBottomRhythmLane && activeJianpuCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
+                                          {(showBottomRhythmLane ? activeRhythmCursor : activeJianpuCursor) && renderActiveNotationCursor()}
                                           {showBottomRhythmLane ? (
                                             <div className="w-full translate-y-[3px]">
 	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
@@ -2952,7 +2985,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             compact
                                             scale={previewJianpuScale}
                                             timeSignature={effectiveTimeSignature}
-                                            gridSlotCount={Math.max(1, parseTimeSignature(effectiveTimeSignature).beatUnits)}
+                                            gridSlotCount={notationBeatUnits}
                                             className="w-full min-w-0"
                                             previousNotationForCrossBar={previewPreviousRiffNotation}
                                             nextNotationForCrossBar={previewNextRiffNotation}
@@ -2960,7 +2993,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             activeInsertPosition={activeJianpuCursor && activeJianpuCursor.noteIndex == null ? {
                                               tokenIndex: activeJianpuCursor.beatIndex,
                                               slotIndex: activeJianpuCursor.unitIndex,
-                                              slotCount: Math.max(1, parseTimeSignature(effectiveTimeSignature).beatUnits)
+                                              slotCount: notationBeatUnits
                                             } : null}
                                             activeNote={activeJianpuCursor?.noteIndex != null ? {
                                               tokenIndex: activeJianpuCursor.beatIndex,
@@ -2989,7 +3022,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 className="absolute bottom-1 left-1 right-1 z-[2] h-[18px] rounded-sm border border-dashed border-indigo-200/0 bg-transparent transition-colors hover:border-indigo-300 hover:bg-indigo-50/55 focus-visible:border-indigo-400 focus-visible:bg-indigo-50/70 focus-visible:outline-none"
                                 onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'lower')}
                                 aria-label={language === 'zh' ? '在下方輸入節奏或簡譜' : 'Enter rhythm or jianpu below'}
-                              />
+                              >
+                                {renderActiveNotationCursor()}
+                              </button>
                             )}
                                 </>
                               );

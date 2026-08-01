@@ -130,6 +130,10 @@ export interface StoredSong extends Song {
   id: string;
   updatedAt: number;
   createdAt?: number;
+  archivedAt?: number | null;
+  archivedBy?: string | null;
+  createdBy?: string;
+  updatedBy?: string;
   teamSource?: {
     libraryId: string;
     libraryName?: string;
@@ -147,6 +151,7 @@ export interface SetlistSong {
   overrideKey?: Key;
   capo?: number;
   personalCapoOverride?: number;
+  sourceArchivedAt?: number | null;
   sectionOrder: string[];
   songData?: Song;
 }
@@ -161,6 +166,7 @@ export interface Setlist {
   updatedAt: number;
   archived?: boolean;
   projectId?: string | null;
+  assignedToCurrentUser?: boolean;
   songs: SetlistSong[];
 }
 
@@ -208,6 +214,7 @@ export interface SharedSongPayload {
   id: string;
   title: string;
   song: Song;
+  archivedAt?: string | null;
 }
 
 export interface SharedSetlistPayload {
@@ -353,3 +360,83 @@ export interface TeamManagementSnapshot {
   members: TeamMember[];
   invites: TeamInvite[];
 }
+
+export interface SetlistAssignableMember {
+  userId: string;
+  email: string;
+  name: string;
+  picture?: string;
+  role: Extract<LibraryRole, 'editor' | 'setlist_manager'>;
+}
+
+export interface SetlistEditorAssignment {
+  userId: string;
+  assignedBy: string;
+  assignedAt: string;
+}
+
+export interface SetlistEditorAssignmentSnapshot {
+  setlistId: string;
+  assignableMembers: SetlistAssignableMember[];
+  assignments: SetlistEditorAssignment[];
+}
+
+export type TeamSongImportResolution = 'create' | 'overwrite' | 'duplicate';
+
+export interface TeamSongImportRequestItem {
+  sourceSongId: string;
+  resolution: TeamSongImportResolution;
+  targetSongId?: string;
+}
+
+export interface TeamSongImportCandidate {
+  songId: string;
+  title: string;
+  currentKey?: string;
+  originalKey?: string;
+  version?: string;
+  lyricist?: string;
+  composer?: string;
+}
+
+export interface TeamSongImportInspectionItem {
+  sourceSongId: string;
+  title: string;
+  existingSongId: string | null;
+  existingTitle: string | null;
+  existingSong?: TeamSongImportCandidate | null;
+  possibleMatches: TeamSongImportCandidate[];
+}
+
+export interface TeamSongImportInspection {
+  songs: TeamSongImportInspectionItem[];
+}
+
+export interface TeamSongImportResultItem {
+  sourceSongId: string;
+  songId: string;
+  title: string;
+  resolution: TeamSongImportResolution;
+  isPrimary: boolean;
+}
+
+export interface TeamSongImportResult {
+  createdCount: number;
+  overwrittenCount: number;
+  duplicateCount: number;
+  songs: TeamSongImportResultItem[];
+}
+
+export interface TeamSongArchiveResult {
+  archivedCount: number;
+  changedCount: number;
+  songIds: string[];
+  archived: boolean;
+}
+
+export interface TeamSongDeleteResult {
+  deletedCount: number;
+  songIds: string[];
+}
+
+export type LibraryChangeKind = 'songs' | 'membership' | 'assignments';

@@ -469,6 +469,28 @@ describe('PreviewBarEditor', () => {
     expect(onNotationCursorChange).not.toHaveBeenCalled();
   });
 
+  it('uses Space for jianpu cursor navigation and Enter for next-bar navigation', () => {
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song, target: jianpuTarget, inputMode: 'letters' });
+    const { onNavigate, onNotationCursorChange } = renderEditor({
+      session: jianpuSession,
+      deviceLayout: 'desktop'
+    });
+
+    fireEvent.keyDown(document.body, { key: ' ' });
+    expect(onNotationCursorChange).toHaveBeenCalledWith(expect.objectContaining({ kind: 'jianpu' }));
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(onNavigate).toHaveBeenLastCalledWith('next', undefined, { bar: true });
+  });
+
   it('docks the iPad keyboard across the full visual viewport without a native chord input', () => {
     renderEditor({ deviceLayout: 'tablet' });
     const dialog = screen.getByRole('dialog', { name: '預覽快捷編輯' });

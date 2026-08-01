@@ -88,15 +88,24 @@ supabase link --project-ref YOUR_PROJECT_REF
 
 ## 5. 推送資料庫 schema
 
-本專案的 migration 在：
+本專案所有 migration 都在 `supabase/migrations/`，Supabase CLI 會按檔名順序套用。團隊曲庫與權限重整拆成兩個前向 migration：
 
-- [supabase/migrations/20260415_auth_sync_share.sql](/Users/zhangenchi/Downloads/chordmaster---智能和弦簡譜編輯器/supabase/migrations/20260415_auth_sync_share.sql)
+- `supabase/migrations/20260801090000_team_library_permissions.sql`
+- `supabase/migrations/20260801100000_team_library_hardening.sql`
+
+推送前先比對本機與遠端 ledger，不要改寫或重命名已套用的舊 migration：
+
+```bash
+supabase migration list
+```
 
 推送：
 
 ```bash
 supabase db push
 ```
+
+團隊曲庫更新採前向上線：先只套用 `20260801090000` 的新資料結構、相容 RPC 與既有權限回填；接著部署相容前端及 `create-share-link`、`resolve-share-link` Edge Functions；確認新舊客戶端都能正常運作後，再套用 `20260801100000` 收緊 RLS 並執行舊歌名清理。若 ledger 有分歧，應先釐清實際遠端狀態，不可直接用 `repair` 猜測修正。
 
 這會建立：
 

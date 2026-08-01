@@ -313,6 +313,11 @@ const normalizeSetlistSong = (
       : sourceSong?.currentKey,
     capo: normalizeOptionalInteger(setlistSong.capo, 0, 12) ?? sourceSong?.capo ?? 0,
     personalCapoOverride: normalizeOptionalInteger(setlistSong.personalCapoOverride, 0, 12),
+    sourceArchivedAt: typeof setlistSong.sourceArchivedAt === 'number' && Number.isFinite(setlistSong.sourceArchivedAt)
+      ? setlistSong.sourceArchivedAt
+      : typeof setlistSong.sourceArchivedAt === 'string' && Number.isFinite(new Date(setlistSong.sourceArchivedAt).getTime())
+        ? new Date(setlistSong.sourceArchivedAt).getTime()
+        : sourceSong?.archivedAt ?? null,
     sectionOrder: sectionOrderSourceSong
       ? sanitizeSetlistSectionOrder(rawSectionOrder, sectionOrderSourceSong)
       : rawSectionOrder,
@@ -379,9 +384,9 @@ export const serializeSongLibrary = (library: StoredSong[]) =>
 
 export const serializeSetlists = (setlists: Setlist[]) =>
   JSON.stringify(
-    setlists.map((setlist) => ({
+    setlists.map(({ assignedToCurrentUser: _assignment, ...setlist }) => ({
       ...setlist,
-      songs: reindexSetlistSongs(setlist.songs).map(({ personalCapoOverride, ...song }) => song)
+      songs: reindexSetlistSongs(setlist.songs).map(({ personalCapoOverride, sourceArchivedAt, ...song }) => song)
     }))
   );
 

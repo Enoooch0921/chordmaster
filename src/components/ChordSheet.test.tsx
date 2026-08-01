@@ -816,13 +816,43 @@ describe('ChordSheet preview notation interactions', () => {
 
     const lowerTarget = screen.getByRole('button', { name: '在下方輸入節奏或簡譜' });
     expect(lowerTarget).toHaveAttribute('data-preview-edit-ui');
-    fireEvent.click(lowerTarget);
+    vi.spyOn(lowerTarget, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 400,
+      bottom: 18,
+      width: 400,
+      height: 18,
+      toJSON: () => ({})
+    });
+    fireEvent.click(lowerTarget, { clientX: 250 });
     expect(onElementClick).toHaveBeenCalledWith(0, 0, 'lower', expect.objectContaining({
       field: 'lower',
+      slotIndex: 2,
       notationMode: null,
       cursor: null,
       anchorKey: 'song-1|section-1|bar-1|lower|all'
     }));
+
+    rerender(
+      <ChordSheet
+        song={emptySong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={onElementClick}
+        activePreviewNotationTarget={{
+          sectionId: 'section-1',
+          barId: 'bar-1',
+          notationMode: 'rhythm',
+          cursor: { kind: 'rhythm', cursorUnit: 8 }
+        }}
+      />
+    );
+    expect(document.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
+    expect(document.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
 
     rerender(
       <ChordSheet
@@ -889,6 +919,8 @@ describe('ChordSheet preview notation interactions', () => {
     const selectedRhythmEvent = screen.getByRole('button', { name: 'Select rhythm note 2' });
     expect(selectedRhythmEvent).toHaveAttribute('data-preview-edit-ui');
     expect(container.querySelector('[data-rhythm-notation] [data-preview-edit-ui].pointer-events-none')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
 
     rerender(
       <ChordSheet
@@ -909,6 +941,8 @@ describe('ChordSheet preview notation interactions', () => {
     const selectedJianpuNote = screen.getByRole('button', { name: 'Select jianpu note 1 in beat 2' });
     expect(selectedJianpuNote).toHaveAttribute('data-preview-edit-ui');
     expect(selectedJianpuNote.previousElementSibling).toHaveAttribute('data-preview-edit-ui');
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
     expect(Array.from(container.querySelectorAll('[data-preview-edit-ui]')).some((node) => (
       node.getAttribute('class')?.includes('bg-indigo-200/45')
     ))).toBe(true);

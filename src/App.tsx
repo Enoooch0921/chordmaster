@@ -34,13 +34,16 @@ import {
   BarNumberMode,
   SongReferenceKind,
   TeamManagementSnapshot,
+  SetlistEditorAssignmentSnapshot,
+  TeamSongImportRequestItem,
+  TeamSongImportResult,
   ShareContact,
   AppNotification,
   NotificationResourceType
 } from './types';
 import { ALL_KEYS, getPlayKey, getSuggestedGuitarCapo, getTransposeOffset, normalizeKeySpelling, transposeKeyPreferFlats, transposeKeyWithPreference } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
-import { getEffectiveTimeSignature } from './utils/rhythmUtils';
+import { getEffectiveTimeSignature, parseTimeSignature } from './utils/rhythmUtils';
 import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
 import { useThemeMode } from './hooks/useThemeMode';
 import { useToast } from './components/Toast';
@@ -63,6 +66,8 @@ import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
+import TeamSongImportDialog from './components/TeamSongImportDialog';
+import SetlistAssignmentDialog from './components/SetlistAssignmentDialog';
 import SetlistNavigator, {
   SETLIST_PROJECT_FILTER_STORAGE_KEY,
   SetlistPanelView,
@@ -204,6 +209,7 @@ type SwipeControllerConfig = {
   openAction: 'delete' | 'archive' | null;
   setDragging: React.Dispatch<React.SetStateAction<{ id: string; dx: number } | null>>;
   setOpen: (next: { id: string; action: 'delete' | 'archive' } | null) => void;
+  canDelete: (id: string) => boolean;
   canArchive: (id: string) => boolean;
 };
 
@@ -237,7 +243,9 @@ const createSwipeController = (config: SwipeControllerConfig) => {
     // Neutral rows can travel either direction; an already-open row only swings
     // back toward 0 so a single gesture can't tear through one action into the other.
     const candidate = start.baseOffset + dx;
-    const min = start.baseOffset === SETLIST_SWIPE_REVEAL_PX ? 0 : -SETLIST_SWIPE_REVEAL_PX;
+    const min = start.baseOffset === SETLIST_SWIPE_REVEAL_PX || !config.canDelete(start.id)
+      ? 0
+      : -SETLIST_SWIPE_REVEAL_PX;
     const max = start.baseOffset === -SETLIST_SWIPE_REVEAL_PX ? 0 : SETLIST_SWIPE_REVEAL_PX;
     const offset = Math.max(min, Math.min(max, candidate));
     start.latestDx = dx;
@@ -267,7 +275,8 @@ const createSwipeController = (config: SwipeControllerConfig) => {
       if (closingNudge > SETLIST_SWIPE_OPEN_THRESHOLD_PX) config.setOpen(null);
       else config.setOpen({ id, action: start.baseOffset < 0 ? 'delete' : 'archive' });
     } else if (offset <= -SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
-      config.setOpen({ id, action: 'delete' });
+      if (config.canDelete(id)) config.setOpen({ id, action: 'delete' });
+      else config.setOpen(null);
     } else if (offset >= SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
       if (config.canArchive(id)) config.setOpen({ id, action: 'archive' });
       else config.setOpen(null);
@@ -479,18 +488,18 @@ const TEAM_SETLIST_CREATE_ROLES = new Set<LibraryRole>(['owner', 'editor', 'setl
 const getRoleLabel = (role: LibraryRole, language: AppLanguage) => {
   if (language === 'zh') {
     switch (role) {
-      case 'owner': return '擁有者';
-      case 'editor': return '完全編輯';
-      case 'setlist_manager': return '查看與建立歌單';
-      case 'viewer': return '只能查看';
+      case 'owner': return '團隊擁有者';
+      case 'editor': return '曲庫管理員';
+      case 'setlist_manager': return '歌單編輯者';
+      case 'viewer': return '檢視者';
       default: return role;
     }
   }
 
   switch (role) {
-    case 'owner': return 'Owner';
-    case 'editor': return 'Full Editor';
-    case 'setlist_manager': return 'Setlist Creator';
+    case 'owner': return 'Team Owner';
+    case 'editor': return 'Song Library Manager';
+    case 'setlist_manager': return 'Setlist Editor';
     case 'viewer': return 'Viewer';
     default: return role;
   }
@@ -519,7 +528,7 @@ const getUnknownErrorMessage = (error: unknown) => {
 };
 
 const isTeamFeatureSchemaError = (message: string) => (
-  /get_user_libraries|create_team|get_team_management|create_team_invite|team_invites|library_members|schema cache|PGRST202|PGRST204|Could not find the function|function public\./i.test(message)
+  /get_user_libraries|create_team|get_team_management|create_team_invite|team_invites|library_members|setlist_editor_assignments|get_setlist_editor_assignments|set_setlist_editor_assignment|inspect_team_song_import|import_personal_songs_to_team|archive_team_songs|delete_team_songs|team_song_imports|archived_at|schema cache|PGRST202|PGRST204|Could not find the function|function public\./i.test(message)
 );
 
 const getTeamFeatureErrorMessage = (error: unknown, language: AppLanguage) => {
@@ -1194,6 +1203,9 @@ const inactiveSetlistShareStatus: SetlistShareStatus = {
   participants: []
 };
 
+type ScopedSetlistShareStatus = SetlistShareStatus & { resourceId: string };
+type ScopedProjectShareStatus = ProjectShareStatus & { resourceId: string };
+
 const createSongId = () => crypto.randomUUID();
 const createSetlistId = () => crypto.randomUUID();
 const createSetlistSongId = () => crypto.randomUUID();
@@ -1294,6 +1306,11 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
 const createStoredSong = (song: Song, id = createSongId()): StoredSong => ({
   ...cloneSong(normalizeSongBars(song)),
   id,
+  createdBy: undefined,
+  updatedBy: undefined,
+  archivedAt: null,
+  archivedBy: null,
+  teamSource: undefined,
   createdAt: Date.now(),
   updatedAt: Date.now()
 });
@@ -1371,6 +1388,11 @@ const normalizeSetlistSong = (setlistId: string, setlistSong: Partial<SetlistSon
       ? setlistSong.overrideKey as Key
       : sourceSong?.currentKey,
     capo: normalizeOptionalInteger(setlistSong.capo, 0, 12) ?? sourceSong?.capo ?? 0,
+    sourceArchivedAt: typeof setlistSong.sourceArchivedAt === 'number' && Number.isFinite(setlistSong.sourceArchivedAt)
+      ? setlistSong.sourceArchivedAt
+      : typeof setlistSong.sourceArchivedAt === 'string' && Number.isFinite(new Date(setlistSong.sourceArchivedAt).getTime())
+        ? new Date(setlistSong.sourceArchivedAt).getTime()
+        : sourceSong?.archivedAt ?? null,
     sectionOrder: sectionOrderSourceSong
       ? sanitizeSetlistSectionOrder(rawSectionOrder, sectionOrderSourceSong)
       : rawSectionOrder,
@@ -1423,24 +1445,6 @@ const buildDuplicateSongTitle = (existingSongs: StoredSong[], originalTitle: str
   while (existingTitles.has(nextTitle.trim().toLowerCase())) {
     copyIndex += 1;
     nextTitle = `${baseTitle} ${copyLabel} ${copyIndex}`;
-  }
-
-  return nextTitle;
-};
-
-const buildImportedTeamSongTitle = (existingSongs: StoredSong[], originalTitle: string, untitledSong: string, importLabel: string) => {
-  const baseTitle = originalTitle.trim() || untitledSong;
-  const existingTitles = new Set(existingSongs.map((song) => song.title.trim().toLowerCase()));
-  if (!existingTitles.has(baseTitle.trim().toLowerCase())) {
-    return baseTitle;
-  }
-
-  let copyIndex = 1;
-  let nextTitle = `${baseTitle} ${importLabel}`;
-
-  while (existingTitles.has(nextTitle.trim().toLowerCase())) {
-    copyIndex += 1;
-    nextTitle = `${baseTitle} ${importLabel} ${copyIndex}`;
   }
 
   return nextTitle;
@@ -1791,9 +1795,9 @@ const serializeSongLibrary = (library: StoredSong[]) =>
 
 const serializeSetlists = (setlists: Setlist[]) =>
   JSON.stringify(
-    setlists.map((setlist) => ({
+    setlists.map(({ assignedToCurrentUser: _assignment, ...setlist }) => ({
       ...setlist,
-      songs: reindexSetlistSongs(setlist.songs).map(({ personalCapoOverride, ...setlistSong }) => setlistSong)
+      songs: reindexSetlistSongs(setlist.songs).map(({ personalCapoOverride, sourceArchivedAt, ...setlistSong }) => setlistSong)
     }))
   );
 
@@ -2075,6 +2079,7 @@ export default function App() {
   const [setlistSortMode, setSetlistSortMode] = useState<SetlistSortMode>(loadSetlistSortPreference);
   const [showArchivedSetlists, setShowArchivedSetlists] = useState(false);
   const [librarySortMode, setLibrarySortMode] = useState<LibrarySortMode>(loadLibrarySortPreference);
+  const [showArchivedSongs, setShowArchivedSongs] = useState(false);
   const [setlistPanelView, setSetlistPanelView] = useState<SetlistPanelView>(
     initialSetlistsRef.current.selectedSetlistId ? 'detail' : 'list'
   );
@@ -2108,9 +2113,9 @@ export default function App() {
   const [leavingSharedProjectId, setLeavingSharedProjectId] = useState<string | null>(null);
   const [pendingLeaveSharedProjectId, setPendingLeaveSharedProjectId] = useState<string | null>(null);
   const [removingMemberKey, setRemovingMemberKey] = useState<string | null>(null);
-  const [selectedSetlistShareStatus, setSelectedSetlistShareStatus] = useState<SetlistShareStatus | null>(null);
+  const [selectedSetlistShareStatus, setSelectedSetlistShareStatus] = useState<ScopedSetlistShareStatus | null>(null);
   const [isLoadingSetlistShareStatus, setIsLoadingSetlistShareStatus] = useState(false);
-  const [selectedProjectShareStatus, setSelectedProjectShareStatus] = useState<ProjectShareStatus | null>(null);
+  const [selectedProjectShareStatus, setSelectedProjectShareStatus] = useState<ScopedProjectShareStatus | null>(null);
   const [isLoadingProjectShareStatus, setIsLoadingProjectShareStatus] = useState(false);
   const [pendingRevokeShareSetlistId, setPendingRevokeShareSetlistId] = useState<string | null>(null);
   const [isRevokingSetlistShare, setIsRevokingSetlistShare] = useState(false);
@@ -2124,6 +2129,7 @@ export default function App() {
   const [cloudLibraries, setCloudLibraries] = useState<CloudLibrarySummary[]>([]);
   const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
   const [isSwitchingLibrary, setIsSwitchingLibrary] = useState(false);
+  const [activeCloudMutationCount, setActiveCloudMutationCount] = useState(0);
   const [teamManagement, setTeamManagement] = useState<TeamManagementSnapshot | null>(null);
   const [isTeamManagementOpen, setIsTeamManagementOpen] = useState(false);
   const [isLoadingTeamManagement, setIsLoadingTeamManagement] = useState(false);
@@ -2132,11 +2138,43 @@ export default function App() {
   const [newTeamName, setNewTeamName] = useState('');
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
   const [isImportingPersonalSongs, setIsImportingPersonalSongs] = useState(false);
+  const [isTeamSongImportOpen, setIsTeamSongImportOpen] = useState(false);
+  const [personalImportSongs, setPersonalImportSongs] = useState<StoredSong[]>([]);
+  const [isLoadingPersonalImportSongs, setIsLoadingPersonalImportSongs] = useState(false);
+  const [setlistAssignmentTargetId, setSetlistAssignmentTargetId] = useState<string | null>(null);
+  const [setlistAssignmentSnapshot, setSetlistAssignmentSnapshot] = useState<SetlistEditorAssignmentSnapshot | null>(null);
+  const [isLoadingSetlistAssignments, setIsLoadingSetlistAssignments] = useState(false);
+  const [updatingSetlistAssignmentUserId, setUpdatingSetlistAssignmentUserId] = useState<string | null>(null);
+  const [teamLibraryUpdatePending, setTeamLibraryUpdatePending] = useState(false);
+  const [isRefreshingTeamLibrary, setIsRefreshingTeamLibrary] = useState(false);
   const [teamInviteEmail, setTeamInviteEmail] = useState('');
-  const [teamInviteRole, setTeamInviteRole] = useState<Exclude<LibraryRole, 'owner'>>('viewer');
+  const [teamInviteRole, setTeamInviteRole] = useState<Exclude<LibraryRole, 'owner'>>('setlist_manager');
   const [isCreatingTeamInvite, setIsCreatingTeamInvite] = useState(false);
   const [teamInviteShareUrl, setTeamInviteShareUrl] = useState<string | null>(null);
   const [teamFeatureError, setTeamFeatureError] = useState<string | null>(null);
+  const setlistShareStatusGenerationRef = useRef(0);
+  const projectShareStatusGenerationRef = useRef(0);
+  const selectedSetlistForShareRef = useRef<string | null>(null);
+  const selectedProjectForShareRef = useRef<string | null>(null);
+  const setlistAssignmentRequestGenerationRef = useRef(0);
+  const setlistAssignmentTargetIdRef = useRef<string | null>(null);
+  const assignmentAccessRefreshGenerationRef = useRef(0);
+  const libraryTransitionOwnerRef = useRef<symbol | null>(null);
+  const switchCloudLibraryHandlerRef = useRef<((libraryId: string) => Promise<void>) | null>(null);
+  const workspacePersistenceInFlightRef = useRef<Promise<void> | null>(null);
+  const revokedLibraryIdsRef = useRef(new Set<string>());
+  const cloudMutationCountRef = useRef(0);
+  const beginCloudMutation = () => {
+    cloudMutationCountRef.current += 1;
+    setActiveCloudMutationCount(cloudMutationCountRef.current);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      cloudMutationCountRef.current = Math.max(0, cloudMutationCountRef.current - 1);
+      setActiveCloudMutationCount(cloudMutationCountRef.current);
+    };
+  };
   const [teamSourceStatuses, setTeamSourceStatuses] = useState<Record<string, {
     latestUpdatedAt?: number;
     missing?: boolean;
@@ -2251,7 +2289,25 @@ export default function App() {
       : [];
   const isTeamWorkspace = activeCloudLibrary?.kind === 'team';
   const activeLibraryRole = activeCloudLibrary?.role ?? 'owner';
-  const hasSongs = songs.length > 0;
+  const activeLibraryIdRef = useRef(activeLibraryId);
+  useEffect(() => {
+    activeLibraryIdRef.current = activeLibraryId;
+  }, [activeLibraryId]);
+  React.useLayoutEffect(() => {
+    if (!isSwitchingLibrary) return;
+    const bodyAlreadyInert = document.body.hasAttribute('inert');
+    document.body.setAttribute('inert', '');
+    return () => {
+      if (!bodyAlreadyInert) {
+        document.body.removeAttribute('inert');
+      }
+    };
+  }, [isSwitchingLibrary]);
+  const activeLibraryRoleRef = useRef(activeLibraryRole);
+  activeLibraryRoleRef.current = activeLibraryRole;
+  const canEditTeamSongs = !isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole);
+  const isShowingArchivedSongs = showArchivedSongs && canEditTeamSongs;
+  const hasSongs = songs.some((item) => !item.archivedAt) || (isShowingArchivedSongs && songs.length > 0);
   const linkedTeamSourceSignature = React.useMemo(
     () => songs
       .filter((item) => item.teamSource)
@@ -2259,17 +2315,32 @@ export default function App() {
       .join('|'),
     [songs]
   );
-  const canEditTeamSongs = !isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole);
   const canCreateTeamSetlists = !isTeamWorkspace || TEAM_SETLIST_CREATE_ROLES.has(activeLibraryRole);
   const canManageActiveTeam = isTeamWorkspace && activeLibraryRole === 'owner';
   const hasTeamLibraries = cloudLibraries.some((library) => library.kind === 'team');
   // Keep the create-team form collapsed by default so it never permanently
   // compresses the sidebar; it only expands when the user opens it explicitly.
   const shouldShowCreateTeamForm = isCreateTeamOpen;
-  const song = songs.find((item) => item.id === selectedSongId) ?? songs[0] ?? EMPTY_LIBRARY_PREVIEW_SONG;
+  const song = songs.find((item) => item.id === selectedSongId && (!item.archivedAt || isShowingArchivedSongs))
+    ?? songs.find((item) => !item.archivedAt)
+    ?? (isShowingArchivedSongs ? songs[0] : null)
+    ?? EMPTY_LIBRARY_PREVIEW_SONG;
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
   const setlistIsDirty = serializeSetlists(setlists) !== serializeSetlists(savedSetlists);
-  const workspaceIsDirty = libraryIsDirty || setlistIsDirty;
+  const projectIsDirty = serializeProjects(projects) !== serializeProjects(savedProjects);
+  const workspaceIsDirty = libraryIsDirty || setlistIsDirty || projectIsDirty;
+  const workspaceIsDirtyRef = useRef(workspaceIsDirty);
+  workspaceIsDirtyRef.current = workspaceIsDirty;
+  const previewEditSessionRef = useRef(previewEditSession);
+  previewEditSessionRef.current = previewEditSession;
+  const songsRef = useRef(songs);
+  songsRef.current = songs;
+  const setlistsRef = useRef(setlists);
+  setlistsRef.current = setlists;
+  const teamLibraryReloadIsUnsafe = libraryIsDirty || Boolean(previewEditSession?.dirty);
+  const teamLibraryReloadIsUnsafeRef = useRef(teamLibraryReloadIsUnsafe);
+  teamLibraryReloadIsUnsafeRef.current = teamLibraryReloadIsUnsafe;
+  const teamLibraryRefreshGenerationRef = useRef(0);
   const isSheetView = activeAppView === 'sheet';
   const isSetlistMode = workspaceMode === 'setlists';
   const performanceScale = Math.min(
@@ -2371,12 +2442,30 @@ export default function App() {
       ?? firstAvailableSetlist
     : firstAvailableSetlist;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
+  const canEditOwnedTeamSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'> | null | undefined) => (
+    activeLibraryRole === 'owner'
+    || (
+      (activeLibraryRole === 'editor' || activeLibraryRole === 'setlist_manager')
+      && Boolean(setlist)
+      && (setlist?.createdBy === authenticatedUser?.id || setlist?.assignedToCurrentUser === true)
+    )
+  );
   const canEditSelectedSetlist = !isTeamWorkspace
     ? !isJoinedSetlist
-    : !isJoinedSetlist && (
-      TEAM_EDIT_ROLES.has(activeLibraryRole)
-      || (activeLibraryRole === 'setlist_manager' && selectedSetlist?.createdBy === authenticatedUser?.id)
-    );
+    : !isJoinedSetlist && canEditOwnedTeamSetlist(selectedSetlist);
+  const canManageTeamSetlistAssignments = (setlist: Pick<Setlist, 'createdBy'> | null | undefined) => Boolean(
+    isTeamWorkspace
+    && setlist
+    && (
+      activeLibraryRole === 'owner'
+      || (
+        (activeLibraryRole === 'editor' || activeLibraryRole === 'setlist_manager')
+        && setlist.createdBy === authenticatedUser?.id
+      )
+    )
+  );
+  const canManageSelectedSetlistAssignments = !isJoinedSetlist
+    && canManageTeamSetlistAssignments(selectedSetlist);
   const canCreateNewShareLink = !isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole);
   const canShareSelectedSetlist = canEditSelectedSetlist && canCreateNewShareLink;
   // The joined project (if any) that contains the currently-selected setlist, plus
@@ -2390,9 +2479,8 @@ export default function App() {
   // joined-project managers.
   const canEditSelectedSetlistKey = canEditSelectedSetlist || isJoinedProjectManager;
   const canReorderSelectedSetlist = canEditSelectedSetlist || isJoinedProjectManager;
-  const canManageSetlist = (setlist: Pick<Setlist, 'createdBy'>) => !isTeamWorkspace
-    || TEAM_EDIT_ROLES.has(activeLibraryRole)
-    || (activeLibraryRole === 'setlist_manager' && setlist.createdBy === authenticatedUser?.id);
+  const canManageSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'>) => !isTeamWorkspace
+    || canEditOwnedTeamSetlist(setlist);
   const isMultiSelectMode = multiSelectedSetlistIds.length > 0;
   const exitMultiSelect = () => setMultiSelectedSetlistIds([]);
   const toggleMultiSelect = (setlistId: string) => {
@@ -2406,10 +2494,26 @@ export default function App() {
   // managers get their own sharing path after selectedJoinedProject is known.
   const canCreateProject = canCreateTeamSetlists;
   const canManageProject = (project: Pick<Project, 'createdBy'>) => !isTeamWorkspace
-    || TEAM_EDIT_ROLES.has(activeLibraryRole)
-    || (activeLibraryRole === 'setlist_manager' && project.createdBy === authenticatedUser?.id);
-  const canShareProject = canCreateNewShareLink;
+    || activeLibraryRole === 'owner'
+    || ((activeLibraryRole === 'editor' || activeLibraryRole === 'setlist_manager') && project.createdBy === authenticatedUser?.id);
+  const canManageProjectById = (projectId: string | null | undefined) => !projectId
+    || Boolean(projects.find((project) => project.id === projectId && canManageProject(project)));
+  const canChangeSetlistProject = (
+    setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser' | 'projectId'>,
+    nextProjectId: string | null
+  ) => canManageSetlist(setlist)
+    && canManageProjectById(setlist.projectId)
+    && canManageProjectById(nextProjectId);
+  const canShareProject = (project: Pick<Project, 'createdBy'> | null | undefined) => Boolean(
+    project
+    && canCreateNewShareLink
+    && canManageProject(project)
+  );
   const canOpenEditor = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs && hasSongs;
+  const canChangeCurrentKey = isSetlistMode ? canEditSelectedSetlistKey : canEditTeamSongs;
+  // Cloud setlist capo is a per-account preference, so read-only setlist
+  // viewers may still adjust it without mutating the shared setlist.
+  const canChangeCurrentCapo = isSetlistMode || canEditTeamSongs;
   const joinedSetlistDisplayPreference = isJoinedSetlist && selectedSetlist
     ? joinedSetlistDisplayPreferences[selectedSetlist.id] ?? {}
     : {};
@@ -2915,7 +3019,15 @@ export default function App() {
     PREVIEW_MAX_SCALE,
     Math.max(PREVIEW_MIN_SCALE, previewViewportWidth / Math.max(1, sheetMetrics.width))
   );
-  const filteredSongs = sortSongsForDisplay(songs.filter((item) => {
+  useEffect(() => {
+    if (!canEditTeamSongs && showArchivedSongs) {
+      setShowArchivedSongs(false);
+    }
+  }, [activeLibraryId, canEditTeamSongs, showArchivedSongs]);
+  const activeLibrarySongs = songs.filter((item) => !item.archivedAt);
+  const archivedSongCount = songs.length - activeLibrarySongs.length;
+  const visibleLibrarySongs = isShowingArchivedSongs ? songs : activeLibrarySongs;
+  const filteredSongs = sortSongsForDisplay(visibleLibrarySongs.filter((item) => {
     if (!normalizedLibrarySearchQuery) {
       return true;
     }
@@ -2939,7 +3051,12 @@ export default function App() {
   }), librarySortMode);
   const getSetlistSongSource = (item: SetlistSong): StoredSong | null => {
     const libSong = songs.find((songItem) => songItem.id === item.songId);
-    return libSong ?? (item.songData ? { ...item.songData, id: item.songId, updatedAt: 0 } as StoredSong : null);
+    return libSong ?? (item.songData ? {
+      ...item.songData,
+      id: item.songId,
+      archivedAt: item.sourceArchivedAt ?? null,
+      updatedAt: 0
+    } as StoredSong : null);
   };
   const getSetlistSongInfoSummary = (item: SetlistSong, sourceSong: Song) => {
     const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
@@ -3024,9 +3141,17 @@ export default function App() {
   const selectedProject = setlistProjectFilter.kind === 'owned-project'
     ? projects.find((item) => item.id === setlistProjectFilter.projectId) ?? null
     : null;
+  selectedSetlistForShareRef.current = selectedSetlist?.id ?? null;
+  selectedProjectForShareRef.current = selectedProject?.id ?? null;
+  const activeSetlistShareStatus = selectedSetlistShareStatus?.resourceId === selectedSetlist?.id
+    ? selectedSetlistShareStatus
+    : null;
+  const activeProjectShareStatus = selectedProjectShareStatus?.resourceId === selectedProject?.id
+    ? selectedProjectShareStatus
+    : null;
   const selectedProjectShareTarget = selectedProject ?? selectedJoinedProject;
   const canShareSelectedProject = selectedProject
-    ? canShareProject
+    ? canShareProject(selectedProject)
     : selectedJoinedProject?.role === 'manager';
   const ungroupedSetlistCount = setlists.filter((item) => (item.projectId ?? null) === null && !item.archived).length;
   const projectSetlistCount = (projectId: string) => setlists.filter((item) => item.projectId === projectId && !item.archived).length;
@@ -3047,7 +3172,7 @@ export default function App() {
   };
   // Filter from the full library (not filteredSongs) so the song-library search
   // query never leaks into the setlist "add songs" list.
-  const filteredSongsForSetlist = songs.filter((item) => {
+  const filteredSongsForSetlist = activeLibrarySongs.filter((item) => {
     if (!normalizedSetlistSongSearchQuery) {
       return true;
     }
@@ -3384,7 +3509,7 @@ export default function App() {
     });
   }, [activeSectionId, isEditing]);
 
-  const persistWorkspace = async (
+  const performWorkspacePersistence = async (
     nextSongs: StoredSong[],
     nextSetlists: Setlist[],
     nextProjects: Project[] = projects
@@ -3459,6 +3584,42 @@ export default function App() {
       const detail = error instanceof Error && error.message.trim() ? error.message.trim() : '';
       throw new Error(detail ? `${fallbackMessage}\n\n${detail}` : fallbackMessage);
     }
+  };
+
+  const persistWorkspace = (
+    nextSongs: StoredSong[],
+    nextSetlists: Setlist[],
+    nextProjects: Project[] = projects,
+    options: { allowDuringLibraryTransition?: boolean } = {}
+  ): Promise<void> => {
+    if (libraryTransitionOwnerRef.current && !options.allowDuringLibraryTransition) {
+      return Promise.reject(new Error(language === 'zh'
+        ? '曲庫切換中，請稍候再儲存。'
+        : 'The library is switching. Please save again when it finishes.'));
+    }
+
+    const previousPersistence = workspacePersistenceInFlightRef.current;
+    const operation = (async () => {
+      if (previousPersistence) {
+        await previousPersistence;
+      }
+      await performWorkspacePersistence(nextSongs, nextSetlists, nextProjects);
+    })();
+
+    workspacePersistenceInFlightRef.current = operation;
+    void operation.then(
+      () => {
+        if (workspacePersistenceInFlightRef.current === operation) {
+          workspacePersistenceInFlightRef.current = null;
+        }
+      },
+      () => {
+        if (workspacePersistenceInFlightRef.current === operation) {
+          workspacePersistenceInFlightRef.current = null;
+        }
+      }
+    );
+    return operation;
   };
 
   const pushSongHistory = (songId: string, previousSong: Song) => {
@@ -3720,41 +3881,120 @@ export default function App() {
 
   const handleSwitchCloudLibrary = async (libraryId: string) => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || libraryId === activeLibraryId || isSwitchingLibrary) {
+    if (!repository || libraryId === activeLibraryId || libraryTransitionOwnerRef.current) {
       return;
     }
+    if (cloudMutationCountRef.current > 0) {
+      toast.info(language === 'zh'
+        ? '目前的雲端操作完成後才能切換曲庫。'
+        : 'Wait for the current cloud operation to finish before switching libraries.');
+      return;
+    }
+    if (previewEditSessionRef.current?.dirty) {
+      pendingPreviewTransitionRef.current = () => {
+        // Let the Finish/Discard state update commit, then invoke the latest
+        // handler closure so its dirty snapshots and refs are current.
+        window.requestAnimationFrame(() => {
+          const latestHandler = switchCloudLibraryHandlerRef.current;
+          if (latestHandler) void latestHandler(libraryId);
+        });
+      };
+      setIsPreviewEditExitPromptOpen(true);
+      return;
+    }
+    const previousLibraryId = activeLibraryIdRef.current;
+    const isLeavingRevokedLibrary = Boolean(
+      previousLibraryId && revokedLibraryIdsRef.current.has(previousLibraryId)
+    );
+    if (isLeavingRevokedLibrary && workspaceIsDirty) {
+      const confirmed = window.confirm(language === 'zh'
+        ? '你已失去這個團隊的存取權；未儲存修改目前只保留在畫面上。切換曲庫會捨棄這些修改，確定要繼續嗎？'
+        : 'You no longer have access to this team. Unsaved edits only remain on this screen. Switching libraries will discard them. Continue?');
+      if (!confirmed) return;
+    }
+    const transitionOwner = Symbol('manual-library-switch');
+    libraryTransitionOwnerRef.current = transitionOwner;
+    let switchWasActivated = false;
 
     try {
-      if (workspaceIsDirty) {
+      setIsSwitchingLibrary(true);
+      setAuthUiError(null);
+      teamLibraryRefreshGenerationRef.current += 1;
+      assignmentAccessRefreshGenerationRef.current += 1;
+      setlistShareStatusGenerationRef.current += 1;
+      projectShareStatusGenerationRef.current += 1;
+      setSelectedSetlistShareStatus(null);
+      setIsLoadingSetlistShareStatus(false);
+      setSelectedProjectShareStatus(null);
+      setIsLoadingProjectShareStatus(false);
+
+      if (workspaceIsDirty && !isLeavingRevokedLibrary) {
         if (isAutoSaveEnabled) {
-          await persistWorkspace(songs, setlists);
+          await persistWorkspace(songs, setlists, projects, { allowDuringLibraryTransition: true });
         } else {
           const shouldSave = window.confirm(copy.confirmSaveBeforeSwitch);
           if (shouldSave) {
-            await persistWorkspace(songs, setlists);
+            await persistWorkspace(songs, setlists, projects, { allowDuringLibraryTransition: true });
           } else {
             restoreSavedWorkspace();
           }
         }
       }
 
-      setIsSwitchingLibrary(true);
-      setAuthUiError(null);
-      repository.setActiveLibrary(libraryId);
+      // A save that began before the switch may still be using the repository.
+      // Never redirect that operation halfway through its multi-row diff.
+      if (workspacePersistenceInFlightRef.current) {
+        if (isLeavingRevokedLibrary) {
+          await workspacePersistenceInFlightRef.current.catch(() => undefined);
+        } else {
+          await workspacePersistenceInFlightRef.current;
+        }
+      }
+
+      // Reading another library is side-effect free. Keep every write pointed
+      // at the current workspace until the complete target snapshot is ready.
       const workspace = await repository.loadLibraryWorkspace(libraryId);
+      if (cloudRepositoryRef.current !== repository || libraryTransitionOwnerRef.current !== transitionOwner) return;
+
+      repository.setActiveLibrary(libraryId);
+      activeLibraryIdRef.current = libraryId;
+      switchWasActivated = true;
       applyWorkspaceSnapshot(workspace, libraryId);
+      setPreviewEditSession(null);
       setActiveLibraryId(libraryId);
-      setSelectedSetlistShareStatus(null);
+      setIsRefreshingTeamLibrary(false);
+      setTeamLibraryUpdatePending(false);
       setTeamManagement(null);
       setIsTeamManagementOpen(false);
+      setIsTeamSongImportOpen(false);
+      setPersonalImportSongs([]);
+      setlistAssignmentRequestGenerationRef.current += 1;
+      setlistAssignmentTargetIdRef.current = null;
+      setSetlistAssignmentTargetId(null);
+      setSetlistAssignmentSnapshot(null);
+      setIsLoadingSetlistAssignments(false);
+      setUpdatingSetlistAssignmentUserId(null);
+      if (previousLibraryId) {
+        revokedLibraryIdsRef.current.delete(previousLibraryId);
+      }
       setSyncStatus('saved');
     } catch (error) {
+      if (switchWasActivated) {
+        teamLibraryRefreshGenerationRef.current += 1;
+        assignmentAccessRefreshGenerationRef.current += 1;
+        activeLibraryIdRef.current = previousLibraryId;
+        repository.setActiveLibrary(previousLibraryId);
+      }
       setAuthUiError(getTeamFeatureErrorMessage(error, language));
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
     } finally {
-      setIsSwitchingLibrary(false);
+      if (libraryTransitionOwnerRef.current === transitionOwner) {
+        libraryTransitionOwnerRef.current = null;
+        setIsSwitchingLibrary(false);
+      }
     }
   };
+  switchCloudLibraryHandlerRef.current = handleSwitchCloudLibrary;
 
   const refreshCloudLibraries = async () => {
     const repository = cloudRepositoryRef.current;
@@ -3839,6 +4079,7 @@ export default function App() {
       setTeamInviteShareUrl(inviteUrl);
       await copyShareUrlToClipboard(inviteUrl);
       setTeamInviteEmail('');
+      setTeamInviteRole('setlist_manager');
       await loadTeamManagement();
     } catch (error) {
       toast.error(getTeamFeatureErrorMessage(error, language));
@@ -4193,13 +4434,20 @@ export default function App() {
     }
 
     setNewSetlistName(language === 'zh' ? `服事歌單 ${setlists.length + 1}` : `Service Setlist ${setlists.length + 1}`);
-    setNewSetlistProjectId(setlistProjectFilter.kind === 'owned-project' ? setlistProjectFilter.projectId : '');
+    const filteredProjectId = setlistProjectFilter.kind === 'owned-project' ? setlistProjectFilter.projectId : '';
+    setNewSetlistProjectId(canManageProjectById(filteredProjectId) ? filteredProjectId : '');
     setIsCreateSetlistOpen(true);
   };
 
   const handleConfirmCreateSetlist = () => {
     const trimmedName = newSetlistName.trim();
     if (!trimmedName || !canCreateTeamSetlists) return;
+    if (!canManageProjectById(newSetlistProjectId || null)) {
+      toast.error(language === 'zh'
+        ? '你只能把新歌單放進自己可管理的專案。'
+        : 'You can only add a new setlist to a project you manage.');
+      return;
+    }
 
     const now = Date.now();
     const newSetlist: Setlist = {
@@ -4287,7 +4535,7 @@ export default function App() {
       : (language === 'zh' ? '已將專案取消歸檔。' : 'Project restored from archive.'));
   };
 
-  const handleDeleteProject = (projectId: string) => {
+  const handleDeleteProject = async (projectId: string) => {
     const target = projects.find((item) => item.id === projectId);
     if (!target) return;
     if (!canManageProject(target)) {
@@ -4300,17 +4548,69 @@ export default function App() {
     if (!confirmed) return;
     // Detach any setlists pointing at this project so they fall back to "Ungrouped".
     const nextSetlists = setlists.map((item) =>
-      item.projectId === projectId ? { ...item, projectId: null, updatedAt: Date.now() } : item
+      item.projectId === projectId ? { ...item, projectId: null } : item
     );
     const nextProjects = projects.filter((item) => item.id !== projectId);
-    setSetlists(nextSetlists);
-    setProjects(nextProjects);
+    let deletedFromTeamCloud = false;
+
+    if (isTeamWorkspace && authenticatedUser && cloudRepositoryRef.current) {
+      const requestRepository = cloudRepositoryRef.current;
+      const requestLibraryId = activeLibraryIdRef.current;
+      if (!navigator.onLine) {
+        toast.error(language === 'zh' ? '團隊區需要連線才能刪除專案。' : 'Team projects can only be deleted while online.');
+        return;
+      }
+      const releaseCloudMutation = beginCloudMutation();
+      try {
+        setSyncStatus('syncing');
+        await requestRepository.deleteProject(projectId);
+        // The delete is scoped to the library captured above. If navigation
+        // completed while the request was in flight, the newly loaded
+        // workspace must never receive this old library's snapshot.
+        if (cloudRepositoryRef.current !== requestRepository
+            || activeLibraryIdRef.current !== requestLibraryId) {
+          return;
+        }
+        // Only advance the saved baseline for the database changes made by
+        // this DELETE. Any unrelated in-memory edits must stay dirty so the
+        // autosave cannot silently discard them.
+        setSavedSetlists((current) => current.map((item) => (
+          item.projectId === projectId ? { ...item, projectId: null } : item
+        )));
+        setSavedProjects((current) => current.filter((item) => item.id !== projectId));
+        setLastSavedAt(Date.now());
+        setSyncStatus('saved');
+        deletedFromTeamCloud = true;
+      } catch (error) {
+        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+        toast.error(error instanceof Error
+          ? error.message
+          : (language === 'zh' ? '刪除專案失敗。' : 'Unable to delete the project.'));
+        return;
+      } finally {
+        releaseCloudMutation();
+      }
+    }
+
+    if (deletedFromTeamCloud) {
+      // Merge only the confirmed database effect into the latest live state;
+      // edits made while the DELETE request was in flight must survive.
+      setSetlists((current) => current.map((item) => (
+        item.projectId === projectId ? { ...item, projectId: null } : item
+      )));
+      setProjects((current) => current.filter((item) => item.id !== projectId));
+    } else {
+      setSetlists(nextSetlists);
+      setProjects(nextProjects);
+    }
     if (setlistProjectFilter.kind === 'owned-project' && setlistProjectFilter.projectId === projectId) {
       handleSetlistProjectFilterChange({ kind: 'all' });
     }
-    void persistWorkspace(songs, nextSetlists, nextProjects).catch(() => {
-      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-    });
+    if (!isTeamWorkspace || !authenticatedUser || !cloudRepositoryRef.current) {
+      void persistWorkspace(songs, nextSetlists, nextProjects).catch(() => {
+        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      });
+    }
   };
 
   const handleSelectProject = (nextProjectId: string | null) => {
@@ -4324,8 +4624,10 @@ export default function App() {
   const handleMoveSetlistToProject = (setlistId: string, nextProjectId: string | null) => {
     const target = setlists.find((item) => item.id === setlistId);
     if (!target) return;
-    if (!canManageSetlist(target)) {
-      toast.error(language === 'zh' ? '你沒有編輯這份歌單的權限。' : 'You do not have permission to edit this setlist.');
+    if (!canChangeSetlistProject(target, nextProjectId)) {
+      toast.error(language === 'zh'
+        ? '你必須同時有這份歌單及原／新專案的管理權限。'
+        : 'You must manage this setlist and both its current and destination projects.');
       return;
     }
     if ((target.projectId ?? null) === nextProjectId) return;
@@ -4352,12 +4654,20 @@ export default function App() {
       .map((id) => setlists.find((item) => item.id === id))
       .filter((item): item is Setlist => Boolean(item));
     if (targets.length === 0) return;
-    if (mode === 'move' && !targets.every(canManageSetlist)) {
-      toast.error(language === 'zh' ? '你沒有編輯某些歌單的權限。' : 'You do not have permission to edit some of these setlists.');
+    if (mode === 'move' && !targets.every((target) => canChangeSetlistProject(target, nextProjectId))) {
+      toast.error(language === 'zh'
+        ? '你必須同時有所有歌單及原／新專案的管理權限。'
+        : 'You must manage every setlist and its current and destination projects.');
       return;
     }
     if (mode === 'copy' && !canCreateTeamSetlists) {
       toast.error(language === 'zh' ? '你沒有在這個團隊建立歌單的權限。' : 'You do not have permission to create setlists in this team.');
+      return;
+    }
+    if (mode === 'copy' && !canManageProjectById(nextProjectId)) {
+      toast.error(language === 'zh'
+        ? '你只能把歌單副本放進自己可管理的專案。'
+        : 'You can only copy a setlist into a project you manage.');
       return;
     }
 
@@ -4419,6 +4729,18 @@ export default function App() {
     exitMultiSelect();
   };
 
+  const canUseProjectPickerTarget = (nextProjectId: string | null) => {
+    if (!projectPicker) return false;
+    if (projectPicker.mode === 'copy') {
+      return canCreateTeamSetlists && canManageProjectById(nextProjectId);
+    }
+    const targets = projectPicker.setlistIds
+      .map((id) => setlists.find((item) => item.id === id))
+      .filter((item): item is Setlist => Boolean(item));
+    return targets.length > 0
+      && targets.every((target) => canChangeSetlistProject(target, nextProjectId));
+  };
+
   const handleBatchArchiveSelectedSetlists = (archived: boolean) => {
     const ids = multiSelectedSetlistIds;
     if (ids.length === 0) return;
@@ -4474,6 +4796,12 @@ export default function App() {
     if (!target) return;
     if (!canCreateTeamSetlists) {
       toast.error(language === 'zh' ? '你沒有在這個團隊建立歌單的權限。' : 'You do not have permission to create setlists in this team.');
+      return;
+    }
+    if (!canManageProjectById(nextProjectId)) {
+      toast.error(language === 'zh'
+        ? '你只能把歌單副本放進自己可管理的專案。'
+        : 'You can only copy a setlist into a project you manage.');
       return;
     }
 
@@ -4732,14 +5060,18 @@ export default function App() {
   };
 
   const loadSetlistShareStatus = async (setlistId: string) => {
+    if (selectedSetlistForShareRef.current !== setlistId) return;
     const repository = cloudRepositoryRef.current;
+    const requestGeneration = ++setlistShareStatusGenerationRef.current;
+    setSelectedSetlistShareStatus(null);
     if (!repository) {
-      setSelectedSetlistShareStatus(null);
+      setIsLoadingSetlistShareStatus(false);
       return;
     }
 
     if (!savedSetlists.some((setlist) => setlist.id === setlistId)) {
-      setSelectedSetlistShareStatus(inactiveSetlistShareStatus);
+      if (selectedSetlistForShareRef.current !== setlistId) return;
+      setSelectedSetlistShareStatus({ ...inactiveSetlistShareStatus, resourceId: setlistId });
       setIsLoadingSetlistShareStatus(false);
       setAuthUiError(null);
       return;
@@ -4748,19 +5080,27 @@ export default function App() {
     try {
       setIsLoadingSetlistShareStatus(true);
       const status = await repository.getSetlistShareStatus(setlistId);
-      setSelectedSetlistShareStatus(status);
+      if (requestGeneration !== setlistShareStatusGenerationRef.current) return;
+      if (selectedSetlistForShareRef.current !== setlistId) return;
+      setSelectedSetlistShareStatus({ ...status, resourceId: setlistId });
       setAuthUiError(null);
     } catch (error) {
+      if (requestGeneration !== setlistShareStatusGenerationRef.current) return;
+      if (selectedSetlistForShareRef.current !== setlistId) return;
       setSelectedSetlistShareStatus(null);
       const reason = error instanceof Error ? error.message.trim() : '';
       setAuthUiError(reason ? `${copy.setlistSharingLoadError}\n\n${reason}` : copy.setlistSharingLoadError);
     } finally {
-      setIsLoadingSetlistShareStatus(false);
+      if (requestGeneration === setlistShareStatusGenerationRef.current
+          && selectedSetlistForShareRef.current === setlistId) {
+        setIsLoadingSetlistShareStatus(false);
+      }
     }
   };
 
   useEffect(() => {
     if (!authenticatedUser || !cloudRepositoryRef.current || !selectedSetlist || !canShareSelectedSetlist || !isSetlistMode) {
+      setlistShareStatusGenerationRef.current += 1;
       setSelectedSetlistShareStatus(null);
       setIsLoadingSetlistShareStatus(false);
       return;
@@ -4772,20 +5112,30 @@ export default function App() {
   // Project "who joined" — mirrors the setlist share status, but for the whole
   // project. Only loadable for owned/manageable projects (not joined ones).
   const loadProjectShareStatus = async (projectId: string) => {
+    if (selectedProjectForShareRef.current !== projectId) return;
     const repository = cloudRepositoryRef.current;
+    const requestGeneration = ++projectShareStatusGenerationRef.current;
+    setSelectedProjectShareStatus(null);
     if (!repository) {
-      setSelectedProjectShareStatus(null);
+      setIsLoadingProjectShareStatus(false);
       return;
     }
     try {
       setIsLoadingProjectShareStatus(true);
       const status = await repository.getProjectShareStatus(projectId);
-      setSelectedProjectShareStatus(status);
+      if (requestGeneration !== projectShareStatusGenerationRef.current) return;
+      if (selectedProjectForShareRef.current !== projectId) return;
+      setSelectedProjectShareStatus({ ...status, resourceId: projectId });
     } catch {
+      if (requestGeneration !== projectShareStatusGenerationRef.current) return;
+      if (selectedProjectForShareRef.current !== projectId) return;
       // Non-fatal: the panel just shows an empty/zero state and can be refreshed.
       setSelectedProjectShareStatus(null);
     } finally {
-      setIsLoadingProjectShareStatus(false);
+      if (requestGeneration === projectShareStatusGenerationRef.current
+          && selectedProjectForShareRef.current === projectId) {
+        setIsLoadingProjectShareStatus(false);
+      }
     }
   };
 
@@ -4810,8 +5160,9 @@ export default function App() {
       || !isSetlistMode
       || !selectedProject
       || selectedJoinedProject
-      || !canShareProject
+      || !canShareSelectedProject
     ) {
+      projectShareStatusGenerationRef.current += 1;
       setSelectedProjectShareStatus(null);
       setIsLoadingProjectShareStatus(false);
       return;
@@ -4819,7 +5170,7 @@ export default function App() {
 
     void loadProjectShareStatus(selectedProject.id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticatedUser, isSetlistMode, selectedProject?.id, selectedJoinedProject?.id]);
+  }, [authenticatedUser, canShareSelectedProject, isSetlistMode, selectedProject?.id, selectedJoinedProject?.id]);
 
   // In-app notification inbox + "people I shared with before" contact list.
   const refreshNotifications = async () => {
@@ -5046,9 +5397,7 @@ export default function App() {
 
   const handleDeleteSetlist = (setlistId: string) => {
     const targetSetlist = setlists.find((item) => item.id === setlistId);
-    const canDeleteTarget = !isTeamWorkspace
-      || TEAM_EDIT_ROLES.has(activeLibraryRole)
-      || (activeLibraryRole === 'setlist_manager' && targetSetlist?.createdBy === authenticatedUser?.id);
+    const canDeleteTarget = !isTeamWorkspace || canEditOwnedTeamSetlist(targetSetlist);
     if (!canDeleteTarget) {
       toast.error(language === 'zh' ? '你沒有刪除這份團隊歌單的權限。' : 'You do not have permission to delete this team setlist.');
       return;
@@ -5126,11 +5475,14 @@ export default function App() {
   };
 
   const handleMobileSongLongPress = (songId: string) => {
+    if (!canEditTeamSongs) return;
     setIsLibraryEditing(true);
     setSelectedLibrarySongIds([songId]);
   };
 
   const handleMobileSetlistLongPress = (setlistId: string) => {
+    const target = setlists.find((item) => item.id === setlistId);
+    if (!target || !canManageSetlist(target)) return;
     // Long-press enters multi-select mode with this item already selected.
     setMobileSwipeSetlist(null);
     setMultiSelectedSetlistIds((current) => (
@@ -5193,6 +5545,10 @@ export default function App() {
     openAction: mobileSwipeSetlist?.action ?? null,
     setDragging: setDraggingSetlist,
     setOpen: setMobileSwipeSetlist,
+    canDelete: (id) => {
+      const target = setlists.find((item) => item.id === id);
+      return Boolean(target && canManageSetlist(target));
+    },
     canArchive: (id) => {
       const target = setlists.find((item) => item.id === id);
       return Boolean(target && canManageSetlist(target));
@@ -5215,6 +5571,10 @@ export default function App() {
     openAction: mobileSwipeProject?.action ?? null,
     setDragging: setDraggingProject,
     setOpen: setMobileSwipeProject,
+    canDelete: (id) => {
+      const target = projects.find((item) => item.id === id);
+      return Boolean(target && canManageProject(target));
+    },
     canArchive: (id) => {
       const target = projects.find((item) => item.id === id);
       return Boolean(target && canManageProject(target));
@@ -5230,6 +5590,7 @@ export default function App() {
     openAction: mobileSwipeMember?.action ?? null,
     setDragging: setDraggingMember,
     setOpen: setMobileSwipeMember,
+    canDelete: () => true,
     canArchive: () => false
   });
 
@@ -5337,6 +5698,12 @@ export default function App() {
   // content are identical (ignoring id/timestamps). Keeps the first occurrence
   // and re-points any setlist references from removed copies to the kept one.
   const handleRemoveLibrarySongDuplicates = () => {
+    if (isTeamWorkspace) {
+      toast.info(language === 'zh'
+        ? '團隊曲庫允許同名或同內容的不同版本，不會自動合併。'
+        : 'Team libraries allow separate same-title or same-content versions and are not auto-merged.');
+      return;
+    }
     if (!canEditTeamSongs) {
       toast.error(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this song library.');
       return;
@@ -5595,6 +5962,12 @@ export default function App() {
   };
 
   const handleExportSongLibraryJson = () => {
+    if (isTeamWorkspace && !canEditTeamSongs) {
+      toast.error(language === 'zh'
+        ? '只有團隊擁有者或曲庫管理員可以匯出團隊曲庫。'
+        : 'Only team owners or library managers can export a team library.');
+      return;
+    }
     const payload: ExportedSongLibraryPayload = {
       version: 1,
       exportedAt: Date.now(),
@@ -5616,6 +5989,12 @@ export default function App() {
   };
 
   const handleImportSongLibraryClick = () => {
+    if (isTeamWorkspace) {
+      toast.info(language === 'zh'
+        ? '團隊曲庫請使用「從個人區匯入」，所有歌曲會以一筆交易寫入。'
+        : 'Use Import from personal for team libraries so the whole batch is written in one transaction.');
+      return;
+    }
     if (!canEditTeamSongs) {
       toast.error(language === 'zh' ? '你沒有匯入覆蓋這個團隊歌曲庫的權限。' : 'You do not have permission to import into this team song library.');
       return;
@@ -5626,13 +6005,41 @@ export default function App() {
   const handleImportSongLibrary = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
+    const requestRepository = cloudRepositoryRef.current;
+    const requestLibraryId = activeLibraryIdRef.current;
+    const requestUsesCloud = Boolean(authenticatedUser && requestRepository);
+    const requestWasPersonalLibrary = !requestUsesCloud || Boolean(
+      requestLibraryId
+      && activeCloudLibrary?.id === requestLibraryId
+      && activeCloudLibrary.kind === 'personal'
+    );
+    const requestIsStillCurrent = () => (
+      !requestUsesCloud
+      || (
+        requestWasPersonalLibrary
+        && cloudRepositoryRef.current === requestRepository
+        && activeLibraryIdRef.current === requestLibraryId
+      )
+    );
 
     if (!file) {
+      return;
+    }
+    if (isTeamWorkspace || !requestWasPersonalLibrary) {
+      toast.error(language === 'zh'
+        ? '團隊曲庫只能透過「從個人區匯入」的交易式流程新增歌曲。'
+        : 'Team libraries only accept songs through the transactional Import from personal flow.');
       return;
     }
 
     try {
       const rawContent = await file.text();
+      if (!requestIsStillCurrent()) {
+        toast.error(language === 'zh'
+          ? '讀取檔案期間曲庫已切換，因此已取消這次匯入。'
+          : 'The active library changed while the file was being read, so this import was cancelled.');
+        return;
+      }
       const parsedContent = JSON.parse(rawContent) as ExportedSongLibraryPayload | Song[];
       const importedSongs = Array.isArray(parsedContent) ? parsedContent : parsedContent.songs;
 
@@ -5645,6 +6052,9 @@ export default function App() {
       const nextSongs = importedSongs.map((item, index) => {
         const storedLikeItem = item as Partial<StoredSong>;
         const normalizedSong = cloneSong(normalizeSongBars(item as Song));
+        const existingSong = storedLikeItem.id
+          ? songs.find((songItem) => songItem.id === storedLikeItem.id)
+          : null;
         const shouldImportAsCopy = isCloudMode && (!storedLikeItem.id || !existingSongIds.has(storedLikeItem.id));
         const importedId = shouldImportAsCopy
           ? crypto.randomUUID()
@@ -5653,6 +6063,12 @@ export default function App() {
         return {
           ...songWithoutWorkspaceLink,
           id: importedId,
+          createdBy: isCloudMode
+            ? (shouldImportAsCopy ? authenticatedUser?.id : existingSong?.createdBy ?? authenticatedUser?.id)
+            : storedLikeItem.createdBy,
+          updatedBy: isCloudMode ? authenticatedUser?.id : storedLikeItem.updatedBy,
+          archivedAt: shouldImportAsCopy ? null : storedLikeItem.archivedAt ?? null,
+          archivedBy: shouldImportAsCopy ? null : storedLikeItem.archivedBy ?? null,
           updatedAt: typeof storedLikeItem.updatedAt === 'number' ? storedLikeItem.updatedAt : Date.now()
         };
       }) as StoredSong[];
@@ -5663,6 +6079,12 @@ export default function App() {
           : `Import ${nextSongs.length} songs and replace the current Song Library?`
       );
       if (!confirmed) {
+        return;
+      }
+      if (!requestIsStillCurrent()) {
+        toast.error(language === 'zh'
+          ? '曲庫已切換，因此已取消這次匯入。'
+          : 'The active library changed, so this import was cancelled.');
         return;
       }
 
@@ -5696,70 +6118,557 @@ export default function App() {
     }
   };
 
-  const handleImportPersonalSongsToTeam = async () => {
+  const commitPreviewEditSession = React.useCallback((session: PreviewEditSession | null = previewEditSession) => {
+    if (!session?.dirty) {
+      setPreviewEditSession(null);
+      return;
+    }
+    if (isSetlistMode && session.previewIdentity === selectedSetlistSong?.id) {
+      handleSetlistSongContentChange(session.draftSong);
+    } else if (!isSetlistMode && session.previewIdentity === song?.id) {
+      handleSongChange(session.draftSong);
+    }
+    setPreviewEditSession(null);
+  }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode, previewEditSession, selectedSetlistSong?.id, song?.id]);
+
+  const waitForWorkspaceStateCommit = () => new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+
+  const flushTeamSongDraftsBeforeMutation = async () => {
+    const pendingPreviewSession = previewEditSessionRef.current;
+    if (pendingPreviewSession?.dirty) {
+      commitPreviewEditSession(pendingPreviewSession);
+      await waitForWorkspaceStateCommit();
+    }
+
+    const nextSongs = songsRef.current;
+    const nextSetlists = setlistsRef.current;
+    await persistWorkspace(nextSongs, nextSetlists);
+    return { songs: nextSongs, setlists: nextSetlists };
+  };
+
+  const refreshActiveTeamSongs = async (force = false) => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || !isTeamWorkspace || !canEditTeamSongs) {
-      toast.error(language === 'zh' ? '你沒有匯入到這個團隊歌曲庫的權限。' : 'You do not have permission to import into this team song library.');
+    if (!repository || !isTeamWorkspace || !activeLibraryId) return;
+    if (teamLibraryReloadIsUnsafeRef.current && !force) {
+      setTeamLibraryUpdatePending(true);
       return;
     }
 
-    const teamName = activeCloudLibrary?.name ?? (language === 'zh' ? '目前團隊' : 'this team');
-    const confirmed = window.confirm(
-      language === 'zh'
-        ? `要把個人區所有歌曲複製到「${teamName}」嗎？\n\n這會建立獨立副本，團隊成員會依權限看到這些歌曲；個人區原本的歌曲不會被修改。同名歌曲會自動加上「(個人匯入)」。`
-        : `Copy all personal songs into "${teamName}"?\n\nThis creates independent copies that team members can see according to their roles. Your personal songs will not be changed. Duplicate titles will be renamed with "(Personal import)".`
-    );
-    if (!confirmed) {
+    const requestGeneration = ++teamLibraryRefreshGenerationRef.current;
+    try {
+      setIsRefreshingTeamLibrary(true);
+      const nextSongs = await repository.loadLibrarySongs(activeLibraryId);
+      if (requestGeneration !== teamLibraryRefreshGenerationRef.current) return;
+      if (activeLibraryIdRef.current !== activeLibraryId) return;
+      if (teamLibraryReloadIsUnsafeRef.current) {
+        setTeamLibraryUpdatePending(true);
+        return;
+      }
+      setSongs(nextSongs);
+      setSavedSongs(cloneSong(nextSongs));
+      setSelectedSongId((currentId) => nextSongs.some((item) => item.id === currentId && (!item.archivedAt || isShowingArchivedSongs))
+        ? currentId
+        : nextSongs.find((item) => !item.archivedAt)?.id ?? (isShowingArchivedSongs ? nextSongs[0]?.id ?? null : null));
+      setSongHistories({});
+      setSelectedLibrarySongIds([]);
+      setIsLibraryEditing(false);
+      setTeamLibraryUpdatePending(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+    } finally {
+      if (requestGeneration === teamLibraryRefreshGenerationRef.current) {
+        setIsRefreshingTeamLibrary(false);
+      }
+    }
+  };
+
+  const handleApplyPendingTeamLibraryUpdate = async () => {
+    try {
+      await flushTeamSongDraftsBeforeMutation();
+      await refreshActiveTeamSongs(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+    }
+  };
+
+  useEffect(() => {
+    if (!teamLibraryUpdatePending || syncStatus !== 'saved' || teamLibraryReloadIsUnsafe) return;
+    void refreshActiveTeamSongs(false);
+    // refreshActiveTeamSongs intentionally reads the latest values through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncStatus, teamLibraryReloadIsUnsafe, teamLibraryUpdatePending]);
+
+  const handleOpenTeamSongImport = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !isTeamWorkspace || !canEditTeamSongs) {
+      toast.error(language === 'zh' ? '你沒有匯入到這個團隊曲庫的權限。' : 'You do not have permission to import into this team song library.');
       return;
     }
 
     try {
-      setIsImportingPersonalSongs(true);
-      setSyncStatus('syncing');
+      await flushTeamSongDraftsBeforeMutation();
+      setIsTeamSongImportOpen(true);
+      setIsLoadingPersonalImportSongs(true);
       const personalWorkspace = await repository.loadPersonalWorkspace();
-      if (personalWorkspace.songs.length === 0) {
-        toast.error(language === 'zh' ? '個人區目前沒有可匯入的歌曲。' : 'Your personal workspace has no songs to import.');
-        return;
+      setPersonalImportSongs(personalWorkspace.songs);
+      if (personalWorkspace.songs.filter((item) => !item.archivedAt).length === 0) {
+        toast.info(language === 'zh' ? '個人區目前沒有可匯入的歌曲。' : 'Your personal workspace has no songs to import.');
       }
-
-      const importedSongs: StoredSong[] = [];
-      const nextSongs = [...songs];
-      personalWorkspace.songs.forEach((sourceSong, index) => {
-        const importLabel = language === 'zh' ? '(個人匯入)' : '(Personal import)';
-        const copiedSong: StoredSong = {
-          ...cloneSong(normalizeSongBars(sourceSong)),
-          id: crypto.randomUUID(),
-          title: buildImportedTeamSongTitle(nextSongs, sourceSong.title, copy.untitledSong, importLabel),
-          updatedAt: Date.now() + index
-        };
-        nextSongs.push(copiedSong);
-        importedSongs.push(copiedSong);
-      });
-
-      setSongs(nextSongs);
-      if (!selectedSongId && importedSongs[0]) {
-        setSelectedSongId(importedSongs[0].id);
-      }
-      setSongHistories({});
-      setSelectedLibrarySongIds([]);
-      setIsLibraryEditing(false);
-      await persistWorkspace(nextSongs, setlists);
-      toast.error(
-        language === 'zh'
-          ? `已匯入 ${importedSongs.length} 首個人歌曲到「${teamName}」。個人區歌曲不會被修改。`
-          : `Imported ${importedSongs.length} personal songs into "${teamName}". Your personal songs were not modified.`
-      );
     } catch (error) {
-      const reason = error instanceof Error ? error.message.trim() : '';
-      toast.error(
-        language === 'zh'
-          ? `無法從個人區匯入歌曲。${reason ? `\n\n${reason}` : ''}`
-          : `Unable to import songs from your personal workspace.${reason ? `\n\n${reason}` : ''}`
-      );
+      setIsTeamSongImportOpen(false);
+      toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+    } finally {
+      setIsLoadingPersonalImportSongs(false);
+    }
+  };
+
+  const handleInspectTeamSongImport = async (sourceSongIds: string[]) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !activeLibraryId || !isTeamWorkspace || !canEditTeamSongs) {
+      throw new Error(language === 'zh' ? '你沒有匯入到這個團隊曲庫的權限。' : 'You do not have permission to import into this team song library.');
+    }
+    return repository.inspectTeamSongImport(activeLibraryId, sourceSongIds);
+  };
+
+  const handleRunTeamSongImport = async (items: TeamSongImportRequestItem[]): Promise<TeamSongImportResult> => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !activeLibraryId || !isTeamWorkspace || !canEditTeamSongs) {
+      throw new Error(language === 'zh' ? '你沒有匯入到這個團隊曲庫的權限。' : 'You do not have permission to import into this team song library.');
+    }
+    try {
+      setIsImportingPersonalSongs(true);
+      await flushTeamSongDraftsBeforeMutation();
+      const result = await repository.importPersonalSongsToTeam(activeLibraryId, items);
+      await refreshActiveTeamSongs(true);
+      toast.success(language === 'zh'
+        ? `已匯入 ${result.createdCount + result.duplicateCount} 首，覆蓋 ${result.overwrittenCount} 首。歌名保持不變。`
+        : `Imported ${result.createdCount + result.duplicateCount}; overwritten ${result.overwrittenCount}. Titles were preserved.`);
+      return result;
     } finally {
       setIsImportingPersonalSongs(false);
     }
   };
+
+  const closeSetlistEditorAssignments = () => {
+    setlistAssignmentRequestGenerationRef.current += 1;
+    setlistAssignmentTargetIdRef.current = null;
+    setSetlistAssignmentTargetId(null);
+    setSetlistAssignmentSnapshot(null);
+    setIsLoadingSetlistAssignments(false);
+    setUpdatingSetlistAssignmentUserId(null);
+  };
+
+  const loadSetlistEditorAssignments = async (setlistId = setlistAssignmentTargetIdRef.current) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !setlistId) return;
+    const requestGeneration = ++setlistAssignmentRequestGenerationRef.current;
+
+    try {
+      setIsLoadingSetlistAssignments(true);
+      const snapshot = await repository.getSetlistEditorAssignments(setlistId);
+      if (requestGeneration !== setlistAssignmentRequestGenerationRef.current) return;
+      if (setlistAssignmentTargetIdRef.current !== setlistId) return;
+      setSetlistAssignmentSnapshot(snapshot);
+    } catch (error) {
+      if (requestGeneration !== setlistAssignmentRequestGenerationRef.current) return;
+      if (setlistAssignmentTargetIdRef.current !== setlistId) return;
+      toast.error(error instanceof Error
+        ? error.message
+        : (language === 'zh' ? '無法載入歌單協作者。' : 'Unable to load setlist collaborators.'));
+    } finally {
+      if (requestGeneration === setlistAssignmentRequestGenerationRef.current
+          && setlistAssignmentTargetIdRef.current === setlistId) {
+        setIsLoadingSetlistAssignments(false);
+      }
+    }
+  };
+
+  const handleOpenSetlistAssignments = (setlistId: string) => {
+    const targetSetlist = setlists.find((item) => item.id === setlistId);
+    if (!targetSetlist || !isTeamWorkspace || (
+      activeLibraryRole !== 'owner'
+      && !(
+        (activeLibraryRole === 'editor' || activeLibraryRole === 'setlist_manager')
+        && targetSetlist.createdBy === authenticatedUser?.id
+      )
+    )) {
+      toast.error(language === 'zh'
+        ? '只有團隊擁有者或歌單建立者可以指派協作者。'
+        : 'Only the team owner or setlist creator can assign collaborators.');
+      return;
+    }
+
+    setlistAssignmentRequestGenerationRef.current += 1;
+    setlistAssignmentTargetIdRef.current = setlistId;
+    setSetlistAssignmentTargetId(setlistId);
+    setSetlistAssignmentSnapshot(null);
+    setIsSetlistActionsMenuOpen(false);
+    void loadSetlistEditorAssignments(setlistId);
+  };
+
+  const handleToggleSetlistAssignment = async (userId: string, enabled: boolean) => {
+    const repository = cloudRepositoryRef.current;
+    const targetSetlistId = setlistAssignmentTargetIdRef.current;
+    if (!repository || !targetSetlistId || updatingSetlistAssignmentUserId) return;
+
+    const targetSetlist = setlists.find((item) => item.id === targetSetlistId);
+    if (!targetSetlist || !canManageTeamSetlistAssignments(targetSetlist)) {
+      closeSetlistEditorAssignments();
+      toast.error(language === 'zh'
+        ? '你已沒有指派這份歌單協作者的權限。'
+        : 'You no longer have permission to assign collaborators for this setlist.');
+      return;
+    }
+
+    const requestGeneration = ++setlistAssignmentRequestGenerationRef.current;
+    try {
+      setUpdatingSetlistAssignmentUserId(userId);
+      const snapshot = await repository.setSetlistEditorAssignment(targetSetlistId, userId, enabled);
+      if (requestGeneration !== setlistAssignmentRequestGenerationRef.current) return;
+      if (setlistAssignmentTargetIdRef.current !== targetSetlistId) return;
+      setSetlistAssignmentSnapshot(snapshot);
+      if (userId === authenticatedUser?.id) {
+        setSetlists((current) => current.map((item) => item.id === targetSetlistId
+          ? { ...item, assignedToCurrentUser: enabled }
+          : item));
+      }
+    } catch (error) {
+      if (requestGeneration !== setlistAssignmentRequestGenerationRef.current) return;
+      if (setlistAssignmentTargetIdRef.current !== targetSetlistId) return;
+      toast.error(error instanceof Error
+        ? error.message
+        : (language === 'zh' ? '無法更新歌單協作者。' : 'Unable to update setlist collaborators.'));
+    } finally {
+      if (requestGeneration === setlistAssignmentRequestGenerationRef.current
+          && setlistAssignmentTargetIdRef.current === targetSetlistId) {
+        setUpdatingSetlistAssignmentUserId((current) => current === userId ? null : current);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !authenticatedUser || !isTeamWorkspace || !activeLibraryId) return;
+
+    let cancelled = false;
+    let membershipRefreshInFlight = false;
+    const refreshAssignmentAccess = async () => {
+      const requestGeneration = ++assignmentAccessRefreshGenerationRef.current;
+      const requestLibraryId = activeLibraryId;
+      try {
+        const workspace = await repository.loadLibraryWorkspace(requestLibraryId);
+        if (cancelled) return;
+        if (requestGeneration !== assignmentAccessRefreshGenerationRef.current) return;
+        if (activeLibraryIdRef.current !== requestLibraryId) return;
+        const assignmentBySetlistId = new Map(
+          workspace.setlists.map((item) => [item.id, item.assignedToCurrentUser === true] as const)
+        );
+        const remoteSetlistById = new Map<string, Setlist>(workspace.setlists.map((item) => [item.id, item]));
+        const revokedSetlistIds = new Set<string>(
+          setlistsRef.current
+            .filter((item) => (
+              item.assignedToCurrentUser === true
+              && assignmentBySetlistId.get(item.id) !== true
+              && activeLibraryRoleRef.current !== 'owner'
+              && item.createdBy !== authenticatedUser.id
+            ))
+            .map((item) => item.id)
+        );
+        const applyAssignmentFlags = (items: Setlist[]) => items.map((item) => {
+          const source: Setlist = revokedSetlistIds.has(item.id)
+            ? (remoteSetlistById.get(item.id) ?? item)
+            : item;
+          return {
+            ...source,
+            assignedToCurrentUser: assignmentBySetlistId.get(item.id) ?? false
+          };
+        });
+        setSetlists(applyAssignmentFlags);
+        if (revokedSetlistIds.size > 0) {
+          // Only revoked setlists are intentionally restored from the remote
+          // snapshot. Assignment updates elsewhere must not mark unrelated,
+          // still-debouncing local edits as saved.
+          setSavedSetlists((current) => current.map((item) => {
+            if (!revokedSetlistIds.has(item.id)) return item;
+            const remote = remoteSetlistById.get(item.id) ?? item;
+            return {
+              ...remote,
+              assignedToCurrentUser: assignmentBySetlistId.get(item.id) ?? false
+            };
+          }));
+        }
+        if (revokedSetlistIds.size > 0) {
+          setMultiSelectedSetlistIds((current) => current.filter((id) => !revokedSetlistIds.has(id)));
+          setProjectPicker((current) => current && current.setlistIds.some((id) => revokedSetlistIds.has(id)) ? null : current);
+          setMobileSwipeSetlist((current) => current && revokedSetlistIds.has(current.id) ? null : current);
+          if (setlistAssignmentTargetIdRef.current && revokedSetlistIds.has(setlistAssignmentTargetIdRef.current)) {
+            closeSetlistEditorAssignments();
+          }
+          setIsSetlistActionsMenuOpen(false);
+          const activeSession = previewEditSessionRef.current;
+          if (activeSession && workspace.setlists.some((item) => (
+            revokedSetlistIds.has(item.id)
+            && item.songs.some((setlistSong) => setlistSong.id === activeSession.previewIdentity)
+          ))) {
+            setPreviewEditSession(null);
+            setIsEditing(false);
+          }
+          toast.info(language === 'zh'
+            ? '你的歌單編輯指派已被移除，該歌單已恢復為雲端版本並改為唯讀。'
+            : 'A setlist assignment was removed. That setlist was restored from the cloud and is now read-only.');
+        }
+      } catch (error) {
+        if (!cancelled
+            && requestGeneration === assignmentAccessRefreshGenerationRef.current
+            && activeLibraryIdRef.current === requestLibraryId) {
+          setAuthUiError(getTeamFeatureErrorMessage(error, language));
+        }
+      }
+    };
+
+    const reconcileActiveMembership = async () => {
+      if (membershipRefreshInFlight || libraryTransitionOwnerRef.current) return;
+      membershipRefreshInFlight = true;
+      let membershipTransitionStarted = false;
+      let membershipTransitionOwner: symbol | null = null;
+      try {
+        const libraries = await repository.listLibraries();
+        if (cancelled || libraryTransitionOwnerRef.current) return;
+
+        const currentLibrary = libraries.find((item) => item.id === activeLibraryId) ?? null;
+        const roleChanged = currentLibrary?.role !== activeLibraryRoleRef.current;
+        if (currentLibrary && !roleChanged) {
+          setCloudLibraries(libraries);
+          return;
+        }
+
+        if (!currentLibrary && revokedLibraryIdsRef.current.has(activeLibraryId)) {
+          const revokedSummary = cloudLibraries.find((item) => item.id === activeLibraryId)
+            ?? activeCloudLibrary;
+          setCloudLibraries(revokedSummary
+            ? [{ ...revokedSummary, role: 'viewer' }, ...libraries.filter((item) => item.id !== activeLibraryId)]
+            : libraries);
+          return;
+        }
+
+        // A role change inside the same library does not require a destructive
+        // workspace reload. Commit any preview draft into local state, update
+        // permissions immediately, and leave the saved baseline untouched.
+        if (currentLibrary && roleChanged) {
+          membershipTransitionOwner = Symbol('membership-role-change');
+          libraryTransitionOwnerRef.current = membershipTransitionOwner;
+          membershipTransitionStarted = true;
+          setIsSwitchingLibrary(true);
+          const hadUnsavedChanges = workspaceIsDirtyRef.current
+            || Boolean(previewEditSessionRef.current?.dirty);
+          const pendingPreviewSession = previewEditSessionRef.current;
+          if (pendingPreviewSession?.dirty) {
+            commitPreviewEditSession(pendingPreviewSession);
+            await waitForWorkspaceStateCommit();
+          }
+          if (cancelled || libraryTransitionOwnerRef.current !== membershipTransitionOwner) return;
+
+          revokedLibraryIdsRef.current.delete(activeLibraryId);
+          teamLibraryRefreshGenerationRef.current += 1;
+          assignmentAccessRefreshGenerationRef.current += 1;
+          setlistShareStatusGenerationRef.current += 1;
+          projectShareStatusGenerationRef.current += 1;
+          setCloudLibraries(libraries);
+          setSelectedSetlistShareStatus(null);
+          setIsLoadingSetlistShareStatus(false);
+          setSelectedProjectShareStatus(null);
+          setIsLoadingProjectShareStatus(false);
+          setTeamManagement(null);
+          setIsTeamManagementOpen(false);
+          setIsTeamSongImportOpen(false);
+          setPersonalImportSongs([]);
+          setlistAssignmentRequestGenerationRef.current += 1;
+          setlistAssignmentTargetIdRef.current = null;
+          setSetlistAssignmentTargetId(null);
+          setSetlistAssignmentSnapshot(null);
+          setIsLoadingSetlistAssignments(false);
+          setUpdatingSetlistAssignmentUserId(null);
+          setIsLibraryEditing(false);
+          setSelectedLibrarySongIds([]);
+          setMultiSelectedSetlistIds([]);
+          setMobileSwipeSetlist(null);
+          setProjectPicker(null);
+          setIsCreateSetlistOpen(false);
+          setNewSetlistProjectId('');
+          setPreviewEditSession(null);
+          setIsEditing(false);
+          toast.info(language === 'zh'
+            ? `你的團隊角色已更新為「${getRoleLabel(currentLibrary.role, language)}」。${hadUnsavedChanges ? '未儲存修改仍保留在畫面；若新權限不允許，這些修改不會上傳。' : ''}`
+            : `Your team role is now ${getRoleLabel(currentLibrary.role, language)}.${hadUnsavedChanges ? ' Unsaved edits remain on screen; they will not upload if the new role does not allow it.' : ''}`);
+          return;
+        }
+
+        // If access was removed while local work is still dirty, never replace
+        // it silently. Keep a synthetic viewer entry so all writes are disabled
+        // while the recovery copy remains visible on this screen.
+        if (!currentLibrary && (
+          workspaceIsDirtyRef.current
+          || previewEditSessionRef.current?.dirty
+          || cloudMutationCountRef.current > 0
+        )) {
+          membershipTransitionOwner = Symbol('membership-removal-recovery');
+          libraryTransitionOwnerRef.current = membershipTransitionOwner;
+          membershipTransitionStarted = true;
+          setIsSwitchingLibrary(true);
+          const pendingPreviewSession = previewEditSessionRef.current;
+          if (pendingPreviewSession?.dirty) {
+            commitPreviewEditSession(pendingPreviewSession);
+            await waitForWorkspaceStateCommit();
+          }
+          if (cancelled || libraryTransitionOwnerRef.current !== membershipTransitionOwner) return;
+
+          revokedLibraryIdsRef.current.add(activeLibraryId);
+          const revokedSummary = cloudLibraries.find((item) => item.id === activeLibraryId)
+            ?? activeCloudLibrary;
+          setCloudLibraries(revokedSummary
+            ? [{ ...revokedSummary, role: 'viewer' }, ...libraries.filter((item) => item.id !== activeLibraryId)]
+            : libraries);
+          setTeamManagement(null);
+          setIsTeamManagementOpen(false);
+          setIsTeamSongImportOpen(false);
+          setPersonalImportSongs([]);
+          closeSetlistEditorAssignments();
+          setIsLibraryEditing(false);
+          setSelectedLibrarySongIds([]);
+          setMultiSelectedSetlistIds([]);
+          setProjectPicker(null);
+          setIsCreateSetlistOpen(false);
+          setPreviewEditSession(null);
+          setIsEditing(false);
+          setSyncStatus('failed');
+          toast.info(language === 'zh'
+            ? '你已不是該團隊成員。未儲存修改已保留在目前畫面並改為唯讀；切換曲庫時可明確選擇是否捨棄。'
+            : 'Your team access was removed. Unsaved edits remain on this screen in read-only mode; switching libraries will ask before discarding them.');
+          return;
+        }
+
+        const fallbackLibrary = libraries.find((item) => item.kind === 'personal') ?? libraries[0] ?? null;
+        const nextLibrary = currentLibrary ?? fallbackLibrary;
+        if (!nextLibrary) {
+          teamLibraryRefreshGenerationRef.current += 1;
+          assignmentAccessRefreshGenerationRef.current += 1;
+          setlistShareStatusGenerationRef.current += 1;
+          projectShareStatusGenerationRef.current += 1;
+          repository.setActiveLibrary(null);
+          activeLibraryIdRef.current = null;
+          setCloudLibraries(libraries);
+          setActiveLibraryId(null);
+          setSelectedSetlistShareStatus(null);
+          setIsLoadingSetlistShareStatus(false);
+          setSelectedProjectShareStatus(null);
+          setIsLoadingProjectShareStatus(false);
+          setIsRefreshingTeamLibrary(false);
+          return;
+        }
+
+        membershipTransitionOwner = Symbol('membership-library-switch');
+        libraryTransitionOwnerRef.current = membershipTransitionOwner;
+        membershipTransitionStarted = true;
+        setIsSwitchingLibrary(true);
+        teamLibraryRefreshGenerationRef.current += 1;
+        assignmentAccessRefreshGenerationRef.current += 1;
+        setlistShareStatusGenerationRef.current += 1;
+        projectShareStatusGenerationRef.current += 1;
+        setSelectedSetlistShareStatus(null);
+        setIsLoadingSetlistShareStatus(false);
+        setSelectedProjectShareStatus(null);
+        setIsLoadingProjectShareStatus(false);
+
+        if (workspacePersistenceInFlightRef.current) {
+          await workspacePersistenceInFlightRef.current;
+        }
+        const workspace = await repository.loadLibraryWorkspace(nextLibrary.id);
+        if (cancelled
+            || cloudRepositoryRef.current !== repository
+            || libraryTransitionOwnerRef.current !== membershipTransitionOwner) return;
+
+        repository.setActiveLibrary(nextLibrary.id);
+        activeLibraryIdRef.current = nextLibrary.id;
+        applyWorkspaceSnapshot(workspace, nextLibrary.id);
+        setCloudLibraries(libraries);
+        setActiveLibraryId(nextLibrary.id);
+        setTeamManagement(null);
+        setIsTeamManagementOpen(false);
+        setIsTeamSongImportOpen(false);
+        setPersonalImportSongs([]);
+        setlistAssignmentRequestGenerationRef.current += 1;
+        setlistAssignmentTargetIdRef.current = null;
+        setSetlistAssignmentTargetId(null);
+        setSetlistAssignmentSnapshot(null);
+        setIsLoadingSetlistAssignments(false);
+        setUpdatingSetlistAssignmentUserId(null);
+        setIsLibraryEditing(false);
+        setSelectedLibrarySongIds([]);
+        setMultiSelectedSetlistIds([]);
+        setMobileSwipeSetlist(null);
+        setProjectPicker(null);
+        setIsCreateSetlistOpen(false);
+        setNewSetlistProjectId('');
+        setShowArchivedSongs(false);
+        setPreviewEditSession(null);
+        setIsEditing(false);
+        setTeamLibraryUpdatePending(false);
+        setIsRefreshingTeamLibrary(false);
+        setSyncStatus('saved');
+
+        if (!currentLibrary) {
+          toast.info(language === 'zh'
+            ? '你已不是該團隊成員，已切回個人區。'
+            : 'Your team access was removed, so ChordMaster switched to your personal workspace.');
+        } else if (roleChanged) {
+          toast.info(language === 'zh'
+            ? `你的團隊角色已更新為「${getRoleLabel(currentLibrary.role, language)}」。`
+            : `Your team role is now ${getRoleLabel(currentLibrary.role, language)}.`);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAuthUiError(getTeamFeatureErrorMessage(error, language));
+          setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+        }
+      } finally {
+        if (membershipTransitionStarted
+            && libraryTransitionOwnerRef.current === membershipTransitionOwner) {
+          libraryTransitionOwnerRef.current = null;
+          setIsSwitchingLibrary(false);
+        }
+        membershipRefreshInFlight = false;
+      }
+    };
+
+    const unsubscribe = repository.subscribeToLibraryChanges(activeLibraryId, (kind) => {
+      if (kind === 'songs') {
+        void refreshActiveTeamSongs(false);
+        return;
+      }
+      if (kind === 'assignments') {
+        void refreshAssignmentAccess();
+        return;
+      }
+      void reconcileActiveMembership();
+    });
+
+    const handleWindowFocus = () => {
+      void refreshActiveTeamSongs(false);
+      void refreshAssignmentAccess();
+      void reconcileActiveMembership();
+    };
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', handleWindowFocus);
+      unsubscribe();
+    };
+  // The subscription is intentionally recreated only when the active team changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLibraryId, authenticatedUser?.id, isTeamWorkspace]);
 
   const handleDuplicateSong = (songId: string) => {
     if (!canEditTeamSongs) {
@@ -5799,6 +6708,12 @@ export default function App() {
     const repository = cloudRepositoryRef.current;
     const targetSong = songs.find((item) => item.id === songId);
     if (!repository || !targetSong || !isTeamWorkspace) {
+      return;
+    }
+    if (!canEditTeamSongs) {
+      toast.error(language === 'zh'
+        ? '只有團隊擁有者與曲庫管理員可以轉存團隊歌曲。'
+        : 'Only team owners and song library managers can copy team songs to personal.');
       return;
     }
 
@@ -5888,13 +6803,70 @@ export default function App() {
     }
   };
 
-  const handleDeleteSong = (songId: string) => {
+  const updateTeamSongArchiveState = async (songIds: string[], archived: boolean) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !activeLibraryId || !isTeamWorkspace || !canEditTeamSongs) {
+      throw new Error(language === 'zh'
+        ? '你沒有管理這個團隊曲庫的權限。'
+        : 'You do not have permission to manage this team song library.');
+    }
+
+    await flushTeamSongDraftsBeforeMutation();
+    const result = await repository.archiveTeamSongs(activeLibraryId, songIds, archived);
+    await refreshActiveTeamSongs(true);
+    setSelectedLibrarySongIds([]);
+    toast.success(language === 'zh'
+      ? `已${archived ? '封存' : '取消封存'} ${result.changedCount} 首歌曲。`
+      : `${archived ? 'Archived' : 'Restored'} ${result.changedCount} song${result.changedCount === 1 ? '' : 's'}.`);
+  };
+
+  const permanentlyDeleteTeamSongs = async (songIds: string[]) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || !activeLibraryId || !isTeamWorkspace || !canEditTeamSongs) {
+      throw new Error(language === 'zh'
+        ? '你沒有管理這個團隊曲庫的權限。'
+        : 'You do not have permission to manage this team song library.');
+    }
+
+    await flushTeamSongDraftsBeforeMutation();
+    const result = await repository.deleteTeamSongs(activeLibraryId, songIds);
+    await refreshActiveTeamSongs(true);
+    setSelectedLibrarySongIds([]);
+    toast.success(language === 'zh'
+      ? `已永久刪除 ${result.deletedCount} 首歌曲。`
+      : `Permanently deleted ${result.deletedCount} song${result.deletedCount === 1 ? '' : 's'}.`);
+  };
+
+  const handleDeleteSong = async (songId: string) => {
     if (!canEditTeamSongs) {
       toast.error(language === 'zh' ? '你沒有刪除這個團隊歌曲的權限。' : 'You do not have permission to delete this team song.');
       return;
     }
     const targetSong = songs.find((item) => item.id === songId);
     if (!targetSong) {
+      return;
+    }
+
+    if (isTeamWorkspace) {
+      const isArchived = Boolean(targetSong.archivedAt);
+      const confirmed = window.confirm(isArchived
+        ? (language === 'zh'
+          ? `要永久刪除「${targetSong.title || copy.untitledSong}」嗎？\n\n只有沒有任何歌單或有效分享引用時才能刪除。`
+          : `Permanently delete "${targetSong.title || copy.untitledSong}"?\n\nDeletion is allowed only when no setlist or active share still references it.`)
+        : (language === 'zh'
+          ? `要封存「${targetSong.title || copy.untitledSong}」嗎？\n\n它會從曲庫與新增歌曲搜尋中隱藏，但既有歌單仍可顯示。`
+          : `Archive "${targetSong.title || copy.untitledSong}"?\n\nIt will be hidden from library and add-song search, while existing setlists keep working.`));
+      if (!confirmed) return;
+
+      try {
+        if (isArchived) {
+          await permanentlyDeleteTeamSongs([songId]);
+        } else {
+          await updateTeamSongArchiveState([songId], true);
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+      }
       return;
     }
 
@@ -5968,12 +6940,44 @@ export default function App() {
     });
   };
 
-  const handleDeleteSelectedSongs = () => {
+  const handleArchiveSelectedSongs = async (archived: boolean) => {
+    if (selectedLibrarySongIds.length === 0) return;
+    const confirmed = window.confirm(language === 'zh'
+      ? `要${archived ? '封存' : '取消封存'}選取的 ${selectedLibrarySongIds.length} 首歌曲嗎？`
+      : `${archived ? 'Archive' : 'Restore'} ${selectedLibrarySongIds.length} selected song${selectedLibrarySongIds.length === 1 ? '' : 's'}?`);
+    if (!confirmed) return;
+    try {
+      await updateTeamSongArchiveState(selectedLibrarySongIds, archived);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+    }
+  };
+
+  const handleDeleteSelectedSongs = async () => {
     if (!canEditTeamSongs) {
       toast.error(language === 'zh' ? '你沒有刪除這些團隊歌曲的權限。' : 'You do not have permission to delete these team songs.');
       return;
     }
     if (selectedLibrarySongIds.length === 0) {
+      return;
+    }
+
+    if (isTeamWorkspace) {
+      const targets = songs.filter((item) => selectedLibrarySongIds.includes(item.id));
+      if (targets.some((item) => !item.archivedAt)) {
+        await handleArchiveSelectedSongs(true);
+        return;
+      }
+
+      const confirmedPermanentDelete = window.confirm(language === 'zh'
+        ? `要永久刪除選取的 ${targets.length} 首封存歌曲嗎？\n\n有任何歌單或有效分享引用時，資料庫會拒絕整批刪除。`
+        : `Permanently delete ${targets.length} selected archived song${targets.length === 1 ? '' : 's'}?\n\nThe database will reject the whole operation if a setlist or active share still references any song.`);
+      if (!confirmedPermanentDelete) return;
+      try {
+        await permanentlyDeleteTeamSongs(targets.map((item) => item.id));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+      }
       return;
     }
 
@@ -7009,7 +8013,7 @@ export default function App() {
     }
 
     autoSaveTimeoutRef.current = window.setTimeout(() => {
-      void persistWorkspace(songs, setlists).catch(() => {
+      void persistWorkspace(songs, setlists, projects).catch(() => {
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       });
       autoSaveTimeoutRef.current = null;
@@ -7021,7 +8025,7 @@ export default function App() {
         autoSaveTimeoutRef.current = null;
       }
     };
-  }, [isAutoSaveEnabled, setlists, songs, workspaceIsDirty]);
+  }, [isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty]);
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
@@ -7452,19 +8456,6 @@ export default function App() {
   const getPreviewIdentityForCurrentMode = React.useCallback(() => (
     isSetlistMode ? (selectedSetlistSong?.id ?? null) : (song?.id ?? null)
   ), [isSetlistMode, selectedSetlistSong?.id, song?.id]);
-
-  const commitPreviewEditSession = React.useCallback((session: PreviewEditSession | null = previewEditSession) => {
-    if (!session?.dirty) {
-      setPreviewEditSession(null);
-      return;
-    }
-    if (isSetlistMode && session.previewIdentity === selectedSetlistSong?.id) {
-      handleSetlistSongContentChange(session.draftSong);
-    } else if (!isSetlistMode && session.previewIdentity === song?.id) {
-      handleSongChange(session.draftSong);
-    }
-    setPreviewEditSession(null);
-  }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode, previewEditSession, selectedSetlistSong?.id, song?.id]);
 
   const clearPendingPreviewSectionAction = React.useCallback(() => {
     if (previewSectionActionTimerRef.current === null) return;
@@ -8344,17 +9335,27 @@ export default function App() {
           const slotIndex = requestedNotationMode === 'chords'
             ? resolvePreviewChordSlotIndex(editableBar, editableBeatCount, tappedSlotIndex)
             : 0;
+          const lowerBeatIndex = field === 'lower' && target?.slotIndex !== null && target?.slotIndex !== undefined
+            ? Math.max(0, Math.min(editableBeatCount - 1, target.slotIndex))
+            : null;
+          const lowerBeatUnit = lowerBeatIndex !== null
+            ? lowerBeatIndex * Math.max(1, parseTimeSignature(getEffectiveTimeSignature(editableBar.timeSignature, editableSong.timeSignature)).beatUnits)
+            : null;
           const rawChordIndex = requestedNotationMode === 'chords'
             ? getChordBeatSlots(editableBar, editableBeatCount)[slotIndex]?.rawChordIndex ?? null
             : null;
           const cursor: PreviewNotationCursor = requestedNotationMode === 'rhythm'
             ? target?.cursor?.kind === 'rhythm'
               ? target.cursor
-              : { kind: 'rhythm', ...getDefaultRhythmCursor(editableSong, { sectionId: actualSection.id, barId: editableBar.id }) }
+              : lowerBeatUnit !== null
+                ? { kind: 'rhythm', cursorUnit: lowerBeatUnit }
+                : { kind: 'rhythm', ...getDefaultRhythmCursor(editableSong, { sectionId: actualSection.id, barId: editableBar.id }) }
             : requestedNotationMode === 'jianpu'
               ? target?.cursor?.kind === 'jianpu'
                 ? target.cursor
-                : {
+                : lowerBeatIndex !== null
+                  ? { kind: 'jianpu', beatIndex: lowerBeatIndex, unitIndex: 0, noteIndex: null }
+                  : {
                     kind: 'jianpu',
                     ...getDefaultJianpuCursor(editableSong, { sectionId: actualSection.id, barId: editableBar.id })
                   }
@@ -9458,9 +10459,18 @@ export default function App() {
 
   const ensureShareResourceIsSynced = async (resourceType: 'song' | 'setlist' | 'project', projectIdForShare?: string) => {
     const repository = cloudRepositoryRef.current;
+    const requestLibraryId = activeLibraryIdRef.current;
     if (!repository) {
       throw new Error(copy.authUnavailable);
     }
+    const assertRequestIsCurrent = () => {
+      if (cloudRepositoryRef.current !== repository
+          || activeLibraryIdRef.current !== requestLibraryId) {
+        throw new Error(language === 'zh'
+          ? '曲庫已切換，已取消分享操作。'
+          : 'The active library changed, so sharing was cancelled.');
+      }
+    };
 
     if (!navigator.onLine) {
       throw new Error(language === 'zh' ? '目前離線，無法建立分享連結。' : 'You are offline. Share links cannot be created right now.');
@@ -9474,6 +10484,7 @@ export default function App() {
       }
 
       await repository.saveSong(song);
+      assertRequestIsCurrent();
       setSavedSongs((current) => {
         const nextSong = cloneSong(song);
         return current.some((item) => item.id === song.id)
@@ -9497,8 +10508,11 @@ export default function App() {
         .filter((item): item is StoredSong => Boolean(item));
 
       await repository.saveProject(project);
+      assertRequestIsCurrent();
       await Promise.all(requiredSongs.map((requiredSong) => repository.saveSong(requiredSong)));
+      assertRequestIsCurrent();
       await Promise.all(projectSetlists.map((sl) => repository.saveSetlist(sl)));
+      assertRequestIsCurrent();
 
       setSavedSongs((current) => {
         const syncedById = new Map(requiredSongs.map((item) => [item.id, cloneSong(item)] as const));
@@ -9546,9 +10560,11 @@ export default function App() {
 
     for (const requiredSong of requiredSongs) {
       await repository.saveSong(requiredSong);
+      assertRequestIsCurrent();
     }
 
     await repository.saveSetlist(selectedSetlist);
+    assertRequestIsCurrent();
     setSavedSongs((current) => {
       const syncedById = new Map(requiredSongs.map((item) => [item.id, cloneSong(item)] as const));
       const merged = current.map((item) => syncedById.get(item.id) ?? item);
@@ -9573,25 +10589,30 @@ export default function App() {
       // spam create-share-link or race the clipboard write.
       return;
     }
-    if (!cloudRepositoryRef.current) {
+    const repository = cloudRepositoryRef.current;
+    const requestLibraryId = activeLibraryIdRef.current;
+    if (!repository) {
       toast.error(copy.authUnavailable);
       return;
     }
     const ownedProject = projects.find((item) => item.id === projectId) ?? null;
     const joinedProject = joinedProjects.find((item) => item.id === projectId) ?? null;
     if (!ownedProject && !joinedProject) return;
-    const canShareTargetProject = ownedProject ? canShareProject : joinedProject?.role === 'manager';
+    const canShareTargetProject = ownedProject ? canShareProject(ownedProject) : joinedProject?.role === 'manager';
     if (!canShareTargetProject) {
       toast.error(language === 'zh' ? '你沒有分享這個專案的權限。' : 'You do not have permission to share this project.');
       return;
     }
 
+    const releaseCloudMutation = beginCloudMutation();
     setCreatingProjectShareLinkId(projectId);
     try {
       if (ownedProject) {
         await ensureShareResourceIsSynced('project', projectId);
       }
-      const token = await cloudRepositoryRef.current.createShareLink('project', projectId);
+      if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
+      const token = await repository.createShareLink('project', projectId);
+      if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
       setPendingShareUrl(buildShareUrl(token));
       setShareDialogContext({ resourceType: 'project', resourceId: projectId });
       void refreshShareContacts();
@@ -9608,11 +10629,14 @@ export default function App() {
       toast.error(copy.shareFailedWithReason.replace('{reason}', localizedReason));
     } finally {
       setCreatingProjectShareLinkId(null);
+      releaseCloudMutation();
     }
   };
 
   const handleCreateShareLink = async (resourceType: 'song' | 'setlist') => {
-    if (!cloudRepositoryRef.current) {
+    const repository = cloudRepositoryRef.current;
+    const requestLibraryId = activeLibraryIdRef.current;
+    if (!repository) {
       toast.error(copy.authUnavailable);
       return;
     }
@@ -9627,14 +10651,17 @@ export default function App() {
       return;
     }
 
+    const releaseCloudMutation = beginCloudMutation();
     try {
       await ensureShareResourceIsSynced(resourceType);
+      if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
 
       if (resourceType === 'setlist') {
         // Reuse the existing active token when there is one so reopening the
         // dialog doesn't mint duplicate links.
-        const token = selectedSetlistShareStatus?.activeToken
-          ?? await cloudRepositoryRef.current.createShareLink(resourceType, resourceId);
+        const token = activeSetlistShareStatus?.activeToken
+          ?? await repository.createShareLink(resourceType, resourceId);
+        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
         setPendingShareUrl(buildShareUrl(token));
         setShareDialogContext({ resourceType: 'setlist', resourceId });
         void refreshShareContacts();
@@ -9642,7 +10669,8 @@ export default function App() {
         return;
       }
 
-      const token = await cloudRepositoryRef.current.createShareLink(resourceType, resourceId);
+      const token = await repository.createShareLink(resourceType, resourceId);
+      if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
       const shareUrl = buildShareUrl(token);
       setPendingShareUrl(shareUrl);
       setShareDialogContext(null);
@@ -9659,11 +10687,14 @@ export default function App() {
         : reason;
 
       toast.error(copy.shareFailedWithReason.replace('{reason}', localizedReason));
+    } finally {
+      releaseCloudMutation();
     }
 	  };
 
   const handleShareSelectedSongs = async () => {
     const repository = cloudRepositoryRef.current;
+    const requestLibraryId = activeLibraryIdRef.current;
     if (!repository || selectedLibrarySongIds.length === 0 || isCreatingSongShare) return;
     if (isTeamWorkspace && !canEditTeamSongs) {
       toast.error(language === 'zh' ? '你沒有分享團隊歌曲的權限。' : 'You do not have permission to share team songs.');
@@ -9678,10 +10709,12 @@ export default function App() {
     const orderedSongs = filteredSongs.filter((item) => selectedIds.has(item.id));
     if (orderedSongs.length === 0) return;
 
+    const releaseCloudMutation = beginCloudMutation();
     try {
       setIsCreatingSongShare(true);
       setSyncStatus('syncing');
       await Promise.all(orderedSongs.map((item) => repository.saveSong(item)));
+      if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
       setSavedSongs((current) => {
         const synced = new Map(orderedSongs.map((item) => [item.id, cloneSong(item)] as const));
         const merged = current.map((item) => synced.get(item.id) ?? item);
@@ -9694,6 +10727,7 @@ export default function App() {
       const token = orderedSongs.length === 1
         ? await repository.createShareLink('song', orderedSongs[0].id)
         : await repository.createSongBundleShare(orderedSongs.map((item) => item.id));
+      if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
       setPendingShareUrl(buildShareUrl(token));
       setShareDialogContext(null);
       setSyncStatus('saved');
@@ -9705,13 +10739,14 @@ export default function App() {
       toast.error(copy.shareFailedWithReason.replace('{reason}', reason));
     } finally {
       setIsCreatingSongShare(false);
+      releaseCloudMutation();
     }
   };
 
   const handleCopyActiveSetlistShareLink = async () => {
-    if (!selectedSetlistShareStatus?.activeToken) return;
+    if (!selectedSetlist || activeSetlistShareStatus?.resourceId !== selectedSetlist.id || !activeSetlistShareStatus.activeToken) return;
 
-    const shareUrl = buildShareUrl(selectedSetlistShareStatus.activeToken);
+    const shareUrl = buildShareUrl(activeSetlistShareStatus.activeToken);
     const didCopy = await copyShareUrlToClipboard(shareUrl);
     if (didCopy) {
       toast.success(copy.shareCopied);
@@ -9728,12 +10763,16 @@ export default function App() {
     try {
       setIsRevokingSetlistShare(true);
       await repository.revokeSetlistSharing(setlistId);
-      setSelectedSetlistShareStatus({
-        activeToken: null,
-        activeCreatedAt: null,
-        participantCount: 0,
-        participants: []
-      });
+      if (selectedSetlistForShareRef.current === setlistId) {
+        setlistShareStatusGenerationRef.current += 1;
+        setSelectedSetlistShareStatus({
+          resourceId: setlistId,
+          activeToken: null,
+          activeCreatedAt: null,
+          participantCount: 0,
+          participants: []
+        });
+      }
       setPendingRevokeShareSetlistId(null);
       toast.success(copy.setlistSharingCancelled);
     } catch (error) {
@@ -9747,13 +10786,23 @@ export default function App() {
   };
 
   const handleImportLocalWorkspaceToCloud = async () => {
-    if (!authenticatedUser || !cloudRepositoryRef.current) {
+    const repository = cloudRepositoryRef.current;
+    const requestLibraryId = activeLibraryIdRef.current;
+    if (!authenticatedUser || !repository) {
+      return;
+    }
+    if (isTeamWorkspace) {
+      setIsImportPromptOpen(false);
+      toast.error(language === 'zh'
+        ? '本機工作區只能匯入個人區；團隊歌曲請使用「從個人區匯入」。'
+        : 'A local workspace can only be imported into your personal library. Use Import from personal for team songs.');
       return;
     }
 
+    const releaseCloudMutation = beginCloudMutation();
     try {
       setIsImportingLocalWorkspace(true);
-      const nextWorkspace = await cloudRepositoryRef.current.importLocalWorkspace({
+      const nextWorkspace = await repository.importLocalWorkspace({
         songs,
         setlists,
         joinedSetlists: [],
@@ -9761,6 +10810,7 @@ export default function App() {
         joinedProjects: [],
         lastSavedAt
       });
+      if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
       setSongs(nextWorkspace.songs);
       setSavedSongs(cloneSong(nextWorkspace.songs));
       setSetlists(nextWorkspace.setlists);
@@ -9778,6 +10828,7 @@ export default function App() {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
     } finally {
       setIsImportingLocalWorkspace(false);
+      releaseCloudMutation();
     }
   };
 
@@ -10038,8 +11089,8 @@ export default function App() {
   // Mirror the project panel: only surface once the setlist is actually shared
   // (active link) or someone has joined. Starting a share still works from the
   // "…" menu, which reloads the status and brings this panel back.
-  const hasSetlistShareActivity = Boolean(selectedSetlistShareStatus?.activeToken)
-    || (selectedSetlistShareStatus?.participantCount ?? 0) > 0;
+  const hasSetlistShareActivity = Boolean(activeSetlistShareStatus?.activeToken)
+    || (activeSetlistShareStatus?.participantCount ?? 0) > 0;
   const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist && hasSetlistShareActivity ? (
     <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
@@ -10047,18 +11098,18 @@ export default function App() {
           <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400 sm:text-xs">{copy.setlistSharingTitle}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-              selectedSetlistShareStatus?.activeToken
+              activeSetlistShareStatus?.activeToken
                 ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
                 : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
             }`}>
               {isLoadingSetlistShareStatus
                 ? copy.cloudSyncSyncing
-                : selectedSetlistShareStatus?.activeToken
+                : activeSetlistShareStatus?.activeToken
                   ? copy.setlistSharingActive
                   : copy.setlistSharingInactive}
             </span>
             <span className="text-xs font-semibold text-gray-500">
-              {copy.setlistSharingParticipants}: {selectedSetlistShareStatus?.participantCount ?? 0}
+              {copy.setlistSharingParticipants}: {activeSetlistShareStatus?.participantCount ?? 0}
             </span>
           </div>
         </div>
@@ -10079,7 +11130,7 @@ export default function App() {
 
       <div className="mt-3 border-t border-gray-100 pt-3">
         {renderShareParticipantList(
-          selectedSetlistShareStatus?.participants,
+          activeSetlistShareStatus?.participants,
           'max-h-48',
           undefined,
           selectedSetlist ? (participant) => { void handleRemoveSharedMember('setlist', selectedSetlist.id, participant); } : undefined
@@ -10093,12 +11144,12 @@ export default function App() {
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
           >
             <Share2 size={13} />
-            <span>{selectedSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
+            <span>{activeSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
           </button>
           <button
             type="button"
             onClick={() => setPendingRevokeShareSetlistId(selectedSetlist.id)}
-            disabled={!selectedSetlistShareStatus?.activeToken || isRevokingSetlistShare}
+            disabled={!activeSetlistShareStatus?.activeToken || isRevokingSetlistShare}
             className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {copy.setlistSharingCancel}
@@ -10113,9 +11164,9 @@ export default function App() {
   // the share button). Collapsible and closed by default. Only surfaces once the
   // project is actually shared (active link) or someone has joined — otherwise
   // it's just empty chrome taking up space.
-  const hasProjectShareActivity = Boolean(selectedProjectShareStatus?.activeToken)
-    || (selectedProjectShareStatus?.participantCount ?? 0) > 0;
-  const projectSharingPanel = isSetlistMode && selectedProject && !selectedJoinedProject && canShareProject && hasProjectShareActivity ? (
+  const hasProjectShareActivity = Boolean(activeProjectShareStatus?.activeToken)
+    || (activeProjectShareStatus?.participantCount ?? 0) > 0;
+  const projectSharingPanel = isSetlistMode && selectedProject && !selectedJoinedProject && canShareProject(selectedProject) && hasProjectShareActivity ? (
     <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
@@ -10124,18 +11175,18 @@ export default function App() {
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-              selectedProjectShareStatus?.activeToken
+              activeProjectShareStatus?.activeToken
                 ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
                 : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
             }`}>
               {isLoadingProjectShareStatus
                 ? copy.cloudSyncSyncing
-                : selectedProjectShareStatus?.activeToken
+                : activeProjectShareStatus?.activeToken
                   ? copy.setlistSharingActive
                   : copy.setlistSharingInactive}
             </span>
             <span className="text-xs font-semibold text-gray-500">
-              {copy.setlistSharingParticipants}: {selectedProjectShareStatus?.participantCount ?? 0}
+              {copy.setlistSharingParticipants}: {activeProjectShareStatus?.participantCount ?? 0}
             </span>
           </div>
         </div>
@@ -10156,7 +11207,7 @@ export default function App() {
 
       <div className="mt-3 border-t border-gray-100 pt-3">
         {renderShareParticipantList(
-          selectedProjectShareStatus?.participants,
+          activeProjectShareStatus?.participants,
           'max-h-48',
           selectedProject ? (participant) => { void handleToggleProjectMemberRole(selectedProject.id, participant); } : undefined,
           selectedProject ? (participant) => { void handleRemoveSharedMember('project', selectedProject.id, participant); } : undefined
@@ -10338,7 +11389,7 @@ export default function App() {
                         void handleSwitchCloudLibrary(library.id);
                       }
                     }}
-                    disabled={isPlaceholder || isSwitchingLibrary || isActive}
+                    disabled={isPlaceholder || isSwitchingLibrary || activeCloudMutationCount > 0 || isActive}
                     className={`inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors disabled:cursor-default ${
                       isActive
                         ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
@@ -10558,7 +11609,7 @@ export default function App() {
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
-                handleDeleteProject(project.id);
+                void handleDeleteProject(project.id);
               }}
               className="flex w-20 items-center justify-center rounded-r-2xl bg-rose-500 px-3 text-sm font-bold text-white"
               aria-label={`${copy.delete} ${name}`}
@@ -10920,20 +11971,22 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                <div className="absolute inset-y-0 right-0 flex items-stretch">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleDeleteSetlist(item.id);
-                    }}
-                    className="flex w-20 items-center justify-center rounded-r-2xl bg-rose-500 px-3 text-sm font-bold text-white"
-                    aria-label={`${copy.delete} ${item.name || copy.untitledSetlist}`}
-                    title={copy.delete}
-                  >
-                    {copy.delete}
-                  </button>
-                </div>
+                {canManage && (
+                  <div className="absolute inset-y-0 right-0 flex items-stretch">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDeleteSetlist(item.id);
+                      }}
+                      className="flex w-20 items-center justify-center rounded-r-2xl bg-rose-500 px-3 text-sm font-bold text-white"
+                      aria-label={`${copy.delete} ${item.name || copy.untitledSetlist}`}
+                      title={copy.delete}
+                    >
+                      {copy.delete}
+                    </button>
+                  </div>
+                )}
                 <div
                   onTouchStart={(event) => {
                     handleMobileSetlistTouchStart(item.id, event);
@@ -10977,14 +12030,14 @@ export default function App() {
                         return;
                       }
                       if (isMultiSelectMode) {
-                        toggleMultiSelect(item.id);
+                        if (canManage) toggleMultiSelect(item.id);
                         return;
                       }
                       handleSelectSetlist(item.id);
                     }}
                     className="flex min-w-0 flex-1 items-start gap-2 text-left"
                   >
-                    {isMultiSelectMode && (
+                    {isMultiSelectMode && canManage && (
                       <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
                         multiSelectedSetlistIds.includes(item.id)
                           ? 'border-indigo-500 bg-indigo-500'
@@ -11226,6 +12279,16 @@ export default function App() {
                     <Copy size={15} />
                     {copy.copySetlistToProject}
                   </button>
+                  {canManageSelectedSetlistAssignments ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenSetlistAssignments(selectedSetlist.id)}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+                    >
+                      <Users size={15} />
+                      {language === 'zh' ? '指派歌單協作者' : 'Assign collaborators'}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => handleSetSetlistArchived(selectedSetlist.id, !selectedSetlist.archived)}
@@ -11311,8 +12374,13 @@ export default function App() {
                           </button>
                         )}
                         <button type="button" onClick={() => handleSelectSetlistSong(item.id)} className="min-w-0 flex-1 text-left">
-                          <div className="flex min-w-0 items-center gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <div className="min-w-0 truncate text-sm font-bold text-gray-900">{displaySong.title || sourceSong.title || copy.untitledSong}</div>
+                            {sourceSong.archivedAt || item.sourceArchivedAt ? (
+                              <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700">
+                                {language === 'zh' ? '已封存' : 'Archived'}
+                              </span>
+                            ) : null}
                             {isActive && (
                               <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-bold text-indigo-700">
                                 {language === 'zh' ? '目前顯示' : 'Current'}
@@ -11560,6 +12628,8 @@ export default function App() {
   return (
     <div
       data-app-root
+      inert={isSwitchingLibrary ? true : undefined}
+      aria-busy={isSwitchingLibrary}
       className="relative flex h-[100dvh] min-h-[100dvh] min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900 dark:bg-[color:var(--color-surface-muted)] dark:text-[color:var(--color-text)] dark:selection:bg-[color:var(--color-indigo-800)] dark:selection:text-[color:var(--color-indigo-100)]"
       style={{
         // Keep the app clear of the iOS status bar / notch (Capacitor). These are
@@ -11569,6 +12639,19 @@ export default function App() {
         paddingRight: 'env(safe-area-inset-right)'
       }}
     >
+      {isSwitchingLibrary && (
+        <div
+          className="absolute inset-0 z-[300] flex items-center justify-center bg-white/70 backdrop-blur-[2px] dark:bg-stone-950/65"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-bold text-stone-700 shadow-xl dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
+            <LoaderCircle size={18} className="animate-spin text-indigo-600" />
+            <span>{language === 'zh' ? '正在切換曲庫…' : 'Switching library…'}</span>
+          </div>
+        </div>
+      )}
+
       {usesOverlaySidebar && isSidebarExpanded && (
         <button
           type="button"
@@ -11966,16 +13049,18 @@ export default function App() {
                             className="w-full min-w-0 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
                           />
                         </label>
-                        <button
-                          type="button"
-                          onClick={handleExportSongLibraryJson}
-                          aria-label={copy.exportJson}
-                          title={copy.exportJson}
-                          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-                        >
-                          <Download size={15} />
-                        </button>
-                        {canEditTeamSongs && (
+                        {(!isTeamWorkspace || canEditTeamSongs) ? (
+                          <button
+                            type="button"
+                            onClick={handleExportSongLibraryJson}
+                            aria-label={copy.exportJson}
+                            title={copy.exportJson}
+                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                          >
+                            <Download size={15} />
+                          </button>
+                        ) : null}
+                        {canEditTeamSongs && !isTeamWorkspace && (
                           <button
                             type="button"
                             onClick={handleImportSongLibraryClick}
@@ -11989,7 +13074,7 @@ export default function App() {
                         {isTeamWorkspace && canEditTeamSongs && personalCloudLibrary && personalCloudLibrary.id !== activeLibraryId ? (
                           <button
                             type="button"
-                            onClick={() => void handleImportPersonalSongsToTeam()}
+                            onClick={() => void handleOpenTeamSongImport()}
                             disabled={isImportingPersonalSongs}
                             aria-label={language === 'zh' ? '從個人區批量匯入' : 'Import personal songs'}
                             title={language === 'zh' ? '從個人區批量匯入' : 'Import personal songs'}
@@ -12040,23 +13125,55 @@ export default function App() {
                         {isCreatingSongShare ? <LoaderCircle size={16} className="animate-spin" /> : <Share2 size={16} />}
                         <span>{language === 'zh' ? `分享所選 (${selectedLibrarySongIds.length})` : `Share selected (${selectedLibrarySongIds.length})`}</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={handleDeleteSelectedSongs}
-                        disabled={selectedLibrarySongIds.length === 0}
-                        className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        <Trash2 size={16} />
-                        <span>{`${copy.deleteSelected} (${selectedLibrarySongIds.length})`}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleRemoveLibrarySongDuplicates}
-                        className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
-                      >
-                        <Copy size={16} />
-                        <span>{language === 'zh' ? '移除重複歌曲' : 'Remove duplicate songs'}</span>
-                      </button>
+                      {isTeamWorkspace ? (() => {
+                        const selectedSongs = songs.filter((item) => selectedLibrarySongIds.includes(item.id));
+                        const allArchived = selectedSongs.length > 0 && selectedSongs.every((item) => Boolean(item.archivedAt));
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void handleArchiveSelectedSongs(!allArchived)}
+                              disabled={selectedLibrarySongIds.length === 0}
+                              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {allArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+                              <span>{language === 'zh'
+                                ? `${allArchived ? '取消封存' : '封存所選'} (${selectedLibrarySongIds.length})`
+                                : `${allArchived ? 'Restore' : 'Archive selected'} (${selectedLibrarySongIds.length})`}</span>
+                            </button>
+                            {allArchived ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteSelectedSongs()}
+                                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                              >
+                                <Trash2 size={16} />
+                                <span>{language === 'zh' ? '永久刪除所選' : 'Permanently delete selected'}</span>
+                              </button>
+                            ) : null}
+                          </>
+                        );
+                      })() : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteSelectedSongs()}
+                            disabled={selectedLibrarySongIds.length === 0}
+                            className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 size={16} />
+                            <span>{`${copy.deleteSelected} (${selectedLibrarySongIds.length})`}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRemoveLibrarySongDuplicates}
+                            className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
+                          >
+                            <Copy size={16} />
+                            <span>{language === 'zh' ? '移除重複歌曲' : 'Remove duplicate songs'}</span>
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -12065,18 +13182,35 @@ export default function App() {
                 <div className="px-3 py-3 border-b border-gray-100">
                   <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
                     <span>{copy.songs}</span>
-                    <span>{normalizedLibrarySearchQuery ? `${filteredSongs.length}/${songs.length}` : songs.length}</span>
+                    <span>{normalizedLibrarySearchQuery ? `${filteredSongs.length}/${visibleLibrarySongs.length}` : visibleLibrarySongs.length}</span>
                   </div>
-                  <select
-                    value={librarySortMode}
-                    onChange={(event) => setLibrarySortMode(event.target.value as LibrarySortMode)}
-                    className="mt-2 h-8 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 outline-none transition-colors focus:border-indigo-300"
-                    aria-label={language === 'zh' ? '歌曲排序' : 'Sort songs'}
-                  >
-                    <option value="updated-desc">{language === 'zh' ? '最近更新' : 'Recently updated'}</option>
-                    <option value="created-desc">{language === 'zh' ? '最近添加' : 'Recently added'}</option>
-                    <option value="name-asc">{language === 'zh' ? '名稱 A→Z' : 'Name A→Z'}</option>
-                  </select>
+                  <div className="mt-2 flex gap-2">
+                    <select
+                      value={librarySortMode}
+                      onChange={(event) => setLibrarySortMode(event.target.value as LibrarySortMode)}
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 outline-none transition-colors focus:border-indigo-300"
+                      aria-label={language === 'zh' ? '歌曲排序' : 'Sort songs'}
+                    >
+                      <option value="updated-desc">{language === 'zh' ? '最近更新' : 'Recently updated'}</option>
+                      <option value="created-desc">{language === 'zh' ? '最近添加' : 'Recently added'}</option>
+                      <option value="name-asc">{language === 'zh' ? '名稱 A→Z' : 'Name A→Z'}</option>
+                    </select>
+                    {canEditTeamSongs && archivedSongCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowArchivedSongs((current) => !current)}
+                        className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-[10px] font-bold transition-colors ${
+                          showArchivedSongs
+                            ? 'border-amber-200 bg-amber-50 text-amber-700'
+                            : 'border-gray-200 bg-white text-gray-500 hover:border-amber-200 hover:text-amber-700'
+                        }`}
+                        aria-pressed={showArchivedSongs}
+                      >
+                        <Archive size={12} />
+                        <span>{language === 'zh' ? `封存 ${archivedSongCount}` : `Archived ${archivedSongCount}`}</span>
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
@@ -12141,6 +13275,11 @@ export default function App() {
                                   }`}
                                   placeholder={copy.untitledSong}
                                 />
+                                {isTeamWorkspace && item.archivedAt ? (
+                                  <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                                    {language === 'zh' ? '已封存' : 'Archived'}
+                                  </span>
+                                ) : null}
                                 <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
                                   {libraryMeta.primary}
                                 </div>
@@ -12190,8 +13329,15 @@ export default function App() {
                                 <FileText size={14} />
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className={`text-sm font-bold leading-snug whitespace-normal break-words ${isActive ? 'text-indigo-900' : 'text-gray-800'}`}>
-                                  {item.title || copy.untitledSong}
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <div className={`text-sm font-bold leading-snug whitespace-normal break-words ${isActive ? 'text-indigo-900' : 'text-gray-800'}`}>
+                                    {item.title || copy.untitledSong}
+                                  </div>
+                                  {item.archivedAt ? (
+                                    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700">
+                                      {language === 'zh' ? '已封存' : 'Archived'}
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
                                   {libraryMeta.primary}
@@ -12234,45 +13380,93 @@ export default function App() {
                                     <Download size={13} />
                                   </button>
                                 ) : null}
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleDuplicateSong(item.id);
-                                  }}
-                                  className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                                  aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                                  title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                                >
-                                  <Copy size={13} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleSelectSong(item.id);
-                                    setIsEditing(true);
-                                  }}
-                                  className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                                  aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
-                                  title={`${copy.edit} ${item.title || copy.untitledSong}`}
-                                >
-                                  <Edit3 size={13} />
-                                </button>
+                                {isTeamWorkspace ? (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleCopyTeamSongToPersonal(item.id);
+                                    }}
+                                    className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                                    aria-label={language === 'zh' ? `轉存 ${item.title || copy.untitledSong}` : `Copy ${item.title || copy.untitledSong} to personal library`}
+                                    title={language === 'zh' ? '轉存到個人區' : 'Copy to personal'}
+                                  >
+                                    <Download size={13} />
+                                  </button>
+                                ) : null}
+                                {isTeamWorkspace && item.archivedAt ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void updateTeamSongArchiveState([item.id], false).catch((error) => {
+                                          toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+                                        });
+                                      }}
+                                      className="rounded-md p-0.5 text-amber-600 transition-colors hover:bg-white hover:text-amber-700"
+                                      aria-label={language === 'zh' ? `取消封存 ${item.title || copy.untitledSong}` : `Restore ${item.title || copy.untitledSong}`}
+                                      title={language === 'zh' ? '取消封存' : 'Restore'}
+                                    >
+                                      <ArchiveRestore size={13} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void handleDeleteSong(item.id);
+                                      }}
+                                      className="rounded-md p-0.5 text-rose-500 transition-colors hover:bg-white hover:text-rose-700"
+                                      aria-label={language === 'zh' ? `永久刪除 ${item.title || copy.untitledSong}` : `Permanently delete ${item.title || copy.untitledSong}`}
+                                      title={language === 'zh' ? '永久刪除' : 'Permanently delete'}
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleDuplicateSong(item.id);
+                                      }}
+                                      className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                                      aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                                      title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
+                                    >
+                                      <Copy size={13} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleSelectSong(item.id);
+                                        setIsEditing(true);
+                                      }}
+                                      className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
+                                      aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
+                                      title={`${copy.edit} ${item.title || copy.untitledSong}`}
+                                    >
+                                      <Edit3 size={13} />
+                                    </button>
+                                    {isTeamWorkspace ? (
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          void handleDeleteSong(item.id);
+                                        }}
+                                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-amber-700"
+                                        aria-label={language === 'zh' ? `封存 ${item.title || copy.untitledSong}` : `Archive ${item.title || copy.untitledSong}`}
+                                        title={language === 'zh' ? '封存' : 'Archive'}
+                                      >
+                                        <Archive size={13} />
+                                      </button>
+                                    ) : null}
+                                  </>
+                                )}
                               </>
-                            ) : isTeamWorkspace ? (
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleCopyTeamSongToPersonal(item.id);
-                                }}
-                                className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                                aria-label={language === 'zh' ? `轉存 ${item.title || copy.untitledSong}` : `Copy ${item.title || copy.untitledSong} to personal library`}
-                                title={language === 'zh' ? '轉存到個人區' : 'Copy to personal'}
-                              >
-                                <Copy size={13} />
-                              </button>
                             ) : null}
                           </div>
                         )}
@@ -12325,6 +13519,26 @@ export default function App() {
             </p>
           </div>
         )}
+
+        {teamLibraryUpdatePending ? (
+          <div className="flex flex-shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 sm:px-6">
+            <RefreshCw size={15} className="shrink-0" />
+            <p className="min-w-0 flex-1 text-xs font-semibold sm:text-sm">
+              {language === 'zh'
+                ? '團隊曲庫有新版本。先儲存目前的歌曲修改，再載入更新。'
+                : 'The team library has an update. Save the current song changes before loading it.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleApplyPendingTeamLibraryUpdate()}
+              disabled={isRefreshingTeamLibrary}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-amber-600 disabled:cursor-wait disabled:opacity-60"
+            >
+              {isRefreshingTeamLibrary ? <LoaderCircle size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              <span>{language === 'zh' ? '儲存並載入' : 'Save & load'}</span>
+            </button>
+          </div>
+        ) : null}
 
         {/* Top Control Bar */}
         <header data-topbar className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]/85 ${
@@ -12389,7 +13603,8 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleToggleEditor}
-                    className={`${getMobileTopbarActionClassName(isEditing ? 'primary' : 'default')} shrink-0`}
+                    disabled={!canOpenEditor}
+                    className={`${getMobileTopbarActionClassName(isEditing ? 'primary' : 'default')} shrink-0 disabled:cursor-default disabled:opacity-40`}
                     title={isEditing ? copy.closeEditor : copy.openEditor}
                     aria-label={isEditing ? copy.closeEditor : copy.openEditor}
                   >
@@ -12427,7 +13642,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && !canEditSelectedSetlistKey}
+                    disabled={!canChangeCurrentKey}
                     buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -12444,6 +13659,7 @@ export default function App() {
                       }
                     }}
                     label="Capo"
+                    disabled={!canChangeCurrentCapo}
                     triggerDensity="compact"
                     buttonClassName="h-10 min-w-[58px] shrink-0 rounded-xl px-2.5"
                     showPlayKey={false}
@@ -12457,6 +13673,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        disabled={!canEditTeamSongs}
                         className={`${mobileTopbarToggleChipClassName(song.showNashvilleNumbers)} shrink-0`}
                         title={copy.nashvilleModeLabel}
                         aria-label={copy.nashvilleModeLabel}
@@ -12467,6 +13684,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                        disabled={!canEditTeamSongs}
                         className={`${mobileTopbarToggleChipClassName(song.showAbsoluteJianpu)} shrink-0`}
                         title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
                         aria-label={copy.fixedDoModeLabel}
@@ -12512,9 +13730,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleToggleEditor}
+                    disabled={!canOpenEditor}
                     title={isEditing ? copy.closeEditor : copy.openEditor}
                     aria-label={isEditing ? copy.closeEditor : copy.openEditor}
-                    className={isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName}
+                    className={`${isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
                   >
                     <Edit3 size={14} />
                     {denseToolbarShowsLabels ? <span>{compactEditorToggleLabel}</span> : null}
@@ -12566,7 +13785,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && !canEditSelectedSetlistKey}
+                    disabled={!canChangeCurrentKey}
                     buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[60px]' : 'min-w-[56px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100`}
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -12583,6 +13802,7 @@ export default function App() {
                       }
                     }}
                     label="Capo"
+                    disabled={!canChangeCurrentCapo}
                     triggerDensity="compact"
                     buttonClassName={`${denseToolbarShowsLabels ? 'min-w-[70px]' : 'min-w-[58px]'} h-9 shrink-0 whitespace-nowrap rounded-lg px-2.5`}
                     showPlayKey={denseToolbarShowsLabels && mainViewportWidth >= 1820}
@@ -12596,6 +13816,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        disabled={!canEditTeamSongs}
                         title={copy.nashvilleModeLabel}
                         aria-label={copy.nashvilleModeLabel}
                         className={denseToolbarToggleClassName(song.showNashvilleNumbers)}
@@ -12613,6 +13834,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                        disabled={!canEditTeamSongs}
                         title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
                         aria-label={copy.fixedDoModeLabel}
                         className={denseToolbarToggleClassName(song.showAbsoluteJianpu)}
@@ -12774,9 +13996,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleToggleEditor}
+                    disabled={!canOpenEditor}
                     title={isEditing ? copy.closeEditor : copy.openEditor}
                     aria-label={isEditing ? copy.closeEditor : copy.openEditor}
-                    className={isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName}
+                    className={`${isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
                   >
                     <Edit3 size={14} />
                   </button>
@@ -12822,7 +14045,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     triggerDensity="compact"
-                    disabled={isSetlistMode && !canEditSelectedSetlistKey}
+                    disabled={!canChangeCurrentKey}
                     buttonClassName="h-9 min-w-[60px] shrink-0 rounded-lg px-2.5 disabled:!cursor-default disabled:!opacity-100"
                     metaTextClassName="hidden"
                     triggerIconSize={14}
@@ -12839,6 +14062,7 @@ export default function App() {
                       }
                     }}
                     label="Capo"
+                    disabled={!canChangeCurrentCapo}
                     triggerDensity="compact"
                     buttonClassName="h-9 min-w-[62px] shrink-0 rounded-lg px-2.5"
                     showPlayKey={mainViewportWidth >= 1080}
@@ -12852,6 +14076,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        disabled={!canEditTeamSongs}
                         title={copy.nashvilleModeLabel}
                         aria-label={copy.nashvilleModeLabel}
                         className={denseToolbarToggleClassName(song.showNashvilleNumbers)}
@@ -12862,6 +14087,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                        disabled={!canEditTeamSongs}
                         title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
                         aria-label={copy.fixedDoModeLabel}
                         className={denseToolbarToggleClassName(song.showAbsoluteJianpu)}
@@ -13134,7 +14360,8 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleToggleEditor}
-                      className={isEditing ? toolbarPrimaryEmphasisActionClassName : toolbarPrimaryActionClassName}
+                      disabled={!canOpenEditor}
+                      className={`${isEditing ? toolbarPrimaryEmphasisActionClassName : toolbarPrimaryActionClassName} disabled:cursor-default disabled:opacity-40`}
                     >
                       <Edit3 size={16} />
                       <span>{isEditing ? copy.closeEditor : copy.openEditor}</span>
@@ -13170,7 +14397,7 @@ export default function App() {
                     originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                     triggerMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
                     panelMetaText={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? '' : getKeyOptionMeta(song.currentKey)}
-                    disabled={isSetlistMode && !canEditSelectedSetlistKey}
+                    disabled={!canChangeCurrentKey}
                     buttonClassName="h-11 w-full min-w-0 disabled:!cursor-default disabled:!opacity-100"
                   />
 
@@ -13185,6 +14412,7 @@ export default function App() {
                       }
                       }}
                       label="Capo"
+                      disabled={!canChangeCurrentCapo}
                       buttonClassName="h-11 w-full min-w-0"
                     />
 
@@ -13254,6 +14482,7 @@ export default function App() {
                                   handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers });
                                   setIsToolbarOverflowMenuOpen(false);
                                 }}
+                                disabled={!canEditTeamSongs}
                                 className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
                                   song.showNashvilleNumbers
                                     ? 'bg-indigo-50 text-indigo-700'
@@ -13274,6 +14503,7 @@ export default function App() {
                                   handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu });
                                   setIsToolbarOverflowMenuOpen(false);
                                 }}
+                                disabled={!canEditTeamSongs}
                                 className={`mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
                                   song.showAbsoluteJianpu
                                     ? 'bg-indigo-50 text-indigo-700'
@@ -13296,6 +14526,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                            disabled={!canEditTeamSongs}
                             className={toolbarSecondaryToggleClassName(song.showNashvilleNumbers)}
                           >
                             <Hash size={14} />
@@ -13305,6 +14536,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                            disabled={!canEditTeamSongs}
                             title={song.showAbsoluteJianpu ? copy.showRelativeJianpu : copy.showAbsoluteJianpu}
                             className={toolbarSecondaryToggleClassName(song.showAbsoluteJianpu)}
                           >
@@ -13916,6 +15148,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                              disabled={!canEditTeamSongs}
                               className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
                                 song.showNashvilleNumbers
                                   ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
@@ -13929,6 +15162,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => handleSongChange({ ...song, showAbsoluteJianpu: !song.showAbsoluteJianpu })}
+                              disabled={!canEditTeamSongs}
                               className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
                                 song.showAbsoluteJianpu
                                   ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
@@ -14175,7 +15409,13 @@ export default function App() {
                 >
                   <option value="">{copy.ungroupedProject}</option>
                   {activeProjects.map((project) => (
-                    <option key={project.id} value={project.id}>{project.name}</option>
+                    <option
+                      key={project.id}
+                      value={project.id}
+                      disabled={!canManageProject(project)}
+                    >
+                      {project.name}{!canManageProject(project) ? (language === 'zh' ? '（唯讀）' : ' (Read-only)') : ''}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -14190,7 +15430,7 @@ export default function App() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!newSetlistName.trim()}
+                  disabled={!canCreateTeamSetlists || !newSetlistName.trim() || !canManageProjectById(newSetlistProjectId || null)}
                   className="h-11 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300"
                 >
                   {language === 'zh' ? '建立歌單' : 'Create setlist'}
@@ -14499,7 +15739,8 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => handleProjectPickerSelect(null)}
-                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50"
+                  disabled={!canUseProjectPickerTarget(null)}
+                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-50"
                 >
                   <div className="text-sm font-bold text-gray-900">{copy.ungroupedProject}</div>
                   <div className="text-xs text-gray-500">{ungroupedSetlistCount} {copy.setlists}</div>
@@ -14509,7 +15750,8 @@ export default function App() {
                     key={project.id}
                     type="button"
                     onClick={() => handleProjectPickerSelect(project.id)}
-                    className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50"
+                    disabled={!canUseProjectPickerTarget(project.id)}
+                    className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-50"
                   >
                     <div className="min-w-0 truncate text-sm font-bold text-gray-900">{project.name}</div>
                     <div className="shrink-0 text-xs text-gray-500">{projectSetlistCount(project.id)} {copy.setlists}</div>
@@ -14712,6 +15954,28 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <TeamSongImportDialog
+        open={isTeamSongImportOpen}
+        language={language}
+        personalSongs={personalImportSongs}
+        loadingSongs={isLoadingPersonalImportSongs}
+        onClose={() => setIsTeamSongImportOpen(false)}
+        inspectSongs={handleInspectTeamSongImport}
+        importSongs={handleRunTeamSongImport}
+      />
+
+      <SetlistAssignmentDialog
+        open={Boolean(setlistAssignmentTargetId)}
+        language={language}
+        setlistName={setlists.find((item) => item.id === setlistAssignmentTargetId)?.name || copy.untitledSetlist}
+        snapshot={setlistAssignmentSnapshot}
+        loading={isLoadingSetlistAssignments}
+        updatingUserId={updatingSetlistAssignmentUserId}
+        onClose={closeSetlistEditorAssignments}
+        onRefresh={() => { void loadSetlistEditorAssignments(); }}
+        onToggle={(userId, enabled) => { void handleToggleSetlistAssignment(userId, enabled); }}
+      />
 
       {activeReferenceKind && activeReferenceSong && (
         <ReferencePlayer
