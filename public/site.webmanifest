@@ -1,11 +1,25 @@
 {
   "name": "ChordMaster | 智能和弦與簡譜編輯器",
   "short_name": "ChordMaster",
+  "description": "智能和弦與簡譜編輯器，支援敬拜歌譜整理、預覽與演出使用。",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "orientation": "any",
+  "lang": "zh-Hant-TW",
+  "dir": "ltr",
+  "categories": ["music", "productivity", "utilities"],
+  "theme_color": "#0D1F17",
+  "background_color": "#0D1F17",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "./icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "./icons/icon-512.png",
@@ -13,8 +27,5 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ],
-  "theme_color": "#0D1F17",
-  "background_color": "#0D1F17",
-  "display": "standalone"
+  ]
 }
