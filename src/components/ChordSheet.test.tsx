@@ -360,6 +360,36 @@ describe('ChordSheet preview input caret', () => {
     expect(pages[1].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(1);
   });
 
+  it('moves a continuing section start off the last row of a page', () => {
+    const leadInBars = Array.from({ length: 36 }, (_, index) => ({
+      id: `lead-${index + 1}`,
+      chords: ['C']
+    }));
+    const continuingSectionBars = Array.from({ length: 8 }, (_, index) => ({
+      id: `bridge-${index + 1}`,
+      chords: ['F']
+    }));
+    const sectionBreakSong: Song = {
+      ...song,
+      barRowCount: 2,
+      sections: [
+        { id: 'section-1', title: 'Verse', bars: leadInBars },
+        { id: 'section-2', title: 'Bridge', bars: continuingSectionBars }
+      ]
+    };
+    const { container } = render(
+      <ChordSheet song={sectionBreakSong} language="zh" currentKey="C" previewIdentity="song-1" />
+    );
+
+    const pages = container.querySelectorAll('[data-print-page]');
+    expect(pages).toHaveLength(2);
+    expect(pages[0].querySelectorAll('[data-preview-section-id="section-1"] [data-rhythm-measure-row]')).toHaveLength(9);
+    expect(pages[0].querySelectorAll('[data-preview-closed-page-row]')).toHaveLength(1);
+    expect(pages[0].querySelectorAll('[data-preview-closed-measure]')).toHaveLength(4);
+    expect(pages[0].querySelector('[data-preview-section-id="section-2"]')).toBeNull();
+    expect(pages[1].querySelectorAll('[data-preview-section-id="section-2"] [data-rhythm-measure-row]')).toHaveLength(2);
+  });
+
   it('uses one-line bar height for chord-only rows without reserving an empty lower lane', () => {
     const bars = Array.from({ length: 76 }, (_, index) => ({
       id: `bar-${index + 1}`,

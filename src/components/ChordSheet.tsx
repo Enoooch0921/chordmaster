@@ -1681,12 +1681,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const previewSectionIndexSet = new Set(previewSectionIndexes);
   const lastSectionIndex = previewSectionIndexes.at(-1) ?? song.sections.length - 1;
   type PreviewSheetRow = {
-    kind: 'music' | 'add-choice';
+    kind: 'music' | 'add-choice' | 'closed-filler';
     sectionTitle: string | null;
     bars: Bar[];
     sIdx: number;
     startBIdx: number;
     addSectionAfter?: boolean;
+    closedFillerId?: string;
     hasThreeNotationRows: boolean;
     hasLowerNotationRows: boolean;
     layoutWeight: number;
@@ -1783,8 +1784,37 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   let activePageWeight = 0;
   let activePageCapacity = ROWS_PER_PAGE_FIRST;
 
-  allRows.forEach((row) => {
+  allRows.forEach((row, rowIndex) => {
     const rowWeight = row.layoutWeight || 1;
+    const nextRow = allRows[rowIndex + 1];
+    const startsContinuingSection = row.kind === 'music'
+      && row.startBIdx === 0
+      && nextRow?.kind === 'music'
+      && nextRow.sIdx === row.sIdx;
+    const wouldOrphanSectionStart = startsContinuingSection
+      && activePageRows.length > 0
+      && activePageWeight + rowWeight + (nextRow.layoutWeight || 1) > activePageCapacity;
+    if (wouldOrphanSectionStart) {
+      const remainingPageWeight = activePageCapacity - activePageWeight;
+      if (remainingPageWeight > 0) {
+        const previousRow = activePageRows.at(-1);
+        activePageRows.push({
+          kind: 'closed-filler',
+          sectionTitle: null,
+          bars: [],
+          sIdx: previousRow?.sIdx ?? row.sIdx,
+          startBIdx: (previousRow?.startBIdx ?? 0) + 4,
+          closedFillerId: `closed-${row.sIdx}-${row.startBIdx}`,
+          hasThreeNotationRows: false,
+          hasLowerNotationRows: false,
+          layoutWeight: remainingPageWeight
+        });
+      }
+      pages.push(activePageRows);
+      activePageRows = [];
+      activePageWeight = 0;
+      activePageCapacity = ROWS_PER_PAGE_OTHER;
+    }
     if (activePageRows.length > 0 && activePageWeight + rowWeight > activePageCapacity) {
       pages.push(activePageRows);
       activePageRows = [];
@@ -1989,6 +2019,34 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
           >
             {pageRows.map((row, rIdx) => {
               const section = song.sections[row.sIdx];
+              if (row.kind === 'closed-filler') {
+                return (
+                  <motion.div
+                    key={row.closedFillerId || `closed-${pIdx}-${rIdx}`}
+                    data-preview-closed-page-row
+                    data-preview-layout-weight={row.layoutWeight}
+                    className="relative flex w-full min-h-0 flex-1 rounded-lg transition-all"
+                    style={{ flexGrow: row.layoutWeight || 1 }}
+                    layout={!suppressSectionTransitions}
+                    initial={false}
+                  >
+                    <div className="relative w-16 sm:w-20 shrink-0" />
+                    <div className="flex-1 grid min-h-0 grid-cols-4 w-full">
+                      {Array.from({ length: 4 }).map((_, bIdx) => (
+                        <div
+                          key={bIdx}
+                          data-preview-closed-measure
+                          className={`sheet-bar relative min-h-0 border-l border-gray-900 px-1 pt-1.5 pb-6 flex flex-col min-w-0 ${bIdx === 3 ? 'border-r border-r-gray-900 sheet-bar-right-edge border-r-2' : ''} ${bIdx === 0 ? 'border-l-2 sheet-bar-left-edge' : ''}`}
+                        >
+                          <div className="absolute inset-0 z-[1] flex items-center pointer-events-none">
+                            <div className="h-[2px] w-full bg-gray-400" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                );
+              }
               const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
               const previousWrittenKey = row.sIdx > 0 ? (sectionStartKeys[row.sIdx - 1] || song.originalKey) : song.originalKey;
               const sectionCurrentKey = transposeKeyWithPreference(sectionWrittenKey, globalKeyShift, displayedCurrentKey);
