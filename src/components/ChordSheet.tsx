@@ -2193,7 +2193,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                   style={pickupRhythmHighlightStyle}
                                 />
                               )}
-                              <div className="relative z-10 w-full translate-y-[2px]">
+                              <div className="relative z-10 w-full">
                                 <RhythmNotation notation={pickup?.rhythm || ''} timeSignature={song.timeSignature} compact />
                               </div>
                             </div>
@@ -2681,7 +2681,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'rhythm')}
                                         >
                                           {activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded bg-indigo-100/45 ring-2 ring-inset ring-indigo-500/70" />}
-                                          <div className="w-full max-w-full overflow-visible translate-y-[3px]">
+                                          <div className="w-full max-w-full overflow-visible">
 	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
                                           </div>
                                         </div>
@@ -2944,7 +2944,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         >
                                           {activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
                                           {activeRhythmCursor && renderActiveNotationCursor()}
-                                          <div className="w-full translate-y-[3px]">
+                                          <div className="w-full">
 	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
                                           </div>
                                         </div>
@@ -3016,7 +3016,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           {!showBottomRhythmLane && activeJianpuCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
                                           {(showBottomRhythmLane ? activeRhythmCursor : activeJianpuCursor) && renderActiveNotationCursor()}
                                           {showBottomRhythmLane ? (
-                                            <div className="w-full translate-y-[3px]">
+                                            <div className="w-full">
 	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
                                           </div>
                                         ) : (

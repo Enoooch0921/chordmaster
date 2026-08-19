@@ -964,6 +964,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                     : (isEditorBeamed || event.base === 'e' || event.base === 's')
                       ? (renderMode === 'preview' ? '-48.5%' : '-54%')
                       : '-48.5%';
+              const glyphTranslateX = !event.isRest && compact && renderMode === 'preview'
+                ? `calc(-50% + ${2.4 * scale}px)`
+                : '-50%';
               const displayGlyph = isEditorBeamed
                 ? getRhythmEventGlyph({
                     base: 'q',
@@ -987,7 +990,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                       left: unitToPercent(centerUnit),
                       top: rhythmContentTop,
                       color: stroke,
-                      transform: `translate(-50%, ${glyphTranslateY})`,
+                      transform: `translate(${glyphTranslateX}, ${glyphTranslateY})`,
                       fontSize: `${hasSingleWholeEvent && isWholeDuration ? editorGlyphFontSize * 1.16 : editorGlyphFontSize}px`
                     }}
                   >
