@@ -132,7 +132,7 @@ describe('ChordSheet preview input caret', () => {
         ]
       }]
     };
-    const { container } = render(
+    const { container, rerender } = render(
       <ChordSheet
         song={endingSong}
         language="zh"
@@ -143,10 +143,129 @@ describe('ChordSheet preview input caret', () => {
 
     const brackets = container.querySelectorAll('[data-sheet-ending-bracket="1"]');
     expect(brackets).toHaveLength(2);
-    expect(brackets[0]).toHaveClass('-top-[1px]', 'border-l-[3px]');
-    expect(brackets[1]).toHaveClass('border-r-[3px]');
-    expect(container.querySelector('[data-sheet-ending-number="1"]')).toHaveClass('-top-[11px]', 'text-[12px]', 'font-black', 'bg-white');
+    expect(brackets[0]).toHaveClass('-top-[16px]', 'h-[12px]', '-left-[2px]', '-right-[1px]', 'border-l-[2px]');
+    expect(brackets[1]).toHaveClass('-left-[1px]', '-right-[1px]', 'border-r-[2px]');
+    expect(container.querySelector('[data-sheet-ending-number="1"]')).toHaveClass('left-[2px]', '-top-[1px]', 'text-[13px]', 'font-semibold', 'text-gray-950');
     expect(screen.getByText('1.')).toBeInTheDocument();
+
+    rerender(
+      <ChordSheet
+        song={{ ...endingSong, barRowCount: 3 }}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+      />
+    );
+    expect(container.querySelectorAll('[data-sheet-ending-bracket="1"]')[0]).toHaveClass('-top-[16px]');
+  });
+
+  it('shrinks multi-number repeat ending labels and offsets first-beat push markers', () => {
+    const endingPushSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['C<', 'G<'], ending: '1,2' }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={endingPushSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+      />
+    );
+
+    const markers = container.querySelectorAll('[data-chord-marker="push"]');
+    const endingNumber = container.querySelector('[data-sheet-ending-number="1,2"]');
+    expect(endingNumber).toHaveAttribute('data-sheet-ending-multiple', 'true');
+    expect(endingNumber).toHaveClass('text-[11px]', 'tracking-[-0.02em]');
+    expect(screen.getByText('1., 2.')).toBeInTheDocument();
+    expect(markers[0]).toHaveAttribute('data-ending-collision-offset', 'true');
+    expect(markers[0]).toHaveClass('left-[60%]', '-top-[12px]');
+    expect(markers[1]).not.toHaveAttribute('data-ending-collision-offset');
+  });
+
+  it('keeps top labels closer to the bar and text-only navigation marks inside the measure', () => {
+    const navigationLabelSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          leftText: 'Vamp',
+          annotation: 'Cue',
+          rightMarker: 'fine'
+        }]
+      }]
+    };
+    render(
+      <ChordSheet
+        song={navigationLabelSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+      />
+    );
+
+    expect(screen.getByText('Vamp').parentElement).toHaveClass('-top-[12px]');
+    expect(screen.getByText('Cue')).toHaveClass('-top-[10px]');
+    expect(screen.getByText('Fine').parentElement).toHaveClass('-bottom-[16px]', 'right-1');
+  });
+
+  it('keeps text-only navigation marks away from rhythm and jianpu lanes', () => {
+    const navigationWithNotationSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          rhythm: 'q q q q',
+          rightMarker: 'fine'
+        }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={navigationWithNotationSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+      />
+    );
+
+    const bottomLane = container.querySelector('[data-preview-bottom-lane]');
+    expect(bottomLane).not.toHaveClass('pr-[96px]');
+    expect(bottomLane).toHaveStyle({ bottom: '4px' });
+    expect(screen.getByText('Fine').parentElement).toHaveClass('-bottom-[16px]', 'right-1');
+    expect(screen.getByText('Fine').parentElement).not.toHaveClass('top-[2px]');
+  });
+
+  it('keeps Nashville accidentals visually separated from numeric degrees', () => {
+    const nashvilleSong: Song = {
+      ...song,
+      showNashvilleNumbers: true,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['Eb', 'G#'] }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={nashvilleSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+      />
+    );
+
+    const accidentalDegrees = container.querySelectorAll('.sheet-bar span[style*="padding-left"]');
+    expect(accidentalDegrees.length).toBeGreaterThan(0);
+    accidentalDegrees.forEach((degree) => {
+      expect(degree).toHaveStyle({ paddingLeft: '0.35em' });
+    });
   });
 
   it('gives rows with chords, rhythm, and jianpu extra vertical space', () => {
@@ -157,7 +276,7 @@ describe('ChordSheet preview input caret', () => {
         bars: [{ id: 'bar-1', chords: ['Gaug', 'A7'], rhythm: 'e e q q', riff: '5 6 7 1' }]
       }]
     };
-    const { container } = render(
+    const { container, rerender } = render(
       <ChordSheet
         song={threeRowSong}
         language="zh"
@@ -169,12 +288,24 @@ describe('ChordSheet preview input caret', () => {
     const row = container.querySelector('[data-preview-row-three-notation-rows="true"]');
     const bar = container.querySelector('[data-preview-three-notation-rows="true"]');
     const lanes = container.querySelectorAll('[data-preview-edit-anchor$="|rhythm|all"], [data-preview-edit-anchor$="|jianpu|all"]');
+    const chordGrid = container.querySelector('[data-preview-slot-hit]')?.parentElement;
 
     expect(row).toHaveClass('min-h-[94px]', 'flex-[1.45]');
     expect(row).toHaveAttribute('data-preview-layout-weight', '1.45');
     expect(bar).toHaveStyle({ paddingBottom: '58px' });
-    expect(lanes[0]).toHaveClass('h-[22px]');
-    expect(lanes[1]).toHaveClass('h-[24px]');
+    expect(chordGrid).toHaveClass('pt-[3px]');
+    expect(lanes[0]).toHaveClass('h-[18px]');
+    expect(lanes[1]).toHaveClass('h-[18px]');
+
+    rerender(
+      <ChordSheet
+        song={{ ...threeRowSong, barRowCount: 3 }}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+      />
+    );
+    expect(container.querySelector('[data-preview-slot-hit]')?.parentElement).toHaveClass('pt-[3px]');
   });
 
   it('uses the three-line bar height for preview and printable page pagination', () => {
@@ -193,6 +324,7 @@ describe('ChordSheet preview input caret', () => {
 
     expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
     expect(container.querySelector('[data-print-page]')).toHaveAttribute('data-sheet-bar-row-count', '2');
+    expect(container.querySelector('[data-sheet-content-area]')).toHaveClass('gap-y-6', 'sm:gap-y-8');
 
     rerender(
       <ChordSheet song={{ ...twoLineSong, barRowCount: 3 }} language="zh" currentKey="C" previewIdentity="song-1" />
@@ -201,8 +333,63 @@ describe('ChordSheet preview input caret', () => {
     const pages = container.querySelectorAll('[data-print-page]');
     expect(pages).toHaveLength(2);
     expect(pages[0]).toHaveAttribute('data-sheet-bar-row-count', '3');
+    expect(container.querySelector('[data-sheet-content-area]')).toHaveClass('gap-y-6', 'sm:gap-y-8');
     expect(pages[0].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(8);
     expect(pages[1].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(1);
+  });
+
+  it('caps two-line printable pages at ten rows with maximum row spacing', () => {
+    const bars = Array.from({ length: 44 }, (_, index) => ({
+      id: `bar-${index + 1}`,
+      chords: ['C']
+    }));
+    const twoLineSong: Song = {
+      ...song,
+      barRowCount: 2,
+      sections: [{ ...song.sections[0], bars }]
+    };
+    const { container } = render(
+      <ChordSheet song={twoLineSong} language="zh" currentKey="C" previewIdentity="song-1" />
+    );
+
+    const pages = container.querySelectorAll('[data-print-page]');
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toHaveAttribute('data-sheet-bar-row-count', '2');
+    expect(container.querySelector('[data-sheet-content-area]')).toHaveClass('gap-y-6', 'sm:gap-y-8');
+    expect(pages[0].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(10);
+    expect(pages[1].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(1);
+  });
+
+  it('uses one-line bar height for chord-only rows without reserving an empty lower lane', () => {
+    const bars = Array.from({ length: 76 }, (_, index) => ({
+      id: `bar-${index + 1}`,
+      chords: ['C']
+    }));
+    const oneLineSong: Song = {
+      ...song,
+      barRowCount: 1,
+      sections: [{ ...song.sections[0], bars }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={oneLineSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+      />
+    );
+
+    const pages = container.querySelectorAll('[data-print-page]');
+    const row = container.querySelector('[data-preview-layout-weight="1"]');
+    const bar = container.querySelector('.sheet-bar');
+
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toHaveAttribute('data-sheet-bar-row-count', '1');
+    expect(row).toHaveClass('min-h-[34px]', 'flex-1');
+    expect(row).not.toHaveAttribute('data-preview-row-lower-notation-rows');
+    expect(bar).toHaveStyle({ paddingBottom: '6px' });
+    expect(container.querySelector('[data-preview-lower-hit]')).toBeNull();
   });
 
   it('expands the visible rhythm lane hit target while chord editing is active', () => {
@@ -229,8 +416,10 @@ describe('ChordSheet preview input caret', () => {
       />
     );
     const rhythmAnchor = container.querySelector<HTMLElement>('[data-preview-edit-anchor$="|rhythm|all"]');
+    const row = container.querySelector('[data-preview-row-lower-notation-rows="true"]');
 
     expect(rhythmAnchor).not.toBeNull();
+    expect(row).toHaveClass('min-h-[68px]', 'flex-[1.18]');
     expect(rhythmAnchor?.className).toContain('before:-top-2');
     expect(rhythmAnchor?.className).toContain('z-[30]');
   });

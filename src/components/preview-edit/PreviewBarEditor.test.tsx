@@ -872,6 +872,31 @@ describe('PreviewBarEditor', () => {
     expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0]).toMatchObject({ finalBar: true, repeatEnd: false });
   });
 
+  it('adds repeat ending numbers with Option digit shortcuts while chord editing', () => {
+    const firstTarget = { ...target, slotIndex: 0, rawChordIndex: 0, anchorKey: 'song-1|section-1|bar-1|chords|0' };
+    const baseSession = createPreviewEditSession({ song, target: firstTarget, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({
+      session: baseSession,
+      deviceLayout: 'desktop'
+    });
+    let capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+
+    fireEvent.keyDown(capture, { key: '¡', code: 'Digit1', altKey: true });
+    const endingOneSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(endingOneSong.sections[0].bars[0].ending).toBe('1');
+
+    rerenderSession(createPreviewEditSession({ song: endingOneSong, target: firstTarget, inputMode: 'letters' }));
+    capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+    fireEvent.keyDown(capture, { key: '™', code: 'Digit2', altKey: true });
+    const endingOneTwoSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(endingOneTwoSong.sections[0].bars[0].ending).toBe('1,2');
+
+    rerenderSession(createPreviewEditSession({ song: endingOneTwoSong, target: firstTarget, inputMode: 'letters' }));
+    capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+    fireEvent.keyDown(capture, { key: '™', code: 'Digit2', altKey: true });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].ending).toBe('1');
+  });
+
   it('appends physical chord characters and backspaces one character on hardware layouts', () => {
     const chordSong: Song = {
       ...song,

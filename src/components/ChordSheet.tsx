@@ -33,6 +33,7 @@ interface FormattedChordProps {
   abbreviateMajorQuality?: boolean;
   color?: string;
   specialLabel?: string;
+  avoidEndingCollision?: boolean;
   // For the multi-measure rest symbol: how many bar columns it spans. >1 widens
   // the thick-bar glyph so it stretches across the absorbed empty bars.
   restSpan?: number;
@@ -282,6 +283,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   abbreviateMajorQuality = false,
   color,
   specialLabel,
+  avoidEndingCollision = false,
   restSpan = 1
 }) => {
   const markStyle = color
@@ -375,9 +377,13 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
     }
   }
 
-  const markerWrapperClass = compactModifier
-    ? 'absolute -top-[15px] left-1/2 -translate-x-1/2 w-7 h-5 z-20 pointer-events-none'
-    : 'absolute -top-6 left-1/2 -translate-x-1/2 w-8 h-6 pointer-events-none';
+  const markerWrapperClass = avoidEndingCollision
+    ? compactModifier
+      ? 'absolute -top-[12px] left-[60%] -translate-x-1/2 w-7 h-5 z-20 pointer-events-none'
+      : 'absolute -top-[21px] left-[60%] -translate-x-1/2 w-8 h-6 pointer-events-none'
+    : compactModifier
+      ? 'absolute -top-[15px] left-1/2 -translate-x-1/2 w-7 h-5 z-20 pointer-events-none'
+      : 'absolute -top-6 left-1/2 -translate-x-1/2 w-8 h-6 pointer-events-none';
   const accentWrapperClass = compactModifier
     ? `absolute ${marker ? '-top-[20px]' : '-top-[15px]'} left-1/2 -translate-x-1/2 w-4 h-4 z-20 pointer-events-none`
     : `absolute ${marker ? '-top-9' : '-top-5'} left-1/2 -translate-x-1/2 w-4 h-4 pointer-events-none`;
@@ -410,6 +416,8 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
           initial={{ scale: 0, opacity: 0, x: 5, y: 5 }}
           animate={{ scale: 1, opacity: 1, x: 0, y: 0 }}
           className={markerWrapperClass}
+          data-chord-marker="push"
+          data-ending-collision-offset={avoidEndingCollision ? true : undefined}
         >
           <svg viewBox="0 0 32 24" className="w-full h-full text-gray-900 overflow-visible" fill="none" stroke="currentColor" strokeWidth={compactModifier ? 1.75 : 1.5} strokeLinecap="round" strokeLinejoin="round">
             <path d="M16 20c0-8 4-10 12-10" />
@@ -422,6 +430,8 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
           initial={{ scale: 0, opacity: 0, x: -5, y: 5 }}
           animate={{ scale: 1, opacity: 1, x: 0, y: 0 }}
           className={markerWrapperClass}
+          data-chord-marker="pull"
+          data-ending-collision-offset={avoidEndingCollision ? true : undefined}
         >
           <svg viewBox="0 0 32 24" className="w-full h-full text-gray-900 overflow-visible" fill="none" stroke="currentColor" strokeWidth={compactModifier ? 1.75 : 1.5} strokeLinecap="round" strokeLinejoin="round">
             <path d="M16 20c0-8-4-10-12-10" />
@@ -452,14 +462,14 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   }) => (
     <span
       className="relative inline-flex items-end leading-none"
-      style={accidentalGlyph ? { paddingLeft: compact ? '0.18em' : '0.22em' } : undefined}
+      style={accidentalGlyph ? { paddingLeft: compact ? '0.28em' : '0.35em' } : undefined}
     >
       {accidentalGlyph && (
         <span
           className={`absolute left-0 top-0 leading-none ${
             compact
               ? 'text-[7px] -translate-x-[0.02em] -translate-y-[0.16em]'
-              : 'text-xs -translate-x-[0.02em] -translate-y-[0.28em]'
+              : 'text-xs -translate-x-[0.01em] -translate-y-[0.28em]'
           }`}
           style={degreeStyle}
         >
@@ -657,7 +667,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
                         const accidentalGlyph = token[0];
                         const degreeText = token.slice(1);
                         return (
-                          <span key={`${token}-${index}`} className="inline-flex items-baseline">
+                          <span key={`${token}-${index}`} className="inline-flex items-baseline gap-[0.04em]">
                             <span className={`relative ${accidentalGlyph === '#' ? '-top-[0.14em]' : '-top-[0.02em]'}`}>
                               {accidentalGlyph}
                             </span>
@@ -729,8 +739,8 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
                   const accidentalGlyph = token[0];
                   const degreeText = token.slice(1);
                   return (
-                    <span key={`${token}-${index}`} className="inline-flex items-baseline">
-                      <span className={`relative ${accidentalGlyph === '#' ? '-top-[0.14em] -mr-[0.08em]' : '-top-[0.02em] -mr-[0.04em]'}`}>
+                    <span key={`${token}-${index}`} className="inline-flex items-baseline gap-[0.04em]">
+                      <span className={`relative ${accidentalGlyph === '#' ? '-top-[0.14em]' : '-top-[0.02em]'}`}>
                         {accidentalGlyph}
                       </span>
                       <span>{degreeText}</span>
@@ -1042,7 +1052,7 @@ const NavigationMarkerIcon: React.FC<{
 const NavigationTextTag: React.FC<{
   text: string;
   side: 'left' | 'right';
-  placement?: 'top' | 'inside-bottom' | 'outside-bottom' | 'outside-bottom-tight';
+  placement?: 'top' | 'inside-top' | 'inside-bottom' | 'outside-bottom' | 'outside-bottom-tight';
   className?: string;
   variant?: 'plain' | 'highlight';
   onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
@@ -1050,9 +1060,11 @@ const NavigationTextTag: React.FC<{
   <div
     className={`absolute z-20 max-w-[calc(100%-8px)] whitespace-nowrap ${onClick ? 'cursor-pointer pointer-events-auto' : ''} ${side === 'left' ? 'left-1' : 'right-1'} ${
       placement === 'top'
-        ? '-top-[18px]'
+        ? '-top-[12px]'
+        : placement === 'inside-top'
+          ? 'top-[2px]'
         : placement === 'inside-bottom'
-          ? 'bottom-1'
+          ? '-bottom-[16px]'
           : placement === 'outside-bottom-tight'
             ? 'top-full -mt-[1px]'
             : 'top-full mt-1'
@@ -1638,9 +1650,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   // Flatten all sections into rows
   // Three-line mode deliberately fits fewer rows on each A4 page. The extra
   // vertical room is printable writable space, not an editor-only zoom.
-  const barRowCount = song.barRowCount === 3 ? 3 : 2;
-  const ROWS_PER_PAGE_FIRST = barRowCount === 3 ? 8 : 12;
-  const ROWS_PER_PAGE_OTHER = barRowCount === 3 ? 9 : 14;
+  const barRowCount = song.barRowCount === 1 ? 1 : song.barRowCount === 3 ? 3 : 2;
+  const ROWS_PER_PAGE_FIRST = barRowCount === 3 ? 8 : barRowCount === 1 ? 18 : 10;
+  const ROWS_PER_PAGE_OTHER = barRowCount === 3 ? 9 : barRowCount === 1 ? 21 : 10;
   const pageIndexOfRow = (rowIndex: number) =>
     rowIndex < ROWS_PER_PAGE_FIRST
       ? 0
@@ -1676,6 +1688,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     startBIdx: number;
     addSectionAfter?: boolean;
     hasThreeNotationRows: boolean;
+    hasLowerNotationRows: boolean;
     layoutWeight: number;
   };
   const allRows: PreviewSheetRow[] = [];
@@ -1683,6 +1696,17 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     if (!bar || !hasMeaningfulChordContent(bar.chords) || !bar.rhythm?.trim()) return false;
     const effectiveTimeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
     return hasVisiblePreviewRiff(getPreviewRiffNotation(bar.riff, effectiveTimeSignature));
+  });
+  const getRowHasLowerNotationRows = (bars: Bar[]) => bars.some((bar) => {
+    if (!bar) return false;
+    const effectiveTimeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
+    return Boolean(
+      bar.rhythm?.trim()
+      || hasVisiblePreviewRiff(getPreviewRiffNotation(bar.riff, effectiveTimeSignature))
+      || bar.label?.trim()
+      || bar.riffLabel?.trim()
+      || bar.rhythmLabel?.trim()
+    );
   });
   // Empty bars are valid chart content: users intentionally add them before
   // entering chords. Never trim them from the preview or the newly-added bar
@@ -1696,6 +1720,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     for (let i = 0; i < sectionRows; i++) {
       const rowBars = sectionBars.slice(i * 4, i * 4 + 4);
       const hasThreeNotationRows = getRowHasThreeNotationRows(rowBars);
+      const hasLowerNotationRows = getRowHasLowerNotationRows(rowBars);
       allRows.push({
         kind: 'music',
         sectionTitle: i === 0 ? section.title : null,
@@ -1703,7 +1728,18 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         sIdx,
         startBIdx: i * 4,
         hasThreeNotationRows,
-        layoutWeight: barRowCount === 3 ? 1 : hasThreeNotationRows ? 1.45 : 1
+        hasLowerNotationRows,
+        layoutWeight: barRowCount === 3
+          ? 1
+          : barRowCount === 1
+            ? hasThreeNotationRows
+              ? 2.2
+              : hasLowerNotationRows
+                ? 1.55
+                : 1
+            : hasThreeNotationRows
+              ? 1.45
+              : 1
       });
       }
   });
@@ -1724,6 +1760,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         startBIdx: finalVisibleBars.length,
         addSectionAfter: true,
         hasThreeNotationRows: false,
+        hasLowerNotationRows: false,
         layoutWeight: 1
       });
     }
@@ -1946,7 +1983,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
           )}
 
           {/* Content Area */}
-          <div className="flex-1 flex flex-col min-h-0 w-full gap-y-2 sm:gap-y-3">
+          <div
+            data-sheet-content-area
+            className={`flex-1 flex flex-col min-h-0 w-full ${barRowCount === 1 ? 'gap-y-4 sm:gap-y-5' : 'gap-y-6 sm:gap-y-8'}`}
+          >
             {pageRows.map((row, rIdx) => {
               const section = song.sections[row.sIdx];
               const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
@@ -2013,6 +2053,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                   data-preview-add-choice-row={row.kind === 'add-choice' ? 'true' : undefined}
                   data-preview-only-control={row.kind === 'add-choice' ? 'true' : undefined}
                   data-preview-row-three-notation-rows={row.hasThreeNotationRows ? true : undefined}
+                  data-preview-row-lower-notation-rows={row.hasLowerNotationRows ? true : undefined}
                   data-preview-layout-weight={row.layoutWeight}
                   data-preview-section-drop-target={row.startBIdx === 0 ? section?.id || '' : undefined}
                   layout={!suppressSectionTransitions}
@@ -2032,7 +2073,21 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     backgroundColor: { duration: suppressSectionTransitions ? 0 : (isHighlighted ? 0.2 : 0.25) },
                     boxShadow: { duration: suppressSectionTransitions ? 0 : 0.2 }
                   }}
-                  className={`relative flex w-full rounded-lg transition-all ${barRowCount === 3 ? 'min-h-0 flex-1' : row.hasThreeNotationRows ? 'min-h-[94px] flex-[1.45]' : 'min-h-0 flex-1'}`}
+                  className={`relative flex w-full rounded-lg transition-all ${
+                    barRowCount === 3
+                      ? 'min-h-0 flex-1'
+                      : barRowCount === 1
+                        ? row.hasThreeNotationRows
+                          ? 'min-h-[94px] flex-[2.2]'
+                          : row.hasLowerNotationRows
+                            ? 'min-h-[58px] flex-[1.55]'
+                            : 'min-h-[34px] flex-1'
+                        : row.hasThreeNotationRows
+                          ? 'min-h-[94px] flex-[1.45]'
+                          : row.hasLowerNotationRows
+                            ? 'min-h-[68px] flex-[1.18]'
+                            : 'min-h-0 flex-1'
+                  }`}
                 >
                   {row.startBIdx === 0 && sectionDrag?.targetSectionId === section?.id && (
                     <span
@@ -2425,7 +2480,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     // target. Reserving another empty lane below it pushes the
                     // visible notation upward, so the remembered-mode target is
                     // only needed while both notation lanes are empty.
-                    const showEmptyLowerHit = Boolean(onElementClick && !hasRhythm && !hasRiff);
+                    const showEmptyLowerHit = Boolean(onElementClick && barRowCount !== 1 && !hasRhythm && !hasRiff);
                     const compactModifier = Boolean(
                       bar?.ending ||
                       bar?.annotation ||
@@ -2457,7 +2512,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         ? 38
                         : lowerLaneCount === 1
                           ? 20
-                          : 24;
+                          : barRowCount === 1
+                            ? 6
+                            : 24;
                     const sharedLaneClass = previewBottomLaneClass;
                     const { numerator: displayNumerator, denominator: displayDenominator } = splitDisplayTimeSignature(effectiveTimeSignature);
                     const hasInlineTimeSignature = Boolean(bar?.timeSignature);
@@ -2507,6 +2564,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         : bIdx === 3
                           ? 'final-measure'
                           : 'normal-measure';
+                    const endingDisplayText = formatEndingDisplay(bar?.ending);
+                    const hasMultipleEndingNumbers = Boolean(bar?.ending?.includes(','));
+                    const endingTopClass = '-top-[16px]';
 
                     return (
 	                      <div
@@ -2549,7 +2609,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         )}
 
                         {showKeyChangeTag && (
-                          <div className="pointer-events-none absolute left-1 -top-4 z-10 inline-flex items-center rounded-sm border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black tracking-[0.04em] leading-none text-amber-800 shadow-[0_1px_0_rgba(251,191,36,0.14)]">
+                          <div className="pointer-events-none absolute left-1 -top-[10px] z-10 inline-flex items-center rounded-sm border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black tracking-[0.04em] leading-none text-amber-800 shadow-[0_1px_0_rgba(251,191,36,0.14)]">
                             {copy.key}: {sectionCurrentKey}
                           </div>
                         )}
@@ -2573,14 +2633,19 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         {bar?.ending && (
                           <div
                             data-sheet-ending-bracket={bar.ending}
-                            className={`sheet-ending-bracket absolute -top-[1px] h-[14px] border-t-[3px] border-gray-950 z-10 pointer-events-none ${isEndingStart ? `${getEndingLeftOffsetClass(endingLeftBarlineType)} border-l-[3px]` : 'left-0'} ${isEndingEnd ? `${getEndingRightOffsetClass(endingRightBarlineType)} border-r-[3px]` : 'right-0'}`}
+                            className={`sheet-ending-bracket absolute ${endingTopClass} h-[12px] border-t-[2px] border-gray-950 z-10 pointer-events-none ${isEndingStart ? `${getEndingLeftOffsetClass(endingLeftBarlineType)} border-l-[2px]` : ENDING_LEFT_OFFSETS.normal} ${isEndingEnd ? `${getEndingRightOffsetClass(endingRightBarlineType)} border-r-[2px]` : ENDING_RIGHT_OFFSETS.normalMeasure}`}
                           >
                              {(!row.bars[bIdx - 1] || row.bars[bIdx - 1].ending !== bar.ending) && (
                                <span
                                  data-sheet-ending-number={bar.ending}
-                                 className="sheet-ending-number absolute left-1 -top-[11px] inline-flex min-w-[1.35rem] items-center justify-center rounded-[2px] border border-gray-950 bg-white px-1 py-[1px] text-[12px] font-black leading-none tracking-[0.02em] shadow-[0_1px_0_rgba(0,0,0,0.18)]"
+                                 data-sheet-ending-multiple={hasMultipleEndingNumbers ? true : undefined}
+                                 className={`sheet-ending-number absolute left-[2px] -top-[1px] inline-flex items-center justify-start font-semibold leading-none text-gray-950 ${
+                                   hasMultipleEndingNumbers
+                                     ? 'text-[11px] tracking-[-0.02em]'
+                                     : 'text-[13px] tracking-[0.01em]'
+                                 }`}
                                >
-                                 {formatEndingDisplay(bar.ending)}
+                                 {endingDisplayText}
                                </span>
                              )}
                           </div>
@@ -2615,9 +2680,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           <NavigationTextTag
                             text={rightNavigationText}
                             side="right"
-                            placement={isRightTextOnlyMarker ? 'outside-bottom-tight' : 'top'}
+                            placement={isRightTextOnlyMarker ? 'inside-bottom' : 'top'}
                             variant={isRightTextOnlyMarker ? 'highlight' : 'plain'}
-                            className={isRightTextOnlyMarker ? 'right-0 text-[10px]' : bar?.rightMarker ? 'right-5' : ''}
+                            className={isRightTextOnlyMarker ? 'text-[10px]' : bar?.rightMarker ? 'right-5' : ''}
                             onClick={onElementClick ? (event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'marker') : undefined}
                           />
                         )}
@@ -2638,7 +2703,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             {/* Annotation */}
                             {bar.annotation && (
                               <div
-                                className={`absolute -top-4 z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap cursor-pointer transition-colors ${
+                                className={`absolute -top-[10px] z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap cursor-pointer transition-colors ${
                                   showKeyChangeTag
                                     ? 'right-1'
                                     : (isEndingStart ? 'left-7' : 'left-1')
@@ -2831,6 +2896,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                       chordFontFamily={chordFontFamily}
                                                       color={getChordMarkTextColor(bar, anchor.chordIndex)}
                                                       specialLabel={getChordSpecialLabel(bar, anchor.chordIndex, language)}
+                                                      avoidEndingCollision={Boolean(bar.ending && anchor.slotIndex === 0)}
                                                     />
                                                     {isSelectedChord && <PreviewChordInputCaret className="mb-px ml-px" />}
                                                   </div>
@@ -2938,7 +3004,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                      <div className="flex items-end gap-1">
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|rhythm|all`}
-	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${hasThreeNotationRows ? 'h-[22px] flex items-center overflow-visible' : sharedLaneClass} ${notationLaneHitClass} flex-1`}
+	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${notationLaneHitClass} flex-1`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'rhythm');
@@ -2955,7 +3021,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                      <div className="flex items-end">
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|jianpu|all`}
-	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${hasThreeNotationRows ? 'h-[24px] flex items-center overflow-visible' : sharedLaneClass} ${notationLaneHitClass}`}
+	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');

@@ -922,12 +922,13 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     <div>
       <label className={controlLabelClassName}>{language === 'zh' ? '小節高度' : 'Bar Height'}</label>
       <CompactSegmentedControl
-        value={String(song.barRowCount ?? 2) as '2' | '3'}
+        value={String(song.barRowCount ?? 2) as '1' | '2' | '3'}
         options={[
+          { value: '1', label: language === 'zh' ? '1 行・和弦' : '1 line' },
           { value: '2', label: language === 'zh' ? '2 行' : '2 lines' },
           { value: '3', label: language === 'zh' ? '3 行・手寫' : '3 lines' }
         ]}
-        onChange={(value) => updateField('barRowCount', value === '3' ? 3 : 2)}
+        onChange={(value) => updateField('barRowCount', value === '1' ? 1 : value === '3' ? 3 : 2)}
         size={segmentedSize}
         stretch
         className="rounded-lg"

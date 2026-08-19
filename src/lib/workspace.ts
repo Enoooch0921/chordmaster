@@ -219,7 +219,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
     showAbsoluteJianpu: normalizeBoolean(song.showAbsoluteJianpu) ?? false,
     jianpuInputAbsolute: normalizeBoolean(song.jianpuInputAbsolute) ?? false,
     barNumberMode: typeof song.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(song.barNumberMode) ? song.barNumberMode : 'none',
-    barRowCount: song.barRowCount === 3 ? 3 : 2,
+    barRowCount: song.barRowCount === 1 ? 1 : song.barRowCount === 3 ? 3 : 2,
     nashvilleFontPreset: typeof song.nashvilleFontPreset === 'string' && VALID_NASHVILLE_FONT_PRESETS.has(song.nashvilleFontPreset)
       ? song.nashvilleFontPreset
       : DEFAULT_NASHVILLE_FONT_PRESET,

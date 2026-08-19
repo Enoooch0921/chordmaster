@@ -20,7 +20,8 @@ import {
   mergeSectionToPrevious as mergeSongSectionToPrevious,
   normalizeChordBeatTokens,
   reorderSongSections,
-  splitSectionAtBar as splitSongSectionAtBar
+  splitSectionAtBar as splitSongSectionAtBar,
+  toggleEndingNumber
 } from '../lib/songEditing';
 import { applyRhythmEdit, type RhythmEditAction } from '../lib/rhythmEditing';
 import {
@@ -142,6 +143,12 @@ const PICKUP_BAR_INDEX = -1;
 const STACKED_BAR_LAYOUT_MAX_WIDTH = 560;
 const FULL_BAR_LAYOUT_MIN_WIDTH = 640;
 const MOBILE_SECTION_REORDER_LONG_PRESS_MS = 360;
+
+const getEndingShortcutDigit = (key: string, code: string) => {
+  const codeMatch = code.match(/^(?:Digit|Numpad)([1-9])$/);
+  if (codeMatch) return codeMatch[1];
+  return /^[1-9]$/.test(key) ? key : null;
+};
 
 const SECTION_TITLE_PRESETS = [
   'Intro',
@@ -1775,11 +1782,11 @@ const SongEditor: React.FC<Props> = ({
     }
   };
 
-  // Shared chord-input keys: [ ] \ toggle the bar markers (repeat/ending) even while
-  // typing in the chord box; Backspace on an empty bar deletes it. Returns true when
-  // the key was handled so the caller can stop.
+  // Shared chord-input keys: [ ] \ toggle the bar markers, Option+number adds
+  // repeat ending numbers, and Backspace on an empty bar deletes it. Returns
+  // true when the key was handled so the caller can stop.
   const handleChordInputShortcutKeys = (event: React.KeyboardEvent<HTMLInputElement>, sIdx: number, bIdx: number): boolean => {
-    if (event.altKey || event.ctrlKey || event.metaKey || (event.nativeEvent as KeyboardEvent).isComposing) {
+    if (event.ctrlKey || event.metaKey || (event.nativeEvent as KeyboardEvent).isComposing) {
       return false;
     }
     if (isPickupTarget(sIdx, bIdx)) {
@@ -1787,6 +1794,16 @@ const SongEditor: React.FC<Props> = ({
     }
 
     const currentBar = getEditorBar(sIdx, bIdx);
+
+    if (event.altKey) {
+      const digit = !event.shiftKey ? getEndingShortcutDigit(event.key, event.code) : null;
+      if (currentBar && digit) {
+        event.preventDefault();
+        updateBar(sIdx, bIdx, { ending: toggleEndingNumber(currentBar.ending, digit) });
+        return true;
+      }
+      return false;
+    }
 
     if (event.key === '[' || event.code === 'BracketLeft') {
       event.preventDefault();

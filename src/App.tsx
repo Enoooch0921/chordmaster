@@ -556,7 +556,7 @@ type SetlistSortMode = 'updated-desc' | 'created-desc' | 'name-asc';
 interface JoinedSetlistDisplayPreference {
   displayMode?: SetlistDisplayMode;
   barNumberMode?: BarNumberMode;
-  barRowCount?: 2 | 3;
+  barRowCount?: 1 | 2 | 3;
 }
 
 interface PdfExportProgressState {
@@ -1346,7 +1346,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
     showAbsoluteJianpu: normalizeBoolean(song.showAbsoluteJianpu) ?? false,
     jianpuInputAbsolute: normalizeBoolean(song.jianpuInputAbsolute) ?? false,
     barNumberMode: typeof song.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(song.barNumberMode) ? song.barNumberMode : 'none',
-    barRowCount: song.barRowCount === 3 ? 3 : 2,
+    barRowCount: song.barRowCount === 1 ? 1 : song.barRowCount === 3 ? 3 : 2,
     nashvilleFontPreset: typeof song.nashvilleFontPreset === 'string' && VALID_NASHVILLE_FONT_PRESETS.has(song.nashvilleFontPreset)
       ? song.nashvilleFontPreset
       : DEFAULT_NASHVILLE_FONT_PRESET,
@@ -1890,7 +1890,7 @@ const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisp
           if (typeof preference.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(preference.barNumberMode)) {
             normalized.barNumberMode = preference.barNumberMode as BarNumberMode;
           }
-          if (preference.barRowCount === 2 || preference.barRowCount === 3) {
+          if (preference.barRowCount === 1 || preference.barRowCount === 2 || preference.barRowCount === 3) {
             normalized.barRowCount = preference.barRowCount;
           }
 

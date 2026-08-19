@@ -100,6 +100,11 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
         action: { en: 'Toggle repeat start, repeat end, or final barline', zh: '切換反覆開始、反覆結束或終止線' }
       },
       {
+        keys: ['Option/Alt + 1-9'],
+        action: { en: 'Toggle a repeat ending number on the current bar', zh: '切換目前小節的房子記號數字' },
+        context: { en: 'Chord mode in preview quick edit and full editor; 1 then 2 becomes 1,2, pressing 2 again removes it', zh: '預覽快捷編輯與完整編輯器的和弦模式；先 1 再 2 會變成 1,2，再按 2 會取消 2' }
+      },
+      {
         keys: ['%'],
         action: { en: 'Write repeat-previous-bar symbol', zh: '輸入重複前一小節符號' },
         context: { en: 'Chord mode', zh: '和弦模式' }

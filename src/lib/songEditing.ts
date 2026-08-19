@@ -58,6 +58,25 @@ export interface ChordTextParseResult {
   error: string | null;
 }
 
+export const toggleEndingNumber = (ending: string | undefined, digit: string): string | undefined => {
+  const normalizedDigit = digit.trim();
+  if (!/^[1-9]$/.test(normalizedDigit)) return ending?.trim() || undefined;
+
+  const trimmedEnding = ending?.trim() ?? '';
+  const parts = trimmedEnding
+    ? trimmedEnding.split(',').map((part) => part.trim()).filter(Boolean)
+    : [];
+  const simpleNumericParts = parts.every((part) => /^[1-9]$/.test(part)) ? parts : [];
+  const hasDigit = simpleNumericParts.includes(normalizedDigit);
+  const numbers = hasDigit
+    ? simpleNumericParts.filter((part) => part !== normalizedDigit)
+    : [...simpleNumericParts, normalizedDigit];
+  const nextEnding = Array.from(new Set(numbers))
+    .sort((left, right) => Number(left) - Number(right))
+    .join(',');
+  return nextEnding || undefined;
+};
+
 export type EditableBarFields = Pick<
   Bar,
   | 'timeSignature'

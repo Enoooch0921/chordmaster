@@ -55,6 +55,7 @@ import {
   setBarChordText,
   setChordAtBeatSlot,
   setMultiMeasureRestAtBar,
+  toggleEndingNumber,
   updateEditableBarFields
 } from '../../lib/songEditing';
 import {
@@ -111,6 +112,12 @@ const EXPANDED_QUALITIES = ['9', 'maj9', 'm9', '11', 'm11', '13', 'm13', 'mMaj7'
 const PICKER_QUALITIES = ['m6', 'sus2', 'dim7', 'aug', ...EXPANDED_QUALITIES];
 const TIME_SIGNATURES = ['2/2', '3/2', '2/4', '3/4', '4/4', '5/4', '6/4', '7/4', '3/8', '5/8', '6/8', '7/8', '9/8', '12/8'];
 const ENDINGS = ['1', '2', '3', '1,2'];
+
+const getEndingShortcutDigit = (key: string, code: string) => {
+  const codeMatch = code.match(/^(?:Digit|Numpad)([1-9])$/);
+  if (codeMatch) return codeMatch[1];
+  return /^[1-9]$/.test(key) ? key : null;
+};
 
 const trailingModifiers = (value: string) => value.match(/[<>^~]+$/)?.[0] ?? '';
 const withoutModifiers = (value: string) => value.replace(/[<>^~]+$/, '');
@@ -498,6 +505,17 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     return false;
   }
 
+  function applyChordEndingShortcut(key: string, code: string) {
+    const digit = getEndingShortcutDigit(key, code);
+    if (!digit) return false;
+    updateFields(
+      { ending: toggleEndingNumber(bar?.ending, digit) },
+      `ending:${bar?.id ?? session.target.barId}`
+    );
+    setActivePicker(null);
+    return true;
+  }
+
   function changeNotationMode(nextMode: PreviewNotationMode) {
     setMode('common');
     setActivePicker(null);
@@ -593,6 +611,18 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         return;
       }
       if (meta && event.key === 'Enter') {
+        event.preventDefault();
+        return;
+      }
+      if (
+        !isTyping
+        && !isButtonActivation
+        && isChordEditing
+        && event.altKey
+        && !event.shiftKey
+        && !meta
+        && applyChordEndingShortcut(event.key, event.code)
+      ) {
         event.preventDefault();
         return;
       }
@@ -1044,7 +1074,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 text-[11px]`} onClick={() => { setMode('text'); setActivePicker(null); }} aria-label={language === 'zh' ? '文字欄位' : 'Text fields'}>{language === 'zh' ? '文字' : 'Text'}</button>
             <button type="button" data-picker-trigger="special" className={`${utilityKeyClass} min-h-0 px-0`} onClick={(event) => openPicker('special', event.currentTarget)} aria-label={language === 'zh' ? '休止符與整小節符號' : 'Rests and whole-bar symbols'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">{getRestGlyph('q')}</span></button>
             <button type="button" data-picker-trigger="articulation" className={`${utilityKeyClass} min-h-0 px-0 ${trailingModifiers(displayedChord) ? activeButtonClass : ''}`} onClick={(event) => openPicker('articulation', event.currentTarget)} aria-label={language === 'zh' ? '選擇演奏記號' : 'Choose articulation'}><DirectionGlyph direction="push" /></button>
-            <button type="button" data-picker-trigger="ending" className={`${utilityKeyClass} min-h-0 overflow-hidden px-1 ${bar.ending ? activeButtonClass : ''}`} onClick={(event) => openPicker('ending', event.currentTarget)} aria-label={language === 'zh' ? '選擇房子記號' : 'Choose ending'}><EndingGlyph value={bar.ending || '1'} /></button>
+            <button type="button" data-picker-trigger="ending" className={`${utilityKeyClass} min-h-0 overflow-hidden px-1 ${bar.ending ? activeButtonClass : ''}`} onClick={(event) => openPicker('ending', event.currentTarget)} aria-label={language === 'zh' ? '選擇房子記號' : 'Choose ending'} aria-keyshortcuts="Alt+1 Alt+2 Alt+3 Alt+4 Alt+5 Alt+6 Alt+7 Alt+8 Alt+9"><EndingGlyph value={bar.ending || '1'} /></button>
             <button type="button" data-picker-trigger="navigation" className={`${utilityKeyClass} min-h-0 px-0 ${bar.leftMarker || bar.rightMarker ? activeButtonClass : ''}`} onClick={(event) => openPicker('navigation', event.currentTarget)} aria-label={language === 'zh' ? '選擇導引記號' : 'Choose navigation marker'}><span className="flex items-center gap-0.5"><SegnoGlyph className="h-4 w-4" /><CodaGlyph className="h-4 w-4" /></span></button>
             <button type="button" data-picker-trigger="barline" className={`${utilityKeyClass} min-h-0 px-0 text-base ${bar.repeatStart || bar.repeatEnd || bar.finalBar ? activeButtonClass : ''}`} onClick={(event) => openPicker('barline', event.currentTarget)} aria-label={language === 'zh' ? '選擇小節線與反覆' : 'Choose barline and repeat'}>{barlineGlyph}</button>
             <button type="button" className={`${copyKeyClass} min-h-0 px-0`} onClick={() => onStructure('copy-bar')} aria-label={language === 'zh' ? '複製小節' : 'Copy bar'}><Copy size={17} aria-hidden="true" /></button>
@@ -1510,6 +1540,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               event.preventDefault();
               event.stopPropagation();
               onDone();
+            } else if (!meta && event.altKey && !event.shiftKey && applyChordEndingShortcut(event.key, event.code)) {
+              event.preventDefault();
+              event.stopPropagation();
             } else if (!meta && !event.altKey && !event.shiftKey && applyChordBarMarkerShortcut(event.key, event.code)) {
               event.preventDefault();
               event.stopPropagation();

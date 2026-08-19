@@ -30,6 +30,7 @@ import {
   setMultiMeasureRestAtBar,
   splitSectionAtBar,
   mergeSectionToPrevious,
+  toggleEndingNumber,
   updateSectionTitle,
   updateEditableBarFields
 } from './songEditing';
@@ -262,6 +263,14 @@ describe('bar commands', () => {
     const song = makeSong({ chords: [], repeatStart: true });
     const edited = updateEditableBarFields(song, { sectionId: 'section-1', barId: 'bar-1' }, { repeatEnd: true });
     expect(edited.sections[0].bars[0]).toMatchObject({ repeatStart: true, repeatEnd: true, finalBar: false });
+  });
+
+  it('toggles shortcut ending numbers in sorted comma order', () => {
+    expect(toggleEndingNumber(undefined, '1')).toBe('1');
+    expect(toggleEndingNumber('1', '2')).toBe('1,2');
+    expect(toggleEndingNumber('2', '1')).toBe('1,2');
+    expect(toggleEndingNumber('1,2,3', '2')).toBe('1,3');
+    expect(toggleEndingNumber('1', '1')).toBeUndefined();
   });
 
   it('inserts, duplicates, and deletes bars immutably', () => {
