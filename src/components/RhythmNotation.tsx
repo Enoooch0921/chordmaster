@@ -209,16 +209,16 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const getTripletLayout = (base: 'q' | 'e') => {
     const tripletVerticalLift = (compact ? 0 : 5.0) * scale;
     const rawBracketY = compact
-      ? (base === 'e' ? 2.1 * scale : 2.5 * scale)
+      ? (base === 'e' ? 0.4 * scale : 0.8 * scale)
       : Math.max(3.8 * scale, base === 'e' ? effectiveBeamTop - (2.6 * scale) : 5.2 * scale);
     const bracketY = rawBracketY - tripletVerticalLift;
     const numberY = compact
-      ? 0.4 * scale
+      ? -1.2 * scale
       : bracketY - (3.1 * scale);
 
     return {
       bracketY,
-      bracketDrop: compact ? 2.2 : 3,
+      bracketDrop: compact ? 1.8 : 3,
       numberY,
       numberGap: compact ? 1.25 : 1.7
     };

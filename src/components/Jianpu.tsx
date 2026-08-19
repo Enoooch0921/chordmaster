@@ -163,13 +163,13 @@ const Jianpu: React.FC<JianpuProps> = ({
   const metrics = React.useMemo(() => {
     if (compact) {
       return {
-        height: 20 * scale,
+        height: 24 * scale,
         digitFontSize: 13 * scale,
         accidentalFontSize: 7 * scale,
-        digitCenterY: 9.25 * scale,
+        digitCenterY: 12.25 * scale,
         highDotY: 1.4 * scale,
-        lowDotY: 16.2 * scale,
-        underlineY: 15.4 * scale,
+        lowDotY: 19.2 * scale,
+        underlineY: 18.4 * scale,
         underlineGap: 2.8 * scale,
         dottedOffsetX: 5.2 * scale,
         octaveDotOffsetX: 0,
@@ -179,7 +179,7 @@ const Jianpu: React.FC<JianpuProps> = ({
         octaveDotSize: 1.5 * scale,
         dottedDotSize: 1.8 * scale,
 	        underlineStroke: 1.2 * scale,
-	        slurBaseY: 6 * scale,
+	        slurBaseY: 8 * scale,
 	        tripletY: 0.5 * scale,
 	        highlightInsetY: 1.8 * scale,
         highlightInsetXUnits: 4,
@@ -738,21 +738,21 @@ const Jianpu: React.FC<JianpuProps> = ({
 	                height: `${compact ? 7 : renderMode === 'editor' ? 9 : 12}px`
 	              }}
 	            >
-	              <span
-	                className="absolute left-0 right-0 top-1/2 h-px rounded-full bg-current"
-	                style={{ transform: 'translateY(-50%)' }}
-	              />
-	              <span
-	                className="absolute bg-white px-[2px] font-semibold leading-none"
-	                style={{
-	                  left: snappedCenterPx !== null
-	                    ? `${snappedCenterPx - (snappedLeftPx ?? 0)}px`
-	                    : '50%',
-	                  top: '50%',
-	                  transform: 'translate(-50%, -52%)',
+              <span
+                className="absolute left-0 right-0 h-px rounded-full bg-current"
+                style={{ top: compact ? `${5 * scale}px` : '50%', transform: 'translateY(-50%)' }}
+              />
+              <span
+                className="absolute bg-white px-[2px] font-semibold leading-none"
+                style={{
+                  left: snappedCenterPx !== null
+                    ? `${snappedCenterPx - (snappedLeftPx ?? 0)}px`
+                    : '50%',
+	                  top: compact ? `${1.8 * scale}px` : '50%',
+	                  transform: compact ? 'translate(-50%, -50%)' : 'translate(-50%, -52%)',
 	                  fontSize: `${compact ? 7 * scale : renderMode === 'editor' ? 8 * scale : 10 * scale}px`
-	                }}
-	              >
+                }}
+              >
 	                3
 	              </span>
 	            </span>
