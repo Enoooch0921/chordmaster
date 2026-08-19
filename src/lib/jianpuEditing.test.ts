@@ -115,7 +115,7 @@ describe('jianpu insertion commands', () => {
 
     expect(middle.error).toBeNull();
     expect(last.error).toBeNull();
-    expect(last.song.sections[0].bars[0].riff).toBe(' | | 1_2 | 3_');
+    expect(last.song.sections[0].bars[0].riff).toBe(' |  | 1_2 | 3_');
   });
 
   it('uses a grouped dotted beat in 6/8', () => {
@@ -259,8 +259,8 @@ describe('duration and placeholder commands', () => {
     expect(result.cursor).toEqual({ beatIndex: 1, unitIndex: 2, noteIndex: null });
   });
 
-  it('can insert an eighth note after dotting the previous quarter note', () => {
-    const song = makeSong({ riff: '5' });
+	  it('can insert an eighth note after dotting the previous quarter note', () => {
+	    const song = makeSong({ riff: '5' });
     const dotted = applyJianpuCommand(
       song,
       target,
@@ -276,10 +276,53 @@ describe('duration and placeholder commands', () => {
       { ...DEFAULT_JIANPU_INPUT_MODE, duration: 'eighth' }
     );
 
-    expect(inserted.error).toBeNull();
-    expect(inserted.song.sections[0].bars[0].riff).toBe('5. | 1_');
-  });
-});
+	    expect(inserted.error).toBeNull();
+	    expect(inserted.song.sections[0].bars[0].riff).toBe('5. | 1_');
+	  });
+
+	  it('inserts three eighth-note triplets into one beat with fractional cursors', () => {
+	    const tripletMode = { ...DEFAULT_JIANPU_INPUT_MODE, duration: 'eighth' as const, triplet: true };
+	    const first = applyJianpuCommand(makeSong(), target, insertion(), { type: 'insert-pitch', pitch: '1' }, tripletMode);
+	    const second = applyJianpuCommand(first.song, target, first.cursor, { type: 'insert-pitch', pitch: '2' }, first.inputMode);
+	    const third = applyJianpuCommand(second.song, target, second.cursor, { type: 'insert-pitch', pitch: '3' }, second.inputMode);
+
+	    expect(first.cursor.unitIndex).toBeCloseTo(4 / 3);
+	    expect(second.cursor.unitIndex).toBeCloseTo(8 / 3);
+	    expect(third.error).toBeNull();
+	    expect(third.song.sections[0].bars[0].riff).toBe('1_t2_t3_t');
+	    expect(third.cursor).toMatchObject({ beatIndex: 1, unitIndex: 0, noteIndex: null });
+	    expect(getJianpuBarLayout(third.song, target)?.beats[0]).toMatchObject({ usedUnits: 4 });
+	  });
+
+	  it('toggles triplet on a selected jianpu note and keeps dots disabled', () => {
+	    const song = makeSong({ riff: '1_ss' });
+	    const selected = getJianpuCursorForNote(song, target, 0, 0)!;
+	    const triplet = applyJianpuCommand(
+	      song,
+	      target,
+	      selected,
+	      { type: 'toggle-triplet' },
+	      { ...DEFAULT_JIANPU_INPUT_MODE, duration: 'eighth' }
+	    );
+	    expect(triplet.error).toBeNull();
+	    expect(triplet.song.sections[0].bars[0].riff).toBe('1_txss');
+	    expect(getJianpuInputModeAtCursor(triplet.song, target, getJianpuCursorForNote(triplet.song, target, 0, 0)!)).toMatchObject({
+	      duration: 'eighth',
+	      dotted: false,
+	      triplet: true
+	    });
+
+	    const dotted = applyJianpuCommand(
+	      triplet.song,
+	      target,
+	      getJianpuCursorForNote(triplet.song, target, 0, 0)!,
+	      { type: 'toggle-dot' },
+	      triplet.inputMode
+	    );
+	    expect(dotted.error).toContain('三連音');
+	    expect(dotted.song.sections[0].bars[0].riff).toBe('1_txss');
+	  });
+	});
 
 describe('pitch modifiers and fixed-do interpretation', () => {
   it('replaces only the pitch of a selected note and preserves its semantic formatting', () => {

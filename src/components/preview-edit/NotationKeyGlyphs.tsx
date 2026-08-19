@@ -97,10 +97,11 @@ export interface JianpuInputGlyphProps {
   pitch: string;
   accidental?: JianpuAccidental;
   octave?: JianpuOctave;
-  duration?: JianpuDuration;
-  dotted?: boolean;
-  className?: string;
-}
+	  duration?: JianpuDuration;
+	  dotted?: boolean;
+	  triplet?: boolean;
+	  className?: string;
+	}
 
 const durationLineCount = (duration: JianpuDuration) => {
   if (duration === 'sixteenth') return 2;
@@ -137,11 +138,12 @@ const OctaveDots = ({
 export function JianpuInputGlyph({
   pitch,
   accidental = '',
-  octave = 0,
-  duration = 'quarter',
-  dotted = false,
-  className = ''
-}: JianpuInputGlyphProps) {
+	  octave = 0,
+	  duration = 'quarter',
+	  dotted = false,
+	  triplet = false,
+	  className = ''
+	}: JianpuInputGlyphProps) {
   const normalizedOctave = Math.trunc(octave);
   const octaveDotCount = Math.min(2, Math.abs(normalizedOctave));
   const underlineCount = durationLineCount(duration);
@@ -155,16 +157,25 @@ export function JianpuInputGlyph({
       data-jianpu-pitch={pitch}
       data-jianpu-accidental={accidental || 'natural'}
       data-jianpu-octave={normalizedOctave}
-      data-jianpu-duration={duration}
-      data-jianpu-dotted={dotted ? 'true' : 'false'}
-    >
+	      data-jianpu-duration={duration}
+	      data-jianpu-dotted={dotted ? 'true' : 'false'}
+	      data-jianpu-triplet={triplet ? 'true' : 'false'}
+	    >
       <OctaveDots
         count={normalizedOctave > 0 ? octaveDotCount : 0}
         placement="high"
       />
 
-      <span className="flex h-[31px] items-center justify-center leading-none" data-jianpu-pitch-row>
-        {accidentalGlyph && (
+	      <span className="flex h-[31px] items-center justify-center leading-none" data-jianpu-pitch-row>
+	        {triplet && (
+	          <span
+	            className="absolute left-[calc(50%+13px)] top-[5px] text-[11px] font-black leading-none"
+	            data-jianpu-triplet-mark
+	          >
+	            3
+	          </span>
+	        )}
+	        {accidentalGlyph && (
           <span
             className="mr-[2px] text-[19px] font-semibold leading-none"
             data-jianpu-accidental-mark

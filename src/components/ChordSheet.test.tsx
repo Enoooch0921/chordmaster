@@ -121,6 +121,34 @@ describe('ChordSheet preview input caret', () => {
     expect(container.querySelector('.sheet-bar')).toHaveAttribute('data-preview-lower-lanes', '0');
   });
 
+  it('renders repeat endings as prominent house brackets', () => {
+    const endingSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [
+          { id: 'bar-1', chords: ['C'], ending: '1' },
+          { id: 'bar-2', chords: ['G'], ending: '1' }
+        ]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={endingSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+      />
+    );
+
+    const brackets = container.querySelectorAll('[data-sheet-ending-bracket="1"]');
+    expect(brackets).toHaveLength(2);
+    expect(brackets[0]).toHaveClass('border-l-[3px]');
+    expect(brackets[1]).toHaveClass('border-r-[3px]');
+    expect(container.querySelector('[data-sheet-ending-number="1"]')).toHaveClass('text-[12px]', 'font-black', 'bg-white');
+    expect(screen.getByText('1.')).toBeInTheDocument();
+  });
+
   it('expands the visible rhythm lane hit target while chord editing is active', () => {
     const rhythmSong: Song = {
       ...song,

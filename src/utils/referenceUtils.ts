@@ -1,4 +1,5 @@
 import { Key, SongReference, SongReferences } from '../types';
+import { normalizeTempoBpm } from './tempoUtils';
 
 const YOUTUBE_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 
@@ -49,10 +50,7 @@ export function getYouTubeEmbedUrl(videoId: string): string {
 }
 
 export function normalizeReferenceBpm(bpm: unknown): number | undefined {
-  if (bpm === '' || bpm === null || bpm === undefined) return undefined;
-  const numericBpm = typeof bpm === 'number' ? bpm : Number(bpm);
-  if (!Number.isFinite(numericBpm)) return undefined;
-  return Math.min(400, Math.max(20, Math.round(numericBpm)));
+  return normalizeTempoBpm(bpm);
 }
 
 export function normalizeSongReference(reference: unknown, validKeys: Set<string>): SongReference | undefined {

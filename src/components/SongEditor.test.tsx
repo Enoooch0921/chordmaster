@@ -213,4 +213,37 @@ describe('SongEditor shared notation commands', () => {
     const nextSong = onChange.mock.calls.at(-1)?.[0] as Song;
     expect(nextSong.pickup?.riff).toBe('#1_3_');
   });
+
+  it('adds section bars from the bar count field', () => {
+    const onChange = renderEditor(makeSong({}));
+
+    fireEvent.change(screen.getByLabelText('小節數'), { target: { value: '4' } });
+
+    const nextSong = onChange.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars).toHaveLength(4);
+    expect(nextSong.sections[0].bars[0].chords).toEqual(['C']);
+    expect(nextSong.sections[0].bars.slice(1).every((bar) => bar.id && bar.chords.length === 0)).toBe(true);
+  });
+
+  it('shrinks section bar count without removing written bars', () => {
+    const song: Song = {
+      ...makeSong({}),
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [
+          { id: 'bar-1', chords: ['C'] },
+          { id: 'bar-2', chords: ['G'] },
+          { id: 'bar-3', chords: [] }
+        ]
+      }]
+    };
+    const onChange = renderEditor(song);
+
+    fireEvent.change(screen.getByLabelText('小節數'), { target: { value: '1' } });
+
+    const nextSong = onChange.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars).toHaveLength(2);
+    expect(nextSong.sections[0].bars.map((bar) => bar.chords)).toEqual([['C'], ['G']]);
+  });
 });

@@ -15,11 +15,13 @@ import {
   absoluteJianpuPartsToRelative,
   buildJianpuNoteFromMode,
   buildJianpuPlaceholder,
+  buildJianpuPlaceholderFromUnits,
   clampRelativeOctave,
   convertAbsoluteJianpuToRelativeNotation,
   convertRelativeJianpuToAbsoluteNotation,
   findJianpuNoteRanges,
   findJianpuPlaceholderRanges,
+  getJianpuDurationUnits,
   getCanonicalJianpuBeatTokens,
   getCanonicalJianpuNotation,
   rebuildJianpuNote,
@@ -53,6 +55,7 @@ export type JianpuAction =
   | { type: 'set-octave'; octave: JianpuOctave }
   | { type: 'set-accidental'; accidental: JianpuAccidental }
   | { type: 'toggle-dot' }
+  | { type: 'toggle-triplet' }
   | { type: 'toggle-slur' }
   | { type: 'delete'; direction?: 'backward' | 'forward' }
   | { type: 'move'; direction: -1 | 1 }
@@ -75,6 +78,7 @@ export interface JianpuNoteLayout {
   octave: JianpuOctave;
   duration: JianpuDuration;
   dotted: boolean;
+  triplet: boolean;
   slurStart: boolean;
   slurEnd: boolean;
 }
@@ -82,6 +86,7 @@ export interface JianpuNoteLayout {
 export interface JianpuPlaceholderLayout {
   unitStart: number;
   unitEnd: number;
+  triplet: boolean;
 }
 
 export interface JianpuBeatLayout {
@@ -107,6 +112,7 @@ export interface JianpuInputAvailability {
   canEighth: boolean;
   canSixteenth: boolean;
   canDot: boolean;
+  canTriplet: boolean;
 }
 
 /**
@@ -123,6 +129,7 @@ export const DEFAULT_JIANPU_INPUT_MODE: JianpuInputMode = {
   duration: 'quarter',
   octave: 0,
   dotted: false,
+  triplet: false,
   accidental: ''
 };
 
@@ -154,6 +161,7 @@ type InternalPlaceholderItem = {
   units: number;
   duration: JianpuDuration;
   dotted: boolean;
+  triplet: boolean;
 };
 
 type InternalItem = InternalNoteItem | InternalPlaceholderItem;
@@ -185,21 +193,20 @@ const normalizeAccidental = (value: string | undefined): JianpuAccidental => (
   value?.includes('#') ? '#' : value?.includes('b') ? 'b' : ''
 );
 
-export const getJianpuDurationUnits = (duration: JianpuDuration, dotted = false): number => {
-  const base = duration === 'quarter' ? 4 : duration === 'eighth' ? 2 : 1;
-  return base + (dotted ? base / 2 : 0);
-};
-
-const getNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted'>): number => (
-  getJianpuDurationUnits(note.duration, note.dotted)
+const getNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'>): number => (
+  getJianpuDurationUnits(note.duration, note.dotted, note.triplet)
 );
 
-const normalizeInputMode = (mode: JianpuInputMode): JianpuInputMode => ({
-  ...mode,
-  octave: Number.isFinite(mode.octave) ? Math.trunc(mode.octave) : 0,
-  dotted: mode.duration === 'sixteenth' ? false : mode.dotted,
-  accidental: normalizeAccidental(mode.accidental)
-});
+const normalizeInputMode = (mode: JianpuInputMode): JianpuInputMode => {
+  const triplet = mode.duration !== 'sixteenth' && Boolean(mode.triplet);
+  return {
+    ...mode,
+    octave: Number.isFinite(mode.octave) ? Math.trunc(mode.octave) : 0,
+    dotted: triplet || mode.duration === 'sixteenth' ? false : mode.dotted,
+    triplet,
+    accidental: normalizeAccidental(mode.accidental)
+  };
+};
 
 export const fitJianpuInputModeToUnits = (
   mode: JianpuInputMode,
@@ -207,18 +214,18 @@ export const fitJianpuInputModeToUnits = (
 ): JianpuInputMode => {
   const normalized = normalizeInputMode(mode);
   if (availableUnits <= EPSILON) return normalized;
-  if (getJianpuDurationUnits(normalized.duration, normalized.dotted) <= availableUnits + EPSILON) {
+  if (getJianpuDurationUnits(normalized.duration, normalized.dotted, normalized.triplet) <= availableUnits + EPSILON) {
     return normalized;
   }
   if (
     normalized.dotted &&
-    getJianpuDurationUnits(normalized.duration, false) <= availableUnits + EPSILON
+    getJianpuDurationUnits(normalized.duration, false, normalized.triplet) <= availableUnits + EPSILON
   ) {
     return { ...normalized, dotted: false };
   }
   const duration = (['quarter', 'eighth', 'sixteenth'] as JianpuDuration[])
-    .find((candidate) => getJianpuDurationUnits(candidate) <= availableUnits + EPSILON);
-  return duration ? { ...normalized, duration, dotted: false } : normalized;
+    .find((candidate) => getJianpuDurationUnits(candidate, false, normalized.triplet && candidate !== 'sixteenth') <= availableUnits + EPSILON);
+  return duration ? { ...normalized, duration, dotted: false, triplet: normalized.triplet && duration !== 'sixteenth' } : normalized;
 };
 
 const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | null => {
@@ -238,14 +245,15 @@ const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | n
         units: getNoteUnits(note),
         note
       })),
-      ...findJianpuPlaceholderRanges(token).map((placeholder) => ({
-        kind: 'placeholder' as const,
-        charStart: placeholder.start,
-        charEnd: placeholder.end,
-        units: getJianpuDurationUnits(placeholder.duration, placeholder.dotted),
-        duration: placeholder.duration,
-        dotted: placeholder.dotted
-      }))
+	      ...findJianpuPlaceholderRanges(token).map((placeholder) => ({
+	        kind: 'placeholder' as const,
+	        charStart: placeholder.start,
+	        charEnd: placeholder.end,
+	        units: getJianpuDurationUnits(placeholder.duration, placeholder.dotted, placeholder.triplet),
+	        duration: placeholder.duration,
+	        dotted: placeholder.dotted,
+	        triplet: placeholder.triplet
+	      }))
     ].sort((left, right) => left.charStart - right.charStart || left.charEnd - right.charEnd);
 
     const carryInUnits = carryUnits;
@@ -289,17 +297,19 @@ const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | n
         pitch: item.note.pitch,
         accidental: item.note.accidental,
         octave: item.note.octave,
-        duration: item.note.duration,
-        dotted: item.note.dotted,
-        slurStart: item.note.slurStart,
-        slurEnd: item.note.slurEnd
+	        duration: item.note.duration,
+	        dotted: item.note.dotted,
+	        triplet: item.note.triplet,
+	        slurStart: item.note.slurStart,
+	        slurEnd: item.note.slurEnd
       }));
     const placeholders = items
       .filter((item): item is InternalPlaceholderItem => item.kind === 'placeholder')
-      .map((item): JianpuPlaceholderLayout => ({
-        unitStart: item.unitStart,
-        unitEnd: item.unitEnd
-      }));
+	      .map((item): JianpuPlaceholderLayout => ({
+	        unitStart: item.unitStart,
+	        unitEnd: item.unitEnd,
+	        triplet: item.triplet
+	      }));
 
     return {
       beatIndex: tokenIndex,
@@ -363,11 +373,11 @@ const clampCursor = (context: JianpuBarContext, cursor: JianpuCursor): JianpuCur
       noteIndex: selectedNote.noteIndex
     };
   }
-  return {
-    beatIndex,
-    unitIndex: Math.max(0, Math.min(context.beatUnits - 1, Math.trunc(cursor.unitIndex))),
-    noteIndex: null
-  };
+	  return {
+	    beatIndex,
+	    unitIndex: Math.max(0, Math.min(context.beatUnits - EPSILON, Number.isFinite(cursor.unitIndex) ? cursor.unitIndex : 0)),
+	    noteIndex: null
+	  };
 };
 
 const cursorForNote = (item: InternalNoteItem): JianpuCursor => ({
@@ -378,7 +388,7 @@ const cursorForNote = (item: InternalNoteItem): JianpuCursor => ({
 
 const cursorForAbsoluteUnit = (context: JianpuBarContext, absoluteUnit: number): JianpuCursor => {
   const totalUnits = context.beats.length * context.beatUnits;
-  const safeAbsoluteUnit = Math.max(0, Math.min(totalUnits - 1, Math.trunc(absoluteUnit)));
+  const safeAbsoluteUnit = Math.max(0, Math.min(totalUnits - EPSILON, Number.isFinite(absoluteUnit) ? absoluteUnit : 0));
   return {
     beatIndex: Math.floor(safeAbsoluteUnit / context.beatUnits),
     unitIndex: safeAbsoluteUnit % context.beatUnits,
@@ -478,7 +488,7 @@ export const getJianpuInputAvailability = (
 ): JianpuInputAvailability => {
   const context = buildContext(song, target);
   if (!context) {
-    return { remainingUnits: 0, canQuarter: false, canEighth: false, canSixteenth: false, canDot: false };
+	    return { remainingUnits: 0, canQuarter: false, canEighth: false, canSixteenth: false, canDot: false, canTriplet: false };
   }
   const selected = selectedNoteAtCursor(context, clampCursor(context, cursor));
   const remainingUnits = selected
@@ -488,12 +498,15 @@ export const getJianpuInputAvailability = (
   const mode = normalizeInputMode(inputMode);
   return {
     remainingUnits,
-    canQuarter: remainingUnits + EPSILON >= getJianpuDurationUnits('quarter', mode.dotted),
-    canEighth: remainingUnits + EPSILON >= getJianpuDurationUnits('eighth', mode.dotted),
-    canSixteenth: remainingUnits + EPSILON >= getJianpuDurationUnits('sixteenth', false),
-    canDot: mode.duration !== 'sixteenth' &&
-      remainingUnits + EPSILON >= getJianpuDurationUnits(mode.duration, true)
-  };
+	    canQuarter: remainingUnits + EPSILON >= getJianpuDurationUnits('quarter', mode.dotted, mode.triplet),
+	    canEighth: remainingUnits + EPSILON >= getJianpuDurationUnits('eighth', mode.dotted, mode.triplet),
+	    canSixteenth: remainingUnits + EPSILON >= getJianpuDurationUnits('sixteenth', false),
+	    canDot: !mode.triplet &&
+	      mode.duration !== 'sixteenth' &&
+	      remainingUnits + EPSILON >= getJianpuDurationUnits(mode.duration, true),
+	    canTriplet: mode.duration !== 'sixteenth' &&
+	      remainingUnits + EPSILON >= getJianpuDurationUnits(mode.duration, false, true)
+	  };
 };
 
 export const getJianpuSectionPlayKey = (
@@ -719,11 +732,12 @@ const findContiguousPlaceholders = (
           unitStart: beat.occupiedEndUnits,
           unitEnd: beat.beatUnits,
           absoluteUnitStart: beat.beatIndex * context.beatUnits + beat.occupiedEndUnits,
-          absoluteUnitEnd: (beat.beatIndex + 1) * context.beatUnits,
-          units: implicitFreeUnits,
-          duration: 'sixteenth' as const,
-          dotted: false
-        }
+	          absoluteUnitEnd: (beat.beatIndex + 1) * context.beatUnits,
+	          units: implicitFreeUnits,
+	          duration: 'sixteenth' as const,
+	          dotted: false,
+	          triplet: false
+	        }
       ];
     })
     .sort((left, right) => left.absoluteUnitStart - right.absoluteUnitStart);
@@ -754,9 +768,9 @@ const resizeSelectedNote = (
     tokenIndex: selected.tokenIndex,
     start: selected.charStart,
     end: selected.charEnd,
-    replacement: delta < -EPSILON
-      ? `${replacement}${'s'.repeat(Math.round(Math.abs(delta)))}`
-      : replacement
+	    replacement: delta < -EPSILON
+	      ? `${replacement}${buildJianpuPlaceholderFromUnits(Math.abs(delta))}`
+	      : replacement
   }];
 
   if (delta > EPSILON) {
@@ -769,12 +783,12 @@ const resizeSelectedNote = (
       const available = placeholder.absoluteUnitEnd - availableFrom;
       const consumed = Math.min(remaining, available);
       const suffixUnits = Math.max(0, placeholder.units - prefixUnits - consumed);
-      updates.push({
-        tokenIndex: placeholder.tokenIndex,
-        start: placeholder.charStart,
-        end: placeholder.charEnd,
-        replacement: `${'s'.repeat(Math.round(prefixUnits))}${'s'.repeat(Math.round(suffixUnits))}`
-      });
+	      updates.push({
+	        tokenIndex: placeholder.tokenIndex,
+	        start: placeholder.charStart,
+	        end: placeholder.charEnd,
+	        replacement: `${buildJianpuPlaceholderFromUnits(prefixUnits)}${buildJianpuPlaceholderFromUnits(suffixUnits)}`
+	      });
       remaining -= consumed;
     }
     if (remaining > EPSILON) {
@@ -795,12 +809,13 @@ const cursorInputModeFromNote = (
   pitchContext?: JianpuPitchContext
 ): JianpuInputMode => {
   const display = displayNoteForInputMode(song, target, note, pitchContext);
-  return {
-    duration: display.duration,
-    octave: display.octave,
-    dotted: display.dotted,
-    accidental: normalizeAccidental(display.accidental)
-  };
+	  return {
+	    duration: display.duration,
+	    octave: display.octave,
+	    dotted: display.dotted,
+	    triplet: display.triplet,
+	    accidental: normalizeAccidental(display.accidental)
+	  };
 };
 
 /** Return the visible input controls represented by a selected semantic note. */
@@ -978,12 +993,12 @@ const insertPitch = (
     const available = item.absoluteUnitEnd - start;
     const consumed = Math.min(remaining, available);
     const suffixUnits = Math.max(0, item.units - prefixUnits - consumed);
-    updates.push({
-      tokenIndex: item.tokenIndex,
-      start: item.charStart,
-      end: item.charEnd,
-      replacement: `${'s'.repeat(Math.round(prefixUnits))}${inserted ? '' : noteText}${'s'.repeat(Math.round(suffixUnits))}`
-    });
+	    updates.push({
+	      tokenIndex: item.tokenIndex,
+	      start: item.charStart,
+	      end: item.charEnd,
+	      replacement: `${buildJianpuPlaceholderFromUnits(prefixUnits)}${inserted ? '' : noteText}${buildJianpuPlaceholderFromUnits(suffixUnits)}`
+	    });
     inserted = true;
     remaining -= consumed;
   }
@@ -1048,23 +1063,24 @@ const setDuration = (
 ): JianpuCommandResult => {
   const context = buildContext(song, target);
   if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
-  const safeCursor = clampCursor(context, cursor);
-  const selected = selectedNoteAtCursor(context, safeCursor);
-  const dotted = duration === 'sixteenth' ? false : (selected?.note.dotted ?? inputMode.dotted);
-  const nextInput = normalizeInputMode({ ...inputMode, duration, dotted });
-  if (!selected) {
-    const available = getAvailableUnitsAtCursor(context, safeCursor);
-    if (getJianpuDurationUnits(duration, dotted) > available + EPSILON) {
-      if (dotted && getJianpuDurationUnits(duration) <= available + EPSILON) {
-        return baseResult(song, target, safeCursor, { ...nextInput, dotted: false });
-      }
-      return baseResult(song, target, safeCursor, inputMode, '這個位置沒有足夠空位改成這個時值。');
-    }
-    return baseResult(song, target, safeCursor, nextInput);
-  }
-  const replacement = rebuildJianpuNote(selected.note, { duration, dotted });
-  const resized = resizeSelectedNote(song, target, context, selected, replacement);
-  return baseResult(resized.song, target, safeCursor, resized.error ? inputMode : nextInput, resized.error);
+	  const safeCursor = clampCursor(context, cursor);
+	  const selected = selectedNoteAtCursor(context, safeCursor);
+	  const triplet = duration !== 'sixteenth' && (selected?.note.triplet ?? inputMode.triplet);
+	  const dotted = triplet || duration === 'sixteenth' ? false : (selected?.note.dotted ?? inputMode.dotted);
+	  const nextInput = normalizeInputMode({ ...inputMode, duration, dotted, triplet });
+	  if (!selected) {
+	    const available = getAvailableUnitsAtCursor(context, safeCursor);
+	    if (getJianpuDurationUnits(duration, dotted, triplet) > available + EPSILON) {
+	      if (dotted && getJianpuDurationUnits(duration, false, triplet) <= available + EPSILON) {
+	        return baseResult(song, target, safeCursor, { ...nextInput, dotted: false });
+	      }
+	      return baseResult(song, target, safeCursor, inputMode, '這個位置沒有足夠空位改成這個時值。');
+	    }
+	    return baseResult(song, target, safeCursor, nextInput);
+	  }
+	  const replacement = rebuildJianpuNote(selected.note, { duration, dotted, triplet });
+	  const resized = resizeSelectedNote(song, target, context, selected, replacement);
+	  return baseResult(resized.song, target, safeCursor, resized.error ? inputMode : nextInput, resized.error);
 };
 
 const toggleDot = (
@@ -1076,25 +1092,61 @@ const toggleDot = (
   const context = buildContext(song, target);
   if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
   const safeCursor = clampCursor(context, cursor);
+	  const selected = selectedNoteAtCursor(context, safeCursor);
+	  const targetNote = selected ?? noteEndingAtCursor(context, safeCursor);
+	  const duration = targetNote?.note.duration ?? inputMode.duration;
+	  const triplet = targetNote?.note.triplet ?? inputMode.triplet;
+	  const dotted = !(targetNote?.note.dotted ?? inputMode.dotted);
+	  if (dotted && triplet) {
+	    return baseResult(song, target, safeCursor, inputMode, '三連音不能加附點。');
+	  }
+	  if (dotted && duration === 'sixteenth') {
+	    return baseResult(song, target, safeCursor, inputMode, '十六分音符不支援附點。');
+	  }
+	  const nextInput = normalizeInputMode({ ...inputMode, duration, dotted, triplet });
+	  if (!targetNote) {
+	    const available = getAvailableUnitsAtCursor(context, safeCursor);
+	    if (getJianpuDurationUnits(duration, dotted, triplet) > available + EPSILON) {
+	      return baseResult(song, target, safeCursor, inputMode, '這個位置沒有足夠空位加附點。');
+	    }
+    return baseResult(song, target, safeCursor, nextInput);
+  }
+	  const replacement = rebuildJianpuNote(targetNote.note, { dotted });
+	  const resized = resizeSelectedNote(song, target, context, targetNote, replacement);
+	  const resultCursor = !selected && !resized.error
+	    ? cursorForAbsoluteUnit(context, targetNote.absoluteUnitStart + getJianpuDurationUnits(duration, dotted, triplet))
+	    : safeCursor;
+	  return baseResult(resized.song, target, resultCursor, resized.error ? inputMode : nextInput, resized.error);
+};
+
+const toggleTriplet = (
+  song: Song,
+  target: SongBarIdentity,
+  cursor: JianpuCursor,
+  inputMode: JianpuInputMode
+): JianpuCommandResult => {
+  const context = buildContext(song, target);
+  if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
+  const safeCursor = clampCursor(context, cursor);
   const selected = selectedNoteAtCursor(context, safeCursor);
   const targetNote = selected ?? noteEndingAtCursor(context, safeCursor);
   const duration = targetNote?.note.duration ?? inputMode.duration;
-  const dotted = !(targetNote?.note.dotted ?? inputMode.dotted);
-  if (dotted && duration === 'sixteenth') {
-    return baseResult(song, target, safeCursor, inputMode, '十六分音符不支援附點。');
+  if (duration === 'sixteenth') {
+    return baseResult(song, target, safeCursor, inputMode, '十六分音符不支援三連音。');
   }
-  const nextInput = normalizeInputMode({ ...inputMode, duration, dotted });
+  const triplet = !(targetNote?.note.triplet ?? inputMode.triplet);
+  const nextInput = normalizeInputMode({ ...inputMode, duration, dotted: false, triplet });
   if (!targetNote) {
     const available = getAvailableUnitsAtCursor(context, safeCursor);
-    if (getJianpuDurationUnits(duration, dotted) > available + EPSILON) {
-      return baseResult(song, target, safeCursor, inputMode, '這個位置沒有足夠空位加附點。');
+    if (getJianpuDurationUnits(duration, false, triplet) > available + EPSILON) {
+      return baseResult(song, target, safeCursor, inputMode, '這個位置沒有足夠空位切換三連音。');
     }
     return baseResult(song, target, safeCursor, nextInput);
   }
-  const replacement = rebuildJianpuNote(targetNote.note, { dotted });
+  const replacement = rebuildJianpuNote(targetNote.note, { dotted: false, triplet });
   const resized = resizeSelectedNote(song, target, context, targetNote, replacement);
   const resultCursor = !selected && !resized.error
-    ? cursorForAbsoluteUnit(context, targetNote.absoluteUnitStart + getJianpuDurationUnits(duration, dotted))
+    ? cursorForAbsoluteUnit(context, targetNote.absoluteUnitStart + getJianpuDurationUnits(duration, false, triplet))
     : safeCursor;
   return baseResult(resized.song, target, resultCursor, resized.error ? inputMode : nextInput, resized.error);
 };
@@ -1226,7 +1278,7 @@ const deleteAtCursor = (
       : notes.find((note) => note.unitStart >= safeCursor.unitIndex - EPSILON || note.unitEnd > safeCursor.unitIndex) ?? null;
   }
   if (selected) {
-    const placeholder = buildJianpuPlaceholder(selected.note.duration, selected.note.dotted);
+	    const placeholder = buildJianpuPlaceholder(selected.note.duration, selected.note.dotted, selected.note.triplet);
     const tokens = [...context.tokens];
     const nextToken = replaceJianpuRange(
       tokens[selected.tokenIndex],
@@ -1292,11 +1344,12 @@ const clearFormatting = (
   );
   const replacement = rebuildJianpuNote(selected.note, {
     pitch: resolved.pitch,
-    accidental: resolved.accidental,
-    duration: 'quarter',
-    octave: resolved.octave,
-    dotted: false,
-    slurStart: false,
+	    accidental: resolved.accidental,
+	    duration: 'quarter',
+	    octave: resolved.octave,
+	    dotted: false,
+	    triplet: false,
+	    slurStart: false,
     slurEnd: false
   });
   const resized = resizeSelectedNote(song, target, context, selected, replacement);
@@ -1328,10 +1381,12 @@ export const applyJianpuCommand = (
       return updateSelectedPitchProperty(song, target, safeCursor, safeInputMode, 'octave', action.octave, pitchContext);
     case 'set-accidental':
       return updateSelectedPitchProperty(song, target, safeCursor, safeInputMode, 'accidental', action.accidental, pitchContext);
-    case 'toggle-dot':
-      return toggleDot(song, target, safeCursor, safeInputMode);
-    case 'toggle-slur':
-      return toggleSlur(song, target, safeCursor, safeInputMode);
+	    case 'toggle-dot':
+	      return toggleDot(song, target, safeCursor, safeInputMode);
+	    case 'toggle-triplet':
+	      return toggleTriplet(song, target, safeCursor, safeInputMode);
+	    case 'toggle-slur':
+	      return toggleSlur(song, target, safeCursor, safeInputMode);
     case 'delete':
       return deleteAtCursor(song, target, safeCursor, safeInputMode, action.direction ?? 'backward', pitchContext);
     case 'move': {

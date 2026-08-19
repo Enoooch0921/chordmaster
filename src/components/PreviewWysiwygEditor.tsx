@@ -6,6 +6,7 @@ import KeyPicker from './KeyPicker';
 import CapoPicker from './CapoPicker';
 import { getUiCopy } from '../constants/i18n';
 import { formatInitialCaps } from '../utils/textUtils';
+import { formatTempoBpm, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import SongMetadataPanel from './SongMetadataPanel';
 import type { PreviewEditorDeviceLayout } from '../lib/previewEditorLayout';
@@ -50,8 +51,8 @@ const TEMPO_STEP_GAP = 2;
 const TEMPO_STEP_CONTROLS_WIDTH = TEMPO_STEP_BUTTON_SIZE * 2 + TEMPO_STEP_GAP * 2;
 
 const getTempoValueWidth = (anchorRect: PreviewAnchorRect, value: string) => {
-  const digitCount = value.replace(/\D+/g, '').length;
-  return Math.max(anchorRect.width, digitCount >= 3 ? 44 : digitCount === 1 ? 20 : 30);
+  const digitCount = value.replace(/[^\d.]+/g, '').length;
+  return Math.max(anchorRect.width, digitCount >= 5 ? 54 : digitCount >= 3 ? 44 : digitCount === 1 ? 20 : 30);
 };
 
 const getTempoEditBounds = (anchorKey: string, fallbackLeft: number, fallbackRight: number) => {
@@ -203,12 +204,6 @@ const clampNumber = (value: number, min: number, max: number) => (
   Math.min(max, Math.max(min, value))
 );
 
-const normalizeTempo = (value: string) => {
-  const digits = value.replace(/\D+/g, '').slice(0, 3);
-  if (!digits) return undefined;
-  return clampNumber(Number(digits), 20, 400);
-};
-
 const sanitizeTimeSignatureText = (value: string) => {
   const cleaned = value.replace(/[^\d/]+/g, '');
   if (!cleaned.includes('/')) {
@@ -312,7 +307,7 @@ export default function PreviewWysiwygEditor({
   const [titleDraft, setTitleDraft] = React.useState(song.title);
   const [versionDraft, setVersionDraft] = React.useState(getVersionValue(song));
   const [translatorDraft, setTranslatorDraft] = React.useState(song.translator ?? '');
-  const [tempoDraft, setTempoDraft] = React.useState(typeof song.tempo === 'number' ? String(song.tempo) : '');
+  const [tempoDraft, setTempoDraft] = React.useState(formatTempoBpm(song.tempo));
   const [timeDraft, setTimeDraft] = React.useState(song.timeSignature);
   const usesMetadataPanel = target.field === 'metadata'
     || target.field === 'groove'
@@ -329,7 +324,7 @@ export default function PreviewWysiwygEditor({
     setTitleDraft(song.title);
     setVersionDraft(getVersionValue(song));
     setTranslatorDraft(song.translator ?? '');
-    setTempoDraft(typeof song.tempo === 'number' ? String(song.tempo) : '');
+    setTempoDraft(formatTempoBpm(song.tempo));
     setTimeDraft(song.timeSignature);
   }, [song.composer, song.lyricist, song.tempo, song.timeSignature, song.title, song.translator, target.anchorKey, target.field]);
 
@@ -449,18 +444,18 @@ export default function PreviewWysiwygEditor({
     if (!markCommitted()) {
       return;
     }
-    onChange({ ...song, tempo: normalizeTempo(tempoDraft) });
+    onChange({ ...song, tempo: normalizeTempoBpm(tempoDraft) });
     onClose();
   };
 
   const applyTempoValue = (value: number) => {
-    const nextTempo = clampNumber(value, 20, 400);
-    setTempoDraft(String(nextTempo));
+    const nextTempo = normalizeTempoBpm(value) ?? 120;
+    setTempoDraft(formatTempoBpm(nextTempo));
     onChange({ ...song, tempo: nextTempo });
   };
 
   const applyTempoDelta = (delta: number) => {
-    const currentTempo = normalizeTempo(tempoDraft) ?? song.tempo ?? 120;
+    const currentTempo = normalizeTempoBpm(tempoDraft) ?? song.tempo ?? 120;
     applyTempoValue(currentTempo + delta);
   };
 
@@ -745,14 +740,14 @@ export default function PreviewWysiwygEditor({
       <input
         data-wysiwyg-autofocus
         type="text"
-        inputMode="numeric"
-        pattern="[0-9]*"
+        inputMode="decimal"
+        pattern="[0-9]*[.]?[0-9]?"
         enterKeyHint="done"
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
         value={tempoDraft}
-        onChange={(event) => setTempoDraft(event.target.value.replace(/\D+/g, '').slice(0, 3))}
+        onChange={(event) => setTempoDraft(sanitizeTempoInput(event.target.value))}
         onBlur={commitTempo}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {

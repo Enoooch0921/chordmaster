@@ -45,6 +45,7 @@ import { ALL_KEYS, getPlayKey, getSuggestedGuitarCapo, getTransposeOffset, norma
 import { normalizeBarChords } from './utils/barUtils';
 import { getEffectiveTimeSignature, parseTimeSignature } from './utils/rhythmUtils';
 import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
+import { normalizeTempoBpm } from './utils/tempoUtils';
 import { useThemeMode } from './hooks/useThemeMode';
 import { useToast } from './components/Toast';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
@@ -896,13 +897,6 @@ const isReferenceOnlySongChange = (previousSong: Song, nextSong: Song): boolean 
   return JSON.stringify(previousRest) === JSON.stringify(nextRest);
 };
 
-const normalizeTempo = (tempo: unknown): number | undefined => {
-  if (tempo === '' || tempo === null || tempo === undefined) return undefined;
-  const numericTempo = typeof tempo === 'number' ? tempo : Number(tempo);
-  if (!Number.isFinite(numericTempo)) return undefined;
-  return Math.min(400, Math.max(20, Math.round(numericTempo)));
-};
-
 const normalizeOptionalText = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
   return value;
@@ -986,141 +980,206 @@ const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
 };
 
 const INITIAL_SONG: Song = {
-  title: "Speak Jesus",
+  title: "符號測試頁",
   shuffle: true,
-  originalKey: "E",
-  currentKey: "E",
+  originalKey: "Eb",
+  currentKey: "Eb",
   showAbsoluteJianpu: false,
-  tempo: 74,
+  tempo: 72,
   timeSignature: "4/4",
-  barNumberMode: 'none',
+  useSectionColors: true,
+  barNumberMode: 'all',
   nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
   chordFontPreset: DEFAULT_CHORD_FONT_PRESET,
+  pickup: {
+    id: 'test-pickup',
+    rhythm: 'e~ e',
+    riff: "(#5_) 6_"
+  },
   sections: [
     {
-      id: "s1",
-      title: "Intro",
+      id: "test-bars",
+      title: "Bars / Marks",
       bars: [
-        { chords: ["E"], riff: "3 - 4 -", riffLabel: "Riff" },
-        { chords: ["%"] },
-        { chords: ["C#m"], riff: "5 - 7 i", riffLabel: "Riff" },
-        { chords: ["/"] },
-        { chords: ["A"] },
-        { chords: ["%"] }
+        {
+          id: "test-repeat-start",
+          chords: ["Eb"],
+          repeatStart: true,
+          leftMarker: 'segno',
+          leftText: 'Segno',
+          annotation: "Intro",
+          rhythm: "qr e~ q q e",
+          rhythmLabel: "Rh",
+          rhythmMark: { color: 'emerald' },
+          chordMarks: { 0: { special: true, color: 'amber' } }
+        },
+        {
+          id: "test-tie-target",
+          chords: ["Bb/D"],
+          rightMarker: 'coda',
+          rightText: 'To Coda',
+          rhythm: "q^ e e s s e q",
+          rhythmMark: { color: 'sky' },
+          unisonMark: { enabled: true, color: 'rose' }
+        },
+        {
+          id: "test-ending-one",
+          chords: ["C#m7b5", "", "F#dim7", ""],
+          ending: "1,2",
+          annotation: "Push",
+          rhythm: "e3 e3 e3 q. e",
+          riff: "1_t2_t3_t | 3= 4= | b5. | 6'",
+          riffLabel: "Riff"
+        },
+        {
+          id: "test-repeat-end",
+          chords: ["Gaug", "", "A7#11", ""],
+          ending: "1,2",
+          repeatEnd: true,
+          rightMarker: 'ds-al-coda',
+          rhythm: "s s s s e~ e q q",
+          riff: "5, 6, | 7 1' | 0 | -"
+        }
       ]
     },
     {
-      id: "s2",
-      title: "Verse 1, 2",
+      id: "test-chords",
+      title: "Chords / Rests",
       bars: [
-        { chords: ["E"], repeatStart: true },
-        { chords: ["%"] },
-        { chords: ["C#m"] },
-        { chords: ["%"] },
-        { chords: ["A"] },
-        { chords: ["%"] },
-        { chords: ["E"], riff: "3 - 4 -", riffLabel: "Riff" },
-        { chords: ["E"], riff: "5 - 7 i", riffLabel: "Riff", repeatEnd: true }
+        {
+          id: "test-percent",
+          chords: ["%"],
+          label: "Perc",
+          annotation: "Repeat",
+          rhythm: "q q q q"
+        },
+        {
+          id: "test-whole-rest",
+          chords: ["0w"],
+          leftMarker: 'coda',
+          leftText: 'Coda',
+          rhythm: "wr"
+        },
+        {
+          id: "test-half-rest",
+          chords: ["0h", "", "Db/F", ""],
+          timeSignature: "3/4",
+          annotation: "3/4",
+          rhythm: "h qr",
+          riff: "1 2 | 3",
+          riffLabel: "3/4"
+        },
+        {
+          id: "test-final-bar",
+          chords: ["|4|"],
+          finalBar: true,
+          rightMarker: 'fine',
+          rhythm: "w"
+        }
       ]
     },
     {
-      id: "s3",
-      title: "Chorus",
+      id: "test-meter",
+      title: "Meter / Jianpu",
+      keyChangeTo: "F",
       bars: [
-        { chords: ["B", "E/G#"], repeatStart: true },
-        { chords: ["A"] },
-        { chords: ["E"] },
-        { chords: ["E"] },
-        { chords: ["B", "E/G#"] },
-        { chords: ["A"] },
-        { chords: ["E"], ending: "1", riff: "3 - 4 -", riffLabel: "Riff" },
-        { chords: ["E"], ending: "1", riff: "5 - 7 i", riffLabel: "Riff", repeatEnd: true }
+        {
+          id: "test-six-eight",
+          chords: ["F", "", "C/E", ""],
+          timeSignature: "6/8",
+          repeatStart: true,
+          annotation: "Key F",
+          rhythm: "e e e e e e",
+          riff: "1_ 2_ 3_ | 4_ 5_ 6_",
+          riffLabel: "6/8"
+        },
+        {
+          id: "test-dotted",
+          chords: ["Dm9", "", "G13", ""],
+          timeSignature: "6/8",
+          rhythm: "q. q.",
+          riff: "(6_) 7_ 1' | 2' 3' 4'",
+          rhythmLabel: "Dot"
+        },
+        {
+          id: "test-minor-quality",
+          chords: ["Bbmaj9", "", "EbmMaj7", ""],
+          timeSignature: "5/4",
+          annotation: "5/4",
+          rhythm: "q q e e q q",
+          riff: "b7 6 | #5 4 | 3"
+        },
+        {
+          id: "test-dc",
+          chords: ["Csus4", "C", "F/A", "Bb"],
+          rightMarker: 'dc',
+          rhythm: "e~ e e e q q",
+          riff: "1= 2= 3= 4= | 5 | 6 | 7"
+        }
       ]
     },
     {
-      id: "s4",
-      title: "Breakdown",
+      id: "test-lanes",
+      title: "Lanes / Text",
       bars: [
-        { chords: ["E"], ending: "2" },
-        { chords: ["E"], ending: "2" }
+        {
+          id: "test-shared-label",
+          chords: ["Ab"],
+          label: "EG",
+          annotation: "Label",
+          rhythm: "q^ q q q",
+          riff: "1 0 | 2 - | 3 | 4"
+        },
+        {
+          id: "test-rhythm-only",
+          chords: [],
+          rhythm: "q e e q~ q",
+          rhythmLabel: "Clap",
+          rhythmMark: { color: 'violet' }
+        },
+        {
+          id: "test-riff-only",
+          chords: [],
+          riff: "(1 2) | #3_ b4_ | 5= 6= 7= 1'= | 0",
+          riffLabel: "Lead"
+        },
+        {
+          id: "test-outro-end",
+          chords: ["Eb", "", "Bb/D", ""],
+          rightMarker: 'ds-al-fine',
+          annotation: "Outro",
+          rhythm: "q q q q",
+          unisonMark: { enabled: true, color: 'sky' }
+        }
       ]
     },
     {
-      id: "s5",
-      title: "Verse 3",
+      id: "test-overflow",
+      title: "Stress",
       bars: [
-        { chords: ["E"] },
-        { chords: ["%"] },
-        { chords: ["C#m"] },
-        { chords: ["%"] },
-        { chords: ["A"] },
-        { chords: ["%"] },
-        { chords: ["E"] },
-        { chords: ["E"] }
-      ]
-    },
-    {
-      id: "s6",
-      title: "Chorus",
-      bars: [
-        { chords: ["B", "E/G#"] },
-        { chords: ["A"] },
-        { chords: ["E"] },
-        { chords: ["E"] },
-        { chords: ["B", "E/G#"] },
-        { chords: ["A"] },
-        { chords: ["E"] },
-        { chords: ["E"] }
-      ]
-    },
-    {
-      id: "s7",
-      title: "Bridge",
-      bars: [
-        { chords: ["E"], annotation: "AG 8 beats" },
-        { chords: ["Esus4", "E"] },
-        { chords: ["C#m"] },
-        { chords: ["C#m6", "C#m"] },
-        { chords: ["A"] },
-        { chords: ["A"] },
-        { chords: ["E"], annotation: "Kick In" },
-        { chords: ["E"] }
-      ]
-    },
-    {
-      id: "s8",
-      title: "Bridge",
-      bars: [
-        { chords: ["E"], annotation: "8 beat build" },
-        { chords: ["E"] },
-        { chords: ["C#m"] },
-        { chords: ["C#m"] },
-        { chords: ["A"] },
-        { chords: ["A"] },
-        { chords: ["E"], annotation: "16 beat build" },
-        { chords: ["E"] }
-      ]
-    },
-    {
-      id: "s9",
-      title: "Up Chorus",
-      bars: [
-        { chords: ["B", "E/G#"], repeatStart: true },
-        { chords: ["A"] },
-        { chords: ["E"] },
-        { chords: ["E", "C#m"] },
-        { chords: ["B", "E/G#"] },
-        { chords: ["A"] },
-        { chords: ["E"], ending: "1" },
-        { chords: ["E"], ending: "1", repeatEnd: true }
-      ]
-    },
-    {
-      id: "s10",
-      title: "Breakdown",
-      bars: [
-        { chords: ["E"], ending: "2" },
-        { chords: ["E"], ending: "2" }
+        {
+          id: "test-dense-chords",
+          chords: ["Ebsus4", "Eb", "Bb7/D", "Abadd9"],
+          leftText: 'Vamp',
+          rhythm: "s s s s s s s s q q"
+        },
+        {
+          id: "test-cross-bar-out",
+          chords: ["Fm11"],
+          rhythm: "q q q q~"
+        },
+        {
+          id: "test-cross-bar-in",
+          chords: ["Fm11"],
+          rhythm: "q q q q"
+        },
+        {
+          id: "test-terminal",
+          chords: ["Eb6/9"],
+          finalBar: true,
+          rightText: 'End',
+          rhythm: "w"
+        }
       ]
     }
   ]
@@ -1277,7 +1336,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
     shuffle: normalizeBoolean(song.shuffle),
     originalKey,
     currentKey,
-    tempo: normalizeTempo(song.tempo),
+    tempo: normalizeTempoBpm(song.tempo),
     timeSignature: normalizeText(song.timeSignature, '4/4'),
     useSectionColors: normalizeBoolean(song.useSectionColors),
     showNashvilleNumbers: normalizeBoolean(song.showNashvilleNumbers),

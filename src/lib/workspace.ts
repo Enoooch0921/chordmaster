@@ -5,6 +5,7 @@ import { ALL_KEYS } from '../utils/musicUtils';
 import { getDefaultSectionOrder } from '../utils/setlistUtils';
 import { normalizeBarChords } from '../utils/barUtils';
 import { normalizeSongReferences } from '../utils/referenceUtils';
+import { normalizeTempoBpm } from '../utils/tempoUtils';
 import { isAnnotationColorId } from '../constants/annotationColors';
 import { repairSongStructure } from './songEditing';
 
@@ -55,13 +56,6 @@ export interface PendingSyncPayload {
 }
 
 export const cloneValue = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
-
-const normalizeTempo = (tempo: unknown): number | undefined => {
-  if (tempo === '' || tempo === null || tempo === undefined) return undefined;
-  const numericTempo = typeof tempo === 'number' ? tempo : Number(tempo);
-  if (!Number.isFinite(numericTempo)) return undefined;
-  return Math.min(400, Math.max(20, Math.round(numericTempo)));
-};
 
 const normalizeOptionalText = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
@@ -218,7 +212,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
     shuffle: normalizeBoolean(song.shuffle),
     originalKey,
     currentKey,
-    tempo: normalizeTempo(song.tempo),
+    tempo: normalizeTempoBpm(song.tempo),
     timeSignature: normalizeText(song.timeSignature, '4/4'),
     useSectionColors: normalizeBoolean(song.useSectionColors),
     showNashvilleNumbers: normalizeBoolean(song.showNashvilleNumbers),

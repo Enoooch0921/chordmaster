@@ -367,7 +367,7 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: '切換高八度簡譜' })).toHaveClass('!bg-indigo-600');
     expect(screen.getByRole('button', { name: '切換簡譜附點' })).toHaveClass('!bg-indigo-600');
     expect(pitchKey).toHaveTextContent('1');
-    expect(document.querySelectorAll('[data-jianpu-input-glyph]')).toHaveLength(11);
+    expect(document.querySelectorAll('[data-jianpu-input-glyph]')).toHaveLength(12);
   });
 
   it('keeps the jianpu movable/fixed input toggle separate from song mutation', async () => {

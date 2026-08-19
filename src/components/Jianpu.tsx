@@ -1,5 +1,5 @@
 import React from 'react';
-import { JianpuDuration, JianpuNoteRange, findJianpuNoteRanges, findJianpuPlaceholderRanges } from '../utils/jianpuUtils';
+import { JianpuNoteRange, findJianpuNoteRanges, findJianpuPlaceholderRanges, getJianpuDurationUnits } from '../utils/jianpuUtils';
 import { parseTimeSignature } from '../utils/rhythmUtils';
 
 interface JianpuProps {
@@ -39,6 +39,13 @@ interface UnderlineSegment {
   leftUnits: number;
   rightUnits: number;
   noteCount: number;
+}
+
+interface TripletSegment {
+  key: string;
+  tokenIndex: number;
+  leftUnits: number;
+  rightUnits: number;
 }
 
 interface SlurSegment {
@@ -102,17 +109,14 @@ const getDurationLevel = (note: Pick<JianpuNoteRange, 'duration'>) => {
   return 0;
 };
 
-const getBaseDurationUnits = (duration: JianpuDuration) => (
-  duration === 'quarter' ? 4 : duration === 'eighth' ? 2 : 1
+const getLayoutUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'>) => (
+  getJianpuDurationUnits(note.duration, note.dotted, note.triplet)
 );
 
-const getLayoutUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted'>) => {
-  const baseUnits = getBaseDurationUnits(note.duration);
-  return baseUnits + (note.dotted ? baseUnits / 2 : 0);
-};
-
-const getAnchorOffsetUnits = (note: Pick<JianpuNoteRange, 'duration'> | Pick<LayoutPlaceholder, 'duration'>) => (
-  getBaseDurationUnits(note.duration) / 2
+const getAnchorOffsetUnits = (
+  note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'> | Pick<LayoutPlaceholder, 'duration' | 'dotted' | 'triplet'>
+) => (
+  getLayoutUnits(note) / 2
 );
 
 const Jianpu: React.FC<JianpuProps> = ({
@@ -174,9 +178,10 @@ const Jianpu: React.FC<JianpuProps> = ({
         tokenPaddingUnits: 14,
         octaveDotSize: 1.5 * scale,
         dottedDotSize: 1.8 * scale,
-        underlineStroke: 1.2 * scale,
-        slurBaseY: 6 * scale,
-        highlightInsetY: 1.8 * scale,
+	        underlineStroke: 1.2 * scale,
+	        slurBaseY: 6 * scale,
+	        tripletY: 0.5 * scale,
+	        highlightInsetY: 1.8 * scale,
         highlightInsetXUnits: 4,
         placeholderSize: 2.4 * scale
       };
@@ -199,9 +204,10 @@ const Jianpu: React.FC<JianpuProps> = ({
         tokenPaddingUnits: 12,
         octaveDotSize: 2.3 * scale,
         dottedDotSize: 1.5 * scale,
-        underlineStroke: 1.2 * scale,
-        slurBaseY: 13.5 * scale,
-        highlightInsetY: 2.5 * scale,
+	        underlineStroke: 1.2 * scale,
+	        slurBaseY: 13.5 * scale,
+	        tripletY: 4.5 * scale,
+	        highlightInsetY: 2.5 * scale,
         highlightInsetXUnits: 6,
         placeholderSize: 3.2 * scale
       };
@@ -223,18 +229,20 @@ const Jianpu: React.FC<JianpuProps> = ({
       tokenPaddingUnits: 17,
       octaveDotSize: 3.2 * scale,
       dottedDotSize: 3 * scale,
-      underlineStroke: 1.7 * scale,
-      slurBaseY: 16 * scale,
-      highlightInsetY: 3.5 * scale,
+	      underlineStroke: 1.7 * scale,
+	      slurBaseY: 16 * scale,
+	      tripletY: 1.5 * scale,
+	      highlightInsetY: 3.5 * scale,
       highlightInsetXUnits: 6,
       placeholderSize: 4 * scale
     };
   }, [compact, scale]);
 
-  const { layoutNotes, layoutPlaceholders, underlineSegments, slurSegments } = React.useMemo(() => {
-    const notes: LayoutNote[] = [];
-    const placeholders: LayoutPlaceholder[] = [];
-    const underlines: UnderlineSegment[] = [];
+	  const { layoutNotes, layoutPlaceholders, underlineSegments, tripletSegments, slurSegments } = React.useMemo(() => {
+	    const notes: LayoutNote[] = [];
+	    const placeholders: LayoutPlaceholder[] = [];
+	    const underlines: UnderlineSegment[] = [];
+	    const triplets: TripletSegment[] = [];
     const useCarryLayout = renderMode !== 'editor';
     let carryUnits = 0;
 
@@ -301,7 +309,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       ), 0);
       carryUnits = useCarryLayout ? Math.max(0, carryInUnits + tokenTotalUnits - tokenCapacityUnits) : 0;
 
-      if (tokenNotes.length > 0) {
+	      if (tokenNotes.length > 0) {
         for (let level = 1 as const; level <= 2; level += 1) {
           let groupStart: Pick<LayoutNote, 'underlineLeftUnits' | 'underlineRightUnits' | 'start' | 'duration'> | null = null;
           let previousItem: Pick<LayoutNote, 'underlineLeftUnits' | 'underlineRightUnits' | 'start' | 'duration'> | null = null;
@@ -356,8 +364,35 @@ const Jianpu: React.FC<JianpuProps> = ({
               });
             }
           });
-        }
-      }
+	        }
+
+	        let tripletGroup: LayoutNote[] = [];
+	        const flushTripletGroup = () => {
+	          if (tripletGroup.length === 0) return;
+	          const first = tripletGroup[0];
+	          const last = tripletGroup[tripletGroup.length - 1];
+	          triplets.push({
+	            key: `${tokenIndex}-triplet-${first.start}-${last.start}`,
+	            tokenIndex,
+	            leftUnits: first.underlineLeftUnits - 2,
+	            rightUnits: last.underlineRightUnits + 2
+	          });
+	          tripletGroup = [];
+	        };
+
+	        tokenNotes.forEach((note) => {
+	          if (!note.triplet) {
+	            flushTripletGroup();
+	            return;
+	          }
+	          const previous = tripletGroup[tripletGroup.length - 1] ?? null;
+	          if (previous && Math.abs(note.unitStart - previous.unitEnd) > 0.01) {
+	            flushTripletGroup();
+	          }
+	          tripletGroup.push(note);
+	        });
+	        flushTripletGroup();
+	      }
 
       notes.push(...tokenNotes);
     });
@@ -394,11 +429,12 @@ const Jianpu: React.FC<JianpuProps> = ({
     }
 
     return {
-      layoutNotes: notes,
-      layoutPlaceholders: placeholders,
-      underlineSegments: underlines,
-      slurSegments: slurs
-    };
+	      layoutNotes: notes,
+	      layoutPlaceholders: placeholders,
+	      underlineSegments: underlines,
+	      tripletSegments: triplets,
+	      slurSegments: slurs
+	    };
   }, [metrics.noteHalfWidthUnits, metrics.tokenPaddingUnits, renderMode, tokenList, tokenCapacityUnits]);
 
   const tokenCount = Math.max(1, tokenList.length);
@@ -618,8 +654,8 @@ const Jianpu: React.FC<JianpuProps> = ({
         );
       })}
 
-      {underlineSegments.map((segment) => (
-        (() => {
+	      {underlineSegments.map((segment) => (
+	        (() => {
           const leftExtendUnits = renderMode === 'editor'
             ? 3.4
             : compact
@@ -663,10 +699,68 @@ const Jianpu: React.FC<JianpuProps> = ({
               }}
             />
           );
-        })()
-      ))}
+	        })()
+	      ))}
 
-      {layoutNotes.map((note) => {
+	      {tripletSegments.map((segment) => (
+	        (() => {
+	          const leftUnits = segment.leftUnits;
+	          const rightUnits = segment.rightUnits;
+	          const leftLocalUnits = leftUnits - (segment.tokenIndex * TOKEN_WIDTH_UNITS);
+	          const rightLocalUnits = rightUnits - (segment.tokenIndex * TOKEN_WIDTH_UNITS);
+	          const snappedLeftPx = useSnappedPixelCenter && containerWidth !== null
+	            ? getTokenAlignedPx(segment.tokenIndex, leftLocalUnits)
+	            : null;
+	          const snappedRightPx = useSnappedPixelCenter && containerWidth !== null
+	            ? getTokenAlignedPx(segment.tokenIndex, rightLocalUnits)
+	            : null;
+	          const lineLeft = snappedLeftPx !== null
+	            ? `${snappedLeftPx}px`
+	            : `${(leftUnits / totalWidthUnits) * 100}%`;
+	          const lineWidth = snappedLeftPx !== null && snappedRightPx !== null
+	            ? `${Math.max(7, snappedRightPx - snappedLeftPx)}px`
+	            : `${((rightUnits - leftUnits) / totalWidthUnits) * 100}%`;
+	          const centerUnits = (leftUnits + rightUnits) / 2;
+	          const centerLocalUnits = centerUnits - (segment.tokenIndex * TOKEN_WIDTH_UNITS);
+	          const snappedCenterPx = useSnappedPixelCenter && containerWidth !== null
+	            ? getTokenAlignedPx(segment.tokenIndex, centerLocalUnits)
+	            : null;
+
+	          return (
+	            <span
+	              key={segment.key}
+	              className="absolute pointer-events-none text-slate-700"
+	              data-jianpu-triplet-mark
+	              style={{
+	                left: lineLeft,
+	                width: lineWidth,
+	                top: `${metrics.tripletY}px`,
+	                height: `${compact ? 7 : renderMode === 'editor' ? 9 : 12}px`
+	              }}
+	            >
+	              <span
+	                className="absolute left-0 right-0 top-1/2 h-px rounded-full bg-current"
+	                style={{ transform: 'translateY(-50%)' }}
+	              />
+	              <span
+	                className="absolute bg-white px-[2px] font-semibold leading-none"
+	                style={{
+	                  left: snappedCenterPx !== null
+	                    ? `${snappedCenterPx - (snappedLeftPx ?? 0)}px`
+	                    : '50%',
+	                  top: '50%',
+	                  transform: 'translate(-50%, -52%)',
+	                  fontSize: `${compact ? 7 * scale : renderMode === 'editor' ? 8 * scale : 10 * scale}px`
+	                }}
+	              >
+	                3
+	              </span>
+	            </span>
+	          );
+	        })()
+	      ))}
+
+	      {layoutNotes.map((note) => {
         const xPercent = (note.xUnits / totalWidthUnits) * 100;
         const noteLocalUnits = note.xUnits - (note.tokenIndex * TOKEN_WIDTH_UNITS);
         const centerPx = useSnappedPixelCenter && containerWidth !== null

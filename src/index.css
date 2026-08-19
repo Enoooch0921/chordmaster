@@ -332,12 +332,16 @@ body.exporting-pdf {
   }
 
   body.exporting-pdf [data-print-page] .sheet-ending-bracket {
-    top: 0 !important;
-    border-top-width: 1px !important;
+    top: -11px !important;
+    height: 12px !important;
+    border-top-width: 2px !important;
   }
 
   body.exporting-pdf [data-print-page] .sheet-ending-number {
-    top: -13px !important;
+    top: 1px !important;
+    font-size: 10px !important;
+    line-height: 1 !important;
+    box-shadow: none !important;
   }
 
   body.exporting-pdf [data-print-page]:last-child {

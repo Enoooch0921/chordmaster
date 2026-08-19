@@ -317,43 +317,6 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       }
     };
   }, [crossBarMeasurementVersion, crossBarNoteheadOvershootPx, glyphs.length, nextNotationForCrossBar, nextTimeSignatureForCrossBar, notation, renderMode, timeSignature]);
-  const displayTies = React.useMemo(() => {
-    const nextTies = [...ties];
-    const firstPlayableEvent = visibleEvents.find((event) => !event.isRest);
-    const lastPlayableEvent = [...visibleEvents].reverse().find((event) => !event.isRest);
-
-    if (tieFromPrevious && firstPlayableEvent) {
-      const endHeadUnit = getHeadCenterUnit(firstPlayableEvent);
-      if (endHeadUnit > 0.12) {
-        nextTies.unshift({
-          eventIndex: -1,
-          startUnit: 0,
-          endUnit: endHeadUnit,
-          startHeadUnit: 0,
-          endHeadUnit,
-          crossesBeat: false,
-          crossBarSegment: 'incoming'
-        });
-      }
-    }
-
-    if (lastPlayableEvent?.tieAfter) {
-      const startHeadUnit = getHeadCenterUnit(lastPlayableEvent);
-      if (barUnits - startHeadUnit > 0.12) {
-        nextTies.push({
-          eventIndex: lastPlayableEvent.index,
-          startUnit: startHeadUnit,
-          endUnit: barUnits,
-          startHeadUnit,
-          endHeadUnit: barUnits,
-          crossesBeat: false,
-          crossBarSegment: 'outgoing'
-        });
-      }
-    }
-
-    return nextTies;
-  }, [barUnits, tieFromPrevious, ties, visibleEvents]);
   const editorBeamGroups = React.useMemo(() => {
     if (!useEditorStyleRenderer) return [];
 
@@ -464,6 +427,59 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     () => new Set(editorBeamGroups.flatMap((group) => group.eventIndices)),
     [editorBeamGroups]
   );
+  const getTieVisualHeadUnit = React.useCallback((event: typeof visibleEvents[number]) => (
+    getCompactDisplayCenterUnit(event, {
+      beamed: editorBeamedEventIndices.has(event.index) && !event.isRest && (event.base === 'e' || event.base === 's')
+    })
+  ), [editorBeamedEventIndices, getCompactDisplayCenterUnit]);
+  const displayTies = React.useMemo(() => {
+    const nextTies = ties.map((tie) => {
+      const startEvent = visibleEvents.find((event) => event.index === tie.eventIndex);
+      const endEvent = startEvent
+        ? visibleEvents.find((event) => !event.isRest && !event.isHidden && rhythmUnitsEqual(event.startUnit, startEvent.endUnit))
+        : undefined;
+
+      return {
+        ...tie,
+        startHeadUnit: startEvent ? getTieVisualHeadUnit(startEvent) : tie.startHeadUnit,
+        endHeadUnit: endEvent ? getTieVisualHeadUnit(endEvent) : tie.endHeadUnit
+      };
+    });
+    const firstPlayableEvent = visibleEvents.find((event) => !event.isRest);
+    const lastPlayableEvent = [...visibleEvents].reverse().find((event) => !event.isRest);
+
+    if (tieFromPrevious && firstPlayableEvent) {
+      const endHeadUnit = getTieVisualHeadUnit(firstPlayableEvent);
+      if (endHeadUnit > 0.12) {
+        nextTies.unshift({
+          eventIndex: -1,
+          startUnit: 0,
+          endUnit: endHeadUnit,
+          startHeadUnit: 0,
+          endHeadUnit,
+          crossesBeat: false,
+          crossBarSegment: 'incoming'
+        });
+      }
+    }
+
+    if (lastPlayableEvent?.tieAfter) {
+      const startHeadUnit = getTieVisualHeadUnit(lastPlayableEvent);
+      if (barUnits - startHeadUnit > 0.12) {
+        nextTies.push({
+          eventIndex: lastPlayableEvent.index,
+          startUnit: startHeadUnit,
+          endUnit: barUnits,
+          startHeadUnit,
+          endHeadUnit: barUnits,
+          crossesBeat: false,
+          crossBarSegment: 'outgoing'
+        });
+      }
+    }
+
+    return nextTies;
+  }, [barUnits, getTieVisualHeadUnit, tieFromPrevious, ties, visibleEvents]);
 
   const selectNearestInsertSlot = (clientX: number, event?: React.MouseEvent<HTMLElement>) => {
     if (!onInsertSelect || !rootRef.current) return;
@@ -687,6 +703,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
             return (
               <path
+                data-rhythm-tie
                 key={`tie-${tie.eventIndex}-${tieIndex}`}
                 d={`M ${startX} ${startY} C ${startX + controlOffset} ${controlY1} ${endX - controlOffset} ${controlY2} ${endX} ${endY}`}
                 fill="none"

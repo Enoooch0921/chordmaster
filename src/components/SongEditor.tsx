@@ -8,13 +8,15 @@ import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { getPlayKey, getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyWithPreference } from '../utils/musicUtils';
 import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
-import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, MAX_RELATIVE_OCTAVE_SHIFT, absoluteJianpuPartsToRelative, buildJianpuNoteFromMode, buildJianpuPlaceholder, clampRelativeOctave, convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
+import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, MAX_RELATIVE_OCTAVE_SHIFT, absoluteJianpuPartsToRelative, buildJianpuNoteFromMode, buildJianpuPlaceholder, buildJianpuPlaceholderFromUnits, clampRelativeOctave, convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, getJianpuDurationUnits as getJianpuDurationUnitsFromUtils, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 import { formatInitialCaps } from '../utils/textUtils';
+import { formatTempoBpm, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import { ANNOTATION_COLOR_OPTIONS, DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
 import {
   deleteSection as deleteSongSection,
   duplicateSection as duplicateSongSection,
+  isBarCompletelyEmpty,
   mergeSectionToPrevious as mergeSongSectionToPrevious,
   normalizeChordBeatTokens,
   reorderSongSections,
@@ -170,13 +172,23 @@ const SECTION_TITLE_PRESETS = [
   'Outro',
   'Ending'
 ] as const;
+const MIN_SECTION_BAR_COUNT = 1;
+const MAX_SECTION_BAR_COUNT = 128;
 
 const getVersionValue = (song: Song) =>
   Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ');
 
-const formatTempoDraftValue = (tempo?: number) => (
-  typeof tempo === 'number' ? String(tempo) : ''
+const clampSectionBarCount = (value: number) => (
+  Math.min(MAX_SECTION_BAR_COUNT, Math.max(MIN_SECTION_BAR_COUNT, Math.round(value)))
 );
+
+const getMinimumSafeSectionBarCount = (section: Section) => {
+  const lastContentIndex = section.bars.reduce((lastIndex, bar, index) => (
+    isBarCompletelyEmpty(bar) ? lastIndex : index
+  ), -1);
+
+  return Math.max(MIN_SECTION_BAR_COUNT, lastContentIndex + 1);
+};
 
 const resizeSectionTitleTextarea = (node: HTMLTextAreaElement | null) => {
   if (!node) return;
@@ -640,14 +652,14 @@ const SongEditor: React.FC<Props> = ({
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [rhythmCursor, setRhythmCursor] = useState<RhythmCursor | null>(null);
   const [jianpuCursor, setJianpuCursor] = useState<JianpuCursor | null>(null);
-  const [jianpuInputMode, setJianpuInputMode] = useState<JianpuInputMode>({ duration: 'quarter', octave: 0, dotted: false, accidental: '' });
+  const [jianpuInputMode, setJianpuInputMode] = useState<JianpuInputMode>({ duration: 'quarter', octave: 0, dotted: false, triplet: false, accidental: '' });
   const [barPanels, setBarPanels] = useState<Record<string, BarPanelState>>({});
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
   const [isBarDragging, setIsBarDragging] = useState(false);
   const [copiedBarHighlight, setCopiedBarHighlight] = useState<CopiedBarHighlight | null>(null);
   const [copiedJianpu, setCopiedJianpu] = useState<string | null>(null);
   const [copiedRhythm, setCopiedRhythm] = useState<string | null>(null);
-  const [tempoDraft, setTempoDraft] = useState<string>(formatTempoDraftValue(song.tempo));
+  const [tempoDraft, setTempoDraft] = useState<string>(formatTempoBpm(song.tempo));
   const [barLayoutMode, setBarLayoutMode] = useState<BarLayoutMode>(() => getBarLayoutMode(0, isPhoneViewport));
   const [compactInspectorBar, setCompactInspectorBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [jianpuDurationBlockedHint, setJianpuDurationBlockedHint] = useState<string | null>(null);
@@ -855,7 +867,7 @@ const SongEditor: React.FC<Props> = ({
   }, [selection]);
 
   useEffect(() => {
-    setTempoDraft(formatTempoDraftValue(song.tempo));
+    setTempoDraft(formatTempoBpm(song.tempo));
   }, [song.tempo]);
 
   useEffect(() => {
@@ -945,15 +957,14 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const commitTempoDraft = () => {
-    const digitsOnly = tempoDraft.replace(/\D+/g, '').slice(0, 3);
-    if (!digitsOnly) {
+    const nextTempo = normalizeTempoBpm(tempoDraft);
+    if (nextTempo === undefined) {
       setTempoDraft('');
       updateField('tempo', undefined);
       return;
     }
 
-    const nextTempo = Math.min(400, Math.max(20, parseInt(digitsOnly, 10)));
-    setTempoDraft(String(nextTempo));
+    setTempoDraft(formatTempoBpm(nextTempo));
     updateField('tempo', nextTempo);
   };
 
@@ -1691,6 +1702,37 @@ const SongEditor: React.FC<Props> = ({
     newBars.splice(insertIndex, 0, createEmptyBar());
     updateSection(sIdx, { ...section, bars: newBars });
     queueChordInputFocus(sIdx, insertIndex, section.id ?? null);
+  };
+
+  const setSectionBarCount = (sIdx: number, rawCount: number) => {
+    const section = song.sections[sIdx];
+    if (!section || !Number.isFinite(rawCount)) return;
+
+    const targetCount = clampSectionBarCount(rawCount);
+    const currentCount = section.bars.length;
+    if (targetCount === currentCount) return;
+
+    if (targetCount > currentCount) {
+      const addedBars = Array.from({ length: targetCount - currentCount }, () => createEmptyBar());
+      updateSection(sIdx, { ...section, bars: [...section.bars, ...addedBars] });
+      queueChordInputFocus(sIdx, currentCount, section.id ?? null);
+      return;
+    }
+
+    const nextCount = Math.max(targetCount, getMinimumSafeSectionBarCount(section));
+    if (nextCount === currentCount) return;
+
+    const nextSection = sanitizeSectionJianpuSlurs({
+      ...section,
+      bars: section.bars.slice(0, nextCount)
+    }, sIdx);
+
+    if (activeBar?.sIdx === sIdx && activeBar.bIdx >= nextCount) {
+      markActiveBar(sIdx, nextCount - 1);
+      clearEditorSelectionState();
+    }
+
+    updateSection(sIdx, nextSection);
   };
 
   const getNextChordBarTarget = (sIdx: number, bIdx: number) => {
@@ -2662,42 +2704,45 @@ const SongEditor: React.FC<Props> = ({
     return { beats, beatUnits };
   };
 
-  const getJianpuNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted'>) => {
-    const baseUnits = note.duration === 'quarter' ? 4 : note.duration === 'eighth' ? 2 : 1;
-    return baseUnits + (note.dotted ? baseUnits / 2 : 0);
-  };
+  const getJianpuNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'>) => (
+    getJianpuDurationUnitsFromUtils(note.duration, note.dotted, note.triplet)
+  );
 
-  const getJianpuDurationUnits = (duration: JianpuDuration, dotted = false) => (
-    getJianpuNoteUnits({ duration, dotted })
+  const getJianpuDurationUnits = (duration: JianpuDuration, dotted = false, triplet = false) => (
+    getJianpuDurationUnitsFromUtils(duration, dotted, triplet)
   );
 
   const canUseDottedJianpuDuration = (duration: JianpuDuration) => duration !== 'sixteenth';
 
-  const normalizeJianpuInputModeForDuration = (mode: JianpuInputMode): JianpuInputMode => ({
-    ...mode,
-    dotted: mode.dotted && canUseDottedJianpuDuration(mode.duration)
-  });
+  const normalizeJianpuInputModeForDuration = (mode: JianpuInputMode): JianpuInputMode => {
+    const triplet = mode.duration !== 'sixteenth' && mode.triplet;
+    return {
+      ...mode,
+      dotted: !triplet && mode.dotted && canUseDottedJianpuDuration(mode.duration),
+      triplet
+    };
+  };
 
   const fitJianpuInputModeToUnits = (mode: JianpuInputMode, availableUnits: number): JianpuInputMode => {
     const normalizedMode = normalizeJianpuInputModeForDuration(mode);
     if (availableUnits <= 0.001) return normalizedMode;
 
-    if (getJianpuDurationUnits(normalizedMode.duration, normalizedMode.dotted) <= availableUnits + 0.001) {
+    if (getJianpuDurationUnits(normalizedMode.duration, normalizedMode.dotted, normalizedMode.triplet) <= availableUnits + 0.001) {
       return normalizedMode;
     }
 
     if (
       normalizedMode.dotted &&
-      getJianpuDurationUnits(normalizedMode.duration, false) <= availableUnits + 0.001
+      getJianpuDurationUnits(normalizedMode.duration, false, normalizedMode.triplet) <= availableUnits + 0.001
     ) {
       return { ...normalizedMode, dotted: false };
     }
 
     const fallbackDuration = (['quarter', 'eighth', 'sixteenth'] as JianpuDuration[])
-      .find((duration) => getJianpuDurationUnits(duration, false) <= availableUnits + 0.001);
+      .find((duration) => getJianpuDurationUnits(duration, false, normalizedMode.triplet && duration !== 'sixteenth') <= availableUnits + 0.001);
 
     return fallbackDuration
-      ? { ...normalizedMode, duration: fallbackDuration, dotted: false }
+      ? { ...normalizedMode, duration: fallbackDuration, dotted: false, triplet: normalizedMode.triplet && fallbackDuration !== 'sixteenth' }
       : normalizedMode;
   };
 
@@ -3491,7 +3536,7 @@ const SongEditor: React.FC<Props> = ({
     const slotIndex = Math.max(0, Math.min(beatUnits, unitsBeforeCaret));
     const availableUnits = Math.max(0, beatUnits - slotIndex);
     const fittedMode = fitJianpuInputModeToUnits(jianpuInputMode, availableUnits);
-    const desiredSpanSlots = getJianpuDurationUnits(fittedMode.duration, fittedMode.dotted);
+	    const desiredSpanSlots = getJianpuDurationUnits(fittedMode.duration, fittedMode.dotted, fittedMode.triplet);
     const visibleSpanSlots = Math.max(0, Math.min(desiredSpanSlots, beatUnits - slotIndex));
 
     if (slotIndex >= beatUnits - 0.001) {
@@ -3528,24 +3573,30 @@ const SongEditor: React.FC<Props> = ({
       const remainingUnits = placeholderCapacity.currentBeatUnits;
       return {
         remainingUnits,
-        canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted),
-        canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted),
-        canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', jianpuInputMode.dotted),
-        canDot: canUseDottedJianpuDuration(jianpuInputMode.duration) &&
-          remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true)
-      };
+	        canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted, jianpuInputMode.triplet),
+	        canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted, jianpuInputMode.triplet),
+	        canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false),
+	        canDot: !jianpuInputMode.triplet &&
+	          canUseDottedJianpuDuration(jianpuInputMode.duration) &&
+	          remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true),
+	        canTriplet: jianpuInputMode.duration !== 'sixteenth' &&
+	          remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, false, true)
+	      };
     }
 
     const remainingUnits = Math.max(0, beatUnits - (beat?.usedUnits ?? 0));
 
     return {
       remainingUnits,
-      canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted),
-      canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted),
-      canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', jianpuInputMode.dotted),
-      canDot: canUseDottedJianpuDuration(jianpuInputMode.duration) &&
-        remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true)
-    };
+	      canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted, jianpuInputMode.triplet),
+	      canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted, jianpuInputMode.triplet),
+	      canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false),
+	      canDot: !jianpuInputMode.triplet &&
+	        canUseDottedJianpuDuration(jianpuInputMode.duration) &&
+	        remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true),
+	      canTriplet: jianpuInputMode.duration !== 'sixteenth' &&
+	        remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, false, true)
+	    };
   };
 
   const normalizeRiffBeatTokenAfterRemoval = (token: string) => (
@@ -3822,7 +3873,7 @@ const SongEditor: React.FC<Props> = ({
         oldUnits - newUnits,
         Math.max(0, beatUnits - currentEntry.unitStart - newUnits)
       );
-      suffix = 's'.repeat(Math.max(0, Math.round(releasedUnitsInCurrentBeat)));
+	      suffix = buildJianpuPlaceholderFromUnits(releasedUnitsInCurrentBeat);
     }
 
     const nextToken = replaceJianpuRange(beat.token, localStart, replacementEnd, `${replacement}${suffix}`);
@@ -3838,19 +3889,20 @@ const SongEditor: React.FC<Props> = ({
     if (!selection || selection.type !== 'riff') return true;
 
     const riff = getRiffValue(selection.sIdx, selection.bIdx);
-    const selectedNote = getSelectedJianpuNote(selection, riff);
-    const currentDuration = selectedNote?.duration ?? jianpuInputMode.duration;
-    const nextDuration = currentDuration === duration ? 'quarter' : duration;
-    const desiredDotted = selectedNote?.dotted ?? jianpuInputMode.dotted;
-    const nextDotted = desiredDotted && canUseDottedJianpuDuration(nextDuration);
+	  const selectedNote = getSelectedJianpuNote(selection, riff);
+	  const currentDuration = selectedNote?.duration ?? jianpuInputMode.duration;
+	  const nextDuration = currentDuration === duration ? 'quarter' : duration;
+	  const nextTriplet = nextDuration !== 'sixteenth' && (selectedNote?.triplet ?? jianpuInputMode.triplet);
+	  const desiredDotted = selectedNote?.dotted ?? jianpuInputMode.dotted;
+	  const nextDotted = !nextTriplet && desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
     if (!selectedNote) {
       const activeBeatIndex = (jianpuCursor && jianpuCursor.sIdx === selection.sIdx && jianpuCursor.bIdx === selection.bIdx)
         ? jianpuCursor.beatIndex
         : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
       const availability = getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
-      const desiredUnits = getJianpuDurationUnits(nextDuration, nextDotted);
-      const undottedUnits = getJianpuDurationUnits(nextDuration, false);
+	      const desiredUnits = getJianpuDurationUnits(nextDuration, nextDotted, nextTriplet);
+	      const undottedUnits = getJianpuDurationUnits(nextDuration, false, nextTriplet);
       return availability.remainingUnits + 0.001 >= desiredUnits ||
         availability.remainingUnits + 0.001 >= undottedUnits;
     }
@@ -3859,10 +3911,11 @@ const SongEditor: React.FC<Props> = ({
       .find((entry) => entry.notes.some((entryNote) => entryNote.start === selectedNote.start && entryNote.end === selectedNote.end));
     if (!beat) return false;
 
-    const replacement = rebuildJianpuNote(selectedNote, {
-      duration: nextDuration,
-      dotted: nextDotted
-    });
+	  const replacement = rebuildJianpuNote(selectedNote, {
+	    duration: nextDuration,
+	    dotted: nextDotted,
+	    triplet: nextTriplet
+	  });
     const replacementNote = findJianpuNoteRanges(replacement)[0];
     if (!replacementNote) return false;
 
@@ -3994,13 +4047,13 @@ const SongEditor: React.FC<Props> = ({
       }
       setJianpuInputMode(insertionMode);
 
-      const replacementEnd = placeholderAtCaret.start + Math.max(1, Math.round(replacementUnits));
-      beatTokens[startingBeatIndex] = replaceJianpuRange(
-        startingBeat.token,
-        placeholderAtCaret.start,
-        replacementEnd,
-        replacement
-      );
+	      const suffix = buildJianpuPlaceholderFromUnits(Math.max(0, placeholderCapacity.currentBeatUnits - replacementUnits));
+	      beatTokens[startingBeatIndex] = replaceJianpuRange(
+	        startingBeat.token,
+	        placeholderAtCaret.start,
+	        placeholderCapacity.replacementEnd,
+	        `${replacement}${suffix}`
+	      );
       const nextRiff = serializeBeatTokens(beatTokens);
       const nextBeatRanges = getBeatTokenRanges(nextRiff, selection.sIdx, selection.bIdx);
       const insertedSelection = {
@@ -4063,7 +4116,7 @@ const SongEditor: React.FC<Props> = ({
     const filledUnits = findJianpuNoteRanges(nextBeatToken)
       .reduce((sum, note) => sum + getJianpuNoteUnits(note), 0);
     const remainingUnits = Math.max(0, beatUnits - targetBeatCarryInUnits - filledUnits);
-    beatTokens[targetBeatIndex] = nextBeatToken + 's'.repeat(Math.round(remainingUnits));
+	    beatTokens[targetBeatIndex] = nextBeatToken + buildJianpuPlaceholderFromUnits(remainingUnits);
     const nextRiff = serializeBeatTokens(beatTokens);
     const nextBeatRanges = getBeatTokenRanges(nextRiff, selection.sIdx, selection.bIdx);
     const insertedSelection = {
@@ -4079,10 +4132,11 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const setSelectedJianpuDuration = (duration: JianpuDuration) => {
-    const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
-    const nextDuration = currentDuration === duration ? 'quarter' : duration;
-    const desiredDotted = selectedJianpuNote?.dotted ?? jianpuInputMode.dotted;
-    const nextDotted = desiredDotted && canUseDottedJianpuDuration(nextDuration);
+	  const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
+	  const nextDuration = currentDuration === duration ? 'quarter' : duration;
+	  const nextTriplet = nextDuration !== 'sixteenth' && (selectedJianpuNote?.triplet ?? jianpuInputMode.triplet);
+	  const desiredDotted = selectedJianpuNote?.dotted ?? jianpuInputMode.dotted;
+	  const nextDotted = !nextTriplet && desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
     if (applySharedJianpuAction({ type: 'set-duration', duration: nextDuration })) return;
 
@@ -4099,21 +4153,22 @@ const SongEditor: React.FC<Props> = ({
         ? jianpuCursor.beatIndex
         : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
       const availability = getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
-      if (getJianpuDurationUnits(nextDuration, nextDotted) > availability.remainingUnits + 0.001) {
-        const undottedUnits = getJianpuDurationUnits(nextDuration, false);
-        if (undottedUnits > availability.remainingUnits + 0.001) {
-          return;
-        }
-        setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: false }));
-        return;
-      }
+	      if (getJianpuDurationUnits(nextDuration, nextDotted, nextTriplet) > availability.remainingUnits + 0.001) {
+	        const undottedUnits = getJianpuDurationUnits(nextDuration, false, nextTriplet);
+	        if (undottedUnits > availability.remainingUnits + 0.001) {
+	          return;
+	        }
+	        setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: false, triplet: nextTriplet }));
+	        return;
+	      }
     }
 
     if (selectedJianpuNote) {
-      const didUpdate = updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
-        duration: note.duration === duration ? 'quarter' : duration,
-        dotted: nextDotted
-      }));
+	      const didUpdate = updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
+	        duration: note.duration === duration ? 'quarter' : duration,
+	        dotted: nextDotted,
+	        triplet: nextTriplet
+	      }));
 
       if (!didUpdate) {
         if (nextDuration === 'quarter') {
@@ -4122,15 +4177,16 @@ const SongEditor: React.FC<Props> = ({
         return;
       }
 
-      setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: nextDotted }));
-      return;
-    }
+	      setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: nextDotted, triplet: nextTriplet }));
+	      return;
+	    }
 
-    setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: nextDotted }));
-    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
-      duration: note.duration === duration ? 'quarter' : duration,
-      dotted: nextDotted
-    }));
+	    setJianpuInputMode((current) => ({ ...current, duration: nextDuration, dotted: nextDotted, triplet: nextTriplet }));
+	    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, {
+	      duration: note.duration === duration ? 'quarter' : duration,
+	      dotted: nextDotted,
+	      triplet: nextTriplet
+	    }));
   };
 
   // L/H buttons cycle one direction: 0 → ±1 → ±2 → 0 (opposite sign jumps to ±1).
@@ -4197,12 +4253,16 @@ const SongEditor: React.FC<Props> = ({
     }
   };
 
-  const toggleSelectedJianpuDot = () => {
-    const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
-    const nextDotted = !(selectedJianpuNote?.dotted ?? jianpuInputMode.dotted);
-    if (nextDotted && !canUseDottedJianpuDuration(currentDuration)) {
-      return;
-    }
+	  const toggleSelectedJianpuDot = () => {
+	    const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
+	    const currentTriplet = selectedJianpuNote?.triplet ?? jianpuInputMode.triplet;
+	    const nextDotted = !(selectedJianpuNote?.dotted ?? jianpuInputMode.dotted);
+	    if (nextDotted && currentTriplet) {
+	      return;
+	    }
+	    if (nextDotted && !canUseDottedJianpuDuration(currentDuration)) {
+	      return;
+	    }
 
     if (applySharedJianpuAction({ type: 'toggle-dot' })) return;
 
@@ -4217,11 +4277,32 @@ const SongEditor: React.FC<Props> = ({
       }
     }
 
-    setJianpuInputMode((current) => ({ ...current, dotted: nextDotted }));
+	    setJianpuInputMode((current) => ({ ...current, dotted: nextDotted }));
 
     if (!selectedJianpuNote) return;
-    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, { dotted: nextDotted }));
-  };
+	    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, { dotted: nextDotted }));
+	  };
+
+	  const toggleSelectedJianpuTriplet = () => {
+	    const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
+	    if (currentDuration === 'sixteenth') return;
+
+	    if (applySharedJianpuAction({ type: 'toggle-triplet' })) return;
+
+	    const nextTriplet = !(selectedJianpuNote?.triplet ?? jianpuInputMode.triplet);
+	    if (!selectedJianpuNote && selection?.type === 'riff') {
+	      const riff = getRiffValue(selection.sIdx, selection.bIdx);
+	      const activeBeatIndex = (jianpuCursor && jianpuCursor.sIdx === selection.sIdx && jianpuCursor.bIdx === selection.bIdx)
+	        ? jianpuCursor.beatIndex
+	        : getBeatIndexFromCaret(riff, selection.sIdx, selection.bIdx, selection.start);
+	      const availability = getJianpuInsertAvailability(selection.sIdx, selection.bIdx, riff, activeBeatIndex, selection.start);
+	      if (nextTriplet && !availability.canTriplet) return;
+	    }
+
+	    setJianpuInputMode((current) => ({ ...current, triplet: nextTriplet, dotted: false }));
+	    if (!selectedJianpuNote) return;
+	    updateSelectedJianpuNote((note) => rebuildJianpuNote(note, { triplet: nextTriplet, dotted: false }));
+	  };
 
   const toggleSelectedJianpuSlur = () => {
     if (!selection || selection.type !== 'riff') return;
@@ -4335,14 +4416,15 @@ const SongEditor: React.FC<Props> = ({
         {
           accidental: '',
           duration: 'quarter',
-          octave: 0,
-          dotted: false,
-          slurStart: false,
+	          octave: 0,
+	          dotted: false,
+	          triplet: false,
+	          slurStart: false,
           slurEnd: false
         }
       ));
     }
-    setJianpuInputMode((current) => ({ ...current, accidental: '', duration: 'quarter', octave: 0, dotted: false }));
+	    setJianpuInputMode((current) => ({ ...current, accidental: '', duration: 'quarter', octave: 0, dotted: false, triplet: false }));
   };
 
   const removeSelectedJianpuNote = () => {
@@ -4365,7 +4447,7 @@ const SongEditor: React.FC<Props> = ({
       entry.kind === 'note' && entry.start === localStart && entry.end === localEnd
     ));
     if (!currentEntry) return;
-    const placeholder = buildJianpuPlaceholder(note.duration, note.dotted);
+	    const placeholder = buildJianpuPlaceholder(note.duration, note.dotted, note.triplet);
     beatTokens[beat.beatIndex] = normalizeRiffBeatTokenAfterRemoval(
       replaceJianpuRange(beat.token, localStart, localEnd, placeholder)
     );
@@ -4382,10 +4464,11 @@ const SongEditor: React.FC<Props> = ({
     setJianpuInputMode((current) => ({
       ...current,
       accidental: normalizeEditableJianpuAccidental(displayNote.accidental),
-      duration: displayNote.duration,
-      octave: displayNote.octave,
-      dotted: displayNote.dotted
-    }));
+	      duration: displayNote.duration,
+	      octave: displayNote.octave,
+	      dotted: displayNote.dotted,
+	      triplet: displayNote.triplet
+	    }));
     setRiffCaretSelection(selection.sIdx, selection.bIdx, sanitizedRiff, nextCaret);
   };
 
@@ -4418,7 +4501,7 @@ const SongEditor: React.FC<Props> = ({
       entry.kind === 'note' && entry.start === localStart && entry.end === localEnd
     ));
     if (!currentEntry) return false;
-    const placeholder = buildJianpuPlaceholder(targetNote.duration, targetNote.dotted);
+	    const placeholder = buildJianpuPlaceholder(targetNote.duration, targetNote.dotted, targetNote.triplet);
     beatTokens[activeBeatIndex] = normalizeRiffBeatTokenAfterRemoval(
       replaceJianpuRange(beat.token, localStart, localEnd, placeholder)
     );
@@ -4427,10 +4510,11 @@ const SongEditor: React.FC<Props> = ({
     setJianpuInputMode((current) => ({
       ...current,
       accidental: normalizeEditableJianpuAccidental(targetNote.accidental),
-      duration: targetNote.duration,
-      octave: targetNote.octave,
-      dotted: targetNote.dotted
-    }));
+	      duration: targetNote.duration,
+	      octave: targetNote.octave,
+	      dotted: targetNote.dotted,
+	      triplet: targetNote.triplet
+	    }));
     setRiffCaretSelection(
       selection.sIdx,
       selection.bIdx,
@@ -4644,11 +4728,15 @@ const SongEditor: React.FC<Props> = ({
       return;
     }
 
-    if (loweredKey === 't') {
-      e.preventDefault();
-      toggleSelectedJianpuSlur();
-      return;
-    }
+	    if (loweredKey === 't') {
+	      e.preventDefault();
+	      if (e.shiftKey) {
+	        toggleSelectedJianpuTriplet();
+	      } else {
+	        toggleSelectedJianpuSlur();
+	      }
+	      return;
+	    }
 
     if (e.key.length === 1) {
       e.preventDefault();
@@ -4859,10 +4947,10 @@ const SongEditor: React.FC<Props> = ({
       }
     } else if (selectionType === 'chord') {
       const chords = bar.chords.length > 0 ? bar.chords : [''];
-      
+
       let currentPos = 0;
       let targetChordIdx = -1;
-      
+
       for (let i = 0; i < chords.length; i++) {
         const chordLen = chords[i].length;
         if (start >= currentPos && start <= currentPos + chordLen) {
@@ -4880,14 +4968,14 @@ const SongEditor: React.FC<Props> = ({
       let c = newChords[targetChordIdx];
       if (c === '%' || c === '/') return;
       c = c || '';
-      
+
       let hasPush = c.includes('<');
       let hasPull = c.includes('>');
       let hasAccent = c.includes('^');
       let hasFermata = c.includes('~');
-      
+
       let clean = c.replace(/[><^~]/g, '');
-      
+
       if (type === 'push') {
         hasPush = !hasPush;
         hasPull = false; // mutually exclusive with pull
@@ -4934,7 +5022,7 @@ const SongEditor: React.FC<Props> = ({
         hasAccent = false;
         hasFermata = false;
       }
-      
+
       let transformed = clean;
       if (hasPush) transformed += '<';
       if (hasPull) transformed += '>';
@@ -4953,7 +5041,7 @@ const SongEditor: React.FC<Props> = ({
       );
       if (normalizedResult.error) return;
       const committedChords = normalizedResult.chords;
-      
+
       const newBars = [...song.sections[sIdx].bars];
       newBars[bIdx] = { ...bar, chords: committedChords };
       const newSections = [...song.sections];
@@ -4965,7 +5053,7 @@ const SongEditor: React.FC<Props> = ({
       for (let i = 0; i < targetChordIdx; i++) {
         newCurrentPos += (committedChords[i]?.length ?? 0) + 1;
       }
-      
+
       setSelection({
         ...selection,
         start: newCurrentPos,
@@ -4995,11 +5083,14 @@ const SongEditor: React.FC<Props> = ({
   })();
   const effectiveJianpuAccidental = normalizeEditableJianpuAccidental(selectedJianpuDisplayMode?.accidental ?? jianpuInputMode.accidental);
   const effectiveJianpuOctave = selectedJianpuDisplayMode?.octave ?? jianpuInputMode.octave;
-  const effectiveJianpuDuration = selectedJianpuDisplayMode?.duration ?? jianpuInputMode.duration;
-  const effectiveJianpuDotted = selectedJianpuDisplayMode?.dotted ?? jianpuInputMode.dotted;
-  const effectiveJianpuTied = Boolean(selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd);
-  const canUseEighthDuration = canApplyJianpuDurationChoice('eighth');
-  const canUseSixteenthDuration = canApplyJianpuDurationChoice('sixteenth');
+	  const effectiveJianpuDuration = selectedJianpuDisplayMode?.duration ?? jianpuInputMode.duration;
+	  const effectiveJianpuDotted = selectedJianpuDisplayMode?.dotted ?? jianpuInputMode.dotted;
+	  const effectiveJianpuTriplet = selectedJianpuDisplayMode?.triplet ?? jianpuInputMode.triplet;
+	  const effectiveJianpuTied = Boolean(selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd);
+	  const canUseEighthDuration = canApplyJianpuDurationChoice('eighth');
+	  const canUseSixteenthDuration = canApplyJianpuDurationChoice('sixteenth');
+	  const canUseTripletDuration = effectiveJianpuDuration !== 'sixteenth' &&
+	    (!jianpuInsertAvailability || jianpuInsertAvailability.canTriplet || effectiveJianpuTriplet);
   const showEighthQuarterBlocked = effectiveJianpuDuration === 'eighth' && !canUseEighthDuration;
   const showSixteenthQuarterBlocked = effectiveJianpuDuration === 'sixteenth' && !canUseSixteenthDuration;
   const isCompactSelectionToolbar = isPhoneViewport;
@@ -5033,9 +5124,15 @@ const SongEditor: React.FC<Props> = ({
       )}
     </div>
   );
-  const renderJianpuTieGlyph = () => (
-    <span className={`${isCompactSelectionToolbar ? 'text-[18px]' : 'text-[21px]'} font-bold leading-none -translate-y-[2px]`}>◠</span>
-  );
+	  const renderJianpuTieGlyph = () => (
+	    <span className={`${isCompactSelectionToolbar ? 'text-[18px]' : 'text-[21px]'} font-bold leading-none -translate-y-[2px]`}>◠</span>
+	  );
+	  const renderJianpuTripletGlyph = () => (
+	    <div className="relative flex h-full w-full items-center justify-center">
+	      <span className={`${isCompactSelectionToolbar ? 'text-[12px]' : 'text-[14px]'} font-bold leading-none`}>111</span>
+	      <span className="absolute left-1/2 top-[2px] -translate-x-1/2 rounded bg-current px-[2px] text-[8px] font-black leading-none text-white">3</span>
+	    </div>
+	  );
   const getActiveJianpuBeatIndex = (sIdx: number, bIdx: number, value: string) => {
     if (jianpuCursor && jianpuCursor.sIdx === sIdx && jianpuCursor.bIdx === bIdx) {
       return jianpuCursor.beatIndex;
@@ -5064,9 +5161,10 @@ const SongEditor: React.FC<Props> = ({
         sixteenth: '1/16'
       };
       const parts = [`${selectedJianpuNote.pitch} · ${durationLabel[selectedJianpuNote.duration]}`, octaveLabel(selectedJianpuNote.octave)];
-      if (effectiveJianpuAccidental === '#') parts.push(copy.editor.sharp);
-      if (effectiveJianpuAccidental === 'b') parts.push(copy.editor.flat);
-      if (selectedJianpuNote.dotted) parts.push(copy.editor.dot);
+	      if (effectiveJianpuAccidental === '#') parts.push(copy.editor.sharp);
+	      if (effectiveJianpuAccidental === 'b') parts.push(copy.editor.flat);
+	      if (selectedJianpuNote.triplet) parts.push('3連');
+	      if (selectedJianpuNote.dotted) parts.push(copy.editor.dot);
       if (selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd) parts.push(copy.editor.tie);
       return parts.join(' · ');
     }
@@ -5084,8 +5182,8 @@ const SongEditor: React.FC<Props> = ({
       : effectiveJianpuAccidental === 'b'
         ? ` · ${copy.editor.flat}`
         : '';
-    return `${beatLabel} · ${durationLabel} · ${octaveLabel(effectiveJianpuOctave)}${accidentalLabel}${effectiveJianpuDotted ? ` · ${copy.editor.dot}` : ''}`;
-  };
+	    return `${beatLabel} · ${durationLabel}${effectiveJianpuTriplet ? ' · 3連' : ''} · ${octaveLabel(effectiveJianpuOctave)}${accidentalLabel}${effectiveJianpuDotted ? ` · ${copy.editor.dot}` : ''}`;
+	  };
 
   const duplicateSection = (sIdx: number) => {
     const sectionId = song.sections[sIdx]?.id;
@@ -5100,10 +5198,10 @@ const SongEditor: React.FC<Props> = ({
     const newSectionId = createSectionId();
     notifyChange({
       ...song,
-      sections: [...song.sections, { 
+      sections: [...song.sections, {
         id: newSectionId,
         title: '',
-        bars: [createEmptyBar()] 
+        bars: [createEmptyBar()]
       }]
     });
     queueSectionTitleFocus(song.sections.length, newSectionId);
@@ -5212,12 +5310,14 @@ const SongEditor: React.FC<Props> = ({
     <div>
       <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.tempo}</label>
       <input
-        type="number"
+        type="text"
+        inputMode="decimal"
+        pattern="[0-9]*[.]?[0-9]?"
         min={20}
         max={400}
-        step={1}
+        step={0.1}
         value={tempoDraft}
-        onChange={e => setTempoDraft(e.target.value.replace(/\D+/g, '').slice(0, 3))}
+        onChange={e => setTempoDraft(sanitizeTempoInput(e.target.value))}
         onFocus={e => {
           const input = e.currentTarget;
           window.requestAnimationFrame(() => input.select());
@@ -6146,7 +6246,7 @@ const SongEditor: React.FC<Props> = ({
           <h2 className="font-display text-2xl font-bold text-gray-800">{copy.editor.editSong}</h2>
         </div>
       )}
-      
+
       {!hideMetadataPanel && isSetlistMetadataMode ? (
         <div className="mb-8 rounded-xl border border-gray-200 bg-white px-3.5 py-3.5">
           <div className="text-base font-bold text-gray-900">{copy.setlistEditor.songData}</div>
@@ -6671,6 +6771,29 @@ const SongEditor: React.FC<Props> = ({
                   </div>
                 </div>
               <div className="flex w-full flex-wrap items-center justify-end gap-2 self-stretch sm:w-auto sm:self-auto">
+                <div className="flex w-20 flex-col gap-1">
+                  <label
+                    htmlFor={`section-${sIdx}-bar-count`}
+                    className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400"
+                  >
+                    {language === 'zh' ? '小節數' : 'Bars'}
+                  </label>
+                  <input
+                    id={`section-${sIdx}-bar-count`}
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_SECTION_BAR_COUNT}
+                    max={MAX_SECTION_BAR_COUNT}
+                    step={1}
+                    value={section.bars.length}
+                    onChange={(event) => {
+                      if (!event.target.value) return;
+                      setSectionBarCount(sIdx, Number(event.target.value));
+                    }}
+                    onFocus={(event) => event.currentTarget.select()}
+                    className="h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-center text-sm font-bold tabular-nums text-gray-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1 sm:min-w-[132px] sm:flex-none">
                   <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400">
                     {copy.editor.changeKeyAfterSection}
@@ -6695,14 +6818,14 @@ const SongEditor: React.FC<Props> = ({
                     buttonClassName="w-full"
                   />
                 </div>
-                <button 
+                <button
                   onClick={() => duplicateSection(sIdx)}
                   className="text-indigo-500 hover:text-indigo-700 p-2 rounded hover:bg-indigo-50 transition-colors"
                   title={copy.editor.duplicateSection}
                 >
                   <Copy size={18} />
                 </button>
-                <button 
+                <button
                   onClick={() => removeSection(sIdx)}
                   className="text-red-500 hover:text-red-700 p-2 rounded hover:bg-red-50 transition-colors"
                   title={copy.editor.removeSection}
@@ -7033,7 +7156,7 @@ const SongEditor: React.FC<Props> = ({
                       <div className="inline-flex min-w-[1.8rem] items-center justify-center rounded-md border border-gray-100 bg-gray-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-gray-400">
                         {globalBarNumber}
                       </div>
-                      <button 
+                      <button
                         onClick={() => {
                           const newBars = section.bars.filter((_, i) => i !== bIdx);
                           clearEditorSelectionState();
@@ -7046,7 +7169,7 @@ const SongEditor: React.FC<Props> = ({
                       </button>
                     </div>
                   </div>
-                  
+
                   <div className="space-y-2.5 pt-6">
                     {/* Chords */}
                     <div>
@@ -7054,10 +7177,10 @@ const SongEditor: React.FC<Props> = ({
                         <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.chords}</label>
                         <span className="text-[10px] font-semibold text-gray-400">{bar.timeSignature || song.timeSignature}</span>
                       </div>
-                      <input 
+                      <input
                         id={`editor-s${sIdx}-b${bIdx}-chords`}
-                        type="text" 
-                        value={bar.chords.join(' ')} 
+                        type="text"
+                        value={bar.chords.join(' ')}
                         data-chord-input
                         data-sidx={sIdx}
                         data-bidx={bIdx}
@@ -7118,7 +7241,7 @@ const SongEditor: React.FC<Props> = ({
 
                           const newBars = [...section.bars];
                           let val = cleanInput(e.target.value);
-                          
+
                           // Helper to check if a string looks like a Nashville number (1-7, b1-7, #1-7)
                           const isNashvillePattern = (s: string) => /^([b#]?)([1-7])/.test(s.trim());
 
@@ -7133,7 +7256,7 @@ const SongEditor: React.FC<Props> = ({
 
                           // If either is true, we are in Nashville Mode for this section
                           const isNashvilleMode = sectionHasNashville || currentInputIsNashville;
-                          
+
                           let processedVal = val;
                           if (!isNashvilleMode) {
                             // Standard Chord Mode: Auto-capitalize A-G
@@ -7146,7 +7269,7 @@ const SongEditor: React.FC<Props> = ({
                             // Keep 'b' as lowercase for flat symbols (b7, b3, etc.)
                             processedVal = val.replace(/(^|\s|\/)([ac-g])/g, (m, p1, p2) => p1 + p2.toUpperCase());
                           }
-                          
+
                           const chordTokens = processedVal.split(' ').map((token) => (
                             isNashvilleMode ? token : normalizeChordEnharmonic(token)
                           ));
@@ -7531,10 +7654,10 @@ const SongEditor: React.FC<Props> = ({
                         <div className="grid grid-cols-2 gap-2">
                           <div className="min-w-0">
                             <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5 truncate">{copy.editor.label}</label>
-                            <input 
+                            <input
                               id={`editor-s${sIdx}-b${bIdx}-label`}
-                              type="text" 
-                              value={getBarDisplayLabel(bar)} 
+                              type="text"
+                              value={getBarDisplayLabel(bar)}
                               lang="en"
                               spellCheck={false}
                               onChange={e => {
@@ -7549,10 +7672,10 @@ const SongEditor: React.FC<Props> = ({
                           </div>
                           <div className="min-w-0">
                             <label className="block text-[10px] font-bold text-gray-400 uppercase mb-0.5 truncate">{copy.editor.annotation}</label>
-                            <input 
+                            <input
                               id={`editor-s${sIdx}-b${bIdx}-annotation`}
-                              type="text" 
-                              value={bar.annotation || ''} 
+                              type="text"
+                              value={bar.annotation || ''}
                               lang="en"
                               spellCheck={false}
                               onChange={e => {
@@ -7623,7 +7746,7 @@ const SongEditor: React.FC<Props> = ({
                         >
                           <span className="font-bold text-[10px]">|:</span>
                         </button>
-                        <button 
+                        <button
                           onClick={() => {
                             const newBars = [...section.bars];
                             const nextRepeatEnd = !bar.repeatEnd;
@@ -7635,7 +7758,7 @@ const SongEditor: React.FC<Props> = ({
                         >
                           <span className="font-bold text-[10px]">:|</span>
                         </button>
-                        <button 
+                        <button
                           onClick={() => {
                             const newBars = [...section.bars];
                             const nextFinalBar = !bar.finalBar;
@@ -7648,12 +7771,12 @@ const SongEditor: React.FC<Props> = ({
                           <span className="font-bold text-[10px]">||</span>
                         </button>
                       </div>
-                      
+
                       <div className="flex w-full min-w-0 items-center gap-1 @min-[238px]:w-auto @min-[238px]:flex-1 @min-[238px]:justify-end">
                         <span className="text-[10px] font-bold text-gray-400 uppercase shrink-0">{copy.editor.endShort}</span>
                         <input
                           list={`ending-options-${sIdx}-${bIdx}`}
-                          value={bar.ending || ''} 
+                          value={bar.ending || ''}
                           onChange={e => {
                             const val = cleanInput(e.target.value).trim();
                             const newBars = [...section.bars];
@@ -7678,7 +7801,7 @@ const SongEditor: React.FC<Props> = ({
                   );
                 })()
               ))}
-              
+
               {/* Add Bar Button */}
               <div
                 onDragOver={e => {
@@ -7710,7 +7833,7 @@ const SongEditor: React.FC<Props> = ({
                       : 'bg-white border-gray-300 hover:border-indigo-300 hover:bg-indigo-50'
                 } ${isSpaceConstrainedBarLayout ? 'min-h-[124px]' : 'min-h-[200px]'}`}
               >
-                <button 
+                <button
                   type="button"
                   onClick={() => {
                     if (suppressAddBarClickRef.current === `append-${sIdx}`) {
@@ -7742,7 +7865,7 @@ const SongEditor: React.FC<Props> = ({
 
       {!hideBottomAddSectionButton && (
         <div className="flex justify-center mt-12 pb-12">
-          <button 
+          <button
             onClick={addSection}
             className="px-8 py-4 bg-white border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center gap-3 text-gray-500 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-all font-bold uppercase tracking-widest text-sm shadow-sm hover:shadow-md"
           >
@@ -7755,7 +7878,7 @@ const SongEditor: React.FC<Props> = ({
       {/* Floating Toolbar for Selection */}
       <AnimatePresence>
         {selection && (
-          <motion.div 
+          <motion.div
             ref={toolbarRef}
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -7783,8 +7906,8 @@ const SongEditor: React.FC<Props> = ({
                   <div className={`${compactToolbarColumnClass} ${isCompactSelectionToolbar ? 'w-full' : ''}`}>
                     {isCompactSelectionToolbar ? (
                       <>
-                        <div className="grid w-full grid-cols-9 gap-0.5">
-                          <button 
+	                        <div className="grid w-full grid-cols-10 gap-0.5">
+                          <button
                             onClick={() => setSelectedJianpuOctave(-1)}
                             className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave < 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                             title={copy.editor.lowOctave}
@@ -7796,7 +7919,7 @@ const SongEditor: React.FC<Props> = ({
                             </div>
                             <span className={`${compactToolLabelClass} ${effectiveJianpuOctave < 0 ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => setSelectedJianpuOctave(1)}
                             className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave > 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                             title={copy.editor.highOctave}
@@ -7832,7 +7955,7 @@ const SongEditor: React.FC<Props> = ({
                             </div>
                             <span className={`${compactToolLabelClass} ${effectiveJianpuAccidental === 'b' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.flat}</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => setSelectedJianpuDuration('eighth')}
                             disabled={!canUseEighthDuration && effectiveJianpuDuration !== 'eighth'}
                             className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseEighthDuration && effectiveJianpuDuration !== 'eighth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
@@ -7845,7 +7968,7 @@ const SongEditor: React.FC<Props> = ({
                             </div>
                             <span className={`${compactToolLabelClass} ${effectiveJianpuDuration === 'eighth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/8</span>
                           </button>
-                          <button 
+                          <button
                             onClick={() => setSelectedJianpuDuration('sixteenth')}
                             disabled={!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth'}
                             className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
@@ -7858,21 +7981,34 @@ const SongEditor: React.FC<Props> = ({
                             </div>
                             <span className={`${compactToolLabelClass} ${effectiveJianpuDuration === 'sixteenth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/16</span>
                           </button>
-                          <button 
-                            onClick={toggleSelectedJianpuDot}
-                            disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted)}
-                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
-                            title={copy.editor.toggleDot}
-                            aria-keyshortcuts="."
-                          >
+	                          <button
+	                            onClick={toggleSelectedJianpuDot}
+	                            disabled={Boolean(effectiveJianpuTriplet || (jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted))}
+	                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${effectiveJianpuTriplet || (jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted) ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+	                            title={copy.editor.toggleDot}
+	                            aria-keyshortcuts="."
+	                          >
                             <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuDotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                               <div className="w-1.5 h-1.5 bg-current rounded-full" />
                               <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuDotted ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>.</span>
                             </div>
-                            <span className={`${compactToolLabelClass} ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
-                          </button>
-                          <button 
-                            onClick={toggleSelectedJianpuSlur}
+	                            <span className={`${compactToolLabelClass} ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
+	                          </button>
+	                          <button
+	                            onClick={toggleSelectedJianpuTriplet}
+	                            disabled={!canUseTripletDuration}
+	                            className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuTriplet ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseTripletDuration ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+	                            title="三連音"
+	                            aria-keyshortcuts="Shift+T"
+	                          >
+	                            <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuTriplet ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+	                              {renderJianpuTripletGlyph()}
+	                              <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuTriplet ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>⇧T</span>
+	                            </div>
+	                            <span className={`${compactToolLabelClass} ${effectiveJianpuTriplet ? 'text-indigo-600' : 'text-gray-500'}`}>3連</span>
+	                          </button>
+	                          <button
+	                            onClick={toggleSelectedJianpuSlur}
                             className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuTied ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                             title={copy.editor.toggleTieSlur}
                             aria-keyshortcuts="T"
@@ -7916,7 +8052,7 @@ const SongEditor: React.FC<Props> = ({
                               <span className={compactToolLabelClass}>{label}</span>
                             </button>
                           ))}
-                          <button 
+                          <button
                             onClick={() => insertOrReplaceJianpuPitch('0')}
                             className={`flex flex-col items-center ${compactToolButtonClass} hover:bg-indigo-50`}
                             title={copy.editor.insertRest}
@@ -7926,7 +8062,7 @@ const SongEditor: React.FC<Props> = ({
                             </div>
                             <span className={compactToolLabelClass}>{copy.editor.rest}</span>
                           </button>
-                          <button 
+                          <button
                             onClick={insertJianpuSustainBeat}
                             className={`flex flex-col items-center ${compactToolButtonClass} hover:bg-indigo-50`}
                             title={copy.editor.sustainNextBeat}
@@ -7941,7 +8077,7 @@ const SongEditor: React.FC<Props> = ({
                     ) : (
                       <>
                       <div className={`${isCompactSelectionToolbar ? 'grid w-full grid-cols-5 gap-0.5' : compactToolbarRowClass} ${isCompactSelectionToolbar ? '[&>button]:min-w-0 [&>button]:gap-0.5 [&>button]:p-1.5 [&>button>div:first-child]:h-7 [&>button>div:first-child]:w-7 [&>button>span:last-child]:text-[9px] [&>button>span:last-child]:leading-none' : ''}`}>
-                      <button 
+                      <button
                         onClick={() => setSelectedJianpuOctave(-1)}
                         className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave < 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.lowOctave}
@@ -7954,7 +8090,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className={`${compactToolLabelClass} ${effectiveJianpuOctave < 0 ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.low}</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => setSelectedJianpuOctave(1)}
                         className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuOctave > 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.highOctave}
@@ -7993,7 +8129,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className={`${compactToolLabelClass} ${effectiveJianpuAccidental === 'b' ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.flat}</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => setSelectedJianpuDuration('eighth')}
                         disabled={!canUseEighthDuration && effectiveJianpuDuration !== 'eighth'}
                         className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDuration === 'eighth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseEighthDuration && effectiveJianpuDuration !== 'eighth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
@@ -8007,7 +8143,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className={`${compactToolLabelClass} ${effectiveJianpuDuration === 'eighth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/8</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => setSelectedJianpuDuration('sixteenth')}
                         disabled={!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth'}
                         className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDuration === 'sixteenth' ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseSixteenthDuration && effectiveJianpuDuration !== 'sixteenth' ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
@@ -8021,22 +8157,36 @@ const SongEditor: React.FC<Props> = ({
                         <span className={`${compactToolLabelClass} ${effectiveJianpuDuration === 'sixteenth' ? 'text-indigo-600' : 'text-gray-500'}`}>1/16</span>
                       </button>
 
-                      <button 
-                        onClick={toggleSelectedJianpuDot}
-                        disabled={Boolean(jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted)}
-                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
-                        title={copy.editor.toggleDot}
-                        aria-keyshortcuts="."
-                      >
+	                      <button
+	                        onClick={toggleSelectedJianpuDot}
+	                        disabled={Boolean(effectiveJianpuTriplet || (jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted))}
+	                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuDotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${effectiveJianpuTriplet || (jianpuInsertAvailability && !jianpuInsertAvailability.canDot && !effectiveJianpuDotted) ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+	                        title={copy.editor.toggleDot}
+	                        aria-keyshortcuts="."
+	                      >
                         <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuDotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                           <div className="w-1.5 h-1.5 bg-current rounded-full" />
                           <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuDotted ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>.</span>
                         </div>
-                        <span className={`${compactToolLabelClass} ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
-                      </button>
+	                        <span className={`${compactToolLabelClass} ${effectiveJianpuDotted ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.dot}</span>
+	                      </button>
 
-                      <button 
-                        onClick={toggleSelectedJianpuSlur}
+	                      <button
+	                        onClick={toggleSelectedJianpuTriplet}
+	                        disabled={!canUseTripletDuration}
+	                        className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuTriplet ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${!canUseTripletDuration ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+	                        title="三連音"
+	                        aria-keyshortcuts="Shift+T"
+	                      >
+	                        <div className={`relative ${compactToolIconBoxClass} ${effectiveJianpuTriplet ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+	                          {renderJianpuTripletGlyph()}
+	                          <span className={`absolute -right-1 -top-1 rounded-md border font-mono font-bold ${effectiveJianpuTriplet ? activeJianpuShortcutBadgeClass : inactiveJianpuShortcutBadgeClass}`}>⇧T</span>
+	                        </div>
+	                        <span className={`${compactToolLabelClass} ${effectiveJianpuTriplet ? 'text-indigo-600' : 'text-gray-500'}`}>3連</span>
+	                      </button>
+
+	                      <button
+	                        onClick={toggleSelectedJianpuSlur}
                         className={`flex flex-col items-center ${compactToolButtonClass} ${effectiveJianpuTied ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
                         title={copy.editor.toggleTieSlur}
                         aria-keyshortcuts="T"
@@ -8056,7 +8206,7 @@ const SongEditor: React.FC<Props> = ({
                     )}
 
                     <div className={compactToolbarRowClass}>
-                      <button 
+                      <button
                         onClick={() => insertOrReplaceJianpuPitch('1')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title="Insert 1"
@@ -8067,7 +8217,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">Do</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => insertOrReplaceJianpuPitch('2')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title="Insert 2"
@@ -8078,7 +8228,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">Re</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => insertOrReplaceJianpuPitch('3')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title="Insert 3"
@@ -8089,7 +8239,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">Mi</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => insertOrReplaceJianpuPitch('4')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title="Insert 4"
@@ -8100,7 +8250,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">Fa</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => insertOrReplaceJianpuPitch('5')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title="Insert 5"
@@ -8111,7 +8261,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">Sol</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => insertOrReplaceJianpuPitch('6')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title="Insert 6"
@@ -8122,7 +8272,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">La</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => insertOrReplaceJianpuPitch('7')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title="Insert 7"
@@ -8133,7 +8283,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">Ti</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => insertOrReplaceJianpuPitch('0')}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title={copy.editor.insertRest}
@@ -8144,7 +8294,7 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-[10px] font-bold text-gray-500">{copy.editor.rest}</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={insertJianpuSustainBeat}
                         className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
                         title={copy.editor.sustainNextBeat}
@@ -8161,7 +8311,7 @@ const SongEditor: React.FC<Props> = ({
                 </>
               ) : selection.type === 'chord' ? (
                 <>
-                  <button 
+                  <button
                     onClick={() => applyTransformation('push')}
                     className={chordToolbarButtonClass}
                     title={copy.editor.pushTitle}
@@ -8175,7 +8325,7 @@ const SongEditor: React.FC<Props> = ({
                     <span className={chordToolbarLabelClass}>{copy.editor.push}</span>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => applyTransformation('pull')}
                     className={chordToolbarButtonClass}
                     title={copy.editor.pullTitle}
@@ -8189,7 +8339,7 @@ const SongEditor: React.FC<Props> = ({
                     <span className={chordToolbarLabelClass}>{copy.editor.pull}</span>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => applyTransformation('accent')}
                     className={chordToolbarButtonClass}
                     title={copy.editor.accentTitle}
@@ -8202,7 +8352,7 @@ const SongEditor: React.FC<Props> = ({
                     <span className={chordToolbarLabelClass}>{copy.editor.accent}</span>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => applyTransformation('fermata')}
                     className={chordToolbarButtonClass}
                     title={copy.editor.fermataTitle}
@@ -8213,7 +8363,7 @@ const SongEditor: React.FC<Props> = ({
                     <span className={chordToolbarLabelClass}>{copy.editor.fermata}</span>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => applyTransformation('rest1')}
                     className={chordToolbarButtonClass}
                     title={copy.editor.wholeRest}
@@ -8226,7 +8376,7 @@ const SongEditor: React.FC<Props> = ({
                     <span className={chordToolbarLabelClass}>{copy.editor.wholeRestShort}</span>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => applyTransformation('rest2')}
                     className={chordToolbarButtonClass}
                     title={copy.editor.halfRest}
@@ -8239,7 +8389,7 @@ const SongEditor: React.FC<Props> = ({
                     <span className={chordToolbarLabelClass}>{copy.editor.halfRestShort}</span>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => applyTransformation('rest')}
                     className={chordToolbarButtonClass}
                     title={copy.editor.quarterRest}
@@ -8252,7 +8402,7 @@ const SongEditor: React.FC<Props> = ({
                     <span className={chordToolbarLabelClass}>{copy.editor.quarterRestShort}</span>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => applyTransformation('rest8')}
                     className={chordToolbarButtonClass}
                     title={copy.editor.eighthRest}
@@ -8460,7 +8610,7 @@ const SongEditor: React.FC<Props> = ({
                 <>
                   <div className={toolbarDividerClass} />
 
-                  <button 
+                  <button
                     onClick={() => {
                       if (selection.type === 'rhythm') {
                         clearRhythmSelection('backspace');
@@ -8486,7 +8636,7 @@ const SongEditor: React.FC<Props> = ({
               )}
             </div>
 
-            <button 
+            <button
               onClick={() => setSelection(null)}
               className={`${isCompactSelectionToolbar ? 'ml-1 p-1.5' : 'ml-2 p-2'} text-gray-400 hover:text-gray-600`}
             >

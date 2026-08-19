@@ -6,6 +6,7 @@ import CapoPicker from './CapoPicker';
 import { CompactSegmentedControl, CompactToggleSwitch } from './SetlistCompactControls';
 import { parseYouTubeVideoId } from '../utils/referenceUtils';
 import { formatInitialCaps } from '../utils/textUtils';
+import { formatTempoBpm, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import type { PreviewEditorDeviceLayout } from '../lib/previewEditorLayout';
 
 type PreviewMetadataFocusField = 'title' | 'credits' | 'key' | 'tempo' | 'timeSignature' | 'capo' | 'groove';
@@ -152,8 +153,8 @@ const getStableTapBpm = (tapTimes: number[], previousBpm: number | null): number
 };
 
 const getReferenceBpmDrafts = (song: Song): Record<SongReferenceKind, string> => ({
-  band: typeof song.references?.band?.bpm === 'number' ? String(song.references.band.bpm) : '',
-  vocal: typeof song.references?.vocal?.bpm === 'number' ? String(song.references.vocal.bpm) : ''
+  band: formatTempoBpm(song.references?.band?.bpm),
+  vocal: formatTempoBpm(song.references?.vocal?.bpm)
 });
 
 const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
@@ -312,7 +313,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const copy = getUiCopy(language);
   const panelRef = React.useRef<HTMLElement>(null);
   const metadataInputId = React.useId();
-  const [tempoDraft, setTempoDraft] = React.useState(typeof song.tempo === 'number' ? String(song.tempo) : '');
+  const [tempoDraft, setTempoDraft] = React.useState(formatTempoBpm(song.tempo));
   const [referenceBpmDrafts, setReferenceBpmDrafts] = React.useState<Record<SongReferenceKind, string>>(() => getReferenceBpmDrafts(song));
   const [activeReferenceTapKind, setActiveReferenceTapKind] = React.useState<SongReferenceKind>('band');
   const [layoutMode, setLayoutMode] = React.useState<MetadataLayoutMode>('wide');
@@ -395,7 +396,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   }, [initialFocusField, isPreviewHeader]);
 
   React.useEffect(() => {
-    setTempoDraft(typeof song.tempo === 'number' ? String(song.tempo) : '');
+    setTempoDraft(formatTempoBpm(song.tempo));
   }, [song.tempo]);
 
   React.useEffect(() => {
@@ -447,11 +448,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   }, [activeReferenceTapKind, showReferenceFields]);
 
   const commitTempoDraft = React.useCallback(() => {
-    const digitsOnly = tempoDraft.replace(/\D+/g, '').slice(0, 3);
-    const parsedTempo = digitsOnly ? Number(digitsOnly) : undefined;
+    const parsedTempo = normalizeTempoBpm(tempoDraft);
+    setTempoDraft(formatTempoBpm(parsedTempo));
     onChange({
       ...song,
-      tempo: parsedTempo === undefined ? undefined : Math.min(400, Math.max(20, parsedTempo))
+      tempo: parsedTempo
     });
   }, [onChange, song, tempoDraft]);
 
@@ -497,8 +498,12 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       referenceBpmCommitTimeoutsRef.current[kind] = null;
     }
 
-    const digitsOnly = draft.replace(/\D+/g, '').slice(0, 3);
-    updateReference(kind, { bpm: digitsOnly ? Number(digitsOnly) : undefined });
+    const nextBpm = normalizeTempoBpm(draft);
+    const nextDraft = formatTempoBpm(nextBpm);
+    setReferenceBpmDrafts((current) => (
+      current[kind] === nextDraft ? current : { ...current, [kind]: nextDraft }
+    ));
+    updateReference(kind, { bpm: nextBpm });
   };
 
   const scheduleReferenceBpmCommit = (kind: SongReferenceKind, draft: string, delay: number) => {
@@ -514,11 +519,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   };
 
   const updateReferenceBpmDraft = (kind: SongReferenceKind, draft: string, delay: number) => {
-    const digitsOnly = draft.replace(/\D+/g, '').slice(0, 3);
+    const nextDraft = sanitizeTempoInput(draft);
     setReferenceBpmDrafts((current) => (
-      current[kind] === digitsOnly ? current : { ...current, [kind]: digitsOnly }
+      current[kind] === nextDraft ? current : { ...current, [kind]: nextDraft }
     ));
-    scheduleReferenceBpmCommit(kind, digitsOnly, delay);
+    scheduleReferenceBpmCommit(kind, nextDraft, delay);
   };
 
   const renderReferenceEditor = (kind: SongReferenceKind) => {
@@ -572,10 +577,12 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           </div>
 
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
+            pattern="[0-9]*[.]?[0-9]?"
             min={20}
             max={400}
-            step={1}
+            step={0.1}
             value={bpmDraft}
             onChange={(event) => {
               updateReferenceBpmDraft(kind, event.target.value, REFERENCE_BPM_INPUT_COMMIT_DELAY_MS);
@@ -731,14 +738,14 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     <div data-song-metadata-field="tempo">
       <label className={labelClassName}>{copy.editor.tempo}</label>
       <input
-        type={isPreviewHeader ? 'text' : 'number'}
-        inputMode="numeric"
-        pattern="[0-9]*"
+        type="text"
+        inputMode="decimal"
+        pattern="[0-9]*[.]?[0-9]?"
         min={20}
         max={400}
-        step={1}
+        step={0.1}
         value={tempoDraft}
-        onChange={(event) => setTempoDraft(event.target.value.replace(/\D+/g, '').slice(0, 3))}
+        onChange={(event) => setTempoDraft(sanitizeTempoInput(event.target.value))}
         onBlur={commitTempoDraft}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
