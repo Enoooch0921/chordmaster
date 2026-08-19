@@ -149,6 +149,34 @@ describe('ChordSheet preview input caret', () => {
     expect(screen.getByText('1.')).toBeInTheDocument();
   });
 
+  it('gives rows with chords, rhythm, and jianpu extra vertical space', () => {
+    const threeRowSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['Gaug', 'A7'], rhythm: 'e e q q', riff: '5 6 7 1' }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={threeRowSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+      />
+    );
+
+    const row = container.querySelector('[data-preview-row-three-notation-rows="true"]');
+    const bar = container.querySelector('[data-preview-three-notation-rows="true"]');
+    const lanes = container.querySelectorAll('[data-preview-edit-anchor$="|rhythm|all"], [data-preview-edit-anchor$="|jianpu|all"]');
+
+    expect(row).toHaveClass('min-h-[94px]', 'flex-[1.45]');
+    expect(row).toHaveAttribute('data-preview-layout-weight', '1.45');
+    expect(bar).toHaveStyle({ paddingBottom: '58px' });
+    expect(lanes[0]).toHaveClass('h-[22px]');
+    expect(lanes[1]).toHaveClass('h-[24px]');
+  });
+
   it('expands the visible rhythm lane hit target while chord editing is active', () => {
     const rhythmSong: Song = {
       ...song,

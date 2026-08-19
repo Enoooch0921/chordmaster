@@ -1674,8 +1674,15 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     sIdx: number;
     startBIdx: number;
     addSectionAfter?: boolean;
+    hasThreeNotationRows: boolean;
+    layoutWeight: number;
   };
   const allRows: PreviewSheetRow[] = [];
+  const getRowHasThreeNotationRows = (bars: Bar[]) => bars.some((bar) => {
+    if (!bar || !hasMeaningfulChordContent(bar.chords) || !bar.rhythm?.trim()) return false;
+    const effectiveTimeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
+    return hasVisiblePreviewRiff(getPreviewRiffNotation(bar.riff, effectiveTimeSignature));
+  });
   // Empty bars are valid chart content: users intentionally add them before
   // entering chords. Never trim them from the preview or the newly-added bar
   // disappears immediately after clicking "+". Failed *sections* are filtered
@@ -1686,12 +1693,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     const sectionBars = visibleSectionBars[sIdx] ?? section.bars;
     const sectionRows = Math.max(1, Math.ceil(sectionBars.length / 4));
     for (let i = 0; i < sectionRows; i++) {
+      const rowBars = sectionBars.slice(i * 4, i * 4 + 4);
+      const hasThreeNotationRows = getRowHasThreeNotationRows(rowBars);
       allRows.push({
         kind: 'music',
         sectionTitle: i === 0 ? section.title : null,
-        bars: sectionBars.slice(i * 4, i * 4 + 4),
+        bars: rowBars,
         sIdx,
-        startBIdx: i * 4
+        startBIdx: i * 4,
+        hasThreeNotationRows,
+        layoutWeight: hasThreeNotationRows ? 1.45 : 1
       });
       }
   });
@@ -1710,7 +1721,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         bars: [],
         sIdx: lastSectionIndex,
         startBIdx: finalVisibleBars.length,
-        addSectionAfter: true
+        addSectionAfter: true,
+        hasThreeNotationRows: false,
+        layoutWeight: 1
       });
     }
   }
@@ -1728,16 +1741,23 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const notationLaneHitClass = 'before:absolute before:left-0 before:right-0 before:-top-2 before:-bottom-2 before:content-[""]';
 
   const pages: PreviewSheetRow[][] = [];
-  let currentRow = 0;
+  let activePageRows: PreviewSheetRow[] = [];
+  let activePageWeight = 0;
+  let activePageCapacity = ROWS_PER_PAGE_FIRST;
 
-  // Page 1
-  pages.push(allRows.slice(0, ROWS_PER_PAGE_FIRST));
-  currentRow = ROWS_PER_PAGE_FIRST;
-
-  // Subsequent pages
-  while (currentRow < allRows.length) {
-    pages.push(allRows.slice(currentRow, currentRow + ROWS_PER_PAGE_OTHER));
-    currentRow += ROWS_PER_PAGE_OTHER;
+  allRows.forEach((row) => {
+    const rowWeight = row.layoutWeight || 1;
+    if (activePageRows.length > 0 && activePageWeight + rowWeight > activePageCapacity) {
+      pages.push(activePageRows);
+      activePageRows = [];
+      activePageWeight = 0;
+      activePageCapacity = ROWS_PER_PAGE_OTHER;
+    }
+    activePageRows.push(row);
+    activePageWeight += rowWeight;
+  });
+  if (activePageRows.length > 0) {
+    pages.push(activePageRows);
   }
 
   // Ensure at least one page
@@ -1990,6 +2010,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                   data-preview-section-id={section?.id || ''}
                   data-preview-add-choice-row={row.kind === 'add-choice' ? 'true' : undefined}
                   data-preview-only-control={row.kind === 'add-choice' ? 'true' : undefined}
+                  data-preview-row-three-notation-rows={row.hasThreeNotationRows ? true : undefined}
+                  data-preview-layout-weight={row.layoutWeight}
                   data-preview-section-drop-target={row.startBIdx === 0 ? section?.id || '' : undefined}
                   layout={!suppressSectionTransitions}
                   initial={false}
@@ -2008,7 +2030,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     backgroundColor: { duration: suppressSectionTransitions ? 0 : (isHighlighted ? 0.2 : 0.25) },
                     boxShadow: { duration: suppressSectionTransitions ? 0 : 0.2 }
                   }}
-                  className="relative flex-1 flex w-full min-h-0 rounded-lg transition-all"
+                  className={`relative flex w-full rounded-lg transition-all ${row.hasThreeNotationRows ? 'min-h-[94px] flex-[1.45]' : 'min-h-0 flex-1'}`}
                 >
                   {row.startBIdx === 0 && sectionDrag?.targetSectionId === section?.id && (
                     <span
@@ -2428,7 +2450,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           : (labelSharesNotationLane || showBottomRhythmLane || hasRiff ? 1 : 0)
                       : 0;
                     const barPaddingBottom = hasThreeNotationRows
-                      ? 48
+                      ? 58
                       : lowerLaneCount >= 2
                         ? 38
                         : lowerLaneCount === 1
@@ -2910,11 +2932,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       </div>
                                     )}
 
-	                                    <div className={`flex flex-1 flex-col ${hasThreeNotationRows ? 'gap-1' : 'gap-0.5'}`}>
+	                                    <div className={`flex flex-1 flex-col ${hasThreeNotationRows ? 'gap-1.5' : 'gap-0.5'}`}>
 	                                      <div className="flex items-end gap-1">
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|rhythm|all`}
-	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${hasThreeNotationRows ? 'h-[19px] flex items-center overflow-visible' : sharedLaneClass} ${notationLaneHitClass} flex-1`}
+	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${hasThreeNotationRows ? 'h-[22px] flex items-center overflow-visible' : sharedLaneClass} ${notationLaneHitClass} flex-1`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'rhythm');
@@ -2931,7 +2953,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                      <div className="flex items-end">
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|jianpu|all`}
-	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${hasThreeNotationRows ? 'h-[21px] flex items-center overflow-visible' : sharedLaneClass} ${notationLaneHitClass}`}
+	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${hasThreeNotationRows ? 'h-[24px] flex items-center overflow-visible' : sharedLaneClass} ${notationLaneHitClass}`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
