@@ -59,6 +59,7 @@ import PreviewWysiwygEditor, { PreviewWysiwygTarget } from './components/Preview
 import PreviewBarEditor from './components/preview-edit/PreviewBarEditor';
 import PreviewSectionActionMenu from './components/preview-edit/PreviewSectionActionMenu';
 import PreviewSectionTitleEditor from './components/preview-edit/PreviewSectionTitleEditor';
+import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
 import SongEditor from './components/SongEditor';
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
@@ -94,7 +95,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus, Keyboard } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -2158,6 +2159,7 @@ export default function App() {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isMobileActionsSheetOpen, setIsMobileActionsSheetOpen] = useState(false);
   const [isMobileMetadataOpen, setIsMobileMetadataOpen] = useState(false);
+  const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const [mobileSwipeSetlist, setMobileSwipeSetlist] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
   const [draggingSetlist, setDraggingSetlist] = useState<{ id: string; dx: number } | null>(null);
   const [mobileSwipeProject, setMobileSwipeProject] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
@@ -8325,6 +8327,27 @@ export default function App() {
   }, [songs, song, selectedSongId]);
 
   useEffect(() => {
+    const isTextEntryTarget = (target: EventTarget | null) => (
+      target instanceof HTMLElement
+      && (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
+    );
+
+    const handleShortcutReferenceKeyDown = (event: KeyboardEvent) => {
+      const isMetaSlash = (event.ctrlKey || event.metaKey) && event.key === '/';
+      const isQuestionMark = event.key === '?' || (event.shiftKey && event.key === '/');
+      if (!isMetaSlash && !isQuestionMark) return;
+      if (!isMetaSlash && isTextEntryTarget(event.target)) return;
+
+      event.preventDefault();
+      setIsKeyboardShortcutsOpen(true);
+      setIsMobileActionsSheetOpen(false);
+    };
+
+    window.addEventListener('keydown', handleShortcutReferenceKeyDown);
+    return () => window.removeEventListener('keydown', handleShortcutReferenceKeyDown);
+  }, []);
+
+  useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
       if (setlistActionsMenuRef.current && !setlistActionsMenuRef.current.contains(event.target as Node)) {
         setIsSetlistActionsMenuOpen(false);
@@ -12742,6 +12765,13 @@ export default function App() {
         </div>
       )}
 
+      {isKeyboardShortcutsOpen && (
+        <KeyboardShortcutsDialog
+          language={language}
+          onClose={() => setIsKeyboardShortcutsOpen(false)}
+        />
+      )}
+
       {usesOverlaySidebar && isSidebarExpanded && (
         <button
           type="button"
@@ -12928,6 +12958,22 @@ export default function App() {
                   >
                     <BookOpen size={18} />
                   </button>
+                  {!isPerformanceMode && (
+                    <button
+                      type="button"
+                      onClick={() => setIsKeyboardShortcutsOpen(true)}
+                      className={`flex h-10 w-10 items-center justify-center rounded-2xl transition-colors ${
+                        isKeyboardShortcutsOpen
+                          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}
+                      title={language === 'zh' ? '快捷鍵（?）' : 'Keyboard shortcuts (?)'}
+                      aria-label={language === 'zh' ? '開啟快捷鍵' : 'Open keyboard shortcuts'}
+                      aria-keyshortcuts="Shift+/ Control+/"
+                    >
+                      <Keyboard size={18} />
+                    </button>
+                  )}
                   {isAuthenticated ? (
                     <button
                       type="button"
