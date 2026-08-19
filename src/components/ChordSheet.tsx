@@ -2031,19 +2031,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     initial={false}
                   >
                     <div className="relative w-16 sm:w-20 shrink-0" />
-                    <div className="flex-1 grid min-h-0 grid-cols-4 w-full">
-                      {Array.from({ length: 4 }).map((_, bIdx) => (
-                        <div
-                          key={bIdx}
-                          data-preview-closed-measure
-                          className={`sheet-bar relative min-h-0 border-l border-gray-900 px-1 pt-1.5 pb-6 flex flex-col min-w-0 ${bIdx === 3 ? 'border-r border-r-gray-900 sheet-bar-right-edge border-r-2' : ''} ${bIdx === 0 ? 'border-l-2 sheet-bar-left-edge' : ''}`}
-                        >
-                          <div className="absolute inset-0 z-[1] flex items-center pointer-events-none">
-                            <div className="h-[2px] w-full bg-gray-400" />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <div
+                      data-preview-invisible-page-spacer
+                      className="flex-1 min-h-0"
+                    />
                   </motion.div>
                 );
               }

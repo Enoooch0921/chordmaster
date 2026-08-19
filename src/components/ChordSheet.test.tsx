@@ -385,7 +385,8 @@ describe('ChordSheet preview input caret', () => {
     expect(pages).toHaveLength(2);
     expect(pages[0].querySelectorAll('[data-preview-section-id="section-1"] [data-rhythm-measure-row]')).toHaveLength(9);
     expect(pages[0].querySelectorAll('[data-preview-closed-page-row]')).toHaveLength(1);
-    expect(pages[0].querySelectorAll('[data-preview-closed-measure]')).toHaveLength(4);
+    expect(pages[0].querySelectorAll('[data-preview-invisible-page-spacer]')).toHaveLength(1);
+    expect(pages[0].querySelector('[data-preview-closed-measure]')).toBeNull();
     expect(pages[0].querySelector('[data-preview-section-id="section-2"]')).toBeNull();
     expect(pages[1].querySelectorAll('[data-preview-section-id="section-2"] [data-rhythm-measure-row]')).toHaveLength(2);
   });
