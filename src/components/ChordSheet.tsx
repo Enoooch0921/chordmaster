@@ -1636,10 +1636,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   };
 
   // Flatten all sections into rows
-  // A4 page row capacity. Kept stable between chord and lyrics modes so
-  // barline heights do not jump.
-  const ROWS_PER_PAGE_FIRST = 12;
-  const ROWS_PER_PAGE_OTHER = 14;
+  // Three-line mode deliberately fits fewer rows on each A4 page. The extra
+  // vertical room is printable writable space, not an editor-only zoom.
+  const barRowCount = song.barRowCount === 3 ? 3 : 2;
+  const ROWS_PER_PAGE_FIRST = barRowCount === 3 ? 8 : 12;
+  const ROWS_PER_PAGE_OTHER = barRowCount === 3 ? 9 : 14;
   const pageIndexOfRow = (rowIndex: number) =>
     rowIndex < ROWS_PER_PAGE_FIRST
       ? 0
@@ -1702,7 +1703,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         sIdx,
         startBIdx: i * 4,
         hasThreeNotationRows,
-        layoutWeight: hasThreeNotationRows ? 1.45 : 1
+        layoutWeight: barRowCount === 3 ? 1 : hasThreeNotationRows ? 1.45 : 1
       });
       }
   });
@@ -1809,6 +1810,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         <div
           key={pIdx}
           data-print-page
+          data-sheet-bar-row-count={barRowCount}
           data-export-page-index={pIdx + 1}
           data-export-page-total={pages.length}
           data-export-song-title={song.title}
@@ -2030,7 +2032,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     backgroundColor: { duration: suppressSectionTransitions ? 0 : (isHighlighted ? 0.2 : 0.25) },
                     boxShadow: { duration: suppressSectionTransitions ? 0 : 0.2 }
                   }}
-                  className={`relative flex w-full rounded-lg transition-all ${row.hasThreeNotationRows ? 'min-h-[94px] flex-[1.45]' : 'min-h-0 flex-1'}`}
+                  className={`relative flex w-full rounded-lg transition-all ${barRowCount === 3 ? 'min-h-0 flex-1' : row.hasThreeNotationRows ? 'min-h-[94px] flex-[1.45]' : 'min-h-0 flex-1'}`}
                 >
                   {row.startBIdx === 0 && sectionDrag?.targetSectionId === section?.id && (
                     <span
@@ -2571,12 +2573,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         {bar?.ending && (
                           <div
                             data-sheet-ending-bracket={bar.ending}
-                            className={`sheet-ending-bracket absolute -top-[13px] h-[14px] border-t-[3px] border-gray-950 z-10 pointer-events-none ${isEndingStart ? `${getEndingLeftOffsetClass(endingLeftBarlineType)} border-l-[3px]` : 'left-0'} ${isEndingEnd ? `${getEndingRightOffsetClass(endingRightBarlineType)} border-r-[3px]` : 'right-0'}`}
+                            className={`sheet-ending-bracket absolute -top-[1px] h-[14px] border-t-[3px] border-gray-950 z-10 pointer-events-none ${isEndingStart ? `${getEndingLeftOffsetClass(endingLeftBarlineType)} border-l-[3px]` : 'left-0'} ${isEndingEnd ? `${getEndingRightOffsetClass(endingRightBarlineType)} border-r-[3px]` : 'right-0'}`}
                           >
                              {(!row.bars[bIdx - 1] || row.bars[bIdx - 1].ending !== bar.ending) && (
                                <span
                                  data-sheet-ending-number={bar.ending}
-                                 className="sheet-ending-number absolute left-1 top-[1px] inline-flex min-w-[1.35rem] items-center justify-center rounded-[2px] border border-gray-950 bg-white px-1 py-[1px] text-[12px] font-black leading-none tracking-[0.02em] shadow-[0_1px_0_rgba(0,0,0,0.18)]"
+                                 className="sheet-ending-number absolute left-1 -top-[11px] inline-flex min-w-[1.35rem] items-center justify-center rounded-[2px] border border-gray-950 bg-white px-1 py-[1px] text-[12px] font-black leading-none tracking-[0.02em] shadow-[0_1px_0_rgba(0,0,0,0.18)]"
                                >
                                  {formatEndingDisplay(bar.ending)}
                                </span>
@@ -2682,7 +2684,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         >
                                           {activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded bg-indigo-100/45 ring-2 ring-inset ring-indigo-500/70" />}
                                           <div className="w-full max-w-full overflow-visible">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamOffsetUnits={0.05} beamVerticalOffset={-0.28} beamStrokeScale={1.14} tieVerticalOffset={-2.1} tieFontScale={0.88} accentVerticalOffset={2.5} accentHorizontalOffset={0.9} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamStrokeScale={1.14} tieFontScale={0.88} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
                                           </div>
                                         </div>
                                       );
@@ -2945,7 +2947,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           {activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
                                           {activeRhythmCursor && renderActiveNotationCursor()}
                                           <div className="w-full">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
                                           </div>
                                         </div>
                                       </div>
@@ -3017,7 +3019,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           {(showBottomRhythmLane ? activeRhythmCursor : activeJianpuCursor) && renderActiveNotationCursor()}
                                           {showBottomRhythmLane ? (
                                             <div className="w-full">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact tieVerticalOffset={-0.8} accentHorizontalOffset={0.9} accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
+	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
                                           </div>
                                         ) : (
                                           <Jianpu

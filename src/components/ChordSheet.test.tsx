@@ -143,9 +143,9 @@ describe('ChordSheet preview input caret', () => {
 
     const brackets = container.querySelectorAll('[data-sheet-ending-bracket="1"]');
     expect(brackets).toHaveLength(2);
-    expect(brackets[0]).toHaveClass('border-l-[3px]');
+    expect(brackets[0]).toHaveClass('-top-[1px]', 'border-l-[3px]');
     expect(brackets[1]).toHaveClass('border-r-[3px]');
-    expect(container.querySelector('[data-sheet-ending-number="1"]')).toHaveClass('text-[12px]', 'font-black', 'bg-white');
+    expect(container.querySelector('[data-sheet-ending-number="1"]')).toHaveClass('-top-[11px]', 'text-[12px]', 'font-black', 'bg-white');
     expect(screen.getByText('1.')).toBeInTheDocument();
   });
 
@@ -175,6 +175,34 @@ describe('ChordSheet preview input caret', () => {
     expect(bar).toHaveStyle({ paddingBottom: '58px' });
     expect(lanes[0]).toHaveClass('h-[22px]');
     expect(lanes[1]).toHaveClass('h-[24px]');
+  });
+
+  it('uses the three-line bar height for preview and printable page pagination', () => {
+    const bars = Array.from({ length: 36 }, (_, index) => ({
+      id: `bar-${index + 1}`,
+      chords: ['C']
+    }));
+    const twoLineSong: Song = {
+      ...song,
+      barRowCount: 2,
+      sections: [{ ...song.sections[0], bars }]
+    };
+    const { container, rerender } = render(
+      <ChordSheet song={twoLineSong} language="zh" currentKey="C" previewIdentity="song-1" />
+    );
+
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
+    expect(container.querySelector('[data-print-page]')).toHaveAttribute('data-sheet-bar-row-count', '2');
+
+    rerender(
+      <ChordSheet song={{ ...twoLineSong, barRowCount: 3 }} language="zh" currentKey="C" previewIdentity="song-1" />
+    );
+
+    const pages = container.querySelectorAll('[data-print-page]');
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toHaveAttribute('data-sheet-bar-row-count', '3');
+    expect(pages[0].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(8);
+    expect(pages[1].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(1);
   });
 
   it('expands the visible rhythm lane hit target while chord editing is active', () => {

@@ -1,5 +1,7 @@
 import React from 'react';
 import { getHeadCenterUnit, getRhythmEventGlyph, parseRhythmNotation, rationalizeRhythmDisplay, rhythmUnitsEqual } from '../utils/rhythmUtils';
+import { buildCompactRhythmGeometry, getCompactRhythmCenterUnit } from '../lib/rhythmGeometry';
+import CompactRhythmRenderer, { type CompactRhythmGlyphAnchor } from './CompactRhythmRenderer';
 
 interface RhythmNotationProps {
   notation: string;
@@ -59,11 +61,48 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   onInsertSelect
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const [layoutWidth, setLayoutWidth] = React.useState(0);
+  const [compactGlyphAnchors, setCompactGlyphAnchors] = React.useState<Record<number, CompactRhythmGlyphAnchor>>({});
   const [measuredNextCrossBarEndPercent, setMeasuredNextCrossBarEndPercent] = React.useState<number | null>(null);
   const { parsed, glyphs, accents, ties } = React.useMemo(
     () => rationalizeRhythmDisplay(notation, timeSignature, { beamGroups }),
     [beamGroups, notation, timeSignature]
   );
+  const handleCompactGlyphAnchorsChange = React.useCallback((next: Record<number, CompactRhythmGlyphAnchor>) => {
+    setCompactGlyphAnchors((current) => {
+      const currentKeys = Object.keys(current);
+      const nextKeys = Object.keys(next);
+      const equal = currentKeys.length === nextKeys.length && currentKeys.every((key) => {
+        const eventIndex = Number(key);
+        return Boolean(
+          current[eventIndex]
+          && next[eventIndex]
+          && Math.abs(current[eventIndex].noteheadTop - next[eventIndex].noteheadTop) < 0.01
+          && Math.abs(current[eventIndex].noteheadBottom - next[eventIndex].noteheadBottom) < 0.01
+        );
+      });
+      return equal ? current : next;
+    });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!compact) return undefined;
+
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const measure = () => {
+      const nextWidth = root.getBoundingClientRect().width;
+      if (nextWidth > 0) {
+        setLayoutWidth((current) => Math.abs(current - nextWidth) < 0.25 ? current : nextWidth);
+      }
+    };
+
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [compact]);
 
   const isEmpty = !notation.trim();
 
@@ -82,8 +121,6 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const guide = overflow ? 'rgba(220, 38, 38, 0.16)' : 'rgba(17, 24, 39, 0.08)';
   const crossBarMeasurementVersion = 5;
   const crossBarNoteheadOvershootPx = compact ? 0.6 : 1.4;
-  const accentY = ((compact ? -9 : -2) + accentVerticalOffset) * scale;
-  const tieAnchorY = (((compact ? 13.2 : 46.1) + (renderMode === 'editor' ? (compact ? -1.1 : -1.3) : 0)) + tieVerticalOffset) * scale;
   const tieStrokeWidth = (compact ? 0.9 : 1.15) * Math.max(0.9, Math.min(1.25, tieFontScale));
   const glyphFontSize = (compact ? 13 : 28) * scale;
   const editorGlyphFontSize = (compact ? 17 : 30) * scale;
@@ -91,19 +128,19 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const editorBeamGap = (compact ? 1.5 : 3.6) * scale;
   const editorBeamVisualExtension = compact ? 0.01 : 0.03;
   const useEditorStyleRenderer = renderMode === 'editor' || renderMode === 'preview';
-  const previewRendererScale = renderMode === 'preview' ? 0.9 : 1;
+  const previewRendererScale = 1;
   const effectiveBeamTop = (renderMode === 'preview' ? editorBeamTop + (compact ? 0.5 : 1.2) : editorBeamTop) + beamVerticalOffset;
   const editorBeamStroke = { primary: compact ? 1.15 : 1.55, secondary: compact ? 1.05 : 1.45 };
   const visibleEvents = parsed.events.filter((event) => !event.isHidden);
   const getCompactDisplayCenterUnit = React.useCallback((
     event: typeof visibleEvents[number],
-    options?: { beamed?: boolean }
+    _options?: { beamed?: boolean }
   ) => {
-    if (evenCompactSpacing && compact && renderMode === 'preview' && !options?.beamed) {
-      return event.startUnit + (event.durationUnits / 2);
+    if (compact) {
+      return getCompactRhythmCenterUnit(event);
     }
     return event.isRest ? event.startUnit + (event.durationUnits / 2) : getHeadCenterUnit(event);
-  }, [compact, evenCompactSpacing, renderMode]);
+  }, [compact]);
   const tripletGroups = React.useMemo(() => {
     const groups: Array<{
       key: string;
@@ -144,8 +181,27 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const minHeight = hasCompactTriplets
     ? Math.max(baseMinHeight, 24 * scale)
     : baseMinHeight;
+  // Bach's up-stem noteheads extend below the compact view box. Use the
+  // measured lower outline when available; this fallback only covers the
+  // first paint before the browser has reported SVG font bounds.
+  const fallbackCompactTieAnchorY = (minHeight / 2) + (10.31 * scale);
+  const tieAnchorY = compact
+    ? fallbackCompactTieAnchorY
+    : ((46.1 + (renderMode === 'editor' ? -1.3 : 0) + tieVerticalOffset) * scale);
+  const compactTieEndpointGap = 0.65 * scale;
   const rhythmContentTop = '50%';
   const visualBeamTop = effectiveBeamTop;
+  const compactGeometry = React.useMemo(() => (
+    compact
+      ? buildCompactRhythmGeometry(visibleEvents, {
+          width: layoutWidth || 100,
+          height: minHeight,
+          barUnits,
+          beatUnits,
+          scale
+        })
+      : null
+  ), [barUnits, beatUnits, compact, layoutWidth, minHeight, scale, visibleEvents]);
   const cursorUnits = React.useMemo(() => {
     if (visibleEvents.length === 0) {
       return [0];
@@ -209,16 +265,16 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const getTripletLayout = (base: 'q' | 'e') => {
     const tripletVerticalLift = (compact ? 0 : 5.0) * scale;
     const rawBracketY = compact
-      ? (base === 'e' ? 0.4 * scale : 0.8 * scale)
+      ? (base === 'e' ? visualBeamTop : visualBeamTop - (2.6 * scale))
       : Math.max(3.8 * scale, base === 'e' ? effectiveBeamTop - (2.6 * scale) : 5.2 * scale);
     const bracketY = rawBracketY - tripletVerticalLift;
     const numberY = compact
-      ? -1.2 * scale
+      ? bracketY - (4.1 * scale)
       : bracketY - (3.1 * scale);
 
     return {
       bracketY,
-      bracketDrop: compact ? 1.8 : 3,
+      bracketDrop: compact ? 2.1 : 3,
       numberY,
       numberGap: compact ? 1.25 : 1.7
     };
@@ -597,16 +653,38 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
           transformOrigin: 'center center'
         }}
       >
-      {accents.length > 0 && (
+      {!compact && accents.length > 0 && (
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           viewBox={`0 0 100 ${minHeight}`}
           preserveAspectRatio="none"
         >
           {accents.map((accent) => {
-            const x = (accent.centerUnit * 100) / Math.max(1, barUnits) + accentHorizontalOffset;
+            const accentEvent = visibleEvents.find((event) => event.index === accent.eventIndex);
+            const accentIsBeamed = Boolean(
+              accentEvent
+              && editorBeamedEventIndices.has(accentEvent.index)
+              && !accentEvent.isRest
+              && (accentEvent.base === 'e' || accentEvent.base === 's')
+            );
+            const centerUnit = accentEvent
+              ? getCompactDisplayCenterUnit(accentEvent, { beamed: accentIsBeamed })
+              : accent.centerUnit;
+            const x = (centerUnit * 100) / Math.max(1, barUnits) + accentHorizontalOffset;
+            const accentGlyphTranslateRatio = accentEvent?.base === 'w'
+              ? 0.53
+              : accentEvent?.base === 'h'
+                ? 0.5
+                : accentIsBeamed && renderMode === 'editor'
+                  ? 0.54
+                  : 0.485;
+            const accentGlyphTop = (minHeight / 2) - (editorGlyphFontSize * accentGlyphTranslateRatio);
+            const accentY = compact
+              ? accentGlyphTop - (3.2 * scale) + (accentVerticalOffset * scale)
+              : (-2 + accentVerticalOffset) * scale;
             return (
               <path
+                data-rhythm-accent
                 key={`accent-${accent.eventIndex}`}
                 d={`M ${x - (1.3 * accentScale)} ${accentY - (2.3 * accentScale)} L ${x + (1.3 * accentScale)} ${accentY} M ${x - (1.3 * accentScale)} ${accentY + (2.3 * accentScale)} L ${x + (1.3 * accentScale)} ${accentY}`}
                 fill="none"
@@ -672,8 +750,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             const curveDepth = (
               isCrossBarTie
                 ? Math.min(
-                    compact ? 3.4 : 6.2,
-                    Math.max(compact ? 2.2 : 4.1, fullCrossBarSpan * (compact ? 0.17 : 0.13))
+                    compact ? 5.2 : 6.2,
+                    Math.max(compact ? 3.6 : 4.1, fullCrossBarSpan * (compact ? 0.22 : 0.13))
                   )
                 : Math.min(
                     compact ? 4.2 : 8.6,
@@ -681,25 +759,51 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                   )
             ) * Math.max(0.92, Math.min(1.18, tieFontScale));
             const crossBarVerticalShift = isCrossBarTie && renderMode === 'preview'
-              ? (compact ? 0.75 : 1.25)
+              ? (compact ? 0 : 1.25)
               : 0;
-            const tieBaseY = tieAnchorY + crossBarVerticalShift;
-            const dipY = Math.min(minHeight - (compact ? 0.4 : 0.8), tieBaseY + curveDepth);
-            const startY = isIncomingCrossBar ? dipY : tieBaseY;
+            const tieStartEvent = isIncomingCrossBar
+              ? visibleEvents.find((event) => !event.isRest)
+              : visibleEvents.find((event) => event.index === tie.eventIndex);
+            const tieEndEvent = isCrossBarTie
+              ? tieStartEvent
+              : tieStartEvent
+                ? visibleEvents.find((event) => !event.isRest && rhythmUnitsEqual(event.startUnit, tieStartEvent.endUnit))
+                : visibleEvents.find((event) => !event.isRest);
+            const startNoteheadY = (
+              compact && tieStartEvent
+                ? compactGlyphAnchors[tieStartEvent.index]?.noteheadBottom ?? tieAnchorY
+                : tieAnchorY
+            );
+            const endNoteheadY = (
+              compact && tieEndEvent
+                ? compactGlyphAnchors[tieEndEvent.index]?.noteheadBottom ?? startNoteheadY
+                : startNoteheadY
+            );
+            // Engraving convention keeps both tie ends on one horizontal
+            // level. Use the lower of the two measured contours so neither
+            // endpoint can drift back into a differently shaped notehead.
+            const alignedCompactTieY = Math.max(startNoteheadY, endNoteheadY) + compactTieEndpointGap;
+            const startBaseY = (compact ? alignedCompactTieY : startNoteheadY) + crossBarVerticalShift;
+            const endBaseY = compact ? alignedCompactTieY : startBaseY;
+            const unclampedDipY = Math.max(startBaseY, endBaseY) + curveDepth;
+            const dipY = compact
+              ? unclampedDipY
+              : Math.min(minHeight - 0.8, unclampedDipY);
+            const startY = isIncomingCrossBar ? dipY : startBaseY;
             const endY = projectsToNextBar
-              ? tieBaseY
+              ? endBaseY
               : isOutgoingCrossBar
                 ? dipY
-                : tieBaseY;
+                : endBaseY;
             // For a smooth join at the meeting point, that endpoint needs
             // horizontal tangent — achieved by placing the adjacent control
             // point at the same Y as the endpoint.
-            const controlY1 = isIncomingCrossBar ? dipY : tieBaseY + curveDepth;
+            const controlY1 = isIncomingCrossBar ? dipY : startBaseY + curveDepth;
             const controlY2 = projectsToNextBar
-              ? tieBaseY + curveDepth
+              ? endBaseY + curveDepth
               : isOutgoingCrossBar
                 ? dipY
-                : tieBaseY + curveDepth;
+                : endBaseY + curveDepth;
 
             return (
               <path
@@ -717,7 +821,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         </svg>
       )}
 
-      {useEditorStyleRenderer && editorBeamGroups.length > 0 && (
+      {!compact && useEditorStyleRenderer && editorBeamGroups.length > 0 && (
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           viewBox={`0 0 100 ${minHeight}`}
@@ -726,6 +830,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
           {editorBeamGroups.map((group, index) => (
             <g key={`editor-beam-${index}`}>
               <line
+                data-rhythm-primary-beam
                 x1={unitToPercentNumber(Math.max(0, group.primaryStartUnit - editorBeamVisualExtension + beamOffsetUnits))}
                 y1={visualBeamTop}
                 x2={unitToPercentNumber(Math.min(barUnits, group.primaryEndUnit + editorBeamVisualExtension + beamOffsetUnits))}
@@ -766,7 +871,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         </svg>
       )}
 
-      {tripletGroups.length > 0 && (
+      {!compact && tripletGroups.length > 0 && (
         <>
           <svg
             className="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
@@ -781,14 +886,17 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
               return (
                 <g key={`triplet-bracket-${group.key}`}>
-                  <path
-                    d={`M ${bracketStartX} ${bracketY + bracketDrop} L ${bracketStartX} ${bracketY} L ${centerX - numberGap} ${bracketY} M ${centerX + numberGap} ${bracketY} L ${bracketEndX} ${bracketY} L ${bracketEndX} ${bracketY + bracketDrop}`}
-                    fill="none"
-                    stroke={stroke}
-                    strokeWidth={group.base === 'e' ? (compact ? 0.58 : 0.8) : (compact ? 0.8 : 1)}
-                    strokeLinecap="round"
-                    vectorEffect="non-scaling-stroke"
-                  />
+                  {!(compact && group.base === 'e') && (
+                    <path
+                      data-rhythm-triplet-bracket
+                      d={`M ${bracketStartX} ${bracketY + bracketDrop} L ${bracketStartX} ${bracketY} L ${centerX - numberGap} ${bracketY} M ${centerX + numberGap} ${bracketY} L ${bracketEndX} ${bracketY} L ${bracketEndX} ${bracketY + bracketDrop}`}
+                      fill="none"
+                      stroke={stroke}
+                      strokeWidth={group.base === 'e' ? (compact ? 0.58 : 0.8) : (compact ? 0.8 : 1)}
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
                 </g>
               );
             })}
@@ -798,6 +906,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
             return (
               <span
+                data-rhythm-triplet-number
+                data-rhythm-triplet-base={group.base}
                 key={`triplet-number-${group.key}`}
                 className="absolute z-[3] pointer-events-none select-none font-bold leading-none"
                 style={{
@@ -942,13 +1052,22 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         );
       })}
 
-      <div
-        className="relative z-[2] grid items-center pointer-events-none"
-        style={{
-          gridTemplateColumns: `repeat(${Math.max(1, barUnits)}, minmax(0, 1fr))`,
-          minHeight: `${minHeight}px`
-        }}
-      >
+      {compactGeometry ? (
+        <CompactRhythmRenderer
+          geometry={compactGeometry}
+          color={stroke}
+          scale={scale}
+          beamStrokeScale={beamStrokeScale}
+          onGlyphAnchorsChange={handleCompactGlyphAnchorsChange}
+        />
+      ) : (
+        <div
+          className="relative z-[2] grid items-center pointer-events-none"
+          style={{
+            gridTemplateColumns: `repeat(${Math.max(1, barUnits)}, minmax(0, 1fr))`,
+            minHeight: `${minHeight}px`
+          }}
+        >
         {useEditorStyleRenderer
           ? visibleEvents.map((event) => {
               const isEditorBeamed = editorBeamedEventIndices.has(event.index) && !event.isRest && (event.base === 'e' || event.base === 's');
@@ -964,9 +1083,6 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                     : (isEditorBeamed || event.base === 'e' || event.base === 's')
                       ? (renderMode === 'preview' ? '-48.5%' : '-54%')
                       : '-48.5%';
-              const glyphTranslateX = !event.isRest && compact && renderMode === 'preview'
-                ? `calc(-50% + ${2.4 * scale}px)`
-                : '-50%';
               const displayGlyph = isEditorBeamed
                 ? getRhythmEventGlyph({
                     base: 'q',
@@ -990,7 +1106,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                       left: unitToPercent(centerUnit),
                       top: rhythmContentTop,
                       color: stroke,
-                      transform: `translate(${glyphTranslateX}, ${glyphTranslateY})`,
+                      transform: `translate(-50%, ${glyphTranslateY})`,
                       fontSize: `${hasSingleWholeEvent && isWholeDuration ? editorGlyphFontSize * 1.16 : editorGlyphFontSize}px`
                     }}
                   >
@@ -1066,7 +1182,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             </span>
           );
         })}
-      </div>
+        </div>
+      )}
       </div>
 
       {isEmpty && renderMode === 'editor' && (

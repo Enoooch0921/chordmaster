@@ -918,6 +918,24 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     </div>
   );
 
+  const barHeightField = (
+    <div>
+      <label className={controlLabelClassName}>{language === 'zh' ? '小節高度' : 'Bar Height'}</label>
+      <CompactSegmentedControl
+        value={String(song.barRowCount ?? 2) as '2' | '3'}
+        options={[
+          { value: '2', label: language === 'zh' ? '2 行' : '2 lines' },
+          { value: '3', label: language === 'zh' ? '3 行・手寫' : '3 lines' }
+        ]}
+        onChange={(value) => updateField('barRowCount', value === '3' ? 3 : 2)}
+        size={segmentedSize}
+        stretch
+        className="rounded-lg"
+        buttonClassName="min-w-0"
+      />
+    </div>
+  );
+
   const referencesField = (
     <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-2.5 py-2">
       <div className="flex items-center gap-2 px-0.5">
@@ -1048,9 +1066,10 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
                 {!isLibraryInputMode && capoField}
               </div>
 
-              <div className="grid items-start gap-2 [grid-template-columns:minmax(7rem,1.4fr)_minmax(7rem,1.2fr)]">
+              <div className="grid items-start gap-2 [grid-template-columns:minmax(7rem,1.35fr)_minmax(7rem,1.15fr)_minmax(7rem,1fr)]">
                 {displayOrInputField}
                 {barNumbersField}
+                {barHeightField}
               </div>
 
               {showReferenceFields ? referencesField : null}
@@ -1082,6 +1101,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
               {displayOrInputField}
               {barNumbersField}
+              {barHeightField}
               {showReferenceFields ? referencesField : null}
             </div>
           ) : null}
@@ -1107,8 +1127,9 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               </div>
 
               <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-6">{displayOrInputField}</div>
-                <div className="col-span-6">{barNumbersField}</div>
+                <div className="col-span-4">{displayOrInputField}</div>
+                <div className="col-span-4">{barNumbersField}</div>
+                <div className="col-span-4">{barHeightField}</div>
               </div>
 
               {showReferenceFields ? referencesField : null}

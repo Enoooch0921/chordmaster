@@ -7,6 +7,7 @@ import {
   getRhythmEventGlyph,
   type RhythmBase
 } from '../../utils/rhythmUtils';
+import { getBachGlyphAnchor } from '../../lib/bachRhythmMetrics';
 
 export interface RhythmStaffKeyGlyphProps {
   base: RhythmBase;
@@ -14,34 +15,6 @@ export interface RhythmStaffKeyGlyphProps {
   triplet?: boolean;
   className?: string;
 }
-
-type RhythmSymbolOffset = {
-  x: number;
-  y: number;
-};
-
-/*
- * Bach's rhythm glyphs have intentionally uneven side bearings and vertical
- * bounds because they are designed to sit on a staff. These small, em-based
- * corrections center the visible ink instead of merely centering each glyph's
- * advance box. The whole rest needs the largest correction because most of its
- * ink sits above and to the right of that box's mathematical center.
- */
-const NOTE_SYMBOL_OFFSETS: Record<RhythmBase, RhythmSymbolOffset> = {
-  w: { x: -0.02, y: -0.09 },
-  h: { x: 0.02, y: 0.18 },
-  q: { x: 0.02, y: 0.18 },
-  e: { x: -0.07, y: 0.17 },
-  s: { x: -0.08, y: 0.18 }
-};
-
-const REST_SYMBOL_OFFSETS: Record<RhythmBase, RhythmSymbolOffset> = {
-  w: { x: -0.06, y: 0.16 },
-  h: { x: -0.06, y: -0.01 },
-  q: { x: 0, y: 0.05 },
-  e: { x: -0.03, y: 0.01 },
-  s: { x: -0.05, y: 0.04 }
-};
 
 /**
  * A keyboard-sized rhythm preview using the same Bach glyphs as the score.
@@ -59,7 +32,7 @@ export function RhythmStaffKeyGlyph({
     dotted: false,
     isHidden: false
   });
-  const offset = (isRest ? REST_SYMBOL_OFFSETS : NOTE_SYMBOL_OFFSETS)[base];
+  const anchor = getBachGlyphAnchor(base, isRest);
 
   return (
     <span
@@ -75,7 +48,7 @@ export function RhythmStaffKeyGlyph({
         data-rhythm-symbol
         style={{
           fontFamily: 'Bach, NotoMusic, serif',
-          transform: `translate(${offset.x}em, ${offset.y}em)`
+          transform: `translate(${anchor.xEm}em, ${anchor.yEm}em)`
         }}
       >
         {glyph}

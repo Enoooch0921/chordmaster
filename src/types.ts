@@ -106,6 +106,9 @@ export interface Song {
   // above): true = absolute/fixed-do (固定), false/undefined = relative/movable (首調).
   jianpuInputAbsolute?: boolean;
   barNumberMode?: BarNumberMode;
+  // Vertical chart density: 2 keeps the compact performance layout, while 3
+  // reserves a third line of writable space in every bar row and in PDF output.
+  barRowCount?: 2 | 3;
   nashvilleFontPreset?: NashvilleFontPreset;
   chordFontPreset?: ChordFontPreset;
   capo?: number;

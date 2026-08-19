@@ -2967,7 +2967,7 @@ const SongEditor: React.FC<Props> = ({
     note: JianpuNoteRange,
     sIdx: number,
     bIdx: number,
-    overrides: Partial<Pick<JianpuNoteRange, 'accidental' | 'pitch' | 'duration' | 'octave' | 'dotted' | 'slurStart' | 'slurEnd'>>
+    overrides: Partial<Pick<JianpuNoteRange, 'accidental' | 'pitch' | 'duration' | 'octave' | 'dotted' | 'triplet' | 'slurStart' | 'slurEnd'>>
   ) => {
     const display = getDisplayJianpuNote(note, sIdx, bIdx);
     const displayPitch = overrides.pitch ?? display.pitch;
@@ -3019,6 +3019,7 @@ const SongEditor: React.FC<Props> = ({
       duration: display.duration,
       octave: display.octave,
       dotted: display.dotted,
+      triplet: display.triplet,
       accidental: normalizeEditableJianpuAccidental(display.accidental)
     };
   };

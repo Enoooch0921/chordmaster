@@ -555,6 +555,7 @@ type SetlistSortMode = 'updated-desc' | 'created-desc' | 'name-asc';
 interface JoinedSetlistDisplayPreference {
   displayMode?: SetlistDisplayMode;
   barNumberMode?: BarNumberMode;
+  barRowCount?: 2 | 3;
 }
 
 interface PdfExportProgressState {
@@ -989,6 +990,7 @@ const INITIAL_SONG: Song = {
   timeSignature: "4/4",
   useSectionColors: true,
   barNumberMode: 'all',
+  barRowCount: 2,
   nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
   chordFontPreset: DEFAULT_CHORD_FONT_PRESET,
   pickup: {
@@ -1343,6 +1345,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
     showAbsoluteJianpu: normalizeBoolean(song.showAbsoluteJianpu) ?? false,
     jianpuInputAbsolute: normalizeBoolean(song.jianpuInputAbsolute) ?? false,
     barNumberMode: typeof song.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(song.barNumberMode) ? song.barNumberMode : 'none',
+    barRowCount: song.barRowCount === 3 ? 3 : 2,
     nashvilleFontPreset: typeof song.nashvilleFontPreset === 'string' && VALID_NASHVILLE_FONT_PRESETS.has(song.nashvilleFontPreset)
       ? song.nashvilleFontPreset
       : DEFAULT_NASHVILLE_FONT_PRESET,
@@ -1519,6 +1522,7 @@ const createEmptySong = (title: string): StoredSong =>
     tempo: 120,
     timeSignature: '4/4',
     barNumberMode: 'none',
+    barRowCount: 2,
     nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
     chordFontPreset: DEFAULT_CHORD_FONT_PRESET,
     sections: [
@@ -1884,6 +1888,9 @@ const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisp
           }
           if (typeof preference.barNumberMode === 'string' && VALID_BAR_NUMBER_MODES.has(preference.barNumberMode)) {
             normalized.barNumberMode = preference.barNumberMode as BarNumberMode;
+          }
+          if (preference.barRowCount === 2 || preference.barRowCount === 3) {
+            normalized.barRowCount = preference.barRowCount;
           }
 
           return [setlistId, normalized] as const;
@@ -2621,6 +2628,9 @@ export default function App() {
         references: selectedSetlistSourceSong.references,
         ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
           ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+          : {}),
+        ...(isJoinedSetlist && joinedSetlistDisplayPreference.barRowCount
+          ? { barRowCount: joinedSetlistDisplayPreference.barRowCount }
           : {})
       }
     : null;
@@ -2659,6 +2669,9 @@ export default function App() {
             references: selectedSetlistSourceSong.references,
             ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
               ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+              : {}),
+            ...(isJoinedSetlist && joinedSetlistDisplayPreference.barRowCount
+              ? { barRowCount: joinedSetlistDisplayPreference.barRowCount }
               : {})
           }
         : activeNavigationPreviewSong)
@@ -7467,13 +7480,22 @@ export default function App() {
           exportRoot?.render(
             <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
               {setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
-                const derivedSong = applySetlistSongOverrides(
+                const baseDerivedSong = applySetlistSongOverrides(
                   sourceSong,
                   selectedSetlist,
                   item,
                   guitaristMode,
                   setlistCapoResolutionOptions
                 );
+                const derivedSong = {
+                  ...baseDerivedSong,
+                  ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
+                    ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+                    : {}),
+                  ...(isJoinedSetlist && joinedSetlistDisplayPreference.barRowCount
+                    ? { barRowCount: joinedSetlistDisplayPreference.barRowCount }
+                    : {})
+                };
                 return (
                   <div
                     key={item.id}
@@ -9790,6 +9812,9 @@ export default function App() {
             references: sourceSong.references,
             ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
               ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+              : {}),
+            ...(isJoinedSetlist && joinedSetlistDisplayPreference.barRowCount
+              ? { barRowCount: joinedSetlistDisplayPreference.barRowCount }
               : {})
           };
 
@@ -9805,6 +9830,7 @@ export default function App() {
     guitaristMode,
     isJoinedSetlist,
     joinedSetlistDisplayPreference.barNumberMode,
+    joinedSetlistDisplayPreference.barRowCount,
     selectedSetlistSong?.id,
     setlistCapoResolutionOptions,
     setlistSongsWithSource
@@ -10945,7 +10971,11 @@ export default function App() {
                 barNumberMode: joinedSetlistDisplayPreference.barNumberMode
                   ?? activeSetlistPreviewSong?.barNumberMode
                   ?? (activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong).barNumberMode
-                  ?? 'none'
+                  ?? 'none',
+                barRowCount: joinedSetlistDisplayPreference.barRowCount
+                  ?? activeSetlistPreviewSong?.barRowCount
+                  ?? (activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong).barRowCount
+                  ?? 2
               }
             : activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong}
           language={language}
@@ -10954,7 +10984,8 @@ export default function App() {
           onChange={(nextSong) => {
             if (isJoinedSetlist) {
               handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, {
-                barNumberMode: nextSong.barNumberMode ?? 'none'
+                barNumberMode: nextSong.barNumberMode ?? 'none',
+                barRowCount: nextSong.barRowCount ?? 2
               });
               return;
             }

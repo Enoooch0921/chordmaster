@@ -60,6 +60,7 @@ interface LayoutPlaceholder {
   end: number;
   duration: LayoutNote['duration'];
   dotted: boolean;
+  triplet: boolean;
   tokenIndex: number;
   slotIndex: number;
   xUnits: number;
@@ -146,6 +147,9 @@ const Jianpu: React.FC<JianpuProps> = ({
     () => getTokenList(notation, tokens),
     [notation, tokens]
   );
+  const hasCompactTripletNotes = React.useMemo(() => (
+    compact && tokenList.some((token) => findJianpuNoteRanges(token).some((note) => note.triplet))
+  ), [compact, tokenList]);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = React.useState<number | null>(null);
   const updateContainerWidth = React.useCallback(() => {
@@ -163,13 +167,13 @@ const Jianpu: React.FC<JianpuProps> = ({
   const metrics = React.useMemo(() => {
     if (compact) {
       return {
-        height: 24 * scale,
+        height: (hasCompactTripletNotes ? 24 : 20) * scale,
         digitFontSize: 13 * scale,
         accidentalFontSize: 7 * scale,
-        digitCenterY: 12.25 * scale,
+        digitCenterY: (hasCompactTripletNotes ? 12.25 : 9.25) * scale,
         highDotY: 1.4 * scale,
-        lowDotY: 19.2 * scale,
-        underlineY: 18.4 * scale,
+        lowDotY: (hasCompactTripletNotes ? 19.2 : 16.2) * scale,
+        underlineY: (hasCompactTripletNotes ? 18.4 : 15.4) * scale,
         underlineGap: 2.8 * scale,
         dottedOffsetX: 5.2 * scale,
         octaveDotOffsetX: 0,
@@ -179,7 +183,7 @@ const Jianpu: React.FC<JianpuProps> = ({
         octaveDotSize: 1.5 * scale,
         dottedDotSize: 1.8 * scale,
 	        underlineStroke: 1.2 * scale,
-	        slurBaseY: 8 * scale,
+	        slurBaseY: (hasCompactTripletNotes ? 8 : 6) * scale,
 	        tripletY: 0.5 * scale,
 	        highlightInsetY: 1.8 * scale,
         highlightInsetXUnits: 4,
@@ -236,7 +240,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       highlightInsetXUnits: 6,
       placeholderSize: 4 * scale
     };
-  }, [compact, scale]);
+  }, [compact, hasCompactTripletNotes, renderMode, scale]);
 
 	  const { layoutNotes, layoutPlaceholders, underlineSegments, tripletSegments, slurSegments } = React.useMemo(() => {
 	    const notes: LayoutNote[] = [];
@@ -739,11 +743,25 @@ const Jianpu: React.FC<JianpuProps> = ({
 	              }}
 	            >
               <span
-                className="absolute left-0 right-0 h-px rounded-full bg-current"
-                style={{ top: compact ? `${5 * scale}px` : '50%', transform: 'translateY(-50%)' }}
+                data-jianpu-triplet-line-segment="left"
+                className="absolute left-0 h-px rounded-full bg-current"
+                style={{
+                  width: `calc(50% - ${compact ? 4.5 * scale : renderMode === 'editor' ? 5 * scale : 6 * scale}px)`,
+                  top: compact ? `${5 * scale}px` : '50%',
+                  transform: 'translateY(-50%)'
+                }}
               />
               <span
-                className="absolute bg-white px-[2px] font-semibold leading-none"
+                data-jianpu-triplet-line-segment="right"
+                className="absolute right-0 h-px rounded-full bg-current"
+                style={{
+                  width: `calc(50% - ${compact ? 4.5 * scale : renderMode === 'editor' ? 5 * scale : 6 * scale}px)`,
+                  top: compact ? `${5 * scale}px` : '50%',
+                  transform: 'translateY(-50%)'
+                }}
+              />
+              <span
+                className="absolute px-[2px] font-semibold leading-none"
                 style={{
                   left: snappedCenterPx !== null
                     ? `${snappedCenterPx - (snappedLeftPx ?? 0)}px`

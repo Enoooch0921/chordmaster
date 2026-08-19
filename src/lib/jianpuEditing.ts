@@ -280,7 +280,8 @@ const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | n
         ...base,
         kind: 'placeholder',
         duration: item.duration,
-        dotted: item.dotted
+        dotted: item.dotted,
+        triplet: item.triplet
       };
     });
     const localNoteUnits = items
