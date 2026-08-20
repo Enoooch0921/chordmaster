@@ -6,7 +6,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
-import { Song, Section, Bar, Key, AppLanguage, NavigationMarker } from '../types';
+import { Song, Section, Bar, Key, AppLanguage, NavigationMarker, BarLabelLane } from '../types';
 import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyPreservingSpelling, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import { getSongKeyStates } from '../lib/songEditing';
@@ -862,6 +862,7 @@ interface ChordSheetProps {
   onMetaClick?: (field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => void;
   onAddBarClick?: (sIdx: number) => void;
   onAddSectionAfterClick?: (sIdx: number) => void;
+  onBarLabelLaneChange?: (sIdx: number, bIdx: number, lane: BarLabelLane) => void;
   highlightedSectionIds?: string[];
   activeSectionId?: string | null;
   activeBar?: { sIdx: number; bIdx: number } | null;
@@ -898,7 +899,59 @@ interface PreviewSectionDragCandidate {
   scrollRoot: HTMLElement | null;
 }
 
+type PreviewLabelLanePointerMode = 'mouse' | 'touch';
+
+interface PreviewLabelLaneDragCandidate {
+  pointerId: number;
+  pointerMode: PreviewLabelLanePointerMode;
+  sIdx: number;
+  bIdx: number;
+  currentLane: BarLabelLane;
+  startX: number;
+  startY: number;
+  active: boolean;
+  longPressReady: boolean;
+  longPressTimer: number | null;
+  rowElement: HTMLElement | null;
+  targetElement: HTMLElement;
+}
+
 const SECTION_TITLE_DOUBLE_CLICK_WINDOW_MS = 320;
+const LABEL_LANE_TOUCH_LONG_PRESS_MS = 260;
+const LABEL_LANE_TOUCH_SCROLL_CANCEL_PX = 8;
+const LABEL_LANE_MOUSE_ACTIVATE_PX = 4;
+const LABEL_LANE_TOUCH_ACTIVATE_PX = 2;
+
+const safeSetPointerCapture = (element: HTMLElement, pointerId: number) => {
+  try {
+    element.setPointerCapture?.(pointerId);
+  } catch {
+    // Some mobile browsers reject capture after native scroll has already won.
+  }
+};
+
+const safeReleasePointerCapture = (element: HTMLElement, pointerId: number) => {
+  try {
+    if (!element.hasPointerCapture || element.hasPointerCapture(pointerId)) {
+      element.releasePointerCapture?.(pointerId);
+    }
+  } catch {
+    // Capture may never have been acquired when the gesture became page scroll.
+  }
+};
+
+const getLabelLanePointerMode = (event: React.PointerEvent<HTMLElement>): PreviewLabelLanePointerMode => {
+  if (event.pointerType === 'mouse') return 'mouse';
+  if (event.pointerType === 'touch' || event.pointerType === 'pen') return 'touch';
+
+  return window.matchMedia?.('(pointer: coarse)').matches ? 'touch' : 'mouse';
+};
+
+const getLabelLaneDragTitle = (language: AppLanguage) => (
+  language === 'zh'
+    ? '滑鼠拖動；手指長按後拖動調整標籤行'
+    : 'Mouse: drag. Touch: long-press, then drag to move label row'
+);
 
 const ShuffleSymbol: React.FC<{ className?: string }> = ({ className = '' }) => (
   <span className={`relative inline-block h-[1em] w-[76px] overflow-visible align-middle text-gray-900 ${className}`} aria-label="Shuffle" role="img">
@@ -1300,7 +1353,7 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   // Chords always use the sans-serif preset; the serif option was removed.
@@ -1315,6 +1368,42 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const sectionDragPointerYRef = React.useRef(0);
   const suppressSectionTitleClickRef = React.useRef(false);
   const lastSectionTitleClickRef = React.useRef<{ sectionId: string; at: number } | null>(null);
+  const labelLaneDragCandidateRef = React.useRef<PreviewLabelLaneDragCandidate | null>(null);
+  const suppressLabelLaneClickRef = React.useRef(false);
+  const clearLabelLaneLongPress = React.useCallback((candidate = labelLaneDragCandidateRef.current) => {
+    if (candidate && candidate.longPressTimer !== null) {
+      window.clearTimeout(candidate.longPressTimer);
+      candidate.longPressTimer = null;
+    }
+  }, []);
+  React.useEffect(() => () => {
+    clearLabelLaneLongPress();
+  }, [clearLabelLaneLongPress]);
+  React.useEffect(() => {
+    const preventActiveLabelLaneTouchScroll = (event: TouchEvent) => {
+      const candidate = labelLaneDragCandidateRef.current;
+      if (candidate?.pointerMode === 'touch' && candidate.longPressReady) {
+        event.preventDefault();
+      }
+    };
+    const clearEndedLabelLaneTouch = () => {
+      const candidate = labelLaneDragCandidateRef.current;
+      if (candidate?.pointerMode === 'touch') {
+        clearLabelLaneLongPress(candidate);
+        labelLaneDragCandidateRef.current = null;
+      }
+    };
+
+    document.addEventListener('touchmove', preventActiveLabelLaneTouchScroll, { capture: true, passive: false });
+    document.addEventListener('touchend', clearEndedLabelLaneTouch, { capture: true, passive: true });
+    document.addEventListener('touchcancel', clearEndedLabelLaneTouch, { capture: true, passive: true });
+
+    return () => {
+      document.removeEventListener('touchmove', preventActiveLabelLaneTouchScroll, { capture: true });
+      document.removeEventListener('touchend', clearEndedLabelLaneTouch, { capture: true });
+      document.removeEventListener('touchcancel', clearEndedLabelLaneTouch, { capture: true });
+    };
+  }, [clearLabelLaneLongPress]);
   const isPreviewIdentityChanged = previousPreviewIdentityRef.current !== previewIdentity;
   const suppressSectionTransitions = isPreviewIdentityChanged || keepTransitionsSuppressed;
   const resolvedActiveNotationTarget = activePreviewNotationTarget ?? (activeChordSlot ? {
@@ -1417,7 +1506,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       scrollRoot: event.currentTarget.closest<HTMLElement>('[data-print-preview-container]')
     };
     sectionDragCandidateRef.current = candidate;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    safeSetPointerCapture(event.currentTarget, event.pointerId);
     if (event.pointerType !== 'mouse') {
       sectionDragLongPressTimerRef.current = window.setTimeout(() => {
         if (sectionDragCandidateRef.current === candidate) {
@@ -1481,6 +1570,102 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     clearSectionDragLongPress();
     stopSectionDragAutoScroll();
   }, []);
+  const getLabelLaneDropTarget = (candidate: PreviewLabelLaneDragCandidate, clientY: number): BarLabelLane => {
+    const rowRect = candidate.rowElement?.getBoundingClientRect();
+    if (!rowRect || rowRect.height <= 0) {
+      return clientY < candidate.startY ? 'rhythm' : 'riff';
+    }
+
+    // In three-line preview, the lower two notation rows occupy the row bottom.
+    // Dropping above this split chooses row 2 (rhythm), below it chooses row 3 (riff).
+    const lowerLaneSplitY = rowRect.bottom - 24;
+    return clientY < lowerLaneSplitY ? 'rhythm' : 'riff';
+  };
+  const handleLabelLanePointerDown = (
+    event: React.PointerEvent<HTMLElement>,
+    sIdx: number,
+    bIdx: number,
+    currentLane: BarLabelLane
+  ) => {
+    if (!onBarLabelLaneChange || event.button !== 0) return;
+    event.stopPropagation();
+    const pointerMode = getLabelLanePointerMode(event);
+    const candidate: PreviewLabelLaneDragCandidate = {
+      pointerId: event.pointerId,
+      pointerMode,
+      sIdx,
+      bIdx,
+      currentLane,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      longPressReady: pointerMode === 'mouse',
+      longPressTimer: null,
+      rowElement: event.currentTarget.closest<HTMLElement>('[data-preview-row-three-notation-rows]'),
+      targetElement: event.currentTarget
+    };
+    labelLaneDragCandidateRef.current = candidate;
+
+    if (pointerMode === 'mouse') {
+      safeSetPointerCapture(event.currentTarget, event.pointerId);
+      return;
+    }
+
+    candidate.longPressTimer = window.setTimeout(() => {
+      const currentCandidate = labelLaneDragCandidateRef.current;
+      if (currentCandidate !== candidate) return;
+      candidate.longPressTimer = null;
+      candidate.longPressReady = true;
+      safeSetPointerCapture(candidate.targetElement, candidate.pointerId);
+    }, LABEL_LANE_TOUCH_LONG_PRESS_MS);
+  };
+  const handleLabelLanePointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const candidate = labelLaneDragCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - candidate.startX, event.clientY - candidate.startY);
+    if (!candidate.active && candidate.pointerMode === 'touch' && !candidate.longPressReady) {
+      if (distance > LABEL_LANE_TOUCH_SCROLL_CANCEL_PX) {
+        clearLabelLaneLongPress(candidate);
+        labelLaneDragCandidateRef.current = null;
+      }
+      return;
+    }
+    const activateDistance = candidate.pointerMode === 'mouse'
+      ? LABEL_LANE_MOUSE_ACTIVATE_PX
+      : LABEL_LANE_TOUCH_ACTIVATE_PX;
+    if (!candidate.active && distance > activateDistance) {
+      clearLabelLaneLongPress(candidate);
+      candidate.active = true;
+      safeSetPointerCapture(candidate.targetElement, candidate.pointerId);
+    }
+    if (!candidate.active) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const finishLabelLaneDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const candidate = labelLaneDragCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) return;
+    labelLaneDragCandidateRef.current = null;
+    clearLabelLaneLongPress(candidate);
+    safeReleasePointerCapture(candidate.targetElement, candidate.pointerId);
+    if (!candidate.active) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    suppressLabelLaneClickRef.current = true;
+    const nextLane = getLabelLaneDropTarget(candidate, event.clientY);
+    if (nextLane !== candidate.currentLane) {
+      onBarLabelLaneChange?.(candidate.sIdx, candidate.bIdx, nextLane);
+    }
+  };
+  const cancelLabelLaneDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const candidate = labelLaneDragCandidateRef.current;
+    if (candidate?.pointerId === event.pointerId) {
+      labelLaneDragCandidateRef.current = null;
+      clearLabelLaneLongPress(candidate);
+      safeReleasePointerCapture(candidate.targetElement, candidate.pointerId);
+    }
+  };
   const emitElementClick = (
     event: React.MouseEvent<HTMLElement>,
     sIdx: number,
@@ -2106,8 +2291,24 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               const isPickupActive = activeBar?.sIdx === 0 && activeBar?.bIdx === -1;
               const sectionStartBar = row.startBIdx === 0 ? row.bars[0] : undefined;
               const sectionStartBarLabel = getBarDisplayLabel(sectionStartBar);
+              const sectionStartEffectiveTimeSignature = getEffectiveTimeSignature(sectionStartBar?.timeSignature, song.timeSignature);
+              const sectionStartHasRhythm = Boolean(sectionStartBar?.rhythm?.trim());
+              const sectionStartHasRiff = hasVisiblePreviewRiff(getPreviewRiffNotation(sectionStartBar?.riff, sectionStartEffectiveTimeSignature));
+              const sectionStartDefaultLabelLane: BarLabelLane = sectionStartHasRhythm && sectionStartHasRiff && !sectionStartBar?.timeSignature ? 'rhythm' : 'riff';
+              const sectionStartLabelLane: BarLabelLane = sectionStartBar?.labelLane === 'rhythm'
+                ? 'rhythm'
+                : sectionStartBar?.labelLane === 'riff'
+                  ? 'riff'
+                  : sectionStartDefaultLabelLane;
+              const canDragSectionStartLabelLane = Boolean(
+                onBarLabelLaneChange
+                && barRowCount === 3
+                && sectionStartBar
+                && (sectionStartHasRhythm || sectionStartHasRiff)
+                && sectionStartBarLabel
+              );
               const sectionStartTimeSignature = sectionStartBar?.timeSignature
-                ? splitDisplayTimeSignature(getEffectiveTimeSignature(sectionStartBar.timeSignature, song.timeSignature))
+                ? splitDisplayTimeSignature(sectionStartEffectiveTimeSignature)
                 : null;
               const showSectionStartGutterTimeSignature = Boolean(
                 row.kind === 'music'
@@ -2127,6 +2328,47 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               );
               const showSectionStartLowerGutter = showSectionStartGutterLabel || showSectionStartGutterTimeSignature;
               const compactSectionStartLowerGutter = Boolean(barRowCount === 2 && sectionStartTimeSignature);
+              const alignSectionStartGutterLabelWithRhythmLane = Boolean(
+                barRowCount === 3
+                && sectionStartLabelLane === 'rhythm'
+                && sectionStartHasRhythm
+                && sectionStartHasRiff
+                && !sectionStartTimeSignature
+              );
+              const renderSectionStartGutterLabel = () => (
+                <div
+                  data-preview-section-gutter-label
+                  data-preview-bar-label
+                  data-preview-label-lane={sectionStartLabelLane}
+                  data-preview-suppress-pan={canDragSectionStartLabelLane ? true : undefined}
+                  className={`flex ${compactSectionStartLowerGutter ? 'h-[13px]' : 'h-[14px]'} min-w-0 max-w-full select-none items-center justify-center rounded-sm border border-black bg-gray-300/70 px-1 mix-blend-multiply leading-none transition-colors ${
+                    onElementClick ? 'cursor-pointer hover:bg-indigo-200/70' : ''
+                  } ${canDragSectionStartLabelLane ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
+                  style={canDragSectionStartLabelLane ? { WebkitUserSelect: 'none', userSelect: 'none' } : undefined}
+                  title={canDragSectionStartLabelLane ? getLabelLaneDragTitle(language) : undefined}
+                  onMouseDown={canDragSectionStartLabelLane ? (event) => event.stopPropagation() : undefined}
+                  onPointerDown={canDragSectionStartLabelLane ? (event) => handleLabelLanePointerDown(event, row.sIdx, 0, sectionStartLabelLane) : undefined}
+                  onPointerMove={canDragSectionStartLabelLane ? handleLabelLanePointerMove : undefined}
+                  onPointerUp={canDragSectionStartLabelLane ? finishLabelLaneDrag : undefined}
+                  onPointerCancel={canDragSectionStartLabelLane ? cancelLabelLaneDrag : undefined}
+                  onClick={onElementClick ? (event) => {
+                    if (suppressLabelLaneClickRef.current) {
+                      suppressLabelLaneClickRef.current = false;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      return;
+                    }
+                    event.stopPropagation();
+                    emitElementClick(event, row.sIdx, 0, 'label');
+                  } : undefined}
+                >
+                  <AutoShrink align="center" minScale={0.64} className="h-full items-center overflow-visible">
+                    <span className="inline-flex -translate-y-[1.5px] items-center justify-center whitespace-nowrap text-[8px] font-bold uppercase leading-none text-black">
+                      {sectionStartBarLabel}
+                    </span>
+                  </AutoShrink>
+                </div>
+              );
 
               return (
                 <motion.div
@@ -2315,11 +2557,23 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       <div
                         data-preview-section-lower-gutter
                         data-preview-section-lower-gutter-compact={compactSectionStartLowerGutter ? true : undefined}
+                        data-preview-suppress-pan={canDragSectionStartLabelLane ? true : undefined}
                         className={`absolute right-2 z-10 flex max-w-[calc(100%-8px)] flex-col items-end overflow-visible ${
-                          compactSectionStartLowerGutter ? 'bottom-[2px] gap-0' : 'bottom-[6px] gap-0.5'
-                        }`}
+                          alignSectionStartGutterLabelWithRhythmLane
+                            ? 'bottom-[30px] gap-0'
+                            : compactSectionStartLowerGutter
+                              ? 'bottom-[2px] gap-0'
+                              : 'bottom-[6px] gap-0.5'
+                        } ${canDragSectionStartLabelLane ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
+                        style={canDragSectionStartLabelLane ? { WebkitUserSelect: 'none', userSelect: 'none' } : undefined}
+                        title={canDragSectionStartLabelLane ? getLabelLaneDragTitle(language) : undefined}
+                        onMouseDown={canDragSectionStartLabelLane ? (event) => event.stopPropagation() : undefined}
+                        onPointerDown={canDragSectionStartLabelLane ? (event) => handleLabelLanePointerDown(event, row.sIdx, 0, sectionStartLabelLane) : undefined}
+                        onPointerMove={canDragSectionStartLabelLane ? handleLabelLanePointerMove : undefined}
+                        onPointerUp={canDragSectionStartLabelLane ? finishLabelLaneDrag : undefined}
+                        onPointerCancel={canDragSectionStartLabelLane ? cancelLabelLaneDrag : undefined}
                       >
-                        {showSectionStartGutterTimeSignature && sectionStartTimeSignature && (
+                        {showSectionStartGutterTimeSignature && sectionStartTimeSignature && sectionStartLabelLane !== 'rhythm' && (
                           <div
                             data-preview-section-gutter-time-signature
                             className="flex w-[18px] shrink-0 flex-col items-center justify-center self-center text-[17px] font-semibold italic leading-[0.72] text-[#1e3a8a] pointer-events-none select-none"
@@ -2330,22 +2584,21 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           </div>
                         )}
                         {showSectionStartGutterLabel && (
+                          renderSectionStartGutterLabel()
+                        )}
+                        {showSectionStartGutterTimeSignature && sectionStartTimeSignature && sectionStartLabelLane === 'rhythm' && (
                           <div
-                            data-preview-section-gutter-label
-                            className={`flex ${compactSectionStartLowerGutter ? 'h-[13px]' : 'h-[14px]'} min-w-0 max-w-full items-center justify-center rounded-sm border border-black bg-gray-300/70 px-1 mix-blend-multiply leading-none transition-colors ${
-                              onElementClick ? 'cursor-pointer hover:bg-indigo-200/70' : ''
-                            }`}
-                            onClick={onElementClick ? (event) => {
-                              event.stopPropagation();
-                              emitElementClick(event, row.sIdx, 0, 'label');
-                            } : undefined}
+                            data-preview-section-gutter-time-signature
+                            data-preview-section-gutter-time-signature-swapped
+                            className="flex w-[18px] shrink-0 flex-col items-center justify-center self-center text-[17px] font-semibold italic leading-[0.72] text-[#1e3a8a] pointer-events-none select-none"
+                            aria-hidden="true"
                           >
-                            <AutoShrink align="center" minScale={0.64} className="h-full items-center overflow-visible">
-                              <span className="inline-flex -translate-y-[1.5px] items-center justify-center whitespace-nowrap text-[8px] font-bold uppercase leading-none text-black">
-                                {sectionStartBarLabel}
-                              </span>
-                            </AutoShrink>
+                            <span>{sectionStartTimeSignature.numerator}</span>
+                            {sectionStartTimeSignature.denominator && <span>{sectionStartTimeSignature.denominator}</span>}
                           </div>
+                        )}
+                        {showSectionStartGutterLabel && sectionStartLabelLane === 'rhythm' && !sectionStartTimeSignature && !alignSectionStartGutterLabelWithRhythmLane && (
+                          <span className="h-[14px] shrink-0" aria-hidden="true" />
                         )}
                       </div>
                     )}
@@ -2661,13 +2914,17 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         || (!row.addSectionAfter && row.bars.length > 0 && bIdx === row.bars.length)
                       )
                     );
+                    const labelLane: BarLabelLane = bar?.labelLane === 'rhythm' ? 'rhythm' : 'riff';
+                    const labelUsesStandaloneRhythmLane = hasBarLabelInContentLane && labelLane === 'rhythm' && hasRiff && !showBottomRhythmLane;
                     const hasThreeNotationRows = hasChordContent && hasRhythm && hasRiff;
                     const lowerLaneCount = bar
                       ? hasThreeNotationRows
                         ? 2
                         : showBottomRhythmLane && hasRiff
                           ? 2
-                          : (labelSharesNotationLane || showBottomRhythmLane || hasRiff ? 1 : 0)
+                          : labelUsesStandaloneRhythmLane
+                            ? 2
+                            : (labelSharesNotationLane || showBottomRhythmLane || hasRiff ? 1 : 0)
                       : 0;
                     const barPaddingBottom = hasThreeNotationRows
                       ? 58
@@ -2687,6 +2944,54 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       : bar?.repeatStart
                         ? 'pl-3.5'
                         : '';
+                    const canDragLabelLane = Boolean(onBarLabelLaneChange && barRowCount === 3 && hasBarLabelInMeasure && (showBottomRhythmLane || hasRiff));
+                    const inlineTimeSignatureLabelBottomClass = labelLane === 'rhythm' ? 'bottom-[30px]' : 'bottom-[6px]';
+                    const shouldOffsetInlineTimeSignatureForLabel = Boolean(
+                      barRowCount === 3
+                      && showInlineTimeSignatureBarLabel
+                      && labelLane === 'rhythm'
+                    );
+                    const inlineTimeSignaturePositionClass = shouldOffsetInlineTimeSignatureForLabel
+                      ? 'top-[10px]'
+                      : 'top-1/2 -translate-y-1/2';
+                    const renderBarLabelBadge = (className: string, options?: { shrink?: boolean; inlineTimeSignature?: boolean }) => (
+                      <div
+                        data-preview-inline-time-signature-label={options?.inlineTimeSignature ? true : undefined}
+                        data-preview-bar-label
+                        data-preview-label-lane={labelLane}
+                        data-preview-suppress-pan={canDragLabelLane ? true : undefined}
+                        className={`${className} select-none ${canDragLabelLane ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
+                        style={canDragLabelLane ? { WebkitUserSelect: 'none', userSelect: 'none' } : undefined}
+                        onMouseDown={canDragLabelLane ? (event) => event.stopPropagation() : undefined}
+                        onPointerDown={canDragLabelLane ? (event) => handleLabelLanePointerDown(event, row.sIdx, row.startBIdx + bIdx, labelLane) : undefined}
+                        onPointerMove={canDragLabelLane ? handleLabelLanePointerMove : undefined}
+                        onPointerUp={canDragLabelLane ? finishLabelLaneDrag : undefined}
+                        onPointerCancel={canDragLabelLane ? cancelLabelLaneDrag : undefined}
+                        onClick={(e) => {
+                          if (suppressLabelLaneClickRef.current) {
+                            suppressLabelLaneClickRef.current = false;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            return;
+                          }
+                          e.stopPropagation();
+                          emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
+                        }}
+                        title={canDragLabelLane ? getLabelLaneDragTitle(language) : undefined}
+                      >
+                        {options?.shrink ? (
+                          <AutoShrink align="center" minScale={0.64} className="h-full items-center overflow-visible">
+                            <span className="inline-flex -translate-y-[1.5px] items-center justify-center whitespace-nowrap text-[8px] font-bold uppercase leading-none text-black">
+                              {barLabel}
+                            </span>
+                          </AutoShrink>
+                        ) : (
+                          <span className="text-[8px] font-bold text-black uppercase leading-none">
+                            {barLabel}
+                          </span>
+                        )}
+                      </div>
+                    );
                     const shouldReserveBarNumberForNavigationMarker = Boolean(bar?.leftMarker || previousBar?.rightMarker);
                     const showBarNumber = Boolean(
                       bar
@@ -2894,7 +3199,17 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             {bar.timeSignature && !showSectionGutterTimeSignature && (
                               <div
                                 data-preview-inline-time-signature
-                                className={`absolute top-1/2 -translate-y-1/2 z-10 flex w-5 flex-col items-center justify-center text-[19px] font-semibold italic leading-[0.78] text-[#1e3a8a] pointer-events-none select-none ${bar.repeatStart ? 'left-2.5' : 'left-1.5'}`}
+                                data-preview-suppress-pan={canDragLabelLane && showInlineTimeSignatureBarLabel ? true : undefined}
+                                className={`absolute ${inlineTimeSignaturePositionClass} z-10 flex w-5 flex-col items-center justify-center text-[19px] font-semibold italic leading-[0.78] text-[#1e3a8a] select-none ${
+                                  canDragLabelLane && showInlineTimeSignatureBarLabel ? 'pointer-events-auto active:cursor-grabbing sm:cursor-grab' : 'pointer-events-none'
+                                } ${bar.repeatStart ? 'left-2.5' : 'left-1.5'}`}
+                                style={canDragLabelLane && showInlineTimeSignatureBarLabel ? { WebkitUserSelect: 'none', userSelect: 'none' } : undefined}
+                                title={canDragLabelLane && showInlineTimeSignatureBarLabel ? getLabelLaneDragTitle(language) : undefined}
+                                onMouseDown={canDragLabelLane && showInlineTimeSignatureBarLabel ? (event) => event.stopPropagation() : undefined}
+                                onPointerDown={canDragLabelLane && showInlineTimeSignatureBarLabel ? (event) => handleLabelLanePointerDown(event, row.sIdx, row.startBIdx + bIdx, labelLane) : undefined}
+                                onPointerMove={canDragLabelLane && showInlineTimeSignatureBarLabel ? handleLabelLanePointerMove : undefined}
+                                onPointerUp={canDragLabelLane && showInlineTimeSignatureBarLabel ? finishLabelLaneDrag : undefined}
+                                onPointerCancel={canDragLabelLane && showInlineTimeSignatureBarLabel ? cancelLabelLaneDrag : undefined}
                                 aria-hidden="true"
                               >
                                 <span>{displayNumerator}</span>
@@ -2902,22 +3217,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               </div>
                             )}
                             {showInlineTimeSignatureBarLabel && (
-                              <div
-                                data-preview-inline-time-signature-label
-                                className={`absolute bottom-[6px] z-10 flex h-[14px] w-[30px] items-center justify-center rounded-sm border border-black bg-gray-300/70 px-1 mix-blend-multiply leading-none transition-colors ${
+                              renderBarLabelBadge(
+                                `absolute ${inlineTimeSignatureLabelBottomClass} z-10 flex h-[14px] w-[30px] items-center justify-center rounded-sm border border-black bg-gray-300/70 px-1 mix-blend-multiply leading-none transition-colors ${
                                   bar.repeatStart ? 'left-1.5' : 'left-0.5'
-                                } ${onElementClick ? 'cursor-pointer hover:bg-indigo-200/70' : ''}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
-                                }}
-                              >
-                                <AutoShrink align="center" minScale={0.64} className="h-full items-center overflow-visible">
-                                  <span className="inline-flex -translate-y-[1.5px] items-center justify-center whitespace-nowrap text-[8px] font-bold uppercase leading-none text-black">
-                                    {barLabel}
-                                  </span>
-                                </AutoShrink>
-                              </div>
+                                } ${onElementClick ? 'cursor-pointer hover:bg-indigo-200/70' : ''}`,
+                                { shrink: true, inlineTimeSignature: true }
+                              )
                             )}
                             {/* Chords */}
                                   {(() => {
@@ -3147,17 +3452,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                     );
                                   })()}
                             {hasBarLabelInContentLane && !labelSharesNotationLane && (
-                              <div
-                                className={`absolute bottom-[6px] left-1 z-10 border border-black px-1 rounded-sm flex h-[14px] items-center bg-gray-300/70 mix-blend-multiply cursor-pointer transition-colors hover:bg-indigo-200/70 ${contentLeftInsetClass}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
-                                }}
-                              >
-                                <span className="text-[8px] font-bold text-black uppercase leading-none">
-                                  {barLabel}
-                                </span>
-                              </div>
+                              renderBarLabelBadge(`absolute bottom-[6px] left-1 z-10 border border-black px-1 rounded-sm flex h-[14px] items-center bg-gray-300/70 mix-blend-multiply cursor-pointer transition-colors hover:bg-indigo-200/70 ${contentLeftInsetClass}`)
                             )}
                             {showBottomLane && (
                               <div
@@ -3168,23 +3463,29 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                {showBottomRhythmLane && hasRiff ? (
 	                                  <div className={`flex gap-1 ${hasThreeNotationRows ? 'items-stretch' : ''}`}>
                                     {hasBarLabelInContentLane && (
-                                      <div className="flex items-end">
-                                        <div
-                                          className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
-                                          }}
-                                        >
-                                          <span className="text-[8px] font-bold text-black uppercase leading-none">
-                                            {barLabel}
-                                          </span>
+                                      <div
+                                        data-preview-bar-label-column
+                                        className={`flex flex-shrink-0 flex-col ${hasThreeNotationRows ? 'gap-1.5' : 'gap-0.5'}`}
+                                      >
+                                        <div className={`${sharedLaneClass} flex items-end`}>
+                                          {labelLane === 'rhythm' ? (
+                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors')
+                                          ) : (
+                                            <span className="mb-0.5 h-[14px]" aria-hidden="true" />
+                                          )}
+                                        </div>
+                                        <div className={`${sharedLaneClass} flex items-end`}>
+                                          {labelLane === 'riff' ? (
+                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors')
+                                          ) : (
+                                            <span className="mb-0.5 h-[14px]" aria-hidden="true" />
+                                          )}
                                         </div>
                                       </div>
                                     )}
 
-	                                    <div className={`flex flex-1 flex-col ${hasThreeNotationRows ? 'gap-1.5' : 'gap-0.5'}`}>
-	                                      <div className="flex items-end gap-1">
+	                                    <div className={`flex flex-1 min-w-0 flex-col ${hasThreeNotationRows ? 'gap-1.5' : 'gap-0.5'}`}>
+	                                      <div className="flex items-end">
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|rhythm|all`}
 	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${notationLaneHitClass} flex-1`}
@@ -3232,26 +3533,58 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               noteIndex: activeJianpuCursor.noteIndex
                                             } : null}
                                             onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
-                                            onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
+                                          onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
                                           />
                                         </div>
+                                      </div>
+                                  </div>
+                                </div>
+                                ) : labelUsesStandaloneRhythmLane ? (
+                                  <div className="flex flex-col gap-1.5 overflow-visible">
+                                    <div className="flex h-[14px] items-end gap-1 overflow-visible">
+                                      {renderBarLabelBadge('border border-black px-1 rounded-sm flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors')}
+                                    </div>
+
+                                    <div className="flex items-end gap-1 h-[18px] overflow-visible">
+                                      <div
+                                        data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|jianpu|all`}
+                                        className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
+                                        }}
+                                      >
+                                        {activeJianpuCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
+                                        {activeJianpuCursor && renderActiveNotationCursor()}
+                                        <Jianpu
+                                          notation={previewRiffNotation}
+                                          compact
+                                          scale={previewJianpuScale}
+                                          timeSignature={effectiveTimeSignature}
+                                          gridSlotCount={notationBeatUnits}
+                                          className="w-full min-w-0"
+                                          previousNotationForCrossBar={previewPreviousRiffNotation}
+                                          nextNotationForCrossBar={previewNextRiffNotation}
+                                          activeTokenIndex={activeJianpuCursor?.beatIndex ?? null}
+                                          activeInsertPosition={activeJianpuCursor && activeJianpuCursor.noteIndex == null ? {
+                                            tokenIndex: activeJianpuCursor.beatIndex,
+                                            slotIndex: activeJianpuCursor.unitIndex,
+                                            slotCount: notationBeatUnits
+                                          } : null}
+                                          activeNote={activeJianpuCursor?.noteIndex != null ? {
+                                            tokenIndex: activeJianpuCursor.beatIndex,
+                                            noteIndex: activeJianpuCursor.noteIndex
+                                          } : null}
+                                          onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
+                                          onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
+                                        />
                                       </div>
                                     </div>
                                   </div>
                                 ) : (
                                   <div className="flex items-end gap-1 h-[18px] overflow-visible">
                                     {hasBarLabelInContentLane && (
-                                      <div
-                                        className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
-                                        }}
-                                      >
-                                        <span className="text-[8px] font-bold text-black uppercase leading-none">
-                                          {barLabel}
-                                        </span>
-                                      </div>
+                                      renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors')
                                     )}
 
                                     {(showBottomRhythmLane || hasRiff) && (

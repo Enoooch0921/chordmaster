@@ -489,6 +489,632 @@ describe('ChordSheet preview input caret', () => {
     expect(pages[1].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(1);
   });
 
+  it('lets a three-line section-start label drag from the riff lane to the rhythm lane', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          rhythm: 'q q q q',
+          riff: '1 2 3 4',
+          label: 'LEAD',
+          labelLane: 'riff'
+        }]
+      }]
+    };
+    const onBarLabelLaneChange = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={onBarLabelLaneChange}
+      />
+    );
+
+    const label = container.querySelector<HTMLElement>('[data-preview-section-gutter-label]');
+    expect(label).not.toBeNull();
+    expect(label).toHaveAttribute('data-preview-label-lane', 'riff');
+    expect(label).toHaveAttribute('data-preview-suppress-pan', 'true');
+    expect(label).toHaveAttribute('title', '滑鼠拖動；手指長按後拖動調整標籤行');
+
+    fireEvent.pointerDown(label!, { pointerId: 1, button: 0, clientX: 24, clientY: 100 });
+    fireEvent.pointerMove(label!, { pointerId: 1, button: 0, clientX: 24, clientY: 80 });
+    fireEvent.pointerUp(label!, { pointerId: 1, button: 0, clientX: 24, clientY: 80 });
+
+    expect(onBarLabelLaneChange).toHaveBeenCalledWith(0, 0, 'rhythm');
+  });
+
+  it('keeps label mouse dragging from bubbling into preview page panning', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          rhythm: 'q q q q',
+          riff: '1 2 3 4',
+          label: 'LEAD'
+        }]
+      }]
+    };
+    const onOuterMouseDown = vi.fn();
+    const { container } = render(
+      <div onMouseDown={onOuterMouseDown}>
+        <ChordSheet
+          song={laneSong}
+          language="zh"
+          currentKey="C"
+          previewIdentity="song-1"
+          onElementClick={vi.fn()}
+          onBarLabelLaneChange={vi.fn()}
+        />
+      </div>
+    );
+
+    const label = container.querySelector<HTMLElement>('[data-preview-section-gutter-label]');
+    expect(label).not.toBeNull();
+
+    fireEvent.mouseDown(label!, { button: 0, clientX: 24, clientY: 100 });
+
+    expect(onOuterMouseDown).not.toHaveBeenCalled();
+  });
+
+  it('lets a jianpu-only bar label drag from the riff lane to the rhythm lane', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          riff: '1 2 3 4',
+          label: 'LEAD'
+        }]
+      }]
+    };
+    const onBarLabelLaneChange = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={onBarLabelLaneChange}
+      />
+    );
+
+    const label = container.querySelector<HTMLElement>('[data-preview-section-gutter-label]');
+    expect(label).not.toBeNull();
+    expect(label).toHaveAttribute('data-preview-label-lane', 'riff');
+    expect(label).toHaveAttribute('data-preview-suppress-pan', 'true');
+
+    fireEvent.pointerDown(label!, { pointerId: 5, pointerType: 'mouse', button: 0, clientX: 24, clientY: 100 });
+    fireEvent.pointerMove(label!, { pointerId: 5, pointerType: 'mouse', clientX: 24, clientY: 80 });
+    fireEvent.pointerUp(label!, { pointerId: 5, pointerType: 'mouse', clientX: 24, clientY: 80 });
+
+    expect(onBarLabelLaneChange).toHaveBeenCalledWith(0, 0, 'rhythm');
+  });
+
+  it('renders a jianpu-only label above the jianpu lane when assigned to the rhythm lane', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: '',
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          riff: '1 2 3 4',
+          label: 'LEAD',
+          labelLane: 'rhythm'
+        }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={vi.fn()}
+      />
+    );
+
+    const bottomLane = container.querySelector<HTMLElement>('[data-preview-bottom-lane]');
+    const label = bottomLane?.querySelector<HTMLElement>('[data-preview-bar-label]');
+    const jianpuLane = bottomLane?.querySelector<HTMLElement>('[data-preview-edit-anchor$="|jianpu|all"]');
+
+    expect(label).toHaveAttribute('data-preview-label-lane', 'rhythm');
+    expect(label && jianpuLane && Boolean(label.compareDocumentPosition(jianpuLane) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it('keeps normal label lane changes from shifting the notation lanes in three-line notation', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: '',
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          rhythm: 'q q q q',
+          riff: '1 0 2 - 3 4',
+          label: 'EG'
+        }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={vi.fn()}
+      />
+    );
+
+    const bottomLane = container.querySelector<HTMLElement>('[data-preview-bottom-lane]');
+    const labelColumn = bottomLane?.querySelector<HTMLElement>('[data-preview-bar-label-column]');
+    const label = bottomLane?.querySelector<HTMLElement>('[data-preview-bar-label]');
+    const rhythmLane = bottomLane?.querySelector<HTMLElement>('[data-preview-edit-anchor$="|rhythm|all"]');
+    const jianpuLane = bottomLane?.querySelector<HTMLElement>('[data-preview-edit-anchor$="|jianpu|all"]');
+
+    expect(label).toHaveAttribute('data-preview-label-lane', 'riff');
+    expect(labelColumn).toContainElement(label!);
+    expect(labelColumn && rhythmLane && Boolean(labelColumn.compareDocumentPosition(rhythmLane) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(labelColumn && jianpuLane && Boolean(labelColumn.compareDocumentPosition(jianpuLane) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it('lets a normal riffLabel drag from the jianpu row to the rhythm row', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: '',
+        bars: [{
+          id: 'bar-1',
+          chords: ['C#m7b5', '', 'F#dim7', ''],
+          ending: '1,2',
+          annotation: 'Push',
+          rhythm: 'e3 e3 e3 q. e',
+          riff: "1_t2_t3_t | 3= 4= | b5. | 6'",
+          riffLabel: 'Riff'
+        }]
+      }]
+    };
+    const onBarLabelLaneChange = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={onBarLabelLaneChange}
+      />
+    );
+
+    const label = container.querySelector<HTMLElement>('[data-preview-bar-label]');
+    expect(label).toHaveAttribute('data-preview-label-lane', 'riff');
+    expect(label).toHaveAttribute('data-preview-suppress-pan', 'true');
+
+    fireEvent.pointerDown(label!, { pointerId: 7, pointerType: 'mouse', button: 0, clientX: 54, clientY: 138 });
+    fireEvent.pointerMove(label!, { pointerId: 7, pointerType: 'mouse', clientX: 54, clientY: 110 });
+    fireEvent.pointerUp(label!, { pointerId: 7, pointerType: 'mouse', clientX: 54, clientY: 110 });
+
+    expect(onBarLabelLaneChange).toHaveBeenCalledWith(0, 0, 'rhythm');
+  });
+
+  it('defaults a section-start label with rhythm and jianpu to the rhythm row', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: 'Lanes / Text',
+        bars: [{
+          id: 'bar-1',
+          chords: ['Ab'],
+          rhythm: 'q q q q',
+          riff: '1 0 2 - 3 4',
+          label: 'EG'
+        }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={vi.fn()}
+      />
+    );
+
+    const lowerGutter = container.querySelector<HTMLElement>('[data-preview-section-lower-gutter]');
+    const label = lowerGutter?.querySelector<HTMLElement>('[data-preview-section-gutter-label]');
+
+    expect(label).toHaveAttribute('data-preview-label-lane', 'rhythm');
+    expect(lowerGutter).toHaveClass('bottom-[30px]', 'gap-0');
+  });
+
+  it('lets a default section-start rhythm-row label drag down to the riff row', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: 'Lanes / Text',
+        bars: [{
+          id: 'bar-1',
+          chords: ['Ab'],
+          rhythm: 'q q q q',
+          riff: '1 0 2 - 3 4',
+          label: 'EG'
+        }]
+      }]
+    };
+    const onBarLabelLaneChange = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={onBarLabelLaneChange}
+      />
+    );
+
+    const label = container.querySelector<HTMLElement>('[data-preview-section-gutter-label]');
+    expect(label).toHaveAttribute('data-preview-label-lane', 'rhythm');
+    expect(label).toHaveAttribute('data-preview-suppress-pan', 'true');
+
+    fireEvent.pointerDown(label!, { pointerId: 8, pointerType: 'mouse', button: 0, clientX: 24, clientY: 90 });
+    fireEvent.pointerMove(label!, { pointerId: 8, pointerType: 'mouse', clientX: 24, clientY: 130 });
+    fireEvent.pointerUp(label!, { pointerId: 8, pointerType: 'mouse', clientX: 24, clientY: 130 });
+
+    expect(onBarLabelLaneChange).toHaveBeenCalledWith(0, 0, 'riff');
+  });
+
+  it('keeps touch page scrolling from triggering label lane dragging before long press', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          rhythm: 'q q q q',
+          riff: '1 2 3 4',
+          label: 'LEAD'
+        }]
+      }]
+    };
+    const onBarLabelLaneChange = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={onBarLabelLaneChange}
+      />
+    );
+
+    const label = container.querySelector<HTMLElement>('[data-preview-section-gutter-label]');
+    expect(label).not.toBeNull();
+    expect(label).not.toHaveStyle({ touchAction: 'none' });
+
+    fireEvent.pointerDown(label!, { pointerId: 2, pointerType: 'touch', button: 0, clientX: 24, clientY: 100 });
+    fireEvent.pointerMove(label!, { pointerId: 2, pointerType: 'touch', clientX: 24, clientY: 116 });
+    fireEvent.pointerUp(label!, { pointerId: 2, pointerType: 'touch', clientX: 24, clientY: 116 });
+
+    expect(onBarLabelLaneChange).not.toHaveBeenCalled();
+  });
+
+  it('allows touch label lane dragging after a long press', () => {
+    vi.useFakeTimers();
+    try {
+      const laneSong: Song = {
+        ...song,
+        barRowCount: 3,
+        sections: [{
+          id: 'section-1',
+          title: 'Verse',
+          bars: [{
+            id: 'bar-1',
+            chords: ['C'],
+            rhythm: 'q q q q',
+            riff: '1 2 3 4',
+            label: 'LEAD',
+            labelLane: 'riff'
+          }]
+        }]
+      };
+      const onBarLabelLaneChange = vi.fn();
+      const { container } = render(
+        <ChordSheet
+          song={laneSong}
+          language="zh"
+          currentKey="C"
+          previewIdentity="song-1"
+          onElementClick={vi.fn()}
+          onBarLabelLaneChange={onBarLabelLaneChange}
+        />
+      );
+
+      const label = container.querySelector<HTMLElement>('[data-preview-section-gutter-label]');
+      expect(label).not.toBeNull();
+
+      fireEvent.pointerDown(label!, { pointerId: 3, pointerType: 'touch', button: 0, clientX: 24, clientY: 100 });
+      act(() => {
+        vi.advanceTimersByTime(280);
+      });
+      fireEvent.pointerMove(label!, { pointerId: 3, pointerType: 'touch', clientX: 24, clientY: 80 });
+      fireEvent.pointerUp(label!, { pointerId: 3, pointerType: 'touch', clientX: 24, clientY: 80 });
+
+      expect(onBarLabelLaneChange).toHaveBeenCalledWith(0, 0, 'rhythm');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('prevents native page scrolling only after a touch label drag is armed', () => {
+    vi.useFakeTimers();
+    try {
+      const laneSong: Song = {
+        ...song,
+        barRowCount: 3,
+        sections: [{
+          id: 'section-1',
+          title: 'Verse',
+          bars: [{
+            id: 'bar-1',
+            chords: ['C'],
+            rhythm: 'q q q q',
+            riff: '1 2 3 4',
+            label: 'LEAD'
+          }]
+        }]
+      };
+      const { container } = render(
+        <ChordSheet
+          song={laneSong}
+          language="zh"
+          currentKey="C"
+          previewIdentity="song-1"
+          onElementClick={vi.fn()}
+          onBarLabelLaneChange={vi.fn()}
+        />
+      );
+
+      const label = container.querySelector<HTMLElement>('[data-preview-section-gutter-label]');
+      expect(label).not.toBeNull();
+
+      fireEvent.pointerDown(label!, { pointerId: 4, pointerType: 'touch', button: 0, clientX: 24, clientY: 100 });
+      const preLongPressMove = new Event('touchmove', { bubbles: true, cancelable: true });
+      document.dispatchEvent(preLongPressMove);
+      expect(preLongPressMove.defaultPrevented).toBe(false);
+
+      act(() => {
+        vi.advanceTimersByTime(280);
+      });
+      const armedMove = new Event('touchmove', { bubbles: true, cancelable: true });
+      document.dispatchEvent(armedMove);
+      expect(armedMove.defaultPrevented).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('swaps the section-start label and temporary time signature when the label is on row two', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{
+          id: 'bar-1',
+          chords: ['C'],
+          rhythm: 'q q q q',
+          riff: '1 2 3 4',
+          label: 'LEAD',
+          labelLane: 'rhythm',
+          timeSignature: '6/8'
+        }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet song={laneSong} language="zh" currentKey="C" previewIdentity="song-1" />
+    );
+
+    const gutter = container.querySelector<HTMLElement>('[data-preview-section-lower-gutter]');
+    const children = Array.from(gutter?.children ?? []);
+
+    expect(children[0]).toHaveAttribute('data-preview-section-gutter-label');
+    expect(children[1]).toHaveAttribute('data-preview-section-gutter-time-signature-swapped');
+  });
+
+  it('lets a section-start label with a temporary time signature drag from the gutter area', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: 'Bridge',
+        bars: [{
+          id: 'bar-1',
+          chords: ['Db/F'],
+          rhythm: 'h hr',
+          riff: '1 2 3',
+          label: '3/4',
+          timeSignature: '3/4'
+        }]
+      }]
+    };
+    const onBarLabelLaneChange = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={onBarLabelLaneChange}
+      />
+    );
+
+    const gutter = container.querySelector<HTMLElement>('[data-preview-section-lower-gutter]');
+    expect(gutter).toHaveAttribute('data-preview-suppress-pan', 'true');
+
+    fireEvent.pointerDown(gutter!, { pointerId: 6, pointerType: 'mouse', button: 0, clientX: 24, clientY: 120 });
+    fireEvent.pointerMove(gutter!, { pointerId: 6, pointerType: 'mouse', clientX: 24, clientY: 88 });
+    fireEvent.pointerUp(gutter!, { pointerId: 6, pointerType: 'mouse', clientX: 24, clientY: 88 });
+
+    expect(onBarLabelLaneChange).toHaveBeenCalledWith(0, 0, 'rhythm');
+  });
+
+  it('lets an inline temporary time-signature label drag from the signature area', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: '',
+        bars: [{
+          id: 'bar-1',
+          chords: ['Db/F'],
+          rhythm: 'h hr',
+          riff: '1 2 3',
+          label: '3/4',
+          timeSignature: '3/4'
+        }]
+      }]
+    };
+    const onBarLabelLaneChange = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={onBarLabelLaneChange}
+      />
+    );
+
+    const signature = container.querySelector<HTMLElement>('[data-preview-inline-time-signature]');
+    const label = container.querySelector<HTMLElement>('[data-preview-inline-time-signature-label]');
+
+    expect(signature).toHaveAttribute('data-preview-suppress-pan', 'true');
+    expect(label).toHaveAttribute('data-preview-suppress-pan', 'true');
+
+    fireEvent.pointerDown(signature!, { pointerId: 7, pointerType: 'mouse', button: 0, clientX: 24, clientY: 120 });
+    fireEvent.pointerMove(signature!, { pointerId: 7, pointerType: 'mouse', clientX: 24, clientY: 88 });
+    fireEvent.pointerUp(signature!, { pointerId: 7, pointerType: 'mouse', clientX: 24, clientY: 88 });
+
+    expect(onBarLabelLaneChange).toHaveBeenCalledWith(0, 0, 'rhythm');
+  });
+
+  it('raises an inline temporary time-signature label when assigned to the rhythm lane', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: '',
+        bars: [{
+          id: 'bar-1',
+          chords: ['Db/F'],
+          rhythm: 'h hr',
+          riff: '1 2 3',
+          label: '3/4',
+          labelLane: 'rhythm',
+          timeSignature: '3/4'
+        }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={vi.fn()}
+      />
+    );
+
+    const signature = container.querySelector<HTMLElement>('[data-preview-inline-time-signature]');
+    const label = container.querySelector<HTMLElement>('[data-preview-inline-time-signature-label]');
+    expect(label).toHaveAttribute('data-preview-label-lane', 'rhythm');
+    expect(label).toHaveClass('bottom-[30px]');
+    expect(signature).toHaveClass('top-[10px]');
+    expect(signature?.className).not.toContain('top-1/2');
+  });
+
+  it('keeps an inline temporary time signature centered beside a riff-lane label', () => {
+    const laneSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        id: 'section-1',
+        title: '',
+        bars: [{
+          id: 'bar-1',
+          chords: ['Db/F'],
+          rhythm: 'h hr',
+          riff: '1 2 3',
+          label: '3/4',
+          labelLane: 'riff',
+          timeSignature: '3/4'
+        }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={laneSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        onBarLabelLaneChange={vi.fn()}
+      />
+    );
+
+    const signature = container.querySelector<HTMLElement>('[data-preview-inline-time-signature]');
+    const label = container.querySelector<HTMLElement>('[data-preview-inline-time-signature-label]');
+
+    expect(label).toHaveAttribute('data-preview-label-lane', 'riff');
+    expect(label).toHaveClass('bottom-[6px]');
+    expect(signature).toHaveClass('top-1/2', '-translate-y-1/2');
+    expect(signature?.className).not.toContain('top-[10px]');
+  });
+
   it('caps two-line printable pages at ten rows with maximum row spacing', () => {
     const bars = Array.from({ length: 44 }, (_, index) => ({
       id: `bar-${index + 1}`,

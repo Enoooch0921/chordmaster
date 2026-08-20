@@ -26,6 +26,7 @@ export type LibraryRole = 'owner' | 'editor' | 'setlist_manager' | 'viewer';
 export type ProjectMemberRole = 'viewer' | 'manager';
 export type SongReferenceKind = 'band' | 'vocal';
 export type AnnotationColorId = 'amber' | 'emerald' | 'sky' | 'rose' | 'violet' | 'slate';
+export type BarLabelLane = 'rhythm' | 'riff';
 
 export interface ChordMark {
   color?: AnnotationColorId;
@@ -60,6 +61,7 @@ export interface Bar {
   riff?: string;    // e.g., "3 - 4 - 5 - 7 1"
   rhythm?: string;  // e.g., "q e e qr"
   label?: string; // Shared lane label, e.g. "Pno", "Dr", "EG"
+  labelLane?: BarLabelLane; // Three-line preview placement: rhythm = row 2, riff = row 3
   riffLabel?: string; // e.g., "Riff", "Pno", "EG"
   rhythmLabel?: string; // e.g., "Dr", "Rhythm", "Clap"
   annotation?: string; // e.g., "Kick In", "8 beat build"

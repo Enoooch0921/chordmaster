@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chordmaster-pwa-v1';
+const CACHE_NAME = 'chordmaster-pwa-v2';
 const APP_SHELL_PATHS = [
   './',
   './site.webmanifest',

@@ -175,6 +175,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           riff: normalizeOptionalText(safeBar.riff),
           rhythm,
           label: normalizeOptionalText(safeBar.label),
+          labelLane: safeBar.labelLane === 'rhythm' || safeBar.labelLane === 'riff' ? safeBar.labelLane : undefined,
           riffLabel: normalizeOptionalText(safeBar.riffLabel),
           rhythmLabel: normalizeOptionalText(safeBar.rhythmLabel),
           annotation: normalizeOptionalText(safeBar.annotation),

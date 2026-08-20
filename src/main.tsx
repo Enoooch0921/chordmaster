@@ -9,7 +9,7 @@ import AuthCallbackPage from './pages/AuthCallbackPage.tsx';
 import SharedChartPage from './pages/SharedChartPage.tsx';
 import TeamInvitePage from './pages/TeamInvitePage.tsx';
 import { ToastProvider } from './components/Toast.tsx';
-import { registerAppFontFaces } from './lib/fontFaceAssets.ts';
+import { registerAppFontFaces, waitForAppFontsReady } from './lib/fontFaceAssets.ts';
 import './index.css';
 
 const appBaseUrl = import.meta.env.BASE_URL;
@@ -121,17 +121,24 @@ if (Capacitor.isNativePlatform()) {
 
 registerServiceWorker();
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <BrowserRouter basename={routerBasename}>
-      <ToastProvider>
-        <Routes>
-          <Route path="/" element={<App />} />
-          <Route path="/auth/callback" element={<AuthCallbackPage />} />
-          <Route path="/share/:token" element={<SharedChartPage />} />
-          <Route path="/team-invite/:token" element={<TeamInvitePage />} />
-        </Routes>
-      </ToastProvider>
-    </BrowserRouter>
-  </StrictMode>,
-);
+const renderApp = () => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <BrowserRouter basename={routerBasename}>
+        <ToastProvider>
+          <Routes>
+            <Route path="/" element={<App />} />
+            <Route path="/auth/callback" element={<AuthCallbackPage />} />
+            <Route path="/share/:token" element={<SharedChartPage />} />
+            <Route path="/team-invite/:token" element={<TeamInvitePage />} />
+          </Routes>
+        </ToastProvider>
+      </BrowserRouter>
+    </StrictMode>,
+  );
+};
+
+void Promise.race([
+  waitForAppFontsReady(),
+  new Promise((resolve) => window.setTimeout(resolve, 1200)),
+]).finally(renderApp);

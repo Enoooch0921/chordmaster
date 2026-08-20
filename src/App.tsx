@@ -18,6 +18,7 @@ import {
   LibraryRole,
   Song,
   Bar,
+  BarLabelLane,
   Key,
   AppLanguage,
   JoinedSetlist,
@@ -48,7 +49,7 @@ import { hasPlayableReference, normalizeSongReferences } from './utils/reference
 import { normalizeTempoBpm } from './utils/tempoUtils';
 import { useThemeMode } from './hooks/useThemeMode';
 import { useToast } from './components/Toast';
-import { waitForAppFontsReady } from './lib/fontFaceAssets';
+import { getAppFontEmbedCSS, waitForAppFontsReady } from './lib/fontFaceAssets';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
@@ -1349,6 +1350,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
           riff: normalizeOptionalText(safeBar.riff),
           rhythm: normalizeOptionalText(safeBar.rhythm),
           label: normalizeOptionalText(safeBar.label),
+          labelLane: safeBar.labelLane === 'rhythm' || safeBar.labelLane === 'riff' ? safeBar.labelLane : undefined,
           riffLabel: normalizeOptionalText(safeBar.riffLabel),
           rhythmLabel: normalizeOptionalText(safeBar.rhythmLabel),
           annotation: normalizeOptionalText(safeBar.annotation),
@@ -7391,12 +7393,24 @@ export default function App() {
       throw new Error('No preview pages found for PDF export.');
     }
 
-    let fontEmbedCSS: string | undefined;
+    const fontEmbedCSSParts: string[] = [];
     try {
-      fontEmbedCSS = await getFontEmbedCSS(captureHost);
+      const appFontEmbedCSS = await getAppFontEmbedCSS();
+      if (appFontEmbedCSS) {
+        fontEmbedCSSParts.push(appFontEmbedCSS);
+      }
+    } catch {
+      // Continue with html-to-image's stylesheet font capture.
+    }
+    try {
+      const capturedFontEmbedCSS = await getFontEmbedCSS(captureHost);
+      if (capturedFontEmbedCSS) {
+        fontEmbedCSSParts.push(capturedFontEmbedCSS);
+      }
     } catch {
       // Fall back to per-page font embedding if pre-fetch fails.
     }
+    const fontEmbedCSS = fontEmbedCSSParts.length > 0 ? fontEmbedCSSParts.join('\n') : undefined;
 
     const pdf = new jsPDF({
       orientation: 'portrait',
@@ -9796,6 +9810,76 @@ export default function App() {
     editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 60);
   }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlist, canEditTeamSongs, focusEditorField, handleSetlistSongContentChange, handleSongChange, isEditing, isSetlistMode]);
 
+  const handleBarLabelLaneChange = React.useCallback((previewSIdx: number, previewBIdx: number, lane: BarLabelLane) => {
+    const canEdit = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs;
+    const editableSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
+    const navigationSong = activeDraftNavigationPreviewSong ?? activeNavigationPreviewSong ?? editableSong;
+    if (!canEdit || !editableSong || !navigationSong) {
+      return;
+    }
+
+    const previewSection = navigationSong.sections[previewSIdx] ?? null;
+    const previewBar = previewSection?.bars[previewBIdx] ?? null;
+    const sectionIndex = previewSection?.id
+      ? editableSong.sections.findIndex((section) => section.id === previewSection.id)
+      : previewSIdx;
+    const editableSection = editableSong.sections[sectionIndex >= 0 ? sectionIndex : previewSIdx];
+    if (!editableSection) {
+      return;
+    }
+
+    const barIndex = previewBar?.id
+      ? editableSection.bars.findIndex((bar) => bar.id === previewBar.id)
+      : previewBIdx;
+    if (barIndex < 0 || !editableSection.bars[barIndex]) {
+      return;
+    }
+
+    const editableBar = editableSection.bars[barIndex];
+    const defaultLane: BarLabelLane = barIndex === 0
+      && editableSection.title.trim()
+      && editableBar.rhythm?.trim()
+      && editableBar.riff?.trim()
+      && !editableBar.timeSignature
+        ? 'rhythm'
+        : 'riff';
+    const currentLane: BarLabelLane = editableBar.labelLane === 'rhythm'
+      ? 'rhythm'
+      : editableBar.labelLane === 'riff'
+        ? 'riff'
+        : defaultLane;
+    if (currentLane === lane) {
+      return;
+    }
+
+    const nextSections = editableSong.sections.map((section, sIdx) => (
+      sIdx === (sectionIndex >= 0 ? sectionIndex : previewSIdx)
+        ? {
+            ...section,
+            bars: section.bars.map((bar, bIdx) => (
+              bIdx === barIndex ? { ...bar, labelLane: lane } : bar
+            ))
+          }
+        : section
+    ));
+    const nextSong = { ...editableSong, sections: nextSections };
+
+    setPreviewMetaEditTarget(null);
+    setActiveSectionId(editableSection.id ?? previewSection?.id ?? null);
+    setActiveBar({ sIdx: sectionIndex >= 0 ? sectionIndex : previewSIdx, bIdx: barIndex });
+
+    if (activePreviewEditSession) {
+      applyPreviewEditDraft(nextSong, { mergeKey: `label-lane:${editableSection.id ?? sectionIndex}:${editableSection.bars[barIndex].id ?? barIndex}` });
+      return;
+    }
+
+    if (isSetlistMode) {
+      handleSetlistSongContentChange(nextSong);
+    } else {
+      handleSongChange(nextSong);
+    }
+  }, [activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, applyPreviewEditDraft, canEditSelectedSetlist, canEditTeamSongs, handleSetlistSongContentChange, handleSongChange, isSetlistMode]);
+
   const handleAddSectionAfterPreviewSection = React.useCallback((previewSIdx: number) => {
     const canEdit = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs;
     const previewIdentity = getPreviewIdentityForCurrentMode();
@@ -9900,6 +9984,7 @@ export default function App() {
         onMetaClick={canOpenEditor ? handleMetaClick : undefined}
         onAddBarClick={canEditTeamSongs && !activePreviewEditSession ? handleAddBarToSection : undefined}
         onAddSectionAfterClick={canEditTeamSongs && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
+        onBarLabelLaneChange={canEditTeamSongs ? handleBarLabelLaneChange : undefined}
         highlightedSectionIds={highlightedSectionIds}
         activeSectionId={isEditing || activePreviewEditSession ? activeSectionId : null}
         activeBar={isEditing || activePreviewEditSession ? activeBar : null}
@@ -9908,7 +9993,7 @@ export default function App() {
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       />
     );
-  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
+  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -9989,6 +10074,7 @@ export default function App() {
               onMetaClick={isSelected && canOpenEditor ? handleMetaClick : undefined}
               onAddBarClick={isSelected && canEditSelectedSetlist && !activePreviewEditSession ? handleAddBarToSection : undefined}
               onAddSectionAfterClick={isSelected && canEditSelectedSetlist && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
+              onBarLabelLaneChange={isSelected && canEditSelectedSetlist ? handleBarLabelLaneChange : undefined}
               highlightedSectionIds={isSelected ? highlightedSectionIds : []}
               activeSectionId={isSelected && (isEditing || activePreviewEditSession) ? activeSectionId : null}
               activeBar={isSelected && (isEditing || activePreviewEditSession) ? activeBar : null}
@@ -10000,7 +10086,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -10582,6 +10668,10 @@ export default function App() {
 
   const handlePreviewMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !previewRef.current) {
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-preview-suppress-pan="true"]')) {
       return;
     }
 
