@@ -5,6 +5,7 @@ import { motion, AnimatePresence, Reorder, LayoutGroup, useDragControls } from '
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import BeatSlashGlyph from './BeatSlashGlyph';
+import { JianpuTripletKeyGlyph } from './preview-edit/NotationKeyGlyphs';
 import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { getPlayKey, getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyPreservingSpelling, transposeKeyWithPreference } from '../utils/musicUtils';
@@ -5268,12 +5269,9 @@ const SongEditor: React.FC<Props> = ({
 	  const renderJianpuTieGlyph = () => (
 	    <span className={`${isCompactSelectionToolbar ? 'text-[18px]' : 'text-[21px]'} font-bold leading-none -translate-y-[2px]`}>◠</span>
 	  );
-	  const renderJianpuTripletGlyph = () => (
-	    <div className="relative flex h-full w-full items-center justify-center">
-	      <span className={`${isCompactSelectionToolbar ? 'text-[12px]' : 'text-[14px]'} font-bold leading-none`}>111</span>
-	      <span className="absolute left-1/2 top-[2px] -translate-x-1/2 rounded bg-current px-[2px] text-[8px] font-black leading-none text-white">3</span>
-	    </div>
-	  );
+		  const renderJianpuTripletGlyph = () => (
+		    <JianpuTripletKeyGlyph className="!h-full !min-w-0 [&_[data-jianpu-triplet-key-number]]:!top-[3px] [&_[data-jianpu-triplet-key-number]]:!text-[8px] [&_[data-jianpu-triplet-key-bracket]]:!top-[11px] [&_[data-jianpu-triplet-key-bracket]]:!h-[5px] [&_[data-jianpu-triplet-key-bracket]]:!w-[23px] [&_[data-jianpu-triplet-key-notes]]:!translate-y-[5px] [&_[data-jianpu-triplet-key-notes]]:!gap-[2px] [&_[data-jianpu-triplet-key-notes]]:!text-[13px]" />
+		  );
   const getActiveJianpuBeatIndex = (sIdx: number, bIdx: number, value: string) => {
     if (jianpuCursor && jianpuCursor.sIdx === sIdx && jianpuCursor.bIdx === bIdx) {
       return jianpuCursor.beatIndex;

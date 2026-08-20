@@ -77,6 +77,10 @@ export interface JianpuInputGlyphProps {
 	  className?: string;
 	}
 
+export interface JianpuTripletKeyGlyphProps {
+  className?: string;
+}
+
 const durationLineCount = (duration: JianpuDuration) => {
   if (duration === 'sixteenth') return 2;
   if (duration === 'eighth') return 1;
@@ -182,6 +186,28 @@ export function JianpuInputGlyph({
         count={normalizedOctave < 0 ? octaveDotCount : 0}
         placement="low"
       />
+    </span>
+  );
+}
+
+export function JianpuTripletKeyGlyph({
+  className = ''
+}: JianpuTripletKeyGlyphProps) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`relative inline-flex h-12 min-w-0 w-full select-none items-center justify-center overflow-visible text-current ${className}`}
+      data-jianpu-triplet-key-glyph
+    >
+      <span className="absolute left-1/2 top-[5px] -translate-x-1/2 text-[10px] font-black leading-none" data-jianpu-triplet-key-number>
+        3
+      </span>
+      <span className="absolute left-1/2 top-[14px] h-[6px] w-[27px] -translate-x-1/2 border-x-[1.5px] border-t-[1.5px] border-current" data-jianpu-triplet-key-bracket />
+      <span className="flex translate-y-[6px] items-center justify-center gap-[3px] text-[17px] font-black leading-none" data-jianpu-triplet-key-notes>
+        <span>1</span>
+        <span>1</span>
+        <span>1</span>
+      </span>
     </span>
   );
 }

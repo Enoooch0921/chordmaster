@@ -64,6 +64,7 @@ import {
 import { getTransposeOffset, transposeKeyPreservingSpelling, transposeKeyWithPreference } from '../../utils/musicUtils';
 import {
   JianpuInputGlyph,
+  JianpuTripletKeyGlyph,
   RhythmStaffKeyGlyph
 } from './NotationKeyGlyphs';
 import BeatSlashGlyph from '../BeatSlashGlyph';
@@ -1394,10 +1395,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             {(['1', '2', '3', '4', '5', '6', '7'] as const).map((pitch) => (
               <button key={pitch} type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-pitch', pitch })} aria-label={language === 'zh' ? `輸入簡譜 ${pitch}` : `Insert jianpu ${pitch}`}>
                 <JianpuInputGlyph
-	                  pitch={pitch}
-	                  duration={jianpuInputMode.duration}
-	                  triplet={jianpuInputMode.triplet}
-	                  className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[24px] [&_[data-jianpu-pitch-symbol]]:!font-medium"
+		                  pitch={pitch}
+		                  duration={jianpuInputMode.duration}
+		                  className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[24px] [&_[data-jianpu-pitch-symbol]]:!font-medium"
                 />
               </button>
             ))}
@@ -1406,7 +1406,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-rest' })} aria-label={language === 'zh' ? '輸入簡譜休止 0' : 'Insert jianpu rest 0'}><span className="text-[23px] font-medium leading-none" aria-hidden="true">0</span></button>
             <button type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-hold' })} aria-label={language === 'zh' ? '輸入簡譜延音' : 'Insert jianpu hold'}><span className="text-[26px] font-medium leading-none" aria-hidden="true">−</span></button>
             {([['eighth', '八分', 'E'], ['sixteenth', '十六分', 'S']] as const).map(([duration, label, shortcut]) => (
-	              <button key={duration} type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.duration === duration ? activeButtonClass : ''}`} onClick={() => toggleJianpuDuration(duration)} aria-label={language === 'zh' ? `切換簡譜${label}音符` : `Toggle jianpu ${duration} note`} aria-keyshortcuts={shortcut} title={language === 'zh' ? `${label}音符（${shortcut}）` : `${duration} note (${shortcut})`}><JianpuInputGlyph pitch="5" duration={duration} triplet={jianpuInputMode.triplet && duration !== 'sixteenth'} className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[23px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
+		              <button key={duration} type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.duration === duration ? activeButtonClass : ''}`} onClick={() => toggleJianpuDuration(duration)} aria-label={language === 'zh' ? `切換簡譜${label}音符` : `Toggle jianpu ${duration} note`} aria-keyshortcuts={shortcut} title={language === 'zh' ? `${label}音符（${shortcut}）` : `${duration} note (${shortcut})`}><JianpuInputGlyph pitch="5" duration={duration} className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[23px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
 	            ))}
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-1 ${session.draftSong.jianpuInputAbsolute ? activeButtonClass : ''}`} onClick={() => onJianpuInputAbsoluteChange(!Boolean(session.draftSong.jianpuInputAbsolute))} aria-label={session.draftSong.jianpuInputAbsolute ? (language === 'zh' ? '切換為首調簡譜輸入' : 'Switch to movable-do jianpu input') : (language === 'zh' ? '切換為固定調簡譜輸入' : 'Switch to fixed-do jianpu input')}><span className="text-xs font-bold leading-none">{session.draftSong.jianpuInputAbsolute ? (language === 'zh' ? '固定調' : 'Fixed') : (language === 'zh' ? '首調' : 'Movable')}</span></button>
           </div>
@@ -1415,7 +1415,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.octave > 0 ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-octave', octave: jianpuInputMode.octave > 0 ? 0 : 1 })} aria-label={language === 'zh' ? '切換高八度簡譜' : 'Toggle high-octave jianpu'} aria-keyshortcuts="ArrowUp H" title={language === 'zh' ? '高八度（↑ / H）' : 'High octave (Up / H)'}><JianpuInputGlyph pitch="5" octave={1} className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[21px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.accidental === '#' ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-accidental', accidental: jianpuInputMode.accidental === '#' ? '' : '#' })} aria-label={language === 'zh' ? '切換簡譜升記號' : 'Toggle jianpu sharp'}><span className="text-[22px] font-medium leading-none" aria-hidden="true">♯</span></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.accidental === 'b' ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-accidental', accidental: jianpuInputMode.accidental === 'b' ? '' : 'b' })} aria-label={language === 'zh' ? '切換簡譜降記號' : 'Toggle jianpu flat'}><span className="text-[22px] font-medium leading-none" aria-hidden="true">♭</span></button>
-	            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.triplet ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'toggle-triplet' })} aria-label={language === 'zh' ? '切換簡譜三連音' : 'Toggle jianpu triplet'} aria-keyshortcuts="Shift+T" title={language === 'zh' ? '三連音（Shift+T）' : 'Triplet (Shift+T)'}><JianpuInputGlyph pitch="5" duration={jianpuInputMode.duration === 'sixteenth' ? 'eighth' : jianpuInputMode.duration} triplet className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[21px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
+		            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.triplet ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'toggle-triplet' })} aria-label={language === 'zh' ? '切換簡譜三連音' : 'Toggle jianpu triplet'} aria-keyshortcuts="Shift+T" title={language === 'zh' ? '三連音（Shift+T）' : 'Triplet (Shift+T)'}><JianpuTripletKeyGlyph className="!h-full !min-w-0" /></button>
 	            <button type="button" disabled={jianpuInputMode.triplet} className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.dotted ? activeButtonClass : ''} ${jianpuInputMode.triplet ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`} onClick={() => applyJianpuAction({ type: 'toggle-dot' })} aria-label={language === 'zh' ? '切換簡譜附點' : 'Toggle jianpu dot'}><span className="h-2.5 w-2.5 rounded-full bg-current" aria-hidden="true" /></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'toggle-slur' })} aria-label={language === 'zh' ? '切換簡譜圓滑線' : 'Toggle jianpu slur'}><svg viewBox="0 0 32 16" className="h-6 w-7" fill="none" aria-hidden="true"><path d="M3 13C8 3 24 3 29 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></svg></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'clear-formatting' })} aria-label={language === 'zh' ? '清除簡譜輸入格式' : 'Clear jianpu input formatting'}><Eraser size={21} aria-hidden="true" /></button>

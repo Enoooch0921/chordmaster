@@ -917,6 +917,8 @@ const normalizeSearchText = (value: string): string => (
     .replace(/祢/g, '你')
 );
 
+const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+
 const normalizeBoolean = (value: unknown): boolean | undefined => (
   typeof value === 'boolean' ? value : undefined
 );
@@ -981,8 +983,12 @@ const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
   };
 };
 
-const INITIAL_SONG: Song = {
-  title: "符號測試頁",
+const SYMBOL_TEST_SONG_LEGACY_TITLE = '符號測試頁';
+const SYMBOL_TEST_SONG_TWO_ROW_TITLE = '符號測試頁（2行）';
+const SYMBOL_TEST_SONG_THREE_ROW_TITLE = '符號測試頁（3行）';
+
+const SYMBOL_TEST_SONG_TEMPLATE: Song = {
+  title: SYMBOL_TEST_SONG_LEGACY_TITLE,
   shuffle: true,
   originalKey: "Eb",
   currentKey: "Eb",
@@ -1188,6 +1194,45 @@ const INITIAL_SONG: Song = {
   ]
 };
 
+const stripSymbolTestBarToTwoLines = (bar: Bar, prefer: 'rhythm' | 'riff'): Bar => {
+  const hasRhythm = Boolean(bar.rhythm?.trim());
+  const hasRiff = Boolean(bar.riff?.trim());
+  if (!hasRhythm || !hasRiff) {
+    return bar;
+  }
+
+  if (prefer === 'riff') {
+    const { rhythm: _rhythm, rhythmLabel, rhythmMark: _rhythmMark, ...riffBar } = bar;
+    return {
+      ...riffBar,
+      label: riffBar.label ?? riffBar.riffLabel ?? rhythmLabel
+    };
+  }
+
+  const { riff: _riff, riffLabel: _riffLabel, ...rhythmBar } = bar;
+  return rhythmBar;
+};
+
+const createSymbolTestSongTemplate = (barRowCount: 2 | 3): Song => {
+  const song = cloneSong(SYMBOL_TEST_SONG_TEMPLATE);
+  return {
+    ...song,
+    title: barRowCount === 3 ? SYMBOL_TEST_SONG_THREE_ROW_TITLE : SYMBOL_TEST_SONG_TWO_ROW_TITLE,
+    barRowCount,
+    sections: barRowCount === 3
+      ? song.sections
+      : song.sections.map((section) => {
+        const prefer: 'rhythm' | 'riff' = section.id === 'test-meter' ? 'riff' : 'rhythm';
+        return {
+          ...section,
+          bars: section.bars.map((bar) => stripSymbolTestBarToTwoLines(bar, prefer))
+        };
+      })
+  };
+};
+
+const INITIAL_SONG = createSymbolTestSongTemplate(2);
+
 const EMPTY_LIBRARY_PREVIEW_SONG: StoredSong = {
   id: 'empty-library-preview',
   title: 'No songs yet',
@@ -1255,8 +1300,6 @@ interface PreviewPinchState {
   focalX: number;
   focalY: number;
 }
-
-const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const inactiveSetlistShareStatus: SetlistShareStatus = {
   activeToken: null,
@@ -1538,10 +1581,101 @@ const createEmptySong = (title: string): StoredSong =>
     ]
   });
 
-const getDefaultLibrary = () => {
-  const defaultSong = createStoredSong(INITIAL_SONG, createSongId());
+const isSymbolTestSong = (song: Song) => (
+  song.sections.some((section) => section.id === 'test-bars')
+  && song.sections.some((section) => section.id === 'test-meter')
+);
+
+const getSymbolTestContentSignature = (song: Song) => JSON.stringify({
+  title: song.title,
+  shuffle: song.shuffle,
+  originalKey: song.originalKey,
+  currentKey: song.currentKey,
+  showAbsoluteJianpu: song.showAbsoluteJianpu,
+  tempo: song.tempo,
+  timeSignature: song.timeSignature,
+  useSectionColors: song.useSectionColors,
+  barNumberMode: song.barNumberMode,
+  barRowCount: song.barRowCount,
+  nashvilleFontPreset: song.nashvilleFontPreset,
+  chordFontPreset: song.chordFontPreset,
+  pickup: song.pickup,
+  sections: song.sections
+});
+
+const updateStoredSymbolTestSong = (song: StoredSong, barRowCount: 2 | 3, updatedAt: number) => {
+  const template = createSymbolTestSongTemplate(barRowCount);
+  if (getSymbolTestContentSignature(song) === getSymbolTestContentSignature(template)) {
+    return { song, changed: false };
+  }
+
   return {
-    songs: [defaultSong],
+    song: {
+      ...song,
+      ...template,
+      id: song.id,
+      createdBy: song.createdBy,
+      updatedBy: song.updatedBy,
+      archivedAt: song.archivedAt,
+      archivedBy: song.archivedBy,
+      teamSource: song.teamSource,
+      createdAt: song.createdAt,
+      updatedAt
+    },
+    changed: true
+  };
+};
+
+const ensureDefaultSymbolTestPages = (songs: StoredSong[]) => {
+  let changed = false;
+  const now = Date.now();
+  const normalizedSongs = songs.map((song) => {
+    if (!isSymbolTestSong(song)) {
+      return song;
+    }
+
+    if (song.title === SYMBOL_TEST_SONG_THREE_ROW_TITLE) {
+      const result = updateStoredSymbolTestSong(song, 3, now);
+      changed = changed || result.changed;
+      return result.song;
+    }
+
+    if (song.title === SYMBOL_TEST_SONG_TWO_ROW_TITLE || song.title === SYMBOL_TEST_SONG_LEGACY_TITLE) {
+      const result = updateStoredSymbolTestSong(song, 2, now);
+      changed = changed || result.changed;
+      return result.song;
+    }
+
+    return song;
+  });
+
+  const hasTwoRowPage = normalizedSongs.some((song) => (
+    isSymbolTestSong(song)
+    && song.title === SYMBOL_TEST_SONG_TWO_ROW_TITLE
+  ));
+  const hasThreeRowPage = normalizedSongs.some((song) => (
+    isSymbolTestSong(song)
+    && song.title === SYMBOL_TEST_SONG_THREE_ROW_TITLE
+  ));
+  const nextSongs = [...normalizedSongs];
+
+  if (!hasTwoRowPage) {
+    changed = true;
+    nextSongs.push(createStoredSong(createSymbolTestSongTemplate(2), createSongId()));
+  }
+  if (!hasThreeRowPage) {
+    changed = true;
+    nextSongs.push(createStoredSong(createSymbolTestSongTemplate(3), createSongId()));
+  }
+
+  return { songs: nextSongs, changed };
+};
+
+const getDefaultLibrary = () => {
+  const defaultSong = createStoredSong(createSymbolTestSongTemplate(2), createSongId());
+  const threeRowSymbolTestSong = createStoredSong(createSymbolTestSongTemplate(3), createSongId());
+  return {
+    songs: [defaultSong, threeRowSymbolTestSong],
     selectedSongId: defaultSong.id
   };
 };
@@ -1643,11 +1777,12 @@ const loadSongLibrary = () => {
       };
     }
 
-    const songs = parsedSongs.map((song, index) => normalizeSongBars({
+    const repairedSongs = parsedSongs.map((song, index) => normalizeSongBars({
       ...song,
       id: song.id || `song-restored-${index + 1}`,
       updatedAt: typeof song.updatedAt === 'number' ? song.updatedAt : Date.now()
     }));
+    const { songs } = ensureDefaultSymbolTestPages(repairedSongs);
     const repairedSerializedSongs = JSON.stringify(songs);
     if (repairedSerializedSongs !== JSON.stringify(parsedSongs)) {
       window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, repairedSerializedSongs);

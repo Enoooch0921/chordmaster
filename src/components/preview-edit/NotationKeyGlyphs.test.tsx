@@ -7,6 +7,7 @@ import {
 } from '../../utils/rhythmUtils';
 import {
   JianpuInputGlyph,
+  JianpuTripletKeyGlyph,
   RhythmStaffKeyGlyph
 } from './NotationKeyGlyphs';
 
@@ -105,5 +106,15 @@ describe('JianpuInputGlyph', () => {
     expect(glyph?.querySelectorAll('[data-jianpu-duration-line]')).toHaveLength(0);
     expect(glyph?.querySelector('[data-jianpu-accidental-mark]')).not.toBeInTheDocument();
     expect(glyph?.querySelector('[data-jianpu-dot]')).not.toBeInTheDocument();
+  });
+
+  it('renders a dedicated triplet key as a grouped three-note symbol', () => {
+    const { container } = render(<JianpuTripletKeyGlyph />);
+
+    const glyph = container.querySelector('[data-jianpu-triplet-key-glyph]');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.querySelector('[data-jianpu-triplet-key-number]')).toHaveTextContent('3');
+    expect(glyph?.querySelector('[data-jianpu-triplet-key-bracket]')).toBeInTheDocument();
+    expect(glyph?.querySelector('[data-jianpu-triplet-key-notes]')).toHaveTextContent('111');
   });
 });

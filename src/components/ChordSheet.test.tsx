@@ -139,8 +139,137 @@ describe('ChordSheet preview input caret', () => {
     );
 
     expect(screen.getByText('Bass In')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-section-gutter-label]')).toHaveTextContent('Bass In');
+    expect(container.querySelector('[data-preview-section-lower-gutter]')).not.toHaveAttribute('data-preview-section-lower-gutter-compact');
     expect(container.querySelector('[data-preview-bottom-lane]')).toBeNull();
     expect(container.querySelector('.sheet-bar')).toHaveAttribute('data-preview-lower-lanes', '0');
+  });
+
+  it('keeps section-start labels in the gutter without compacting when there is no temporary time signature', () => {
+    const labelOnlySectionStartSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['C'], riff: '1 2 3 4', label: 'Top Note' }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={labelOnlySectionStartSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+      />
+    );
+
+    const lowerGutter = container.querySelector('[data-preview-section-lower-gutter]');
+    const gutterLabel = container.querySelector('[data-preview-section-gutter-label]');
+    expect(lowerGutter).not.toBeNull();
+    expect(lowerGutter).not.toHaveAttribute('data-preview-section-lower-gutter-compact');
+    expect(lowerGutter).toHaveClass('bottom-[6px]', 'gap-0.5');
+    expect(gutterLabel).toHaveTextContent('Top Note');
+    expect(gutterLabel).toHaveClass('h-[14px]');
+    expect(container.querySelector('[data-preview-bottom-lane]')).not.toHaveTextContent('Top Note');
+    expect(container.querySelector('[data-preview-section-start-lower-gutter]')).not.toBeNull();
+  });
+
+  it('moves section-start bar labels before the lower notation lane with time signatures above them', () => {
+    const sectionStartSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [
+          { id: 'bar-1', chords: ['C'], riff: '1 2 3 4', label: 'Top Note', timeSignature: '4/4' },
+          { id: 'bar-2', chords: ['G'], label: 'Stay Here', timeSignature: '2/4' }
+        ]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={sectionStartSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+      />
+    );
+
+    const lowerGutter = container.querySelector('[data-preview-section-lower-gutter]');
+    const gutterLabel = container.querySelector('[data-preview-section-gutter-label]');
+    expect(lowerGutter).not.toBeNull();
+    expect(gutterLabel).toHaveTextContent('Top Note');
+    expect(gutterLabel).toHaveClass('h-[13px]', 'justify-center', 'leading-none');
+    expect(gutterLabel?.querySelector('span')).toHaveClass('-translate-y-[1.5px]');
+    expect(lowerGutter).toHaveAttribute('data-preview-section-lower-gutter-compact', 'true');
+    expect(lowerGutter).toHaveClass('absolute', 'bottom-[2px]', 'right-2', 'flex-col', 'gap-0');
+    expect(lowerGutter?.querySelector('[data-preview-section-gutter-time-signature]')).toHaveTextContent('44');
+    expect(lowerGutter?.querySelector('[data-preview-section-gutter-label]')).toHaveTextContent('Top Note');
+    expect(lowerGutter?.closest('[data-preview-section-start-lower-gutter]')).toHaveClass('min-h-[68px]', 'flex-[1.18]');
+    expect(container.querySelector('[data-preview-inline-time-signature]')).toHaveTextContent('24');
+    expect(container.querySelector('.sheet-bar [data-preview-section-gutter-label]')).toBeNull();
+  });
+
+  it('keeps section-start time signatures and labels uncompressed in three-line charts', () => {
+    const threeLineSectionStartSong: Song = {
+      ...song,
+      barRowCount: 3,
+      sections: [{
+        ...song.sections[0],
+        bars: [
+          { id: 'bar-1', chords: ['C'], rhythm: 'q q q q', riff: '1 2 3 4', label: 'Top Note', timeSignature: '4/4' }
+        ]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={threeLineSectionStartSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+      />
+    );
+
+    const lowerGutter = container.querySelector('[data-preview-section-lower-gutter]');
+    const gutterLabel = container.querySelector('[data-preview-section-gutter-label]');
+    expect(lowerGutter).not.toBeNull();
+    expect(lowerGutter).not.toHaveAttribute('data-preview-section-lower-gutter-compact');
+    expect(lowerGutter).toHaveClass('bottom-[6px]', 'gap-0.5');
+    expect(lowerGutter?.querySelector('[data-preview-section-gutter-time-signature]')).toHaveTextContent('44');
+    expect(gutterLabel).toHaveTextContent('Top Note');
+    expect(gutterLabel).toHaveClass('h-[14px]');
+  });
+
+  it('places inline time-signature bar labels below the signature instead of before notation', () => {
+    const inlineTimeSignatureSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [
+          { id: 'bar-1', chords: ['C'] },
+          { id: 'bar-2', chords: ['Dm9'], riff: '6 7 1 2 3 4', label: 'DOT', timeSignature: '6/8' }
+        ]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={inlineTimeSignatureSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+      />
+    );
+
+    const inlineSignatureLabel = container.querySelector('[data-preview-inline-time-signature-label]');
+    expect(inlineSignatureLabel).toHaveTextContent('DOT');
+    expect(inlineSignatureLabel).toHaveClass('bottom-[6px]', 'left-0.5', 'w-[30px]', 'justify-center', 'leading-none');
+    expect(inlineSignatureLabel?.querySelector('span')).toHaveClass('-translate-y-[1.5px]');
+    expect(container.querySelector('[data-preview-inline-time-signature]')).toHaveTextContent('68');
+    expect(container.querySelector('[data-preview-bottom-lane]')).toHaveTextContent('6');
+    expect(container.querySelector('[data-preview-bottom-lane]')).toHaveClass('pl-8');
+    expect(container.querySelector('[data-preview-bottom-lane]')).not.toHaveTextContent('DOT');
   });
 
   it('renders repeat endings as prominent house brackets', () => {

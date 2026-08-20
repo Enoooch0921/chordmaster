@@ -1693,6 +1693,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     closedFillerId?: string;
     hasThreeNotationRows: boolean;
     hasLowerNotationRows: boolean;
+    hasSectionStartLowerGutter: boolean;
     layoutWeight: number;
   };
   const allRows: PreviewSheetRow[] = [];
@@ -1701,7 +1702,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     const effectiveTimeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
     return hasVisiblePreviewRiff(getPreviewRiffNotation(bar.riff, effectiveTimeSignature));
   });
-  const getRowHasLowerNotationRows = (bars: Bar[]) => bars.some((bar) => {
+  const getRowHasLowerNotationRows = (bars: Bar[], startsSection = false) => bars.some((bar, barIdx) => {
     if (!bar) return false;
     const effectiveTimeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
     return Boolean(
@@ -1710,6 +1711,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       || bar.label?.trim()
       || bar.riffLabel?.trim()
       || bar.rhythmLabel?.trim()
+      || (startsSection && barIdx === 0 && bar.timeSignature)
     );
   });
   // Empty bars are valid chart content: users intentionally add them before
@@ -1724,7 +1726,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     for (let i = 0; i < sectionRows; i++) {
       const rowBars = sectionBars.slice(i * 4, i * 4 + 4);
       const hasThreeNotationRows = getRowHasThreeNotationRows(rowBars);
-      const hasLowerNotationRows = getRowHasLowerNotationRows(rowBars);
+      const hasLowerNotationRows = getRowHasLowerNotationRows(rowBars, i === 0);
+      const hasSectionStartLowerGutter = Boolean(
+        barRowCount === 2
+        && i === 0
+        && section.title.trim()
+        && rowBars[0]
+        && (rowBars[0].timeSignature || getBarDisplayLabel(rowBars[0]))
+      );
       allRows.push({
         kind: 'music',
         sectionTitle: i === 0 ? section.title : null,
@@ -1733,6 +1742,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         startBIdx: i * 4,
         hasThreeNotationRows,
         hasLowerNotationRows,
+        hasSectionStartLowerGutter,
         layoutWeight: barRowCount === 3
           ? 1
           : barRowCount === 1
@@ -1765,6 +1775,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         addSectionAfter: true,
         hasThreeNotationRows: false,
         hasLowerNotationRows: false,
+        hasSectionStartLowerGutter: false,
         layoutWeight: 1
       });
     }
@@ -1810,6 +1821,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
           closedFillerId: `closed-${row.sIdx}-${row.startBIdx}`,
           hasThreeNotationRows: false,
           hasLowerNotationRows: false,
+          hasSectionStartLowerGutter: false,
           layoutWeight: remainingPageWeight
         });
       }
@@ -2092,6 +2104,29 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               const pickupDisplayBeatSpan = Math.max(1, pickupRiffSpan.span, pickupRhythmSpanBeats);
               const pickupDisplayWidthPx = Math.min(188, Math.max(96, pickupDisplayBeatSpan * 44, pickupMaxTokenItems * 24));
               const isPickupActive = activeBar?.sIdx === 0 && activeBar?.bIdx === -1;
+              const sectionStartBar = row.startBIdx === 0 ? row.bars[0] : undefined;
+              const sectionStartBarLabel = getBarDisplayLabel(sectionStartBar);
+              const sectionStartTimeSignature = sectionStartBar?.timeSignature
+                ? splitDisplayTimeSignature(getEffectiveTimeSignature(sectionStartBar.timeSignature, song.timeSignature))
+                : null;
+              const showSectionStartGutterTimeSignature = Boolean(
+                row.kind === 'music'
+                && row.startBIdx === 0
+                && section?.title.trim()
+                && sectionStartBar
+                && !hasPickupDisplay
+                && sectionStartTimeSignature
+              );
+              const showSectionStartGutterLabel = Boolean(
+                row.kind === 'music'
+                && row.startBIdx === 0
+                && section?.title.trim()
+                && sectionStartBar
+                && !hasPickupDisplay
+                && sectionStartBarLabel
+              );
+              const showSectionStartLowerGutter = showSectionStartGutterLabel || showSectionStartGutterTimeSignature;
+              const compactSectionStartLowerGutter = Boolean(barRowCount === 2 && sectionStartTimeSignature);
 
               return (
                 <motion.div
@@ -2101,6 +2136,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                   data-preview-only-control={row.kind === 'add-choice' ? 'true' : undefined}
                   data-preview-row-three-notation-rows={row.hasThreeNotationRows ? true : undefined}
                   data-preview-row-lower-notation-rows={row.hasLowerNotationRows ? true : undefined}
+                  data-preview-section-start-lower-gutter={row.hasSectionStartLowerGutter ? true : undefined}
                   data-preview-layout-weight={row.layoutWeight}
                   data-preview-section-drop-target={row.startBIdx === 0 ? section?.id || '' : undefined}
                   layout={!suppressSectionTransitions}
@@ -2275,6 +2311,44 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         </div>
                       );
                     })()}
+                    {showSectionStartLowerGutter && (
+                      <div
+                        data-preview-section-lower-gutter
+                        data-preview-section-lower-gutter-compact={compactSectionStartLowerGutter ? true : undefined}
+                        className={`absolute right-2 z-10 flex max-w-[calc(100%-8px)] flex-col items-end overflow-visible ${
+                          compactSectionStartLowerGutter ? 'bottom-[2px] gap-0' : 'bottom-[6px] gap-0.5'
+                        }`}
+                      >
+                        {showSectionStartGutterTimeSignature && sectionStartTimeSignature && (
+                          <div
+                            data-preview-section-gutter-time-signature
+                            className="flex w-[18px] shrink-0 flex-col items-center justify-center self-center text-[17px] font-semibold italic leading-[0.72] text-[#1e3a8a] pointer-events-none select-none"
+                            aria-hidden="true"
+                          >
+                            <span>{sectionStartTimeSignature.numerator}</span>
+                            {sectionStartTimeSignature.denominator && <span>{sectionStartTimeSignature.denominator}</span>}
+                          </div>
+                        )}
+                        {showSectionStartGutterLabel && (
+                          <div
+                            data-preview-section-gutter-label
+                            className={`flex ${compactSectionStartLowerGutter ? 'h-[13px]' : 'h-[14px]'} min-w-0 max-w-full items-center justify-center rounded-sm border border-black bg-gray-300/70 px-1 mix-blend-multiply leading-none transition-colors ${
+                              onElementClick ? 'cursor-pointer hover:bg-indigo-200/70' : ''
+                            }`}
+                            onClick={onElementClick ? (event) => {
+                              event.stopPropagation();
+                              emitElementClick(event, row.sIdx, 0, 'label');
+                            } : undefined}
+                          >
+                            <AutoShrink align="center" minScale={0.64} className="h-full items-center overflow-visible">
+                              <span className="inline-flex -translate-y-[1.5px] items-center justify-center whitespace-nowrap text-[8px] font-bold uppercase leading-none text-black">
+                                {sectionStartBarLabel}
+                              </span>
+                            </AutoShrink>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {hasPickupDisplay && (
                       <div
                         className={`absolute bottom-1 right-2 flex flex-col items-end space-y-0.5 overflow-visible transition-all ${isPickupActive ? 'scale-[1.01]' : ''}`}
@@ -2432,7 +2506,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const unisonMarkStyle = getUnisonMarkStyle(bar);
                     const hasRhythm = Boolean(bar?.rhythm);
                     const hasRiff = hasVisiblePreviewRiff(previewRiffNotation);
-                    const labelSharesNotationLane = hasBarLabel && (hasRhythm || hasRiff);
+                    const hasInlineTimeSignature = Boolean(bar?.timeSignature);
+                    const isSectionLeadBar = Boolean(row.startBIdx === 0 && bIdx === 0 && section?.title.trim() && !hasPickupDisplay);
+                    const showSectionGutterBarLabel = hasBarLabel && isSectionLeadBar;
+                    const showSectionGutterTimeSignature = hasInlineTimeSignature && isSectionLeadBar;
+                    const hasBarLabelInMeasure = hasBarLabel && !showSectionGutterBarLabel;
+                    const showInlineTimeSignatureBarLabel = hasBarLabelInMeasure && hasInlineTimeSignature;
+                    const hasBarLabelInContentLane = hasBarLabelInMeasure && !showInlineTimeSignatureBarLabel;
+                    const labelSharesNotationLane = hasBarLabelInContentLane && (hasRhythm || hasRiff);
                     const isActiveNotationBar = Boolean(
                       resolvedActiveNotationTarget
                       && resolvedActiveNotationTarget.sectionId === section?.id
@@ -2599,9 +2680,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             : 24;
                     const sharedLaneClass = previewBottomLaneClass;
                     const { numerator: displayNumerator, denominator: displayDenominator } = splitDisplayTimeSignature(effectiveTimeSignature);
-                    const hasInlineTimeSignature = Boolean(bar?.timeSignature);
-                    const contentLeftInsetClass = hasInlineTimeSignature
-                      ? 'pl-6'
+                    const contentLeftInsetClass = showInlineTimeSignatureBarLabel
+                      ? bar?.repeatStart ? 'pl-9' : 'pl-8'
+                      : hasInlineTimeSignature && !showSectionGutterTimeSignature
+                        ? 'pl-6'
                       : bar?.repeatStart
                         ? 'pl-3.5'
                         : '';
@@ -2809,13 +2891,32 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 {language === 'zh' ? '齊奏' : 'Unison'}
                               </div>
                             )}
-                            {bar.timeSignature && (
+                            {bar.timeSignature && !showSectionGutterTimeSignature && (
                               <div
+                                data-preview-inline-time-signature
                                 className={`absolute top-1/2 -translate-y-1/2 z-10 flex w-5 flex-col items-center justify-center text-[19px] font-semibold italic leading-[0.78] text-[#1e3a8a] pointer-events-none select-none ${bar.repeatStart ? 'left-2.5' : 'left-1.5'}`}
                                 aria-hidden="true"
                               >
                                 <span>{displayNumerator}</span>
                                 {displayDenominator && <span>{displayDenominator}</span>}
+                              </div>
+                            )}
+                            {showInlineTimeSignatureBarLabel && (
+                              <div
+                                data-preview-inline-time-signature-label
+                                className={`absolute bottom-[6px] z-10 flex h-[14px] w-[30px] items-center justify-center rounded-sm border border-black bg-gray-300/70 px-1 mix-blend-multiply leading-none transition-colors ${
+                                  bar.repeatStart ? 'left-1.5' : 'left-0.5'
+                                } ${onElementClick ? 'cursor-pointer hover:bg-indigo-200/70' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
+                                }}
+                              >
+                                <AutoShrink align="center" minScale={0.64} className="h-full items-center overflow-visible">
+                                  <span className="inline-flex -translate-y-[1.5px] items-center justify-center whitespace-nowrap text-[8px] font-bold uppercase leading-none text-black">
+                                    {barLabel}
+                                  </span>
+                                </AutoShrink>
                               </div>
                             )}
                             {/* Chords */}
@@ -3045,7 +3146,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       )
                                     );
                                   })()}
-                            {hasBarLabel && !labelSharesNotationLane && (
+                            {hasBarLabelInContentLane && !labelSharesNotationLane && (
                               <div
                                 className={`absolute bottom-[6px] left-1 z-10 border border-black px-1 rounded-sm flex h-[14px] items-center bg-gray-300/70 mix-blend-multiply cursor-pointer transition-colors hover:bg-indigo-200/70 ${contentLeftInsetClass}`}
                                 onClick={(e) => {
@@ -3066,7 +3167,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               >
 	                                {showBottomRhythmLane && hasRiff ? (
 	                                  <div className={`flex gap-1 ${hasThreeNotationRows ? 'items-stretch' : ''}`}>
-                                    {hasBarLabel && (
+                                    {hasBarLabelInContentLane && (
                                       <div className="flex items-end">
                                         <div
                                           className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
@@ -3139,7 +3240,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                   </div>
                                 ) : (
                                   <div className="flex items-end gap-1 h-[18px] overflow-visible">
-                                    {hasBarLabel && (
+                                    {hasBarLabelInContentLane && (
                                       <div
                                         className="border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors"
                                         onClick={(e) => {
