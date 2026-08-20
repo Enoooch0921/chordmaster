@@ -10,6 +10,7 @@ import {
   markPreviewTargetDeleted,
   redoPreviewDraft,
   retargetPreviewEditSession,
+  setPreviewEditChordDisplayMode,
   setPreviewEditChordInputMode,
   setPreviewEditInputMode,
   setPreviewNotationCursor,
@@ -91,6 +92,26 @@ describe('preview edit session', () => {
     expect(letters.chordInputMode).toBe('letters');
     expect(letters.inputMode).toBe('letters');
     expect(setPreviewEditInputMode(letters, 'nashville').chordInputMode).toBe('nashville');
+  });
+
+  it('syncs chord keyboard mode with Nashville display mode', () => {
+    const session = applyPreviewDraft(
+      createPreviewEditSession({ song, target, chordInputMode: 'letters' }),
+      { ...song, title: 'Draft' }
+    );
+    const nashville = setPreviewEditChordDisplayMode(session, true);
+    expect(nashville.chordInputMode).toBe('nashville');
+    expect(nashville.inputMode).toBe('nashville');
+    expect(nashville.baseSong.showNashvilleNumbers).toBe(true);
+    expect(nashville.draftSong.showNashvilleNumbers).toBe(true);
+    expect(nashville.past[0].showNashvilleNumbers).toBe(true);
+
+    const letters = setPreviewEditChordDisplayMode(nashville, false);
+    expect(letters.chordInputMode).toBe('letters');
+    expect(letters.inputMode).toBe('letters');
+    expect(letters.baseSong.showNashvilleNumbers).toBe(false);
+    expect(letters.draftSong.showNashvilleNumbers).toBe(false);
+    expect(letters.past[0].showNashvilleNumbers).toBe(false);
   });
 
   it('cycles chords, rhythm and jianpu in a stable order', () => {

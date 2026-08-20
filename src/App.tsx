@@ -115,6 +115,7 @@ import {
   PreviewNotationMode,
   redoPreviewDraft,
   retargetPreviewEditSession,
+  setPreviewEditChordDisplayMode,
   setPreviewEditChordInputMode,
   setPreviewNotationCursor,
   setPreviewNotationMode,
@@ -4397,6 +4398,21 @@ export default function App() {
     replaceSongInLibrary(song.id, nextSong);
   };
 
+  const syncPreviewChordKeyboardWithDisplayMode = React.useCallback((showNashvilleNumbers: boolean) => {
+    setPreviewEditSession((current) => (
+      current ? setPreviewEditChordDisplayMode(current, showNashvilleNumbers) : current
+    ));
+  }, []);
+
+  const handleToggleSongNashvilleMode = () => {
+    if (!song) {
+      return;
+    }
+    const nextShowNashvilleNumbers = !song.showNashvilleNumbers;
+    syncPreviewChordKeyboardWithDisplayMode(nextShowNashvilleNumbers);
+    handleSongChange({ ...song, showNashvilleNumbers: nextShowNashvilleNumbers });
+  };
+
   const handleToggleLyricsMode = () => {
     if (previewEditSession?.dirty) {
       pendingPreviewTransitionRef.current = () => {
@@ -5601,6 +5617,8 @@ export default function App() {
     if (!selectedSetlist) {
       return;
     }
+
+    syncPreviewChordKeyboardWithDisplayMode(mode === 'nashville-number-system');
 
     if (isJoinedSetlist) {
       handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { displayMode: mode });
@@ -9622,7 +9640,7 @@ export default function App() {
                 song: editableSong,
                 target: nextTarget,
                 notationMode: requestedNotationMode ?? 'chords',
-                chordInputMode: getChordStorageModeForTarget(editableSong, nextTarget),
+                chordInputMode: navigationSong.showNashvilleNumbers ? 'nashville' : 'letters',
                 cursorByMode: initialCursorByMode
               });
         });
@@ -13993,7 +14011,7 @@ export default function App() {
                     <>
                       <button
                         type="button"
-                        onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        onClick={handleToggleSongNashvilleMode}
                         disabled={!canEditTeamSongs}
                         className={`${mobileTopbarToggleChipClassName(song.showNashvilleNumbers)} shrink-0`}
                         title={copy.nashvilleModeLabel}
@@ -14136,7 +14154,7 @@ export default function App() {
                     <>
                       <button
                         type="button"
-                        onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        onClick={handleToggleSongNashvilleMode}
                         disabled={!canEditTeamSongs}
                         title={copy.nashvilleModeLabel}
                         aria-label={copy.nashvilleModeLabel}
@@ -14396,7 +14414,7 @@ export default function App() {
                     <>
                       <button
                         type="button"
-                        onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                        onClick={handleToggleSongNashvilleMode}
                         disabled={!canEditTeamSongs}
                         title={copy.nashvilleModeLabel}
                         aria-label={copy.nashvilleModeLabel}
@@ -14800,7 +14818,7 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers });
+                                  handleToggleSongNashvilleMode();
                                   setIsToolbarOverflowMenuOpen(false);
                                 }}
                                 disabled={!canEditTeamSongs}
@@ -14846,7 +14864,7 @@ export default function App() {
                         <>
                           <button
                             type="button"
-                            onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                            onClick={handleToggleSongNashvilleMode}
                             disabled={!canEditTeamSongs}
                             className={toolbarSecondaryToggleClassName(song.showNashvilleNumbers)}
                           >
@@ -15468,7 +15486,7 @@ export default function App() {
                           <div className="grid grid-cols-2 gap-2">
                             <button
                               type="button"
-                              onClick={() => handleSongChange({ ...song, showNashvilleNumbers: !song.showNashvilleNumbers })}
+                              onClick={handleToggleSongNashvilleMode}
                               disabled={!canEditTeamSongs}
                               className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
                                 song.showNashvilleNumbers

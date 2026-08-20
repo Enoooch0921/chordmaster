@@ -288,6 +288,26 @@ export const setPreviewEditChordInputMode = (
   inputMode: chordInputMode
 });
 
+export const setPreviewEditChordDisplayMode = (
+  session: PreviewEditSession,
+  showNashvilleNumbers: boolean
+): PreviewEditSession => {
+  const chordInputMode: ChordInputMode = showNashvilleNumbers ? 'nashville' : 'letters';
+  const syncSongDisplayMode = (song: Song): Song => (
+    Boolean(song.showNashvilleNumbers) === showNashvilleNumbers
+      ? song
+      : { ...song, showNashvilleNumbers }
+  );
+  const nextSession = setPreviewEditChordInputMode(session, chordInputMode);
+  return {
+    ...nextSession,
+    baseSong: syncSongDisplayMode(nextSession.baseSong),
+    draftSong: syncSongDisplayMode(nextSession.draftSong),
+    past: nextSession.past.map(syncSongDisplayMode),
+    future: nextSession.future.map(syncSongDisplayMode)
+  };
+};
+
 /** @deprecated Use `setPreviewEditChordInputMode`. */
 export const setPreviewEditInputMode = setPreviewEditChordInputMode;
 
