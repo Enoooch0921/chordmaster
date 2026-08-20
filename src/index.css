@@ -46,39 +46,11 @@
 }
 
 @font-face {
-  font-family: 'JianpuASCII';
-  src: url('https://cdn.jsdelivr.net/gh/RobertWinslow/jianpu-ascii-font@main/JianpuASCII.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
   font-family: 'NotoMusic';
   src: url('https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@master/hinted/ttf/NotoMusic/NotoMusic-Regular.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Bach';
-  src: url('/fonts/BachRhythm.ttf') format('truetype'),
-       url('/fonts/Bach41.ttf') format('truetype'),
-       url('/fonts/Bach.ttf') format('truetype'),
-       local('Bach'),
-       local('Bach Regular');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'BachSlurs';
-  src: url('/fonts/BachSlurs.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
+  font-display: block;
 }
 
 @theme {

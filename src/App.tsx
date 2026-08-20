@@ -48,6 +48,7 @@ import { hasPlayableReference, normalizeSongReferences } from './utils/reference
 import { normalizeTempoBpm } from './utils/tempoUtils';
 import { useThemeMode } from './hooks/useThemeMode';
 import { useToast } from './components/Toast';
+import { waitForAppFontsReady } from './lib/fontFaceAssets';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
@@ -7374,7 +7375,7 @@ export default function App() {
 
   const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName: string) => {
     try {
-      await document.fonts.ready;
+      await waitForAppFontsReady();
     } catch {
       // Continue with a best-effort export if font readiness isn't available.
     }

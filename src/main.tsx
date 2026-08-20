@@ -9,6 +9,7 @@ import AuthCallbackPage from './pages/AuthCallbackPage.tsx';
 import SharedChartPage from './pages/SharedChartPage.tsx';
 import TeamInvitePage from './pages/TeamInvitePage.tsx';
 import { ToastProvider } from './components/Toast.tsx';
+import { registerAppFontFaces } from './lib/fontFaceAssets.ts';
 import './index.css';
 
 const appBaseUrl = import.meta.env.BASE_URL;
@@ -43,6 +44,7 @@ const restoreGitHubPagesSpaRedirect = () => {
 };
 
 restoreGitHubPagesSpaRedirect();
+registerAppFontFaces();
 
 const registerServiceWorker = () => {
   if (

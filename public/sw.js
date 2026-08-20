@@ -6,6 +6,11 @@ const APP_SHELL_PATHS = [
   './apple-touch-icon.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './fonts/JianpuASCII.ttf',
+  './fonts/BachRhythm.ttf',
+  './fonts/Bach41.ttf',
+  './fonts/Bach.ttf',
+  './fonts/BachSlurs.ttf',
 ];
 
 const toScopedUrl = (path) => new URL(path, self.registration.scope).toString();
