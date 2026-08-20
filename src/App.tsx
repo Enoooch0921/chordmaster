@@ -127,10 +127,10 @@ import {
   ensureSongEditingIds,
   finalizeSectionTitleEdit,
   findSongBar,
+  getBarStoredKey,
   getBeatCount,
   getChordBeatSlots,
   getChordStorageModeForTarget,
-  getSectionStoredKey,
   insertBar,
   insertSectionAfter,
   mergeSectionToPrevious,
@@ -1298,6 +1298,9 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
           ...safeBar,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
           chords: normalizeChordTokens(safeBar.chords),
+          keyChangeTo: typeof safeBar.keyChangeTo === 'string' && VALID_KEYS.has(safeBar.keyChangeTo)
+            ? safeBar.keyChangeTo as Key
+            : undefined,
           timeSignature: normalizeOptionalText(safeBar.timeSignature),
           riff: normalizeOptionalText(safeBar.riff),
           rhythm: normalizeOptionalText(safeBar.rhythm),
@@ -14922,7 +14925,7 @@ export default function App() {
               className="fixed left-0 top-0 h-px w-px opacity-0 pointer-events-none"
             />
             {activePreviewEditSession && activePreviewEditSession.target.field !== 'sectionName' && activeDraftNavigationPreviewSong && canOpenEditor && !isLyricsMode && (() => {
-              const storedKey = getSectionStoredKey(activePreviewEditSession.draftSong, activePreviewEditSession.target.sectionId);
+              const storedKey = getBarStoredKey(activePreviewEditSession.draftSong, activePreviewEditSession.target);
               const globalOffset = getTransposeOffset(activePreviewEditSession.draftSong.originalKey, activeDraftNavigationPreviewSong.currentKey);
               const displayedChartKey = transposeKeyWithPreference(storedKey, globalOffset, activeDraftNavigationPreviewSong.currentKey);
               const displayedKey = getPlayKey(displayedChartKey, activeDraftNavigationPreviewSong.capo ?? 0);

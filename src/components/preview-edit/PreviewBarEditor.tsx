@@ -29,6 +29,7 @@ import {
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
 import { getRestGlyph, parseTimeSignature } from '../../utils/rhythmUtils';
 import type { JianpuInputMode } from '../../utils/jianpuUtils';
+import KeyPicker from '../KeyPicker';
 import {
   applyJianpuCommand,
   DEFAULT_JIANPU_INPUT_MODE,
@@ -42,6 +43,7 @@ import {
   type RhythmEditAction
 } from '../../lib/rhythmEditing';
 import {
+  applyBarKeyChange,
   convertDisplayedChordToStoredChord,
   convertStoredChordToDisplayedChord,
   findSongBar,
@@ -49,6 +51,7 @@ import {
   getChordBeatSlots,
   getChordPlacementError,
   getMultiMeasureRestPlacementError,
+  getSongKeyStates,
   insertChordBeatBeforeSlot,
   isBarCompletelyEmpty,
   normalizeChordTextInput,
@@ -58,6 +61,7 @@ import {
   toggleEndingNumber,
   updateEditableBarFields
 } from '../../lib/songEditing';
+import { getTransposeOffset, transposeKeyPreservingSpelling, transposeKeyWithPreference } from '../../utils/musicUtils';
 import {
   JianpuInputGlyph,
   RhythmStaffKeyGlyph
@@ -295,6 +299,23 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     ? getRhythmEventAtCursor(session.draftSong, session.target, rhythmCursor)
     : null;
   const effectiveBarTimeSignature = bar?.timeSignature || session.draftSong.timeSignature || '4/4';
+  const keyStates = getSongKeyStates(session.draftSong);
+  const sectionIndex = located?.sectionIndex ?? -1;
+  const barIndex = located?.barIndex ?? -1;
+  const globalKeyShift = getTransposeOffset(session.draftSong.originalKey, session.draftSong.currentKey);
+  const barBaseKey = sectionIndex >= 0 && barIndex >= 0
+    ? keyStates.barBaseKeys[sectionIndex]?.[barIndex]
+      ?? keyStates.sectionActiveKeys[sectionIndex]
+      ?? session.draftSong.originalKey
+    : session.draftSong.originalKey;
+  const barWrittenKey = sectionIndex >= 0 && barIndex >= 0
+    ? keyStates.barActiveKeys[sectionIndex]?.[barIndex] ?? barBaseKey
+    : barBaseKey;
+  const barDisplayBaseKey = transposeKeyWithPreference(barBaseKey, globalKeyShift, session.draftSong.currentKey);
+  const barTargetKey = bar?.keyChangeTo
+    ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift)
+    : undefined;
+  const barDisplayKey = barTargetKey ?? transposeKeyWithPreference(barWrittenKey, globalKeyShift, session.draftSong.currentKey);
 
   React.useEffect(() => {
     setMode(modeForField(session.target.field));
@@ -861,6 +882,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     );
   };
 
+  const applyBarKey = (key: Key | null) => {
+    const nextWrittenKey = key ? transposeKeyWithPreference(key, -globalKeyShift, key) : undefined;
+    onApplyDraft(
+      applyBarKeyChange(session.draftSong, session.target, nextWrittenKey),
+      { mergeKey: `bar-key:${bar?.id ?? session.target.barId}` }
+    );
+  };
+
   const viewport = window.visualViewport;
   const viewportWidth = viewport?.width ?? window.innerWidth;
   const viewportHeight = viewport?.height ?? window.innerHeight;
@@ -1057,8 +1086,29 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             </>
           )}
 
-          <div className="grid min-h-0 grid-cols-10 gap-1.5" data-chord-key-row="modifiers" data-key-surface="utility">
+          <div className="grid min-h-0 grid-cols-[repeat(12,minmax(0,1fr))] gap-1.5" data-chord-key-row="modifiers" data-key-surface="utility">
             <button type="button" data-picker-trigger="time" className={`${utilityKeyClass} min-h-0 px-0 ${bar.timeSignature ? activeButtonClass : ''}`} onClick={(event) => openPicker('time', event.currentTarget)} aria-label={language === 'zh' ? '選擇小節拍號' : 'Choose time signature'}>{effectiveBarTimeSignature}</button>
+            <KeyPicker
+              value={barTargetKey ?? null}
+              onChange={applyBarKey}
+              label={language === 'zh' ? '轉調' : 'Key'}
+              title={barTargetKey ? (language === 'zh' ? `轉Key：${barTargetKey}` : `Key change: ${barTargetKey}`) : (language === 'zh' ? `轉Key：沿用 ${barDisplayBaseKey}` : `Key change: inherit ${barDisplayBaseKey}`)}
+              triggerLabel={barTargetKey ?? 'Key'}
+              clearLabel={language === 'zh' ? '不轉' : 'Inherit'}
+              originalKey={barDisplayBaseKey}
+              panelMetaText={barTargetKey ? `${barDisplayBaseKey} → ${barDisplayKey}` : barDisplayBaseKey}
+              align="center"
+              triggerDensity="compact"
+              triggerIconSize={10}
+              touchOptimized={deviceLayout !== 'desktop'}
+              rootClassName="col-span-2"
+              buttonStyle={{ height: '100%', minWidth: 0, padding: 0, width: '100%' }}
+              buttonClassName={`!h-full !min-h-0 !w-full !min-w-0 !rounded-[11px] !px-0 !shadow-[0_1px_0_rgba(15,23,42,0.18),0_2px_5px_rgba(15,23,42,0.10)] ${barTargetKey ? activeButtonClass : '!border-white/40 !bg-slate-300/75 !text-slate-700 hover:!bg-white'}`}
+              valueTextClassName="!text-[11px] !font-black"
+              metaTextClassName="hidden"
+              hideTriggerIcon={deviceLayout === 'phone'}
+              panelZIndex={5300}
+            />
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 text-base`} onClick={() => applyDisplayedChord('%')} aria-label={language === 'zh' ? '重複前一小節' : 'Repeat previous bar'}>%</button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => applyDisplayedChord('N.C.')} aria-label="N.C.">N.C.</button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => appendQualityFragment('sus')}>sus</button>

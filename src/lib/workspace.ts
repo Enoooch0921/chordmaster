@@ -168,6 +168,9 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           ...safeBar,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
           chords,
+          keyChangeTo: typeof safeBar.keyChangeTo === 'string' && VALID_KEYS.has(safeBar.keyChangeTo)
+            ? safeBar.keyChangeTo as Key
+            : undefined,
           timeSignature: normalizeOptionalText(safeBar.timeSignature),
           riff: normalizeOptionalText(safeBar.riff),
           rhythm,

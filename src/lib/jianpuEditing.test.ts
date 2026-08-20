@@ -449,6 +449,30 @@ describe('pitch modifiers and fixed-do interpretation', () => {
     expect(convertRelativeJianpuToAbsoluteNotation(fixed.sections[0].bars[0].riff, 'D')).toBe('1');
     expect(convertRelativeJianpuToAbsoluteNotation(fixed.sections[1].bars[0].riff, 'E')).toBe('3');
   });
+
+  it('uses per-bar key changes when reinterpreting fixed-do jianpu', () => {
+    const song: Song = {
+      ...makeSong(),
+      originalKey: 'C',
+      currentKey: 'C',
+      sections: [
+        {
+          id: 'section-1',
+          title: 'Verse',
+          bars: [
+            { id: 'bar-1', chords: [], riff: '1' },
+            { id: 'bar-2', keyChangeTo: 'D', chords: [], riff: '1' }
+          ]
+        }
+      ]
+    };
+
+    const fixed = reinterpretSongJianpuInput(song, true);
+    expect(convertRelativeJianpuToAbsoluteNotation(fixed.sections[0].bars[0].riff, 'C')).toBe('1');
+    expect(convertRelativeJianpuToAbsoluteNotation(fixed.sections[0].bars[1].riff, 'D')).toBe('1');
+    const relative = reinterpretSongJianpuInput(fixed, false);
+    expect(relative.sections[0].bars.map((bar) => bar.riff)).toEqual(['1', '1']);
+  });
 });
 
 describe('slurs and semantic navigation', () => {

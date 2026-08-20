@@ -45,6 +45,28 @@ describe('ChordSheet preview input caret', () => {
     expect(caret?.closest('[data-preview-slot-index="1"]')).not.toBeNull();
   });
 
+  it('shows key-change tags for per-bar key changes', () => {
+    const barKeySong: Song = {
+      ...song,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [
+          { id: 'bar-1', chords: ['C'] },
+          { id: 'bar-2', keyChangeTo: 'D', chords: ['D'] },
+          { id: 'bar-3', chords: ['D'] },
+          { id: 'bar-4', keyChangeTo: 'E', chords: ['E'] }
+        ]
+      }]
+    };
+
+    render(<ChordSheet song={barKeySong} language="en" currentKey="C" previewIdentity="song-1" />);
+
+    expect(screen.queryByText('Key: C')).not.toBeInTheDocument();
+    expect(screen.getByText('Key: D')).toBeInTheDocument();
+    expect(screen.getByText('Key: E')).toBeInTheDocument();
+  });
+
   it('shows only one caret after repairing ids from a legacy duplicated section', () => {
     const legacySong: Song = {
       ...song,

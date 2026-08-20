@@ -225,6 +225,23 @@ describe('SongEditor shared notation commands', () => {
     expect(nextSong.sections[0].bars.slice(1).every((bar) => bar.id && bar.chords.length === 0)).toBe(true);
   });
 
+  it('preserves sharp spelling for an explicit transposed section key', () => {
+    renderEditor({
+      ...makeSong({}),
+      originalKey: 'Eb',
+      currentKey: 'F',
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        keyChangeTo: 'E',
+        bars: [{ id: 'bar-1', chords: ['C'] }]
+      }]
+    });
+
+    expect(screen.getAllByRole('button', { name: /F#/ }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /Gb/ })).not.toBeInTheDocument();
+  });
+
   it('shrinks section bar count without removing written bars', () => {
     const song: Song = {
       ...makeSong({}),

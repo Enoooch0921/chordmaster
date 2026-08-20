@@ -84,6 +84,12 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: /^G$/ })).toBeInTheDocument();
   });
 
+  it('shows a bar key-change button on the chord keyboard', () => {
+    renderEditor();
+
+    expect(screen.getByRole('button', { name: 'Key' })).toBeInTheDocument();
+  });
+
   it('keeps touch input unfocused and writes a visual chord into the selected beat', async () => {
     const user = userEvent.setup();
     const { onApplyDraft } = renderEditor({ deviceLayout: 'phone' });

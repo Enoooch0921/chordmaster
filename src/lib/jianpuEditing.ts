@@ -34,7 +34,7 @@ import {
   getTransposeOffset,
   transposeKeyWithPreference
 } from '../utils/musicUtils';
-import { findSongBar, type SongBarIdentity } from './songEditing';
+import { findSongBar, getSongKeyStates, type SongBarIdentity } from './songEditing';
 
 export type JianpuPitch = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7';
 
@@ -122,6 +122,7 @@ export interface JianpuInputAvailability {
  */
 export interface JianpuPitchContext {
   playKeyBySectionId?: Readonly<Record<string, Key>>;
+  playKeyByBarId?: Readonly<Record<string, Key>>;
   pickupPlayKey?: Key;
 }
 
@@ -530,16 +531,44 @@ export const getJianpuSectionPlayKey = (
   return getPlayKey(currentKey, song.capo || 0);
 };
 
+const getJianpuTargetPlayKey = (
+  song: Song,
+  target: SongBarIdentity,
+  pitchContext?: JianpuPitchContext
+): Key => {
+  const overriddenBarKey = pitchContext?.playKeyByBarId?.[target.barId];
+  if (overriddenBarKey) return overriddenBarKey;
+  const overriddenSectionKey = pitchContext?.playKeyBySectionId?.[target.sectionId];
+  if (overriddenSectionKey) return overriddenSectionKey;
+  const located = findSongBar(song, target);
+  if (located) {
+    return getJianpuBarPlayKey(song, located.sectionIndex, located.barIndex);
+  }
+  return getJianpuSectionPlayKey(song, target.sectionId, pitchContext);
+};
+
 const getJianpuSectionPlayKeys = (song: Song): Key[] => {
   const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
-  let writtenKey = song.originalKey;
-  return song.sections.map((section) => {
-    if (section.keyChangeTo) writtenKey = section.keyChangeTo;
+  const keyStates = getSongKeyStates(song);
+  return song.sections.map((_, sectionIndex) => {
+    const writtenKey = keyStates.sectionActiveKeys[sectionIndex] ?? song.originalKey;
     return getPlayKey(
       transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey),
       song.capo || 0
     );
   });
+};
+
+const getJianpuBarPlayKey = (song: Song, sectionIndex: number, barIndex: number): Key => {
+  const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
+  const keyStates = getSongKeyStates(song);
+  const writtenKey = keyStates.barActiveKeys[sectionIndex]?.[barIndex]
+    ?? keyStates.sectionActiveKeys[sectionIndex]
+    ?? song.originalKey;
+  return getPlayKey(
+    transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey),
+    song.capo || 0
+  );
 };
 
 export const getJianpuPickupPlayKey = (song: Song): Key => {
@@ -555,6 +584,15 @@ export const buildJianpuPitchContext = (song: Song): JianpuPitchContext => ({
     song.sections
       .filter((section) => Boolean(section.id))
       .map((section) => [section.id!, getJianpuSectionPlayKey(song, section.id!)])
+  ),
+  playKeyByBarId: Object.fromEntries(
+    song.sections.flatMap((section, sectionIndex) => (
+      section.bars
+        .map((bar, barIndex) => (
+          bar.id ? [bar.id, getJianpuBarPlayKey(song, sectionIndex, barIndex)] as const : null
+        ))
+        .filter((entry): entry is readonly [string, Key] => Boolean(entry))
+    ))
   ),
   pickupPlayKey: getJianpuPickupPlayKey(song)
 });
@@ -585,12 +623,15 @@ export const reinterpretSongJianpuInput = (
       ? { ...song.pickup, riff: rewrite(song.pickup.riff, pitchContext?.pickupPlayKey ?? getJianpuPickupPlayKey(song)) }
       : song.pickup,
     sections: song.sections.map((section, sectionIndex) => {
-      const key = pitchContext?.playKeyBySectionId?.[section.id ?? ''] ?? sectionPlayKeys[sectionIndex];
       return {
         ...section,
-        bars: section.bars.map((bar) => (
-          bar.riff?.trim() ? { ...bar, riff: rewrite(bar.riff, key) } : bar
-        ))
+        bars: section.bars.map((bar, barIndex) => {
+          const key = pitchContext?.playKeyByBarId?.[bar.id ?? '']
+            ?? pitchContext?.playKeyBySectionId?.[section.id ?? '']
+            ?? getJianpuBarPlayKey(song, sectionIndex, barIndex)
+            ?? sectionPlayKeys[sectionIndex];
+          return bar.riff?.trim() ? { ...bar, riff: rewrite(bar.riff, key) } : bar;
+        })
       };
     })
   };
@@ -605,7 +646,7 @@ const displayNoteForInputMode = (
   if (!song.jianpuInputAbsolute) return note;
   const absolute = convertRelativeJianpuToAbsoluteNotation(
     note.text,
-    getJianpuSectionPlayKey(song, target.sectionId, pitchContext)
+    getJianpuTargetPlayKey(song, target, pitchContext)
   );
   return findJianpuNoteRanges(absolute || note.text)[0] ?? note;
 };
@@ -623,7 +664,7 @@ const resolveInputParts = (
       pitch,
       accidental,
       octave,
-      getJianpuSectionPlayKey(song, target.sectionId, pitchContext)
+      getJianpuTargetPlayKey(song, target, pitchContext)
     )
     : { pitch, accidental, octave: clampRelativeOctave(octave) }
 );

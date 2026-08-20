@@ -7,8 +7,9 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker } from '../types';
-import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
+import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyPreservingSpelling, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
+import { getSongKeyStates } from '../lib/songEditing';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { formatInitialCaps } from '../utils/textUtils';
@@ -1620,17 +1621,20 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const displayedCurrentKey = normalizeKeySpelling(currentKey);
   const baseWrittenKey = transposeFromOriginal ? song.originalKey : displayedCurrentKey;
   const globalKeyShift = transposeFromOriginal ? getTransposeOffset(song.originalKey, displayedCurrentKey) : 0;
-  const sectionStartKeys: Key[] = [];
-  let activeSectionKey = baseWrittenKey;
-  song.sections.forEach((section) => {
-    if (section.keyChangeTo) {
-      activeSectionKey = section.keyChangeTo;
-    }
-    sectionStartKeys.push(activeSectionKey);
-  });
+  const songKeyStates = transposeFromOriginal
+    ? getSongKeyStates(song)
+    : {
+      sectionBaseKeys: song.sections.map(() => baseWrittenKey),
+      sectionActiveKeys: song.sections.map(() => baseWrittenKey),
+      barBaseKeys: song.sections.map((section) => section.bars.map(() => baseWrittenKey)),
+      barActiveKeys: song.sections.map((section) => section.bars.map(() => baseWrittenKey))
+    };
+  const sectionStartKeys = songKeyStates.sectionActiveKeys;
+  const chartWrittenKeySequence = songKeyStates.barActiveKeys.flat().length > 0
+    ? songKeyStates.barActiveKeys.flat()
+    : (sectionStartKeys.length > 0 ? sectionStartKeys : [baseWrittenKey]);
   const displayedChartKeySequence = getConsecutiveKeySequence(
-    (sectionStartKeys.length > 0 ? sectionStartKeys : [baseWrittenKey])
-      .map((key) => transposeKeyWithPreference(key, globalKeyShift, displayedCurrentKey))
+    chartWrittenKeySequence.map((key) => transposeKeyWithPreference(key, globalKeyShift, displayedCurrentKey))
   );
   const displayedPlayKeySequence = getConsecutiveKeySequence(
     displayedChartKeySequence.map((key) => getPlayKey(key, capo))
@@ -2039,13 +2043,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 );
               }
               const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
-              const previousWrittenKey = row.sIdx > 0 ? (sectionStartKeys[row.sIdx - 1] || song.originalKey) : song.originalKey;
               const sectionCurrentKey = transposeKeyWithPreference(sectionWrittenKey, globalKeyShift, displayedCurrentKey);
-              const previousSectionKey = row.sIdx > 0 ? transposeKeyWithPreference(previousWrittenKey, globalKeyShift, displayedCurrentKey) : displayedCurrentKey;
               const sectionPlayKey = getPlayKey(sectionCurrentKey, capo);
-              const sectionOffset = getTransposeOffset(sectionWrittenKey, sectionPlayKey);
-              const sectionKeyChanged = sectionCurrentKey !== previousSectionKey;
-              const firstBarInRowIndex = row.bars.findIndex(Boolean);
               const colors = getSectionColor(section?.title || '', true);
               const activeTone = getSectionActiveTone(colors.accent);
               const isHighlighted = highlightedSectionIds.includes(section?.id || '');
@@ -2367,25 +2366,60 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const lastBIdx = bIdx + restSpan - 1;
                     const bar = row.bars[bIdx];
                     const previousBar = row.bars[bIdx - 1];
-                    const showKeyChangeTag = sectionKeyChanged && row.startBIdx === 0 && bIdx === (firstBarInRowIndex === -1 ? 0 : firstBarInRowIndex);
+                    const globalBarIndex = row.startBIdx + bIdx;
+                    const barWrittenKey = songKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex] ?? sectionWrittenKey;
+                    const previousBarWrittenKey = globalBarIndex > 0
+                      ? songKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex - 1] ?? sectionWrittenKey
+                      : row.sIdx > 0
+                        ? songKeyStates.barActiveKeys[row.sIdx - 1]?.at(-1) ?? sectionStartKeys[row.sIdx - 1] ?? song.originalKey
+                        : song.originalKey;
+                    const barCurrentKey = bar?.keyChangeTo
+                      ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift)
+                      : transposeKeyWithPreference(barWrittenKey, globalKeyShift, displayedCurrentKey);
+                    const previousBarCurrentKey = globalBarIndex > 0 || row.sIdx > 0
+                      ? transposeKeyWithPreference(previousBarWrittenKey, globalKeyShift, displayedCurrentKey)
+                      : displayedCurrentKey;
+                    const barPlayKey = getPlayKey(barCurrentKey, capo);
+                    const barOffset = getTransposeOffset(barWrittenKey, barPlayKey);
+                    const showKeyChangeTag = Boolean(bar) && barCurrentKey !== previousBarCurrentKey;
                     const effectiveTimeSignature = bar ? getEffectiveTimeSignature(bar.timeSignature, song.timeSignature) : song.timeSignature;
                     const canonicalRiffNotation = getPreviewRiffNotation(bar?.riff, effectiveTimeSignature);
                     const previewRiffNotation = song.showAbsoluteJianpu
-                      ? convertRelativeJianpuToAbsoluteNotation(canonicalRiffNotation, sectionPlayKey)
+                      ? convertRelativeJianpuToAbsoluteNotation(canonicalRiffNotation, barPlayKey)
                       : canonicalRiffNotation;
+                    const previousBarGlobalIndex = globalBarIndex - 1;
+                    const previousPlayKey = previousBarGlobalIndex >= 0
+                      ? getPlayKey(
+                        transposeKeyWithPreference(
+                          songKeyStates.barActiveKeys[row.sIdx]?.[previousBarGlobalIndex] ?? barWrittenKey,
+                          globalKeyShift,
+                          displayedCurrentKey
+                        ),
+                        capo
+                      )
+                      : barPlayKey;
+                    const nextBarGlobalIndex = globalBarIndex + 1;
+                    const nextPlayKey = getPlayKey(
+                      transposeKeyWithPreference(
+                        songKeyStates.barActiveKeys[row.sIdx]?.[nextBarGlobalIndex] ?? barWrittenKey,
+                        globalKeyShift,
+                        displayedCurrentKey
+                      ),
+                      capo
+                    );
                     const previousCanonicalRiffNotation = getPreviewRiffNotation(
                       bIdx > 0 ? row.bars[bIdx - 1]?.riff : undefined,
                       getEffectiveTimeSignature(row.bars[bIdx - 1]?.timeSignature, song.timeSignature)
                     );
                     const previewPreviousRiffNotation = song.showAbsoluteJianpu
-                      ? convertRelativeJianpuToAbsoluteNotation(previousCanonicalRiffNotation, sectionPlayKey)
+                      ? convertRelativeJianpuToAbsoluteNotation(previousCanonicalRiffNotation, previousPlayKey)
                       : previousCanonicalRiffNotation;
                     const nextCanonicalRiffNotation = getPreviewRiffNotation(
                       bIdx < row.bars.length - 1 ? row.bars[bIdx + 1]?.riff : undefined,
                       getEffectiveTimeSignature(row.bars[bIdx + 1]?.timeSignature, song.timeSignature)
                     );
                     const previewNextRiffNotation = song.showAbsoluteJianpu
-                      ? convertRelativeJianpuToAbsoluteNotation(nextCanonicalRiffNotation, sectionPlayKey)
+                      ? convertRelativeJianpuToAbsoluteNotation(nextCanonicalRiffNotation, nextPlayKey)
                       : nextCanonicalRiffNotation;
                     const barLabel = getBarDisplayLabel(bar);
                     const leftNavigationText = bar?.leftText?.trim();
@@ -2659,7 +2693,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
                         {showKeyChangeTag && (
                           <div className="pointer-events-none absolute left-1 -top-[10px] z-10 inline-flex items-center rounded-sm border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black tracking-[0.04em] leading-none text-amber-800 shadow-[0_1px_0_rgba(251,191,36,0.14)]">
-                            {copy.key}: {sectionCurrentKey}
+                            {copy.key}: {barCurrentKey}
                           </div>
                         )}
 
@@ -2853,7 +2887,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         })}
                                         {(() => {
                                           const fullRenderedAnchors = occupiedChordAnchors.map((anchor) => {
-                                            const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers, false, sectionWrittenKey);
+                                            const renderedChord = getDisplayedChordString(anchor.chord, barOffset, barPlayKey, song.showNashvilleNumbers, false, barWrittenKey);
                                             return {
                                               ...anchor,
                                               renderedChord,
@@ -2865,7 +2899,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             && meaningfulFullRenderedAnchors.some((anchor) => hasCrowdedAbbreviatableChordQuality(anchor.renderedChord));
                                           const renderedAnchors = shouldAbbreviateCrowdedQuality
                                             ? fullRenderedAnchors.map((anchor) => {
-                                                const renderedChord = getDisplayedChordString(anchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers, true, sectionWrittenKey);
+                                                const renderedChord = getDisplayedChordString(anchor.chord, barOffset, barPlayKey, song.showNashvilleNumbers, true, barWrittenKey);
                                                 return {
                                                   ...anchor,
                                                   renderedChord,
@@ -2994,7 +3028,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         >
                                           {isCenteredSpecialSelected && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92)]" />}
                                           <FormattedChord
-                                            chordString={getDisplayedChordString(centeredWholeRestAnchor.chord, sectionOffset, sectionPlayKey, song.showNashvilleNumbers, false, sectionWrittenKey)}
+                                            chordString={getDisplayedChordString(centeredWholeRestAnchor.chord, barOffset, barPlayKey, song.showNashvilleNumbers, false, barWrittenKey)}
                                             compactModifier={compactModifier}
                                             nashvilleFontFamily={nashvilleFontFamily}
                                             chordFontFamily={chordFontFamily}

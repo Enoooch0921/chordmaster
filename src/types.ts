@@ -55,6 +55,7 @@ export interface SongReferences {
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
   chords: string[]; // e.g., ["E", "C#m"]
+  keyChangeTo?: Key; // Per-bar key change starting at this bar
   timeSignature?: string; // Per-bar override, e.g., "2/4"
   riff?: string;    // e.g., "3 - 4 - 5 - 7 1"
   rhythm?: string;  // e.g., "q e e qr"

@@ -13,10 +13,12 @@ import {
   deleteSection,
   ensureSongEditingIds,
   finalizeSectionTitleEdit,
+  getBarStoredKey,
   getChordStorageModeForTarget,
   getChordBeatSlots,
   getChordPlacementError,
   getMultiMeasureRestPlacementError,
+  getSongKeyStates,
   insertBar,
   insertChordBeatBeforeSlot,
   insertSectionAfter,
@@ -509,6 +511,35 @@ describe('section commands', () => {
     expect(deleted.sections.map((section) => section.id)).toEqual(['a', 'c']);
     expect(deleted.sections[1].keyChangeTo).toBe('D');
     expect(deleted.sections[1].bars[0].chords).toEqual(['D']);
+  });
+
+  it('tracks per-bar key changes from the changed bar forward', () => {
+    const song: Song = {
+      title: 'Bar keys', originalKey: 'C', currentKey: 'C', timeSignature: '4/4',
+      sections: [
+        {
+          id: 'a',
+          title: 'Verse',
+          bars: [
+            { id: 'a1', chords: ['C'] },
+            { id: 'a2', keyChangeTo: 'D', chords: ['D'] },
+            { id: 'a3', chords: ['G'] }
+          ]
+        },
+        {
+          id: 'b',
+          title: 'Chorus',
+          bars: [{ id: 'b1', chords: ['D'] }]
+        }
+      ]
+    };
+
+    const states = getSongKeyStates(song);
+    expect(states.barBaseKeys).toEqual([['C', 'C', 'D'], ['D']]);
+    expect(states.barActiveKeys).toEqual([['C', 'D', 'D'], ['D']]);
+    expect(getBarStoredKey(song, { sectionId: 'a', barId: 'a1' })).toBe('C');
+    expect(getBarStoredKey(song, { sectionId: 'a', barId: 'a2' })).toBe('D');
+    expect(getBarStoredKey(song, { sectionId: 'b', barId: 'b1' })).toBe('D');
   });
 
   it('merges only a previously named non-first section when its title is cleared', () => {

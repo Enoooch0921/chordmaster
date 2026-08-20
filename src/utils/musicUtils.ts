@@ -272,6 +272,10 @@ export function transposeKeyWithPreference(key: Key, steps: number, preferenceKe
   return getKeyFromIndex(nextIndex, preferFlats);
 }
 
+export function transposeKeyPreservingSpelling(key: Key, steps: number): Key {
+  return transposeKeyWithPreference(key, steps, key);
+}
+
 export function normalizeKeySpelling(key: Key): Key {
   const keyIndex = getNoteIndex(key);
   if (keyIndex === -1) return key;

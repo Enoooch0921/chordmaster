@@ -29,11 +29,14 @@ interface KeyPickerProps {
   disabled?: boolean;
   label: string;
   originalKey?: Key | null;
+  title?: string;
+  triggerLabel?: string;
   triggerMetaText?: string;
   panelMetaText?: string;
   clearLabel?: string;
   align?: PanelAlign;
   buttonClassName?: string;
+  rootClassName?: string;
   valueTextClassName?: string;
   metaTextClassName?: string;
   buttonStyle?: React.CSSProperties;
@@ -43,6 +46,7 @@ interface KeyPickerProps {
   triggerDensity?: 'default' | 'compact';
   autoOpen?: boolean;
   touchOptimized?: boolean;
+  panelZIndex?: number;
 }
 
 const findNextKey = (currentKey: Key, rowStep: number, columnStep: number): Key | null => {
@@ -73,11 +77,14 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   disabled = false,
   label,
   originalKey = null,
+  title,
+  triggerLabel,
   triggerMetaText,
   panelMetaText,
   clearLabel,
   align = 'center',
   buttonClassName = '',
+  rootClassName = '',
   valueTextClassName = '',
   metaTextClassName = '',
   buttonStyle,
@@ -86,7 +93,8 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   hideTriggerIcon = false,
   triggerDensity = 'default',
   autoOpen = false,
-  touchOptimized = false
+  touchOptimized = false,
+  panelZIndex = 90
 }) => {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -195,14 +203,15 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
     align: resolvedAlign,
     triggerRef,
     panelRef,
-    onRequestClose: closePanel
+    onRequestClose: closePanel,
+    zIndex: panelZIndex
   });
 
-  const triggerValueText = value ?? clearLabel ?? label;
+  const triggerValueText = triggerLabel ?? value ?? clearLabel ?? label;
   const resolvedPanelMetaText = panelMetaText ?? triggerMetaText;
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={`relative ${rootClassName}`}>
       <button
         ref={triggerRef}
         type="button"
@@ -220,6 +229,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
               : 'text-gray-700 hover:border-gray-400'
         } ${buttonClassName}`}
         style={buttonStyle}
+        title={title}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
       >

@@ -6,7 +6,7 @@ import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
-import { getPlayKey, getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyWithPreference } from '../utils/musicUtils';
+import { getPlayKey, getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyPreservingSpelling, transposeKeyWithPreference } from '../utils/musicUtils';
 import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
 import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, MAX_RELATIVE_OCTAVE_SHIFT, absoluteJianpuPartsToRelative, buildJianpuNoteFromMode, buildJianpuPlaceholder, buildJianpuPlaceholderFromUnits, clampRelativeOctave, convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, getJianpuDurationUnits as getJianpuDurationUnitsFromUtils, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
@@ -16,6 +16,7 @@ import { ANNOTATION_COLOR_OPTIONS, DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CH
 import {
   deleteSection as deleteSongSection,
   duplicateSection as duplicateSongSection,
+  getSongKeyStates,
   isBarCompletelyEmpty,
   mergeSectionToPrevious as mergeSongSectionToPrevious,
   normalizeChordBeatTokens,
@@ -123,6 +124,7 @@ interface RhythmEditorEvent {
 
 interface BarPanelState {
   riff?: boolean;
+  key?: boolean;
   barTime?: boolean;
   rhythm?: boolean;
   marks?: boolean;
@@ -246,22 +248,6 @@ const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
     || target instanceof HTMLTextAreaElement
     || target instanceof HTMLSelectElement
     || (target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'file', 'range'].includes(target.type));
-};
-
-const getSectionKeyStates = (song: Song) => {
-  const baseKeys: Key[] = [];
-  const activeKeys: Key[] = [];
-  let activeKey = song.originalKey;
-
-  song.sections.forEach((section) => {
-    baseKeys.push(activeKey);
-    if (section.keyChangeTo) {
-      activeKey = section.keyChangeTo;
-    }
-    activeKeys.push(activeKey);
-  });
-
-  return { baseKeys, activeKeys };
 };
 
 interface SectionNavigationLabel {
@@ -707,9 +693,46 @@ const SongEditor: React.FC<Props> = ({
     return () => window.clearTimeout(timer);
   }, []);
 
-  const { baseKeys: sectionBaseKeys, activeKeys: sectionActiveKeys } = getSectionKeyStates(song);
+  const {
+    sectionBaseKeys,
+    sectionActiveKeys,
+    barBaseKeys,
+    barActiveKeys
+  } = getSongKeyStates(song);
   const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
   const effectiveJianpuPitchContext = jianpuPitchContext ?? buildJianpuPitchContext(song);
+
+  const getExplicitKeySourceForPosition = (writtenKey: Key, sIdx: number, bIdx?: number): Key | undefined => {
+    if (sIdx < 0) return undefined;
+    let sourceKey: Key | undefined;
+
+    for (let sectionIndex = 0; sectionIndex <= sIdx; sectionIndex += 1) {
+      const section = song.sections[sectionIndex];
+      if (!section) continue;
+      if (section.keyChangeTo === writtenKey) {
+        sourceKey = section.keyChangeTo;
+      }
+
+      const lastBarIndex = sectionIndex < sIdx
+        ? section.bars.length - 1
+        : bIdx ?? -1;
+      for (let barIndex = 0; barIndex <= lastBarIndex; barIndex += 1) {
+        const barKey = section.bars[barIndex]?.keyChangeTo;
+        if (barKey === writtenKey) {
+          sourceKey = barKey;
+        }
+      }
+    }
+
+    return sourceKey;
+  };
+
+  const getDisplayKeyForPosition = (writtenKey: Key, sIdx: number, bIdx?: number): Key => {
+    const sourceKey = getExplicitKeySourceForPosition(writtenKey, sIdx, bIdx);
+    return sourceKey
+      ? transposeKeyPreservingSpelling(sourceKey, globalKeyShift)
+      : transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey);
+  };
 
   // Sounding key used to render/interpret absolute (1=C) jianpu for a section,
   // matching ChordSheet's sectionPlayKey (written key → current key → capo) so the
@@ -718,13 +741,16 @@ const SongEditor: React.FC<Props> = ({
     if (sIdx === PICKUP_SECTION_INDEX && bIdx === PICKUP_BAR_INDEX && effectiveJianpuPitchContext.pickupPlayKey) {
       return effectiveJianpuPitchContext.pickupPlayKey;
     }
+    const barId = song.sections[sIdx]?.bars[bIdx]?.id;
     const sectionId = song.sections[sIdx]?.id;
-    const overriddenKey = sectionId
+    const overriddenKey = barId
+      ? effectiveJianpuPitchContext.playKeyByBarId?.[barId]
+      : sectionId
       ? effectiveJianpuPitchContext.playKeyBySectionId?.[sectionId]
       : undefined;
     if (overriddenKey) return overriddenKey;
-    const writtenKey = sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
-    const currentKey = transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey);
+    const writtenKey = barActiveKeys[sIdx]?.[bIdx] || sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
+    const currentKey = getDisplayKeyForPosition(writtenKey, sIdx, bIdx);
     return getPlayKey(currentKey, song.capo || 0);
   };
 
@@ -998,6 +1024,20 @@ const SongEditor: React.FC<Props> = ({
     };
   };
 
+  const transposeBarChordsToKey = (bar: Bar, fromKey: Key, toKey: Key): Bar => {
+    if (fromKey === toKey) {
+      return bar;
+    }
+
+    const offset = getTransposeOffset(fromKey, toKey);
+    return {
+      ...bar,
+      chords: bar.chords.map((token) => (
+        isNashville(token) ? token : transposeChord(token, offset, toKey, false, fromKey)
+      ))
+    };
+  };
+
   const normalizeSectionKeyChanges = (sections: Section[]) => {
     let inheritedKey = song.originalKey;
 
@@ -1006,10 +1046,19 @@ const SongEditor: React.FC<Props> = ({
         ? section.keyChangeTo
         : undefined;
       inheritedKey = nextKeyChangeTo || inheritedKey;
+      const nextBars = section.bars.map((bar) => {
+        const nextBarKeyChangeTo = bar.keyChangeTo && bar.keyChangeTo !== inheritedKey
+          ? bar.keyChangeTo
+          : undefined;
+        inheritedKey = nextBarKeyChangeTo || inheritedKey;
+        return nextBarKeyChangeTo === bar.keyChangeTo
+          ? bar
+          : { ...bar, keyChangeTo: nextBarKeyChangeTo };
+      });
 
-      return nextKeyChangeTo === section.keyChangeTo
+      return nextKeyChangeTo === section.keyChangeTo && nextBars.every((bar, index) => bar === section.bars[index])
         ? section
-        : { ...section, keyChangeTo: nextKeyChangeTo };
+        : { ...section, keyChangeTo: nextKeyChangeTo, bars: nextBars };
     });
   };
 
@@ -1019,6 +1068,11 @@ const SongEditor: React.FC<Props> = ({
       if (sections[i]?.keyChangeTo) {
         inheritedKey = sections[i].keyChangeTo as Key;
       }
+      sections[i]?.bars.forEach((bar) => {
+        if (bar.keyChangeTo) {
+          inheritedKey = bar.keyChangeTo;
+        }
+      });
     }
     return inheritedKey;
   };
@@ -1066,6 +1120,59 @@ const SongEditor: React.FC<Props> = ({
       return {
         ...nextSection,
         keyChangeTo: transposeKeyWithPreference(section.keyChangeTo, shift, resolvedWrittenKey)
+      };
+    });
+
+    notifyChange({ ...song, sections: normalizeSectionKeyChanges(nextSections) });
+  };
+
+  const applyBarKeyChangeFromIndex = (sIdx: number, bIdx: number, nextWrittenKey?: Key) => {
+    const currentWrittenKey = barActiveKeys[sIdx]?.[bIdx]
+      || sectionActiveKeys[sIdx]
+      || sectionBaseKeys[sIdx]
+      || song.originalKey;
+    const baseWrittenKey = barBaseKeys[sIdx]?.[bIdx]
+      || sectionActiveKeys[sIdx]
+      || sectionBaseKeys[sIdx]
+      || song.originalKey;
+    const resolvedWrittenKey = nextWrittenKey || baseWrittenKey;
+    const shift = getTransposeOffset(currentWrittenKey, resolvedWrittenKey);
+
+    const nextSections = song.sections.map((section, sectionIndex) => {
+      const afterTargetSection = sectionIndex > sIdx;
+      const inTargetSection = sectionIndex === sIdx;
+      const nextSectionKeyChangeTo = afterTargetSection && section.keyChangeTo && shift !== 0
+        ? transposeKeyWithPreference(section.keyChangeTo, shift, resolvedWrittenKey)
+        : section.keyChangeTo;
+
+      const bars = section.bars.map((bar, barIndex) => {
+        const isTargetBar = inTargetSection && barIndex === bIdx;
+        const isAffectedBar = afterTargetSection || (inTargetSection && barIndex >= bIdx);
+        const nextBar = isAffectedBar && shift !== 0
+          ? transposeBarChordsToKey(bar, currentWrittenKey, resolvedWrittenKey)
+          : bar;
+
+        if (isTargetBar) {
+          return {
+            ...nextBar,
+            keyChangeTo: resolvedWrittenKey === baseWrittenKey ? undefined : resolvedWrittenKey
+          };
+        }
+
+        if (!isAffectedBar || !bar.keyChangeTo || shift === 0) {
+          return nextBar;
+        }
+
+        return {
+          ...nextBar,
+          keyChangeTo: transposeKeyWithPreference(bar.keyChangeTo, shift, resolvedWrittenKey)
+        };
+      });
+
+      return {
+        ...section,
+        keyChangeTo: nextSectionKeyChangeTo,
+        bars
       };
     });
 
@@ -1328,6 +1435,7 @@ const SongEditor: React.FC<Props> = ({
     const barLabel = getBarDisplayLabel(bar);
     return {
       riff: state?.riff ?? Boolean(bar.riff || barLabel),
+      key: state?.key ?? Boolean(bar.keyChangeTo),
       barTime: state?.barTime ?? Boolean(bar.timeSignature),
       rhythm: state?.rhythm ?? Boolean(bar.rhythm),
       marks: state?.marks ?? hasBarAnnotationMarks(bar),
@@ -5567,6 +5675,11 @@ const SongEditor: React.FC<Props> = ({
     const canMergeSection = sIdx !== 0 && bIdx === 0;
     const canSplitSection = bIdx !== 0;
     const panelState = getBarPanelState(bar, sIdx, bIdx);
+    const barBaseKey = barBaseKeys[sIdx]?.[bIdx] || sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
+    const barWrittenKey = barActiveKeys[sIdx]?.[bIdx] || barBaseKey;
+    const barDisplayBaseKey = getDisplayKeyForPosition(barBaseKey, sIdx, bIdx - 1);
+    const barTargetKey = bar.keyChangeTo ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift) : undefined;
+    const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(barWrittenKey, sIdx, bIdx);
     const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
     const compactInspectorTitle = language === 'zh' ? `小節 ${globalBarNumber}` : `Bar ${globalBarNumber}`;
     const compactInspectorSubtitle = [getBarDisplayLabel(bar), bar.annotation].filter(Boolean).join(' · ');
@@ -5591,6 +5704,13 @@ const SongEditor: React.FC<Props> = ({
               </div>
               <div className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-500">
                 {bar.timeSignature || song.timeSignature}
+              </div>
+              <div className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${
+                barTargetKey
+                  ? 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700'
+                  : 'border-gray-200 bg-gray-50 text-gray-500'
+              }`}>
+                {barTargetKey ?? barDisplayKey}
               </div>
               {isPrimary ? (
                 <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
@@ -5700,7 +5820,7 @@ const SongEditor: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="mt-3 grid grid-cols-5 items-center gap-1">
+          <div className="mt-3 grid grid-cols-3 items-center gap-1 sm:grid-cols-6">
             <button
               type="button"
               onClick={() => updateBarPanelState(bar, sIdx, bIdx, { riff: !panelState.riff })}
@@ -5724,6 +5844,18 @@ const SongEditor: React.FC<Props> = ({
               }`}
             >
               <span className="text-[11px] font-bold leading-none">節奏</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => updateBarPanelState(bar, sIdx, bIdx, { key: !panelState.key })}
+              title={language === 'zh' ? '小節轉調' : 'Bar Key'}
+              className={`h-7 min-w-0 w-full overflow-hidden rounded-md border px-1 transition-colors flex items-center justify-center ${
+                panelState.key
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                  : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+              }`}
+            >
+              <span className="text-[11px] font-bold leading-none">{barTargetKey ?? barDisplayKey}</span>
             </button>
             <button
               type="button"
@@ -5766,6 +5898,34 @@ const SongEditor: React.FC<Props> = ({
           </div>
 
           <div className="mt-3 space-y-3">
+            {panelState.key && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                <div className="mb-1 text-[10px] font-bold uppercase text-gray-400">
+                  {language === 'zh' ? '小節轉調' : 'Bar Key Change'}
+                </div>
+                <KeyPicker
+                  value={barTargetKey ?? null}
+                  onChange={(key) => {
+                    if (!key) {
+                      applyBarKeyChangeFromIndex(sIdx, bIdx);
+                      return;
+                    }
+
+                    const nextWrittenKey = transposeKeyWithPreference(key, -globalKeyShift, key);
+                    applyBarKeyChangeFromIndex(sIdx, bIdx, nextWrittenKey);
+                  }}
+                  label={copy.key}
+                  clearLabel={copy.editor.noKeyChange}
+                  originalKey={barDisplayBaseKey}
+                  triggerMetaText={barDisplayBaseKey}
+                  panelMetaText={barTargetKey ? `${barDisplayBaseKey} → ${barDisplayKey}` : barDisplayBaseKey}
+                  align="left"
+                  buttonClassName="w-full"
+                  touchOptimized={isPhoneViewport}
+                />
+              </div>
+            )}
+
             {panelState.riff && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
                 <div className="mb-1">
@@ -6599,9 +6759,9 @@ const SongEditor: React.FC<Props> = ({
           const sectionId = section.id || `section-${sIdx}`;
           const sectionStartKey = sectionBaseKeys[sIdx] || song.originalKey;
           const sectionWrittenKey = sectionActiveKeys[sIdx] || sectionStartKey;
-          const sectionDisplayBaseKey = transposeKeyWithPreference(sectionStartKey, globalKeyShift, song.currentKey);
-          const sectionDisplayKey = transposeKeyWithPreference(sectionWrittenKey, globalKeyShift, song.currentKey);
-          const sectionTargetKey = section.keyChangeTo ? transposeKeyWithPreference(section.keyChangeTo, globalKeyShift, song.currentKey) : undefined;
+          const sectionDisplayBaseKey = getDisplayKeyForPosition(sectionStartKey, sIdx - 1);
+          const sectionTargetKey = section.keyChangeTo ? transposeKeyPreservingSpelling(section.keyChangeTo, globalKeyShift) : undefined;
+          const sectionDisplayKey = sectionTargetKey ?? getDisplayKeyForPosition(sectionWrittenKey, sIdx);
           const isActiveSection = activeSectionId === sectionId;
           const accentHighlight = getAccentHighlight(colors.accent);
           const hasSectionTitleLineBreak = section.title.includes('\n');
@@ -6867,6 +7027,11 @@ const SongEditor: React.FC<Props> = ({
                   const isDragAfterTarget = dragOverTarget === `bar-after-${sIdx}-${bIdx}`;
                   const isDragTarget = isDragBeforeTarget || isDragAfterTarget;
                   const panelState = getBarPanelState(bar, sIdx, bIdx);
+                  const barBaseKey = barBaseKeys[sIdx]?.[bIdx] || sectionWrittenKey || sectionStartKey || song.originalKey;
+                  const barWrittenKey = barActiveKeys[sIdx]?.[bIdx] || barBaseKey;
+                  const barDisplayBaseKey = getDisplayKeyForPosition(barBaseKey, sIdx, bIdx - 1);
+                  const barTargetKey = bar.keyChangeTo ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift) : undefined;
+                  const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(barWrittenKey, sIdx, bIdx);
                   const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
 
                   if (isSpaceConstrainedBarLayout) {
@@ -6932,6 +7097,13 @@ const SongEditor: React.FC<Props> = ({
                               </div>
                               <div className="inline-flex items-center rounded-md border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-indigo-600">
                                 {bar.timeSignature || song.timeSignature}
+                              </div>
+                              <div className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${
+                                barTargetKey
+                                  ? 'border-fuchsia-100 bg-fuchsia-50 text-fuchsia-600'
+                                  : 'border-gray-100 bg-gray-50 text-gray-400'
+                              }`}>
+                                {barTargetKey ?? barDisplayKey}
                               </div>
                             </div>
                             {compactSummary ? (
@@ -7319,7 +7491,7 @@ const SongEditor: React.FC<Props> = ({
                       />
                     </div>
 
-                    <div className="grid grid-cols-5 items-center gap-1">
+                    <div className="grid grid-cols-3 items-center gap-1 sm:grid-cols-6">
                       <button
                         type="button"
                         onClick={() => updateBarPanelState(bar, sIdx, bIdx, { riff: !panelState.riff })}
@@ -7343,6 +7515,18 @@ const SongEditor: React.FC<Props> = ({
                         }`}
                       >
                         <span className="text-[11px] font-bold leading-none">節奏</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateBarPanelState(bar, sIdx, bIdx, { key: !panelState.key })}
+                        title={language === 'zh' ? '小節轉調' : 'Bar Key'}
+                        className={`h-7 min-w-0 w-full overflow-hidden px-1 rounded-md border transition-colors flex items-center justify-center ${
+                          panelState.key
+                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                            : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
+                        }`}
+                      >
+                        <span className="text-[11px] font-bold leading-none">{barTargetKey ?? barDisplayKey}</span>
                       </button>
                       <button
                         type="button"
@@ -7383,6 +7567,33 @@ const SongEditor: React.FC<Props> = ({
                         <span className="text-base leading-none">⋯</span>
                       </button>
                     </div>
+
+                    {panelState.key && (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                      <div className="mb-1">
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase">{language === 'zh' ? '小節轉調' : 'Bar Key Change'}</label>
+                      </div>
+                      <KeyPicker
+                        value={barTargetKey ?? null}
+                        onChange={(key) => {
+                          if (!key) {
+                            applyBarKeyChangeFromIndex(sIdx, bIdx);
+                            return;
+                          }
+
+                          const nextWrittenKey = transposeKeyWithPreference(key, -globalKeyShift, key);
+                          applyBarKeyChangeFromIndex(sIdx, bIdx, nextWrittenKey);
+                        }}
+                        label={copy.key}
+                        clearLabel={copy.editor.noKeyChange}
+                        originalKey={barDisplayBaseKey}
+                        triggerMetaText={barDisplayBaseKey}
+                        panelMetaText={barTargetKey ? `${barDisplayBaseKey} → ${barDisplayKey}` : barDisplayBaseKey}
+                        align="left"
+                        buttonClassName="w-full"
+                      />
+                    </div>
+                    )}
 
                     {/* Riff Section */}
                     {panelState.riff && (

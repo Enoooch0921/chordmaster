@@ -16,7 +16,8 @@ import {
   isNashville,
   normalizeChordEnharmonic,
   parseNashvilleToChord,
-  transposeChord
+  transposeChord,
+  transposeKeyWithPreference
 } from '../utils/musicUtils';
 
 export type ChordInputMode = 'letters' | 'nashville';
@@ -56,6 +57,13 @@ export interface ChordBeatSlot {
 export interface ChordTextParseResult {
   chords: string[];
   error: string | null;
+}
+
+export interface SongKeyStates {
+  sectionBaseKeys: Key[];
+  sectionActiveKeys: Key[];
+  barBaseKeys: Key[][];
+  barActiveKeys: Key[][];
 }
 
 export const toggleEndingNumber = (ending: string | undefined, digit: string): string | undefined => {
@@ -532,14 +540,41 @@ const isFormatNeutralChord = (chord: string) => {
     || /^0(?:_|h|w)?$/i.test(trimmed);
 };
 
-const getSectionActiveKeys = (song: Song) => {
-  const activeKeys: Key[] = [];
+export const getSongKeyStates = (song: Song): SongKeyStates => {
+  const sectionBaseKeys: Key[] = [];
+  const sectionActiveKeys: Key[] = [];
+  const barBaseKeys: Key[][] = [];
+  const barActiveKeys: Key[][] = [];
   let activeKey = song.originalKey;
+
   song.sections.forEach((section) => {
+    sectionBaseKeys.push(activeKey);
     if (section.keyChangeTo) activeKey = section.keyChangeTo;
-    activeKeys.push(activeKey);
+    sectionActiveKeys.push(activeKey);
+
+    const baseKeys: Key[] = [];
+    const activeKeys: Key[] = [];
+    section.bars.forEach((bar) => {
+      baseKeys.push(activeKey);
+      if (bar.keyChangeTo) activeKey = bar.keyChangeTo;
+      activeKeys.push(activeKey);
+    });
+    barBaseKeys.push(baseKeys);
+    barActiveKeys.push(activeKeys);
   });
-  return activeKeys;
+
+  return { sectionBaseKeys, sectionActiveKeys, barBaseKeys, barActiveKeys };
+};
+
+const getSectionActiveKeys = (song: Song) => getSongKeyStates(song).sectionActiveKeys;
+
+export const getBarStoredKey = (song: Song, target: SongBarIdentity): Key => {
+  const keyStates = getSongKeyStates(song);
+  const located = findSongBar(song, target);
+  if (!located) return song.originalKey;
+  return keyStates.barActiveKeys[located.sectionIndex]?.[located.barIndex]
+    ?? keyStates.sectionActiveKeys[located.sectionIndex]
+    ?? song.originalKey;
 };
 
 const transposeSectionLetterChords = (
@@ -562,6 +597,19 @@ const transposeSectionLetterChords = (
   };
 };
 
+const transposeBarLetterChords = (bar: Bar, fromKey: Key, toKey: Key): Bar => {
+  if (fromKey === toKey) return bar;
+  const offset = getTransposeOffset(fromKey, toKey);
+  return {
+    ...bar,
+    chords: bar.chords.map((token) => (
+      isFormatNeutralChord(token) || isNashville(token.trim())
+        ? token
+        : transposeChord(token, offset, toKey, false, fromKey)
+    ))
+  };
+};
+
 const normalizeSectionKeyChanges = (song: Song, sections: Section[]) => {
   let inheritedKey = song.originalKey;
   return sections.map((section) => {
@@ -569,8 +617,71 @@ const normalizeSectionKeyChanges = (song: Song, sections: Section[]) => {
       ? section.keyChangeTo
       : undefined;
     inheritedKey = keyChangeTo ?? inheritedKey;
-    return keyChangeTo === section.keyChangeTo ? section : { ...section, keyChangeTo };
+    const bars = section.bars.map((bar) => {
+      const barKeyChangeTo = bar.keyChangeTo && bar.keyChangeTo !== inheritedKey
+        ? bar.keyChangeTo
+        : undefined;
+      inheritedKey = barKeyChangeTo ?? inheritedKey;
+      return barKeyChangeTo === bar.keyChangeTo ? bar : { ...bar, keyChangeTo: barKeyChangeTo };
+    });
+    return keyChangeTo === section.keyChangeTo && bars.every((bar, index) => bar === section.bars[index])
+      ? section
+      : { ...section, keyChangeTo, bars };
   });
+};
+
+export const applyBarKeyChange = (
+  song: Song,
+  target: SongBarIdentity,
+  nextWrittenKey?: Key
+): Song => {
+  const located = findSongBar(song, target);
+  if (!located) return song;
+
+  const keyStates = getSongKeyStates(song);
+  const currentWrittenKey = keyStates.barActiveKeys[located.sectionIndex]?.[located.barIndex]
+    ?? keyStates.sectionActiveKeys[located.sectionIndex]
+    ?? song.originalKey;
+  const baseWrittenKey = keyStates.barBaseKeys[located.sectionIndex]?.[located.barIndex]
+    ?? keyStates.sectionActiveKeys[located.sectionIndex]
+    ?? song.originalKey;
+  const resolvedWrittenKey = nextWrittenKey ?? baseWrittenKey;
+  const shift = getTransposeOffset(currentWrittenKey, resolvedWrittenKey);
+
+  const sections = song.sections.map((section, sectionIndex) => {
+    const afterTargetSection = sectionIndex > located.sectionIndex;
+    const inTargetSection = sectionIndex === located.sectionIndex;
+    const keyChangeTo = afterTargetSection && section.keyChangeTo && shift !== 0
+      ? transposeKeyWithPreference(section.keyChangeTo, shift, resolvedWrittenKey)
+      : section.keyChangeTo;
+    const bars = section.bars.map((bar, barIndex) => {
+      const isTargetBar = inTargetSection && barIndex === located.barIndex;
+      const isAffectedBar = afterTargetSection || (inTargetSection && barIndex >= located.barIndex);
+      const nextBar = isAffectedBar && shift !== 0
+        ? transposeBarLetterChords(bar, currentWrittenKey, resolvedWrittenKey)
+        : bar;
+
+      if (isTargetBar) {
+        return {
+          ...nextBar,
+          keyChangeTo: resolvedWrittenKey === baseWrittenKey ? undefined : resolvedWrittenKey
+        };
+      }
+
+      if (!isAffectedBar || !bar.keyChangeTo || shift === 0) {
+        return nextBar;
+      }
+
+      return {
+        ...nextBar,
+        keyChangeTo: transposeKeyWithPreference(bar.keyChangeTo, shift, resolvedWrittenKey)
+      };
+    });
+
+    return { ...section, keyChangeTo, bars };
+  });
+
+  return { ...song, sections: normalizeSectionKeyChanges(song, sections) };
 };
 
 export const updateSectionTitle = (song: Song, sectionId: string, title: string): Song => {
@@ -917,10 +1028,8 @@ export const convertStoredChordToDisplayedChord = ({
 };
 
 export const getSectionStoredKey = (song: Song, sectionId: string): Key => {
-  let activeKey = song.originalKey;
-  for (const section of song.sections) {
-    if (section.keyChangeTo) activeKey = section.keyChangeTo;
-    if (section.id === sectionId) return activeKey;
-  }
-  return activeKey;
+  const keyStates = getSongKeyStates(song);
+  const sectionIndex = song.sections.findIndex((section) => section.id === sectionId);
+  if (sectionIndex < 0) return song.originalKey;
+  return keyStates.sectionActiveKeys[sectionIndex] ?? song.originalKey;
 };
