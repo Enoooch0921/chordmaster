@@ -203,6 +203,29 @@ body.exporting-pdf {
   color-scheme: light;
 }
 
+body.exporting-pdf [data-pdf-capture-root] [data-print-preview] {
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  transform: none !important;
+  transform-origin: top center !important;
+  width: 794px !important;
+  min-width: 794px !important;
+  max-width: 794px !important;
+  margin: 0 auto !important;
+}
+
+body.exporting-pdf [data-pdf-capture-root] [data-print-preview] svg {
+  shape-rendering: geometricPrecision;
+}
+
+body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
+  margin: 0 auto !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background: #ffffff !important;
+}
+
 @media print {
   @page {
     size: A4 portrait;

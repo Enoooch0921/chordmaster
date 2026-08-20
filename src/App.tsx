@@ -7337,37 +7337,9 @@ export default function App() {
     }
 
     let globalPageCount = 0;
-    for (const { container, pageIndices } of songContainerGroups) {
+    for (const { pageIndices } of songContainerGroups) {
       if (pdfExportCancelRequestedRef.current) {
         throw new PdfExportCancelledError();
-      }
-
-      // Render the entire song container once when it fits the current
-      // device's canvas limits; otherwise render each page individually.
-      let songCanvas: HTMLCanvasElement | null = null;
-      let songCanvasPixelRatio = PDF_EXPORT_PREFERRED_PIXEL_RATIO;
-      const containerSize = getElementExportSize(container);
-      const containerPixelRatio = getSafePdfPixelRatio(containerSize.width, containerSize.height);
-      const firstPageSize = getElementExportSize(pages[pageIndices[0]].element);
-      const firstPagePixelRatio = getSafePdfPixelRatio(firstPageSize.width, firstPageSize.height);
-      const canRenderWholeSong =
-        containerPixelRatio >= Math.min(firstPagePixelRatio, PDF_EXPORT_MOBILE_MAX_PIXEL_RATIO);
-
-      if (canRenderWholeSong) {
-        try {
-          songCanvas = await toCanvas(container, {
-            ...createRenderOptions(containerPixelRatio),
-            width: containerSize.width,
-            height: containerSize.height,
-          });
-          songCanvasPixelRatio = containerPixelRatio;
-
-          if (!canvasHasVisibleContent(songCanvas)) {
-            songCanvas = null;
-          }
-        } catch {
-          songCanvas = null;
-        }
       }
 
       for (const pageIndex of pageIndices) {
@@ -7397,32 +7369,10 @@ export default function App() {
           throw new PdfExportCancelledError();
         }
 
-        let renderedImage: PdfRenderedImage;
-        if (songCanvas) {
-          // Slice this page out of the full-song canvas.
-          // Use layout-relative offsets so off-screen setlist pages keep the
-          // correct slice position in browsers with viewport-relative quirks.
-          const pageSize = getElementExportSize(page.element);
-          const offsetY = Math.round((page.element.offsetTop - container.offsetTop) * songCanvasPixelRatio);
-          const sliceW = Math.round(pageSize.width * songCanvasPixelRatio);
-          const sliceH = Math.round(pageSize.height * songCanvasPixelRatio);
-          const sliceCanvas = document.createElement('canvas');
-          sliceCanvas.width = sliceW;
-          sliceCanvas.height = sliceH;
-          const sliceContext = sliceCanvas.getContext('2d')!;
-          sliceContext.fillStyle = '#ffffff';
-          sliceContext.fillRect(0, 0, sliceW, sliceH);
-          sliceContext.drawImage(songCanvas, 0, offsetY, sliceW, sliceH, 0, 0, sliceW, sliceH);
-
-          renderedImage = canvasHasVisibleContent(sliceCanvas)
-            ? {
-                data: sliceCanvas.toDataURL('image/jpeg', 0.92),
-                format: 'JPEG',
-              }
-            : await renderPageElement(page.element);
-        } else {
-          renderedImage = await renderPageElement(page.element);
-        }
+        // Render each printable page directly. The old whole-song canvas path
+        // was faster, but slicing pages out of a tall off-screen canvas could
+        // drift when the capture DOM used different spacing or font bounds.
+        const renderedImage = await renderPageElement(page.element);
 
         if (pdfExportCancelRequestedRef.current) {
           throw new PdfExportCancelledError();
@@ -7459,8 +7409,11 @@ export default function App() {
     setPdfExportProgress(null);
     const captureHost = document.createElement('div');
     let exportRoot: ReturnType<typeof createRoot> | null = null;
+    const hadExportingPdfClass = document.body.classList.contains('exporting-pdf');
 
     try {
+      document.body.classList.add('exporting-pdf');
+      captureHost.dataset.pdfCaptureRoot = 'true';
       captureHost.setAttribute('aria-hidden', 'true');
       captureHost.style.position = 'fixed';
       captureHost.style.top = '0';
@@ -7573,6 +7526,9 @@ export default function App() {
     } finally {
       exportRoot?.unmount();
       captureHost.remove();
+      if (!hadExportingPdfClass) {
+        document.body.classList.remove('exporting-pdf');
+      }
       pdfExportCancelRequestedRef.current = false;
       setPdfExportProgress(null);
       setIsExportingPdf(false);
