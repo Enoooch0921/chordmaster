@@ -4,6 +4,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUp
 import { motion, AnimatePresence, Reorder, LayoutGroup, useDragControls } from 'motion/react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
+import BeatSlashGlyph from './BeatSlashGlyph';
 import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { getPlayKey, getSectionColor, getTransposeOffset, isNashville, normalizeChordEnharmonic, transposeChord, transposeKeyPreferFlats, transposeKeyPreservingSpelling, transposeKeyWithPreference } from '../utils/musicUtils';
@@ -116,6 +117,7 @@ interface RhythmEditorEvent {
   durationUnits: number;
   base: 'w' | 'h' | 'q' | 'e' | 's';
   isRest: boolean;
+  isSlash: boolean;
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -2227,6 +2229,7 @@ const SongEditor: React.FC<Props> = ({
         durationUnits: event.durationUnits,
         base: event.base,
         isRest: event.isRest,
+        isSlash: event.isSlash,
         dotted: event.dotted,
         triplet: event.triplet,
         accent: event.accent,
@@ -2261,7 +2264,7 @@ const SongEditor: React.FC<Props> = ({
 
   const parseToolbarRhythmToken = (sIdx: number, bIdx: number, token: string): RhythmEditorEvent | null => {
     const normalized = normalizeRhythmToken(token);
-    const match = normalized.match(/^(w|h|q|e|s)(3)?(r)?(\.)?(\^)?(~)?$/);
+    const match = normalized === '/' ? ['/' as const] : normalized.match(/^(w|h|q|e|s)(3)?(r)?(\.)?(\^)?(~)?$/);
     if (!match) return null;
     const parsed = parseRhythmNotation(normalized, getBarTimeSignature(getEditorBar(sIdx, bIdx)));
     const event = parsed.events[0];
@@ -2272,6 +2275,7 @@ const SongEditor: React.FC<Props> = ({
       durationUnits: event.durationUnits,
       base: event.base,
       isRest: event.isRest,
+      isSlash: event.isSlash,
       dotted: event.dotted,
       triplet: event.triplet,
       accent: event.accent,
@@ -2279,11 +2283,12 @@ const SongEditor: React.FC<Props> = ({
     };
   };
 
-  const buildRhythmEditorToken = (event: RhythmEditorEvent) => (
-    normalizeRhythmToken(
+  const buildRhythmEditorToken = (event: RhythmEditorEvent) => {
+    if (event.isSlash) return '/';
+    return normalizeRhythmToken(
       `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
-    )
-  );
+    );
+  };
 
   const createRhythmEditorEvent = (sIdx: number, bIdx: number, token: string, startUnit: number): RhythmEditorEvent | null => {
     const event = parseToolbarRhythmToken(sIdx, bIdx, token);
@@ -2292,8 +2297,8 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const preserveRhythmEventModifiers = (existingEvent: RhythmEditorEvent, nextEvent: RhythmEditorEvent): RhythmEditorEvent => {
-    if (nextEvent.isRest) {
-      const shouldKeepTripletRest = existingEvent.triplet && existingEvent.base === nextEvent.base && !nextEvent.triplet;
+    if (nextEvent.isRest || nextEvent.isSlash) {
+      const shouldKeepTripletRest = nextEvent.isRest && existingEvent.triplet && existingEvent.base === nextEvent.base && !nextEvent.triplet;
       const tripletRest = shouldKeepTripletRest
         ? parseToolbarRhythmToken(
             selection?.sIdx ?? 0,
@@ -2304,6 +2309,8 @@ const SongEditor: React.FC<Props> = ({
 
       return {
         ...(tripletRest ? { ...tripletRest, startUnit: nextEvent.startUnit } : nextEvent),
+        dotted: nextEvent.isSlash ? false : (tripletRest ?? nextEvent).dotted,
+        triplet: nextEvent.isSlash ? false : (tripletRest ?? nextEvent).triplet,
         accent: false,
         tieAfter: false
       };
@@ -2485,6 +2492,7 @@ const SongEditor: React.FC<Props> = ({
       e: copy.editor.eighth,
       s: copy.editor.sixteenth
     };
+    if (event.isSlash) return '/';
     const parts = [`${event.isRest ? copy.editor.rest : baseLabel[event.base]}${event.triplet ? ' 3' : ''}${event.dotted ? ` ${copy.editor.dot.toLowerCase()}` : ''}`];
 
     if (event.accent) parts.push(copy.editor.accent.toLowerCase());
@@ -2579,6 +2587,12 @@ const SongEditor: React.FC<Props> = ({
     if (e.key === 'Backspace' || e.key === 'Delete') {
       e.preventDefault();
       clearRhythmSelection(e.key === 'Backspace' ? 'backspace' : 'delete');
+      return;
+    }
+
+    if (!isMetaKey && !e.altKey && !e.shiftKey && e.key === '/') {
+      e.preventDefault();
+      insertRhythmToken('/');
       return;
     }
 
@@ -2726,6 +2740,7 @@ const SongEditor: React.FC<Props> = ({
     const { tokenIndex: targetIndex } = getEditableRhythmTokenContext(selection);
     if (targetIndex === -1) return;
     const event = events[targetIndex];
+    if (event.isSlash) return;
     if (event.triplet) return;
     const nextEvent = createRhythmEditorEvent(
       selection.sIdx,
@@ -2764,7 +2779,7 @@ const SongEditor: React.FC<Props> = ({
     if (targetIndex === -1) return;
 
     const event = events[targetIndex];
-    if (event.isRest) return;
+    if (event.isRest || event.isSlash) return;
 
     const nextEvents = [...events];
     nextEvents.splice(targetIndex, 1, {
@@ -8742,8 +8757,8 @@ const SongEditor: React.FC<Props> = ({
 
                   <button
                     onClick={toggleRhythmDot}
-                    disabled={Boolean(selectedRhythmEditorEvent?.triplet)}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.dotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${selectedRhythmEditorEvent?.triplet ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
+                    disabled={Boolean(selectedRhythmEditorEvent?.triplet || selectedRhythmEditorEvent?.isSlash)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.dotted ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${selectedRhythmEditorEvent?.triplet || selectedRhythmEditorEvent?.isSlash ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
                     title={copy.editor.toggleDot}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedRhythmEditorEvent?.dotted ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
@@ -8754,7 +8769,8 @@ const SongEditor: React.FC<Props> = ({
 
                   <button
                     onClick={toggleRhythmAccent}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.accent ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                    disabled={Boolean(selectedRhythmEditorEvent?.isRest || selectedRhythmEditorEvent?.isSlash)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.accent ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${selectedRhythmEditorEvent?.isRest || selectedRhythmEditorEvent?.isSlash ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
                     title={copy.editor.toggleAccent}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedRhythmEditorEvent?.accent ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
@@ -8767,13 +8783,25 @@ const SongEditor: React.FC<Props> = ({
 
                   <button
                     onClick={toggleRhythmTie}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.tieAfter ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                    disabled={Boolean(selectedRhythmEditorEvent?.isRest || selectedRhythmEditorEvent?.isSlash)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.tieAfter ? 'bg-indigo-50' : 'hover:bg-indigo-50'} ${selectedRhythmEditorEvent?.isRest || selectedRhythmEditorEvent?.isSlash ? 'opacity-35 cursor-not-allowed hover:bg-transparent' : ''}`}
                     title={copy.editor.toggleTie}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedRhythmEditorEvent?.tieAfter ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
                       <Link size={16} />
                     </div>
                     <span className={`text-[10px] font-bold ${selectedRhythmEditorEvent?.tieAfter ? 'text-indigo-600' : 'text-gray-500'}`}>{copy.editor.tie}</span>
+                  </button>
+
+                  <button
+                    onClick={() => insertRhythmToken('/')}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors group ${selectedRhythmEditorEvent?.isSlash ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+                    title={language === 'zh' ? '插入節奏佔用拍' : 'Insert rhythm slash placeholder'}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedRhythmEditorEvent?.isSlash ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white'}`}>
+                      <span className="text-[20px] leading-none"><BeatSlashGlyph /></span>
+                    </div>
+                    <span className={`text-[10px] font-bold ${selectedRhythmEditorEvent?.isSlash ? 'text-indigo-600' : 'text-gray-500'}`}>/</span>
                   </button>
 
                   <div className="w-px h-8 bg-gray-100 mx-1" />

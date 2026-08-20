@@ -6,6 +6,7 @@ export interface RhythmEvent {
   base: RhythmBase;
   isRest: boolean;
   isHidden: boolean;
+  isSlash: boolean;
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -33,6 +34,7 @@ export interface RhythmDisplayGlyph {
   text: string;
   startUnit: number;
   spanUnits: number;
+  isSlash: boolean;
 }
 
 export interface RhythmAccentMark {
@@ -118,6 +120,7 @@ interface RhythmTokenParts {
   base: RhythmBase;
   isRest: boolean;
   isHidden: boolean;
+  isSlash: boolean;
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -125,6 +128,19 @@ interface RhythmTokenParts {
 }
 
 function parseNormalizedRhythmTokenParts(token: string): RhythmTokenParts | null {
+  if (token === '/') {
+    return {
+      base: 'q',
+      isRest: false,
+      isHidden: false,
+      isSlash: true,
+      dotted: false,
+      triplet: false,
+      accent: false,
+      tieAfter: false
+    };
+  }
+
   const match = token.match(/^(w|h|q|e|s)(3)?(r|x)?(\.)?(\^)?(~)?$/);
   if (!match) return null;
 
@@ -137,6 +153,7 @@ function parseNormalizedRhythmTokenParts(token: string): RhythmTokenParts | null
     base: baseToken as RhythmBase,
     isRest: markerFlag === 'r',
     isHidden: markerFlag === 'x',
+    isSlash: false,
     dotted: Boolean(dotFlag),
     triplet,
     accent: Boolean(accentFlag),
@@ -148,6 +165,8 @@ export function normalizeRhythmToken(token: string): string {
   if (!token.trim()) return '';
 
   const trimmed = token.trim();
+  if (trimmed === '/') return '/';
+
   const dotted = trimmed.includes('.');
   const accent = trimmed.includes('^');
   const tieAfter = trimmed.includes('~');
@@ -225,8 +244,10 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
       return;
     }
 
-    const { base, isRest, isHidden, dotted, triplet, accent, tieAfter } = parsedToken;
-    const durationUnits = triplet
+    const { base, isRest, isHidden, isSlash, dotted, triplet, accent, tieAfter } = parsedToken;
+    const durationUnits = isSlash
+      ? beatUnits
+      : triplet
       ? (base === 'q' ? 8 / 3 : 4 / 3)
       : BASE_UNITS[base] + (dotted ? BASE_UNITS[base] / 2 : 0);
 
@@ -236,10 +257,11 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
       base,
       isRest,
       isHidden,
+      isSlash,
       dotted,
       triplet,
-      accent,
-      tieAfter,
+      accent: isSlash ? false : accent,
+      tieAfter: isSlash ? false : tieAfter,
       durationUnits,
       startUnit: cursor,
       endUnit: cursor + durationUnits,
@@ -265,7 +287,7 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
 
 export function rhythmEndsWithTieToNext(notation: string | undefined, timeSignature: string): boolean {
   const parsed = parseRhythmNotation(notation || '', timeSignature);
-  const lastPlayableEvent = [...parsed.events].reverse().find((event) => !event.isRest && !event.isHidden);
+  const lastPlayableEvent = [...parsed.events].reverse().find((event) => !event.isRest && !event.isHidden && !event.isSlash);
   return Boolean(lastPlayableEvent?.tieAfter);
 }
 
@@ -319,8 +341,9 @@ export function getRestGlyph(base: RhythmBase): string {
   return REST_GLYPHS[base];
 }
 
-export function getRhythmEventGlyph(event: Pick<RhythmEvent, 'base' | 'isRest' | 'dotted' | 'isHidden'>): string {
+export function getRhythmEventGlyph(event: Pick<RhythmEvent, 'base' | 'isRest' | 'dotted' | 'isHidden' | 'isSlash'>): string {
   if (event.isHidden) return '';
+  if (event.isSlash) return '/';
   const base = event.isRest ? REST_GLYPHS[event.base] : NOTE_GLYPHS[event.base];
   return event.dotted ? `${base}${BACH_DOT}` : base;
 }
@@ -411,7 +434,7 @@ const BACH_BEAM_PATTERN_MAP: Record<string, string> = {
 };
 
 function canBeamByRule(event: RhythmEvent): boolean {
-  if (event.isRest || event.isHidden) return false;
+  if (event.isRest || event.isHidden || event.isSlash) return false;
   if (event.base !== 'e' && event.base !== 's') return false;
   // Dotted sixteenth is rare and hard to read in beamed pop charts; keep it standalone.
   if (event.base === 's' && event.dotted) return false;
@@ -433,7 +456,8 @@ function pushFallbackRun(glyphs: RhythmDisplayGlyph[], run: RhythmEvent[]) {
     glyphs.push({
       text: eventToGlyphText(current),
       startUnit: current.startUnit,
-      spanUnits: current.durationUnits
+      spanUnits: current.durationUnits,
+      isSlash: current.isSlash
     });
     i += 1;
   }
@@ -453,16 +477,16 @@ export function rationalizeRhythmDisplay(
   const beamGroups = options?.beamGroups ?? true;
 
   parsed.events.forEach((event, index) => {
-    if (!event.isRest && !event.isHidden && event.accent) {
+    if (!event.isRest && !event.isHidden && !event.isSlash && event.accent) {
       accents.push({
         eventIndex: event.index,
         centerUnit: getHeadCenterUnit(event)
       });
     }
 
-    if (!event.isRest && !event.isHidden && event.tieAfter) {
+    if (!event.isRest && !event.isHidden && !event.isSlash && event.tieAfter) {
       const next = parsed.events[index + 1];
-      if (next && !next.isRest && !next.isHidden) {
+      if (next && !next.isRest && !next.isHidden && !next.isSlash) {
         const startHeadUnit = getHeadCenterUnit(event);
         const endHeadUnit = getHeadCenterUnit(next);
         const startUnit = getTieAnchorUnit(event, 'right');
@@ -515,7 +539,8 @@ export function rationalizeRhythmDisplay(
           glyphs.push({
             text: bachGlyph,
             startUnit: run[0].startUnit,
-            spanUnits: run[run.length - 1].endUnit - run[0].startUnit
+            spanUnits: run[run.length - 1].endUnit - run[0].startUnit,
+            isSlash: false
           });
         } else {
           pushFallbackRun(glyphs, run);
@@ -529,7 +554,8 @@ export function rationalizeRhythmDisplay(
     glyphs.push({
       text: eventToGlyphText(current),
       startUnit: current.startUnit,
-      spanUnits: current.durationUnits
+      spanUnits: current.durationUnits,
+      isSlash: current.isSlash
     });
     idx += 1;
   }

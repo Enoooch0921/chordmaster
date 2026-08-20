@@ -66,6 +66,7 @@ import {
   JianpuInputGlyph,
   RhythmStaffKeyGlyph
 } from './NotationKeyGlyphs';
+import BeatSlashGlyph from '../BeatSlashGlyph';
 
 type KeyboardMode = 'common' | 'advanced' | 'symbols' | 'text';
 type KeyboardPicker = 'quality' | 'time' | 'special' | 'articulation' | 'ending' | 'navigation' | 'barline' | 'structure' | 'bar' | null;
@@ -700,6 +701,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       } else if (notationMode === 'rhythm' && ['w', 'h', 'q', 'e', 's'].includes(event.key.toLowerCase())) {
         event.preventDefault();
         applyRhythmAction({ type: 'insert', token: event.key.toLowerCase() });
+      } else if (notationMode === 'rhythm' && event.key === '/') {
+        event.preventDefault();
+        applyRhythmAction({ type: 'insert', token: '/' });
       } else if (notationMode === 'rhythm' && event.key.toLowerCase() === 'r') {
         event.preventDefault();
         applyRhythmAction({ type: 'insert', token: 'qr' });
@@ -1353,7 +1357,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.52fr]'} gap-1.5`} data-keyboard-view="rhythm">
           <div className="grid min-h-0 grid-cols-5 gap-1.5" data-rhythm-key-row="notes" data-key-surface="character">
             {([['w', '全音符', 'Whole'], ['h', '二分音符', 'Half'], ['q', '四分音符', 'Quarter'], ['e', '八分音符', 'Eighth'], ['s', '十六分音符', 'Sixteenth']] as const).map(([token, zhLabel, enLabel]) => (
-              <button key={token} type="button" className={`${characterKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === token && !selectedRhythmEvent.isRest && !selectedRhythmEvent.triplet ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token })} aria-label={language === 'zh' ? zhLabel : `${enLabel} note`}>
+              <button key={token} type="button" className={`${characterKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === token && !selectedRhythmEvent.isRest && !selectedRhythmEvent.isSlash && !selectedRhythmEvent.triplet ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token })} aria-label={language === 'zh' ? zhLabel : `${enLabel} note`}>
                 <RhythmStaffKeyGlyph base={token} className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[35px]" />
               </button>
             ))}
@@ -1365,14 +1369,15 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               </button>
             ))}
           </div>
-          <div className="grid min-h-0 grid-cols-8 gap-1.5" data-rhythm-key-row="modifiers" data-key-surface="utility">
+          <div className="grid min-h-0 grid-cols-9 gap-1.5" data-rhythm-key-row="modifiers" data-key-surface="utility">
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'q' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 'q3' })} aria-label={language === 'zh' ? '四分三連音' : 'Quarter-note triplet'}><RhythmStaffKeyGlyph base="q" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === 'e' && selectedRhythmEvent.triplet && !selectedRhythmEvent.isRest ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: 'e3' })} aria-label={language === 'zh' ? '八分三連音' : 'Eighth-note triplet'}><RhythmStaffKeyGlyph base="e" triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => applyRhythmAction({ type: 'insert', token: 'q3r' })} aria-label={language === 'zh' ? '四分三連休止' : 'Quarter-triplet rest'}><RhythmStaffKeyGlyph base="q" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0`} onClick={() => applyRhythmAction({ type: 'insert', token: 'e3r' })} aria-label={language === 'zh' ? '八分三連休止' : 'Eighth-triplet rest'}><RhythmStaffKeyGlyph base="e" isRest triplet className="!h-full !min-w-0 [&_[data-rhythm-symbol]]:!text-[26px]" /></button>
-            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.triplet} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.dotted ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-dot' })} aria-label={language === 'zh' ? '切換節奏附點' : 'Toggle rhythm dot'}><span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" /></button>
-            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.isRest} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.accent ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-accent' })} aria-label={language === 'zh' ? '切換節奏重音' : 'Toggle rhythm accent'}><span className="text-[24px] font-black leading-none" aria-hidden="true">&gt;</span></button>
-            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.isRest} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.tieAfter ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-tie' })} aria-label={language === 'zh' ? '切換節奏連結' : 'Toggle rhythm tie'}><svg viewBox="0 0 32 16" className="h-5 w-7" fill="none" aria-hidden="true"><path d="M3 13C8 3 24 3 29 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></svg></button>
+            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.triplet || selectedRhythmEvent.isSlash} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.dotted ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-dot' })} aria-label={language === 'zh' ? '切換節奏附點' : 'Toggle rhythm dot'}><span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" /></button>
+            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.isRest || selectedRhythmEvent.isSlash} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.accent ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-accent' })} aria-label={language === 'zh' ? '切換節奏重音' : 'Toggle rhythm accent'}><span className="text-[24px] font-black leading-none" aria-hidden="true">&gt;</span></button>
+            <button type="button" disabled={!selectedRhythmEvent || selectedRhythmEvent.isRest || selectedRhythmEvent.isSlash} className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.tieAfter ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'toggle-tie' })} aria-label={language === 'zh' ? '切換節奏連結' : 'Toggle rhythm tie'}><svg viewBox="0 0 32 16" className="h-5 w-7" fill="none" aria-hidden="true"><path d="M3 13C8 3 24 3 29 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></svg></button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.isSlash ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token: '/' })} aria-label={language === 'zh' ? '插入節奏佔用拍' : 'Insert rhythm slash placeholder'}><span className="text-[20px] leading-none" aria-hidden="true"><BeatSlashGlyph /></span></button>
             <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 px-0`} onClick={() => applyRhythmAction({ type: 'delete', mode: 'backspace' })} aria-label={language === 'zh' ? '刪除節奏事件' : 'Delete rhythm event'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
           </div>
           <div className="grid min-h-0 grid-cols-2 gap-1.5" data-rhythm-key-row="copy-paste" data-key-surface="utility">

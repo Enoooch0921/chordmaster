@@ -41,6 +41,7 @@ export interface RhythmEditableEvent {
   durationUnits: number;
   base: RhythmBase;
   isRest: boolean;
+  isSlash: boolean;
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -108,6 +109,7 @@ const toEditableEvents = (notation: string, timeSignature: string): RhythmEditab
       durationUnits: event.durationUnits,
       base: event.base,
       isRest: event.isRest,
+      isSlash: event.isSlash,
       dotted: event.dotted,
       triplet: event.triplet,
       accent: event.accent,
@@ -185,11 +187,12 @@ const getNextBoundary = (events: RhythmEditableEvent[], cursorUnit: number, barU
   events.find((event) => event.startUnit > cursorUnit + RHYTHM_EPSILON)?.startUnit ?? barUnits
 );
 
-const buildRhythmToken = (event: RhythmEditableEvent) => (
-  normalizeRhythmToken(
+const buildRhythmToken = (event: RhythmEditableEvent) => {
+  if (event.isSlash) return '/';
+  return normalizeRhythmToken(
     `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
-  )
-);
+  );
+};
 
 const parseEditableToken = (token: string, timeSignature: string): RhythmEditableEvent | null => {
   const normalized = normalizeRhythmToken(token);
@@ -205,6 +208,7 @@ const parseEditableToken = (token: string, timeSignature: string): RhythmEditabl
     durationUnits: event.durationUnits,
     base: event.base,
     isRest: event.isRest,
+    isSlash: event.isSlash,
     dotted: event.dotted,
     triplet: event.triplet,
     accent: event.accent,
@@ -223,15 +227,18 @@ const preserveEventModifiers = (
   nextEvent: RhythmEditableEvent,
   timeSignature: string
 ): RhythmEditableEvent => {
-  if (nextEvent.isRest) {
+  if (nextEvent.isRest || nextEvent.isSlash) {
     const keepTripletRest = existingEvent.triplet
       && existingEvent.base === nextEvent.base
+      && nextEvent.isRest
       && !nextEvent.triplet;
     const replacement = keepTripletRest
       ? parseEditableToken(`${nextEvent.base}3r`, timeSignature)
       : nextEvent;
     return {
       ...positionEvent(replacement ?? nextEvent, nextEvent.startUnit),
+      dotted: nextEvent.isSlash ? false : (replacement ?? nextEvent).dotted,
+      triplet: nextEvent.isSlash ? false : (replacement ?? nextEvent).triplet,
       accent: false,
       tieAfter: false
     };
@@ -494,6 +501,7 @@ export const applyRhythmEdit = (
   const event = context.events[targetIndex];
 
   if (action.type === 'toggle-dot') {
+    if (event.isSlash) return result(song, safeCursor, '/ 不能加附點。');
     if (event.triplet) return result(song, safeCursor, '三連音不能加附點。');
     const token = `${event.base}${event.isRest ? 'r' : ''}${event.dotted ? '' : '.'}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`;
     const nextEvent = parseEditableToken(token, context.timeSignature);
@@ -516,10 +524,10 @@ export const applyRhythmEdit = (
     return result(nextSong, nextCursor, null, song);
   }
 
-  if (event.isRest) {
+  if (event.isRest || event.isSlash) {
     return result(song, safeCursor, action.type === 'toggle-accent'
-      ? '休止符不能加上重音。'
-      : '休止符不能加上連結。');
+      ? `${event.isSlash ? '/' : '休止符'}不能加上重音。`
+      : `${event.isSlash ? '/' : '休止符'}不能加上連結。`);
   }
 
   const nextEvents = [...context.events];

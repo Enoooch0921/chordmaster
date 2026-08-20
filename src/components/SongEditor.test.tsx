@@ -61,6 +61,16 @@ describe('SongEditor shared notation commands', () => {
     expect(nextSong.sections[0].bars[0].rhythm).toBe('e.^~');
   });
 
+  it('inserts rhythm slash placeholders from the legacy rhythm toolbar', () => {
+    const onChange = renderEditor(makeSong({ rhythm: 'q q' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select rhythm note 1' }));
+    fireEvent.click(screen.getByTitle('插入節奏佔用拍'));
+
+    const nextSong = onChange.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].rhythm).toBe('/ q');
+  });
+
   it('routes selected jianpu replacement through the semantic command and preserves duration', () => {
     const onChange = renderEditor(makeSong({ riff: '1_' }));
 

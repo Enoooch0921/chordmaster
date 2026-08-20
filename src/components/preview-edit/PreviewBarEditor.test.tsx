@@ -169,6 +169,27 @@ describe('PreviewBarEditor', () => {
     expect(onNotationCursorChange).toHaveBeenLastCalledWith({ kind: 'rhythm', cursorUnit: 4 });
   });
 
+  it('writes slash placeholders from the rhythm keyboard', async () => {
+    const user = userEvent.setup();
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft, onNotationCursorChange } = renderEditor({
+      session: rhythmSession,
+      deviceLayout: 'phone'
+    });
+
+    await user.click(screen.getByRole('button', { name: '插入節奏佔用拍' }));
+
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].rhythm).toBe('/');
+    expect(onNotationCursorChange).toHaveBeenLastCalledWith({ kind: 'rhythm', cursorUnit: 4 });
+  });
+
   it('shows clean rhythm symbols without staff lines, fractions or token labels', () => {
     const rhythmTarget = {
       ...target,

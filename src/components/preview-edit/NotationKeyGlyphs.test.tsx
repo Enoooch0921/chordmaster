@@ -39,7 +39,8 @@ describe('RhythmStaffKeyGlyph', () => {
           base,
           isRest: false,
           dotted: false,
-          isHidden: false
+          isHidden: false,
+          isSlash: false
         })
       );
     });

@@ -30,7 +30,8 @@ export function RhythmStaffKeyGlyph({
     base,
     isRest,
     dotted: false,
-    isHidden: false
+    isHidden: false,
+    isSlash: false
   });
   const anchor = getBachGlyphAnchor(base, isRest);
 

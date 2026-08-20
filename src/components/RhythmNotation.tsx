@@ -2,6 +2,7 @@ import React from 'react';
 import { getHeadCenterUnit, getRhythmEventGlyph, parseRhythmNotation, rationalizeRhythmDisplay, rhythmUnitsEqual } from '../utils/rhythmUtils';
 import { buildCompactRhythmGeometry, getCompactRhythmCenterUnit } from '../lib/rhythmGeometry';
 import CompactRhythmRenderer, { type CompactRhythmGlyphAnchor } from './CompactRhythmRenderer';
+import BeatSlashGlyph from './BeatSlashGlyph';
 
 interface RhythmNotationProps {
   notation: string;
@@ -136,6 +137,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     event: typeof visibleEvents[number],
     _options?: { beamed?: boolean }
   ) => {
+    if (event.isSlash) {
+      return event.startUnit + (event.durationUnits / 2);
+    }
     if (compact) {
       return getCompactRhythmCenterUnit(event);
     }
@@ -234,6 +238,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         kind: 'event' as const,
         base: eventAtInsert.base,
         isRest: eventAtInsert.isRest,
+        isSlash: eventAtInsert.isSlash,
         centerUnit: getCompactDisplayCenterUnit(eventAtInsert)
       };
     }
@@ -289,7 +294,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     }
 
     const nextParsed = parseRhythmNotation(nextNotationForCrossBar, nextTimeSignatureForCrossBar || timeSignature);
-    const firstPlayableEvent = nextParsed.events.find((event) => !event.isRest && !event.isHidden);
+    const firstPlayableEvent = nextParsed.events.find((event) => !event.isRest && !event.isHidden && !event.isSlash);
     if (!firstPlayableEvent) {
       return null;
     }
@@ -386,7 +391,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     let current: typeof visibleEvents = [];
 
     const canGroup = (event: typeof visibleEvents[number]) => (
-      !event.isRest && (event.base === 'e' || event.base === 's')
+      !event.isRest && !event.isSlash && (event.base === 'e' || event.base === 's')
     );
 
     const flush = () => {
@@ -485,14 +490,14 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   );
   const getTieVisualHeadUnit = React.useCallback((event: typeof visibleEvents[number]) => (
     getCompactDisplayCenterUnit(event, {
-      beamed: editorBeamedEventIndices.has(event.index) && !event.isRest && (event.base === 'e' || event.base === 's')
+      beamed: editorBeamedEventIndices.has(event.index) && !event.isRest && !event.isSlash && (event.base === 'e' || event.base === 's')
     })
   ), [editorBeamedEventIndices, getCompactDisplayCenterUnit]);
   const displayTies = React.useMemo(() => {
     const nextTies = ties.map((tie) => {
       const startEvent = visibleEvents.find((event) => event.index === tie.eventIndex);
       const endEvent = startEvent
-        ? visibleEvents.find((event) => !event.isRest && !event.isHidden && rhythmUnitsEqual(event.startUnit, startEvent.endUnit))
+        ? visibleEvents.find((event) => !event.isRest && !event.isHidden && !event.isSlash && rhythmUnitsEqual(event.startUnit, startEvent.endUnit))
         : undefined;
 
       return {
@@ -501,8 +506,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         endHeadUnit: endEvent ? getTieVisualHeadUnit(endEvent) : tie.endHeadUnit
       };
     });
-    const firstPlayableEvent = visibleEvents.find((event) => !event.isRest);
-    const lastPlayableEvent = [...visibleEvents].reverse().find((event) => !event.isRest);
+    const firstPlayableEvent = visibleEvents.find((event) => !event.isRest && !event.isSlash);
+    const lastPlayableEvent = [...visibleEvents].reverse().find((event) => !event.isRest && !event.isSlash);
 
     if (tieFromPrevious && firstPlayableEvent) {
       const endHeadUnit = getTieVisualHeadUnit(firstPlayableEvent);
@@ -767,8 +772,8 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             const tieEndEvent = isCrossBarTie
               ? tieStartEvent
               : tieStartEvent
-                ? visibleEvents.find((event) => !event.isRest && rhythmUnitsEqual(event.startUnit, tieStartEvent.endUnit))
-                : visibleEvents.find((event) => !event.isRest);
+                ? visibleEvents.find((event) => !event.isRest && !event.isSlash && rhythmUnitsEqual(event.startUnit, tieStartEvent.endUnit))
+                : visibleEvents.find((event) => !event.isRest && !event.isSlash);
             const startNoteheadY = (
               compact && tieStartEvent
                 ? compactGlyphAnchors[tieStartEvent.index]?.noteheadBottom ?? tieAnchorY
@@ -937,13 +942,15 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
               className={`${selectedSlotVisual.base === 's' ? 'rounded-[12px]' : 'rounded-[8px]'} absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-indigo-400/18 ring-1 ring-indigo-400/45`}
               style={{
                 width:
-                  selectedSlotVisual.base === 'w' ? (compact ? '24px' : '30px')
+                  selectedSlotVisual.isSlash ? (compact ? '16px' : '20px')
+                  : selectedSlotVisual.base === 'w' ? (compact ? '24px' : '30px')
                   : selectedSlotVisual.base === 'h' ? (compact ? '20px' : '26px')
                   : selectedSlotVisual.base === 'q' ? (compact ? '17px' : '22px')
                   : selectedSlotVisual.base === 'e' ? (compact ? '15px' : '19px')
                   : (compact ? '14px' : '17px'),
                 height:
-                  selectedSlotVisual.base === 's' ? (compact ? '28px' : '34px')
+                  selectedSlotVisual.isSlash ? (compact ? '26px' : '32px')
+                  : selectedSlotVisual.base === 's' ? (compact ? '28px' : '34px')
                   : selectedSlotVisual.isRest ? (compact ? '26px' : '32px')
                   : (compact ? '30px' : '36px')
               }}
@@ -1070,11 +1077,13 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         >
         {useEditorStyleRenderer
           ? visibleEvents.map((event) => {
-              const isEditorBeamed = editorBeamedEventIndices.has(event.index) && !event.isRest && (event.base === 'e' || event.base === 's');
+              const isEditorBeamed = editorBeamedEventIndices.has(event.index) && !event.isRest && !event.isSlash && (event.base === 'e' || event.base === 's');
               const isWholeDuration = event.durationUnits >= parsed.barUnits;
               const isHalfDuration = event.base === 'h';
               const centerUnit = getCompactDisplayCenterUnit(event, { beamed: isEditorBeamed });
-              const glyphTranslateY = event.isRest
+              const glyphTranslateY = event.isSlash
+                ? '-50%'
+                : event.isRest
                 ? '-62%'
                 : isWholeDuration
                   ? '-53%'
@@ -1084,11 +1093,12 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                       ? (renderMode === 'preview' ? '-48.5%' : '-54%')
                       : '-48.5%';
               const displayGlyph = isEditorBeamed
-                ? getRhythmEventGlyph({
+                  ? getRhythmEventGlyph({
                     base: 'q',
                     isRest: false,
                     dotted: false,
-                    isHidden: false
+                    isHidden: false,
+                    isSlash: false
                   })
                 : getRhythmEventGlyph({
                     ...event,
@@ -1097,22 +1107,23 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
 
               return (
                 <React.Fragment key={`editor-glyph-${event.index}`}>
-                  <span
+                    <span
                     data-rhythm-glyph
                     data-rhythm-base={event.base}
+                    data-rhythm-slash={event.isSlash ? 'true' : undefined}
                     data-rhythm-rendered-beamed={isEditorBeamed ? 'true' : 'false'}
-                    className="absolute z-[2] select-none font-rhythm leading-none whitespace-pre"
+                    className={`absolute z-[2] select-none leading-none whitespace-pre ${event.isSlash ? 'inline-flex items-center justify-center' : 'font-rhythm'}`}
                     style={{
                       left: unitToPercent(centerUnit),
                       top: rhythmContentTop,
                       color: stroke,
                       transform: `translate(-50%, ${glyphTranslateY})`,
-                      fontSize: `${hasSingleWholeEvent && isWholeDuration ? editorGlyphFontSize * 1.16 : editorGlyphFontSize}px`
+                      fontSize: `${hasSingleWholeEvent && isWholeDuration && !event.isSlash ? editorGlyphFontSize * 1.16 : editorGlyphFontSize}px`
                     }}
                   >
-                    {displayGlyph}
+                    {event.isSlash ? <BeatSlashGlyph /> : displayGlyph}
                   </span>
-                  {event.dotted && (
+                  {event.dotted && !event.isSlash && (
                     <span
                       className="absolute z-[3] select-none leading-none"
                       style={{
@@ -1152,8 +1163,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             return (
               <span
                 data-rhythm-glyph
+                data-rhythm-slash={glyph.isSlash ? 'true' : undefined}
                 key={`glyph-${idx}-${glyph.startUnit}-${glyph.text}`}
-                className="absolute z-[2] select-none font-rhythm leading-none whitespace-pre"
+                className={`absolute z-[2] select-none leading-none whitespace-pre ${glyph.isSlash ? 'inline-flex items-center justify-center' : 'font-rhythm'}`}
                 style={{
                   left: unitToPercent(anchorUnit),
                   top: rhythmContentTop,
@@ -1162,7 +1174,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                   fontSize: `${currentGlyphFontSize}px`
                 }}
               >
-                {glyph.text}
+                {glyph.isSlash ? <BeatSlashGlyph /> : glyph.text}
               </span>
             );
           }
@@ -1170,15 +1182,16 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
           return (
             <span
               data-rhythm-glyph
+              data-rhythm-slash={glyph.isSlash ? 'true' : undefined}
               key={`glyph-${idx}-${glyph.startUnit}-${glyph.text}`}
-              className="justify-self-center self-center select-none font-rhythm leading-none whitespace-pre"
+              className={`justify-self-center self-center select-none leading-none whitespace-pre ${glyph.isSlash ? 'inline-flex items-center justify-center' : 'font-rhythm'}`}
               style={{
                 gridColumn: `${start} / span ${span}`,
                 color: stroke,
                 fontSize: `${currentGlyphFontSize}px`
               }}
             >
-              {glyph.text}
+              {glyph.isSlash ? <BeatSlashGlyph /> : glyph.text}
             </span>
           );
         })}

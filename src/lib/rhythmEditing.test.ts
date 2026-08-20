@@ -86,6 +86,24 @@ describe('rhythm insertion and capacity', () => {
     expect(parseRhythmNotation(rhythmOf(song) ?? '', '4/4').overflow).toBe(false);
   });
 
+  it('inserts slash placeholders as one beat in the active meter', () => {
+    const commonTime = edit(makeSong(), 0, { type: 'insert', token: '/' });
+    expect(rhythmOf(commonTime.song)).toBe('/');
+    expect(commonTime.cursor).toEqual({ cursorUnit: 4 });
+    expect(parseRhythmNotation(rhythmOf(commonTime.song) ?? '', '4/4').events[0]).toMatchObject({
+      isSlash: true,
+      durationUnits: 4
+    });
+
+    const compoundTime = edit(makeSong({}, '6/8'), 0, { type: 'insert', token: '/' });
+    expect(rhythmOf(compoundTime.song)).toBe('/');
+    expect(compoundTime.cursor).toEqual({ cursorUnit: 6 });
+    expect(parseRhythmNotation(rhythmOf(compoundTime.song) ?? '', '6/8').events[0]).toMatchObject({
+      isSlash: true,
+      durationUnits: 6
+    });
+  });
+
   it('rejects unsupported triplets and canonicalizes a triplet without a dot', () => {
     const song = makeSong();
     expect(edit(song, 0, { type: 'insert', token: 'h3' }).error).toContain('無效');
@@ -129,6 +147,11 @@ describe('rhythm replacement and modifiers', () => {
     const rest = makeSong({ rhythm: 'qr' });
     expect(edit(rest, 0, { type: 'toggle-accent' }).error).toContain('休止符');
     expect(edit(rest, 0, { type: 'toggle-tie' }).error).toContain('休止符');
+
+    const slash = makeSong({ rhythm: '/' });
+    expect(edit(slash, 0, { type: 'toggle-dot' }).error).toContain('/');
+    expect(edit(slash, 0, { type: 'toggle-accent' }).error).toContain('/');
+    expect(edit(slash, 0, { type: 'toggle-tie' }).error).toContain('/');
   });
 
   it('does not let a dotted event overlap the next event', () => {

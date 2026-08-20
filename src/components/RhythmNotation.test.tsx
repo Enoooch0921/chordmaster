@@ -29,6 +29,18 @@ describe('RhythmNotation', () => {
     expect(container.querySelectorAll('[data-rhythm-formal-symbol]')).toHaveLength(4);
   });
 
+  it('renders slash placeholders as visible rhythm occupancy marks', () => {
+    const { container } = render(
+      <RhythmNotation notation="/ q" timeSignature="4/4" compact />
+    );
+
+    const slash = container.querySelector('[data-rhythm-slash="true"]');
+
+    expect(slash).not.toBeNull();
+    expect(slash?.querySelector('path')?.getAttribute('d')).toBe('M3 13L13 3');
+    expect(slash).not.toHaveAttribute('data-rhythm-notehead');
+  });
+
   it('does not shrink compact preview overlays away from glyph anchors', () => {
     const { container } = render(
       <RhythmNotation notation="e e e e" timeSignature="4/4" compact />

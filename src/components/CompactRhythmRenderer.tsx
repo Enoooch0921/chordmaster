@@ -6,6 +6,7 @@ import {
 } from '../lib/bachRhythmMetrics';
 import type { CompactRhythmGeometry } from '../lib/rhythmGeometry';
 import { getRhythmEventGlyph, type RhythmBase } from '../utils/rhythmUtils';
+import BeatSlashGlyph from './BeatSlashGlyph';
 
 export interface CompactRhythmGlyphAnchor {
   noteheadTop: number;
@@ -149,8 +150,10 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
       {geometry.events.map(({ event, head, dot, accent }) => {
         const isBeamed = beamedEventIndices.has(event.index);
         const displayBase = isBeamed ? 'q' : event.base;
-        const anchor = getBachGlyphAnchor(displayBase, event.isRest);
+        const anchor = event.isSlash ? { xEm: 0, yEm: 0 } : getBachGlyphAnchor(displayBase, event.isRest);
         const measuredAnchor = measuredGlyphAnchors[event.index];
+        const slashWidth = fontSize * 0.7;
+        const slashHeight = fontSize * 0.92;
         const accentY = accent
           ? (measuredAnchor?.top ?? accent.y + (3.25 * scale)) - (3.25 * scale)
           : null;
@@ -162,27 +165,42 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
             data-rhythm-rendered-beamed={isBeamed ? 'true' : 'false'}
             key={`bach-symbol-${event.index}`}
           >
-            <text
-              data-rhythm-notehead={!event.isRest ? 'true' : undefined}
-              data-rhythm-formal-symbol
-              data-rhythm-beamed-symbol={isBeamed ? 'true' : undefined}
-              data-rhythm-event-index={event.index}
-              data-rhythm-display-base={displayBase}
-              data-rhythm-head-x={head.x}
-              x={head.x + (anchor.xEm * fontSize)}
-              y={(geometry.height / 2) + (anchor.yEm * fontSize)}
-              fill={color}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontFamily="Bach, NotoMusic, serif"
-              fontSize={fontSize}
-            >
-              {getRhythmEventGlyph({
-                ...event,
-                base: displayBase,
-                dotted: false
-              })}
-            </text>
+            {event.isSlash ? (
+              <BeatSlashGlyph
+                data-rhythm-slash="true"
+                data-rhythm-event-index={event.index}
+                data-rhythm-display-base={displayBase}
+                data-rhythm-head-x={head.x}
+                x={head.x - (slashWidth / 2)}
+                y={(geometry.height / 2) - (slashHeight / 2)}
+                width={slashWidth}
+                height={slashHeight}
+                color={color}
+                className="overflow-visible"
+              />
+            ) : (
+              <text
+                data-rhythm-notehead={!event.isRest ? 'true' : undefined}
+                data-rhythm-formal-symbol
+                data-rhythm-beamed-symbol={isBeamed ? 'true' : undefined}
+                data-rhythm-event-index={event.index}
+                data-rhythm-display-base={displayBase}
+                data-rhythm-head-x={head.x}
+                x={head.x + (anchor.xEm * fontSize)}
+                y={(geometry.height / 2) + (anchor.yEm * fontSize)}
+                fill={color}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontFamily="Bach, NotoMusic, serif"
+                fontSize={fontSize}
+              >
+                {getRhythmEventGlyph({
+                  ...event,
+                  base: displayBase,
+                  dotted: false
+                })}
+              </text>
+            )}
             {dot && (
               <circle data-rhythm-dot cx={dot.x} cy={dot.y} r={0.72 * scale} fill={color} />
             )}

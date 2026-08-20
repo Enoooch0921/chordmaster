@@ -63,7 +63,7 @@ interface BeamGroupDraft {
 }
 
 const isBeamable = (event: RhythmEvent) => (
-  !event.isRest && !event.isHidden && (event.base === 'e' || event.base === 's')
+  !event.isRest && !event.isHidden && !event.isSlash && (event.base === 'e' || event.base === 's')
 );
 
 const buildBeamGroups = (events: RhythmEvent[], beatUnits: number): BeamGroupDraft[] => {
@@ -168,7 +168,7 @@ export const buildCompactRhythmGeometry = (
 
   const events = visibleEvents.map((event): CompactRhythmEventGeometry => {
     const x = centerX(event);
-    const hasStem = !event.isRest && event.base !== 'w';
+    const hasStem = !event.isRest && !event.isSlash && event.base !== 'w';
     const isBeamed = beamedIndices.has(event.index);
     const stem = hasStem
       ? {
@@ -184,9 +184,9 @@ export const buildCompactRhythmGeometry = (
       headRadiusX,
       headRadiusY,
       stem,
-      flagCount: !isBeamed && !event.isRest ? (event.base === 'e' ? 1 : event.base === 's' ? 2 : 0) : 0,
-      dot: event.dotted ? { x: x + (3.7 * scale), y: headY } : null,
-      accent: event.accent && stem
+      flagCount: !isBeamed && !event.isRest && !event.isSlash ? (event.base === 'e' ? 1 : event.base === 's' ? 2 : 0) : 0,
+      dot: event.dotted && !event.isSlash ? { x: x + (3.7 * scale), y: headY } : null,
+      accent: event.accent && stem && !event.isSlash
         ? { x, y: stem.top - (3.25 * scale) }
         : null
     };

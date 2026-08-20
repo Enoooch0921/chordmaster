@@ -16,6 +16,7 @@ import { formatInitialCaps } from '../utils/textUtils';
 import { Repeat, ArrowUpRight, ArrowDownRight, SlidersHorizontal } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
+import BeatSlashGlyph from './BeatSlashGlyph';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
 import { getChordDisplaySlotEntries, getChordDisplaySlotOwnership } from '../utils/chordSlots';
@@ -348,9 +349,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
     // Beat slash: keep its own glyph box so it aligns with chord content instead of sticking to the top edge.
     return withChordMark(
       <div className="relative inline-flex h-[1.02em] w-[0.92em] items-center justify-center translate-y-[1px]">
-        <svg viewBox="0 0 16 16" className="h-[0.92em] w-[0.7em] text-gray-400" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
-          <path d="M3 13L13 3" />
-        </svg>
+        <BeatSlashGlyph className="h-[0.92em] w-[0.7em] text-gray-400" strokeWidth={1.75} />
       </div>
     );
   }
