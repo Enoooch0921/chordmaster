@@ -19,6 +19,7 @@ import {
   transposeChord,
   transposeKeyWithPreference
 } from '../utils/musicUtils';
+import { getEffectiveTimeSignature } from '../utils/rhythmUtils';
 
 export type ChordInputMode = 'letters' | 'nashville';
 
@@ -70,6 +71,13 @@ export interface SongKeyStates {
   barActiveKeys: Key[][];
 }
 
+export interface SongTimeSignatureStates {
+  sectionBaseTimeSignatures: string[];
+  sectionActiveTimeSignatures: string[];
+  barBaseTimeSignatures: string[][];
+  barActiveTimeSignatures: string[][];
+}
+
 export const toggleEndingNumber = (ending: string | undefined, digit: string): string | undefined => {
   const normalizedDigit = digit.trim();
   if (!/^[1-9]$/.test(normalizedDigit)) return ending?.trim() || undefined;
@@ -102,6 +110,9 @@ export type EditableBarFields = Pick<
   | 'repeatEnd'
   | 'finalBar'
   | 'ending'
+  | 'chordMarks'
+  | 'rhythmMark'
+  | 'unisonMark'
 >;
 
 const createId = (prefix: 'section' | 'bar') => {
@@ -216,8 +227,54 @@ export const repairSongStructure = <T extends Song>(song: T): T => {
   return unchanged ? song : { ...identifiedSong, sections } as T;
 };
 
+export const getSongTimeSignatureStates = (song: Song): SongTimeSignatureStates => {
+  const sectionBaseTimeSignatures: string[] = [];
+  const sectionActiveTimeSignatures: string[] = [];
+  const barBaseTimeSignatures: string[][] = [];
+  const barActiveTimeSignatures: string[][] = [];
+  let activeTimeSignature = getEffectiveTimeSignature(song.timeSignature);
+
+  song.sections.forEach((section) => {
+    sectionBaseTimeSignatures.push(activeTimeSignature);
+    sectionActiveTimeSignatures.push(activeTimeSignature);
+
+    const baseTimeSignatures: string[] = [];
+    const activeTimeSignatures: string[] = [];
+    section.bars.forEach((bar) => {
+      baseTimeSignatures.push(activeTimeSignature);
+      if (bar.timeSignature?.trim()) {
+        activeTimeSignature = getEffectiveTimeSignature(bar.timeSignature, activeTimeSignature);
+      }
+      activeTimeSignatures.push(activeTimeSignature);
+    });
+    barBaseTimeSignatures.push(baseTimeSignatures);
+    barActiveTimeSignatures.push(activeTimeSignatures);
+  });
+
+  return {
+    sectionBaseTimeSignatures,
+    sectionActiveTimeSignatures,
+    barBaseTimeSignatures,
+    barActiveTimeSignatures
+  };
+};
+
+export const getEffectiveTimeSignatureForBar = (song: Song, targetBar: Bar): string => {
+  const states = getSongTimeSignatureStates(song);
+  for (let sectionIndex = 0; sectionIndex < song.sections.length; sectionIndex += 1) {
+    const barIndex = song.sections[sectionIndex].bars.findIndex((bar) => (
+      bar === targetBar || (Boolean(targetBar.id) && bar.id === targetBar.id)
+    ));
+    if (barIndex >= 0) {
+      return states.barActiveTimeSignatures[sectionIndex]?.[barIndex]
+        ?? getEffectiveTimeSignature(targetBar.timeSignature, song.timeSignature);
+    }
+  }
+  return getEffectiveTimeSignature(targetBar.timeSignature, song.timeSignature);
+};
+
 export const getBeatCount = (song: Song, bar: Bar) => {
-  const numerator = Number.parseInt((bar.timeSignature || song.timeSignature || '4/4').split('/')[0], 10);
+  const numerator = Number.parseInt(getEffectiveTimeSignatureForBar(song, bar).split('/')[0], 10);
   return Number.isFinite(numerator) && numerator > 0 ? numerator : 4;
 };
 
@@ -228,6 +285,13 @@ export const findSongBar = (song: Song, target: SongBarIdentity): LocatedSongBar
   const barIndex = section.bars.findIndex((bar) => bar.id === target.barId);
   if (barIndex < 0) return null;
   return { sectionIndex, barIndex, section, bar: section.bars[barIndex] };
+};
+
+export const getEffectiveTimeSignatureForTarget = (song: Song, target: SongBarIdentity): string => {
+  const located = findSongBar(song, target);
+  if (!located) return getEffectiveTimeSignature(song.timeSignature);
+  return getSongTimeSignatureStates(song).barActiveTimeSignatures[located.sectionIndex]?.[located.barIndex]
+    ?? getEffectiveTimeSignature(located.bar.timeSignature, song.timeSignature);
 };
 
 export const findSongSection = (song: Song, sectionId: string) => {
@@ -299,10 +363,14 @@ const remapChordMarksByBeat = (
   if (!oldBar.chordMarks) return undefined;
   const oldEntries = getChordDisplaySlotEntries(oldBar.chords, beatCount);
   const nextEntries = getChordDisplaySlotEntries(nextChords, beatCount);
+  const oldRawIndexes = new Set(oldEntries.flatMap((entry) => entry ? [entry.rawIndex] : []));
   const nextMarks: Record<number, ChordMark> = {};
   oldEntries.forEach((oldEntry, slotIndex) => {
-    if (!oldEntry) return;
-    const mark = oldBar.chordMarks?.[oldEntry.rawIndex];
+    const mark = oldEntry
+      ? oldBar.chordMarks?.[oldEntry.rawIndex]
+      : oldRawIndexes.has(slotIndex)
+        ? undefined
+        : oldBar.chordMarks?.[slotIndex];
     const nextEntry = nextEntries[slotIndex];
     if (mark && nextEntry) nextMarks[nextEntry.rawIndex] = mark;
   });

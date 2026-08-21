@@ -1,4 +1,4 @@
-import { act, createEvent, fireEvent, render, screen } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
 import { ensureSongEditingIds, reorderSection } from '../lib/songEditing';
@@ -62,6 +62,34 @@ describe('ChordSheet preview input caret', () => {
     expect(selectedBar).not.toBeNull();
     expect(selectedBar).toHaveClass('z-20');
     expect(selectedBar?.style.boxShadow).toContain('rgba(245, 158, 11');
+  });
+
+  it('uses the preview edit color for the active notation bar', () => {
+    const notationSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['C'], riff: '1 2 3 4' }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={notationSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        activeBar={{ sIdx: 0, bIdx: 0 }}
+        activePreviewNotationTarget={{
+          sectionId: 'section-1',
+          barId: 'bar-1',
+          notationMode: 'jianpu',
+          cursor: { kind: 'jianpu', beatIndex: 1, unitIndex: 2, noteIndex: null }
+        }}
+      />
+    );
+
+    const activeBar = container.querySelector<HTMLElement>('.sheet-bar');
+    expect(activeBar?.style.boxShadow).toContain('rgba(5, 150, 105');
   });
 
   it('emits preview bar context menu targets and prevents the browser menu', () => {
@@ -136,6 +164,31 @@ describe('ChordSheet preview input caret', () => {
     expect(screen.queryByText('Key: C')).not.toBeInTheDocument();
     expect(screen.getByText('Key: D')).toBeInTheDocument();
     expect(screen.getByText('Key: E')).toBeInTheDocument();
+  });
+
+  it('shows only the editable performance key while the chart is temporarily transposed', () => {
+    const onMetaClick = vi.fn();
+    const transposedSong: Song = {
+      ...song,
+      originalKey: 'C',
+      currentKey: 'D'
+    };
+    const { container } = render(
+      <ChordSheet
+        song={transposedSong}
+        language="en"
+        currentKey="D"
+        previewIdentity="song-1"
+        showWrittenKeyInMetadata
+        onMetaClick={onMetaClick}
+      />
+    );
+
+    const keyMeta = container.querySelector<HTMLElement>('[data-preview-edit-hit="song-1|meta|key"]');
+    const performanceKeyMeta = container.querySelector<HTMLElement>('[data-preview-edit-hit="song-1|meta|performanceKey"]');
+    expect(keyMeta).toBeNull();
+    expect(performanceKeyMeta?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Play Key - D');
+    expect(container.textContent?.replace(/\s+/g, ' ')).toContain('Play Key - D');
   });
 
   it('shows only one caret after repairing ids from a legacy duplicated section', () => {
@@ -1947,6 +2000,176 @@ describe('ChordSheet preview notation interactions', () => {
     }));
   });
 
+  it('uses inherited time signatures for following preview jianpu bars', () => {
+    const inheritedMeterSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [
+          { id: 'bar-1', chords: ['C'], timeSignature: '5/4', riff: '1 | 2 | 3 | 4 | 5' },
+          { id: 'bar-2', chords: ['G'], riff: '1 | 2 | 3 | 4 | 5' },
+          { id: 'bar-3', chords: ['F'], timeSignature: '3/4', riff: '1 | 2 | 3' }
+        ]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={inheritedMeterSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+      />
+    );
+
+    const secondBarJianpu = container.querySelector<HTMLElement>(
+      '[data-preview-edit-anchor="song-1|section-1|bar-2|jianpu|all"]'
+    );
+    expect(secondBarJianpu).not.toBeNull();
+    expect(within(secondBarJianpu!).getByRole('button', { name: 'Select jianpu beat 5' })).toBeInTheDocument();
+    expect(within(secondBarJianpu!).queryByRole('button', { name: 'Select jianpu beat 6' })).not.toBeInTheDocument();
+  });
+
+  it('aligns the 6/8 preview cursor to grouped notation units', () => {
+    const sixEightSong: Song = {
+      ...song,
+      timeSignature: '6/8',
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['C'], rhythm: 'e e e e e e', riff: '1 2 3 | 4 5 6' }]
+      }]
+    };
+    const { container, rerender } = render(
+      <ChordSheet
+        song={sixEightSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        activePreviewNotationTarget={{
+          sectionId: 'section-1',
+          barId: 'bar-1',
+          notationMode: 'jianpu',
+          cursor: { kind: 'jianpu', beatIndex: 1, unitIndex: 3, noteIndex: null }
+        }}
+      />
+    );
+
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toHaveStyle({ left: '50%', width: '50%' });
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).toHaveStyle({ left: '75%' });
+
+    rerender(
+      <ChordSheet
+        song={sixEightSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        activePreviewNotationTarget={{
+          sectionId: 'section-1',
+          barId: 'bar-1',
+          notationMode: 'rhythm',
+          cursor: { kind: 'rhythm', cursorUnit: 9 }
+        }}
+      />
+    );
+
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toHaveStyle({ left: '50%', width: '50%' });
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).toHaveStyle({ left: '75%' });
+  });
+
+  it('uses only the note highlight for a selected preview jianpu note', () => {
+    const multiNoteSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['Ab'], rhythm: 'q q q q', riff: '1 0 | 2 - | 3 | 4', label: 'Label' }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={multiNoteSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        activePreviewNotationTarget={{
+          sectionId: 'section-1',
+          barId: 'bar-1',
+          notationMode: 'jianpu',
+          cursor: { kind: 'jianpu', beatIndex: 1, unitIndex: 0, noteIndex: 0 }
+        }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Select jianpu note 1 in beat 2' }).previousElementSibling).toHaveAttribute('data-jianpu-selected-note-highlight');
+    expect(container.querySelector('[data-preview-active-lane]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).not.toBeInTheDocument();
+  });
+
+  it('marks the next insert point after a selected preview jianpu note when the beat has free space', () => {
+    const partialBeatSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['Ab'], riff: '2_' }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={partialBeatSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        activePreviewNotationTarget={{
+          sectionId: 'section-1',
+          barId: 'bar-1',
+          notationMode: 'jianpu',
+          cursor: { kind: 'jianpu', beatIndex: 0, unitIndex: 0, noteIndex: 0 }
+        }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Select jianpu note 1 in beat 1' })).toHaveAttribute('data-preview-edit-ui');
+    expect(container.querySelector('[data-jianpu-selected-note-highlight]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
+  });
+
+  it('marks trailing insert space after auto-shortened preview jianpu notes', () => {
+    const shorthandSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['Ab'], riff: '234' }]
+      }]
+    };
+    const { container } = render(
+      <ChordSheet
+        song={shorthandSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={vi.fn()}
+        activePreviewNotationTarget={{
+          sectionId: 'section-1',
+          barId: 'bar-1',
+          notationMode: 'jianpu',
+          cursor: { kind: 'jianpu', beatIndex: 0, unitIndex: 2, noteIndex: 2 }
+        }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Select jianpu note 3 in beat 1' })).toHaveAttribute('data-preview-edit-ui');
+    expect(container.querySelector('[data-jianpu-selected-note-highlight]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+  });
+
   it('exposes the editor-only empty lower target only while preview editing is enabled', () => {
     const emptySong: Song = {
       ...song,
@@ -2070,9 +2293,31 @@ describe('ChordSheet preview notation interactions', () => {
 
     const selectedRhythmEvent = screen.getByRole('button', { name: 'Select rhythm note 2' });
     expect(selectedRhythmEvent).toHaveAttribute('data-preview-edit-ui');
-    expect(container.querySelector('[data-rhythm-notation] [data-preview-edit-ui].pointer-events-none')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-active-lane]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
+    expect(container.querySelector('[data-rhythm-notation] [data-preview-edit-ui].pointer-events-none')).not.toBeInTheDocument();
+
+    rerender(
+      <ChordSheet
+        song={notationSong}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={onElementClick}
+        activePreviewNotationTarget={{
+          sectionId: 'section-1',
+          barId: 'bar-1',
+          notationMode: 'jianpu',
+          cursor: { kind: 'jianpu', beatIndex: 1, unitIndex: 2, noteIndex: null }
+        }}
+      />
+    );
+
+    expect(container.querySelector('[data-preview-active-lane]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-active-insert-highlight]')).not.toBeInTheDocument();
 
     rerender(
       <ChordSheet
@@ -2093,18 +2338,16 @@ describe('ChordSheet preview notation interactions', () => {
     const selectedJianpuNote = screen.getByRole('button', { name: 'Select jianpu note 1 in beat 2' });
     expect(selectedJianpuNote).toHaveAttribute('data-preview-edit-ui');
     expect(selectedJianpuNote.previousElementSibling).toHaveAttribute('data-preview-edit-ui');
-    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
-    expect(container.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
-    expect(Array.from(container.querySelectorAll('[data-preview-edit-ui]')).some((node) => (
-      node.getAttribute('class')?.includes('bg-indigo-200/45')
-    ))).toBe(true);
+    expect(selectedJianpuNote.previousElementSibling).toHaveAttribute('data-jianpu-selected-note-highlight');
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
 
     const printableClone = container.cloneNode(true) as HTMLElement;
     printableClone.querySelectorAll('[data-preview-edit-ui]').forEach((node) => node.remove());
-    expect(Array.from(printableClone.querySelectorAll('[class]')).some((node) => (
-      node.getAttribute('class')?.includes('bg-indigo-200/45')
-      || node.getAttribute('class')?.includes('bg-indigo-200/60')
-    ))).toBe(false);
+    expect(printableClone.querySelector('[data-preview-active-lane]')).not.toBeInTheDocument();
+    expect(printableClone.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+    expect(printableClone.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
+    expect(printableClone.querySelector('[data-jianpu-selected-note-highlight]')).not.toBeInTheDocument();
   });
 
   it('keeps centered percent selection styling inside removable preview chrome', () => {
@@ -2130,6 +2373,6 @@ describe('ChordSheet preview notation interactions', () => {
 
     const selectedOverlay = container.querySelector('[data-preview-owner-slot="0"] > [data-preview-edit-ui]');
     expect(selectedOverlay).toBeInTheDocument();
-    expect(selectedOverlay?.getAttribute('class')).toContain('bg-indigo-100/65');
+    expect(selectedOverlay?.getAttribute('class')).toContain('bg-emerald-100/70');
   });
 });

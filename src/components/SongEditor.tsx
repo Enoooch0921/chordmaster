@@ -18,6 +18,7 @@ import { ANNOTATION_COLOR_OPTIONS, DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CH
 import {
   deleteSection as deleteSongSection,
   duplicateSection as duplicateSongSection,
+  getEffectiveTimeSignatureForBar,
   getSongKeyStates,
   isBarCompletelyEmpty,
   mergeSectionToPrevious as mergeSongSectionToPrevious,
@@ -1423,7 +1424,9 @@ const SongEditor: React.FC<Props> = ({
     }
   };
 
-  const getBarTimeSignature = (bar?: Bar) => getEffectiveTimeSignature(bar?.timeSignature, song.timeSignature);
+  const getBarTimeSignature = (bar?: Bar) => (
+    bar ? getEffectiveTimeSignatureForBar(song, bar) : getEffectiveTimeSignature(undefined, song.timeSignature)
+  );
   const getCanonicalRiffNotationForBar = (notation: string | undefined, sIdx: number, bIdx: number, trimTrailingEmpty = false) => (
     getCanonicalJianpuNotation(notation, getBarTimeSignature(getEditorBar(sIdx, bIdx)), trimTrailingEmpty)
   );
@@ -3285,7 +3288,7 @@ const SongEditor: React.FC<Props> = ({
     }
     const nextRiff = getCanonicalJianpuNotation(
       nextBar.riff,
-      getEffectiveTimeSignature(nextBar.timeSignature, result.song.timeSignature),
+      getEffectiveTimeSignatureForBar(result.song, nextBar),
       true
     );
     const nextBeat = getBeatNoteRanges(nextRiff, indexes.sIdx, indexes.bIdx)[result.cursor.beatIndex];
@@ -5179,7 +5182,7 @@ const SongEditor: React.FC<Props> = ({
 
       const normalizedResult = normalizeChordBeatTokens(
         newChords,
-        parseTimeSignature(bar.timeSignature || song.timeSignature).beats
+        parseTimeSignature(getBarTimeSignature(bar)).beats
       );
       if (normalizedResult.error) return;
       const committedChords = normalizedResult.chords;
@@ -5716,7 +5719,7 @@ const SongEditor: React.FC<Props> = ({
                 {compactInspectorTitle}
               </div>
               <div className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-500">
-                {bar.timeSignature || song.timeSignature}
+                {getBarTimeSignature(bar)}
               </div>
               <div className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${
                 barTargetKey
@@ -5881,7 +5884,7 @@ const SongEditor: React.FC<Props> = ({
               }`}
             >
               <span className="text-[11px] font-bold leading-none">
-                {bar.timeSignature || song.timeSignature || '4/4'}
+                {getBarTimeSignature(bar)}
               </span>
             </button>
             <button
@@ -6039,6 +6042,7 @@ const SongEditor: React.FC<Props> = ({
                           gridSlotCount={jianpuBeatUnits}
                           leadingOccupiedSlots={leadingOccupiedSlots}
                           activeNote={selectedLayoutNote}
+                          color={bar.unisonMark?.enabled ? getAnnotationColorOption(bar.unisonMark.color ?? DEFAULT_UNISON_MARK_COLOR).text : undefined}
                           onTokenClick={(beatIndex, slotIndex) => {
                             const nextCaret = getRiffCaretForBeatSlot(
                               sIdx,
@@ -6089,7 +6093,7 @@ const SongEditor: React.FC<Props> = ({
                           lang="en"
                           spellCheck={false}
                           onChange={e => updateBarTimeSignature(e.target.value, barTimeSignatureParts.denominator)}
-                          placeholder={splitTimeSignatureInput(song.timeSignature).numerator || '4'}
+                          placeholder={splitTimeSignatureInput(getBarTimeSignature(bar)).numerator || '4'}
                           className="w-full rounded border border-gray-300 bg-white p-1.5 text-center text-xs outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                         <span className="text-sm font-bold text-gray-400">/</span>
@@ -6100,7 +6104,7 @@ const SongEditor: React.FC<Props> = ({
                           lang="en"
                           spellCheck={false}
                           onChange={e => updateBarTimeSignature(barTimeSignatureParts.numerator, e.target.value)}
-                          placeholder={splitTimeSignatureInput(song.timeSignature).denominator || '4'}
+                          placeholder={splitTimeSignatureInput(getBarTimeSignature(bar)).denominator || '4'}
                           className="w-full rounded border border-gray-300 bg-white p-1.5 text-center text-xs outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
@@ -7109,7 +7113,7 @@ const SongEditor: React.FC<Props> = ({
                                 {globalBarNumber}
                               </div>
                               <div className="inline-flex items-center rounded-md border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-indigo-600">
-                                {bar.timeSignature || song.timeSignature}
+                                {getBarTimeSignature(bar)}
                               </div>
                               <div className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${
                                 barTargetKey
@@ -7241,7 +7245,7 @@ const SongEditor: React.FC<Props> = ({
                               ));
                               const parsedChords = normalizeChordBeatTokens(
                                 chordTokens,
-                                parseTimeSignature(bar.timeSignature || song.timeSignature).beats
+                                parseTimeSignature(getBarTimeSignature(bar)).beats
                               );
                               if (parsedChords.error) return;
                               const nextChords = hasVisibleChordTokens(parsedChords.chords) ? parsedChords.chords : [];
@@ -7378,7 +7382,7 @@ const SongEditor: React.FC<Props> = ({
                     <div>
                       <div className="mb-1 flex items-center justify-between">
                         <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.chords}</label>
-                        <span className="text-[10px] font-semibold text-gray-400">{bar.timeSignature || song.timeSignature}</span>
+                        <span className="text-[10px] font-semibold text-gray-400">{getBarTimeSignature(bar)}</span>
                       </div>
                       <input
                         id={`editor-s${sIdx}-b${bIdx}-chords`}
@@ -7478,7 +7482,7 @@ const SongEditor: React.FC<Props> = ({
                           ));
                           const parsedChords = normalizeChordBeatTokens(
                             chordTokens,
-                            parseTimeSignature(bar.timeSignature || song.timeSignature).beats
+                            parseTimeSignature(getBarTimeSignature(bar)).beats
                           );
                           if (parsedChords.error) return;
                           const nextChords = hasVisibleChordTokens(parsedChords.chords) ? parsedChords.chords : [];
@@ -7552,7 +7556,7 @@ const SongEditor: React.FC<Props> = ({
                         }`}
                       >
                         <span className="text-[11px] font-bold leading-none">
-                          {bar.timeSignature || song.timeSignature || '4/4'}
+                          {getBarTimeSignature(bar)}
                         </span>
                       </button>
                       <button
@@ -7709,6 +7713,7 @@ const SongEditor: React.FC<Props> = ({
                                 gridSlotCount={jianpuBeatUnits}
                                 leadingOccupiedSlots={leadingOccupiedSlots}
                                 activeNote={selectedLayoutNote}
+                                color={bar.unisonMark?.enabled ? getAnnotationColorOption(bar.unisonMark.color ?? DEFAULT_UNISON_MARK_COLOR).text : undefined}
                                 onTokenClick={(beatIndex, slotIndex) => {
                                   const nextCaret = getRiffCaretForBeatSlot(
                                     sIdx,
@@ -7759,7 +7764,7 @@ const SongEditor: React.FC<Props> = ({
                                 lang="en"
                                 spellCheck={false}
                                 onChange={e => updateBarTimeSignature(e.target.value, barTimeSignatureParts.denominator)}
-                                placeholder={splitTimeSignatureInput(song.timeSignature).numerator || '4'}
+                                placeholder={splitTimeSignatureInput(getBarTimeSignature(bar)).numerator || '4'}
                                 className="w-full text-xs p-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none bg-white text-center"
                               />
                               <span className="text-sm font-bold text-gray-400">/</span>
@@ -7770,7 +7775,7 @@ const SongEditor: React.FC<Props> = ({
                                 lang="en"
                                 spellCheck={false}
                                 onChange={e => updateBarTimeSignature(barTimeSignatureParts.numerator, e.target.value)}
-                                placeholder={splitTimeSignatureInput(song.timeSignature).denominator || '4'}
+                                placeholder={splitTimeSignatureInput(getBarTimeSignature(bar)).denominator || '4'}
                                 className="w-full text-xs p-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none bg-white text-center"
                               />
                             </div>

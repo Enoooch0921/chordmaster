@@ -9,7 +9,6 @@ import {
   Copy,
   Delete,
   Eraser,
-  Globe2,
   Keyboard,
   Plus,
   Redo2,
@@ -18,10 +17,9 @@ import {
   Undo2,
   X
 } from 'lucide-react';
-import type { AppLanguage, Key, NavigationMarker, Song } from '../../types';
+import type { AnnotationColorId, AppLanguage, Bar, Key, NavigationMarker, Song } from '../../types';
 import {
   PREVIEW_NOTATION_MODES,
-  getNextPreviewNotationMode,
   type PreviewEditSession,
   type PreviewNotationCursor,
   type PreviewNotationMode
@@ -43,6 +41,13 @@ import {
   type RhythmEditAction
 } from '../../lib/rhythmEditing';
 import {
+  ANNOTATION_COLOR_OPTIONS,
+  DEFAULT_RHYTHM_MARK_COLOR,
+  DEFAULT_SPECIAL_CHORD_COLOR,
+  DEFAULT_UNISON_MARK_COLOR,
+  getAnnotationColorOption
+} from '../../constants/annotationColors';
+import {
   applyBarKeyChange,
   convertDisplayedChordToStoredChord,
   convertStoredChordToDisplayedChord,
@@ -50,6 +55,7 @@ import {
   getBeatCount,
   getChordBeatSlots,
   getChordPlacementError,
+  getEffectiveTimeSignatureForBar,
   getMultiMeasureRestPlacementError,
   getSongKeyStates,
   insertChordBeatBeforeSlot,
@@ -220,6 +226,10 @@ const modeForField = (field: PreviewEditSession['target']['field']): KeyboardMod
   field === 'text' ? 'text' : 'common'
 );
 
+const getCleanChordMarks = (marks: Bar['chordMarks']) => (
+  marks && Object.keys(marks).length > 0 ? marks : undefined
+);
+
 const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   session,
   language,
@@ -251,7 +261,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [mode, setMode] = React.useState<KeyboardMode>(() => modeForField(session.target.field));
   const [activePicker, setActivePicker] = React.useState<KeyboardPicker>(null);
   const [pickerAnchor, setPickerAnchor] = React.useState<PickerAnchor | null>(null);
-  const [notationModeMenuAnchor, setNotationModeMenuAnchor] = React.useState<PickerAnchor | null>(null);
   const [bassMode, setBassMode] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
   const [desktopKeysVisible, setDesktopKeysVisible] = React.useState(() => (
@@ -269,8 +278,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const panelRef = React.useRef<HTMLElement>(null);
   const chordCaptureRef = React.useRef<HTMLInputElement>(null);
   const multiRestInputRef = React.useRef<HTMLInputElement>(null);
-  const notationModeLongPressTimerRef = React.useRef<number | null>(null);
-  const suppressNextNotationModeClickRef = React.useRef(false);
 
   const located = findSongBar(session.draftSong, session.target);
   const bar = located?.bar;
@@ -300,7 +307,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const selectedRhythmEvent = bar
     ? getRhythmEventAtCursor(session.draftSong, session.target, rhythmCursor)
     : null;
-  const effectiveBarTimeSignature = bar?.timeSignature || session.draftSong.timeSignature || '4/4';
+  const effectiveBarTimeSignature = bar
+    ? getEffectiveTimeSignatureForBar(session.draftSong, bar)
+    : session.draftSong.timeSignature || '4/4';
   const keyStates = getSongKeyStates(session.draftSong);
   const sectionIndex = located?.sectionIndex ?? -1;
   const barIndex = located?.barIndex ?? -1;
@@ -323,7 +332,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     setMode(modeForField(session.target.field));
     setActivePicker(null);
     setPickerAnchor(null);
-    setNotationModeMenuAnchor(null);
     setNotationActionError(null);
     if (deviceLayout === 'desktop' && (notationMode !== 'chords' || session.target.field !== 'chords')) {
       setDesktopKeysVisible(true);
@@ -406,25 +414,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     document.addEventListener('pointerdown', closePickerOnOutsidePress, true);
     return () => document.removeEventListener('pointerdown', closePickerOnOutsidePress, true);
   }, [activePicker]);
-
-  React.useEffect(() => {
-    if (!notationModeMenuAnchor) return;
-    const closeNotationModeMenuOnOutsidePress = (event: PointerEvent) => {
-      if (!(event.target instanceof Element)) return;
-      if (event.target.closest('[data-notation-mode-menu]')) return;
-      if (event.target.closest('[data-notation-mode-trigger]')) return;
-      setNotationModeMenuAnchor(null);
-    };
-    document.addEventListener('pointerdown', closeNotationModeMenuOnOutsidePress, true);
-    return () => document.removeEventListener('pointerdown', closeNotationModeMenuOnOutsidePress, true);
-  }, [notationModeMenuAnchor]);
-
-  React.useEffect(() => () => {
-    if (notationModeLongPressTimerRef.current !== null) {
-      window.clearTimeout(notationModeLongPressTimerRef.current);
-      notationModeLongPressTimerRef.current = null;
-    }
-  }, []);
 
   function applyDisplayedChord(value: string, mergeKey?: string) {
     const normalizedInput = normalizeChordTextInput(value, chordInputMode);
@@ -540,59 +529,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }
 
   function changeNotationMode(nextMode: PreviewNotationMode) {
+    if (nextMode === notationMode) return;
     setMode('common');
     setActivePicker(null);
     setPickerAnchor(null);
-    setNotationModeMenuAnchor(null);
     setBassMode(false);
     setNotationActionError(null);
     setCollapsed(false);
     onNotationModeChange(nextMode);
-  }
-
-  function cycleNotationMode() {
-    changeNotationMode(getNextPreviewNotationMode(notationMode));
-  }
-
-  function clearNotationModeLongPress() {
-    if (notationModeLongPressTimerRef.current !== null) {
-      window.clearTimeout(notationModeLongPressTimerRef.current);
-      notationModeLongPressTimerRef.current = null;
-    }
-  }
-
-  function openNotationModeMenu(trigger: HTMLElement) {
-    const rect = trigger.getBoundingClientRect();
-    setActivePicker(null);
-    setPickerAnchor(null);
-    setNotationModeMenuAnchor({
-      left: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height
-    });
-    setCollapsed(false);
-  }
-
-  function handleNotationModePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) return;
-    const trigger = event.currentTarget;
-    clearNotationModeLongPress();
-    suppressNextNotationModeClickRef.current = false;
-    notationModeLongPressTimerRef.current = window.setTimeout(() => {
-      notationModeLongPressTimerRef.current = null;
-      suppressNextNotationModeClickRef.current = true;
-      openNotationModeMenu(trigger);
-    }, 420);
-  }
-
-  function handleNotationModeClick(event: React.MouseEvent<HTMLButtonElement>) {
-    if (suppressNextNotationModeClickRef.current) {
-      event.preventDefault();
-      suppressNextNotationModeClickRef.current = false;
-      return;
-    }
-    cycleNotationMode();
   }
 
   function navigateNotation(direction: 'previous' | 'next') {
@@ -951,6 +895,107 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const activeButtonClass = '!border-indigo-500/70 !bg-indigo-600 !text-white !shadow-[0_1px_0_rgba(49,46,129,0.8),0_3px_8px_rgba(79,70,229,0.28)] hover:!bg-indigo-600';
   const fieldClass = 'h-9 w-full rounded-xl border border-white/90 bg-white/95 px-3 text-sm font-semibold text-slate-800 shadow-inner outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200/70';
 
+  const activeChordMarkIndex = bar
+    ? getChordBeatSlots(bar, beatCount)[Math.max(0, Math.min(beatCount - 1, session.target.slotIndex))]?.rawChordIndex
+      ?? Math.max(0, Math.min(beatCount - 1, session.target.slotIndex))
+    : Math.max(0, session.target.slotIndex);
+  const activeChordMark = bar?.chordMarks?.[activeChordMarkIndex];
+  const activeChordColor = activeChordMark?.color ?? (activeChordMark?.special ? DEFAULT_SPECIAL_CHORD_COLOR : undefined);
+  const activeRhythmColor = bar?.rhythmMark?.color ?? (bar?.rhythmMark ? DEFAULT_RHYTHM_MARK_COLOR : undefined);
+  const activeUnisonColor = bar?.unisonMark?.enabled
+    ? bar.unisonMark.color ?? DEFAULT_UNISON_MARK_COLOR
+    : undefined;
+  const selectedPreviewColor = notationMode === 'chords'
+    ? activeChordColor
+    : notationMode === 'rhythm'
+      ? activeRhythmColor
+      : activeUnisonColor;
+  const previewColorLabel = notationMode === 'chords'
+    ? (language === 'zh' ? '和弦色' : 'Chord color')
+    : notationMode === 'rhythm'
+      ? (language === 'zh' ? '節奏色' : 'Rhythm color')
+      : (language === 'zh' ? '簡譜色' : 'Jianpu color');
+  const previewColorDisabled = notationMode === 'rhythm' && !bar?.rhythm?.trim();
+
+  const updateActiveChordMark = (nextMark: NonNullable<Bar['chordMarks']>[number] | undefined) => {
+    if (!bar) return;
+    const nextMarks = { ...(bar.chordMarks ?? {}) };
+    if (nextMark?.color || nextMark?.special) {
+      nextMarks[activeChordMarkIndex] = nextMark;
+    } else {
+      delete nextMarks[activeChordMarkIndex];
+    }
+    updateFields(
+      { chordMarks: getCleanChordMarks(nextMarks) },
+      `chord-color:${bar.id ?? session.target.barId}:${activeChordMarkIndex}`
+    );
+  };
+
+  const applyPreviewColor = (color: AnnotationColorId) => {
+    if (!bar || previewColorDisabled) return;
+    const shouldClear = selectedPreviewColor === color;
+    if (notationMode === 'chords') {
+      updateActiveChordMark(shouldClear ? undefined : { color });
+      return;
+    }
+    if (notationMode === 'rhythm') {
+      updateFields(
+        { rhythmMark: shouldClear ? undefined : { color } },
+        `rhythm-color:${bar.id ?? session.target.barId}`
+      );
+      return;
+    }
+    updateFields(
+      { unisonMark: shouldClear ? undefined : { enabled: true, color } },
+      `jianpu-color:${bar.id ?? session.target.barId}`
+    );
+  };
+
+  const renderPreviewColorControls = (key: string) => (
+    <div
+      key={key}
+      data-preview-color-controls
+      data-preview-color-target={notationMode}
+      className="grid min-h-0 grid-cols-[auto_repeat(6,minmax(0,1fr))] gap-1.5"
+      data-key-surface="utility"
+    >
+      <div className="flex min-h-0 items-center justify-center rounded-[11px] border border-white/40 bg-slate-300/70 px-1 text-[9px] font-black text-slate-600 shadow-inner">
+        {previewColorLabel}
+      </div>
+      {ANNOTATION_COLOR_OPTIONS.map((option) => {
+        const selected = option.id === selectedPreviewColor;
+        const title = language === 'zh' ? option.labelZh : option.label;
+        const tone = getAnnotationColorOption(option.id);
+
+        return (
+          <button
+            key={option.id}
+            type="button"
+            disabled={previewColorDisabled}
+            className={`${buttonClass} min-h-0 min-w-0 !px-0 disabled:cursor-not-allowed`}
+            style={{
+              backgroundColor: selected ? tone.text : tone.soft,
+              borderColor: selected ? tone.text : tone.border,
+              color: selected ? '#fff' : tone.text,
+              boxShadow: selected
+                ? `0 0 0 2px rgba(255,255,255,0.9), 0 0 0 4px ${tone.soft}, 0 3px 8px rgba(15,23,42,0.16)`
+                : undefined
+            }}
+            onClick={() => applyPreviewColor(option.id)}
+            aria-label={`${previewColorLabel}: ${title}`}
+            title={`${previewColorLabel}: ${title}`}
+          >
+            <span
+              className="h-3.5 w-3.5 rounded-full border border-white/70"
+              style={{ backgroundColor: selected ? '#fff' : tone.text }}
+              aria-hidden="true"
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+
   if (!bar || !section) {
     const fallbackStyle: React.CSSProperties = isDocked
       ? {
@@ -1047,32 +1092,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const pickerTop = pickerAnchor
     ? Math.max(viewportTop + 8, pickerAnchor.top - pickerHeight - 8)
     : viewportTop + 8;
-  const notationModeMenuWidth = Math.min(180, viewportWidth - 16);
-  const notationModeMenuHeight = 144;
-  const notationModeMenuLeft = notationModeMenuAnchor
-    ? Math.max(viewportLeft + 8, Math.min(
-        notationModeMenuAnchor.left + notationModeMenuAnchor.width / 2 - notationModeMenuWidth / 2,
-        viewportLeft + viewportWidth - notationModeMenuWidth - 8
-      ))
-    : viewportLeft + 8;
-  const notationModeMenuTop = notationModeMenuAnchor
-    ? (
-        notationModeMenuAnchor.top - notationModeMenuHeight - 8 >= viewportTop + 8
-          ? notationModeMenuAnchor.top - notationModeMenuHeight - 8
-          : Math.max(
-              viewportTop + 8,
-              Math.min(
-                viewportTop + viewportHeight - notationModeMenuHeight - 8,
-                notationModeMenuAnchor.top + (notationModeMenuAnchor.height ?? 32) + 8
-              )
-            )
-      )
-    : viewportTop + 8;
   const keyboardSurfaceMode = notationMode === 'chords' ? mode : notationMode;
   const keyboardContent = (
     <div data-keyboard-mode={keyboardSurfaceMode} data-notation-mode={notationMode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
       {notationMode === 'chords' && mode === 'common' && (
-        <div className={`grid min-h-0 flex-1 ${compactHardwareMode ? 'grid-rows-2' : 'grid-rows-4'} gap-2`} data-keyboard-view="main" data-desktop-compact={compactHardwareMode ? 'true' : undefined}>
+        <div className={`grid min-h-0 flex-1 ${compactHardwareMode ? 'grid-rows-3' : 'grid-rows-5'} gap-2`} data-keyboard-view="main" data-desktop-compact={compactHardwareMode ? 'true' : undefined}>
           {!compactHardwareMode && (
             <>
               <div className="grid min-h-0 grid-cols-10 gap-1.5" data-chord-key-row="roots" data-key-surface="character">
@@ -1137,6 +1161,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" data-picker-trigger="structure" className={`${utilityKeyClass} min-h-0 px-0 text-base`} onClick={(event) => openPicker('structure', event.currentTarget)} aria-label={language === 'zh' ? '小節操作' : 'Bar actions'}>+│</button>
             <button type="button" data-picker-trigger="bar" className={`${utilityKeyClass} min-h-0 px-0 text-base`} onClick={(event) => openPicker('bar', event.currentTarget)} aria-label={language === 'zh' ? '整小節輸入' : 'Whole bar input'}>•••</button>
           </div>
+
+          {renderPreviewColorControls('chord-color-controls')}
 
           {activePicker && pickerAnchor && pickerSize && typeof document !== 'undefined' && createPortal(
             <div
@@ -1355,7 +1381,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       )}
 
       {notationMode === 'rhythm' && (
-        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.52fr]'} gap-1.5`} data-keyboard-view="rhythm">
+        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr]'} gap-1.5`} data-keyboard-view="rhythm">
           <div className="grid min-h-0 grid-cols-5 gap-1.5" data-rhythm-key-row="notes" data-key-surface="character">
             {([['w', '全音符', 'Whole'], ['h', '二分音符', 'Half'], ['q', '四分音符', 'Quarter'], ['e', '八分音符', 'Eighth'], ['s', '十六分音符', 'Sixteenth']] as const).map(([token, zhLabel, enLabel]) => (
               <button key={token} type="button" className={`${characterKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === token && !selectedRhythmEvent.isRest && !selectedRhythmEvent.isSlash && !selectedRhythmEvent.triplet ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token })} aria-label={language === 'zh' ? zhLabel : `${enLabel} note`}>
@@ -1385,12 +1411,13 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyRhythm} aria-label={language === 'zh' ? '複製節奏' : 'Copy rhythm'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製節奏' : 'Copy rhythm'}</button>
             <button type="button" disabled={!hasCopiedRhythm} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteRhythm} aria-label={language === 'zh' ? '貼上節奏' : 'Paste rhythm'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上節奏' : 'Paste rhythm'}</button>
           </div>
+          {renderPreviewColorControls('rhythm-color-controls')}
           {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
         </div>
       )}
 
       {notationMode === 'jianpu' && (
-        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr]'} gap-1.5`} data-keyboard-view="jianpu">
+        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr]'} gap-1.5`} data-keyboard-view="jianpu">
           <div className="grid min-h-0 grid-cols-7 gap-1.5" data-jianpu-key-row="pitches" data-key-surface="character">
             {(['1', '2', '3', '4', '5', '6', '7'] as const).map((pitch) => (
               <button key={pitch} type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-pitch', pitch })} aria-label={language === 'zh' ? `輸入簡譜 ${pitch}` : `Insert jianpu ${pitch}`}>
@@ -1425,6 +1452,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyJianpu} aria-label={language === 'zh' ? '複製簡譜' : 'Copy jianpu'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製簡譜' : 'Copy jianpu'}</button>
             <button type="button" disabled={!hasCopiedJianpu} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteJianpu} aria-label={language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}</button>
           </div>
+          {renderPreviewColorControls('jianpu-color-controls')}
           {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
         </div>
       )}
@@ -1456,7 +1484,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const notationLabels: Record<PreviewNotationMode, string> = language === 'zh'
     ? { chords: '和弦', rhythm: '節奏', jianpu: '簡譜' }
     : { chords: 'Chords', rhythm: 'Rhythm', jianpu: 'Jianpu' };
-  const nextNotationMode = getNextPreviewNotationMode(notationMode);
+  const compactNotationLabels: Record<PreviewNotationMode, string> = language === 'zh'
+    ? notationLabels
+    : { chords: 'Chord', rhythm: 'Rhy', jianpu: 'Jian' };
   const notationMeter = parseTimeSignature(effectiveBarTimeSignature);
   const rhythmBeatNumber = Math.min(
     notationMeter.beats,
@@ -1503,24 +1533,35 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     >
       <header className="flex shrink-0 items-center gap-1.5 border-b border-white/70 bg-white/70 px-2.5 py-2 backdrop-blur-xl">
         {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={16} /></button>}
-        <button
-          type="button"
-          data-notation-mode-trigger
-          className={`${toolbarButtonClass} shrink-0 gap-1 !px-1.5 ${notationMode !== 'chords' ? '!border-indigo-300 !bg-indigo-50 !text-indigo-700' : ''}`}
-          onPointerDown={handleNotationModePointerDown}
-          onPointerUp={clearNotationModeLongPress}
-          onPointerCancel={clearNotationModeLongPress}
-          onPointerLeave={clearNotationModeLongPress}
-          onClick={handleNotationModeClick}
-          onContextMenu={(event) => event.preventDefault()}
-          aria-label={language === 'zh'
-            ? `切換輸入法，目前${notationLabels[notationMode]}，下一個${notationLabels[nextNotationMode]}，長按選擇模式`
-            : `Switch input mode, current ${notationLabels[notationMode]}, next ${notationLabels[nextNotationMode]}. Long press to choose mode`}
-          title={language === 'zh' ? `目前：${notationLabels[notationMode]}，長按選擇` : `Current: ${notationLabels[notationMode]}, long press to choose`}
+        <div
+          data-notation-mode-segments
+          className="grid h-9 w-[7.6rem] shrink-0 grid-cols-3 rounded-[13px] border border-white/80 bg-slate-300/70 p-0.5 shadow-inner sm:w-[9rem]"
+          role="group"
+          aria-label={language === 'zh' ? '輸入法' : 'Input mode'}
         >
-          <Globe2 size={14} />
-          <span className="text-[10px] font-black">{notationLabels[notationMode]}</span>
-        </button>
+          {PREVIEW_NOTATION_MODES.map((candidateMode) => {
+            const selected = candidateMode === notationMode;
+            return (
+              <button
+                key={candidateMode}
+                type="button"
+                aria-pressed={selected}
+                className={`min-w-0 rounded-[10px] px-0.5 text-[10px] font-black leading-none transition-colors ${
+                  selected
+                    ? 'bg-white text-indigo-700 shadow-[0_1px_4px_rgba(15,23,42,0.14)]'
+                    : 'text-slate-600 hover:bg-white/60 hover:text-slate-900'
+                }`}
+                onClick={() => changeNotationMode(candidateMode)}
+                aria-label={selected
+                  ? (language === 'zh' ? `目前${notationLabels[candidateMode]}` : `Current ${notationLabels[candidateMode]}`)
+                  : (language === 'zh' ? `切換到${notationLabels[candidateMode]}` : `Switch to ${notationLabels[candidateMode]}`)}
+                title={notationLabels[candidateMode]}
+              >
+                <span className="block truncate">{compactNotationLabels[candidateMode]}</span>
+              </button>
+            );
+          })}
+        </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-indigo-500">{section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}</div>
           <div className="truncate text-xs font-black text-slate-900">{headerValue}</div>
@@ -1542,42 +1583,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <button type="button" className={`${toolbarButtonClass} !text-rose-700`} onClick={onCancel} aria-label="Cancel"><X size={15} /></button>
         <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-600 !text-white hover:!bg-indigo-500`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={15} /><span className={deviceLayout === 'phone' ? 'sr-only' : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
       </header>
-
-      {notationModeMenuAnchor && createPortal(
-        <div
-          data-preview-edit-ui
-          data-notation-mode-menu
-          className="fixed z-[5100] rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-[0_18px_42px_rgba(15,23,42,0.24)] backdrop-blur-xl"
-          style={{
-            left: notationModeMenuLeft,
-            top: notationModeMenuTop,
-            width: notationModeMenuWidth
-          }}
-          role="menu"
-          aria-label={language === 'zh' ? '選擇輸入法' : 'Choose input mode'}
-        >
-          <div className="relative z-[1] flex flex-col gap-1">
-            {PREVIEW_NOTATION_MODES.map((candidateMode) => (
-              <button
-                key={candidateMode}
-                type="button"
-                role="menuitemradio"
-                aria-checked={candidateMode === notationMode}
-                className={`flex min-h-10 items-center justify-between rounded-xl px-3 text-sm font-bold transition-colors ${
-                  candidateMode === notationMode
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100/80 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700'
-                }`}
-                onClick={() => changeNotationMode(candidateMode)}
-              >
-                <span>{notationLabels[candidateMode]}</span>
-                {candidateMode === notationMode && <Check size={16} aria-hidden="true" />}
-              </button>
-            ))}
-          </div>
-        </div>,
-        document.body
-      )}
 
       {deviceLayout === 'desktop' && notationMode === 'chords' && session.target.field === 'chords' && (
         <input

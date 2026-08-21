@@ -33,6 +33,32 @@ const insertion = (beatIndex = 0, unitIndex = 0): JianpuCursor => ({
 });
 
 describe('jianpu insertion commands', () => {
+  it('uses an explicit time signature until the next explicit change', () => {
+    const song: Song = {
+      title: 'Inherited meter',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [
+          { id: 'bar-1', chords: [], timeSignature: '5/4', riff: '1 | 2 | 3 | 4 | 5' },
+          { id: 'bar-2', chords: [], riff: '1 | 2 | 3 | 4 | 5' },
+          { id: 'bar-3', chords: [], timeSignature: '3/4', riff: '1 | 2 | 3' }
+        ]
+      }]
+    };
+
+    expect(getJianpuBarLayout(song, { sectionId: 'section-1', barId: 'bar-2' })).toMatchObject({
+      timeSignature: '5/4',
+      beats: expect.arrayContaining([
+        expect.objectContaining({ beatIndex: 4 })
+      ])
+    });
+    expect(getJianpuBarLayout(song, { sectionId: 'section-1', barId: 'bar-3' })?.beats).toHaveLength(3);
+  });
+
   it('inserts digits, rests, and a hold without mutating the source song', () => {
     const source = makeSong();
     const note = applyJianpuCommand(source, target, insertion(), { type: 'insert-pitch', pitch: '1' });
@@ -543,5 +569,40 @@ describe('slurs and semantic navigation', () => {
     const moved = applyJianpuCommand(song, target, last, { type: 'move', direction: 1 });
     expect(moved.target.barId).toBe('bar-2');
     expect(moved.cursor).toEqual({ beatIndex: 0, unitIndex: 0, noteIndex: null });
+  });
+
+  it('moves between a selected note and the trailing input space in the same beat', () => {
+    const song = makeSong({ riff: '2_' });
+    const selected = getJianpuCursorForNote(song, target, 0, 0)!;
+
+    const next = applyJianpuCommand(song, target, selected, { type: 'move', direction: 1 });
+    expect(next.cursor).toEqual({ beatIndex: 0, unitIndex: 2, noteIndex: null });
+
+    const previous = applyJianpuCommand(song, target, next.cursor, { type: 'move', direction: -1 });
+    expect(previous.cursor).toEqual(selected);
+  });
+
+  it('continues through explicit trailing jianpu placeholder space', () => {
+    const song = makeSong({ riff: '2_s' });
+    const selected = getJianpuCursorForNote(song, target, 0, 0)!;
+
+    const firstGap = applyJianpuCommand(song, target, selected, { type: 'move', direction: 1 });
+    expect(firstGap.cursor).toEqual({ beatIndex: 0, unitIndex: 2, noteIndex: null });
+
+    const secondGap = applyJianpuCommand(song, target, firstGap.cursor, { type: 'move', direction: 1 });
+    expect(secondGap.cursor).toEqual({ beatIndex: 0, unitIndex: 3, noteIndex: null });
+  });
+
+  it('uses preview auto-duration shorthand when moving into trailing empty beat space', () => {
+    const song = makeSong({ riff: '234' });
+    const selected = getJianpuCursorForNote(song, target, 0, 2)!;
+
+    expect(selected).toEqual({ beatIndex: 0, unitIndex: 2, noteIndex: 2 });
+
+    const next = applyJianpuCommand(song, target, selected, { type: 'move', direction: 1 });
+    expect(next.cursor).toEqual({ beatIndex: 0, unitIndex: 3, noteIndex: null });
+
+    const previous = applyJianpuCommand(song, target, next.cursor, { type: 'move', direction: -1 });
+    expect(previous.cursor).toEqual(selected);
   });
 });

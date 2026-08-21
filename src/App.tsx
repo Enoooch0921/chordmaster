@@ -10242,6 +10242,7 @@ export default function App() {
         song={renderedSong}
         language={language}
         currentKey={renderedSong.currentKey}
+        showWrittenKeyInMetadata={!isSetlistMode}
         onElementClick={canOpenEditor ? handleElementClick : undefined}
         onMetaClick={canOpenEditor ? handleMetaClick : undefined}
         onAddBarClick={canEditTeamSongs && !activePreviewEditSession ? handleAddBarToSection : undefined}
@@ -15540,7 +15541,19 @@ export default function App() {
                 currentCapo={isSetlistMode ? currentSetlistCapo : currentCapo}
                 originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
                 canEditKey={isSetlistMode ? canEditSelectedSetlistKey : canEditTeamSongs}
+                metadataKeyValue={!isSetlistMode ? activeEditorSong.originalKey : undefined}
+                onMetadataKeyChange={!isSetlistMode ? (key) => handlePreviewWysiwygEditorChange({
+                  ...activeEditorSong,
+                  originalKey: key
+                }) : undefined}
                 metadataSuggestions={metadataSuggestions}
+                jianpuInputAbsolute={!isSetlistMode ? (activeEditorSong.jianpuInputAbsolute ?? false) : undefined}
+                onJianpuInputAbsoluteChange={!isSetlistMode ? (value) => handlePreviewWysiwygEditorChange(
+                  value === Boolean(activeEditorSong.jianpuInputAbsolute)
+                    ? { ...activeEditorSong, jianpuInputAbsolute: value }
+                    : reinterpretSongJianpuInput(activeEditorSong, value)
+                ) : undefined}
+                showReferenceFields={!isSetlistMode}
                 onChange={handlePreviewWysiwygEditorChange}
                 onKeyChange={(key) => {
                   if (isSetlistMode) {

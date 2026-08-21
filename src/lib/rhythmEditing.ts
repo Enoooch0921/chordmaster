@@ -15,6 +15,8 @@ import {
   type RhythmBase
 } from '../utils/rhythmUtils';
 import {
+  getEffectiveTimeSignatureForBar,
+  getEffectiveTimeSignatureForTarget,
   findSongBar,
   updateBarById,
   type LocatedSongBar,
@@ -97,7 +99,7 @@ const HIDDEN_GAP_TOKEN_CANDIDATES = [
 ] as const;
 
 const getBarTimeSignature = (song: Song, bar: Bar) => (
-  getEffectiveTimeSignature(bar.timeSignature, song.timeSignature)
+  getEffectiveTimeSignatureForBar(song, bar)
 );
 
 const toEditableEvents = (notation: string, timeSignature: string): RhythmEditableEvent[] => (
@@ -124,7 +126,7 @@ const getRhythmBarContext = (
 ): RhythmBarContext | null => {
   const located = findSongBar(song, target);
   if (!located) return null;
-  const timeSignature = getBarTimeSignature(song, located.bar);
+  const timeSignature = getEffectiveTimeSignatureForTarget(song, target);
   const notation = notationOverride ?? located.bar.rhythm ?? '';
   const parsed = parseRhythmNotation(notation, timeSignature);
   return {

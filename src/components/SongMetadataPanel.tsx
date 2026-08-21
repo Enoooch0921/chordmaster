@@ -6,6 +6,7 @@ import CapoPicker from './CapoPicker';
 import { CompactSegmentedControl, CompactToggleSwitch } from './SetlistCompactControls';
 import { parseYouTubeVideoId } from '../utils/referenceUtils';
 import { formatInitialCaps } from '../utils/textUtils';
+import { estimateTapTempo, getRecentTapTimes, resolveTapTempoDisplayBpm, type TapTempoLockState } from '../utils/tapTempoUtils';
 import { formatTempoBpm, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import type { PreviewEditorDeviceLayout } from '../lib/previewEditorLayout';
 
@@ -35,6 +36,7 @@ interface SongMetadataPanelProps {
   variant?: 'default' | 'preview-header';
   deviceLayout?: PreviewEditorDeviceLayout;
   initialFocusField?: PreviewMetadataFocusField;
+  initialAdvancedOpen?: boolean;
   canEditKey?: boolean;
 }
 
@@ -93,12 +95,7 @@ interface TapTempoButtonHandle {
 }
 
 const TAP_RESET_AFTER_MS = 2500;
-const TAP_MAX_SAMPLES = 8;
-const TAP_MIN_INTERVAL_MS = 150;
-const TAP_MAX_INTERVAL_MS = 3000;
-const TAP_OUTLIER_TOLERANCE = 0.16;
-const TAP_DEADBAND_BPM = 1;
-const TAP_MAX_STEP_BPM = 4;
+const TAP_MAX_SAMPLES = 12;
 const TAP_APPLY_IDLE_MS = 1400;
 const REFERENCE_BPM_TAP_COMMIT_DELAY_MS = 1400;
 const REFERENCE_BPM_INPUT_COMMIT_DELAY_MS = 300;
@@ -110,46 +107,6 @@ const getTapTimestamp = (eventTimeStamp?: number): number => {
   }
 
   return Math.abs(eventTimeStamp - now) < 60000 ? eventTimeStamp : now;
-};
-
-const getStableTapBpm = (tapTimes: number[], previousBpm: number | null): number | null => {
-  if (tapTimes.length < 2) {
-    return null;
-  }
-
-  const intervals = tapTimes
-    .slice(1)
-    .map((time, index) => time - tapTimes[index])
-    .filter((interval) => interval >= TAP_MIN_INTERVAL_MS && interval <= TAP_MAX_INTERVAL_MS);
-
-  if (intervals.length < 2) {
-    const interval = intervals[0];
-    return interval ? Math.min(400, Math.max(20, Math.round(60000 / interval))) : null;
-  }
-
-  const sortedIntervals = [...intervals].sort((a, b) => a - b);
-  const medianInterval = sortedIntervals[Math.floor(sortedIntervals.length / 2)];
-  const inlierIntervals = sortedIntervals.filter((interval) => (
-    Math.abs(interval - medianInterval) <= medianInterval * TAP_OUTLIER_TOLERANCE
-  ));
-  const usableIntervals = inlierIntervals.length >= 2 ? inlierIntervals : sortedIntervals;
-  const trimmedIntervals = usableIntervals.length >= 5
-    ? usableIntervals.slice(1, -1)
-    : usableIntervals;
-  const trimmedAverageInterval = trimmedIntervals.reduce((total, interval) => total + interval, 0) / trimmedIntervals.length;
-  const stableInterval = medianInterval * 0.65 + trimmedAverageInterval * 0.35;
-  const rawBpm = Math.min(400, Math.max(20, Math.round(60000 / stableInterval)));
-
-  if (previousBpm === null) {
-    return rawBpm;
-  }
-
-  const difference = Math.abs(rawBpm - previousBpm);
-  if (difference <= TAP_DEADBAND_BPM) {
-    return previousBpm;
-  }
-
-  return previousBpm + Math.sign(rawBpm - previousBpm) * Math.min(TAP_MAX_STEP_BPM, difference);
 };
 
 const getReferenceBpmDrafts = (song: Song): Record<SongReferenceKind, string> => ({
@@ -172,6 +129,8 @@ const TapTempoButton = React.forwardRef<TapTempoButtonHandle, TapTempoButtonProp
   const buttonRef = React.useRef<HTMLButtonElement>(null);
   const tapTimesRef = React.useRef<number[]>([]);
   const detectedBpmRef = React.useRef<number | null>(null);
+  const detectedPreciseBpmRef = React.useRef<number | null>(null);
+  const tapLockStateRef = React.useRef<TapTempoLockState>({ lockedBpm: null, recentPreciseBpms: [] });
   const displayedBpmRef = React.useRef<number | null>(null);
   const applyTimeoutRef = React.useRef<number | null>(null);
   const displayFrameRef = React.useRef<number | null>(null);
@@ -229,20 +188,27 @@ const TapTempoButton = React.forwardRef<TapTempoButtonHandle, TapTempoButtonProp
       easing: 'ease-out'
     });
 
-    const recentTaps = tapTimesRef.current.filter((time) => now - time < TAP_RESET_AFTER_MS);
-    const nextTaps = [...recentTaps, now].slice(-TAP_MAX_SAMPLES);
+    const nextTaps = getRecentTapTimes(tapTimesRef.current, now, {
+      resetAfterMs: TAP_RESET_AFTER_MS,
+      maxSamples: TAP_MAX_SAMPLES
+    });
     tapTimesRef.current = nextTaps;
 
-    const nextBpm = getStableTapBpm(nextTaps, detectedBpmRef.current);
-    if (nextBpm === null) {
+    const nextEstimate = estimateTapTempo(nextTaps, detectedPreciseBpmRef.current);
+    if (nextEstimate === null) {
       detectedBpmRef.current = null;
+      detectedPreciseBpmRef.current = null;
+      tapLockStateRef.current = { lockedBpm: null, recentPreciseBpms: [] };
       updateDisplayedBpm(null);
       return;
     }
 
-    if (nextBpm !== detectedBpmRef.current) {
-      detectedBpmRef.current = nextBpm;
-      updateDisplayedBpm(nextBpm);
+    detectedPreciseBpmRef.current = nextEstimate.preciseBpm;
+    const resolvedDisplay = resolveTapTempoDisplayBpm(nextEstimate, tapLockStateRef.current);
+    tapLockStateRef.current = resolvedDisplay.state;
+    if (resolvedDisplay.bpm !== detectedBpmRef.current) {
+      detectedBpmRef.current = resolvedDisplay.bpm;
+      updateDisplayedBpm(resolvedDisplay.bpm);
     }
 
     if (applyTimeoutRef.current !== null) {
@@ -308,6 +274,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   variant = 'default',
   deviceLayout = 'desktop',
   initialFocusField,
+  initialAdvancedOpen = false,
   canEditKey = true
 }) => {
   const copy = getUiCopy(language);
@@ -319,7 +286,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const [layoutMode, setLayoutMode] = React.useState<MetadataLayoutMode>('wide');
   // Keep only the core fields visible by default; everything else lives in a
   // collapsible "advanced" block so the panel stays compact on small laptops.
-  const [isAdvancedOpen, setIsAdvancedOpen] = React.useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = React.useState(initialAdvancedOpen);
   const bandTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
   const vocalTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
   const referenceBpmCommitTimeoutsRef = React.useRef<Record<SongReferenceKind, number | null>>({
@@ -1034,6 +1001,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   return (
     <section
       ref={panelRef}
+      data-song-metadata-panel
+      data-device-layout={deviceLayout}
       className={`border border-gray-200 bg-white shadow-sm ${
         isWideLayout ? 'rounded-[18px] px-3.5 py-2.5' : 'rounded-xl px-3 py-2.5'
       }`}

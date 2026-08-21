@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../../types';
@@ -102,49 +102,43 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: 'Next beat' })).toHaveTextContent('下一拍');
   });
 
-  it('cycles the globe through the three notation modes without mutating the draft', async () => {
+  it('shows all notation modes in the header and switches directly without mutating the draft', async () => {
     const user = userEvent.setup();
     const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
     const { onApplyDraft, onNotationModeChange, rerenderSession } = renderEditor({
       session: base,
       deviceLayout: 'phone'
     });
+    const group = screen.getByRole('group', { name: '輸入法' });
 
-    await user.click(screen.getByRole('button', { name: /切換輸入法，目前和弦，下一個節奏/ }));
+    expect(within(group).getByRole('button', { name: '目前和弦' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(group).getByRole('button', { name: '切換到節奏' })).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: '切換到簡譜' })).toBeInTheDocument();
+
+    await user.click(within(group).getByRole('button', { name: '切換到節奏' }));
     expect(onNotationModeChange).toHaveBeenCalledWith('rhythm');
     expect(onApplyDraft).not.toHaveBeenCalled();
 
     rerenderSession({ ...base, notationMode: 'rhythm' });
-    await user.click(screen.getByRole('button', { name: /切換輸入法，目前節奏，下一個簡譜/ }));
+    await user.click(screen.getByRole('button', { name: '切換到簡譜' }));
     expect(onNotationModeChange).toHaveBeenLastCalledWith('jianpu');
 
     rerenderSession({ ...base, notationMode: 'jianpu' });
-    await user.click(screen.getByRole('button', { name: /切換輸入法，目前簡譜，下一個和弦/ }));
+    await user.click(screen.getByRole('button', { name: '切換到和弦' }));
     expect(onNotationModeChange).toHaveBeenLastCalledWith('chords');
   });
 
-  it('opens a direct notation mode chooser from a long press on the mode button', () => {
-    vi.useFakeTimers();
-    try {
-      const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
-      const { onNotationModeChange } = renderEditor({
-        session: base,
-        deviceLayout: 'phone'
-      });
-      const modeButton = screen.getByRole('button', { name: /切換輸入法，目前和弦，下一個節奏/ });
+  it('keeps the current segmented notation button inert', async () => {
+    const user = userEvent.setup();
+    const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { onNotationModeChange } = renderEditor({
+      session: base,
+      deviceLayout: 'phone'
+    });
 
-      fireEvent.pointerDown(modeButton, { button: 0 });
-      act(() => {
-        vi.advanceTimersByTime(420);
-      });
+    await user.click(screen.getByRole('button', { name: '目前和弦' }));
 
-      const menu = screen.getByRole('menu', { name: '選擇輸入法' });
-      expect(within(menu).getByRole('menuitemradio', { name: '和弦' })).toHaveAttribute('aria-checked', 'true');
-      fireEvent.click(within(menu).getByRole('menuitemradio', { name: '簡譜' }));
-      expect(onNotationModeChange).toHaveBeenCalledWith('jianpu');
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(onNotationModeChange).not.toHaveBeenCalled();
   });
 
   it('writes rhythm notes and rests through semantic rhythm cursors', async () => {
@@ -394,7 +388,148 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: '切換高八度簡譜' })).toHaveClass('!bg-indigo-600');
     expect(screen.getByRole('button', { name: '切換簡譜附點' })).toHaveClass('!bg-indigo-600');
     expect(pitchKey).toHaveTextContent('1');
-    expect(document.querySelectorAll('[data-jianpu-input-glyph]')).toHaveLength(12);
+    expect(document.querySelectorAll('[data-jianpu-input-glyph]')).toHaveLength(11);
+  });
+
+  it('marks the selected chord beat color from the preview keyboard', async () => {
+    const user = userEvent.setup();
+    const chordSong: Song = {
+      ...song,
+      sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C', 'Dm'] }] }]
+    };
+    const chordTarget = {
+      ...target,
+      slotIndex: 1,
+      rawChordIndex: 1,
+      cursor: { kind: 'chord' as const, slotIndex: 1, rawChordIndex: 1 }
+    };
+    const chordSession = createPreviewEditSession({ song: chordSong, target: chordTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: chordSession, deviceLayout: 'phone' });
+
+    await user.click(screen.getByRole('button', { name: '和弦色: 玫瑰' }));
+
+    const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].chordMarks).toEqual({ 1: { color: 'rose' } });
+  });
+
+  it('keeps preview chord colors as swatch toggles without special or clear buttons', async () => {
+    const user = userEvent.setup();
+    const chordSong: Song = {
+      ...song,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{ id: 'bar-1', chords: ['C', 'Dm'], chordMarks: { 1: { color: 'rose' } } }]
+      }]
+    };
+    const chordTarget = {
+      ...target,
+      slotIndex: 1,
+      rawChordIndex: 1,
+      cursor: { kind: 'chord' as const, slotIndex: 1, rawChordIndex: 1 }
+    };
+    const chordSession = createPreviewEditSession({ song: chordSong, target: chordTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: chordSession, deviceLayout: 'phone' });
+
+    expect(screen.queryByRole('button', { name: '切換特殊和弦標記' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '清除目前顏色標註' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '和弦色: 玫瑰' }));
+
+    const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].chordMarks).toBeUndefined();
+  });
+
+  it('marks rhythm color from the rhythm keyboard', async () => {
+    const user = userEvent.setup();
+    const rhythmSong: Song = {
+      ...song,
+      sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'], rhythm: 'q' }] }]
+    };
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song: rhythmSong, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: rhythmSession, deviceLayout: 'phone' });
+
+    await user.click(screen.getByRole('button', { name: '節奏色: 天藍' }));
+
+    const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].rhythmMark).toEqual({ color: 'sky' });
+  });
+
+  it('clears rhythm color by tapping the selected swatch again', async () => {
+    const user = userEvent.setup();
+    const rhythmSong: Song = {
+      ...song,
+      sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'], rhythm: 'q', rhythmMark: { color: 'sky' } }] }]
+    };
+    const rhythmTarget = {
+      ...target,
+      field: 'rhythm' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'rhythm' as const, cursorUnit: 0 }
+    };
+    const rhythmSession = createPreviewEditSession({ song: rhythmSong, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: rhythmSession, deviceLayout: 'phone' });
+
+    await user.click(screen.getByRole('button', { name: '節奏色: 天藍' }));
+
+    const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].rhythmMark).toBeUndefined();
+  });
+
+  it('marks jianpu color as an enabled unison mark from the jianpu keyboard', async () => {
+    const user = userEvent.setup();
+    const jianpuSong: Song = {
+      ...song,
+      sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'], riff: '1 2 3 4' }] }]
+    };
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song: jianpuSong, target: jianpuTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: jianpuSession, deviceLayout: 'phone' });
+
+    await user.click(screen.getByRole('button', { name: '簡譜色: 紫羅蘭' }));
+
+    const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].unisonMark).toEqual({ enabled: true, color: 'violet' });
+  });
+
+  it('clears jianpu color by tapping the selected swatch again', async () => {
+    const user = userEvent.setup();
+    const jianpuSong: Song = {
+      ...song,
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [{ id: 'bar-1', chords: ['C'], riff: '1 2 3 4', unisonMark: { enabled: true, color: 'violet' } }]
+      }]
+    };
+    const jianpuTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null }
+    };
+    const jianpuSession = createPreviewEditSession({ song: jianpuSong, target: jianpuTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: jianpuSession, deviceLayout: 'phone' });
+
+    await user.click(screen.getByRole('button', { name: '簡譜色: 紫羅蘭' }));
+
+    const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].unisonMark).toBeUndefined();
   });
 
   it('keeps the jianpu movable/fixed input toggle separate from song mutation', async () => {
@@ -516,6 +651,52 @@ describe('PreviewBarEditor', () => {
 
     fireEvent.keyDown(document.body, { key: 'Enter' });
     expect(onNavigate).toHaveBeenLastCalledWith('next', undefined, { bar: true });
+  });
+
+  it('moves jianpu navigation between a selected note and its trailing input space', async () => {
+    const user = userEvent.setup();
+    const partialBeatSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [{ id: 'bar-1', chords: ['C'], riff: '2_' }]
+      }]
+    };
+    const selectedTarget = {
+      ...target,
+      field: 'jianpu' as const,
+      slotIndex: 0,
+      rawChordIndex: null,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 }
+    };
+    const selectedSession = createPreviewEditSession({ song: partialBeatSong, target: selectedTarget, inputMode: 'letters' });
+    const { onNavigate, onNotationCursorChange, rerenderSession } = renderEditor({
+      session: selectedSession,
+      deviceLayout: 'phone'
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Next beat' }));
+    expect(onNotationCursorChange).toHaveBeenLastCalledWith({
+      kind: 'jianpu',
+      beatIndex: 0,
+      unitIndex: 2,
+      noteIndex: null
+    });
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    const insertTarget = {
+      ...selectedTarget,
+      cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 2, noteIndex: null }
+    };
+    rerenderSession(createPreviewEditSession({ song: partialBeatSong, target: insertTarget, inputMode: 'letters' }));
+
+    await user.click(screen.getByRole('button', { name: 'Previous beat' }));
+    expect(onNotationCursorChange).toHaveBeenLastCalledWith({
+      kind: 'jianpu',
+      beatIndex: 0,
+      unitIndex: 0,
+      noteIndex: 0
+    });
   });
 
   it('docks the iPad keyboard across the full visual viewport without a native chord input', () => {
@@ -740,6 +921,36 @@ describe('PreviewBarEditor', () => {
     await user.click(screen.getByRole('button', { name: '4/4' }));
     const withoutOverride = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
     expect(withoutOverride.sections[0].bars[0].timeSignature).toBeUndefined();
+  });
+
+  it('shows an inherited meter without treating it as this bar override', async () => {
+    const user = userEvent.setup();
+    const inheritedMeterSong: Song = {
+      ...song,
+      sections: [{
+        ...song.sections[0],
+        bars: [
+          { id: 'bar-1', chords: ['C'], timeSignature: '5/4' },
+          { id: 'bar-2', chords: ['G'] }
+        ]
+      }]
+    };
+    const secondTarget = {
+      ...target,
+      barId: 'bar-2',
+      slotIndex: 4,
+      anchorKey: 'song-1|section-1|bar-2|chords|4'
+    };
+    const base = createPreviewEditSession({ song: inheritedMeterSong, target: secondTarget, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session: base, deviceLayout: 'phone' });
+
+    const timeButton = screen.getByRole('button', { name: '選擇小節拍號' });
+    expect(timeButton).toHaveTextContent('5/4');
+    await user.click(timeButton);
+    await user.click(screen.getByRole('button', { name: '5/4' }));
+
+    const edited = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(edited.sections[0].bars[1].timeSignature).toBe('5/4');
   });
 
   it('allows repeat start and repeat end together without a normal-barline option', async () => {

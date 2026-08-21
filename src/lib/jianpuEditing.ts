@@ -12,6 +12,7 @@ import {
   type JianpuInputMode,
   type JianpuNoteRange,
   type JianpuOctave,
+  applyJianpuAutoDurationShorthand,
   absoluteJianpuPartsToRelative,
   buildJianpuNoteFromMode,
   buildJianpuPlaceholder,
@@ -28,13 +29,19 @@ import {
   replaceJianpuRange,
   serializeJianpuBeatTokens
 } from '../utils/jianpuUtils';
-import { getEffectiveTimeSignature, parseTimeSignature } from '../utils/rhythmUtils';
+import { parseTimeSignature } from '../utils/rhythmUtils';
 import {
   getPlayKey,
   getTransposeOffset,
   transposeKeyWithPreference
 } from '../utils/musicUtils';
-import { findSongBar, getSongKeyStates, type SongBarIdentity } from './songEditing';
+import {
+  findSongBar,
+  getEffectiveTimeSignatureForBar,
+  getEffectiveTimeSignatureForTarget,
+  getSongKeyStates,
+  type SongBarIdentity
+} from './songEditing';
 
 export type JianpuPitch = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7';
 
@@ -232,21 +239,29 @@ export const fitJianpuInputModeToUnits = (
 const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | null => {
   const located = findSongBar(song, target);
   if (!located) return null;
-  const timeSignature = getEffectiveTimeSignature(located.bar.timeSignature, song.timeSignature);
+  const timeSignature = getEffectiveTimeSignatureForTarget(song, target);
   const { beatUnits } = parseTimeSignature(timeSignature);
   const tokens = getCanonicalJianpuBeatTokens(located.bar.riff, timeSignature);
   let carryUnits = 0;
 
   const beats: InternalBeatLayout[] = tokens.map((token, tokenIndex) => {
+    const rawNotes = findJianpuNoteRanges(token);
+    const rawPlaceholders = findJianpuPlaceholderRanges(token);
+    const parsedNotes = applyJianpuAutoDurationShorthand(
+      rawNotes,
+      rawNotes.length + rawPlaceholders.length,
+      rawPlaceholders.length > 0,
+      beatUnits
+    );
     const rawItems = [
-      ...findJianpuNoteRanges(token).map((note) => ({
+      ...parsedNotes.map((note) => ({
         kind: 'note' as const,
         charStart: note.start,
         charEnd: note.end,
         units: getNoteUnits(note),
         note
       })),
-	      ...findJianpuPlaceholderRanges(token).map((placeholder) => ({
+	      ...rawPlaceholders.map((placeholder) => ({
 	        kind: 'placeholder' as const,
 	        charStart: placeholder.start,
 	        charEnd: placeholder.end,
@@ -693,7 +708,7 @@ const sanitizeSectionSlurs = (song: Song, sectionIndex: number): Song => {
   const section = song.sections[sectionIndex];
   if (!section) return song;
   const refs = section.bars.flatMap((bar, barIndex) => {
-    const timeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
+    const timeSignature = getEffectiveTimeSignatureForBar(song, bar);
     const riff = getCanonicalJianpuNotation(bar.riff, timeSignature, true);
     return findJianpuNoteRanges(riff).map((note) => ({ barIndex, riff, note }));
   });
@@ -717,7 +732,7 @@ const sanitizeSectionSlurs = (song: Song, sectionIndex: number): Song => {
   const bars = [...section.bars];
   updates.forEach((barUpdates, barIndex) => {
     const bar = bars[barIndex];
-    const timeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
+    const timeSignature = getEffectiveTimeSignatureForBar(song, bar);
     let riff = getCanonicalJianpuNotation(bar.riff, timeSignature, true);
     barUpdates
       .sort((left, right) => right.start - left.start || right.end - left.end)
@@ -877,19 +892,28 @@ export const getJianpuInputModeAtCursor = (
 
 const getNavigationCursors = (context: JianpuBarContext): JianpuCursor[] => {
   const cursors: JianpuCursor[] = [];
+  const pushCursor = (cursor: JianpuCursor) => {
+    if (!cursors.some((candidate) => cursorEquals(candidate, cursor))) {
+      cursors.push(cursor);
+    }
+  };
+
   context.beats.forEach((beat) => {
     beat.items.forEach((item) => {
       if (item.kind === 'note') {
-        cursors.push(cursorForNote(item));
+        pushCursor(cursorForNote(item));
+        if (
+          item.unitEnd < beat.beatUnits - EPSILON
+          && findContiguousPlaceholders(context, item.absoluteUnitEnd).length > 0
+        ) {
+          pushCursor({ beatIndex: beat.beatIndex, unitIndex: item.unitEnd, noteIndex: null });
+        }
       } else if (item.unitStart < beat.beatUnits - EPSILON) {
-        cursors.push({ beatIndex: beat.beatIndex, unitIndex: item.unitStart, noteIndex: null });
+        pushCursor({ beatIndex: beat.beatIndex, unitIndex: item.unitStart, noteIndex: null });
       }
     });
-    if (
-      !beat.items.some((item) => item.kind === 'placeholder') &&
-      beat.occupiedEndUnits < beat.beatUnits - EPSILON
-    ) {
-      cursors.push({
+    if (beat.occupiedEndUnits < beat.beatUnits - EPSILON) {
+      pushCursor({
         beatIndex: beat.beatIndex,
         unitIndex: Math.max(beat.carryInUnits, beat.occupiedEndUnits),
         noteIndex: null
@@ -1231,7 +1255,7 @@ const toggleSlur = (
   const refs = section.bars.flatMap((bar, barIndex) => {
     const tokens = getCanonicalJianpuBeatTokens(
       bar.riff,
-      getEffectiveTimeSignature(bar.timeSignature, song.timeSignature)
+      getEffectiveTimeSignatureForBar(song, bar)
     );
     return tokens.flatMap((token, tokenIndex) => (
       findJianpuNoteRanges(token).map((note, noteIndex) => ({ barIndex, tokenIndex, noteIndex, note }))
@@ -1289,7 +1313,7 @@ const toggleSlur = (
     const bar = bars[barIndex];
     const tokens = getCanonicalJianpuBeatTokens(
       bar.riff,
-      getEffectiveTimeSignature(bar.timeSignature, song.timeSignature)
+      getEffectiveTimeSignatureForBar(song, bar)
     );
     const riff = serializeJianpuBeatTokens(applyStringUpdates(tokens, barUpdates), true);
     bars[barIndex] = { ...bar, riff: riff || undefined };

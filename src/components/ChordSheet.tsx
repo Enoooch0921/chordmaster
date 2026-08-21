@@ -9,7 +9,12 @@ import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker, BarLabelLane } from '../types';
 import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyPreservingSpelling, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
-import { getSongKeyStates } from '../lib/songEditing';
+import {
+  getEffectiveTimeSignatureForBar,
+  getSongKeyStates,
+  getSongTimeSignatureStates,
+  isBarCompletelyEmpty
+} from '../lib/songEditing';
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { formatInitialCaps } from '../utils/textUtils';
@@ -24,7 +29,6 @@ import { getEffectiveTimeSignature, getRestGlyph, getShuffleSymbolGlyphs, parseR
 import { DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
 import type { PreviewNotationCursor, PreviewNotationMode } from '../lib/previewEditSession';
 import { getJianpuCursorForNote } from '../lib/jianpuEditing';
-import { isBarCompletelyEmpty } from '../lib/songEditing';
 
 interface FormattedChordProps {
   chordString: string;
@@ -251,6 +255,15 @@ const getSectionBadgeStyle = (accent: string): React.CSSProperties => {
     color: tone.color
   };
 };
+
+const PREVIEW_EDIT_BAR_FILL = 'rgba(236, 253, 245, 0.34)';
+const PREVIEW_EDIT_BAR_SHADOW = 'inset 0 0 0 2px rgba(5, 150, 105, 0.78), inset 0 0 0 4px rgba(236, 253, 245, 0.86), 0 12px 24px rgba(16, 185, 129, 0.16)';
+const PREVIEW_EDIT_MULTI_SELECT_SHADOW = '0 0 0 3px rgba(245, 158, 11, 0.34)';
+const PREVIEW_ACTIVE_LANE_CLASS = 'pointer-events-none absolute inset-0 z-[0] rounded-sm shadow-[inset_0_0_0_1px_rgba(5,150,105,0.42)]';
+const PREVIEW_NOTATION_BEAT_CLASS = 'pointer-events-none absolute inset-y-[2px] z-[1] rounded-[3px] bg-emerald-300/24 shadow-[inset_0_0_0_1px_rgba(5,150,105,0.28)]';
+const PREVIEW_NOTATION_CARET_CLASS = 'pointer-events-none absolute top-[2px] bottom-[2px] z-[2] w-[2px] -translate-x-1/2 rounded-full bg-emerald-700 shadow-[0_0_0_1px_rgba(255,255,255,0.96),0_0_0_3px_rgba(16,185,129,0.18)]';
+const PREVIEW_CHORD_SLOT_ACTIVE_CLASS = 'bg-emerald-100/70 shadow-[inset_0_0_0_2px_rgba(5,150,105,0.86),0_0_0_1px_rgba(255,255,255,0.88)]';
+const PREVIEW_CENTERED_CHORD_ACTIVE_CLASS = 'pointer-events-none absolute inset-0 rounded bg-emerald-100/70 shadow-[inset_0_0_0_2px_rgba(5,150,105,0.86)]';
 
 const getChordMarkTextColor = (bar: Bar | undefined, chordIndex: number) => {
   const mark = bar?.chordMarks?.[chordIndex];
@@ -786,6 +799,10 @@ const getConsecutiveKeySequence = (keys: Key[]) => (
   }, [])
 );
 
+const areKeySequencesEqual = (left: Key[], right: Key[]) => (
+  left.length === right.length && left.every((key, index) => key === right[index])
+);
+
 const FormattedKeySequence: React.FC<{
   keys: Key[];
   nashvilleFontFamily?: string;
@@ -806,7 +823,7 @@ const FormattedKeySequence: React.FC<{
 );
 
 export type ChordSheetElementField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lower' | 'sectionName' | 'marker';
-export type ChordSheetMetaField = 'title' | 'credits' | 'key' | 'tempo' | 'timeSignature' | 'capo' | 'groove' | 'metadata';
+export type ChordSheetMetaField = 'title' | 'credits' | 'key' | 'performanceKey' | 'tempo' | 'timeSignature' | 'capo' | 'groove' | 'metadata';
 
 export interface PreviewAnchorRect {
   left: number;
@@ -862,13 +879,14 @@ const getPreviewAnchorRect = (element: HTMLElement): PreviewAnchorRect => {
   };
 };
 
-const VALUE_ANCHORED_META_FIELDS = new Set<ChordSheetMetaField>(['key', 'tempo', 'timeSignature']);
+const VALUE_ANCHORED_META_FIELDS = new Set<ChordSheetMetaField>(['key', 'performanceKey', 'tempo', 'timeSignature']);
 
 interface ChordSheetProps {
   song: Song;
   language: AppLanguage;
   currentKey: Key;
   transposeFromOriginal?: boolean;
+  showWrittenKeyInMetadata?: boolean;
   onElementClick?: (sIdx: number, bIdx: number, field: ChordSheetElementField, target: ChordSheetElementTarget) => void;
   onMetaClick?: (field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => void;
   onAddBarClick?: (sIdx: number) => void;
@@ -1367,7 +1385,7 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   // Chords always use the sans-serif preset; the serif option was removed.
@@ -1683,6 +1701,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       safeReleasePointerCapture(candidate.targetElement, candidate.pointerId);
     }
   };
+  const songTimeSignatureStates = getSongTimeSignatureStates(song);
+  const getBarEffectiveTimeSignature = (bar?: Bar | null) => (
+    bar ? getEffectiveTimeSignatureForBar(song, bar) : getEffectiveTimeSignature(undefined, song.timeSignature)
+  );
+  const getBarEffectiveTimeSignatureByIndex = (sIdx: number, bIdx: number, bar?: Bar | null) => (
+    songTimeSignatureStates.barActiveTimeSignatures[sIdx]?.[bIdx]
+      ?? getBarEffectiveTimeSignature(bar)
+  );
   const emitElementClick = (
     event: React.MouseEvent<HTMLElement>,
     sIdx: number,
@@ -1697,7 +1723,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     if (!onElementClick) return;
     const section = song.sections[sIdx];
     const bar = bIdx >= 0 ? section?.bars[bIdx] : undefined;
-    const beatCount = Math.max(1, Number.parseInt((bar?.timeSignature || song.timeSignature || '4/4').split('/')[0], 10) || 4);
+    const beatCount = Math.max(1, Number.parseInt(getBarEffectiveTimeSignature(bar).split('/')[0], 10) || 4);
     const hitRect = event.currentTarget.getBoundingClientRect();
     const calculatedSlotIndex = (field === 'chords' || field === 'lower') && bIdx >= 0
       ? Math.max(0, Math.min(beatCount - 1, Math.floor(((event.clientX - hitRect.left) / Math.max(1, hitRect.width)) * beatCount)))
@@ -1878,6 +1904,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const displayedChartKeySequence = getConsecutiveKeySequence(
     chartWrittenKeySequence.map((key) => transposeKeyWithPreference(key, globalKeyShift, displayedCurrentKey))
   );
+  const metadataKeySequence = showWrittenKeyInMetadata
+    ? getConsecutiveKeySequence(chartWrittenKeySequence)
+    : displayedChartKeySequence;
+  const metadataPlayKeySequence = showWrittenKeyInMetadata && !areKeySequencesEqual(metadataKeySequence, displayedChartKeySequence)
+    ? displayedChartKeySequence
+    : null;
   const displayedPlayKeySequence = getConsecutiveKeySequence(
     displayedChartKeySequence.map((key) => getPlayKey(key, capo))
   );
@@ -1942,12 +1974,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const allRows: PreviewSheetRow[] = [];
   const getRowHasThreeNotationRows = (bars: Bar[]) => bars.some((bar) => {
     if (!bar || !hasMeaningfulChordContent(bar.chords) || !bar.rhythm?.trim()) return false;
-    const effectiveTimeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
+    const effectiveTimeSignature = getBarEffectiveTimeSignature(bar);
     return hasVisiblePreviewRiff(getPreviewRiffNotation(bar.riff, effectiveTimeSignature));
   });
   const getRowHasLowerNotationRows = (bars: Bar[], startsSection = false) => bars.some((bar, barIdx) => {
     if (!bar) return false;
-    const effectiveTimeSignature = getEffectiveTimeSignature(bar.timeSignature, song.timeSignature);
+    const effectiveTimeSignature = getBarEffectiveTimeSignature(bar);
     return Boolean(
       bar.rhythm?.trim()
       || hasVisiblePreviewRiff(getPreviewRiffNotation(bar.riff, effectiveTimeSignature))
@@ -2182,22 +2214,41 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 )}
                 <AutoShrink className="min-w-0 overflow-visible mt-4.5">
                   <div className="flex items-center gap-3 text-xs font-medium text-gray-500 tracking-widest" style={{ fontFamily: chordFontFamily }}>
-                    <div
-                      {...getMetaHitProps('key')}
-                      className={`shrink-0 -mx-1 rounded-sm px-1 py-0.5 ${onMetaClick ? 'cursor-pointer transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(99,102,241,0.4)]' : ''}`}
-                    >
-                      <span>{copy.key} - </span>
-                      <span
-                        {...getMetaValueAnchorProps('key')}
-                        className="text-gray-900 font-bold"
+                    {metadataPlayKeySequence ? (
+                      <div
+                        {...getMetaHitProps('performanceKey')}
+                        className={`shrink-0 -mx-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold tracking-[0.12em] text-emerald-700 ${onMetaClick ? 'cursor-pointer transition-shadow hover:shadow-[0_0_0_2px_rgba(5,150,105,0.22)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(5,150,105,0.4)]' : ''}`}
                       >
-                        <FormattedKeySequence
-                          keys={displayedChartKeySequence}
-                          nashvilleFontFamily={nashvilleFontFamily}
-                          chordFontFamily={chordFontFamily}
-                        />
-                      </span>
-                    </div>
+                        <span>{copy.performanceKey} - </span>
+                        <span
+                          {...getMetaValueAnchorProps('performanceKey')}
+                          className="text-emerald-900"
+                        >
+                          <FormattedKeySequence
+                            keys={metadataPlayKeySequence}
+                            nashvilleFontFamily={nashvilleFontFamily}
+                            chordFontFamily={chordFontFamily}
+                          />
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        {...getMetaHitProps('key')}
+                        className={`shrink-0 -mx-1 rounded-sm px-1 py-0.5 ${onMetaClick ? 'cursor-pointer transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(99,102,241,0.4)]' : ''}`}
+                      >
+                        <span>{copy.key} - </span>
+                        <span
+                          {...getMetaValueAnchorProps('key')}
+                          className="text-gray-900 font-bold"
+                        >
+                          <FormattedKeySequence
+                            keys={metadataKeySequence}
+                            nashvilleFontFamily={nashvilleFontFamily}
+                            chordFontFamily={chordFontFamily}
+                          />
+                        </span>
+                      </div>
+                    )}
                     {typeof song.tempo === 'number' && (
                       <>
                         <span className="text-gray-400">|</span>
@@ -2349,7 +2400,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               const isPickupActive = activeBar?.sIdx === 0 && activeBar?.bIdx === -1;
               const sectionStartBar = row.startBIdx === 0 ? row.bars[0] : undefined;
               const sectionStartBarLabel = getBarDisplayLabel(sectionStartBar);
-              const sectionStartEffectiveTimeSignature = getEffectiveTimeSignature(sectionStartBar?.timeSignature, song.timeSignature);
+              const sectionStartEffectiveTimeSignature = getBarEffectiveTimeSignatureByIndex(row.sIdx, row.startBIdx, sectionStartBar);
               const sectionStartHasRhythm = Boolean(sectionStartBar?.rhythm?.trim());
               const sectionStartHasRiff = hasVisiblePreviewRiff(getPreviewRiffNotation(sectionStartBar?.riff, sectionStartEffectiveTimeSignature));
               const sectionStartDefaultLabelLane: BarLabelLane = sectionStartHasRhythm && sectionStartHasRiff && !sectionStartBar?.timeSignature ? 'rhythm' : 'riff';
@@ -2728,7 +2779,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     if (candidate.rhythm?.trim()) return false;
                     const riffNotation = getPreviewRiffNotation(
                       candidate.riff,
-                      getEffectiveTimeSignature(candidate.timeSignature, song.timeSignature)
+                      getBarEffectiveTimeSignature(candidate)
                     );
                     if (hasVisiblePreviewRiff(riffNotation)) return false;
                     return true;
@@ -2766,7 +2817,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const barPlayKey = getPlayKey(barCurrentKey, capo);
                     const barOffset = getTransposeOffset(barWrittenKey, barPlayKey);
                     const showKeyChangeTag = Boolean(bar) && barCurrentKey !== previousBarCurrentKey;
-                    const effectiveTimeSignature = bar ? getEffectiveTimeSignature(bar.timeSignature, song.timeSignature) : song.timeSignature;
+                    const effectiveTimeSignature = bar
+                      ? getBarEffectiveTimeSignatureByIndex(row.sIdx, globalBarIndex, bar)
+                      : getEffectiveTimeSignature(undefined, song.timeSignature);
                     const canonicalRiffNotation = getPreviewRiffNotation(bar?.riff, effectiveTimeSignature);
                     const previewRiffNotation = song.showAbsoluteJianpu
                       ? convertRelativeJianpuToAbsoluteNotation(canonicalRiffNotation, barPlayKey)
@@ -2793,14 +2846,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     );
                     const previousCanonicalRiffNotation = getPreviewRiffNotation(
                       bIdx > 0 ? row.bars[bIdx - 1]?.riff : undefined,
-                      getEffectiveTimeSignature(row.bars[bIdx - 1]?.timeSignature, song.timeSignature)
+                      getBarEffectiveTimeSignatureByIndex(row.sIdx, row.startBIdx + bIdx - 1, row.bars[bIdx - 1])
                     );
                     const previewPreviousRiffNotation = song.showAbsoluteJianpu
                       ? convertRelativeJianpuToAbsoluteNotation(previousCanonicalRiffNotation, previousPlayKey)
                       : previousCanonicalRiffNotation;
                     const nextCanonicalRiffNotation = getPreviewRiffNotation(
                       bIdx < row.bars.length - 1 ? row.bars[bIdx + 1]?.riff : undefined,
-                      getEffectiveTimeSignature(row.bars[bIdx + 1]?.timeSignature, song.timeSignature)
+                      getBarEffectiveTimeSignatureByIndex(row.sIdx, row.startBIdx + bIdx + 1, row.bars[bIdx + 1])
                     );
                     const previewNextRiffNotation = song.showAbsoluteJianpu
                       ? convertRelativeJianpuToAbsoluteNotation(nextCanonicalRiffNotation, nextPlayKey)
@@ -2815,6 +2868,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const displayChordEntries = bar ? getChordDisplaySlotEntries(bar.chords, beatsPerBar) : [];
                     const rhythmMarkColor = getRhythmMarkTextColor(bar);
                     const unisonMarkStyle = getUnisonMarkStyle(bar);
+                    const unisonMarkColor = bar?.unisonMark?.enabled
+                      ? getAnnotationColorOption(bar.unisonMark.color ?? DEFAULT_UNISON_MARK_COLOR).text
+                      : undefined;
                     const hasRhythm = Boolean(bar?.rhythm);
                     const hasRiff = hasVisiblePreviewRiff(previewRiffNotation);
                     const hasInlineTimeSignature = Boolean(bar?.timeSignature);
@@ -2840,32 +2896,42 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       && resolvedActiveNotationTarget.cursor.kind === 'jianpu'
                       ? resolvedActiveNotationTarget.cursor
                       : null;
-                    const notationBeatUnits = Math.max(1, parseTimeSignature(effectiveTimeSignature).beatUnits);
+                    const isActiveChordEditBar = Boolean(
+                      resolvedActiveChordSlot
+                      && resolvedActiveChordSlot.sectionId === section?.id
+                      && resolvedActiveChordSlot.barId === bar?.id
+                    );
+                    const isActivePreviewEditBar = isActiveNotationBar || isActiveChordEditBar;
+                    const notationMeter = parseTimeSignature(effectiveTimeSignature);
+                    const notationBeatUnits = Math.max(1, notationMeter.beatUnits);
+                    const notationBarUnits = Math.max(notationBeatUnits, notationMeter.barUnits);
+                    const notationBeatCount = Math.max(1, notationMeter.beats);
+                    const hideNotationCursor = Boolean(activeJianpuCursor?.noteIndex != null);
                     const renderActiveNotationCursor = () => {
                       const cursorUnit = activeRhythmCursor
                         ? activeRhythmCursor.cursorUnit
                         : activeJianpuCursor
                           ? (activeJianpuCursor.beatIndex * notationBeatUnits) + activeJianpuCursor.unitIndex
                           : null;
-                      if (cursorUnit === null) return null;
-                      const beatIndex = Math.max(0, Math.min(beatsPerBar - 1, Math.floor(cursorUnit / notationBeatUnits)));
-                      const clampedCursorUnit = Math.max(0, Math.min(beatsPerBar * notationBeatUnits, cursorUnit));
+                      if (cursorUnit === null || hideNotationCursor) return null;
+                      const beatIndex = Math.max(0, Math.min(notationBeatCount - 1, Math.floor(cursorUnit / notationBeatUnits)));
+                      const clampedCursorUnit = Math.max(0, Math.min(notationBarUnits, cursorUnit));
                       return (
                         <>
                           <span
                             data-preview-edit-ui
                             data-preview-notation-cursor-beat
-                            className="pointer-events-none absolute inset-y-0 z-[1] rounded-sm bg-emerald-100/55 ring-1 ring-inset ring-emerald-500/65"
+                            className={PREVIEW_NOTATION_BEAT_CLASS}
                             style={{
-                              left: `${(beatIndex / beatsPerBar) * 100}%`,
-                              width: `${100 / beatsPerBar}%`
+                              left: `${((beatIndex * notationBeatUnits) / notationBarUnits) * 100}%`,
+                              width: `${(notationBeatUnits / notationBarUnits) * 100}%`
                             }}
                           />
                           <span
                             data-preview-edit-ui
                             data-preview-notation-cursor-caret
-                            className="pointer-events-none absolute top-1 bottom-1 z-[2] w-[2px] -translate-x-1/2 rounded-full bg-emerald-600 shadow-[0_0_0_2px_rgba(255,255,255,0.78)]"
-                            style={{ left: `${(clampedCursorUnit / (beatsPerBar * notationBeatUnits)) * 100}%` }}
+                            className={PREVIEW_NOTATION_CARET_CLASS}
+                            style={{ left: `${(clampedCursorUnit / notationBarUnits) * 100}%` }}
                           />
                         </>
                       );
@@ -2901,7 +2967,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         'riff',
                         undefined,
                         undefined,
-                        { kind: 'jianpu', ...(cursor ?? { beatIndex, unitIndex: noteIndex, noteIndex }) }
+                        { kind: 'jianpu', ...(cursor ?? { beatIndex, unitIndex: 0, noteIndex }) }
                       );
                     };
                     const emitJianpuInsertSelection = (
@@ -2930,8 +2996,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           ? song.sections[row.sIdx - 1]?.bars.at(-1)
                           : undefined;
                     const previousRhythmTimeSignature = previousRhythmBar
-                      ? getEffectiveTimeSignature(previousRhythmBar.timeSignature, song.timeSignature)
-                      : song.timeSignature;
+                      ? getBarEffectiveTimeSignature(previousRhythmBar)
+                      : getEffectiveTimeSignature(undefined, song.timeSignature);
                     const tieRhythmFromPrevious = Boolean(
                       previousRhythmBar?.rhythm
                       && rhythmEndsWithTieToNext(previousRhythmBar.rhythm, previousRhythmTimeSignature)
@@ -2939,8 +3005,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const showIncomingRhythmTie = tieRhythmFromPrevious && bIdx === 0;
                     const nextRhythmBar = bIdx < row.bars.length - 1 ? row.bars[bIdx + 1] : undefined;
                     const nextRhythmTimeSignature = nextRhythmBar
-                      ? getEffectiveTimeSignature(nextRhythmBar.timeSignature, song.timeSignature)
-                      : song.timeSignature;
+                      ? getBarEffectiveTimeSignatureByIndex(row.sIdx, row.startBIdx + bIdx + 1, nextRhythmBar)
+                      : getEffectiveTimeSignature(undefined, song.timeSignature);
                     const projectsRhythmTieToNextBar = Boolean(
                       bar?.rhythm
                       && nextRhythmBar?.rhythm
@@ -3101,15 +3167,17 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       && previewBarId
                       && selectedPreviewBarKeys.has(`${previewBarSectionId}\u0000${previewBarId}`)
                     );
-                    const activeBarShadow = `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}`;
+                    const activeBarShadow = isActivePreviewEditBar
+                      ? PREVIEW_EDIT_BAR_SHADOW
+                      : `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}`;
                     const selectedBarShadow = 'inset 0 0 0 2px rgba(245, 158, 11, 0.96), inset 0 0 0 4px rgba(255, 251, 235, 0.88), 0 0 0 2px rgba(245, 158, 11, 0.24)';
                     const barStyle: React.CSSProperties = {
                       gridColumn: `${bIdx + 1} / span ${restSpan}`,
                       paddingBottom: `${barPaddingBottom}px`,
                       ...(isActiveBar ? {
-                        backgroundColor: activeTone.barFill,
+                        backgroundColor: isActivePreviewEditBar ? PREVIEW_EDIT_BAR_FILL : activeTone.barFill,
                         boxShadow: isPreviewSelectedBar
-                          ? `${activeBarShadow}, 0 0 0 3px rgba(245, 158, 11, 0.34)`
+                          ? `${activeBarShadow}, ${PREVIEW_EDIT_MULTI_SELECT_SHADOW}`
                           : activeBarShadow
                       } : isPreviewSelectedBar ? {
                         backgroundColor: 'rgba(251, 191, 36, 0.13)',
@@ -3318,9 +3386,24 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           className={`relative z-[30] flex flex-1 items-center justify-center w-full h-full cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${notationLaneHitClass} ${contentLeftInsetClass}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'rhythm')}
                                         >
-                                          {activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded bg-indigo-100/45 ring-2 ring-inset ring-indigo-500/70" />}
-                                          <div className="w-full max-w-full overflow-visible">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact scale={1.34} beamStrokeScale={1.14} tieFontScale={0.88} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
+                                          {activeRhythmCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
+                                          <div className="relative z-[1] w-full max-w-full overflow-visible">
+                                            {activeRhythmCursor && renderActiveNotationCursor()}
+                                            <RhythmNotation
+                                              notation={bar.rhythm}
+                                              timeSignature={effectiveTimeSignature}
+                                              compact
+                                              scale={1.34}
+                                              beamStrokeScale={1.14}
+                                              tieFontScale={0.88}
+                                              tieFromPrevious={showIncomingRhythmTie}
+                                              nextNotationForCrossBar={nextRhythmBar?.rhythm}
+                                              nextTimeSignatureForCrossBar={nextRhythmTimeSignature}
+                                              color={rhythmMarkColor}
+                                              className="w-full"
+                                              selectionMode="insert"
+                                              onInsertSelect={onElementClick ? emitRhythmSelection : undefined}
+                                            />
                                           </div>
                                         </div>
                                       );
@@ -3366,7 +3449,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               data-preview-slot-index={slotIndex}
                                               data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|chords|${slotIndex}`}
                                               aria-hidden="true"
-                                              className={`pointer-events-none relative h-[26px] rounded-[4px] transition-shadow ${isSelectedSlot ? 'bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92),0_0_0_1px_rgba(255,255,255,0.88)]' : ''}`}
+                                              className={`pointer-events-none relative h-[26px] rounded-[4px] transition-shadow ${isSelectedSlot ? PREVIEW_CHORD_SLOT_ACTIVE_CLASS : ''}`}
                                               style={{ gridColumn: `${slotIndex + 1} / span ${slotSpan}`, gridRow: '1' }}
                                             >
                                               {isSelectedSlot && !slotHasChord && <PreviewChordInputCaret className="absolute bottom-[4px] left-[5px]" />}
@@ -3494,7 +3577,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           className={`relative flex-1 flex items-center justify-center w-full h-full cursor-pointer rounded ${contentLeftInsetClass}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
-                                          {isCenteredSpecialSelected && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92)]" />}
+                                          {isCenteredSpecialSelected && <span data-preview-edit-ui className={PREVIEW_CENTERED_CHORD_ACTIVE_CLASS} />}
                                           <FormattedChord
                                             chordString="%"
                                             nashvilleFontFamily={nashvilleFontFamily}
@@ -3514,7 +3597,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           className={`relative flex flex-1 h-full w-full items-center justify-center cursor-pointer rounded transition-colors hover:bg-indigo-50/50 ${contentLeftInsetClass}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
-                                          {isCenteredSpecialSelected && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded bg-indigo-100/65 shadow-[inset_0_0_0_2px_rgba(79,70,229,0.92)]" />}
+                                          {isCenteredSpecialSelected && <span data-preview-edit-ui className={PREVIEW_CENTERED_CHORD_ACTIVE_CLASS} />}
                                           <FormattedChord
                                             chordString={getDisplayedChordString(centeredWholeRestAnchor.chord, barOffset, barPlayKey, song.showNashvilleNumbers, false, barWrittenKey)}
                                             compactModifier={compactModifier}
@@ -3577,10 +3660,22 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'rhythm');
                                           }}
                                         >
-                                          {activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
-                                          {activeRhythmCursor && renderActiveNotationCursor()}
-                                          <div className="w-full">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
+                                          {activeRhythmCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
+                                          <div className="relative z-[1] w-full">
+                                            {activeRhythmCursor && renderActiveNotationCursor()}
+                                            <RhythmNotation
+                                              notation={bar.rhythm}
+                                              timeSignature={effectiveTimeSignature}
+                                              compact
+                                              accentScale={0.86}
+                                              tieFromPrevious={showIncomingRhythmTie}
+                                              nextNotationForCrossBar={nextRhythmBar?.rhythm}
+                                              nextTimeSignatureForCrossBar={nextRhythmTimeSignature}
+                                              color={rhythmMarkColor}
+                                              className="w-full"
+                                              selectionMode="insert"
+                                              onInsertSelect={onElementClick ? emitRhythmSelection : undefined}
+                                            />
                                           </div>
                                         </div>
                                       </div>
@@ -3594,30 +3689,27 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
                                           }}
                                         >
-                                          {activeJianpuCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
-                                          {activeJianpuCursor && renderActiveNotationCursor()}
-                                          <Jianpu
-                                            notation={previewRiffNotation}
-                                            compact
-                                            scale={previewJianpuScale}
-                                            timeSignature={effectiveTimeSignature}
-                                            gridSlotCount={notationBeatUnits}
-                                            className="w-full min-w-0"
-                                            previousNotationForCrossBar={previewPreviousRiffNotation}
-                                            nextNotationForCrossBar={previewNextRiffNotation}
-                                            activeTokenIndex={activeJianpuCursor?.beatIndex ?? null}
-                                            activeInsertPosition={activeJianpuCursor && activeJianpuCursor.noteIndex == null ? {
-                                              tokenIndex: activeJianpuCursor.beatIndex,
-                                              slotIndex: activeJianpuCursor.unitIndex,
-                                              slotCount: notationBeatUnits
-                                            } : null}
-                                            activeNote={activeJianpuCursor?.noteIndex != null ? {
-                                              tokenIndex: activeJianpuCursor.beatIndex,
-                                              noteIndex: activeJianpuCursor.noteIndex
-                                            } : null}
-                                            onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
-                                          onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
-                                          />
+                                          {activeJianpuCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
+                                          <div className="relative z-[1] w-full min-w-0">
+                                            {activeJianpuCursor && renderActiveNotationCursor()}
+                                            <Jianpu
+                                              notation={previewRiffNotation}
+                                              compact
+                                              scale={previewJianpuScale}
+                                              timeSignature={effectiveTimeSignature}
+                                              gridSlotCount={notationBeatUnits}
+                                              color={unisonMarkColor}
+                                              className="w-full min-w-0"
+                                              previousNotationForCrossBar={previewPreviousRiffNotation}
+                                              nextNotationForCrossBar={previewNextRiffNotation}
+                                              activeNote={activeJianpuCursor?.noteIndex != null ? {
+                                                tokenIndex: activeJianpuCursor.beatIndex,
+                                                noteIndex: activeJianpuCursor.noteIndex
+                                              } : null}
+                                              onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
+                                              onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
+                                            />
+                                          </div>
                                         </div>
                                       </div>
                                   </div>
@@ -3637,30 +3729,27 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
                                         }}
                                       >
-                                        {activeJianpuCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
-                                        {activeJianpuCursor && renderActiveNotationCursor()}
-                                        <Jianpu
-                                          notation={previewRiffNotation}
-                                          compact
-                                          scale={previewJianpuScale}
-                                          timeSignature={effectiveTimeSignature}
-                                          gridSlotCount={notationBeatUnits}
-                                          className="w-full min-w-0"
-                                          previousNotationForCrossBar={previewPreviousRiffNotation}
-                                          nextNotationForCrossBar={previewNextRiffNotation}
-                                          activeTokenIndex={activeJianpuCursor?.beatIndex ?? null}
-                                          activeInsertPosition={activeJianpuCursor && activeJianpuCursor.noteIndex == null ? {
-                                            tokenIndex: activeJianpuCursor.beatIndex,
-                                            slotIndex: activeJianpuCursor.unitIndex,
-                                            slotCount: notationBeatUnits
-                                          } : null}
-                                          activeNote={activeJianpuCursor?.noteIndex != null ? {
-                                            tokenIndex: activeJianpuCursor.beatIndex,
-                                            noteIndex: activeJianpuCursor.noteIndex
-                                          } : null}
-                                          onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
-                                          onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
-                                        />
+                                        {activeJianpuCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
+                                        <div className="relative z-[1] w-full min-w-0">
+                                          {activeJianpuCursor && renderActiveNotationCursor()}
+                                          <Jianpu
+                                            notation={previewRiffNotation}
+                                            compact
+                                            scale={previewJianpuScale}
+                                            timeSignature={effectiveTimeSignature}
+                                            gridSlotCount={notationBeatUnits}
+                                            color={unisonMarkColor}
+                                            className="w-full min-w-0"
+                                            previousNotationForCrossBar={previewPreviousRiffNotation}
+                                            nextNotationForCrossBar={previewNextRiffNotation}
+                                            activeNote={activeJianpuCursor?.noteIndex != null ? {
+                                              tokenIndex: activeJianpuCursor.beatIndex,
+                                              noteIndex: activeJianpuCursor.noteIndex
+                                            } : null}
+                                            onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
+                                            onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
+                                          />
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
@@ -3679,36 +3768,46 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           emitElementClick(e, row.sIdx, row.startBIdx + bIdx, showBottomRhythmLane ? 'rhythm' : 'riff');
                                         }}
                                         >
-                                          {showBottomRhythmLane && activeRhythmCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
-                                          {!showBottomRhythmLane && activeJianpuCursor && <span data-preview-edit-ui className="pointer-events-none absolute inset-0 rounded-sm bg-indigo-100/45 ring-1 ring-inset ring-indigo-500/70" />}
-                                          {(showBottomRhythmLane ? activeRhythmCursor : activeJianpuCursor) && renderActiveNotationCursor()}
+                                          {showBottomRhythmLane && activeRhythmCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
+                                          {!showBottomRhythmLane && activeJianpuCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
                                           {showBottomRhythmLane ? (
-                                            <div className="w-full">
-	                                            <RhythmNotation notation={bar.rhythm} timeSignature={effectiveTimeSignature} compact accentScale={0.86} tieFromPrevious={showIncomingRhythmTie} nextNotationForCrossBar={nextRhythmBar?.rhythm} nextTimeSignatureForCrossBar={nextRhythmTimeSignature} color={rhythmMarkColor} className="w-full" selectionMode="insert" selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null} onInsertSelect={onElementClick ? emitRhythmSelection : undefined} />
+                                            <div className="relative z-[1] w-full">
+                                              {activeRhythmCursor && renderActiveNotationCursor()}
+                                              <RhythmNotation
+                                                notation={bar.rhythm}
+                                                timeSignature={effectiveTimeSignature}
+                                                compact
+                                                accentScale={0.86}
+                                                tieFromPrevious={showIncomingRhythmTie}
+                                                nextNotationForCrossBar={nextRhythmBar?.rhythm}
+                                                nextTimeSignatureForCrossBar={nextRhythmTimeSignature}
+                                                color={rhythmMarkColor}
+                                                className="w-full"
+                                                selectionMode="insert"
+                                                onInsertSelect={onElementClick ? emitRhythmSelection : undefined}
+                                              />
+                                            </div>
+                                          ) : (
+                                          <div className="relative z-[1] w-full min-w-0">
+                                            {activeJianpuCursor && renderActiveNotationCursor()}
+                                            <Jianpu
+                                              notation={previewRiffNotation}
+                                              compact
+                                              scale={previewJianpuScale}
+                                              timeSignature={effectiveTimeSignature}
+                                              gridSlotCount={notationBeatUnits}
+                                              color={unisonMarkColor}
+                                              className="w-full min-w-0"
+                                              previousNotationForCrossBar={previewPreviousRiffNotation}
+                                              nextNotationForCrossBar={previewNextRiffNotation}
+                                              activeNote={activeJianpuCursor?.noteIndex != null ? {
+                                                tokenIndex: activeJianpuCursor.beatIndex,
+                                                noteIndex: activeJianpuCursor.noteIndex
+                                              } : null}
+                                              onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
+                                              onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
+                                            />
                                           </div>
-                                        ) : (
-                                          <Jianpu
-                                            notation={previewRiffNotation}
-                                            compact
-                                            scale={previewJianpuScale}
-                                            timeSignature={effectiveTimeSignature}
-                                            gridSlotCount={notationBeatUnits}
-                                            className="w-full min-w-0"
-                                            previousNotationForCrossBar={previewPreviousRiffNotation}
-                                            nextNotationForCrossBar={previewNextRiffNotation}
-                                            activeTokenIndex={activeJianpuCursor?.beatIndex ?? null}
-                                            activeInsertPosition={activeJianpuCursor && activeJianpuCursor.noteIndex == null ? {
-                                              tokenIndex: activeJianpuCursor.beatIndex,
-                                              slotIndex: activeJianpuCursor.unitIndex,
-                                              slotCount: notationBeatUnits
-                                            } : null}
-                                            activeNote={activeJianpuCursor?.noteIndex != null ? {
-                                              tokenIndex: activeJianpuCursor.beatIndex,
-                                              noteIndex: activeJianpuCursor.noteIndex
-                                            } : null}
-                                            onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
-                                            onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
-                                          />
                                         )}
                                       </div>
                                     )}

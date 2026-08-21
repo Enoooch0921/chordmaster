@@ -34,10 +34,15 @@ interface PreviewWysiwygEditorProps {
   currentCapo: number;
   originalKey: Key | null;
   canEditKey?: boolean;
+  metadataKeyValue?: Key;
+  onMetadataKeyChange?: (key: Key) => void;
   metadataSuggestions?: {
     versions: string[];
     translators: string[];
   };
+  jianpuInputAbsolute?: boolean;
+  onJianpuInputAbsoluteChange?: (value: boolean) => void;
+  showReferenceFields?: boolean;
   onChange: (song: Song) => void;
   onKeyChange: (key: Key) => void;
   onCapoChange: (capo: number) => void;
@@ -45,7 +50,7 @@ interface PreviewWysiwygEditorProps {
 }
 
 const COMMON_TIME_DENOMINATORS = [2, 4, 8, 16];
-const VALUE_OVERLAY_FIELDS = new Set<ChordSheetMetaField>(['key', 'tempo', 'timeSignature']);
+const VALUE_OVERLAY_FIELDS = new Set<ChordSheetMetaField>(['key', 'performanceKey', 'tempo', 'timeSignature']);
 const TEMPO_STEP_BUTTON_SIZE = 16;
 const TEMPO_STEP_GAP = 2;
 const TEMPO_STEP_CONTROLS_WIDTH = TEMPO_STEP_BUTTON_SIZE * 2 + TEMPO_STEP_GAP * 2;
@@ -84,7 +89,7 @@ const getDesktopPosition = (anchorRect: PreviewAnchorRect, field: ChordSheetMeta
 
   const margin = 12;
   const minimumWidth = field === 'metadata'
-    ? 520
+    ? 900
     : field === 'title'
     ? 280
     : field === 'credits'
@@ -98,7 +103,7 @@ const getDesktopPosition = (anchorRect: PreviewAnchorRect, field: ChordSheetMeta
     Math.max(margin, field === 'metadata' ? anchorRect.right - width : anchorRect.left),
     Math.max(margin, window.innerWidth - width - margin)
   );
-  const estimatedHeight = field === 'metadata' ? 410 : field === 'credits' ? 170 : 150;
+  const estimatedHeight = field === 'metadata' ? 560 : field === 'credits' ? 170 : 150;
   const availableBelow = window.innerHeight - anchorRect.bottom - margin;
   const top = field === 'metadata'
     ? availableBelow >= estimatedHeight
@@ -292,7 +297,12 @@ export default function PreviewWysiwygEditor({
   currentCapo,
   originalKey,
   canEditKey = true,
+  metadataKeyValue,
+  onMetadataKeyChange,
   metadataSuggestions,
+  jianpuInputAbsolute,
+  onJianpuInputAbsoluteChange,
+  showReferenceFields = true,
   onChange,
   onKeyChange,
   onCapoChange,
@@ -311,12 +321,36 @@ export default function PreviewWysiwygEditor({
   const [timeDraft, setTimeDraft] = React.useState(song.timeSignature);
   const usesMetadataPanel = target.field === 'metadata'
     || target.field === 'groove'
-    || deviceLayout !== 'desktop';
+    || (deviceLayout !== 'desktop' && target.field !== 'performanceKey');
   const isTouchLayout = deviceLayout !== 'desktop';
   const [visualViewportState, setVisualViewportState] = React.useState(() => ({
     height: typeof window === 'undefined' ? 800 : window.innerHeight,
     keyboardOffset: 0
   }));
+  const editableMetadataKey = metadataKeyValue ?? currentKey;
+  const metadataOriginalKey = metadataKeyValue ?? originalKey;
+  const metadataKeyMetaText = metadataKeyValue ? copy.original : originalKey ?? undefined;
+  const isPerformanceKeyField = target.field === 'performanceKey';
+  const inlineKeyValue = isPerformanceKeyField ? currentKey : editableMetadataKey;
+  const inlineKeyOriginalKey = isPerformanceKeyField ? (metadataKeyValue ?? originalKey) : metadataOriginalKey;
+  const inlineKeyMetaText = isPerformanceKeyField
+    ? (metadataKeyValue ?? originalKey ?? undefined)
+    : metadataKeyMetaText;
+  const handleMetadataKeyChange = React.useCallback((key: Key) => {
+    if (onMetadataKeyChange) {
+      onMetadataKeyChange(key);
+      return;
+    }
+    onKeyChange(key);
+  }, [onKeyChange, onMetadataKeyChange]);
+  const handleInlineKeyChange = React.useCallback((key: Key) => {
+    if (isPerformanceKeyField) {
+      onKeyChange(key);
+      return;
+    }
+
+    handleMetadataKeyChange(key);
+  }, [handleMetadataKeyChange, isPerformanceKeyField, onKeyChange]);
 
   React.useEffect(() => {
     cancelCloseRef.current = false;
@@ -674,16 +708,16 @@ export default function PreviewWysiwygEditor({
       onKeyDown={handleEscape}
     >
       <KeyPicker
-        value={currentKey}
+        value={inlineKeyValue}
         onChange={(key) => {
           if (!key) return;
-          onKeyChange(key);
+          handleInlineKeyChange(key);
           onClose();
         }}
         disabled={!canEditKey}
-        label={copy.key}
-        originalKey={originalKey}
-        panelMetaText={originalKey ?? undefined}
+        label={isPerformanceKeyField ? copy.performanceKey : copy.key}
+        originalKey={inlineKeyOriginalKey}
+        panelMetaText={inlineKeyMetaText}
         align="left"
         triggerDensity="compact"
         autoOpen
@@ -855,20 +889,25 @@ export default function PreviewWysiwygEditor({
     'Capo'
   );
 
+  const usesFullSongInfoPanel = target.field === 'metadata' && showReferenceFields;
   const renderMetadataPanel = () => chrome(
     <SongMetadataPanel
       song={song}
       language={language}
       onChange={onChange}
       metadataSuggestions={metadataSuggestions}
-      keyValue={currentKey}
+      title={usesFullSongInfoPanel ? copy.editor.editSong : undefined}
+      keyValue={editableMetadataKey}
       capoValue={currentCapo}
-      onKeyChange={onKeyChange}
+      onKeyChange={handleMetadataKeyChange}
       onCapoChange={onCapoChange}
-      showReferenceFields={false}
-      variant="preview-header"
+      jianpuInputAbsolute={jianpuInputAbsolute}
+      onJianpuInputAbsoluteChange={onJianpuInputAbsoluteChange}
+      showReferenceFields={showReferenceFields}
+      variant={usesFullSongInfoPanel ? 'default' : 'preview-header'}
       deviceLayout={deviceLayout}
       initialFocusField={target.field === 'metadata' ? undefined : target.field}
+      initialAdvancedOpen={usesFullSongInfoPanel}
       canEditKey={canEditKey}
     />,
     zh ? '歌曲資訊' : 'Song information',
@@ -878,13 +917,14 @@ export default function PreviewWysiwygEditor({
   const isInlineField = !usesMetadataPanel && (target.field === 'title'
     || target.field === 'credits'
     || target.field === 'key'
+    || target.field === 'performanceKey'
     || target.field === 'tempo'
     || target.field === 'timeSignature');
   const desktopStyle = isInlineField
     ? getInlinePosition(
         target.anchorRect,
         target.field,
-        target.field === 'tempo' ? tempoDraft : target.field === 'timeSignature' ? timeDraft : currentKey,
+        target.field === 'tempo' ? tempoDraft : target.field === 'timeSignature' ? timeDraft : inlineKeyValue,
         target.anchorKey
       )
     : getDesktopPosition(target.anchorRect, usesMetadataPanel ? 'metadata' : target.field);
@@ -896,19 +936,16 @@ export default function PreviewWysiwygEditor({
         valueWidth: getTempoValueWidth(target.anchorRect, tempoDraft)
       }
     : undefined;
-  const body = usesMetadataPanel
-    ? renderMetadataPanel()
-    : target.field === 'title'
-    ? renderTitle()
-    : target.field === 'credits'
-      ? renderCredits()
-      : target.field === 'key'
-        ? renderKey()
-        : target.field === 'tempo'
-          ? renderTempo(tempoOverlayLayout)
-          : target.field === 'timeSignature'
-            ? renderTimeSignature()
-            : renderCapo();
+  const renderBody = () => {
+    if (usesMetadataPanel) return renderMetadataPanel();
+    if (target.field === 'title') return renderTitle();
+    if (target.field === 'credits') return renderCredits();
+    if (target.field === 'key' || target.field === 'performanceKey') return renderKey();
+    if (target.field === 'tempo') return renderTempo(tempoOverlayLayout);
+    if (target.field === 'timeSignature') return renderTimeSignature();
+    return renderCapo();
+  };
+  const body = renderBody();
 
   if (usesMetadataPanel && isTouchLayout) {
     const maxHeight = deviceLayout === 'phone'

@@ -14,12 +14,14 @@ import {
   deleteSection,
   ensureSongEditingIds,
   finalizeSectionTitleEdit,
+  getBeatCount,
   getBarStoredKey,
   getChordStorageModeForTarget,
   getChordBeatSlots,
   getChordPlacementError,
   getMultiMeasureRestPlacementError,
   getSongKeyStates,
+  getSongTimeSignatureStates,
   insertBar,
   insertChordBeatBeforeSlot,
   insertSectionAfter,
@@ -78,6 +80,21 @@ describe('chord beat slots', () => {
     const bar = edited.sections[0].bars[0];
     expect(getChordBeatSlots(bar, 4).map((slot) => slot.chord)).toEqual(['C', 'Dm', 'G', '']);
     expect(bar.chordMarks).toEqual({ 2: { color: 'rose', special: true } });
+  });
+
+  it('keeps a preview-only empty beat mark when a chord is later inserted there', () => {
+    const song = makeSong({
+      chords: ['C'],
+      chordMarks: { 1: { color: 'sky' } }
+    });
+    const edited = setChordAtBeatSlot(song, {
+      sectionId: 'section-1',
+      barId: 'bar-1',
+      slotIndex: 1
+    }, 'G');
+    const bar = edited.sections[0].bars[0];
+    expect(getChordBeatSlots(bar, 4).map((slot) => slot.chord)).toEqual(['C', 'G', '', '']);
+    expect(bar.chordMarks).toEqual({ 1: { color: 'sky' } });
   });
 
   it('clears one beat without shifting later chords or marks', () => {
@@ -649,6 +666,35 @@ describe('section commands', () => {
     expect(getBarStoredKey(song, { sectionId: 'a', barId: 'a1' })).toBe('C');
     expect(getBarStoredKey(song, { sectionId: 'a', barId: 'a2' })).toBe('D');
     expect(getBarStoredKey(song, { sectionId: 'b', barId: 'b1' })).toBe('D');
+  });
+
+  it('tracks per-bar time signatures from the changed bar forward', () => {
+    const song: Song = {
+      title: 'Meter changes', originalKey: 'C', currentKey: 'C', timeSignature: '4/4',
+      sections: [
+        {
+          id: 'a',
+          title: 'Verse',
+          bars: [
+            { id: 'a1', timeSignature: '5/4', chords: ['C'] },
+            { id: 'a2', chords: ['G'] },
+            { id: 'a3', timeSignature: '3/4', chords: ['F'] }
+          ]
+        },
+        {
+          id: 'b',
+          title: 'Chorus',
+          bars: [{ id: 'b1', chords: ['Dm'] }]
+        }
+      ]
+    };
+
+    const states = getSongTimeSignatureStates(song);
+    expect(states.barBaseTimeSignatures).toEqual([['4/4', '5/4', '5/4'], ['3/4']]);
+    expect(states.barActiveTimeSignatures).toEqual([['5/4', '5/4', '3/4'], ['3/4']]);
+    expect(getBeatCount(song, song.sections[0].bars[1])).toBe(5);
+    expect(getBeatCount(song, song.sections[0].bars[2])).toBe(3);
+    expect(getBeatCount(song, song.sections[1].bars[0])).toBe(3);
   });
 
   it('merges only a previously named non-first section when its title is cleared', () => {

@@ -54,6 +54,9 @@ const StatefulEditor = ({
       currentKey={currentSong.currentKey}
       currentCapo={currentSong.capo ?? 0}
       originalKey={currentSong.originalKey}
+      jianpuInputAbsolute={currentSong.jianpuInputAbsolute ?? false}
+      onJianpuInputAbsoluteChange={(value) => setCurrentSong({ ...currentSong, jianpuInputAbsolute: value })}
+      showReferenceFields
       onChange={setCurrentSong}
       onKeyChange={() => undefined}
       onCapoChange={() => undefined}
@@ -95,14 +98,71 @@ describe('PreviewWysiwygEditor song information panel', () => {
     expect(titleInput).toHaveClass('h-11');
   });
 
-  it('uses a two-column tablet sheet with touch-sized controls', () => {
+  it('opens the complete song information panel from the metadata target', () => {
     const { container } = render(<StatefulEditor deviceLayout="tablet" />);
     const panel = container.querySelector<HTMLElement>('[data-song-metadata-panel]');
-    const keyButton = container.querySelector<HTMLButtonElement>('[data-song-metadata-field="key"] button');
 
     expect(panel?.dataset.deviceLayout).toBe('tablet');
-    expect(panel).toHaveClass('grid', 'grid-cols-2');
-    expect(keyButton).toHaveClass('!h-11');
+    expect(panel).not.toHaveClass('grid-cols-2');
+    expect(screen.getByText('編輯歌曲')).toBeInTheDocument();
+    expect(screen.getByText('參考音源')).toBeInTheDocument();
+    expect(screen.getByText('簡譜輸入設定')).toBeInTheDocument();
+  });
+
+  it('edits the song metadata key instead of the temporary transpose key', () => {
+    const onMetadataKeyChange = vi.fn();
+    const onKeyChange = vi.fn();
+    render(
+      <PreviewWysiwygEditor
+        song={{ ...song, originalKey: 'C', currentKey: 'D' }}
+        language="zh"
+        target={makeTarget('key')}
+        deviceLayout="desktop"
+        currentKey="D"
+        currentCapo={0}
+        originalKey="C"
+        metadataKeyValue="C"
+        onMetadataKeyChange={onMetadataKeyChange}
+        onChange={() => undefined}
+        onKeyChange={onKeyChange}
+        onCapoChange={() => undefined}
+        onClose={() => undefined}
+      />
+    );
+
+    const ebOption = screen.getByText('Eb').closest('button');
+    expect(ebOption).not.toBeNull();
+    fireEvent.click(ebOption!);
+    expect(onMetadataKeyChange).toHaveBeenCalledWith('Eb');
+    expect(onKeyChange).not.toHaveBeenCalled();
+  });
+
+  it('edits the temporary transpose key from the performance key target', () => {
+    const onMetadataKeyChange = vi.fn();
+    const onKeyChange = vi.fn();
+    render(
+      <PreviewWysiwygEditor
+        song={{ ...song, originalKey: 'C', currentKey: 'D' }}
+        language="zh"
+        target={makeTarget('performanceKey')}
+        deviceLayout="desktop"
+        currentKey="D"
+        currentCapo={0}
+        originalKey="C"
+        metadataKeyValue="C"
+        onMetadataKeyChange={onMetadataKeyChange}
+        onChange={() => undefined}
+        onKeyChange={onKeyChange}
+        onCapoChange={() => undefined}
+        onClose={() => undefined}
+      />
+    );
+
+    const ebOption = screen.getByText('Eb').closest('button');
+    expect(ebOption).not.toBeNull();
+    fireEvent.click(ebOption!);
+    expect(onKeyChange).toHaveBeenCalledWith('Eb');
+    expect(onMetadataKeyChange).not.toHaveBeenCalled();
   });
 
   it('anchors the complete panel at desktop width', () => {
@@ -111,7 +171,7 @@ describe('PreviewWysiwygEditor song information panel', () => {
     const shell = dialog.parentElement;
 
     expect(container.querySelector('[data-preview-metadata-backdrop]')).toBeNull();
-    expect(shell).toHaveStyle({ width: '520px' });
+    expect(shell).toHaveStyle({ width: '900px' });
   });
 
   it('closes the complete panel with Escape', () => {

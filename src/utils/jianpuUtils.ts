@@ -141,6 +141,26 @@ export function getJianpuDurationUnits(duration: JianpuDuration, dotted = false,
   return baseUnits + (dotted ? baseUnits / 2 : 0);
 }
 
+export function applyJianpuAutoDurationShorthand(
+  notes: JianpuNoteRange[],
+  slotCount = notes.length,
+  hasExplicitGrid = false,
+  tokenCapacityUnits = 4
+): JianpuNoteRange[] {
+  if (notes.length === 0) return notes;
+  if (hasExplicitGrid) return notes;
+
+  const hasExplicitDurations = notes.some((note) => note.duration !== 'quarter');
+  if (hasExplicitDurations) return notes;
+
+  const unitsPerNote = slotCount > 0 ? tokenCapacityUnits / slotCount : 4;
+  if (unitsPerNote >= 4) return notes;
+  if (unitsPerNote >= 2) {
+    return notes.map((note) => ({ ...note, duration: 'eighth' as const }));
+  }
+  return notes.map((note) => ({ ...note, duration: 'sixteenth' as const }));
+}
+
 function getOctaveFromParts(prefix: string, octaveMarks: string): JianpuOctave {
   // Count the octave dots so multi-octave (absolute) notation survives parsing;
   // relative clamping happens later, not here.

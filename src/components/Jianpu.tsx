@@ -1,5 +1,5 @@
 import React from 'react';
-import { JianpuNoteRange, findJianpuNoteRanges, findJianpuPlaceholderRanges, getJianpuDurationUnits } from '../utils/jianpuUtils';
+import { type JianpuNoteRange, applyJianpuAutoDurationShorthand, findJianpuNoteRanges, findJianpuPlaceholderRanges, getJianpuDurationUnits } from '../utils/jianpuUtils';
 import { parseTimeSignature } from '../utils/rhythmUtils';
 
 interface JianpuProps {
@@ -17,6 +17,7 @@ interface JianpuProps {
   gridSlotCount?: number;
   leadingOccupiedSlots?: number[];
   activeNote?: { tokenIndex: number; noteIndex: number } | null;
+  color?: string;
   onTokenClick?: (tokenIndex: number, slotIndex: number, event?: React.MouseEvent<HTMLElement>) => void;
   onNoteClick?: (tokenIndex: number, noteIndex: number, event?: React.MouseEvent<HTMLElement>) => void;
   showPlaceholders?: boolean;
@@ -72,28 +73,9 @@ interface LayoutPlaceholder {
 
 const TOKEN_WIDTH_UNITS = 100;
 const TOKEN_CAPACITY_UNITS = 4;
+const JIANPU_LAYOUT_EPSILON = 0.001;
 const JIANPU_DIGIT_FONT = '"SF Mono", "Cascadia Mono", "Roboto Mono", "Menlo", "Consolas", ui-monospace, monospace';
 const JIANPU_SYMBOL_FONT = '"Avenir Next", "PingFang TC", "Microsoft JhengHei", ui-sans-serif, system-ui, sans-serif';
-
-const applyAutoDurationShorthand = (
-  notes: JianpuNoteRange[],
-  slotCount = notes.length,
-  hasExplicitGrid = false,
-  tokenCapacityUnits = 4
-) => {
-  if (notes.length === 0) return notes;
-  if (hasExplicitGrid) return notes;
-
-  const hasExplicitDurations = notes.some((note) => note.duration !== 'quarter');
-  if (hasExplicitDurations) return notes;
-
-  const unitsPerNote = slotCount > 0 ? tokenCapacityUnits / slotCount : 4;
-  if (unitsPerNote >= 4) return notes;
-  if (unitsPerNote >= 2) {
-    return notes.map((note) => ({ ...note, duration: 'eighth' as const }));
-  }
-  return notes.map((note) => ({ ...note, duration: 'sixteenth' as const }));
-};
 
 const getTokenList = (notation?: string, tokens?: string[]) => {
   if (tokens) return tokens;
@@ -135,6 +117,7 @@ const Jianpu: React.FC<JianpuProps> = ({
   gridSlotCount = TOKEN_CAPACITY_UNITS,
   leadingOccupiedSlots = [],
   activeNote = null,
+  color,
   onTokenClick,
   onNoteClick,
   showPlaceholders = false
@@ -152,6 +135,8 @@ const Jianpu: React.FC<JianpuProps> = ({
   ), [compact, tokenList]);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = React.useState<number | null>(null);
+  const notationColor = color || '#334155';
+  const symbolColor = color || '#1f2937';
   const updateContainerWidth = React.useCallback(() => {
     const element = rootRef.current;
     if (!element) {
@@ -255,7 +240,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       const carryInUnits = useCarryLayout ? carryUnits : 0;
       const rawNotes = findJianpuNoteRanges(token);
       const parsedPlaceholders = findJianpuPlaceholderRanges(token);
-      const parsedNotes = applyAutoDurationShorthand(
+      const parsedNotes = applyJianpuAutoDurationShorthand(
         rawNotes,
         rawNotes.length + parsedPlaceholders.length,
         parsedPlaceholders.length > 0,
@@ -498,10 +483,10 @@ const Jianpu: React.FC<JianpuProps> = ({
       const carryInUnits = carryUnits;
       const rawNotes = findJianpuNoteRanges(token);
       const parsedPlaceholders = findJianpuPlaceholderRanges(token);
-      const parsedNotes = applyAutoDurationShorthand(
-        rawNotes,
-        rawNotes.length + parsedPlaceholders.length,
-        parsedPlaceholders.length > 0,
+        const parsedNotes = applyJianpuAutoDurationShorthand(
+          rawNotes,
+          rawNotes.length + parsedPlaceholders.length,
+          parsedPlaceholders.length > 0,
         tokenCapacityUnits
       );
       const slotItems = [
@@ -631,6 +616,7 @@ const Jianpu: React.FC<JianpuProps> = ({
             {isActive && (
               <span
                 data-preview-edit-ui
+                data-jianpu-active-insert-highlight
                 className="absolute bg-indigo-200/45 ring-1 ring-indigo-300/90"
                 style={{
                   left: insertLeft,
@@ -699,7 +685,8 @@ const Jianpu: React.FC<JianpuProps> = ({
                   ? `${Math.max(1, snappedRightPx - snappedLeftPx)}px`
                   : `${((rightUnits - leftUnits) / totalWidthUnits) * 100}%`,
                 top: `${underlineTop}px`,
-                height: `${underlineHeight}px`
+                height: `${underlineHeight}px`,
+                backgroundColor: notationColor
               }}
             />
           );
@@ -733,15 +720,16 @@ const Jianpu: React.FC<JianpuProps> = ({
 	          return (
 	            <span
 	              key={segment.key}
-	              className="absolute pointer-events-none text-slate-700"
-	              data-jianpu-triplet-mark
-	              style={{
-	                left: lineLeft,
-	                width: lineWidth,
-	                top: `${metrics.tripletY}px`,
-	                height: `${compact ? 7 : renderMode === 'editor' ? 9 : 12}px`
-	              }}
-	            >
+              className="absolute pointer-events-none text-slate-700"
+              data-jianpu-triplet-mark
+              style={{
+                left: lineLeft,
+                width: lineWidth,
+                top: `${metrics.tripletY}px`,
+                height: `${compact ? 7 : renderMode === 'editor' ? 9 : 12}px`,
+                color: notationColor
+              }}
+            >
               <span
                 data-jianpu-triplet-line-segment="left"
                 className="absolute left-0 h-px rounded-full bg-current"
@@ -801,6 +789,37 @@ const Jianpu: React.FC<JianpuProps> = ({
               ? { width: 12, height: 25, radius: '4px' }
               : { width: 15, height: 27, radius: '4px' }
           : { width: 18, height: 20, radius: '4px' };
+        const selectedNoteClass = renderMode === 'editor'
+          ? 'absolute bg-indigo-200/60 ring-1 ring-indigo-300/90'
+          : 'absolute bg-emerald-100/70 ring-1 ring-emerald-500/70 shadow-[0_0_0_1px_rgba(255,255,255,0.82)]';
+        const selectedNoteInsertCaretClass = renderMode === 'editor'
+          ? 'pointer-events-none absolute z-20 w-[2px] -translate-x-1/2 rounded-full bg-indigo-600 shadow-[0_0_0_1px_rgba(255,255,255,0.86)]'
+          : 'pointer-events-none absolute z-20 w-[2px] -translate-x-1/2 rounded-full bg-emerald-700 shadow-[0_0_0_1px_rgba(255,255,255,0.96),0_0_0_3px_rgba(16,185,129,0.18)]';
+        const hasLaterNoteInToken = layoutNotes.some((candidate) => (
+          candidate.tokenIndex === note.tokenIndex
+          && candidate.start !== note.start
+          && candidate.unitStart >= note.unitEnd - JIANPU_LAYOUT_EPSILON
+        ));
+        const hasTrailingPlaceholderSpace = layoutPlaceholders.some((placeholder) => (
+          placeholder.tokenIndex === note.tokenIndex
+          && placeholder.unitStart <= note.unitEnd + JIANPU_LAYOUT_EPSILON
+          && placeholder.unitEnd > note.unitEnd + JIANPU_LAYOUT_EPSILON
+        ));
+        const hasTrailingImplicitSpace = !hasLaterNoteInToken
+          && !layoutPlaceholders.some((placeholder) => (
+            placeholder.tokenIndex === note.tokenIndex
+            && placeholder.unitStart >= note.unitEnd - JIANPU_LAYOUT_EPSILON
+          ))
+          && note.unitEnd < tokenCapacityUnits - JIANPU_LAYOUT_EPSILON;
+        const hasTrailingInsertSpace = Boolean(
+          isSelectedNote
+          && onTokenClick
+          && (hasTrailingPlaceholderSpace || hasTrailingImplicitSpace)
+        );
+        const trailingInsertLocalUnits = TOKEN_WIDTH_UNITS * (Math.min(note.unitEnd, tokenCapacityUnits) / tokenCapacityUnits);
+        const trailingInsertLeft = useSnappedPixelCenter && containerWidth !== null
+          ? `${getTokenAlignedPx(note.tokenIndex, trailingInsertLocalUnits) ?? 0}px`
+          : `${(((note.tokenIndex * TOKEN_WIDTH_UNITS) + trailingInsertLocalUnits) / totalWidthUnits) * 100}%`;
         const hitMetrics = renderMode === 'editor'
           ? { width: 24, height: 28 }
           : { width: 18, height: 20 };
@@ -812,7 +831,8 @@ const Jianpu: React.FC<JianpuProps> = ({
             {isSelectedNote && (
               <span
                 data-preview-edit-ui
-                className="absolute bg-indigo-200/60 ring-1 ring-indigo-300/90"
+                data-jianpu-selected-note-highlight
+                className={selectedNoteClass}
                 style={{
                   left: renderMode === 'editor' && selectionVisibleSpanUnits > 0
                     ? `${selectionLeftPercent}%`
@@ -826,6 +846,19 @@ const Jianpu: React.FC<JianpuProps> = ({
                     : `${selectionMetrics.width}px`,
                   height: `${selectionMetrics.height}px`,
                   borderRadius: selectionMetrics.radius
+                }}
+              />
+            )}
+
+            {hasTrailingInsertSpace && (
+              <span
+                data-preview-edit-ui
+                data-jianpu-selected-note-insert-caret
+                className={selectedNoteInsertCaretClass}
+                style={{
+                  left: trailingInsertLeft,
+                  top: `${metrics.digitCenterY - (selectionMetrics.height / 2)}px`,
+                  height: `${selectionMetrics.height}px`
                 }}
               />
             )}
@@ -944,7 +977,7 @@ const Jianpu: React.FC<JianpuProps> = ({
                       ? metrics.accidentalFontSize * 1.14
                       : metrics.accidentalFontSize}px`,
                   fontFamily: JIANPU_SYMBOL_FONT,
-                  color: note.accidental === '#' ? '#1f2937' : '#020617',
+                  color: symbolColor,
                   fontWeight: note.accidental === '#' ? 600 : 700
                 }}
               >
@@ -966,7 +999,8 @@ const Jianpu: React.FC<JianpuProps> = ({
                     : `${metrics.digitCenterY}px`,
                   transform: useDirectSustainPlacement ? undefined : 'translate(-50%, -50%)',
                   width: `${snappedSustainWidth}px`,
-                  height: `${snappedSustainHeight}px`
+                  height: `${snappedSustainHeight}px`,
+                  backgroundColor: notationColor
                 }}
               />
             ) : (
@@ -978,7 +1012,8 @@ const Jianpu: React.FC<JianpuProps> = ({
                   transform: 'translate(-50%, -50%)',
                   fontSize: `${metrics.digitFontSize}px`,
                 fontFamily: JIANPU_DIGIT_FONT,
-                fontVariantNumeric: 'lining-nums tabular-nums'
+                fontVariantNumeric: 'lining-nums tabular-nums',
+                color: notationColor
               }}
             >
                 {digit}
@@ -1001,7 +1036,8 @@ const Jianpu: React.FC<JianpuProps> = ({
                     : `${metrics.digitCenterY}px`,
                   transform: useDirectDottedPlacement ? undefined : 'translate(-50%, -50%)',
                   width: `${snappedDottedDotSize}px`,
-                  height: `${snappedDottedDotSize}px`
+                  height: `${snappedDottedDotSize}px`,
+                  backgroundColor: notationColor
                 }}
               />
             )}
@@ -1023,7 +1059,8 @@ const Jianpu: React.FC<JianpuProps> = ({
                     : `${metrics.highDotY - (dotIndex * octaveDotGap)}px`,
                   transform: useDirectOctaveDotPlacement ? undefined : 'translate(-50%, -50%)',
                   width: `${snappedOctaveDotSize}px`,
-                  height: `${snappedOctaveDotSize}px`
+                  height: `${snappedOctaveDotSize}px`,
+                  backgroundColor: notationColor
                 }}
               />
             ))}
@@ -1045,7 +1082,8 @@ const Jianpu: React.FC<JianpuProps> = ({
                     : `${metrics.lowDotY + (dotIndex * octaveDotGap)}px`,
                   transform: useDirectOctaveDotPlacement ? undefined : 'translate(-50%, -50%)',
                   width: `${snappedOctaveDotSize}px`,
-                  height: `${snappedOctaveDotSize}px`
+                  height: `${snappedOctaveDotSize}px`,
+                  backgroundColor: notationColor
                 }}
               />
             ))}
@@ -1103,7 +1141,7 @@ const Jianpu: React.FC<JianpuProps> = ({
                 key={slur.key}
                 d={`M ${startX} ${anchorY} C ${startX + controlOffset} ${controlY} ${endX - controlOffset} ${controlY} ${endX} ${anchorY}`}
                 fill="none"
-                stroke="rgba(71, 85, 105, 0.9)"
+                stroke={color ? notationColor : 'rgba(71, 85, 105, 0.9)'}
                 strokeWidth={compact ? 1 : renderMode === 'editor' ? 1.2 : 1.4}
                 strokeLinecap="round"
               />
