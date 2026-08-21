@@ -54,7 +54,7 @@ import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
-import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
+import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, ChordSheetPreviewBarContextMenuTarget, ChordSheetPreviewBarTarget, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
 import PreviewWysiwygEditor, { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
@@ -97,7 +97,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus, Keyboard } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus, Keyboard } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -122,6 +122,7 @@ import {
   undoPreviewDraft
 } from './lib/previewEditSession';
 import {
+  copyBarsForClipboard,
   createEmptyBar,
   deleteSection,
   deleteBar,
@@ -136,10 +137,14 @@ import {
   getChordStorageModeForTarget,
   insertBar,
   insertSectionAfter,
+  isBarCompletelyEmpty,
   mergeSectionToPrevious,
+  pasteBarsAtBar,
+  PasteBarsMode,
   repairSongStructure,
   reorderSection,
   resolvePreviewChordSlotIndex,
+  setEndingForBars,
   splitSectionAtBar,
   updateSectionTitle
 } from './lib/songEditing';
@@ -922,6 +927,24 @@ const normalizeSearchText = (value: string): string => (
 
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
+const getPreviewBarSelectionKey = (target: PreviewBarSelectionTarget) => (
+  `${target.previewIdentity}\u0000${target.sectionId}\u0000${target.barId}`
+);
+
+const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || (target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'file', 'range'].includes(target.type));
+};
+
+const getEndingShortcutDigit = (key: string, code: string) => {
+  const codeMatch = code.match(/^(?:Digit|Numpad)([1-9])$/);
+  if (codeMatch) return codeMatch[1];
+  return /^[1-9]$/.test(key) ? key : null;
+};
+
 const normalizeBoolean = (value: unknown): boolean | undefined => (
   typeof value === 'boolean' ? value : undefined
 );
@@ -1271,6 +1294,22 @@ interface PreviewSectionActionTarget {
   title: string;
   anchorKey: string;
   anchorRect: PreviewAnchorRect;
+}
+
+interface PreviewBarSelectionTarget {
+  previewIdentity: string;
+  sectionId: string;
+  barId: string;
+}
+
+interface PreviewBarContextMenuState extends PreviewBarSelectionTarget {
+  clientX: number;
+  clientY: number;
+  anchorRect: PreviewAnchorRect;
+}
+
+interface PreviewBarClipboard {
+  bars: Bar[];
 }
 
 interface EditorFocusRequest {
@@ -2193,6 +2232,9 @@ export default function App() {
   const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
   const [previewEditSession, setPreviewEditSession] = useState<PreviewEditSession | null>(null);
   const [previewCopiedBar, setPreviewCopiedBar] = useState<Bar | null>(null);
+  const [previewSelectedBars, setPreviewSelectedBars] = useState<PreviewBarSelectionTarget[]>([]);
+  const [previewBarClipboard, setPreviewBarClipboard] = useState<PreviewBarClipboard | null>(null);
+  const [previewBarContextMenu, setPreviewBarContextMenu] = useState<PreviewBarContextMenuState | null>(null);
   const [previewCopiedJianpu, setPreviewCopiedJianpu] = useState<string | null>(null);
   const [previewCopiedRhythm, setPreviewCopiedRhythm] = useState<string | null>(null);
   const [lastPreviewNonChordMode, setLastPreviewNonChordMode] = useState<PreviewNonChordMode>(loadPreviewLastNonChordMode);
@@ -2788,6 +2830,11 @@ export default function App() {
   const activePreviewEditSession = previewEditSession?.previewIdentity === activePreviewIdentity
     ? previewEditSession
     : null;
+  const activePreviewSelectedBars = React.useMemo(() => (
+    activePreviewIdentity
+      ? previewSelectedBars.filter((target) => target.previewIdentity === activePreviewIdentity)
+      : []
+  ), [activePreviewIdentity, previewSelectedBars]);
   const activePreviewNotationTarget = activePreviewEditSession?.target.kind === 'bar'
     ? {
         sectionId: activePreviewEditSession.target.sectionId,
@@ -9395,8 +9442,202 @@ export default function App() {
     setActiveBar(null);
   }, [activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSetlistEditableSong, canEditSelectedSetlist, canEditTeamSongs, handleSongChange, handleUpdateSetlistSong, isSetlistMode, selectedSetlistSong]);
 
+  const getPreviewBatchSong = React.useCallback(() => (
+    activePreviewEditSession?.draftSong ?? activeEditorSong ?? null
+  ), [activeEditorSong, activePreviewEditSession]);
+
+  const commitPreviewBarBatchSong = React.useCallback((nextSong: Song, previousSong: Song) => {
+    if (nextSong === previousSong) return;
+    if (isSetlistMode) {
+      handleSetlistSongContentChange(nextSong);
+    } else {
+      handleSongChange(nextSong);
+    }
+    setPreviewEditSession(null);
+    window.requestAnimationFrame(refreshPreviewEditAnchorRect);
+  }, [handleSetlistSongContentChange, handleSongChange, isSetlistMode, refreshPreviewEditAnchorRect]);
+
+  const getPreviewBatchTargets = React.useCallback((fallback?: PreviewBarSelectionTarget | null) => {
+    if (activePreviewSelectedBars.length > 0) {
+      return activePreviewSelectedBars.map(({ sectionId, barId }) => ({ sectionId, barId }));
+    }
+    return fallback && fallback.previewIdentity === activePreviewIdentity
+      ? [{ sectionId: fallback.sectionId, barId: fallback.barId }]
+      : [];
+  }, [activePreviewIdentity, activePreviewSelectedBars]);
+
+  const getActivePreviewBarTarget = React.useCallback((sourceSong: Song): PreviewBarSelectionTarget | null => {
+    if (!activePreviewIdentity || !activeBar || activePreviewEditSession) return null;
+    const section = sourceSong.sections[activeBar.sIdx];
+    const bar = section?.bars[activeBar.bIdx];
+    return section?.id && bar?.id
+      ? { previewIdentity: activePreviewIdentity, sectionId: section.id, barId: bar.id }
+      : null;
+  }, [activeBar, activePreviewEditSession, activePreviewIdentity]);
+
+  const handlePreviewBarMetaClick = React.useCallback((target: ChordSheetPreviewBarTarget) => {
+    if (!canOpenEditor || !target.previewIdentity) return;
+    clearPendingPreviewSectionAction();
+    setPreviewBarContextMenu(null);
+    setPreviewMetaEditTarget(null);
+    setPreviewSectionActionTarget(null);
+    if (activePreviewEditSession) commitPreviewEditSession(activePreviewEditSession);
+
+    const nextTarget: PreviewBarSelectionTarget = {
+      previewIdentity: target.previewIdentity,
+      sectionId: target.sectionId,
+      barId: target.barId
+    };
+    const nextKey = getPreviewBarSelectionKey(nextTarget);
+    setPreviewSelectedBars((current) => {
+      const samePreviewTargets = current.filter((candidate) => candidate.previewIdentity === target.previewIdentity);
+      const exists = samePreviewTargets.some((candidate) => getPreviewBarSelectionKey(candidate) === nextKey);
+      return exists
+        ? samePreviewTargets.filter((candidate) => getPreviewBarSelectionKey(candidate) !== nextKey)
+        : [...samePreviewTargets, nextTarget];
+    });
+  }, [activePreviewEditSession, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession]);
+
+  const handlePreviewBarContextMenu = React.useCallback((target: ChordSheetPreviewBarContextMenuTarget) => {
+    if (!canOpenEditor || !target.previewIdentity) return;
+    clearPendingPreviewSectionAction();
+    setPreviewMetaEditTarget(null);
+    setPreviewSectionActionTarget(null);
+
+    const menuTarget: PreviewBarContextMenuState = {
+      previewIdentity: target.previewIdentity,
+      sectionId: target.sectionId,
+      barId: target.barId,
+      clientX: target.clientX,
+      clientY: target.clientY,
+      anchorRect: target.anchorRect
+    };
+    const menuTargetKey = getPreviewBarSelectionKey(menuTarget);
+    const isAlreadySelected = activePreviewSelectedBars.some((candidate) => (
+      getPreviewBarSelectionKey(candidate) === menuTargetKey
+    ));
+    if (!isAlreadySelected) {
+      setPreviewSelectedBars([menuTarget]);
+    }
+    setPreviewBarContextMenu(menuTarget);
+  }, [activePreviewSelectedBars, canOpenEditor, clearPendingPreviewSectionAction]);
+
+  const copyPreviewSelectedBars = React.useCallback(() => {
+    const sourceSong = getPreviewBatchSong();
+    if (!sourceSong) return;
+    const copiedBars = copyBarsForClipboard(sourceSong, getPreviewBatchTargets(previewBarContextMenu));
+    if (copiedBars.length === 0) return;
+    setPreviewBarClipboard({ bars: copiedBars });
+    if (copiedBars.length === 1) {
+      setPreviewCopiedBar(structuredClone(copiedBars[0]));
+    }
+    setPreviewBarContextMenu(null);
+  }, [getPreviewBatchSong, getPreviewBatchTargets, previewBarContextMenu]);
+
+  const applyPreviewEndingToTargets = React.useCallback((
+    ending: string | undefined,
+    mode: 'set' | 'toggle-digit' = 'set',
+    fallback?: PreviewBarSelectionTarget | null
+  ) => {
+    const sourceSong = getPreviewBatchSong();
+    if (!sourceSong) return;
+    const targets = getPreviewBatchTargets(fallback);
+    if (targets.length === 0) return;
+    const nextSong = setEndingForBars(sourceSong, targets, ending, mode);
+    commitPreviewBarBatchSong(nextSong, sourceSong);
+    setPreviewBarContextMenu(null);
+  }, [commitPreviewBarBatchSong, getPreviewBatchSong, getPreviewBatchTargets]);
+
+  const pastePreviewBarsAtContextTarget = React.useCallback((mode: PasteBarsMode) => {
+    const sourceSong = getPreviewBatchSong();
+    if (!sourceSong || !previewBarClipboard || !previewBarContextMenu) return;
+    const result = pasteBarsAtBar(
+      sourceSong,
+      { sectionId: previewBarContextMenu.sectionId, barId: previewBarContextMenu.barId },
+      previewBarClipboard.bars,
+      mode
+    );
+    if (result.song === sourceSong) return;
+    commitPreviewBarBatchSong(result.song, sourceSong);
+    setPreviewSelectedBars(result.pastedBarIds.map((barId) => ({
+      previewIdentity: previewBarContextMenu.previewIdentity,
+      sectionId: previewBarContextMenu.sectionId,
+      barId
+    })));
+    setPreviewBarContextMenu(null);
+  }, [commitPreviewBarBatchSong, getPreviewBatchSong, previewBarClipboard, previewBarContextMenu]);
+
+  React.useEffect(() => {
+    const handlePreviewEndingShortcut = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented
+        || !canOpenEditor
+        || isEditing
+        || isLyricsMode
+        || !event.altKey
+        || event.metaKey
+        || event.ctrlKey
+        || event.shiftKey
+        || event.isComposing
+        || isEditableKeyboardTarget(event.target)
+      ) {
+        return;
+      }
+      const digit = getEndingShortcutDigit(event.key, event.code);
+      if (!digit) return;
+
+      const sourceSong = getPreviewBatchSong();
+      if (!sourceSong) return;
+      const fallbackTarget = activePreviewSelectedBars.length > 0
+        ? null
+        : getActivePreviewBarTarget(sourceSong);
+      const targets = getPreviewBatchTargets(fallbackTarget);
+      if (targets.length === 0) return;
+
+      event.preventDefault();
+      const nextSong = setEndingForBars(sourceSong, targets, digit, 'toggle-digit');
+      commitPreviewBarBatchSong(nextSong, sourceSong);
+      setPreviewBarContextMenu(null);
+    };
+
+    window.addEventListener('keydown', handlePreviewEndingShortcut, true);
+    return () => window.removeEventListener('keydown', handlePreviewEndingShortcut, true);
+  }, [
+    activePreviewSelectedBars.length,
+    canOpenEditor,
+    commitPreviewBarBatchSong,
+    getActivePreviewBarTarget,
+    getPreviewBatchSong,
+    getPreviewBatchTargets,
+    isEditing,
+    isLyricsMode
+  ]);
+
+  React.useEffect(() => {
+    if (!previewBarContextMenu) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-preview-bar-batch-menu]')) {
+        return;
+      }
+      setPreviewBarContextMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewBarContextMenu(null);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [previewBarContextMenu]);
+
   const handleElementClick = React.useCallback((sIdx: number, bIdx: number, field: ChordSheetElementField, target?: ChordSheetElementTarget) => {
     clearPendingPreviewSectionAction();
+    setPreviewBarContextMenu(null);
+    if (field !== 'sectionName') {
+      setPreviewSelectedBars([]);
+    }
     const editorSong = activeDraftEditorSong ?? activeEditorSong;
     const navigationSong = activeDraftNavigationPreviewSong ?? activeNavigationPreviewSong;
     if (!editorSong || !navigationSong) {
@@ -10007,11 +10248,14 @@ export default function App() {
         activeSectionId={isEditing || activePreviewEditSession ? activeSectionId : null}
         activeBar={isEditing || activePreviewEditSession ? activeBar : null}
         activePreviewNotationTarget={activePreviewNotationTarget}
+        selectedPreviewBars={activePreviewSelectedBars}
+        onPreviewBarMetaClick={canOpenEditor ? handlePreviewBarMetaClick : undefined}
+        onPreviewBarContextMenu={canOpenEditor ? handlePreviewBarContextMenu : undefined}
         previewIdentity={song.id}
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       />
     );
-  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
+  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -10097,6 +10341,9 @@ export default function App() {
               activeSectionId={isSelected && (isEditing || activePreviewEditSession) ? activeSectionId : null}
               activeBar={isSelected && (isEditing || activePreviewEditSession) ? activeBar : null}
               activePreviewNotationTarget={isSelected ? activePreviewNotationTarget : null}
+              selectedPreviewBars={isSelected ? activePreviewSelectedBars : []}
+              onPreviewBarMetaClick={isSelected && canOpenEditor ? handlePreviewBarMetaClick : undefined}
+              onPreviewBarContextMenu={isSelected && canOpenEditor ? handlePreviewBarContextMenu : undefined}
               previewIdentity={item.id}
               onSectionReorder={isSelected && canEditSelectedSetlist ? handlePreviewSectionReorder : undefined}
             />
@@ -10104,7 +10351,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -10114,8 +10361,16 @@ export default function App() {
     setHighlightedSectionIds([]);
     setActiveBar(null);
     setPreviewMetaEditTarget(null);
+    setPreviewSelectedBars([]);
+    setPreviewBarContextMenu(null);
     setActiveSectionId(activeEditorSong?.sections[0]?.id ?? null);
   }, [currentPreviewIdentity]);
+
+  useEffect(() => {
+    if (canOpenEditor && !isLyricsMode) return;
+    setPreviewSelectedBars([]);
+    setPreviewBarContextMenu(null);
+  }, [canOpenEditor, isLyricsMode]);
 
   useEffect(() => {
     if (!activePreviewEditSession) return;
@@ -15192,6 +15447,86 @@ export default function App() {
                 }}
               />
             )}
+            {previewBarContextMenu && canOpenEditor && !isLyricsMode && activeEditorSong && previewBarContextMenu.previewIdentity === activePreviewIdentity && (() => {
+              const menuSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
+              const locatedTarget = menuSong
+                ? findSongBar(menuSong, {
+                    sectionId: previewBarContextMenu.sectionId,
+                    barId: previewBarContextMenu.barId
+                  })
+                : null;
+              const selectedCount = Math.max(1, activePreviewSelectedBars.length);
+              const clipboardCount = previewBarClipboard?.bars.length ?? 0;
+              const canPaste = clipboardCount > 0;
+              const canPasteIntoEmpty = Boolean(canPaste && locatedTarget && isBarCompletelyEmpty(locatedTarget.bar));
+              const menuWidth = 230;
+              const menuLeft = typeof window === 'undefined'
+                ? previewBarContextMenu.clientX
+                : Math.min(Math.max(8, previewBarContextMenu.clientX), Math.max(8, window.innerWidth - menuWidth - 8));
+              const menuTop = typeof window === 'undefined'
+                ? previewBarContextMenu.clientY
+                : Math.min(Math.max(8, previewBarContextMenu.clientY), Math.max(8, window.innerHeight - 360));
+              const menuButtonClass = 'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs font-bold text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-700';
+              const endingButtonClass = 'flex h-8 min-w-0 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700';
+              return (
+                <div
+                  data-preview-bar-batch-menu
+                  role="menu"
+                  aria-label={language === 'zh' ? '小節批量操作' : 'Batch bar actions'}
+                  className="fixed z-[2400] w-[230px] rounded-lg border border-slate-200 bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
+                  style={{ left: menuLeft, top: menuTop }}
+                  onContextMenu={(event) => event.preventDefault()}
+                >
+                  <div className="mb-1 border-b border-slate-100 px-2 pb-2 text-[11px] font-black text-slate-500">
+                    {language === 'zh' ? `已選 ${selectedCount} 小節` : `${selectedCount} bar${selectedCount === 1 ? '' : 's'} selected`}
+                  </div>
+                  <button type="button" role="menuitem" className={menuButtonClass} onClick={copyPreviewSelectedBars}>
+                    <Copy size={14} />
+                    <span>{language === 'zh' ? '複製選取小節' : 'Copy selected bars'}</span>
+                  </button>
+                  {canPasteIntoEmpty ? (
+                    <button type="button" role="menuitem" className={menuButtonClass} onClick={() => pastePreviewBarsAtContextTarget('replace-empty')}>
+                      <ClipboardPaste size={14} />
+                      <span>{language === 'zh' ? `貼上 ${clipboardCount} 小節` : `Paste ${clipboardCount} bar${clipboardCount === 1 ? '' : 's'}`}</span>
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" role="menuitem" disabled={!canPaste} className={menuButtonClass} onClick={() => pastePreviewBarsAtContextTarget('before')}>
+                        <ClipboardPaste size={14} />
+                        <span>{language === 'zh' ? '貼到前方' : 'Paste before'}</span>
+                      </button>
+                      <button type="button" role="menuitem" disabled={!canPaste} className={menuButtonClass} onClick={() => pastePreviewBarsAtContextTarget('after')}>
+                        <ClipboardPaste size={14} />
+                        <span>{language === 'zh' ? '貼到後方' : 'Paste after'}</span>
+                      </button>
+                    </>
+                  )}
+                  <div className="mt-2 border-t border-slate-100 pt-2">
+                    <div className="mb-1 flex items-center gap-1 px-2 text-[11px] font-black text-slate-500">
+                      <Hash size={12} />
+                      <span>{language === 'zh' ? '房子' : 'Ending'}</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {(['1', '2', '3', '1,2'] as const).map((ending) => (
+                        <button
+                          key={ending}
+                          type="button"
+                          role="menuitem"
+                          className={endingButtonClass}
+                          onClick={() => applyPreviewEndingToTargets(ending, 'set', previewBarContextMenu)}
+                        >
+                          {ending}
+                        </button>
+                      ))}
+                    </div>
+                    <button type="button" role="menuitem" className={`${menuButtonClass} mt-1`} onClick={() => applyPreviewEndingToTargets(undefined, 'set', previewBarContextMenu)}>
+                      <Minus size={14} />
+                      <span>{language === 'zh' ? '清除房子' : 'Clear ending'}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
               <PreviewWysiwygEditor
                 song={activeEditorSong}

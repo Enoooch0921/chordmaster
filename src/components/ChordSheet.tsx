@@ -834,6 +834,17 @@ export interface ChordSheetElementTarget extends ChordSheetElementClickMeta {
   sectionTitleIntent?: 'actions' | 'rename';
 }
 
+export interface ChordSheetPreviewBarTarget extends ChordSheetElementClickMeta {
+  previewIdentity: string | null;
+  sectionId: string;
+  barId: string;
+}
+
+export interface ChordSheetPreviewBarContextMenuTarget extends ChordSheetPreviewBarTarget {
+  clientX: number;
+  clientY: number;
+}
+
 export const getChordSheetMetaAnchorKey = (
   previewIdentity: string | null | undefined,
   field: ChordSheetMetaField
@@ -874,6 +885,9 @@ interface ChordSheetProps {
   } | null;
   /** @deprecated Use activePreviewNotationTarget. */
   activeChordSlot?: { sectionId: string; barId: string; slotIndex: number } | null;
+  selectedPreviewBars?: Array<{ sectionId: string; barId: string }>;
+  onPreviewBarMetaClick?: (target: ChordSheetPreviewBarTarget) => void;
+  onPreviewBarContextMenu?: (target: ChordSheetPreviewBarContextMenuTarget) => void;
   previewIdentity?: string | null;
   showPageBadges?: boolean;
   onSectionReorder?: (sourceSectionId: string, targetSectionId: string, placement: 'before' | 'after') => void;
@@ -1353,7 +1367,7 @@ const AutoShrink: React.FC<{
   );
 };
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
   const copy = getUiCopy(language);
   const nashvilleFontFamily = getNashvilleFontFamily(song.nashvilleFontPreset);
   // Chords always use the sans-serif preset; the serif option was removed.
@@ -1423,6 +1437,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         slotIndex: resolvedActiveNotationTarget.cursor.slotIndex
       }
     : null;
+  const selectedPreviewBarKeys = React.useMemo(() => (
+    new Set(selectedPreviewBars.map((target) => `${target.sectionId}\u0000${target.barId}`))
+  ), [selectedPreviewBars]);
   const clearSectionDragLongPress = () => {
     if (sectionDragLongPressTimerRef.current !== null) {
       window.clearTimeout(sectionDragLongPressTimerRef.current);
@@ -1729,6 +1746,47 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         : undefined,
       anchorKey,
       anchorRect: getPreviewAnchorRect(slotAnchor ?? notationAnchor ?? event.currentTarget)
+    });
+  };
+  const shouldIgnorePreviewBarMultiSelectEvent = (target: EventTarget | null) => (
+    target instanceof Element
+    && Boolean(target.closest('[data-preview-only-control], button, a, input, textarea, select, [role="button"]'))
+  );
+  const getPreviewBarActionTarget = (
+    element: HTMLElement,
+    sectionId: string,
+    barId: string
+  ): ChordSheetPreviewBarTarget => ({
+    previewIdentity,
+    sectionId,
+    barId,
+    anchorKey: `${previewIdentity || 'preview'}|${sectionId}|${barId}|bar|all`,
+    anchorRect: getPreviewAnchorRect(element)
+  });
+  const emitPreviewBarMetaClick = (
+    event: React.MouseEvent<HTMLElement>,
+    sectionId?: string,
+    barId?: string
+  ) => {
+    if (!onPreviewBarMetaClick || !sectionId || !barId) return;
+    if (!(event.metaKey || event.ctrlKey) || shouldIgnorePreviewBarMultiSelectEvent(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onPreviewBarMetaClick(getPreviewBarActionTarget(event.currentTarget, sectionId, barId));
+  };
+  const emitPreviewBarContextMenu = (
+    event: React.MouseEvent<HTMLElement>,
+    sectionId?: string,
+    barId?: string
+  ) => {
+    if (!onPreviewBarContextMenu || !sectionId || !barId) return;
+    if (shouldIgnorePreviewBarMultiSelectEvent(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onPreviewBarContextMenu({
+      ...getPreviewBarActionTarget(event.currentTarget, sectionId, barId),
+      clientX: event.clientX,
+      clientY: event.clientY
     });
   };
   const getMetaEditAnchorKey = (field: ChordSheetMetaField) => getChordSheetMetaAnchorKey(previewIdentity, field);
@@ -3036,10 +3094,33 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const endingDisplayText = formatEndingDisplay(bar?.ending);
                     const hasMultipleEndingNumbers = Boolean(bar?.ending?.includes(','));
                     const endingTopClass = '-top-[16px]';
+                    const previewBarSectionId = section?.id;
+                    const previewBarId = bar?.id;
+                    const isPreviewSelectedBar = Boolean(
+                      previewBarSectionId
+                      && previewBarId
+                      && selectedPreviewBarKeys.has(`${previewBarSectionId}\u0000${previewBarId}`)
+                    );
+                    const activeBarShadow = `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}`;
+                    const selectedBarShadow = 'inset 0 0 0 2px rgba(245, 158, 11, 0.96), inset 0 0 0 4px rgba(255, 251, 235, 0.88), 0 0 0 2px rgba(245, 158, 11, 0.24)';
+                    const barStyle: React.CSSProperties = {
+                      gridColumn: `${bIdx + 1} / span ${restSpan}`,
+                      paddingBottom: `${barPaddingBottom}px`,
+                      ...(isActiveBar ? {
+                        backgroundColor: activeTone.barFill,
+                        boxShadow: isPreviewSelectedBar
+                          ? `${activeBarShadow}, 0 0 0 3px rgba(245, 158, 11, 0.34)`
+                          : activeBarShadow
+                      } : isPreviewSelectedBar ? {
+                        backgroundColor: 'rgba(251, 191, 36, 0.13)',
+                        boxShadow: selectedBarShadow
+                      } : {})
+                    };
 
                     return (
 	                      <div
 	                        key={bIdx}
+                          data-preview-selected-bar={isPreviewSelectedBar ? true : undefined}
 	                        data-preview-lower-lanes={onElementClick ? lowerLaneCount : undefined}
 	                        data-preview-three-notation-rows={hasThreeNotationRows ? true : undefined}
                         className={`sheet-bar relative min-h-0 px-1 pt-1.5 flex flex-col min-w-0 ${leftBorderClass} ${rightBorderClass} ${bar?.repeatStart ? 'sheet-has-repeat-start' : ''} ${
@@ -3047,7 +3128,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         } ${previousBar?.finalBar ? 'sheet-after-final-bar' : ''} ${
                           suppressRightBarline ? 'sheet-has-terminal-right' : ''
                         } ${isActiveBar ? 'z-20' : projectsRhythmTieToNextBar ? 'z-10' : ''}`}
-                        style={isActiveBar ? { gridColumn: `${bIdx + 1} / span ${restSpan}`, paddingBottom: `${barPaddingBottom}px`, backgroundColor: activeTone.barFill, boxShadow: `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}` } : { gridColumn: `${bIdx + 1} / span ${restSpan}`, paddingBottom: `${barPaddingBottom}px` }}
+                        style={barStyle}
+                        onClickCapture={(event) => emitPreviewBarMetaClick(event, previewBarSectionId, previewBarId)}
+                        onContextMenu={(event) => emitPreviewBarContextMenu(event, previewBarSectionId, previewBarId)}
                       >
                         {showAddBarButton && (
                           <button

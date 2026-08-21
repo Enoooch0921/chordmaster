@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
 import { ensureSongEditingIds, reorderSection } from '../lib/songEditing';
@@ -19,6 +19,77 @@ const song: Song = {
 };
 
 describe('ChordSheet preview input caret', () => {
+  it('toggles preview bar multi-selection with command or control click without opening edit', () => {
+    const onElementClick = vi.fn();
+    const onPreviewBarMetaClick = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={song}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onElementClick={onElementClick}
+        onPreviewBarMetaClick={onPreviewBarMetaClick}
+      />
+    );
+
+    const bar = container.querySelector<HTMLElement>('.sheet-bar')!;
+    fireEvent.click(bar, { metaKey: true });
+    fireEvent.click(bar, { ctrlKey: true });
+
+    expect(onPreviewBarMetaClick).toHaveBeenCalledTimes(2);
+    expect(onPreviewBarMetaClick).toHaveBeenCalledWith(expect.objectContaining({
+      previewIdentity: 'song-1',
+      sectionId: 'section-1',
+      barId: 'bar-1'
+    }));
+    expect(onElementClick).not.toHaveBeenCalled();
+  });
+
+  it('marks selected preview bars while preserving active bar styling', () => {
+    const { container } = render(
+      <ChordSheet
+        song={song}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        activeBar={{ sIdx: 0, bIdx: 0 }}
+        selectedPreviewBars={[{ sectionId: 'section-1', barId: 'bar-1' }]}
+      />
+    );
+
+    const selectedBar = container.querySelector<HTMLElement>('[data-preview-selected-bar="true"]');
+    expect(selectedBar).not.toBeNull();
+    expect(selectedBar).toHaveClass('z-20');
+    expect(selectedBar?.style.boxShadow).toContain('rgba(245, 158, 11');
+  });
+
+  it('emits preview bar context menu targets and prevents the browser menu', () => {
+    const onPreviewBarContextMenu = vi.fn();
+    const { container } = render(
+      <ChordSheet
+        song={song}
+        language="zh"
+        currentKey="C"
+        previewIdentity="song-1"
+        onPreviewBarContextMenu={onPreviewBarContextMenu}
+      />
+    );
+
+    const bar = container.querySelector<HTMLElement>('.sheet-bar')!;
+    const event = createEvent.contextMenu(bar, { clientX: 123, clientY: 45 });
+    fireEvent(bar, event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onPreviewBarContextMenu).toHaveBeenCalledWith(expect.objectContaining({
+      previewIdentity: 'song-1',
+      sectionId: 'section-1',
+      barId: 'bar-1',
+      clientX: 123,
+      clientY: 45
+    }));
+  });
+
   it('shows one caret at either an occupied or empty selected beat', () => {
     const { container, rerender } = render(
       <ChordSheet

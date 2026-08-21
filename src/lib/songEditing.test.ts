@@ -6,6 +6,7 @@ import {
   clearChordAtBeatSlot,
   convertDisplayedChordToStoredChord,
   convertStoredChordToDisplayedChord,
+  copyBarsForClipboard,
   deleteBar,
   detectSectionChordInputMode,
   duplicateBar,
@@ -24,11 +25,13 @@ import {
   insertSectionAfter,
   normalizeChordTextInput,
   parseChordBarText,
+  pasteBarsAtBar,
   repairSongStructure,
   resolvePreviewChordSlotIndex,
   reorderSection,
   serializeChordBeatSlots,
   setChordAtBeatSlot,
+  setEndingForBars,
   setMultiMeasureRestAtBar,
   splitSectionAtBar,
   mergeSectionToPrevious,
@@ -300,6 +303,112 @@ describe('bar commands', () => {
 
     expect(deleteBar(multiSectionSong, { sectionId: 'section-2', barId: 'bar-2' }).sections.map((section) => section.id)).toEqual(['section-1']);
     expect(deleteBar(makeSong({ chords: [] }), { sectionId: 'section-1', barId: 'bar-1' }).sections[0].bars).toHaveLength(0);
+  });
+
+  it('toggles ending shortcut digits across selected bars', () => {
+    const multiBarSong: Song = {
+      title: 'Batch ending',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [
+          { id: 'bar-1', chords: ['C'] },
+          { id: 'bar-2', chords: ['G'], ending: '1' },
+          { id: 'bar-3', chords: ['Am'] }
+        ]
+      }]
+    };
+    const targets = [
+      { sectionId: 'section-1', barId: 'bar-1' },
+      { sectionId: 'section-1', barId: 'bar-2' }
+    ];
+
+    const withOne = setEndingForBars(multiBarSong, targets, '1', 'toggle-digit');
+    expect(withOne.sections[0].bars.map((bar) => bar.ending)).toEqual(['1', undefined, undefined]);
+
+    const withOneTwo = setEndingForBars(withOne, targets, '2', 'toggle-digit');
+    expect(withOneTwo.sections[0].bars.map((bar) => bar.ending)).toEqual(['1,2', '2', undefined]);
+
+    const cleared = setEndingForBars(withOneTwo, targets, undefined);
+    expect(cleared.sections[0].bars.map((bar) => bar.ending)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('copies selected bars in chart order instead of click order', () => {
+    const multiSectionSong: Song = {
+      title: 'Copy order',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [
+        { id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'] }, { id: 'bar-2', chords: ['Dm'] }] },
+        { id: 'section-2', title: 'Chorus', bars: [{ id: 'bar-3', chords: ['G'] }] }
+      ]
+    };
+
+    expect(copyBarsForClipboard(multiSectionSong, [
+      { sectionId: 'section-2', barId: 'bar-3' },
+      { sectionId: 'section-1', barId: 'bar-1' }
+    ]).map((bar) => bar.id)).toEqual(['bar-1', 'bar-3']);
+  });
+
+  it('pastes copied bars into an empty target while preserving the target id', () => {
+    const pasteSong: Song = {
+      title: 'Paste empty',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [
+          { id: 'bar-1', chords: ['C'], riff: '1' },
+          { id: 'bar-2', chords: ['G'] },
+          { id: 'blank', chords: [] }
+        ]
+      }]
+    };
+    const copiedBars = copyBarsForClipboard(pasteSong, [
+      { sectionId: 'section-1', barId: 'bar-1' },
+      { sectionId: 'section-1', barId: 'bar-2' }
+    ]);
+
+    const result = pasteBarsAtBar(pasteSong, { sectionId: 'section-1', barId: 'blank' }, copiedBars, 'replace-empty');
+
+    expect(result.pastedBarIds[0]).toBe('blank');
+    expect(result.song.sections[0].bars.map((bar) => bar.id)).toHaveLength(4);
+    expect(result.song.sections[0].bars[2]).toMatchObject({ id: 'blank', chords: ['C'], riff: '1' });
+    expect(result.song.sections[0].bars[3].id).not.toBe('bar-2');
+    expect(result.song.sections[0].bars[3].chords).toEqual(['G']);
+  });
+
+  it('pastes copied bars before or after non-empty targets without overwriting them', () => {
+    const pasteSong: Song = {
+      title: 'Paste around',
+      originalKey: 'C',
+      currentKey: 'C',
+      timeSignature: '4/4',
+      sections: [{
+        id: 'section-1',
+        title: 'Verse',
+        bars: [
+          { id: 'bar-1', chords: ['C'] },
+          { id: 'bar-2', chords: ['G'] }
+        ]
+      }]
+    };
+    const copiedBars = copyBarsForClipboard(pasteSong, [{ sectionId: 'section-1', barId: 'bar-1' }]);
+    const unchanged = pasteBarsAtBar(pasteSong, { sectionId: 'section-1', barId: 'bar-2' }, copiedBars, 'replace-empty');
+    const before = pasteBarsAtBar(pasteSong, { sectionId: 'section-1', barId: 'bar-2' }, copiedBars, 'before');
+    const after = pasteBarsAtBar(pasteSong, { sectionId: 'section-1', barId: 'bar-2' }, copiedBars, 'after');
+
+    expect(unchanged.song).toBe(pasteSong);
+    expect(before.song.sections[0].bars.map((bar) => bar.chords[0])).toEqual(['C', 'C', 'G']);
+    expect(after.song.sections[0].bars.map((bar) => bar.chords[0])).toEqual(['C', 'G', 'C']);
+    expect(before.song.sections[0].bars[2].id).toBe('bar-2');
+    expect(after.song.sections[0].bars[1].id).toBe('bar-2');
   });
 });
 

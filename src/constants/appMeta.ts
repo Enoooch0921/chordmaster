@@ -85,6 +85,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-08-21',
+        title: 'Preview bar multi-select and consolidated 0.9.6 notes',
+        bullets: [
+          'Added Command/Ctrl-click multi-selection on preview bars, with a right-click batch menu for selected bars.',
+          'Selected bars can now be copied and pasted as a group; empty targets are filled directly while non-empty targets offer paste-before and paste-after placement.',
+          'Option+1 through Option+9 now batch-toggle repeat ending numbers across selected bars while preserving the existing single-bar shortcut when nothing is selected.',
+          'Consolidated the 0.9.6 release notes for bar row height controls, team library role hardening, personal imports, archive/delete flows, realtime safety checks, and Bach rhythm geometry fixes into the latest in-app changelog.'
+        ]
+      },
+      {
+        version: '0.9.5',
         date: '2026-07-27',
         title: 'Shared setlist section sync fix',
         bullets: [
@@ -455,6 +466,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-08-21',
+        title: '預覽小節多選與 0.9.6 更新整合',
+        bullets: [
+          '新增預覽譜面 `Command/Ctrl + click` 多小節選取，右鍵可開啟選取小節的批量操作選單。',
+          '選取小節可批量複製／貼上；空白目標會直接填入，非空白目標可選擇貼到前方或後方。',
+          '`Option + 1..9` 現在可批量切換所選小節的房子記號；沒有多選時仍保留原本目前小節快捷鍵。',
+          '整合 0.9.6 已發布的更新紀錄：小節高度切換、團隊曲庫角色與權限強化、個人匯入、封存／刪除、Realtime 安全檢查與 Bach 節奏幾何修正。'
+        ]
+      },
+      {
+        version: '0.9.5',
         date: '2026-07-27',
         title: '分享歌單段落同步修正',
         bullets: [

@@ -49,6 +49,10 @@ export interface LocatedSongBar {
   bar: Bar;
 }
 
+export interface LocatedSongBarSelection extends LocatedSongBar {
+  target: SongBarIdentity;
+}
+
 export interface ChordBeatSlot {
   chord: string;
   rawChordIndex: number | null;
@@ -518,6 +522,123 @@ export const insertBar = (
 export const duplicateBar = (song: Song, target: SongBarIdentity): Song => {
   const located = findSongBar(song, target);
   return located ? insertBar(song, target, 'after', cloneBarForInsert(located.bar)) : song;
+};
+
+const getSongBarIdentityKey = (target: SongBarIdentity) => `${target.sectionId}\u0000${target.barId}`;
+
+export const getBarsByIdentities = (
+  song: Song,
+  targets: SongBarIdentity[]
+): LocatedSongBarSelection[] => {
+  const requestedKeys = new Set(
+    targets
+      .filter((target) => target.sectionId.trim() && target.barId.trim())
+      .map(getSongBarIdentityKey)
+  );
+  if (requestedKeys.size === 0) return [];
+
+  const locatedBars: LocatedSongBarSelection[] = [];
+  song.sections.forEach((section, sectionIndex) => {
+    if (!section.id) return;
+    section.bars.forEach((bar, barIndex) => {
+      if (!bar.id) return;
+      const target = { sectionId: section.id!, barId: bar.id };
+      if (!requestedKeys.has(getSongBarIdentityKey(target))) return;
+      locatedBars.push({
+        sectionIndex,
+        barIndex,
+        section,
+        bar,
+        target
+      });
+    });
+  });
+  return locatedBars;
+};
+
+export const copyBarsForClipboard = (
+  song: Song,
+  targets: SongBarIdentity[]
+): Bar[] => getBarsByIdentities(song, targets).map(({ bar }) => structuredClone(bar));
+
+export const setEndingForBars = (
+  song: Song,
+  targets: SongBarIdentity[],
+  ending: string | undefined,
+  mode: 'set' | 'toggle-digit' = 'set'
+): Song => {
+  const locatedBars = getBarsByIdentities(song, targets);
+  if (locatedBars.length === 0) return song;
+  const targetKeys = new Set(locatedBars.map(({ target }) => getSongBarIdentityKey(target)));
+  let changed = false;
+  const normalizedEnding = ending?.trim() || undefined;
+  const sections = song.sections.map((section) => {
+    if (!section.id) return section;
+    let sectionChanged = false;
+    const bars = section.bars.map((bar) => {
+      if (!bar.id || !targetKeys.has(getSongBarIdentityKey({ sectionId: section.id!, barId: bar.id }))) {
+        return bar;
+      }
+      const nextEnding = mode === 'toggle-digit' && normalizedEnding
+        ? toggleEndingNumber(bar.ending, normalizedEnding)
+        : normalizedEnding;
+      if ((bar.ending || undefined) === nextEnding) return bar;
+      changed = true;
+      sectionChanged = true;
+      return { ...bar, ending: nextEnding };
+    });
+    return sectionChanged ? { ...section, bars } : section;
+  });
+  return changed ? { ...song, sections } : song;
+};
+
+export type PasteBarsMode = 'replace-empty' | 'before' | 'after';
+
+export interface PasteBarsAtBarResult {
+  song: Song;
+  pastedBarIds: string[];
+}
+
+export const pasteBarsAtBar = (
+  song: Song,
+  target: SongBarIdentity,
+  sourceBars: Bar[],
+  mode: PasteBarsMode
+): PasteBarsAtBarResult => {
+  const located = findSongBar(song, target);
+  if (!located || sourceBars.length === 0) return { song, pastedBarIds: [] };
+
+  if (mode === 'replace-empty') {
+    if (!isBarCompletelyEmpty(located.bar)) return { song, pastedBarIds: [] };
+    const [firstBar, ...remainingBars] = sourceBars;
+    const replacement = {
+      ...structuredClone(firstBar),
+      id: located.bar.id
+    };
+    const insertedBars = remainingBars.map(cloneBarForInsert);
+    const bars = [...located.section.bars];
+    bars.splice(located.barIndex, 1, replacement, ...insertedBars);
+    const sections = [...song.sections];
+    sections[located.sectionIndex] = { ...located.section, bars };
+    return {
+      song: { ...song, sections },
+      pastedBarIds: [
+        replacement.id,
+        ...insertedBars.map((bar) => bar.id).filter((id): id is string => Boolean(id))
+      ].filter((id): id is string => Boolean(id))
+    };
+  }
+
+  const insertedBars = sourceBars.map(cloneBarForInsert);
+  const insertIndex = located.barIndex + (mode === 'after' ? 1 : 0);
+  const bars = [...located.section.bars];
+  bars.splice(insertIndex, 0, ...insertedBars);
+  const sections = [...song.sections];
+  sections[located.sectionIndex] = { ...located.section, bars };
+  return {
+    song: { ...song, sections },
+    pastedBarIds: insertedBars.map((bar) => bar.id).filter((id): id is string => Boolean(id))
+  };
 };
 
 export const deleteBar = (song: Song, target: SongBarIdentity): Song => {
