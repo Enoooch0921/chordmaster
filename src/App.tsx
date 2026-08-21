@@ -153,6 +153,11 @@ import {
   resolvePreviewEditorDeviceLayout,
   shouldAutoScrollPreviewEditTarget
 } from './lib/previewEditorLayout';
+import {
+  getPreviewBarSelectionKey,
+  PreviewBarSelectionTarget,
+  togglePreviewBarSelection
+} from './lib/previewBarSelection';
 import { getPreviewZoomContentRatio, resolvePreviewZoomScrollPosition } from './lib/previewZoom';
 import { getChordDisplaySlotOwnership } from './utils/chordSlots';
 import { getDefaultRhythmCursor, getRhythmCursorUnits } from './lib/rhythmEditing';
@@ -927,10 +932,6 @@ const normalizeSearchText = (value: string): string => (
 
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
-const getPreviewBarSelectionKey = (target: PreviewBarSelectionTarget) => (
-  `${target.previewIdentity}\u0000${target.sectionId}\u0000${target.barId}`
-);
-
 const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable
@@ -1294,12 +1295,6 @@ interface PreviewSectionActionTarget {
   title: string;
   anchorKey: string;
   anchorRect: PreviewAnchorRect;
-}
-
-interface PreviewBarSelectionTarget {
-  previewIdentity: string;
-  sectionId: string;
-  barId: string;
 }
 
 interface PreviewBarContextMenuState extends PreviewBarSelectionTarget {
@@ -9467,7 +9462,18 @@ export default function App() {
   }, [activePreviewIdentity, activePreviewSelectedBars]);
 
   const getActivePreviewBarTarget = React.useCallback((sourceSong: Song): PreviewBarSelectionTarget | null => {
-    if (!activePreviewIdentity || !activeBar || activePreviewEditSession) return null;
+    if (!activePreviewIdentity) return null;
+    if (
+      activePreviewEditSession?.previewIdentity === activePreviewIdentity
+      && activePreviewEditSession.target.kind === 'bar'
+    ) {
+      return {
+        previewIdentity: activePreviewIdentity,
+        sectionId: activePreviewEditSession.target.sectionId,
+        barId: activePreviewEditSession.target.barId
+      };
+    }
+    if (!activeBar) return null;
     const section = sourceSong.sections[activeBar.sIdx];
     const bar = section?.bars[activeBar.bIdx];
     return section?.id && bar?.id
@@ -9488,15 +9494,12 @@ export default function App() {
       sectionId: target.sectionId,
       barId: target.barId
     };
-    const nextKey = getPreviewBarSelectionKey(nextTarget);
+    const batchSong = getPreviewBatchSong();
+    const activeTarget = batchSong ? getActivePreviewBarTarget(batchSong) : null;
     setPreviewSelectedBars((current) => {
-      const samePreviewTargets = current.filter((candidate) => candidate.previewIdentity === target.previewIdentity);
-      const exists = samePreviewTargets.some((candidate) => getPreviewBarSelectionKey(candidate) === nextKey);
-      return exists
-        ? samePreviewTargets.filter((candidate) => getPreviewBarSelectionKey(candidate) !== nextKey)
-        : [...samePreviewTargets, nextTarget];
+      return togglePreviewBarSelection(current, nextTarget, activeTarget);
     });
-  }, [activePreviewEditSession, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession]);
+  }, [activePreviewEditSession, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession, getActivePreviewBarTarget, getPreviewBatchSong]);
 
   const handlePreviewBarContextMenu = React.useCallback((target: ChordSheetPreviewBarContextMenuTarget) => {
     if (!canOpenEditor || !target.previewIdentity) return;
