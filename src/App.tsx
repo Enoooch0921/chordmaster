@@ -54,6 +54,7 @@ import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
+import { EDITABLE_TEAM_ROLES, getTeamRoleDescription, getTeamRoleLabel } from './constants/teamRoles';
 import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, ChordSheetPreviewBarContextMenuTarget, ChordSheetPreviewBarTarget, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
@@ -499,26 +500,6 @@ interface GoogleUserSession {
 
 const TEAM_EDIT_ROLES = new Set<LibraryRole>(['owner', 'editor']);
 const TEAM_SETLIST_CREATE_ROLES = new Set<LibraryRole>(['owner', 'editor', 'setlist_manager']);
-
-const getRoleLabel = (role: LibraryRole, language: AppLanguage) => {
-  if (language === 'zh') {
-    switch (role) {
-      case 'owner': return '團隊擁有者';
-      case 'editor': return '曲庫管理員';
-      case 'setlist_manager': return '歌單編輯者';
-      case 'viewer': return '檢視者';
-      default: return role;
-    }
-  }
-
-  switch (role) {
-    case 'owner': return 'Team Owner';
-    case 'editor': return 'Song Library Manager';
-    case 'setlist_manager': return 'Setlist Editor';
-    case 'viewer': return 'Viewer';
-    default: return role;
-  }
-};
 
 const getUnknownErrorMessage = (error: unknown) => {
   if (error instanceof Error && error.message.trim()) {
@@ -2397,6 +2378,7 @@ export default function App() {
   const [teamInviteEmail, setTeamInviteEmail] = useState('');
   const [teamInviteRole, setTeamInviteRole] = useState<Exclude<LibraryRole, 'owner'>>('setlist_manager');
   const [isCreatingTeamInvite, setIsCreatingTeamInvite] = useState(false);
+  const [updatingTeamMemberUserId, setUpdatingTeamMemberUserId] = useState<string | null>(null);
   const [teamInviteShareUrl, setTeamInviteShareUrl] = useState<string | null>(null);
   const [teamFeatureError, setTeamFeatureError] = useState<string | null>(null);
   const setlistShareStatusGenerationRef = useRef(0);
@@ -4359,13 +4341,21 @@ export default function App() {
 
   const handleUpdateTeamMemberRole = async (userId: string, role: Exclude<LibraryRole, 'owner'>) => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || !activeCloudLibrary) return;
+    if (!repository || !activeCloudLibrary || !canManageActiveTeam || updatingTeamMemberUserId) return;
     try {
+      setUpdatingTeamMemberUserId(userId);
       await repository.updateTeamMemberRole(activeCloudLibrary.id, userId, role);
-      await loadTeamManagement();
-      await refreshCloudLibraries();
+      await Promise.all([
+        loadTeamManagement(),
+        refreshCloudLibraries()
+      ]);
+      toast.success(language === 'zh'
+        ? `已將成員權限改為「${getTeamRoleLabel(role, language)}」。`
+        : `Member role changed to ${getTeamRoleLabel(role, language)}.`);
     } catch (error) {
       toast.error(getTeamFeatureErrorMessage(error, language));
+    } finally {
+      setUpdatingTeamMemberUserId(null);
     }
   };
 
@@ -6239,7 +6229,7 @@ export default function App() {
   const handleExportSongLibraryJson = () => {
     if (isTeamWorkspace && !canEditTeamSongs) {
       toast.error(language === 'zh'
-        ? '只有團隊擁有者或曲庫管理員可以匯出團隊曲庫。'
+        ? '只有團隊擁有者或歌曲管理員可以匯出團隊曲庫。'
         : 'Only team owners or library managers can export a team library.');
       return;
     }
@@ -6775,8 +6765,8 @@ export default function App() {
           setPreviewEditSession(null);
           setIsEditing(false);
           toast.info(language === 'zh'
-            ? `你的團隊角色已更新為「${getRoleLabel(currentLibrary.role, language)}」。${hadUnsavedChanges ? '未儲存修改仍保留在畫面；若新權限不允許，這些修改不會上傳。' : ''}`
-            : `Your team role is now ${getRoleLabel(currentLibrary.role, language)}.${hadUnsavedChanges ? ' Unsaved edits remain on screen; they will not upload if the new role does not allow it.' : ''}`);
+            ? `你的團隊角色已更新為「${getTeamRoleLabel(currentLibrary.role, language)}」。${hadUnsavedChanges ? '未儲存修改仍保留在畫面；若新權限不允許，這些修改不會上傳。' : ''}`
+            : `Your team role is now ${getTeamRoleLabel(currentLibrary.role, language)}.${hadUnsavedChanges ? ' Unsaved edits remain on screen; they will not upload if the new role does not allow it.' : ''}`);
           return;
         }
 
@@ -6899,8 +6889,8 @@ export default function App() {
             : 'Your team access was removed, so ChordMaster switched to your personal workspace.');
         } else if (roleChanged) {
           toast.info(language === 'zh'
-            ? `你的團隊角色已更新為「${getRoleLabel(currentLibrary.role, language)}」。`
-            : `Your team role is now ${getRoleLabel(currentLibrary.role, language)}.`);
+            ? `你的團隊角色已更新為「${getTeamRoleLabel(currentLibrary.role, language)}」。`
+            : `Your team role is now ${getTeamRoleLabel(currentLibrary.role, language)}.`);
         }
       } catch (error) {
         if (!cancelled) {
@@ -6987,7 +6977,7 @@ export default function App() {
     }
     if (!canEditTeamSongs) {
       toast.error(language === 'zh'
-        ? '只有團隊擁有者與曲庫管理員可以轉存團隊歌曲。'
+        ? '只有團隊擁有者與歌曲管理員可以轉存團隊歌曲。'
         : 'Only team owners and song library managers can copy team songs to personal.');
       return;
     }
@@ -11976,7 +11966,7 @@ export default function App() {
                     <span className="max-w-[120px] truncate">{library.kind === 'personal' ? (language === 'zh' ? '個人區' : 'Personal') : library.name}</span>
                     {library.kind === 'team' ? (
                       <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] text-gray-500">
-                        {getRoleLabel(library.role, language)}
+                        {getTeamRoleLabel(library.role, language)}
                       </span>
                     ) : null}
                   </button>
@@ -11998,11 +11988,11 @@ export default function App() {
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
             >
               <Users size={14} />
-              <span>{language === 'zh' ? '成員與邀請' : 'Members & Invites'}</span>
+              <span>{language === 'zh' ? '團隊成員與權限' : 'Team Members & Roles'}</span>
             </button>
           ) : isTeamWorkspace ? (
             <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-500">
-              {language === 'zh' ? `目前權限：${getRoleLabel(activeLibraryRole, language)}` : `Role: ${getRoleLabel(activeLibraryRole, language)}`}
+              {language === 'zh' ? `目前權限：${getTeamRoleLabel(activeLibraryRole, language)}` : `Role: ${getTeamRoleLabel(activeLibraryRole, language)}`}
             </div>
           ) : null}
         </div>
@@ -12011,14 +12001,17 @@ export default function App() {
   ) : null;
 
   const teamManagementPanel = isWorkspacePanelOpen && isTeamManagementOpen && canManageActiveTeam ? (
-    <div className="border-b border-gray-200 bg-white px-4 py-3">
+    <div className="max-h-[70vh] shrink-0 overflow-y-auto border-b border-gray-200 bg-white px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
-            {language === 'zh' ? '團隊管理' : 'Team Management'}
+            {language === 'zh' ? '團隊成員與權限' : 'Team Members & Roles'}
           </div>
           <div className="mt-0.5 text-xs font-semibold text-gray-600">
             {activeCloudLibrary?.name}
+          </div>
+          <div className="mt-1 text-[11px] font-medium leading-4 text-indigo-700">
+            {language === 'zh' ? '你可以隨時調整每位成員的權限。' : 'You can change each member’s role at any time.'}
           </div>
         </div>
         <button
@@ -12031,7 +12024,24 @@ export default function App() {
         </button>
       </div>
 
+      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
+          {language === 'zh' ? '權限說明' : 'Role guide'}
+        </div>
+        <div className="mt-2 space-y-2">
+          {EDITABLE_TEAM_ROLES.map((role) => (
+            <div key={role}>
+              <div className="text-[11px] font-bold text-gray-800">{getTeamRoleLabel(role, language)}</div>
+              <div className="mt-0.5 text-[10px] font-medium leading-4 text-gray-500">{getTeamRoleDescription(role, language)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="mt-3 grid grid-cols-1 gap-2">
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
+          {language === 'zh' ? '邀請新成員' : 'Invite a member'}
+        </div>
         <input
           value={teamInviteEmail}
           onChange={(event) => setTeamInviteEmail(event.target.value)}
@@ -12042,11 +12052,12 @@ export default function App() {
           <select
             value={teamInviteRole}
             onChange={(event) => setTeamInviteRole(event.target.value as Exclude<LibraryRole, 'owner'>)}
+            aria-label={language === 'zh' ? '新成員權限' : 'New member role'}
             className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"
           >
-            <option value="editor">{getRoleLabel('editor', language)}</option>
-            <option value="setlist_manager">{getRoleLabel('setlist_manager', language)}</option>
-            <option value="viewer">{getRoleLabel('viewer', language)}</option>
+            {EDITABLE_TEAM_ROLES.map((role) => (
+              <option key={role} value={role}>{getTeamRoleLabel(role, language)}</option>
+            ))}
           </select>
           <button
             type="button"
@@ -12057,6 +12068,10 @@ export default function App() {
             {language === 'zh' ? '邀請' : 'Invite'}
           </button>
         </div>
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] font-medium leading-4 text-indigo-800">
+          <span className="font-bold">{getTeamRoleLabel(teamInviteRole, language)}：</span>
+          {getTeamRoleDescription(teamInviteRole, language)}
+        </div>
         {teamInviteShareUrl ? (
           <div className="break-all rounded-xl bg-indigo-50 px-3 py-2 text-[11px] font-medium text-indigo-700">
             {teamInviteShareUrl}
@@ -12066,35 +12081,50 @@ export default function App() {
 
       <div className="mt-3 space-y-2">
         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
-          {language === 'zh' ? '成員' : 'Members'}
+          {language === 'zh' ? '成員權限' : 'Member Roles'}
         </div>
         {(teamManagement?.members ?? []).map((member) => (
-          <div key={member.userId} className="flex min-w-0 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-2.5 py-2">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-bold text-gray-900">{member.name || member.email}</div>
-              <div className="truncate text-[11px] text-gray-500">{member.email}</div>
-            </div>
-            {member.role === 'owner' ? (
-              <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-gray-600">{getRoleLabel(member.role, language)}</span>
-            ) : (
-              <>
-                <select
-                  value={member.role}
-                  onChange={(event) => void handleUpdateTeamMemberRole(member.userId, event.target.value as Exclude<LibraryRole, 'owner'>)}
-                  className="max-w-[130px] rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-700"
-                >
-                  <option value="editor">{getRoleLabel('editor', language)}</option>
-                  <option value="setlist_manager">{getRoleLabel('setlist_manager', language)}</option>
-                  <option value="viewer">{getRoleLabel('viewer', language)}</option>
-                </select>
+          <div key={member.userId} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-bold text-gray-900">{member.name || member.email}</div>
+                <div className="truncate text-[11px] text-gray-500">{member.email}</div>
+              </div>
+              {member.role !== 'owner' ? (
                 <button
                   type="button"
                   onClick={() => void handleRemoveTeamMember(member.userId)}
-                  className="rounded-lg px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50"
+                  disabled={Boolean(updatingTeamMemberUserId)}
+                  className="rounded-lg px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-40"
                 >
                   {copy.delete}
                 </button>
-              </>
+              ) : null}
+            </div>
+            {member.role === 'owner' ? (
+              <div className="mt-2 rounded-lg border border-gray-200 bg-white px-2.5 py-2">
+                <div className="text-[11px] font-bold text-gray-700">{getTeamRoleLabel(member.role, language)}</div>
+                <div className="mt-0.5 text-[10px] font-medium leading-4 text-gray-500">{getTeamRoleDescription(member.role, language)}</div>
+              </div>
+            ) : (
+              <div className="mt-2">
+                <select
+                  value={member.role}
+                  onChange={(event) => void handleUpdateTeamMemberRole(member.userId, event.target.value as Exclude<LibraryRole, 'owner'>)}
+                  disabled={Boolean(updatingTeamMemberUserId)}
+                  aria-label={language === 'zh' ? `調整 ${member.name || member.email} 的權限` : `Change role for ${member.name || member.email}`}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-[11px] font-bold text-gray-700 outline-none focus:border-indigo-300 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {EDITABLE_TEAM_ROLES.map((role) => (
+                    <option key={role} value={role}>{getTeamRoleLabel(role, language)}</option>
+                  ))}
+                </select>
+                <div className="mt-1 text-[10px] font-medium leading-4 text-gray-500">
+                  {updatingTeamMemberUserId === member.userId
+                    ? (language === 'zh' ? '正在更新權限…' : 'Updating role…')
+                    : getTeamRoleDescription(member.role, language)}
+                </div>
+              </div>
             )}
           </div>
         ))}
@@ -12109,7 +12139,8 @@ export default function App() {
             <div key={invite.id} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-bold text-gray-900">{invite.email}</div>
-                <div className="truncate text-[11px] text-gray-500">{getRoleLabel(invite.role, language)}</div>
+                <div className="truncate text-[11px] font-semibold text-gray-600">{getTeamRoleLabel(invite.role, language)}</div>
+                <div className="mt-0.5 text-[10px] leading-4 text-gray-400">{getTeamRoleDescription(invite.role, language)}</div>
               </div>
               <button
                 type="button"
@@ -12885,7 +12916,7 @@ export default function App() {
             </div>
           ) : (
             <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600">
-              {getRoleLabel(activeLibraryRole, language)}
+              {getTeamRoleLabel(activeLibraryRole, language)}
             </span>
           )}
         </div>

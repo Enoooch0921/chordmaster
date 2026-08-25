@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, LoaderCircle, RefreshCw, UserRoundCog, X } from 'lucide-react';
 import { AppLanguage, SetlistEditorAssignmentSnapshot } from '../types';
+import { getTeamRoleLabel } from '../constants/teamRoles';
 
 interface SetlistAssignmentDialogProps {
   open: boolean;
@@ -43,8 +44,8 @@ export const SetlistAssignmentDialog: React.FC<SetlistAssignmentDialogProps> = (
         </div>
         <div className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs font-medium leading-5 text-gray-600">
           {language === 'zh'
-            ? '被指派的曲庫管理員或歌單編輯者，可以新增、移除與排序這份歌單的團隊歌曲。'
-            : 'Assigned song-library managers and setlist editors can add, remove, and reorder team songs in this setlist.'}
+            ? '被指派的歌曲管理員或歌單協作者，可以新增、移除與排序這份歌單的團隊歌曲。'
+            : 'Assigned song managers and setlist collaborators can add, remove, and reorder team songs in this setlist.'}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {loading && !snapshot ? (
@@ -62,7 +63,7 @@ export const SetlistAssignmentDialog: React.FC<SetlistAssignmentDialogProps> = (
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-bold text-gray-900">{member.name}</span>
                       {member.email ? <span className="mt-0.5 block truncate text-[11px] text-gray-500">{member.email}</span> : null}
-                      <span className="mt-0.5 block truncate text-[11px] text-gray-500">{member.role === 'editor' ? (language === 'zh' ? '曲庫管理員' : 'Song Library Manager') : (language === 'zh' ? '歌單編輯者' : 'Setlist Editor')}</span>
+                      <span className="mt-0.5 block truncate text-[11px] text-gray-500">{getTeamRoleLabel(member.role, language)}</span>
                     </span>
                     <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${assigned ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 bg-white text-transparent'}`}>{updating ? <LoaderCircle size={13} className="animate-spin text-indigo-600" /> : <Check size={14} strokeWidth={3} />}</span>
                   </button>

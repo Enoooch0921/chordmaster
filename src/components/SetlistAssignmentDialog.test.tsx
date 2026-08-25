@@ -47,8 +47,8 @@ describe('SetlistAssignmentDialog', () => {
     );
 
     expect(screen.getByText('8/2 主日敬拜')).toBeInTheDocument();
-    expect(screen.getByText('曲庫管理員')).toBeInTheDocument();
-    expect(screen.getByText('歌單編輯者')).toBeInTheDocument();
+    expect(screen.getByText('歌曲管理員')).toBeInTheDocument();
+    expect(screen.getAllByText('歌單協作者')).toHaveLength(2);
     expect(screen.getByText('manager@example.com')).toBeInTheDocument();
     expect(screen.getByText('editor@example.com')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '歌單協作者' })).toHaveAttribute('aria-busy', 'false');
