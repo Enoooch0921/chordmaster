@@ -92,7 +92,12 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     const root = rootRef.current;
     if (!root) return undefined;
     const measure = () => {
-      const nextWidth = root.getBoundingClientRect().width;
+      // The whole preview sheet is scaled with a CSS transform. A bounding
+      // rect includes that visual scale, while the SVG below still lays out in
+      // the element's untransformed CSS coordinate space. Feeding the scaled
+      // width into its viewBox applies the preview zoom a second time and
+      // compresses compact rhythm notation on narrow/mobile previews.
+      const nextWidth = root.clientWidth || root.offsetWidth || root.getBoundingClientRect().width;
       if (nextWidth > 0) {
         setLayoutWidth((current) => Math.abs(current - nextWidth) < 0.25 ? current : nextWidth);
       }

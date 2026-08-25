@@ -1,5 +1,5 @@
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { render, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import RhythmNotation from './RhythmNotation';
 
 describe('RhythmNotation', () => {
@@ -49,6 +49,36 @@ describe('RhythmNotation', () => {
     const overlay = container.querySelector<HTMLElement>('[data-rhythm-overlay]');
 
     expect(overlay?.style.transform).toBe('scale(1)');
+  });
+
+  it('uses untransformed layout width when the preview sheet is visually scaled', async () => {
+    const clientWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(200);
+    const offsetWidth = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200);
+    const boundingRect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 154,
+      bottom: 16,
+      left: 0,
+      width: 154,
+      height: 16,
+      toJSON: () => ({})
+    });
+
+    try {
+      const { container } = render(
+        <RhythmNotation notation="q q q q" timeSignature="4/4" compact />
+      );
+
+      await waitFor(() => {
+        expect(container.querySelector('[data-rhythm-geometry-svg]')?.getAttribute('viewBox')).toBe('0 0 200 16');
+      });
+    } finally {
+      clientWidth.mockRestore();
+      offsetWidth.mockRestore();
+      boundingRect.mockRestore();
+    }
   });
 
   it('keeps compact triplet numbers above the rhythm bracket', () => {
