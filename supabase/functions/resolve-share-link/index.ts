@@ -187,6 +187,7 @@ Deno.serve(async (request) => {
               id: item.id,
               title: baseSong?.title ?? '',
               song: songContent,
+              overrideKey: item.override_json?.overrideKey ?? null,
               archivedAt: baseSong?.archived_at ?? null
             };
           })
@@ -255,6 +256,7 @@ Deno.serve(async (request) => {
           id: item.id,
           title: song.title,
           song: item.override_json?.songData ?? song.content_json,
+          overrideKey: item.override_json?.overrideKey ?? null,
           archivedAt: song.archived_at ?? null
         };
       })

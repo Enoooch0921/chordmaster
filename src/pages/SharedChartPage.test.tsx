@@ -48,6 +48,7 @@ const song = (title: string) => ({
   title,
   originalKey: 'C' as const,
   currentKey: 'C' as const,
+  tempo: 96,
   timeSignature: '4/4',
   sections: [{ id: `section-${title}`, title: 'Verse', bars: [{ id: `bar-${title}`, chords: ['C'] }] }]
 });
@@ -178,5 +179,26 @@ describe('SharedChartPage song imports', () => {
     expect(window.localStorage.getItem('chordmaster.workspace-mode.v1')).toBe('setlists');
     expect(window.localStorage.getItem('chordmaster.selected-setlist-id.v1')).toBe('shared-setlist-1');
     expect(window.localStorage.getItem('chordmaster.selected-setlist-song-id.v1')).toBe('setlist-song-1');
+  });
+
+  it('shows each shared setlist song with its setlist key and BPM', async () => {
+    const payload: SharedResourcePayload = {
+      resourceType: 'setlist',
+      setlist: {
+        id: 'shared-setlist-1',
+        name: 'Sunday Setlist',
+        displayMode: 'chord-movable-key',
+        songs: [
+          { id: 'setlist-song-1', title: 'Alpha', overrideKey: 'D', song: { ...song('Alpha'), tempo: 128 } },
+          { id: 'setlist-song-2', title: 'Beta', song: song('Beta') }
+        ]
+      }
+    };
+    mocks.resolveShareLink.mockResolvedValue(payload);
+
+    renderPage();
+
+    expect(await screen.findByText('D · 128 BPM')).toBeInTheDocument();
+    expect(screen.getByText('C · 96 BPM')).toBeInTheDocument();
   });
 });

@@ -232,6 +232,8 @@ export interface SharedSetlistPayload {
     id: string;
     title: string;
     song: Song;
+    overrideKey?: Key | null;
+    archivedAt?: string | null;
   }>;
 }
 

@@ -6,6 +6,7 @@ import { APP_NAME } from '../constants/appMeta';
 import {
   AppLanguage,
   SharedResourcePayload,
+  SharedSetlistPayload,
   SharedSongImportInspection,
   SharedSongImportResult,
   SongImportResolution
@@ -17,6 +18,42 @@ import { supabase } from '../lib/supabase';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
 const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.v1';
+
+type SharedSetlistSong = SharedSetlistPayload['songs'][number];
+
+const getSharedSongMeta = (item: SharedSetlistSong) => {
+  const key = item.overrideKey ?? item.song.currentKey;
+  const tempo = typeof item.song.tempo === 'number' && Number.isFinite(item.song.tempo)
+    ? `${item.song.tempo} BPM`
+    : null;
+  return [key, tempo].filter(Boolean).join(' · ');
+};
+
+const SharedSetlistSongRow = ({
+  item,
+  index,
+  language
+}: {
+  key?: string;
+  item: SharedSetlistSong;
+  index: number;
+  language: AppLanguage;
+}) => (
+  <div className="flex items-center gap-3 px-4 py-2.5">
+    <span className="w-5 shrink-0 text-right text-xs font-bold text-stone-400">{index + 1}</span>
+    <span className="min-w-0 flex-1">
+      <span className="block text-sm font-semibold text-stone-800">{item.title}</span>
+      <span className="mt-0.5 block text-xs font-semibold text-stone-500">
+        {getSharedSongMeta(item)}
+      </span>
+    </span>
+    {item.archivedAt ? (
+      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+        {language === 'zh' ? '已封存' : 'Archived'}
+      </span>
+    ) : null}
+  </div>
+);
 
 const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string | null) => {
   try {
@@ -491,15 +528,7 @@ export default function SharedChartPage() {
 
               <div className="mb-6 overflow-hidden rounded-xl border border-stone-100 bg-stone-50 divide-y divide-stone-100">
                 {payload.setlist.songs.map((item, index) => (
-                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <span className="w-5 shrink-0 text-right text-xs font-bold text-stone-400">{index + 1}</span>
-                    <span className="min-w-0 flex-1 text-sm font-semibold text-stone-800">{item.title}</span>
-                    {item.archivedAt ? (
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                        {language === 'zh' ? '已封存' : 'Archived'}
-                      </span>
-                    ) : null}
-                  </div>
+                  <SharedSetlistSongRow key={item.id} item={item} index={index} language={language} />
                 ))}
               </div>
 
@@ -585,15 +614,7 @@ export default function SharedChartPage() {
                       ) : (
                         <div className="divide-y divide-stone-100">
                           {sl.songs.map((item, index) => (
-                            <div key={item.id} className="flex items-center gap-3 px-4 py-2">
-                              <span className="w-5 shrink-0 text-right text-xs font-bold text-stone-400">{index + 1}</span>
-                              <span className="min-w-0 flex-1 text-sm font-semibold text-stone-800">{item.title}</span>
-                              {item.archivedAt ? (
-                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                                  {language === 'zh' ? '已封存' : 'Archived'}
-                                </span>
-                              ) : null}
-                            </div>
+                            <SharedSetlistSongRow key={item.id} item={item} index={index} language={language} />
                           ))}
                         </div>
                       )}
