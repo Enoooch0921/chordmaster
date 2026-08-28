@@ -1159,7 +1159,11 @@ const toggleDot = (
   if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
   const safeCursor = clampCursor(context, cursor);
 	  const selected = selectedNoteAtCursor(context, safeCursor);
-	  const targetNote = selected ?? noteEndingAtCursor(context, safeCursor);
+	  const noteBeforeCursor = selected ? null : noteEndingAtCursor(context, safeCursor);
+	  // A dot may only be removed from an explicitly selected note. When the
+	  // cursor merely follows a dotted note, toggle the input mode instead so
+	  // disabling dots for the next note does not alter the previous one.
+	  const targetNote = selected ?? (noteBeforeCursor?.note.dotted ? null : noteBeforeCursor);
 	  const duration = targetNote?.note.duration ?? inputMode.duration;
 	  const triplet = targetNote?.note.triplet ?? inputMode.triplet;
 	  const dotted = !(targetNote?.note.dotted ?? inputMode.dotted);

@@ -285,6 +285,30 @@ describe('duration and placeholder commands', () => {
     expect(result.cursor).toEqual({ beatIndex: 1, unitIndex: 2, noteIndex: null });
   });
 
+  it('keeps an unselected dotted note intact when disabling dot input', () => {
+    const dottedMode = { ...DEFAULT_JIANPU_INPUT_MODE, dotted: true };
+    const inserted = applyJianpuCommand(
+      makeSong(),
+      target,
+      insertion(),
+      { type: 'insert-pitch', pitch: '5' },
+      dottedMode
+    );
+    const result = applyJianpuCommand(
+      inserted.song,
+      target,
+      inserted.cursor,
+      { type: 'toggle-dot' },
+      inserted.inputMode
+    );
+
+    expect(inserted.cursor.noteIndex).toBeNull();
+    expect(result.error).toBeNull();
+    expect(result.song).toBe(inserted.song);
+    expect(result.song.sections[0].bars[0].riff).toBe('5. | ss');
+    expect(result.inputMode.dotted).toBe(false);
+  });
+
 	  it('can insert an eighth note after dotting the previous quarter note', () => {
 	    const song = makeSong({ riff: '5' });
     const dotted = applyJianpuCommand(
