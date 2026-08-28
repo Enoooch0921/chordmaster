@@ -736,6 +736,40 @@ const openSystemShareSheet = async (shareUrl: string, title: string) => {
   return false;
 };
 
+const isAppleTouchWebDevice = () => {
+  if (typeof navigator === 'undefined') return false;
+  const userAgent = navigator.userAgent || '';
+  const platform = navigator.platform || '';
+  return /iPad|iPhone|iPod/i.test(userAgent) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+};
+
+const trySharePdfFileFromWeb = async (pdf: jsPDF, safeFileName: string, title: string) => {
+  if (
+    typeof navigator === 'undefined'
+    || typeof navigator.share !== 'function'
+    || typeof File === 'undefined'
+  ) {
+    return false;
+  }
+
+  const pdfBlob = pdf.output('blob') as Blob;
+  const pdfFile = new File([pdfBlob], safeFileName, { type: 'application/pdf' });
+  const shareData = { title, files: [pdfFile] };
+
+  try {
+    if (typeof navigator.canShare === 'function' && !navigator.canShare(shareData)) {
+      return false;
+    }
+
+    await navigator.share(shareData);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/cancel|abort/i.test(message)) return true;
+    return false;
+  }
+};
+
 // On native iPad (Capacitor WKWebView), jsPDF's `.save()` relies on an
 // `<a download>` click that WKWebView silently ignores, so nothing happens.
 // Instead, write the PDF to the cache directory and hand it to the iOS share
@@ -744,6 +778,10 @@ const savePdfDocument = async (pdf: jsPDF, fileName: string) => {
   const safeFileName = `${fileName}.pdf`;
 
   if (!Capacitor.isNativePlatform()) {
+    if (isAppleTouchWebDevice() && await trySharePdfFileFromWeb(pdf, safeFileName, fileName)) {
+      return;
+    }
+
     pdf.save(safeFileName);
     return;
   }
@@ -762,7 +800,7 @@ const savePdfDocument = async (pdf: jsPDF, fileName: string) => {
   try {
     await Share.share({
       title: fileName,
-      url: writeResult.uri,
+      files: [writeResult.uri],
     });
   } catch (error) {
     // Dismissing the iOS share sheet rejects with a "canceled" error — that is
