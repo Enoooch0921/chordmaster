@@ -77,6 +77,18 @@ const JIANPU_LAYOUT_EPSILON = 0.001;
 const JIANPU_DIGIT_FONT = '"SF Mono", "Cascadia Mono", "Roboto Mono", "Menlo", "Consolas", ui-monospace, monospace';
 const JIANPU_SYMBOL_FONT = '"Avenir Next", "PingFang TC", "Microsoft JhengHei", ui-sans-serif, system-ui, sans-serif';
 
+const resolveSlurAnchor = (markedNote: LayoutNote | null, notes: LayoutNote[]) => {
+  if (!markedNote || markedNote.pitch !== '-') return markedNote;
+
+  const markedIndex = notes.lastIndexOf(markedNote);
+  for (let index = markedIndex - 1; index >= 0; index -= 1) {
+    const candidate = notes[index];
+    if (candidate.pitch !== '-' && candidate.pitch !== '0') return candidate;
+  }
+
+  return markedNote;
+};
+
 const getTokenList = (notation?: string, tokens?: string[]) => {
   if (tokens) return tokens;
   if (!notation?.trim()) return [];
@@ -1109,11 +1121,12 @@ const Jianpu: React.FC<JianpuProps> = ({
             const isSelfSlur = slur.type === 'self' && slur.start && slur.end;
             const selfSpan = renderMode === 'editor' ? 12 : compact ? 10 : 18;
             const edgeOvershoot = renderMode === 'editor' ? 8 : compact ? 5 : 10;
-            const startNote = slur.start ?? null;
-            const endNote = slur.end ?? null;
-            const crossBarNextEnd = compact && slur.type === 'outgoing'
-              ? nextCrossBarNotes.find((note) => note.slurEnd)
+            const startNote = resolveSlurAnchor(slur.start ?? null, layoutNotes);
+            const endNote = resolveSlurAnchor(slur.end ?? null, layoutNotes);
+            const markedCrossBarNextEnd = compact && slur.type === 'outgoing'
+              ? nextCrossBarNotes.find((note) => note.slurEnd) ?? null
               : null;
+            const crossBarNextEnd = resolveSlurAnchor(markedCrossBarNextEnd, nextCrossBarNotes);
             const laneWidth = containerWidth ?? totalWidthUnits;
             const crossBarGap = compact ? 18 : 20;
             const slurAnchorXBias = compact ? 0 : renderMode === 'editor' ? 0 : -1.2;
@@ -1139,6 +1152,7 @@ const Jianpu: React.FC<JianpuProps> = ({
             return (
               <path
                 key={slur.key}
+                data-jianpu-slur={slur.type}
                 d={`M ${startX} ${anchorY} C ${startX + controlOffset} ${controlY} ${endX - controlOffset} ${controlY} ${endX} ${anchorY}`}
                 fill="none"
                 stroke={color ? notationColor : 'rgba(71, 85, 105, 0.9)'}

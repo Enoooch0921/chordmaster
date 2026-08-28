@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import Jianpu from './Jianpu';
 
 describe('Jianpu', () => {
@@ -34,5 +34,25 @@ describe('Jianpu', () => {
     expect(tripletLines).toHaveLength(2);
     expect(tripletLines?.[0].style.top).toBe('5px');
     expect(tripletLines?.[1].style.top).toBe('5px');
+  });
+
+  it('anchors a cross-bar slur on the sounded note before sustain dashes', () => {
+    const widthSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);
+    try {
+      const { container } = render(
+        <Jianpu
+          notation="5 | - | - | (-"
+          nextNotationForCrossBar="5_)1'_ | 7_(5_ | 5_)3_ | 4_(5_"
+          compact
+        />
+      );
+
+      const outgoingSlur = container.querySelector<SVGPathElement>('[data-jianpu-slur="outgoing"]');
+
+      expect(outgoingSlur).not.toBeNull();
+      expect(outgoingSlur?.getAttribute('d')).toMatch(/^M 50 /);
+    } finally {
+      widthSpy.mockRestore();
+    }
   });
 });
