@@ -104,6 +104,7 @@ import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
 import { loadPendingSync, markMigrationCompleted, hasCompletedMigration, savePendingSync } from './lib/workspace';
 import { mergeWorkspaceByUpdatedAt, syncWorkspaceDiff } from './lib/sync';
+import { applySongLibraryImport, getSongLibraryImportMode, resolveImportedSongIdentity } from './lib/songLibraryImport';
 import { hasSupabaseConfig } from './lib/supabase';
 import {
   applyPreviewDraft,
@@ -6313,17 +6314,25 @@ export default function App() {
         return;
       }
 
-      const existingSongIds = new Set(songs.map((item) => item.id));
-      const nextSongs = importedSongs.map((item, index) => {
+      const importMode = getSongLibraryImportMode(importedSongs.length);
+      const importTimestamp = Date.now();
+      const existingSongIds = new Set<string>(songs.map((item) => item.id));
+      const preparedImportedSongs = importedSongs.map((item, index) => {
         const storedLikeItem = item as Partial<StoredSong>;
         const normalizedSong = cloneSong(normalizeSongBars(item as Song));
         const existingSong = storedLikeItem.id
           ? songs.find((songItem) => songItem.id === storedLikeItem.id)
           : null;
-        const shouldImportAsCopy = isCloudMode && (!storedLikeItem.id || !existingSongIds.has(storedLikeItem.id));
-        const importedId = shouldImportAsCopy
-          ? crypto.randomUUID()
-          : storedLikeItem.id || `song-imported-${Date.now()}-${index + 1}`;
+        const importedIdentity = resolveImportedSongIdentity({
+          sourceId: storedLikeItem.id,
+          existingSongIds,
+          mode: importMode,
+          isCloudMode,
+          createId: createSongId,
+          fallbackId: `song-imported-${importTimestamp}-${index + 1}`
+        });
+        const shouldImportAsCopy = importedIdentity.importedAsCopy;
+        const importedId = importedIdentity.id;
         const { teamSource: _teamSource, ...songWithoutWorkspaceLink } = normalizedSong as StoredSong;
         return {
           ...songWithoutWorkspaceLink,
@@ -6334,14 +6343,21 @@ export default function App() {
           updatedBy: isCloudMode ? authenticatedUser?.id : storedLikeItem.updatedBy,
           archivedAt: shouldImportAsCopy ? null : storedLikeItem.archivedAt ?? null,
           archivedBy: shouldImportAsCopy ? null : storedLikeItem.archivedBy ?? null,
-          updatedAt: typeof storedLikeItem.updatedAt === 'number' ? storedLikeItem.updatedAt : Date.now()
+          createdAt: importMode === 'append-single' ? importTimestamp : storedLikeItem.createdAt,
+          updatedAt: importMode === 'append-single'
+            ? importTimestamp
+            : typeof storedLikeItem.updatedAt === 'number' ? storedLikeItem.updatedAt : importTimestamp
         };
       }) as StoredSong[];
 
       const confirmed = window.confirm(
         language === 'zh'
-          ? `要匯入 ${nextSongs.length} 首歌並取代目前的 Song Library 嗎？`
-          : `Import ${nextSongs.length} songs and replace the current Song Library?`
+          ? importMode === 'append-single'
+            ? `要將「${preparedImportedSongs[0].title}」加入目前的 Song Library 嗎？\n\n現有歌曲與歌單都會保留。`
+            : `要匯入 ${preparedImportedSongs.length} 首歌並取代目前的 Song Library 嗎？`
+          : importMode === 'append-single'
+            ? `Add “${preparedImportedSongs[0].title}” to the current Song Library?\n\nExisting songs and setlists will be kept.`
+            : `Import ${preparedImportedSongs.length} songs and replace the current Song Library?`
       );
       if (!confirmed) {
         return;
@@ -6353,30 +6369,26 @@ export default function App() {
         return;
       }
 
-      const nextSelectedSongId = nextSongs[0].id;
-      const nextSongIds = new Set(nextSongs.map((item) => item.id));
-      const nextSetlists = setlists.map((setlist) => {
-        const songsInLibrary = setlist.songs.filter((item) => nextSongIds.has(item.songId));
-        if (songsInLibrary.length === setlist.songs.length) {
-          return setlist;
-        }
-
-        return {
-          ...setlist,
-          songs: reindexSetlistSongs(songsInLibrary),
-          updatedAt: Date.now()
-        };
+      const nextSelectedSongId = preparedImportedSongs[0].id;
+      const importedWorkspace = applySongLibraryImport({
+        currentSongs: songs,
+        currentSetlists: setlists,
+        importedSongs: preparedImportedSongs,
+        mode: importMode,
+        updatedAt: importTimestamp
       });
-      setSongs(nextSongs);
-      setSetlists(nextSetlists);
+      setSongs(importedWorkspace.songs);
+      setSetlists(importedWorkspace.setlists);
       setSelectedSongId(nextSelectedSongId);
-      setSelectedSetlistSongId((currentId) => nextSetlists.some((setlist) => setlist.songs.some((item) => item.id === currentId))
+      setSelectedSetlistSongId((currentId) => importedWorkspace.setlists.some((setlist) => setlist.songs.some((item) => item.id === currentId))
         ? currentId
         : null);
-      setSongHistories({});
+      if (importMode === 'replace-library') {
+        setSongHistories({});
+      }
       setSelectedLibrarySongIds([]);
       setIsLibraryEditing(false);
-      await persistWorkspace(nextSongs, nextSetlists);
+      await persistWorkspace(importedWorkspace.songs, importedWorkspace.setlists);
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
       toast.error(reason ? `${copy.importInvalidError}\n\n${reason}` : copy.importInvalidError);
