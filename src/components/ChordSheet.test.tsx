@@ -61,14 +61,16 @@ describe('ChordSheet preview input caret', () => {
     const selectedBar = container.querySelector<HTMLElement>('[data-preview-selected-bar="true"]');
     expect(selectedBar).not.toBeNull();
     expect(selectedBar).toHaveClass('z-20');
-    expect(selectedBar?.style.boxShadow).toContain('rgba(245, 158, 11');
+    expect(selectedBar?.style.boxShadow).toContain('var(--section-selection-glow)');
+    expect(selectedBar?.style.getPropertyValue('--section-selection-stroke')).toBe('rgba(30, 64, 175, 0.92)');
   });
 
-  it('uses the preview edit color for the active notation bar', () => {
+  it.each([['Verse', 'rgba(30, 64, 175, 0.92)'], ['Chorus', 'rgba(159, 18, 57, 0.92)'], ['Refrain', 'rgba(162, 28, 175, 0.92)']])('uses the %s section color for the active notation bar', (title, stroke) => {
     const notationSong: Song = {
       ...song,
       sections: [{
         ...song.sections[0],
+        title,
         bars: [{ id: 'bar-1', chords: ['C'], riff: '1 2 3 4' }]
       }]
     };
@@ -89,7 +91,8 @@ describe('ChordSheet preview input caret', () => {
     );
 
     const activeBar = container.querySelector<HTMLElement>('.sheet-bar');
-    expect(activeBar?.style.boxShadow).toContain('rgba(5, 150, 105');
+    expect(activeBar?.style.boxShadow).toContain('var(--section-selection-stroke)');
+    expect(activeBar?.style.getPropertyValue('--section-selection-stroke')).toBe(stroke);
   });
 
   it('emits preview bar context menu targets and prevents the browser menu', () => {
@@ -2078,7 +2081,7 @@ describe('ChordSheet preview notation interactions', () => {
     expect(container.querySelector('[data-preview-notation-cursor-caret]')).toHaveStyle({ left: '75%' });
   });
 
-  it('uses only the note highlight for a selected preview jianpu note', () => {
+  it('frames the current beat and points to the selected preview jianpu subdivision', () => {
     const multiNoteSong: Song = {
       ...song,
       sections: [{
@@ -2102,9 +2105,9 @@ describe('ChordSheet preview notation interactions', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: 'Select jianpu note 1 in beat 2' }).previousElementSibling).toHaveAttribute('data-jianpu-selected-note-highlight');
-    expect(container.querySelector('[data-preview-active-lane]')).toBeInTheDocument();
-    expect(container.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select jianpu note 1 in beat 2' }).previousElementSibling).toHaveAttribute('data-jianpu-selected-note-pointer');
+    expect(container.querySelector('[data-preview-active-lane]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
     expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).not.toBeInTheDocument();
   });
@@ -2134,9 +2137,9 @@ describe('ChordSheet preview notation interactions', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Select jianpu note 1 in beat 1' })).toHaveAttribute('data-preview-edit-ui');
-    expect(container.querySelector('[data-jianpu-selected-note-highlight]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-selected-note-pointer]')).toBeInTheDocument();
     expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).toBeInTheDocument();
-    expect(container.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
   });
 
@@ -2165,9 +2168,9 @@ describe('ChordSheet preview notation interactions', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Select jianpu note 3 in beat 1' })).toHaveAttribute('data-preview-edit-ui');
-    expect(container.querySelector('[data-jianpu-selected-note-highlight]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-selected-note-pointer]')).toBeInTheDocument();
     expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).toBeInTheDocument();
-    expect(container.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
   });
 
   it('exposes the editor-only empty lower target only while preview editing is enabled', () => {
@@ -2293,10 +2296,12 @@ describe('ChordSheet preview notation interactions', () => {
 
     const selectedRhythmEvent = screen.getByRole('button', { name: 'Select rhythm note 2' });
     expect(selectedRhythmEvent).toHaveAttribute('data-preview-edit-ui');
-    expect(container.querySelector('[data-preview-active-lane]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-active-lane]')).not.toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
-    expect(container.querySelector('[data-rhythm-notation] [data-preview-edit-ui].pointer-events-none')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-rhythm-selected-note-highlight]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).toHaveClass('notation-note-pointer');
+    expect(selectedRhythmEvent).toHaveAttribute('aria-pressed', 'true');
 
     rerender(
       <ChordSheet
@@ -2314,7 +2319,7 @@ describe('ChordSheet preview notation interactions', () => {
       />
     );
 
-    expect(container.querySelector('[data-preview-active-lane]')).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-active-lane]')).not.toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
     expect(container.querySelector('[data-jianpu-active-insert-highlight]')).not.toBeInTheDocument();
@@ -2338,8 +2343,8 @@ describe('ChordSheet preview notation interactions', () => {
     const selectedJianpuNote = screen.getByRole('button', { name: 'Select jianpu note 1 in beat 2' });
     expect(selectedJianpuNote).toHaveAttribute('data-preview-edit-ui');
     expect(selectedJianpuNote.previousElementSibling).toHaveAttribute('data-preview-edit-ui');
-    expect(selectedJianpuNote.previousElementSibling).toHaveAttribute('data-jianpu-selected-note-highlight');
-    expect(container.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
+    expect(selectedJianpuNote.previousElementSibling).toHaveAttribute('data-jianpu-selected-note-pointer');
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
 
     const printableClone = container.cloneNode(true) as HTMLElement;
@@ -2347,7 +2352,7 @@ describe('ChordSheet preview notation interactions', () => {
     expect(printableClone.querySelector('[data-preview-active-lane]')).not.toBeInTheDocument();
     expect(printableClone.querySelector('[data-preview-notation-cursor-beat]')).not.toBeInTheDocument();
     expect(printableClone.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
-    expect(printableClone.querySelector('[data-jianpu-selected-note-highlight]')).not.toBeInTheDocument();
+    expect(printableClone.querySelector('[data-jianpu-selected-note-pointer]')).not.toBeInTheDocument();
   });
 
   it('keeps centered percent selection styling inside removable preview chrome', () => {
@@ -2373,6 +2378,6 @@ describe('ChordSheet preview notation interactions', () => {
 
     const selectedOverlay = container.querySelector('[data-preview-owner-slot="0"] > [data-preview-edit-ui]');
     expect(selectedOverlay).toBeInTheDocument();
-    expect(selectedOverlay?.getAttribute('class')).toContain('bg-emerald-100/70');
+    expect(selectedOverlay?.getAttribute('class')).toContain('preview-section-active-chord');
   });
 });

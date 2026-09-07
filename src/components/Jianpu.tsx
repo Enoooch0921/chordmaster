@@ -800,13 +800,9 @@ const Jianpu: React.FC<JianpuProps> = ({
             : note.duration === 'eighth'
               ? { width: 12, height: 25, radius: '4px' }
               : { width: 15, height: 27, radius: '4px' }
-          : { width: 18, height: 20, radius: '4px' };
-        const selectedNoteClass = renderMode === 'editor'
-          ? 'absolute bg-indigo-200/60 ring-1 ring-indigo-300/90'
-          : 'absolute bg-emerald-100/70 ring-1 ring-emerald-500/70 shadow-[0_0_0_1px_rgba(255,255,255,0.82)]';
-        const selectedNoteInsertCaretClass = renderMode === 'editor'
-          ? 'pointer-events-none absolute z-20 w-[2px] -translate-x-1/2 rounded-full bg-indigo-600 shadow-[0_0_0_1px_rgba(255,255,255,0.86)]'
-          : 'pointer-events-none absolute z-20 w-[2px] -translate-x-1/2 rounded-full bg-emerald-700 shadow-[0_0_0_1px_rgba(255,255,255,0.96),0_0_0_3px_rgba(16,185,129,0.18)]';
+          : { width: 18, height: 26, radius: '4px' };
+        const selectedNoteClass = 'absolute bg-indigo-200/60 ring-1 ring-indigo-300/90';
+        const selectedNoteInsertCaretClass = 'pointer-events-none absolute z-20 w-[2px] -translate-x-1/2 rounded-full bg-indigo-600 shadow-[0_0_0_1px_rgba(255,255,255,0.86)]';
         const hasLaterNoteInToken = layoutNotes.some((candidate) => (
           candidate.tokenIndex === note.tokenIndex
           && candidate.start !== note.start
@@ -840,7 +836,7 @@ const Jianpu: React.FC<JianpuProps> = ({
 
         return (
           <React.Fragment key={`note-ui-${note.tokenIndex}-${note.noteIndex}-${note.start}`}>
-            {isSelectedNote && (
+            {isSelectedNote && renderMode === 'editor' && (
               <span
                 data-preview-edit-ui
                 data-jianpu-selected-note-highlight
@@ -862,17 +858,16 @@ const Jianpu: React.FC<JianpuProps> = ({
               />
             )}
 
-            {hasTrailingInsertSpace && (
-              <span
-                data-preview-edit-ui
-                data-jianpu-selected-note-insert-caret
+            {isSelectedNote && renderMode !== 'editor' && (
+              <span data-preview-edit-ui data-jianpu-selected-note-pointer
+                data-jianpu-selected-note-insert-caret={hasTrailingInsertSpace || undefined}
+                className="notation-note-pointer pointer-events-none absolute z-20"
+                style={{ left: hasTrailingInsertSpace ? trailingInsertLeft : centerLeft, top: metrics.digitCenterY + selectionMetrics.height / 2 + 3 }} />
+            )}
+            {hasTrailingInsertSpace && renderMode === 'editor' && (
+              <span data-preview-edit-ui data-jianpu-selected-note-insert-caret
                 className={selectedNoteInsertCaretClass}
-                style={{
-                  left: trailingInsertLeft,
-                  top: `${metrics.digitCenterY - (selectionMetrics.height / 2)}px`,
-                  height: `${selectionMetrics.height}px`
-                }}
-              />
+                style={{ left: trailingInsertLeft, top: metrics.digitCenterY - selectionMetrics.height / 2, height: selectionMetrics.height }} />
             )}
 
             {onNoteClick && (

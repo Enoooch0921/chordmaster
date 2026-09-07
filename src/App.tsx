@@ -63,6 +63,8 @@ import { EDITABLE_TEAM_ROLES, getTeamRoleDescription, getTeamRoleLabel } from '.
 import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, ChordSheetPreviewBarContextMenuTarget, ChordSheetPreviewBarTarget, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
+import LyricsBook from './components/LyricsBook';
+import { DEFAULT_LYRICS_BOOK_SETTINGS } from './utils/lyricsBook';
 import type { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
 const PreviewWysiwygEditor = React.lazy(() => import('./components/PreviewWysiwygEditor'));
 import PreviewBarEditor from './components/preview-edit/PreviewBarEditor';
@@ -2071,6 +2073,9 @@ export default function App() {
   const [selectedLibrarySongIds, setSelectedLibrarySongIds] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [isLyricsMode, setIsLyricsMode] = useState(false);
+  const [isLyricsReading, setIsLyricsReading] = useState(false);
+  const [isLyricsContinuous, setIsLyricsContinuous] = useState(true);
+  const [lyricsBookSettings, setLyricsBookSettings] = useState(DEFAULT_LYRICS_BOOK_SETTINGS);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pdfExportProgress, setPdfExportProgress] = useState<PdfExportProgressState | null>(null);
   const [isLibraryEditing, setIsLibraryEditing] = useState(false);
@@ -3072,7 +3077,7 @@ export default function App() {
     }
   }, [activeReferenceKind, playableReferenceKinds.join('|')]);
   const duplicateLabel = language === 'zh' ? '副本' : 'Copy';
-  const previewScale = Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, previewBaseScale * previewZoom));
+  const previewScale = isLyricsMode && isLyricsReading ? 1 : Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, previewBaseScale * previewZoom));
   const previewSheetWidth = sheetMetrics.width * previewScale;
   const previewSheetHeight = sheetMetrics.height * previewScale;
   const previewCanvasWidth = Math.max(previewSheetWidth, previewViewportWidth);
@@ -3842,6 +3847,15 @@ export default function App() {
       sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong, nextSong),
       songData: cloneSong(normalizeSongBars(nextSong))
     }));
+  };
+
+  const handleBookLyricsChange = (itemId: string, lyricsDoc: Song['lyricsDoc']) => {
+    if (!canEditSelectedSetlist) return;
+    const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
+    if (!entry) return;
+    const previous = ensureSongEditingIds(normalizeSongBars(cloneSong(entry.item.songData ?? entry.sourceSong)));
+    pushSetlistSongHistory(itemId, previous, entry.item.sectionOrder);
+    handleUpdateSetlistSong(itemId, current => ({ ...current, songData: { ...previous, lyricsDoc } }));
   };
 
   const restoreSavedWorkspace = () => {
@@ -7404,7 +7418,7 @@ export default function App() {
         flushSync(() => {
           exportRoot?.render(
             <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
-              {setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
+              {isLyricsMode && isLyricsContinuous ? <LyricsBook title={selectedSetlist.name} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode /> : setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
                 const baseDerivedSong = applySetlistSongOverrides(
                   sourceSong,
                   selectedSetlist,
@@ -7429,11 +7443,11 @@ export default function App() {
                     data-export-total-songs={setlistSongsWithSource.length}
                     data-export-song-title={derivedSong.title}
                   >
-                    <ChordSheet
+                    {isLyricsMode ? <LyricsSheet song={derivedSong} language={language} exportMode /> : <ChordSheet
                       song={derivedSong}
                       language={language}
                       currentKey={derivedSong.currentKey}
-                    />
+                    />}
                   </div>
                 );
               })}
@@ -7441,6 +7455,17 @@ export default function App() {
           );
         });
         await exportCaptureHostToPdf(captureHost, buildSetlistPdfFileName(selectedSetlist));
+      } else if (isLyricsMode && song) {
+        exportRoot = createRoot(captureHost);
+        flushSync(() => {
+          exportRoot?.render(
+            <div data-print-preview data-export-song-container data-export-song-index={1}
+              data-export-total-songs={1} data-export-song-title={song.title}>
+              <LyricsSheet song={song} language={language} exportMode />
+            </div>
+          );
+        });
+        await exportCaptureHostToPdf(captureHost, buildPdfFileName(song));
       } else {
         if (!song || !sheetRef.current) {
           return;
@@ -7562,7 +7587,7 @@ export default function App() {
       setPerformancePageIndex(next); // update indicator only
       return;
     }
-    if (isSetlistMode) {
+    if (isSetlistMode && !(isLyricsMode && isLyricsContinuous)) {
       const items = setlistSongsWithSource.map(({ item }) => item);
       const idx = items.findIndex((s) => s.id === selectedSetlistSongId);
       const nextSong = items[idx + 1];
@@ -7584,7 +7609,7 @@ export default function App() {
       setPerformancePageIndex(prev); // update indicator only
       return;
     }
-    if (isSetlistMode) {
+    if (isSetlistMode && !(isLyricsMode && isLyricsContinuous)) {
       const items = setlistSongsWithSource.map(({ item }) => item);
       const idx = items.findIndex((s) => s.id === selectedSetlistSongId);
       const prevSong = items[idx - 1];
@@ -7648,7 +7673,10 @@ export default function App() {
   // Uses RAF to wait for ChordSheet to render, then reads page count from DOM.
   useEffect(() => {
     if (!isPerformanceMode) return;
-    const rAF = window.requestAnimationFrame(() => {
+    let rAF = 0;
+    const syncPages = () => {
+      window.cancelAnimationFrame(rAF);
+      rAF = window.requestAnimationFrame(() => {
       const container = performanceSheetRef.current;
       const pageEls: HTMLElement[] = container
         ? Array.from(container.querySelectorAll('[data-print-page]'))
@@ -7662,10 +7690,14 @@ export default function App() {
       performancePageIndexRef.current = clampedIndex;
       setPerformancePageIndex(clampedIndex);
       applyPerformanceTranslation(clampedIndex, performanceScale);
-    });
-    return () => window.cancelAnimationFrame(rAF);
+      });
+    };
+    syncPages();
+    const observer = new ResizeObserver(syncPages);
+    if (performanceSheetRef.current) observer.observe(performanceSheetRef.current);
+    return () => { observer.disconnect(); window.cancelAnimationFrame(rAF); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPerformanceMode, selectedSetlistSongId, selectedSongId]);
+  }, [isPerformanceMode, selectedSetlistSongId, selectedSongId, isLyricsMode, isLyricsContinuous]);
 
   // Keep refs to latest handlers so the keyboard effect never has stale closures.
   const handlePerformanceNextPageRef = useRef(handlePerformanceNextPage);
@@ -10030,7 +10062,9 @@ export default function App() {
     }
 
     if (isLyricsMode && song) {
-      return <LyricsSheet song={song} language={language} />;
+      return <LyricsSheet key={song.id} song={song} language={language}
+        onChange={canOpenEditor ? handleSongChange : undefined}
+        reading={isLyricsReading} onReadingChange={setIsLyricsReading} />;
     }
 
     const renderedSong = (activePreviewEditSession && activeDraftNavigationPreviewSong
@@ -10059,7 +10093,7 @@ export default function App() {
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       /></RecoveryBoundary>
     );
-  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
+  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -10105,6 +10139,11 @@ export default function App() {
     setlistSongsWithSource
   ]);
 
+  const setlistLyricsEntries = React.useMemo(() => setlistSongsWithSource.map(({ item, sourceSong }) => ({
+    id: item.id,
+    song: item.songData ?? sourceSong,
+  })), [setlistSongsWithSource]);
+
   const setlistPreviewSheet = React.useMemo(() => {
     if (setlistPreviewSongs.length === 0) {
       return null;
@@ -10115,7 +10154,19 @@ export default function App() {
       if (!selected) {
         return null;
       }
-      return <LyricsSheet song={selected.song} language={language} />;
+      return <div className="flex flex-col gap-4">
+        <div data-preview-only-control className="flex gap-2 rounded-xl border border-stone-200 bg-white p-2 text-sm">
+          <button type="button" aria-pressed={isLyricsContinuous} onClick={() => setIsLyricsContinuous(true)} className={`rounded-lg px-4 py-2 ${isLyricsContinuous ? 'bg-indigo-100 font-bold text-indigo-800' : 'text-stone-600'}`}>{language === 'zh' ? '整份歌單連續排版' : 'Continuous setlist'}</button>
+          <button type="button" aria-pressed={!isLyricsContinuous} onClick={() => setIsLyricsContinuous(false)} className={`rounded-lg px-4 py-2 ${!isLyricsContinuous ? 'bg-indigo-100 font-bold text-indigo-800' : 'text-stone-600'}`}>{language === 'zh' ? '單曲編輯' : 'Single song'}</button>
+        </div>
+        {isLyricsContinuous ? <LyricsBook title={selectedSetlist?.name ?? ''} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} onSettingsChange={setLyricsBookSettings}
+          onSongChange={canOpenEditor ? handleBookLyricsChange : undefined}
+          onSelectSong={id => { skipNextSetlistPreviewAutoScrollRef.current = true; setSelectedSetlistSongId(id); }}
+          onEditSong={id => { setSelectedSetlistSongId(id); setIsLyricsContinuous(false); }}
+          reading={isLyricsReading} onReadingChange={setIsLyricsReading} /> : <LyricsSheet key={selected.item.id} song={activeSetlistEditableSong ?? selected.song} language={language}
+          onChange={canOpenEditor ? handleSetlistSongContentChange : undefined}
+          reading={isLyricsReading} onReadingChange={setIsLyricsReading} />}
+      </div>;
     }
 
     return (
@@ -10155,7 +10206,7 @@ export default function App() {
         ))}
       </div>
     );
-  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, language, selectedSetlistSong?.id, setlistPreviewSongs]);
+  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -10274,6 +10325,8 @@ export default function App() {
   useEffect(() => {
     if (isLyricsMode) {
       setPreviewMetaEditTarget(null);
+      setIsEditing(false);
+      if (isPhoneViewport) setIsLyricsReading(true);
     }
   }, [isLyricsMode]);
 
@@ -10381,7 +10434,7 @@ export default function App() {
     // narrow and any reflow/scroll (including the auto-scroll-to-selected
     // effect itself) would otherwise ping-pong the selection between two
     // adjacent songs and re-mount the editor on each swap.
-    if (isPerformanceMode || !isSetlistMode || isEditing || previewEditSession || setlistPreviewSongs.length === 0) {
+    if (isPerformanceMode || !isSetlistMode || isLyricsMode || isEditing || previewEditSession || setlistPreviewSongs.length === 0) {
       return;
     }
 
@@ -10441,7 +10494,7 @@ export default function App() {
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [isPerformanceMode, isSetlistMode, isEditing, previewEditSession, selectedSetlistSongId, setlistPreviewSongs.length]);
+  }, [isPerformanceMode, isSetlistMode, isLyricsMode, isEditing, previewEditSession, selectedSetlistSongId, setlistPreviewSongs.length]);
 
   const clearLivePreviewScaleStyles = () => {
     sheetRef.current?.style.removeProperty('--preview-live-scale');
@@ -15290,7 +15343,7 @@ export default function App() {
                 ref={previewCanvasRef}
                 className="relative flex min-h-full min-w-full items-start justify-center"
                 style={{
-                  width: `var(--preview-live-canvas-width, ${previewCanvasWidth}px)`,
+                  width: isLyricsMode && isLyricsReading ? '100%' : `var(--preview-live-canvas-width, ${previewCanvasWidth}px)`,
                   height: `var(--preview-live-canvas-height, ${previewSheetHeight}px)`
                 }}
               >
@@ -15298,10 +15351,10 @@ export default function App() {
                   ref={sheetRef}
                   data-print-preview
                   style={{ 
-                    transform: `scale(var(--preview-live-scale, ${previewScale}))`,
+                    transform: isLyricsMode && isLyricsReading ? 'none' : `scale(var(--preview-live-scale, ${previewScale}))`,
                     transformOrigin: 'top center',
-                    width: `${sheetMetrics.width}px`,
-                    minWidth: `${sheetMetrics.width}px`,
+                    width: isLyricsMode && isLyricsReading ? '100%' : `${sheetMetrics.width}px`,
+                    minWidth: isLyricsMode && isLyricsReading ? 0 : `${sheetMetrics.width}px`,
                     marginLeft: 'auto',
                     marginRight: 'auto'
                   }}
@@ -15531,7 +15584,7 @@ export default function App() {
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
                 <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
-                  {canOpenEditor && !activePreviewEditSession && !isLyricsMode && (
+                  {canOpenEditor && !activePreviewEditSession && (
                     <>
                       <button
                         type="button"
@@ -15561,7 +15614,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleZoomOutPreview}
-                    disabled={previewScale <= PREVIEW_MIN_SCALE + 0.001}
+                    disabled={(isLyricsMode && isLyricsReading) || previewScale <= PREVIEW_MIN_SCALE + 0.001}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
                     title={copy.zoomOutPreview}
                   >
@@ -15571,15 +15624,16 @@ export default function App() {
                     type="button"
                     ref={previewZoomLabelRef}
                     onClick={handleResetPreviewZoom}
+                    disabled={isLyricsMode && isLyricsReading}
                     className="inline-flex min-w-[4rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 sm:min-w-[4.25rem]"
                     title={copy.resetPreviewZoom}
                   >
-                    {previewScalePercent}%
+                    {isLyricsMode && isLyricsReading ? '100' : previewScalePercent}%
                   </button>
                   <button
                     type="button"
                     onClick={handleZoomInPreview}
-                    disabled={previewScale >= PREVIEW_MAX_SCALE - 0.001}
+                    disabled={(isLyricsMode && isLyricsReading) || previewScale >= PREVIEW_MAX_SCALE - 0.001}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg font-bold text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:w-9"
                     title={copy.zoomInPreview}
                   >
@@ -16664,7 +16718,12 @@ export default function App() {
               }}
             >
 	              <div ref={performanceSheetRef}>
-	                {isSetlistMode ? (
+	                {isLyricsMode && isSetlistMode && isLyricsContinuous ? (
+                    <LyricsBook title={selectedSetlist?.name ?? ''} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode />
+                  ) : isLyricsMode ? (
+                    <LyricsSheet key={isSetlistMode ? selectedSetlistSong?.id : song.id}
+                      song={isSetlistMode ? (activeSetlistPreviewSong ?? song) : song} language={language} exportMode />
+                  ) : isSetlistMode ? (
 	                  activeSetlistPreviewSong && (
 	                    <RecoveryBoundary label="譜面預覽"><ChordSheet
 	                      song={activeSetlistPreviewSong}
@@ -16719,12 +16778,11 @@ export default function App() {
 	          {isSetlistMode && activeSetlistPreviewSong && (
 	            <div className={`absolute left-1/2 -translate-x-1/2 pointer-events-none rounded-2xl bg-stone-900/70 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500 ${performanceChromeVisible ? 'opacity-100' : 'opacity-0'}`} style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
 	              <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-stone-300">
-	                {copy.performanceModeSongIndicator}{' '}
-	                {setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSongId) + 1}
-	                {' / '}
-	                {setlistSongsWithSource.length}
-	                {'  ·  '}
-	                {activeSetlistPreviewSong.title}
+	                {isLyricsMode && isLyricsContinuous ? `${selectedSetlist?.name ?? ''} · ${performancePageIndex + 1} / ${performanceTotalPages}` : <>
+                    {copy.performanceModeSongIndicator}{' '}
+                    {setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSongId) + 1}
+                    {' / '}{setlistSongsWithSource.length}{'  ·  '}{activeSetlistPreviewSong.title}
+                  </>}
 	              </div>
 	            </div>
 	          )}

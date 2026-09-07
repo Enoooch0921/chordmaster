@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import RhythmNotation from './RhythmNotation';
 
@@ -164,4 +164,30 @@ describe('RhythmNotation', () => {
     expect(container.querySelector('[data-rhythm-glyph][data-rhythm-base="e"] [data-rhythm-formal-symbol]')).not.toBeNull();
     expect(container.querySelector('[data-rhythm-flag]')).toBeNull();
   });
+  it('frames the active beat and keeps the subdivision arrow inside it across note lengths', () => {
+    const onInsertSelect = vi.fn();
+    const props = { notation: 'h e s s q', timeSignature: '4/4', compact: true, showInsertCursor: true, onInsertSelect };
+    const { container, rerender, getByRole } = render(<RhythmNotation {...props} selectedInsertIndex={0} />);
+    const caret = () => container.querySelector<HTMLElement>('[data-rhythm-cursor-unit]')!;
+    expect(caret().style.left).toBe('12.5%');
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toHaveStyle({ left: '0%', width: '25%' });
+    expect(caret()).toHaveClass('notation-note-pointer');
+    expect(container.querySelector('[data-rhythm-selected-note-highlight]')).toBeNull();
+    fireEvent.click(getByRole('button', { name: 'Select rhythm note 3' }));
+    expect(onInsertSelect).toHaveBeenCalledWith(10, expect.anything());
+    rerender(<RhythmNotation {...props} selectedInsertIndex={10} />);
+    expect(caret().style.left).toBe('65.625%');
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toHaveStyle({ left: '50%', width: '25%' });
+    expect(caret()).toHaveClass('notation-note-pointer');
+    expect(caret()).not.toHaveClass('notation-insert-caret');
+    expect(container.querySelector('[data-rhythm-geometry-svg]')).toHaveClass('z-[2]');
+    expect(getByRole('button', { name: 'Select rhythm note 3' })).toHaveAttribute('aria-pressed', 'true');
+    expect(getByRole('button', { name: 'Select rhythm note 1' })).toHaveAttribute('aria-pressed', 'false');
+    rerender(<RhythmNotation {...props} selectedInsertIndex={16} />);
+    expect(container.querySelector('[data-rhythm-selected-note-highlight]')).toBeNull();
+    expect(caret().style.left).toBe('100%');
+    expect(container.querySelector('[data-preview-notation-cursor-beat]')).toHaveStyle({ left: '75%', width: '25%' });
+    expect(caret()).toHaveClass('notation-note-pointer');
+  });
+
 });

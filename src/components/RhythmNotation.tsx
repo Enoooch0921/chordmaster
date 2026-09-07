@@ -25,6 +25,7 @@ interface RhythmNotationProps {
   className?: string;
   selectedEventIndex?: number | null;
   selectedInsertIndex?: number | null;
+  showInsertCursor?: boolean;
   tieFromPrevious?: boolean;
   nextNotationForCrossBar?: string;
   nextTimeSignatureForCrossBar?: string;
@@ -54,6 +55,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   className = '',
   selectedEventIndex = null,
   selectedInsertIndex = null,
+  showInsertCursor = false,
   tieFromPrevious = false,
   nextNotationForCrossBar,
   nextTimeSignatureForCrossBar,
@@ -267,6 +269,16 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       base: inferredBase as 'q' | 'e' | 's'
     };
   }, [barUnits, getCompactDisplayCenterUnit, selectedCursorUnit, visibleEvents]);
+  // Keep the cursor and selection in the same coordinate system as the glyphs.
+  // A temporal boundary can be far from a long note's displayed centre.
+  const selectedEvent = visibleEvents.find(event => rhythmUnitsEqual(event.startUnit, selectedCursorUnit ?? -1));
+  const activeBeatIndex = Math.max(0, Math.min(beats - 1, Math.floor((selectedCursorUnit ?? 0) / beatUnits)));
+  const beatStartUnit = activeBeatIndex * beatUnits;
+  // Long notes span beats; keep the subdivision pointer inside the active beat.
+  const pointerUnit = selectedEvent
+    ? selectedEvent.startUnit + Math.min(selectedEvent.durationUnits, beatStartUnit + beatUnits - selectedEvent.startUnit) / 2
+    : Math.max(0, Math.min(barUnits, selectedCursorUnit ?? 0));
+  const pointerPercent = pointerUnit / barUnits * 100;
   const hasSingleWholeEvent = visibleEvents.length === 1 && visibleEvents[0].base === 'w';
 
   const unitToPercent = (unit: number) => `${(unit * 100) / Math.max(1, barUnits)}%`;
@@ -936,7 +948,17 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         </>
       )}
 
-      {selectionMode === 'insert' && selectedSlotVisual && (
+      {selectionMode === 'insert' && showInsertCursor && selectedCursorUnit !== null && (
+        <>
+          <span data-preview-edit-ui data-preview-notation-cursor-beat data-notation-beat-index={activeBeatIndex}
+            className="notation-beat-frame pointer-events-none absolute z-[1]"
+            style={{ left: `${beatStartUnit / barUnits * 100}%`, width: `${beatUnits / barUnits * 100}%`, top: -4 * scale, bottom: -4 * scale }} />
+          <span data-preview-edit-ui data-preview-notation-cursor-caret data-rhythm-cursor-unit={selectedCursorUnit}
+            className="notation-note-pointer pointer-events-none absolute z-[4]"
+            style={{ left: `${pointerPercent}%`, top: minHeight + 6 * scale }} />
+        </>
+      )}
+      {selectionMode === 'insert' && !showInsertCursor && selectedSlotVisual && (
         selectedSlotVisual.kind === 'event' ? (
           <div
             data-preview-edit-ui
@@ -1048,6 +1070,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
               }
             }}
             aria-label={`Select rhythm note ${event.index + 1}`}
+            aria-pressed={selectionMode === 'insert' ? rhythmUnitsEqual(event.startUnit, selectedCursorUnit ?? -1) : isSelected}
           >
             {selectionMode === 'event' && isSelected && isSixteenth && (
               <span

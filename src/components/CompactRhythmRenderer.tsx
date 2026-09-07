@@ -142,7 +142,7 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
     <svg
       ref={svgRef}
       data-rhythm-geometry-svg
-      className="absolute inset-0 h-full w-full overflow-visible pointer-events-none select-none"
+      className="absolute inset-0 z-[2] h-full w-full overflow-visible pointer-events-none select-none"
       viewBox={`0 0 ${geometry.width} ${geometry.height}`}
       preserveAspectRatio="none"
       aria-hidden="true"

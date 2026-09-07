@@ -1,82 +1,43 @@
-// Parsing + helpers for the worship-lyrics formatter.
-//
-// A lyrics body is plain text split into sections by blank lines. The first
-// line of each section may carry a marker that controls indentation:
-//   - leading number (e.g. "1.", "2、", "3)") → verse, NOT indented
-//   - leading non-alphanumeric symbol (○ ※ ◎ △ or anything the user types)
-//     → marked section, whole block indented with the symbol hanging left
-//   - otherwise → plain block, not indented
-//
-// Symbols are intentionally free-form: whatever the user types is shown as-is.
+import { readLyricsHeading } from './lyricsSections';
+
+// Parse editable English section headings while accepting legacy numeric and
+// symbol markers from existing lyrics documents.
 
 export type LyricSectionKind = 'verse' | 'marked' | 'plain';
 
 export interface LyricSection {
   kind: LyricSectionKind;
-  marker: string;   // e.g. "1." / "○" / "" (plain)
+  marker: string;   // e.g. "Verse 1" / "Chorus" / "" (plain)
   indented: boolean;
   lines: string[];  // section text lines; first line has the marker stripped
 }
 
-// Verse markers: a number followed by . 、 ) or 。 and optional trailing space.
-const VERSE_MARKER = /^\s*(\d+[.。、)）])\s?/;
-
-/** Parse one lyrics body (Chinese or English) into sections. */
+/** Parse headings and old symbols, with or without blank lines between them. */
 export function parseLyricsBody(text: string): LyricSection[] {
-  if (!text || !text.trim()) return [];
-
-  // Normalise newlines, then split into blocks on one-or-more blank lines.
-  const normalised = text.replace(/\r\n?/g, '\n');
-  const blocks = normalised
-    .split(/\n[ \t]*\n+/)
-    .map((block) => block.replace(/\s+$/g, ''))
-    .filter((block) => block.trim().length > 0);
-
-  return blocks.map((block) => {
-    const rawLines = block.split('\n').map((line) => line.replace(/\s+$/g, ''));
-    const firstLine = rawLines[0] ?? '';
-
-    const verseMatch = firstLine.match(VERSE_MARKER);
-    if (verseMatch) {
-      const marker = verseMatch[1];
-      const rest = firstLine.slice(verseMatch[0].length);
-      return {
-        kind: 'verse' as const,
-        marker,
-        indented: false,
-        lines: [rest, ...rawLines.slice(1)].filter((_, i) => i > 0 || rest.length > 0),
-      };
+  const sections: LyricSection[] = [];
+  let current: LyricSection | null = null;
+  const finish = () => {
+    if (current && (current.marker || current.lines.length)) sections.push(current);
+    current = null;
+  };
+  for (const raw of text.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = raw.trimEnd();
+    if (!line.trim()) {
+      // A blank line after a heading must not detach it from its lyrics.
+      if (current?.lines.length) finish();
+      continue;
     }
-
-    const trimmedFirst = firstLine.trimStart();
-    const firstChar = [...trimmedFirst][0] ?? '';
-    if (firstChar && isMarkerSymbol(firstChar)) {
-      const rest = trimmedFirst.slice(firstChar.length).replace(/^\s+/, '');
-      return {
-        kind: 'marked' as const,
-        marker: firstChar,
-        indented: true,
-        lines: [rest, ...rawLines.slice(1)].filter((_, i) => i > 0 || rest.length > 0),
-      };
+    const heading = readLyricsHeading(line);
+    if (heading) {
+      if (current?.lines.length || (current?.marker && current.marker !== heading.marker)) finish();
+      current = { kind: /^Verse(?: |$)/.test(heading.marker) ? 'verse' : 'marked', marker: heading.marker, indented: false, lines: heading.rest ? [heading.rest] : [] };
+    } else {
+      current ??= { kind: 'plain', marker: '', indented: false, lines: [] };
+      current.lines.push(line);
     }
-
-    return {
-      kind: 'plain' as const,
-      marker: '',
-      indented: false,
-      lines: rawLines,
-    };
-  });
-}
-
-// A "marker symbol" is a single leading char that is neither a letter, a CJK
-// character, nor a digit — i.e. ○ ※ ◎ △ ◆ ● ☆ * etc.
-function isMarkerSymbol(ch: string): boolean {
-  if (/[0-9A-Za-z]/.test(ch)) return false;
-  // CJK ideographs / Hiragana / Katakana / Hangul → treat as text, not marker.
-  if (/[぀-ヿ㐀-鿿가-힯＀-￯]/.test(ch)) return false;
-  if (/\s/.test(ch)) return false;
-  return true;
+  }
+  finish();
+  return sections;
 }
 
 export interface PairedSection {
@@ -116,12 +77,7 @@ export const LYRIC_QUICK_SYMBOLS: Array<{ symbol: string; label: string }> = [
   { symbol: '△', label: 'Refrain' },
 ];
 
-/** Count existing verse blocks so the number button inserts the next index. */
+/** Find the next free verse number, including named headings. */
 export function nextVerseNumber(text: string): number {
-  if (!text) return 1;
-  const matches = text
-    .replace(/\r\n?/g, '\n')
-    .split(/\n[ \t]*\n+/)
-    .filter((block) => VERSE_MARKER.test(block.trimStart()));
-  return matches.length + 1;
+  return Math.max(0, ...parseLyricsBody(text).map(section => Number(section.marker.match(/^Verse (\d+)$/)?.[1]) || 0)) + 1;
 }

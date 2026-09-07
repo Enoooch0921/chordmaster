@@ -1,3 +1,4 @@
+import { getSectionBadgeStyle } from '../utils/sectionBadgeStyle';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -188,82 +189,10 @@ const formatBarAnnotation = (annotation: string) => (
   }).join(' ')
 );
 
-const getSectionBadgeTone = (accent: string) => {
-  switch (accent) {
-    case 'blue':
-      return {
-        backgroundColor: 'rgba(219, 234, 254, 0.96)',
-        borderColor: 'rgba(30, 64, 175, 0.92)',
-        color: 'rgba(30, 64, 175, 0.96)'
-      };
-    case 'rose':
-      return {
-        backgroundColor: 'rgba(255, 228, 230, 0.96)',
-        borderColor: 'rgba(159, 18, 57, 0.92)',
-        color: 'rgba(159, 18, 57, 0.96)'
-      };
-    case 'amber':
-      return {
-        backgroundColor: 'rgba(254, 243, 199, 0.96)',
-        borderColor: 'rgba(146, 64, 14, 0.92)',
-        color: 'rgba(146, 64, 14, 0.96)'
-      };
-    case 'emerald':
-      return {
-        backgroundColor: 'rgba(209, 250, 229, 0.96)',
-        borderColor: 'rgba(6, 95, 70, 0.92)',
-        color: 'rgba(6, 95, 70, 0.96)'
-      };
-    case 'cyan':
-      return {
-        backgroundColor: 'rgba(207, 250, 254, 0.96)',
-        borderColor: 'rgba(14, 116, 144, 0.92)',
-        color: 'rgba(14, 116, 144, 0.96)'
-      };
-    case 'fuchsia':
-      return {
-        backgroundColor: 'rgba(250, 232, 255, 0.96)',
-        borderColor: 'rgba(162, 28, 175, 0.92)',
-        color: 'rgba(162, 28, 175, 0.96)'
-      };
-    case 'violet':
-      return {
-        backgroundColor: 'rgba(237, 233, 254, 0.96)',
-        borderColor: 'rgba(109, 40, 217, 0.92)',
-        color: 'rgba(109, 40, 217, 0.96)'
-      };
-    case 'slate':
-      return {
-        backgroundColor: 'rgba(226, 232, 240, 0.94)',
-        borderColor: 'rgba(30, 41, 59, 0.9)',
-        color: 'rgba(30, 41, 59, 0.94)'
-      };
-    default:
-      return {
-        backgroundColor: 'rgba(224, 231, 255, 0.96)',
-        borderColor: 'rgba(55, 48, 163, 0.92)',
-        color: 'rgba(55, 48, 163, 0.96)'
-      };
-  }
-};
-
-const getSectionBadgeStyle = (accent: string): React.CSSProperties => {
-  const tone = getSectionBadgeTone(accent);
-  return {
-    backgroundColor: tone.backgroundColor,
-    borderColor: tone.borderColor,
-    color: tone.color
-  };
-};
-
-const PREVIEW_EDIT_BAR_FILL = 'rgba(236, 253, 245, 0.34)';
-const PREVIEW_EDIT_BAR_SHADOW = 'inset 0 0 0 2px rgba(5, 150, 105, 0.78), inset 0 0 0 4px rgba(236, 253, 245, 0.86), 0 12px 24px rgba(16, 185, 129, 0.16)';
-const PREVIEW_EDIT_MULTI_SELECT_SHADOW = '0 0 0 3px rgba(245, 158, 11, 0.34)';
-const PREVIEW_ACTIVE_LANE_CLASS = 'pointer-events-none absolute inset-0 z-[0] rounded-sm shadow-[inset_0_0_0_1px_rgba(5,150,105,0.42)]';
-const PREVIEW_NOTATION_BEAT_CLASS = 'pointer-events-none absolute inset-y-[2px] z-[1] rounded-[3px] bg-emerald-300/24 shadow-[inset_0_0_0_1px_rgba(5,150,105,0.28)]';
-const PREVIEW_NOTATION_CARET_CLASS = 'pointer-events-none absolute top-[2px] bottom-[2px] z-[2] w-[2px] -translate-x-1/2 rounded-full bg-emerald-700 shadow-[0_0_0_1px_rgba(255,255,255,0.96),0_0_0_3px_rgba(16,185,129,0.18)]';
-const PREVIEW_CHORD_SLOT_ACTIVE_CLASS = 'bg-emerald-100/70 shadow-[inset_0_0_0_2px_rgba(5,150,105,0.86),0_0_0_1px_rgba(255,255,255,0.88)]';
-const PREVIEW_CENTERED_CHORD_ACTIVE_CLASS = 'pointer-events-none absolute inset-0 rounded bg-emerald-100/70 shadow-[inset_0_0_0_2px_rgba(5,150,105,0.86)]';
+const PREVIEW_EDIT_BAR_SHADOW = 'inset 0 0 0 2px var(--section-selection-stroke), inset 0 0 0 4px rgba(255, 255, 255, 0.86), 0 12px 24px var(--section-selection-glow)';
+const PREVIEW_EDIT_MULTI_SELECT_SHADOW = '0 0 0 3px var(--section-selection-glow)';
+const PREVIEW_CHORD_SLOT_ACTIVE_CLASS = 'preview-section-active-chord';
+const PREVIEW_CENTERED_CHORD_ACTIVE_CLASS = 'preview-section-active-chord pointer-events-none absolute inset-0 rounded';
 
 const getChordMarkTextColor = (bar: Bar | undefined, chordIndex: number) => {
   const mark = bar?.chordMarks?.[chordIndex];
@@ -1287,6 +1216,12 @@ const getSectionActiveTone = (accent: string) => {
       return { fill: 'rgba(245, 158, 11, 0.06)', stroke: 'rgba(245, 158, 11, 0.16)', glow: 'rgba(245, 158, 11, 0.06)', barFill: 'rgba(245, 158, 11, 0.12)', barStroke: 'rgba(245, 158, 11, 0.36)', barGlow: 'rgba(245, 158, 11, 0.20)' };
     case 'emerald':
       return { fill: 'rgba(16, 185, 129, 0.05)', stroke: 'rgba(16, 185, 129, 0.14)', glow: 'rgba(16, 185, 129, 0.06)', barFill: 'rgba(16, 185, 129, 0.10)', barStroke: 'rgba(16, 185, 129, 0.34)', barGlow: 'rgba(16, 185, 129, 0.18)' };
+    case 'cyan':
+      return { fill: 'rgba(6, 182, 212, 0.05)', stroke: 'rgba(6, 182, 212, 0.14)', glow: 'rgba(6, 182, 212, 0.06)', barFill: 'rgba(6, 182, 212, 0.10)', barStroke: 'rgba(6, 182, 212, 0.34)', barGlow: 'rgba(6, 182, 212, 0.18)' };
+    case 'fuchsia':
+      return { fill: 'rgba(217, 70, 239, 0.05)', stroke: 'rgba(217, 70, 239, 0.14)', glow: 'rgba(217, 70, 239, 0.06)', barFill: 'rgba(217, 70, 239, 0.10)', barStroke: 'rgba(217, 70, 239, 0.34)', barGlow: 'rgba(217, 70, 239, 0.18)' };
+    case 'violet':
+      return { fill: 'rgba(139, 92, 246, 0.05)', stroke: 'rgba(139, 92, 246, 0.14)', glow: 'rgba(139, 92, 246, 0.06)', barFill: 'rgba(139, 92, 246, 0.10)', barStroke: 'rgba(139, 92, 246, 0.34)', barGlow: 'rgba(139, 92, 246, 0.18)' };
     case 'slate':
       return { fill: 'rgba(100, 116, 139, 0.05)', stroke: 'rgba(100, 116, 139, 0.14)', glow: 'rgba(100, 116, 139, 0.06)', barFill: 'rgba(100, 116, 139, 0.10)', barStroke: 'rgba(100, 116, 139, 0.28)', barGlow: 'rgba(100, 116, 139, 0.16)' };
     default:
@@ -2905,7 +2840,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const notationMeter = parseTimeSignature(effectiveTimeSignature);
                     const notationBeatUnits = Math.max(1, notationMeter.beatUnits);
                     const notationBarUnits = Math.max(notationBeatUnits, notationMeter.barUnits);
-                    const notationBeatCount = Math.max(1, notationMeter.beats);
                     const hideNotationCursor = Boolean(activeJianpuCursor?.noteIndex != null);
                     const renderActiveNotationCursor = () => {
                       const cursorUnit = activeRhythmCursor
@@ -2913,26 +2847,17 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         : activeJianpuCursor
                           ? (activeJianpuCursor.beatIndex * notationBeatUnits) + activeJianpuCursor.unitIndex
                           : null;
-                      if (cursorUnit === null || hideNotationCursor) return null;
-                      const beatIndex = Math.max(0, Math.min(notationBeatCount - 1, Math.floor(cursorUnit / notationBeatUnits)));
+                      if (cursorUnit === null) return null;
                       const clampedCursorUnit = Math.max(0, Math.min(notationBarUnits, cursorUnit));
+                      const beatIndex = Math.max(0, Math.min(notationMeter.beats - 1, Math.floor(clampedCursorUnit / notationBeatUnits)));
                       return (
                         <>
-                          <span
-                            data-preview-edit-ui
-                            data-preview-notation-cursor-beat
-                            className={PREVIEW_NOTATION_BEAT_CLASS}
-                            style={{
-                              left: `${((beatIndex * notationBeatUnits) / notationBarUnits) * 100}%`,
-                              width: `${(notationBeatUnits / notationBarUnits) * 100}%`
-                            }}
-                          />
-                          <span
-                            data-preview-edit-ui
-                            data-preview-notation-cursor-caret
-                            className={PREVIEW_NOTATION_CARET_CLASS}
-                            style={{ left: `${(clampedCursorUnit / notationBarUnits) * 100}%` }}
-                          />
+                          <span data-preview-edit-ui data-preview-notation-cursor-beat data-notation-beat-index={beatIndex}
+                            className="notation-beat-frame pointer-events-none absolute z-[0]"
+                            style={{ left: `${beatIndex * notationBeatUnits / notationBarUnits * 100}%`, width: `${notationBeatUnits / notationBarUnits * 100}%`, top: -4, bottom: -4 }} />
+                          {!hideNotationCursor && <span data-preview-edit-ui data-preview-notation-cursor-caret
+                            className="notation-note-pointer pointer-events-none absolute z-[2]"
+                            style={{ left: `${(clampedCursorUnit / notationBarUnits) * 100}%`, top: 'calc(100% + 6px)' }} />}
                         </>
                       );
                     };
@@ -3170,17 +3095,20 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const activeBarShadow = isActivePreviewEditBar
                       ? PREVIEW_EDIT_BAR_SHADOW
                       : `inset 0 0 0 2px ${activeTone.barStroke}, inset 0 0 0 1px rgba(255, 255, 255, 0.86), 0 12px 24px ${activeTone.barGlow}`;
-                    const selectedBarShadow = 'inset 0 0 0 2px rgba(245, 158, 11, 0.96), inset 0 0 0 4px rgba(255, 251, 235, 0.88), 0 0 0 2px rgba(245, 158, 11, 0.24)';
-                    const barStyle: React.CSSProperties = {
+                    const selectedBarShadow = `${PREVIEW_EDIT_BAR_SHADOW}, ${PREVIEW_EDIT_MULTI_SELECT_SHADOW}`;
+                    const barStyle: React.CSSProperties & Record<`--section-selection-${string}`, string> = {
+                      '--section-selection-stroke': String(getSectionBadgeStyle(colors.accent).borderColor),
+                      '--section-selection-fill': activeTone.barFill,
+                      '--section-selection-glow': activeTone.barGlow,
                       gridColumn: `${bIdx + 1} / span ${restSpan}`,
                       paddingBottom: `${barPaddingBottom}px`,
                       ...(isActiveBar ? {
-                        backgroundColor: isActivePreviewEditBar ? PREVIEW_EDIT_BAR_FILL : activeTone.barFill,
+                        backgroundColor: activeTone.barFill,
                         boxShadow: isPreviewSelectedBar
                           ? `${activeBarShadow}, ${PREVIEW_EDIT_MULTI_SELECT_SHADOW}`
                           : activeBarShadow
                       } : isPreviewSelectedBar ? {
-                        backgroundColor: 'rgba(251, 191, 36, 0.13)',
+                        backgroundColor: activeTone.barFill,
                         boxShadow: selectedBarShadow
                       } : {})
                     };
@@ -3386,9 +3314,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           className={`relative z-[30] flex flex-1 items-center justify-center w-full h-full cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${notationLaneHitClass} ${contentLeftInsetClass}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'rhythm')}
                                         >
-                                          {activeRhythmCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
                                           <div className="relative z-[1] w-full max-w-full overflow-visible">
-                                            {activeRhythmCursor && renderActiveNotationCursor()}
+                                            {activeRhythmCursor && !bar.rhythm?.trim() && renderActiveNotationCursor()}
                                             <RhythmNotation
                                               notation={bar.rhythm}
                                               timeSignature={effectiveTimeSignature}
@@ -3402,6 +3329,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               color={rhythmMarkColor}
                                               className="w-full"
                                               selectionMode="insert"
+                                              selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null}
+                                              showInsertCursor={Boolean(activeRhythmCursor)}
                                               onInsertSelect={onElementClick ? emitRhythmSelection : undefined}
                                             />
                                           </div>
@@ -3660,9 +3589,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'rhythm');
                                           }}
                                         >
-                                          {activeRhythmCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
                                           <div className="relative z-[1] w-full">
-                                            {activeRhythmCursor && renderActiveNotationCursor()}
+                                            {activeRhythmCursor && !bar.rhythm?.trim() && renderActiveNotationCursor()}
                                             <RhythmNotation
                                               notation={bar.rhythm}
                                               timeSignature={effectiveTimeSignature}
@@ -3674,6 +3602,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               color={rhythmMarkColor}
                                               className="w-full"
                                               selectionMode="insert"
+                                              selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null}
+                                              showInsertCursor={Boolean(activeRhythmCursor)}
                                               onInsertSelect={onElementClick ? emitRhythmSelection : undefined}
                                             />
                                           </div>
@@ -3689,7 +3619,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
                                           }}
                                         >
-                                          {activeJianpuCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
                                           <div className="relative z-[1] w-full min-w-0">
                                             {activeJianpuCursor && renderActiveNotationCursor()}
                                             <Jianpu
@@ -3729,7 +3658,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
                                         }}
                                       >
-                                        {activeJianpuCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
                                         <div className="relative z-[1] w-full min-w-0">
                                           {activeJianpuCursor && renderActiveNotationCursor()}
                                           <Jianpu
@@ -3768,11 +3696,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           emitElementClick(e, row.sIdx, row.startBIdx + bIdx, showBottomRhythmLane ? 'rhythm' : 'riff');
                                         }}
                                         >
-                                          {showBottomRhythmLane && activeRhythmCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
-                                          {!showBottomRhythmLane && activeJianpuCursor && <span data-preview-edit-ui data-preview-active-lane className={PREVIEW_ACTIVE_LANE_CLASS} />}
                                           {showBottomRhythmLane ? (
                                             <div className="relative z-[1] w-full">
-                                              {activeRhythmCursor && renderActiveNotationCursor()}
+                                              {activeRhythmCursor && !bar.rhythm?.trim() && renderActiveNotationCursor()}
                                               <RhythmNotation
                                                 notation={bar.rhythm}
                                                 timeSignature={effectiveTimeSignature}
@@ -3784,6 +3710,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                 color={rhythmMarkColor}
                                                 className="w-full"
                                                 selectionMode="insert"
+                                                selectedInsertIndex={activeRhythmCursor?.cursorUnit ?? null}
+                                                showInsertCursor={Boolean(activeRhythmCursor)}
                                                 onInsertSelect={onElementClick ? emitRhythmSelection : undefined}
                                               />
                                             </div>

@@ -122,15 +122,24 @@ export interface Song {
   sections: Section[];
 }
 
-// Standalone worship-lyrics document for the lyrics formatter view. Decoupled
-// from the chord chart: `chinese` is the primary body (mode B = monolingual
-// two-column flow); a non-empty `english` switches to mode A (bilingual,
-// English left / Chinese right, paired by section order).
-// The header's 出處 / 翻譯 are read from the song's own metadata (version =
-// lyricist/composer, translator), so they are not duplicated here.
+// Bilingual sections are the editable source; legacy text bodies remain populated
+// for sharing with older clients. Layout preferences are independent of content.
 export interface LyricsDoc {
-  chinese: string;       // 中文 body（含段落符號）
-  english?: string;      // 英文原文 body（選填）→ 非空進入中英對照
+  chinese: string;       // Serialized Chinese body including markers
+  english?: string;      // Serialized English body including markers
+  blocks?: LyricsBlock[];
+  displayLanguage?: 'chinese' | 'english' | 'bilingual';
+  fontSize?: number;
+  lineHeight?: number;
+}
+
+export interface LyricsBlock {
+  id: string;
+  marker: string;
+  chinese: string;
+  english: string;
+  pageBreakBefore?: boolean;
+  needsPairingReview?: boolean;
 }
 
 export interface StoredSong extends Song {
