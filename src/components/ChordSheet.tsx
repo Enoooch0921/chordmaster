@@ -1702,7 +1702,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     }
   };
   const songTimeSignatureStates = getSongTimeSignatureStates(song);
-  const getBarEffectiveTimeSignature = (bar?: Bar | null) => (
+  const getBarEffectiveTimeSignature = (bar?: Pick<Bar, 'id' | 'timeSignature'> | null) => (
     bar ? getEffectiveTimeSignatureForBar(song, bar) : getEffectiveTimeSignature(undefined, song.timeSignature)
   );
   const getBarEffectiveTimeSignatureByIndex = (sIdx: number, bIdx: number, bar?: Bar | null) => (

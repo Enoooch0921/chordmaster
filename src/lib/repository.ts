@@ -5,7 +5,7 @@ import {
   JoinedSetlist,
   LibraryChangeKind,
   LibraryRole,
-  NotificationResourceType,
+  ShareContactResourceType,
   Project,
   ProjectMemberRole,
   ProjectShareStatus,
@@ -24,6 +24,7 @@ import {
   StoredSong,
   TeamInvite,
   TeamManagementSnapshot,
+  PendingTeamInvite,
   TeamSongArchiveResult,
   TeamSongDeleteResult,
   TeamSongImportCandidate,
@@ -51,6 +52,7 @@ import {
   resolveShareLink as resolveEdgeShareLink
 } from './sharing';
 import { supabase } from './supabase';
+import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
 
 interface SongRow {
   id: string;
@@ -227,10 +229,13 @@ export interface WorkspaceRepository {
   createTeam(name: string): Promise<CloudLibrarySummary>;
   getTeamManagement(libraryId: string): Promise<TeamManagementSnapshot>;
   createTeamInvite(libraryId: string, email: string, role: Exclude<LibraryRole, 'owner'>): Promise<TeamInvite>;
+  getPendingTeamInvites(): Promise<PendingTeamInvite[]>;
   revokeTeamInvite(inviteId: string): Promise<void>;
   updateTeamMemberRole(libraryId: string, userId: string, role: Exclude<LibraryRole, 'owner'>): Promise<void>;
   removeTeamMember(libraryId: string, userId: string): Promise<void>;
   acceptTeamInvite(token: string): Promise<string>;
+  acceptPendingTeamInvite(inviteId: string): Promise<string>;
+  declinePendingTeamInvite(inviteId: string): Promise<void>;
   getSetlistEditorAssignments(setlistId: string): Promise<SetlistEditorAssignmentSnapshot>;
   setSetlistEditorAssignment(setlistId: string, userId: string, enabled: boolean): Promise<SetlistEditorAssignmentSnapshot>;
   inspectTeamSongImport(teamLibraryId: string, sourceSongIds: string[]): Promise<TeamSongImportInspection>;
@@ -268,7 +273,7 @@ export interface WorkspaceRepository {
   reorderProjectSetlist(setlistId: string, songIds: string[]): Promise<void>;
   saveCapoOverride(setlistSongId: string, capo: number | null): Promise<void>;
   getShareContacts(): Promise<ShareContact[]>;
-  shareToContacts(resourceType: NotificationResourceType, resourceId: string, userIds: string[]): Promise<number>;
+  shareToContacts(resourceType: ShareContactResourceType, resourceId: string, userIds: string[]): Promise<number>;
   getNotifications(): Promise<AppNotification[]>;
   markNotificationsRead(ids: string[]): Promise<void>;
 }
@@ -523,7 +528,8 @@ const normalizeTeamInvite = (value: unknown): TeamInvite | null => {
     invitedAt: typeof row.invitedAt === 'string' ? row.invitedAt : new Date().toISOString(),
     expiresAt: typeof row.expiresAt === 'string' ? row.expiresAt : null,
     acceptedAt: typeof row.acceptedAt === 'string' ? row.acceptedAt : null,
-    revokedAt: typeof row.revokedAt === 'string' ? row.revokedAt : null
+    revokedAt: typeof row.revokedAt === 'string' ? row.revokedAt : null,
+    notificationSent: row.notificationSent === true
   };
 };
 
@@ -545,6 +551,20 @@ const normalizeTeamManagementSnapshot = (payload: unknown): TeamManagementSnapsh
       };
     }).filter((member) => member.userId),
     invites: rawInvites.map(normalizeTeamInvite).filter((invite): invite is TeamInvite => Boolean(invite))
+  };
+};
+
+const normalizePendingTeamInvite = (value: unknown): PendingTeamInvite | null => {
+  const row = value as Partial<PendingTeamInvite> & Record<string, unknown>;
+  const invite = normalizeTeamInvite(value);
+  if (!invite || typeof row.libraryId !== 'string' || !row.libraryId) return null;
+  return {
+    ...invite,
+    libraryId: row.libraryId,
+    libraryName: typeof row.libraryName === 'string' ? row.libraryName : '',
+    inviterName: typeof row.inviterName === 'string' ? row.inviterName : '',
+    inviterEmail: typeof row.inviterEmail === 'string' ? row.inviterEmail : '',
+    inviterPicture: typeof row.inviterPicture === 'string' ? row.inviterPicture : undefined
   };
 };
 
@@ -762,6 +782,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   async createTeamInvite() {
     throw new Error('Please sign in before inviting team members.');
   },
+  async getPendingTeamInvites() {
+    return [];
+  },
   async revokeTeamInvite() {
     throw new Error('Please sign in before managing team invites.');
   },
@@ -773,6 +796,12 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async acceptTeamInvite() {
     throw new Error('Please sign in before accepting a team invite.');
+  },
+  async acceptPendingTeamInvite() {
+    throw new Error('Please sign in before accepting a team invite.');
+  },
+  async declinePendingTeamInvite() {
+    throw new Error('Please sign in before declining a team invite.');
   },
   async getSetlistEditorAssignments(setlistId) {
     return { setlistId, assignableMembers: [], assignments: [] };
@@ -1324,6 +1353,12 @@ export const createCloudRepository = (params: {
       throw new Error('Supabase is not configured.');
     }
 
+    // Bundled symbol fixtures stay on-device even when a caller bypasses the
+    // normal workspace diff and asks the repository to save one directly.
+    if (isLocalOnlySymbolTestSong(song)) {
+      return;
+    }
+
     const existingSong = await assertSongIdIsWritableInLibrary(song.id, libraryId);
     const createdBy = existingSong?.created_by ?? params.userId;
     const now = new Date(song.updatedAt || Date.now()).toISOString();
@@ -1500,6 +1535,15 @@ export const createCloudRepository = (params: {
       return invite;
     },
 
+    async getPendingTeamInvites() {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('get_my_team_invites');
+      if (error) throw error;
+      return (Array.isArray(data) ? data : [])
+        .map(normalizePendingTeamInvite)
+        .filter((invite): invite is PendingTeamInvite => Boolean(invite));
+    },
+
     async revokeTeamInvite(inviteId) {
       if (!supabase) throw new Error('Supabase is not configured.');
       const { error } = await supabase.rpc('revoke_team_invite', { p_invite_id: inviteId });
@@ -1530,6 +1574,19 @@ export const createCloudRepository = (params: {
       const { data, error } = await supabase.rpc('accept_team_invite', { p_token: token });
       if (error) throw error;
       return data as string;
+    },
+
+    async acceptPendingTeamInvite(inviteId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('accept_my_team_invite', { p_invite_id: inviteId });
+      if (error) throw error;
+      return data as string;
+    },
+
+    async declinePendingTeamInvite(inviteId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('decline_my_team_invite', { p_invite_id: inviteId });
+      if (error) throw error;
     },
 
     async getSetlistEditorAssignments(setlistId) {
@@ -1823,6 +1880,9 @@ export const createCloudRepository = (params: {
       const songIdMap = new Map<string, string>();
 
       for (const localSong of localWorkspace.songs) {
+        if (isLocalOnlySymbolTestSong(localSong)) {
+          continue;
+        }
         const normalizedTitle = normalizeMatchingTitle(localSong.title);
         const matches = normalizedTitle ? (remoteByTitle.get(normalizedTitle) ?? []) : [];
 

@@ -13,7 +13,7 @@ import type { PreviewEditorDeviceLayout } from '../lib/previewEditorLayout';
 type PreviewMetadataFocusField = 'title' | 'credits' | 'key' | 'tempo' | 'timeSignature' | 'capo' | 'groove';
 
 interface SongMetadataPanelProps {
-  song: Song;
+  song: Song & { id?: string };
   language: AppLanguage;
   onChange: (song: Song) => void;
   metadataSuggestions?: {

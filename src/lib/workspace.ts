@@ -1,3 +1,4 @@
+import { parseWorkspaceDeletions, type WorkspaceDeletions } from './workspaceMerge';
 import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from '../constants/nashvilleFonts';
 import { Key, Project, Setlist, SetlistDisplayMode, SetlistSong, Song, StoredSong, WorkspaceSnapshot } from '../types';
@@ -20,6 +21,27 @@ export const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
 export const AUTO_SAVE_STORAGE_KEY = 'chordmaster.auto-save.v1';
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'chordmaster.sidebar-width.v1';
 export const PENDING_SYNC_STORAGE_KEY = 'chordmaster.pending-sync.v1';
+export const WORKSPACE_SNAPSHOT_STORAGE_KEY = 'chordmaster.workspace-snapshot.v2';
+export const WORKSPACE_SNAPSHOT_BACKUP_STORAGE_KEY = 'chordmaster.workspace-snapshot-backup.v2';
+export const WORKSPACE_CORRUPT_SNAPSHOT_STORAGE_KEY = 'chordmaster.workspace-snapshot-corrupt.v2';
+
+const WORKSPACE_SNAPSHOT_VERSION = 2 as const;
+
+interface LocalWorkspaceEnvelope {
+  version: typeof WORKSPACE_SNAPSHOT_VERSION;
+  savedAt: number;
+  songs: StoredSong[];
+  setlists: Setlist[];
+  projects: Project[];
+  checksum: string;
+}
+
+export type LocalWorkspaceRecoveryNotice =
+  | 'recovered-backup'
+  | 'recovered-legacy'
+  | 'corrupt-unrecoverable';
+
+let pendingRecoveryNotice: LocalWorkspaceRecoveryNotice | null = null;
 
 const VALID_KEYS = new Set<string>(ALL_KEYS);
 const VALID_NAVIGATION_MARKERS = new Set([
@@ -49,6 +71,9 @@ const VALID_SETLIST_DISPLAY_MODES = new Set<SetlistDisplayMode>([
 ]);
 
 export interface PendingSyncPayload {
+  deletions?: WorkspaceDeletions;
+  userId?: string;
+  libraryId?: string;
   songs: StoredSong[];
   setlists: Setlist[];
   projects: Project[];
@@ -389,55 +414,85 @@ export const serializeSetlists = (setlists: Setlist[]) =>
     }))
   );
 
-export const loadLocalWorkspaceSnapshot = (): WorkspaceSnapshot => {
-  if (typeof window === 'undefined') {
-    return {
-      songs: [],
-      setlists: [],
-      joinedSetlists: [],
-      projects: [],
-      joinedProjects: [],
-      lastSavedAt: null
-    };
-  }
+const createEmptyWorkspaceSnapshot = (): WorkspaceSnapshot => ({
+  songs: [],
+  setlists: [],
+  joinedSetlists: [],
+  projects: [],
+  joinedProjects: [],
+  lastSavedAt: null
+});
 
-  let songs: StoredSong[] = [];
-  let setlists: Setlist[] = [];
-  let projects: Project[] = [];
-  let lastSavedAt: number | null = null;
+const calculateWorkspaceChecksum = (value: string) => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
+const getEnvelopePayload = (envelope: Omit<LocalWorkspaceEnvelope, 'checksum'> | LocalWorkspaceEnvelope) => ({
+  version: envelope.version,
+  savedAt: envelope.savedAt,
+  songs: envelope.songs,
+  setlists: envelope.setlists,
+  projects: envelope.projects
+});
+
+const createWorkspaceEnvelope = (
+  songs: StoredSong[],
+  setlists: Setlist[],
+  projects: Project[],
+  savedAt: number
+): LocalWorkspaceEnvelope => {
+  const payload = {
+    version: WORKSPACE_SNAPSHOT_VERSION,
+    savedAt,
+    songs,
+    setlists,
+    projects
+  };
+  return {
+    ...payload,
+    checksum: calculateWorkspaceChecksum(JSON.stringify(payload))
+  };
+};
+
+const parseWorkspaceEnvelope = (raw: string | null): LocalWorkspaceEnvelope | null => {
+  if (!raw) return null;
 
   try {
-    const storedSongs = window.localStorage.getItem(SONG_LIBRARY_STORAGE_KEY);
-    const storedLastSavedAt = window.localStorage.getItem(LAST_SAVED_AT_STORAGE_KEY);
-    const parsedSongs = storedSongs ? JSON.parse(storedSongs) as Array<Partial<StoredSong> & Record<string, unknown>> : [];
-    songs = Array.isArray(parsedSongs) ? parsedSongs.map(normalizeStoredSong) : [];
-    const parsedLastSavedAt = storedLastSavedAt ? Number(storedLastSavedAt) : null;
-    lastSavedAt = Number.isFinite(parsedLastSavedAt) ? parsedLastSavedAt : null;
-  } catch {
-    songs = [];
-    lastSavedAt = null;
-  }
+    const parsed = JSON.parse(raw) as Partial<LocalWorkspaceEnvelope>;
+    if (
+      parsed.version !== WORKSPACE_SNAPSHOT_VERSION
+      || typeof parsed.savedAt !== 'number'
+      || !Number.isFinite(parsed.savedAt)
+      || !Array.isArray(parsed.songs)
+      || !Array.isArray(parsed.setlists)
+      || !Array.isArray(parsed.projects)
+      || typeof parsed.checksum !== 'string'
+    ) {
+      return null;
+    }
 
-  try {
-    const storedSetlists = window.localStorage.getItem(SETLIST_STORAGE_KEY);
-    const parsedSetlists = storedSetlists ? JSON.parse(storedSetlists) as Array<Partial<Setlist> & Record<string, unknown>> : [];
-    const songsById = new Map(songs.map((song) => [song.id, song] as const));
-    setlists = Array.isArray(parsedSetlists)
-      ? parsedSetlists.map((setlist, index) => normalizeStoredSetlist(setlist, songsById, index))
-      : [];
+    const envelope = parsed as LocalWorkspaceEnvelope;
+    const expectedChecksum = calculateWorkspaceChecksum(JSON.stringify(getEnvelopePayload(envelope)));
+    return envelope.checksum === expectedChecksum ? envelope : null;
   } catch {
-    setlists = [];
+    return null;
   }
+};
 
-  try {
-    const storedProjects = window.localStorage.getItem(PROJECT_STORAGE_KEY);
-    const parsedProjects = storedProjects ? JSON.parse(storedProjects) as Array<Partial<Project> & Record<string, unknown>> : [];
-    projects = Array.isArray(parsedProjects)
-      ? parsedProjects.map((project, index) => normalizeStoredProject(project, index))
-      : [];
-  } catch {
-    projects = [];
-  }
+const normalizeWorkspaceEnvelope = (envelope: LocalWorkspaceEnvelope): WorkspaceSnapshot => {
+  const songs = envelope.songs.map((song, index) => normalizeStoredSong(song, index));
+  const songsById = new Map(songs.map((song) => [song.id, song] as const));
+  const setlists = envelope.setlists.map((setlist, index) => (
+    normalizeStoredSetlist(setlist as Partial<Setlist> & Record<string, unknown>, songsById, index)
+  ));
+  const projects = envelope.projects.map((project, index) => (
+    normalizeStoredProject(project as Partial<Project> & Record<string, unknown>, index)
+  ));
 
   return {
     songs,
@@ -445,16 +500,206 @@ export const loadLocalWorkspaceSnapshot = (): WorkspaceSnapshot => {
     joinedSetlists: [],
     projects,
     joinedProjects: [],
-    lastSavedAt
+    lastSavedAt: envelope.savedAt
   };
 };
 
+const preserveCorruptWorkspaceValue = (source: string, raw: unknown) => {
+  try {
+    window.localStorage.setItem(WORKSPACE_CORRUPT_SNAPSHOT_STORAGE_KEY, JSON.stringify({
+      capturedAt: Date.now(),
+      source,
+      raw
+    }));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const loadLegacyWorkspaceSnapshot = () => {
+  const rawValues: Record<string, string | null> = {};
+  let corrupt = false;
+
+  const read = (key: string) => {
+    try {
+      const value = window.localStorage.getItem(key);
+      rawValues[key] = value;
+      return value;
+    } catch {
+      corrupt = true;
+      rawValues[key] = null;
+      return null;
+    }
+  };
+
+  const storedSongs = read(SONG_LIBRARY_STORAGE_KEY);
+  const storedSetlists = read(SETLIST_STORAGE_KEY);
+  const storedProjects = read(PROJECT_STORAGE_KEY);
+  const storedLastSavedAt = read(LAST_SAVED_AT_STORAGE_KEY);
+  let songs: StoredSong[] = [];
+  let setlists: Setlist[] = [];
+  let projects: Project[] = [];
+  let lastSavedAt: number | null = null;
+
+  try {
+    const parsedSongs = storedSongs ? JSON.parse(storedSongs) as Array<Partial<StoredSong>> : [];
+    if (!Array.isArray(parsedSongs)) throw new Error('Invalid song library');
+    songs = parsedSongs.map(normalizeStoredSong);
+  } catch {
+    corrupt = true;
+  }
+
+  try {
+    const parsedSetlists = storedSetlists ? JSON.parse(storedSetlists) as Array<Partial<Setlist> & Record<string, unknown>> : [];
+    if (!Array.isArray(parsedSetlists)) throw new Error('Invalid setlists');
+    const songsById = new Map(songs.map((song) => [song.id, song] as const));
+    setlists = parsedSetlists.map((setlist, index) => normalizeStoredSetlist(setlist, songsById, index));
+  } catch {
+    corrupt = true;
+  }
+
+  try {
+    const parsedProjects = storedProjects ? JSON.parse(storedProjects) as Array<Partial<Project> & Record<string, unknown>> : [];
+    if (!Array.isArray(parsedProjects)) throw new Error('Invalid projects');
+    projects = parsedProjects.map((project, index) => normalizeStoredProject(project, index));
+  } catch {
+    corrupt = true;
+  }
+
+  if (storedLastSavedAt !== null) {
+    const parsedLastSavedAt = Number(storedLastSavedAt);
+    if (storedLastSavedAt.trim() && Number.isFinite(parsedLastSavedAt)) {
+      lastSavedAt = parsedLastSavedAt;
+    } else {
+      corrupt = true;
+    }
+  }
+
+  return {
+    snapshot: {
+      songs,
+      setlists,
+      joinedSetlists: [],
+      projects,
+      joinedProjects: [],
+      lastSavedAt
+    } satisfies WorkspaceSnapshot,
+    hasStoredData: Object.values(rawValues).some((value) => value !== null),
+    corrupt,
+    rawValues
+  };
+};
+
+export const consumeLocalWorkspaceRecoveryNotice = () => {
+  const notice = pendingRecoveryNotice;
+  pendingRecoveryNotice = null;
+  return notice;
+};
+
+export const loadLocalWorkspaceSnapshot = (): WorkspaceSnapshot => {
+  if (typeof window === 'undefined') {
+    return createEmptyWorkspaceSnapshot();
+  }
+
+  let primaryRaw: string | null = null;
+  let backupRaw: string | null = null;
+  try {
+    primaryRaw = window.localStorage.getItem(WORKSPACE_SNAPSHOT_STORAGE_KEY);
+    backupRaw = window.localStorage.getItem(WORKSPACE_SNAPSHOT_BACKUP_STORAGE_KEY);
+  } catch {
+    pendingRecoveryNotice = 'corrupt-unrecoverable';
+    return createEmptyWorkspaceSnapshot();
+  }
+
+  const primaryEnvelope = parseWorkspaceEnvelope(primaryRaw);
+  if (primaryEnvelope) {
+    return normalizeWorkspaceEnvelope(primaryEnvelope);
+  }
+
+  const backupEnvelope = parseWorkspaceEnvelope(backupRaw);
+  if (backupEnvelope) {
+    const corruptValuePreserved = primaryRaw
+      ? preserveCorruptWorkspaceValue(WORKSPACE_SNAPSHOT_STORAGE_KEY, primaryRaw)
+      : true;
+    if (corruptValuePreserved && backupRaw) {
+      try {
+        window.localStorage.setItem(WORKSPACE_SNAPSHOT_STORAGE_KEY, backupRaw);
+      } catch {
+        // The verified backup is still used for this session.
+      }
+    }
+    pendingRecoveryNotice = 'recovered-backup';
+    return normalizeWorkspaceEnvelope(backupEnvelope);
+  }
+
+  const legacy = loadLegacyWorkspaceSnapshot();
+  if (primaryRaw) {
+    preserveCorruptWorkspaceValue(WORKSPACE_SNAPSHOT_STORAGE_KEY, primaryRaw);
+  }
+  if (legacy.corrupt && !primaryRaw) {
+    preserveCorruptWorkspaceValue('legacy-workspace', legacy.rawValues);
+  }
+  if (primaryRaw && legacy.hasStoredData && !legacy.corrupt) {
+    pendingRecoveryNotice = 'recovered-legacy';
+  } else if ((primaryRaw || legacy.hasStoredData) && legacy.corrupt) {
+    pendingRecoveryNotice = 'corrupt-unrecoverable';
+  }
+  return legacy.snapshot;
+};
+
 export const persistLocalWorkspaceSnapshot = (songs: StoredSong[], setlists: Setlist[], projects: Project[] = []) => {
+  if (typeof window === 'undefined') {
+    throw new Error('Local workspace storage is unavailable.');
+  }
+
   const savedAt = Date.now();
-  window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(songs));
-  window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(setlists));
-  window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(projects));
-  window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
+  const envelope = createWorkspaceEnvelope(songs, setlists, projects, savedAt);
+  const serializedEnvelope = JSON.stringify(envelope);
+  let previousRaw: string | null = null;
+
+  try {
+    previousRaw = window.localStorage.getItem(WORKSPACE_SNAPSHOT_STORAGE_KEY);
+    if (parseWorkspaceEnvelope(previousRaw)) {
+      try {
+        window.localStorage.setItem(WORKSPACE_SNAPSHOT_BACKUP_STORAGE_KEY, previousRaw!);
+      } catch {
+        // The current primary remains a valid rollback point until it is replaced.
+      }
+    } else if (previousRaw) {
+      preserveCorruptWorkspaceValue(WORKSPACE_SNAPSHOT_STORAGE_KEY, previousRaw);
+    }
+
+    window.localStorage.setItem(WORKSPACE_SNAPSHOT_STORAGE_KEY, serializedEnvelope);
+    const verifiedEnvelope = parseWorkspaceEnvelope(window.localStorage.getItem(WORKSPACE_SNAPSHOT_STORAGE_KEY));
+    if (!verifiedEnvelope || verifiedEnvelope.savedAt !== savedAt) {
+      throw new Error('Local workspace verification failed.');
+    }
+  } catch (error) {
+    try {
+      if (previousRaw !== null) {
+        window.localStorage.setItem(WORKSPACE_SNAPSHOT_STORAGE_KEY, previousRaw);
+      } else {
+        window.localStorage.removeItem(WORKSPACE_SNAPSHOT_STORAGE_KEY);
+      }
+    } catch {
+      // Preserve the original storage error below.
+    }
+    const detail = error instanceof Error && error.message ? ` ${error.message}` : '';
+    throw new Error(`Unable to save the local workspace.${detail}`);
+  }
+
+  const writeLegacyValue = (key: string, value: string) => {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // The verified v2 snapshot is authoritative; legacy keys are downgrade-only mirrors.
+    }
+  };
+  writeLegacyValue(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(songs));
+  writeLegacyValue(SETLIST_STORAGE_KEY, JSON.stringify(setlists));
+  writeLegacyValue(PROJECT_STORAGE_KEY, JSON.stringify(projects));
+  writeLegacyValue(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
   return savedAt;
 };
 
@@ -471,13 +716,18 @@ export const markMigrationCompleted = (userId: string) => {
   window.localStorage.setItem(getMigrationMarkerKey(userId), 'true');
 };
 
-export const loadPendingSync = (): PendingSyncPayload | null => {
+export interface PendingSyncScope { userId: string; libraryId: string }
+const pendingSyncKey = (scope?: PendingSyncScope) => scope
+  ? `chordmaster.pending-sync.v2.${encodeURIComponent(scope.userId)}.${encodeURIComponent(scope.libraryId)}`
+  : PENDING_SYNC_STORAGE_KEY;
+
+export const loadPendingSync = (scope?: PendingSyncScope): PendingSyncPayload | null => {
   if (typeof window === 'undefined') {
     return null;
   }
 
   try {
-    const raw = window.localStorage.getItem(PENDING_SYNC_STORAGE_KEY);
+    const raw = window.localStorage.getItem(pendingSyncKey(scope));
     if (!raw) {
       return null;
     }
@@ -498,22 +748,33 @@ export const loadPendingSync = (): PendingSyncPayload | null => {
       songs,
       setlists,
       projects,
-      savedAt: parsed.savedAt
+      savedAt: parsed.savedAt,
+      deletions: parseWorkspaceDeletions(parsed.deletions),
+      userId: typeof parsed.userId === 'string' ? parsed.userId : undefined,
+      libraryId: typeof parsed.libraryId === 'string' ? parsed.libraryId : undefined
     };
   } catch {
     return null;
   }
 };
 
-export const savePendingSync = (payload: PendingSyncPayload | null) => {
+export const savePendingSync = (payload: PendingSyncPayload | null, scope?: PendingSyncScope) => {
+  const key = pendingSyncKey(scope ?? (payload?.userId && payload.libraryId ? { userId: payload.userId, libraryId: payload.libraryId } : undefined));
   if (typeof window === 'undefined') {
     return;
   }
 
   if (!payload) {
-    window.localStorage.removeItem(PENDING_SYNC_STORAGE_KEY);
+    window.localStorage.removeItem(key);
+    if (window.localStorage.getItem(key) !== null) {
+      throw new Error('Unable to clear the pending sync queue.');
+    }
     return;
   }
 
-  window.localStorage.setItem(PENDING_SYNC_STORAGE_KEY, JSON.stringify(payload));
+  const serializedPayload = JSON.stringify(payload);
+  window.localStorage.setItem(key, serializedPayload);
+  if (window.localStorage.getItem(key) !== serializedPayload) {
+    throw new Error('Unable to verify the pending sync queue.');
+  }
 };

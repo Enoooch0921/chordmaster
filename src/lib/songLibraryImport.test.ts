@@ -14,6 +14,15 @@ const makeSong = (id: string): StoredSong => ({
   updatedAt: 1
 });
 
+const makeSymbolTestSong = (): StoredSong => ({
+  ...makeSong('local-symbol-test'),
+  title: '符號測試頁（2行）',
+  sections: [
+    { id: 'test-bars', title: 'Bars / Marks', bars: [] },
+    { id: 'test-meter', title: 'Meter', bars: [] }
+  ]
+});
+
 const makeSetlist = (): Setlist => ({
   id: 'setlist-1',
   name: 'Sunday',
@@ -105,6 +114,31 @@ describe('song library import mode', () => {
     expect(repository.deleteSong).not.toHaveBeenCalled();
     expect(repository.deleteSetlist).not.toHaveBeenCalled();
     expect(repository.saveSetlist).not.toHaveBeenCalled();
+  });
+
+  it('keeps bundled symbol test pages out of cloud synchronization', async () => {
+    const symbolTestSong = makeSymbolTestSong();
+    const repository = {
+      saveSong: vi.fn().mockResolvedValue(undefined),
+      saveSetlist: vi.fn().mockResolvedValue(undefined),
+      saveProject: vi.fn().mockResolvedValue(undefined),
+      deleteSong: vi.fn().mockResolvedValue(undefined),
+      deleteSetlist: vi.fn().mockResolvedValue(undefined),
+      deleteProject: vi.fn().mockResolvedValue(undefined)
+    } as unknown as WorkspaceRepository;
+
+    await syncWorkspaceDiff({
+      repository,
+      songs: [symbolTestSong],
+      setlists: [],
+      projects: [],
+      savedSongs: [],
+      savedSetlists: [],
+      savedProjects: []
+    });
+
+    expect(repository.saveSong).not.toHaveBeenCalled();
+    expect(repository.deleteSong).not.toHaveBeenCalled();
   });
 
   it('retains the explicit replace behavior for multi-song library restores', () => {

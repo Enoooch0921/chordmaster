@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bell, ListMusic, FolderTree } from 'lucide-react';
+import { Bell, ListMusic, FolderTree, Users } from 'lucide-react';
 import { AppNotification } from '../types';
 
 interface NotificationBellProps {
@@ -15,6 +15,8 @@ interface NotificationBellProps {
     demoted: string;
     removedSetlist: string;
     removedProject: string;
+    teamInvite: string;
+    reviewInvite: string;
   };
   onOpen: (notification: AppNotification) => void;
   onMarkAllRead: () => void;
@@ -46,7 +48,7 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
+          <div className="absolute right-0 z-50 mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5">
               <span className="text-xs font-bold uppercase tracking-[0.14em] text-gray-500">{labels.title}</span>
               {unreadCount > 0 && (
@@ -66,8 +68,11 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
               <div className="max-h-80 overflow-y-auto">
                 {notifications.map((item) => {
                   const isSetlist = item.resourceType === 'setlist';
+                  const isTeam = item.resourceType === 'team';
                   const isRemoval = item.type === 'access_removed';
-                  const message = item.type === 'member_promoted'
+                  const message = item.type === 'team_invite'
+                    ? labels.teamInvite
+                    : item.type === 'member_promoted'
                     ? labels.promoted
                     : item.type === 'member_demoted'
                       ? labels.demoted
@@ -87,7 +92,7 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
                       }`}
                     >
                       <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">
-                        {isSetlist ? <ListMusic size={14} /> : <FolderTree size={14} />}
+                        {isTeam ? <Users size={14} /> : isSetlist ? <ListMusic size={14} /> : <FolderTree size={14} />}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs leading-snug text-gray-800">
@@ -98,7 +103,9 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
                           <div className="mt-0.5 truncate text-[11px] font-semibold text-gray-900">{item.resourceName}</div>
                         )}
                         {!isRemoval && (
-                          <div className="mt-1 text-[11px] font-semibold text-indigo-600">{labels.open}</div>
+                          <div className="mt-1 text-[11px] font-semibold text-indigo-600">
+                            {isTeam ? labels.reviewInvite : labels.open}
+                          </div>
                         )}
                       </div>
                       {!item.readAt && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-rose-500" />}

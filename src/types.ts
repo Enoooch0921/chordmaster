@@ -317,9 +317,10 @@ export interface ShareContact {
   picture?: string;
 }
 
-export type NotificationResourceType = 'setlist' | 'project';
+export type NotificationResourceType = 'setlist' | 'project' | 'team';
+export type ShareContactResourceType = Exclude<NotificationResourceType, 'team'>;
 
-export type NotificationType = 'resource_shared' | 'member_promoted' | 'member_demoted' | 'access_removed';
+export type NotificationType = 'resource_shared' | 'member_promoted' | 'member_demoted' | 'access_removed' | 'team_invite';
 
 export interface AppNotification {
   id: string;
@@ -363,11 +364,20 @@ export interface TeamInvite {
   expiresAt: string | null;
   acceptedAt: string | null;
   revokedAt: string | null;
+  notificationSent?: boolean;
 }
 
 export interface TeamManagementSnapshot {
   members: TeamMember[];
   invites: TeamInvite[];
+}
+
+export interface PendingTeamInvite extends TeamInvite {
+  libraryId: string;
+  libraryName: string;
+  inviterName: string;
+  inviterEmail: string;
+  inviterPicture?: string;
 }
 
 export interface SetlistAssignableMember {

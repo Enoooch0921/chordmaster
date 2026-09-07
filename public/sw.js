@@ -1,5 +1,8 @@
 const CACHE_NAME = 'chordmaster-pwa-v2';
+// Filled by the production build, including lazy routes and PDF export chunks.
+const BUILD_ASSETS = [];
 const APP_SHELL_PATHS = [
+  ...BUILD_ASSETS,
   './',
   './site.webmanifest',
   './logo.svg',
@@ -65,7 +68,7 @@ self.addEventListener('activate', (event) => {
     caches.keys()
       .then((cacheNames) => Promise.all(
         cacheNames
-          .filter((cacheName) => cacheName !== CACHE_NAME)
+          .filter((cacheName) => cacheName.startsWith('chordmaster-pwa-') && cacheName !== CACHE_NAME)
           .map((cacheName) => caches.delete(cacheName))
       ))
       .then(() => self.clients.claim())

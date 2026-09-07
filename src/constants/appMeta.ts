@@ -85,6 +85,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-09-07',
+        title: 'Safer sync, draft recovery, and file-only PDF sharing',
+        bullets: [
+          'PDF export on phones and tablets shares only the PDF file, without extra title, text, or URL items.',
+          'Offline sync tracks explicit deletions and keeps newer or previously unseen remote records. Pending changes are isolated by account and library.',
+          'Team edits have local drafts with recovery, conflict confirmation, and backup downloads. Failed views offer retry and data recovery.',
+          'Team invitations are available in the app inbox and notification bell, with accept and decline actions.',
+          'Editors, shared pages, and PDF tools load on demand, with offline caching and automated release checks.'
+        ]
+      },
+      {
+        version: '0.9.7',
         date: '2026-08-21',
         title: 'Preview bar multi-select and consolidated 0.9.6 notes',
         bullets: [
@@ -466,6 +478,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-09-07',
+        title: '同步安全、草稿救援與純 PDF 分享',
+        bullets: [
+          '手機與平板匯出只分享 PDF 檔案，不再附加標題、文字或網址。',
+          '離線同步記錄明確刪除項目，保留其他裝置新增或更新的內容；待同步資料依帳號及曲庫隔離。',
+          '團隊編輯新增本機草稿、恢復與衝突確認；畫面錯誤時可重試或下載資料備份。',
+          '團隊邀請可從收件匣與通知鈴查看、接受或婉拒，並改善手機管理介面。',
+          '編輯器、分享頁與 PDF 工具改為按需載入，搭配離線快取及發布前自動檢查。'
+        ]
+      },
+      {
+        version: '0.9.7',
         date: '2026-08-21',
         title: '預覽小節多選與 0.9.6 更新整合',
         bullets: [

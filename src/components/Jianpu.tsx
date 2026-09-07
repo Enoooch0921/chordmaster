@@ -77,7 +77,7 @@ const JIANPU_LAYOUT_EPSILON = 0.001;
 const JIANPU_DIGIT_FONT = '"SF Mono", "Cascadia Mono", "Roboto Mono", "Menlo", "Consolas", ui-monospace, monospace';
 const JIANPU_SYMBOL_FONT = '"Avenir Next", "PingFang TC", "Microsoft JhengHei", ui-sans-serif, system-ui, sans-serif';
 
-const resolveSlurAnchor = (markedNote: LayoutNote | null, notes: LayoutNote[]) => {
+const resolveSlurAnchor = <T extends LayoutNote,>(markedNote: T | null, notes: T[]): T | null => {
   if (!markedNote || markedNote.pitch !== '-') return markedNote;
 
   const markedIndex = notes.lastIndexOf(markedNote);

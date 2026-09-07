@@ -189,6 +189,22 @@ describe('cloud repository song creator integrity', () => {
     vi.clearAllMocks();
   });
 
+  it('never writes bundled symbol test fixtures to a cloud library', async () => {
+    const repository = createRepository();
+    repository.setActiveLibrary('personal-1');
+
+    await repository.saveSong(makeSong({
+      id: 'symbol-test',
+      title: '符號測試頁（2行）',
+      sections: [
+        { id: 'test-bars', title: 'Bars / Marks', bars: [] },
+        { id: 'test-meter', title: 'Meter', bars: [] }
+      ]
+    }));
+
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
   it('uses the authenticated user for a newly created song', async () => {
     const songUpsert = vi.fn().mockResolvedValue({ error: null });
     let songQueryCount = 0;

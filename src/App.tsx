@@ -1,3 +1,9 @@
+import LegacyDraftRecovery from './components/LegacyDraftRecovery';
+import RecoveryBoundary from './components/RecoveryBoundary';
+import TeamDraftRecovery from './components/TeamDraftRecovery';
+import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
+import { writeTeamDraft, removeTeamDraft, restoreTeamDraft } from './lib/teamDrafts';
+import { setRecoverySnapshot } from './lib/recovery';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -7,11 +13,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
-import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { createRoot } from 'react-dom/client';
-import { toPng, toCanvas, getFontEmbedCSS } from 'html-to-image';
-import { jsPDF } from 'jspdf';
 import * as OpenCC from 'opencc-js/t2cn';
 import {
   CloudLibrarySummary,
@@ -35,12 +38,14 @@ import {
   BarNumberMode,
   SongReferenceKind,
   TeamManagementSnapshot,
+  PendingTeamInvite,
   SetlistEditorAssignmentSnapshot,
   TeamSongImportRequestItem,
   TeamSongImportResult,
   ShareContact,
   AppNotification,
-  NotificationResourceType
+  ShareContactResourceType,
+  WorkspaceSnapshot
 } from './types';
 import { ALL_KEYS, getPlayKey, getSuggestedGuitarCapo, getTransposeOffset, normalizeKeySpelling, transposeKeyPreferFlats, transposeKeyWithPreference } from './utils/musicUtils';
 import { normalizeBarChords } from './utils/barUtils';
@@ -49,7 +54,7 @@ import { hasPlayableReference, normalizeSongReferences } from './utils/reference
 import { normalizeTempoBpm } from './utils/tempoUtils';
 import { useThemeMode } from './hooks/useThemeMode';
 import { useToast } from './components/Toast';
-import { getAppFontEmbedCSS, waitForAppFontsReady } from './lib/fontFaceAssets';
+import { PdfExportCancelledError, type PdfExportProgressState } from './lib/pdfExportTypes';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
@@ -58,12 +63,13 @@ import { EDITABLE_TEAM_ROLES, getTeamRoleDescription, getTeamRoleLabel } from '.
 import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, ChordSheetPreviewBarContextMenuTarget, ChordSheetPreviewBarTarget, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
-import PreviewWysiwygEditor, { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
+import type { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
+const PreviewWysiwygEditor = React.lazy(() => import('./components/PreviewWysiwygEditor'));
 import PreviewBarEditor from './components/preview-edit/PreviewBarEditor';
 import PreviewSectionActionMenu from './components/preview-edit/PreviewSectionActionMenu';
 import PreviewSectionTitleEditor from './components/preview-edit/PreviewSectionTitleEditor';
 import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
-import SongEditor from './components/SongEditor';
+const SongEditor = React.lazy(() => import('./components/SongEditor'));
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
@@ -102,8 +108,17 @@ import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, M
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
-import { loadPendingSync, markMigrationCompleted, hasCompletedMigration, savePendingSync } from './lib/workspace';
-import { mergeWorkspaceByUpdatedAt, syncWorkspaceDiff } from './lib/sync';
+import {
+  consumeLocalWorkspaceRecoveryNotice,
+  hasCompletedMigration,
+  loadLocalWorkspaceSnapshot,
+  loadPendingSync,
+  markMigrationCompleted,
+  persistLocalWorkspaceSnapshot,
+  savePendingSync
+} from './lib/workspace';
+import { syncWorkspaceDiff } from './lib/sync';
+import { collectWorkspaceDeletions, mergeWorkspaceByUpdatedAt } from './lib/workspaceMerge';
 import { applySongLibraryImport, getSongLibraryImportMode, resolveImportedSongIdentity } from './lib/songLibraryImport';
 import { hasSupabaseConfig } from './lib/supabase';
 import {
@@ -161,6 +176,12 @@ import {
   togglePreviewBarSelection
 } from './lib/previewBarSelection';
 import { getPreviewZoomContentRatio, resolvePreviewZoomScrollPosition } from './lib/previewZoom';
+import {
+  isLocalOnlySymbolTestSong,
+  SYMBOL_TEST_SONG_LEGACY_TITLE,
+  SYMBOL_TEST_SONG_THREE_ROW_TITLE,
+  SYMBOL_TEST_SONG_TWO_ROW_TITLE
+} from './lib/symbolTestSongs';
 import { getChordDisplaySlotOwnership } from './utils/chordSlots';
 import { getDefaultRhythmCursor, getRhythmCursorUnits } from './lib/rhythmEditing';
 import {
@@ -175,9 +196,6 @@ import {
   type PreviewNonChordMode
 } from './lib/previewNotationPreference';
 
-const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
-const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
-const PROJECT_STORAGE_KEY = 'chordmaster.projects.v1';
 const SELECTED_PROJECT_STORAGE_KEY = 'chordmaster.selected-project-id.v1';
 const SELECTED_SONG_STORAGE_KEY = 'chordmaster.selected-song-id.v1';
 const SELECTED_SONG_BY_LIBRARY_STORAGE_KEY = 'chordmaster.selected-song-id-by-library.v1';
@@ -188,7 +206,6 @@ const LIBRARY_SORT_STORAGE_KEY = 'chordmaster.library-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const GUITARIST_MODE_STORAGE_KEY = 'chordmaster.guitarist-mode.v1';
 const PREVIEW_QUICK_EDIT_STORAGE_KEY = 'chordmaster.preview-quick-edit.v1';
-const LAST_SAVED_AT_STORAGE_KEY = 'chordmaster.last-saved-at.v1';
 const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'chordmaster.sidebar-width.v1';
@@ -381,12 +398,6 @@ const PREVIEW_MAX_SCALE = 2.4;
 const PREVIEW_ZOOM_STEP = 0.15;
 const PREVIEW_SAFETY_MARGIN = 20;
 const PREVIEW_PAGE_HEIGHT = 1123;
-const PDF_EXPORT_PREFERRED_PIXEL_RATIO = 5;
-const PDF_EXPORT_MOBILE_MAX_PIXEL_RATIO = 3;
-const PDF_EXPORT_MOBILE_MAX_CANVAS_SIDE = 4096;
-const PDF_EXPORT_MOBILE_MAX_CANVAS_AREA = 12_000_000;
-const PDF_EXPORT_DESKTOP_MAX_CANVAS_SIDE = 16384;
-const PDF_EXPORT_DESKTOP_MAX_CANVAS_AREA = 64_000_000;
 const VALID_KEYS = new Set<string>(ALL_KEYS);
 const VALID_NAVIGATION_MARKERS = new Set([
   'segno',
@@ -525,7 +536,7 @@ const getUnknownErrorMessage = (error: unknown) => {
 };
 
 const isTeamFeatureSchemaError = (message: string) => (
-  /get_user_libraries|create_team|get_team_management|create_team_invite|team_invites|library_members|setlist_editor_assignments|get_setlist_editor_assignments|set_setlist_editor_assignment|inspect_team_song_import|import_personal_songs_to_team|archive_team_songs|delete_team_songs|team_song_imports|archived_at|schema cache|PGRST202|PGRST204|Could not find the function|function public\./i.test(message)
+  /get_user_libraries|create_team|get_team_management|create_team_invite|get_my_team_invites|accept_my_team_invite|decline_my_team_invite|team_invites|library_members|setlist_editor_assignments|get_setlist_editor_assignments|set_setlist_editor_assignment|inspect_team_song_import|import_personal_songs_to_team|archive_team_songs|delete_team_songs|team_song_imports|archived_at|schema cache|PGRST202|PGRST204|Could not find the function|function public\./i.test(message)
 );
 
 const getTeamFeatureErrorMessage = (error: unknown, language: AppLanguage) => {
@@ -552,49 +563,6 @@ interface JoinedSetlistDisplayPreference {
   displayMode?: SetlistDisplayMode;
   barNumberMode?: BarNumberMode;
   barRowCount?: 1 | 2 | 3;
-}
-
-interface PdfExportProgressState {
-  totalPages: number;
-  completedPages: number;
-  currentPage: number;
-  songIndex: number;
-  totalSongs: number;
-  songTitle: string;
-  sectionIndex: number | null;
-  sectionTitle: string | null;
-  pageInSong: number;
-  totalPagesInSong: number;
-  cancelRequested: boolean;
-}
-
-interface ExportPageDescriptor {
-  element: HTMLElement;
-  songIndex: number;
-  totalSongs: number;
-  songTitle: string;
-  sectionIndex: number | null;
-  sectionTitle: string | null;
-  pageInSong: number;
-  totalPagesInSong: number;
-}
-
-interface PdfCanvasLimits {
-  maxSide: number;
-  maxArea: number;
-  maxPixelRatio: number;
-}
-
-interface PdfRenderedImage {
-  data: string;
-  format: 'JPEG' | 'PNG';
-}
-
-class PdfExportCancelledError extends Error {
-  constructor() {
-    super('PDF export cancelled.');
-    this.name = 'PdfExportCancelledError';
-  }
 }
 
 const sanitizeFileNamePart = (value: string) => (
@@ -736,188 +704,6 @@ const openSystemShareSheet = async (shareUrl: string, title: string) => {
   return false;
 };
 
-const isAppleTouchWebDevice = () => {
-  if (typeof navigator === 'undefined') return false;
-  const userAgent = navigator.userAgent || '';
-  const platform = navigator.platform || '';
-  return /iPad|iPhone|iPod/i.test(userAgent) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-};
-
-const trySharePdfFileFromWeb = async (pdf: jsPDF, safeFileName: string, title: string) => {
-  if (
-    typeof navigator === 'undefined'
-    || typeof navigator.share !== 'function'
-    || typeof File === 'undefined'
-  ) {
-    return false;
-  }
-
-  const pdfBlob = pdf.output('blob') as Blob;
-  const pdfFile = new File([pdfBlob], safeFileName, { type: 'application/pdf' });
-  const shareData = { title, files: [pdfFile] };
-
-  try {
-    if (typeof navigator.canShare === 'function' && !navigator.canShare(shareData)) {
-      return false;
-    }
-
-    await navigator.share(shareData);
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/cancel|abort/i.test(message)) return true;
-    return false;
-  }
-};
-
-// On native iPad (Capacitor WKWebView), jsPDF's `.save()` relies on an
-// `<a download>` click that WKWebView silently ignores, so nothing happens.
-// Instead, write the PDF to the cache directory and hand it to the iOS share
-// sheet (Save to Files, AirDrop, Mail, etc.).
-const savePdfDocument = async (pdf: jsPDF, fileName: string) => {
-  const safeFileName = `${fileName}.pdf`;
-
-  if (!Capacitor.isNativePlatform()) {
-    if (isAppleTouchWebDevice() && await trySharePdfFileFromWeb(pdf, safeFileName, fileName)) {
-      return;
-    }
-
-    pdf.save(safeFileName);
-    return;
-  }
-
-  // jsPDF emits a "data:application/pdf;filename=...;base64,XXXX" URI; strip the
-  // prefix so Filesystem.writeFile receives raw base64 data.
-  const dataUri = pdf.output('datauristring');
-  const base64Data = dataUri.slice(dataUri.indexOf(',') + 1);
-
-  const writeResult = await Filesystem.writeFile({
-    path: safeFileName,
-    data: base64Data,
-    directory: Directory.Cache,
-  });
-
-  try {
-    await Share.share({
-      title: fileName,
-      files: [writeResult.uri],
-    });
-  } catch (error) {
-    // Dismissing the iOS share sheet rejects with a "canceled" error — that is
-    // not an export failure, so swallow it.
-    const message = error instanceof Error ? error.message : String(error);
-    if (/cancel/i.test(message)) {
-      return;
-    }
-    throw error;
-  }
-};
-
-const waitForPaint = async () => {
-  await new Promise<void>((resolve) => {
-    window.requestAnimationFrame(() => resolve());
-  });
-};
-
-const parsePositiveIntegerAttribute = (value: string | null): number | null => {
-  if (!value) {
-    return null;
-  }
-
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue) || numericValue <= 0) {
-    return null;
-  }
-
-  return Math.round(numericValue);
-};
-
-const isMobileLikePdfExportDevice = () => {
-  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-    return false;
-  }
-
-  const userAgent = navigator.userAgent || '';
-  const hasCoarsePointer = typeof window.matchMedia === 'function'
-    ? window.matchMedia('(pointer: coarse)').matches
-    : false;
-  const maxTouchPoints = navigator.maxTouchPoints || 0;
-
-  return (
-    /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent) ||
-    (maxTouchPoints > 1 && hasCoarsePointer) ||
-    window.innerWidth < 1024
-  );
-};
-
-const getPdfCanvasLimits = (): PdfCanvasLimits => (
-  isMobileLikePdfExportDevice()
-    ? {
-        maxSide: PDF_EXPORT_MOBILE_MAX_CANVAS_SIDE,
-        maxArea: PDF_EXPORT_MOBILE_MAX_CANVAS_AREA,
-        maxPixelRatio: PDF_EXPORT_MOBILE_MAX_PIXEL_RATIO,
-      }
-    : {
-        maxSide: PDF_EXPORT_DESKTOP_MAX_CANVAS_SIDE,
-        maxArea: PDF_EXPORT_DESKTOP_MAX_CANVAS_AREA,
-        maxPixelRatio: PDF_EXPORT_PREFERRED_PIXEL_RATIO,
-      }
-);
-
-const getElementExportSize = (element: HTMLElement) => ({
-  width: Math.max(1, Math.ceil(element.scrollWidth || element.offsetWidth || element.getBoundingClientRect().width)),
-  height: Math.max(1, Math.ceil(element.scrollHeight || element.offsetHeight || element.getBoundingClientRect().height)),
-});
-
-const getSafePdfPixelRatio = (width: number, height: number, preferredRatio = PDF_EXPORT_PREFERRED_PIXEL_RATIO) => {
-  const limits = getPdfCanvasLimits();
-  const safeWidth = Math.max(1, width);
-  const safeHeight = Math.max(1, height);
-  const sideLimitedRatio = Math.min(limits.maxSide / safeWidth, limits.maxSide / safeHeight);
-  const areaLimitedRatio = Math.sqrt(limits.maxArea / (safeWidth * safeHeight));
-  const ratio = Math.min(preferredRatio, limits.maxPixelRatio, sideLimitedRatio, areaLimitedRatio);
-
-  return Math.max(1, Math.floor(ratio * 100) / 100);
-};
-
-const canvasHasVisibleContent = (canvas: HTMLCanvasElement) => {
-  if (canvas.width <= 0 || canvas.height <= 0) {
-    return false;
-  }
-
-  const probeCanvas = document.createElement('canvas');
-  const probeSize = 64;
-  probeCanvas.width = probeSize;
-  probeCanvas.height = probeSize;
-
-  const probeContext = probeCanvas.getContext('2d', { willReadFrequently: true });
-  if (!probeContext) {
-    return true;
-  }
-
-  probeContext.fillStyle = '#ffffff';
-  probeContext.fillRect(0, 0, probeSize, probeSize);
-  probeContext.drawImage(canvas, 0, 0, probeSize, probeSize);
-
-  try {
-    const imageData = probeContext.getImageData(0, 0, probeSize, probeSize).data;
-    for (let index = 0; index < imageData.length; index += 4) {
-      const alpha = imageData[index + 3];
-      const red = imageData[index];
-      const green = imageData[index + 1];
-      const blue = imageData[index + 2];
-
-      if (alpha > 8 && (red < 245 || green < 245 || blue < 245)) {
-        return true;
-      }
-    }
-  } catch {
-    return true;
-  }
-
-  return false;
-};
-
 const getSongVersionSummary = (song: Song) => (
   Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ')
 );
@@ -1029,10 +815,6 @@ const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
     tooltip: primary,
   };
 };
-
-const SYMBOL_TEST_SONG_LEGACY_TITLE = '符號測試頁';
-const SYMBOL_TEST_SONG_TWO_ROW_TITLE = '符號測試頁（2行）';
-const SYMBOL_TEST_SONG_THREE_ROW_TITLE = '符號測試頁（3行）';
 
 const SYMBOL_TEST_SONG_TEMPLATE: Song = {
   title: SYMBOL_TEST_SONG_LEGACY_TITLE,
@@ -1639,11 +1421,6 @@ const createEmptySong = (title: string): StoredSong =>
     ]
   });
 
-const isSymbolTestSong = (song: Song) => (
-  song.sections.some((section) => section.id === 'test-bars')
-  && song.sections.some((section) => section.id === 'test-meter')
-);
-
 const getSymbolTestContentSignature = (song: Song) => JSON.stringify({
   title: song.title,
   shuffle: song.shuffle,
@@ -1688,7 +1465,7 @@ const ensureDefaultSymbolTestPages = (songs: StoredSong[]) => {
   let changed = false;
   const now = Date.now();
   const normalizedSongs = songs.map((song) => {
-    if (!isSymbolTestSong(song)) {
+    if (!isLocalOnlySymbolTestSong(song)) {
       return song;
     }
 
@@ -1708,11 +1485,11 @@ const ensureDefaultSymbolTestPages = (songs: StoredSong[]) => {
   });
 
   const hasTwoRowPage = normalizedSongs.some((song) => (
-    isSymbolTestSong(song)
+    isLocalOnlySymbolTestSong(song)
     && song.title === SYMBOL_TEST_SONG_TWO_ROW_TITLE
   ));
   const hasThreeRowPage = normalizedSongs.some((song) => (
-    isSymbolTestSong(song)
+    isLocalOnlySymbolTestSong(song)
     && song.title === SYMBOL_TEST_SONG_THREE_ROW_TITLE
   ));
   const nextSongs = [...normalizedSongs];
@@ -1728,6 +1505,13 @@ const ensureDefaultSymbolTestPages = (songs: StoredSong[]) => {
 
   return { songs: nextSongs, changed };
 };
+
+const addLocalSymbolTestPages = (cloudSongs: StoredSong[], localSongs: StoredSong[]) => (
+  ensureDefaultSymbolTestPages([
+    ...cloudSongs.filter((song) => !isLocalOnlySymbolTestSong(song)),
+    ...localSongs.filter(isLocalOnlySymbolTestSong)
+  ]).songs
+);
 
 const getDefaultLibrary = () => {
   const defaultSong = createStoredSong(createSymbolTestSongTemplate(2), createSongId());
@@ -1807,61 +1591,38 @@ const persistSelectedSongId = (libraryId: string | null | undefined, songId: str
   window.localStorage.setItem(SELECTED_SONG_STORAGE_KEY, songId);
 };
 
-const loadSongLibrary = () => {
-  if (typeof window === 'undefined') {
+const loadSongLibrary = (workspace: WorkspaceSnapshot) => {
+  if (workspace.songs.length === 0) {
     return {
       ...getDefaultLibrary(),
       lastSavedAt: null as number | null
     };
   }
 
-  try {
-    const storedSongs = window.localStorage.getItem(SONG_LIBRARY_STORAGE_KEY);
-    const storedSelectedId = getStoredSelectedSongId(null);
-    const storedLastSavedAt = window.localStorage.getItem(LAST_SAVED_AT_STORAGE_KEY);
-
-    if (!storedSongs) {
-      return {
-        ...getDefaultLibrary(),
-        lastSavedAt: null as number | null
-      };
+  const storedSelectedId = getStoredSelectedSongId(null);
+  const repairedSongs = workspace.songs.map((song, index) => normalizeSongBars({
+    ...song,
+    id: song.id || `song-restored-${index + 1}`,
+    updatedAt: typeof song.updatedAt === 'number' ? song.updatedAt : Date.now()
+  }));
+  const { songs, changed } = ensureDefaultSymbolTestPages(repairedSongs);
+  let lastSavedAt = workspace.lastSavedAt;
+  if (changed || JSON.stringify(repairedSongs) !== JSON.stringify(workspace.songs)) {
+    try {
+      lastSavedAt = persistLocalWorkspaceSnapshot(songs, workspace.setlists, workspace.projects);
+    } catch {
+      // Keep the repaired in-memory copy; the recovery warning/save path will surface storage failures.
     }
-
-    const parsedSongs = JSON.parse(storedSongs) as StoredSong[];
-    if (!Array.isArray(parsedSongs) || parsedSongs.length === 0) {
-      return {
-        ...getDefaultLibrary(),
-        lastSavedAt: null as number | null
-      };
-    }
-
-    const repairedSongs = parsedSongs.map((song, index) => normalizeSongBars({
-      ...song,
-      id: song.id || `song-restored-${index + 1}`,
-      updatedAt: typeof song.updatedAt === 'number' ? song.updatedAt : Date.now()
-    }));
-    const { songs } = ensureDefaultSymbolTestPages(repairedSongs);
-    const repairedSerializedSongs = JSON.stringify(songs);
-    if (repairedSerializedSongs !== JSON.stringify(parsedSongs)) {
-      window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, repairedSerializedSongs);
-    }
-    const selectedSongId = pickAvailableSongId(songs, [storedSelectedId]);
-    const parsedLastSavedAt = storedLastSavedAt ? Number(storedLastSavedAt) : null;
-
-    return {
-      songs,
-      selectedSongId,
-      lastSavedAt: Number.isFinite(parsedLastSavedAt) ? parsedLastSavedAt : null
-    };
-  } catch {
-    return {
-      ...getDefaultLibrary(),
-      lastSavedAt: null as number | null
-    };
   }
+
+  return {
+    songs,
+    selectedSongId: pickAvailableSongId(songs, [storedSelectedId]),
+    lastSavedAt
+  };
 };
 
-const loadSetlists = (songs: StoredSong[]) => {
+const loadSetlists = (workspace: WorkspaceSnapshot, songs: StoredSong[]) => {
   if (typeof window === 'undefined') {
     return {
       setlists: [] as Setlist[],
@@ -1871,29 +1632,14 @@ const loadSetlists = (songs: StoredSong[]) => {
   }
 
   try {
-    const storedSetlists = window.localStorage.getItem(SETLIST_STORAGE_KEY);
     const storedSelectedSetlistId = getStoredSelectedSetlistId();
     const storedSelectedSetlistSongId = getStoredSelectedSetlistSongId();
-
-    if (!storedSetlists) {
-      return {
-        setlists: [] as Setlist[],
-        selectedSetlistId: null as string | null,
-        selectedSetlistSongId: null as string | null
-      };
-    }
-
-    const parsedSetlists = JSON.parse(storedSetlists) as Array<Partial<Setlist> & Record<string, unknown>>;
-    if (!Array.isArray(parsedSetlists)) {
-      return {
-        setlists: [] as Setlist[],
-        selectedSetlistId: null as string | null,
-        selectedSetlistSongId: null as string | null
-      };
-    }
-
     const songsById = new Map(songs.map((song) => [song.id, song] as const));
-    const setlists = parsedSetlists.map((setlist, index) => normalizeStoredSetlist(setlist, songsById, index));
+    const setlists = workspace.setlists.map((setlist, index) => normalizeStoredSetlist(
+      setlist as Partial<Setlist> & Record<string, unknown>,
+      songsById,
+      index
+    ));
     const selectedSetlist = pickAvailableSetlist(setlists, [], [], [storedSelectedSetlistId]);
     const selectedSetlistSongId = pickAvailableSetlistSongId(selectedSetlist, [storedSelectedSetlistSongId]);
 
@@ -1911,7 +1657,7 @@ const loadSetlists = (songs: StoredSong[]) => {
   }
 };
 
-const loadProjects = () => {
+const loadProjects = (workspace: WorkspaceSnapshot) => {
   if (typeof window === 'undefined') {
     return {
       projects: [] as Project[],
@@ -1920,12 +1666,11 @@ const loadProjects = () => {
   }
 
   try {
-    const stored = window.localStorage.getItem(PROJECT_STORAGE_KEY);
     const storedSelected = window.localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY);
-    const parsed = stored ? JSON.parse(stored) as Array<Partial<Project> & Record<string, unknown>> : [];
-    const projects = Array.isArray(parsed)
-      ? parsed.map((project, index) => normalizeStoredProject(project, index))
-      : [];
+    const projects = workspace.projects.map((project, index) => normalizeStoredProject(
+      project as Partial<Project> & Record<string, unknown>,
+      index
+    ));
     const selectedProjectId = storedSelected && projects.some((project) => project.id === storedSelected)
       ? storedSelected
       : null;
@@ -2270,20 +2015,47 @@ export default function App() {
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
   const toast = useToast();
-  const initialLibraryRef = useRef(loadSongLibrary());
-  const initialSetlistsRef = useRef(loadSetlists(initialLibraryRef.current.songs));
-  const initialProjectsRef = useRef(loadProjects());
-  const [songs, setSongs] = useState<StoredSong[]>(initialLibraryRef.current.songs);
-  const [savedSongs, setSavedSongs] = useState<StoredSong[]>(cloneSong(initialLibraryRef.current.songs));
+  const initialWorkspaceRef = useRef<WorkspaceSnapshot | null>(null);
+  const initialWorkspace = initialWorkspaceRef.current ?? loadLocalWorkspaceSnapshot();
+  initialWorkspaceRef.current = initialWorkspace;
+  const initialLibraryRef = useRef<ReturnType<typeof loadSongLibrary> | null>(null);
+  const initialLibrary = initialLibraryRef.current ?? loadSongLibrary(initialWorkspace);
+  initialLibraryRef.current = initialLibrary;
+  const initialSetlistsRef = useRef<ReturnType<typeof loadSetlists> | null>(null);
+  const initialSetlists = initialSetlistsRef.current ?? loadSetlists(initialWorkspace, initialLibrary.songs);
+  initialSetlistsRef.current = initialSetlists;
+  const initialProjectsRef = useRef<ReturnType<typeof loadProjects> | null>(null);
+  const initialProjects = initialProjectsRef.current ?? loadProjects(initialWorkspace);
+  initialProjectsRef.current = initialProjects;
+  useEffect(() => {
+    const recoveryNotice = consumeLocalWorkspaceRecoveryNotice();
+    if (!recoveryNotice) return;
+
+    if (recoveryNotice === 'recovered-backup') {
+      toast.info(language === 'zh' ? '偵測到本機資料損壞，已從上一版自動復原。' : 'Damaged local data was detected and restored from the previous snapshot.', {
+        description: language === 'zh' ? '損壞的原始內容已另外保留，方便後續救援。' : 'The damaged original was retained separately for recovery.'
+      });
+      return;
+    }
+    if (recoveryNotice === 'recovered-legacy') {
+      toast.info(language === 'zh' ? '新版快照無法讀取，已從舊版本機資料復原。' : 'The new snapshot was unreadable, so the legacy local data was restored.');
+      return;
+    }
+    toast.error(language === 'zh' ? '本機資料已損壞，無法自動復原。' : 'The local workspace is damaged and could not be recovered automatically.', {
+      description: language === 'zh' ? '原始內容未被靜默清除，已保留供後續救援。' : 'The original content was retained instead of being silently cleared.'
+    });
+  }, [language, toast]);
+  const [songs, setSongs] = useState<StoredSong[]>(initialLibrary.songs);
+  const [savedSongs, setSavedSongs] = useState<StoredSong[]>(cloneSong(initialLibrary.songs));
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(loadWorkspaceMode);
   const [guitaristMode, setGuitaristMode] = useState<boolean>(loadGuitaristMode);
-  const [selectedSongId, setSelectedSongId] = useState(initialLibraryRef.current.selectedSongId);
-  const [setlists, setSetlists] = useState<Setlist[]>(initialSetlistsRef.current.setlists);
-  const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(cloneSong(initialSetlistsRef.current.setlists));
-  const [projects, setProjects] = useState<Project[]>(initialProjectsRef.current.projects);
-  const [savedProjects, setSavedProjects] = useState<Project[]>(cloneSong(initialProjectsRef.current.projects));
+  const [selectedSongId, setSelectedSongId] = useState(initialLibrary.selectedSongId);
+  const [setlists, setSetlists] = useState<Setlist[]>(initialSetlists.setlists);
+  const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(cloneSong(initialSetlists.setlists));
+  const [projects, setProjects] = useState<Project[]>(initialProjects.projects);
+  const [savedProjects, setSavedProjects] = useState<Project[]>(cloneSong(initialProjects.projects));
   const [setlistProjectFilter, setSetlistProjectFilter] = useState<SetlistProjectFilter>(() => (
-    loadSetlistProjectFilter(initialProjectsRef.current.projects)
+    loadSetlistProjectFilter(initialProjects.projects)
   ));
   const [showArchivedProjects, setShowArchivedProjects] = useState(false);
   const [projectPicker, setProjectPicker] = useState<{ mode: 'move' | 'copy'; setlistIds: string[] } | null>(null);
@@ -2292,8 +2064,8 @@ export default function App() {
   const [joinedSetlists, setJoinedSetlists] = useState<JoinedSetlist[]>([]);
   const [joinedProjects, setJoinedProjects] = useState<JoinedProject[]>([]);
   const [joinedSetlistDisplayPreferences, setJoinedSetlistDisplayPreferences] = useState<Record<string, JoinedSetlistDisplayPreference>>(loadJoinedSetlistDisplayPreferences);
-  const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistId);
-  const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlistsRef.current.selectedSetlistSongId);
+  const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlists.selectedSetlistId);
+  const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlists.selectedSetlistSongId);
   const [songHistories, setSongHistories] = useState<Record<string, SongHistoryState>>({});
   const [setlistSongHistories, setSetlistSongHistories] = useState<Record<string, SetlistSongHistoryState>>({});
   const [selectedLibrarySongIds, setSelectedLibrarySongIds] = useState<string[]>([]);
@@ -2306,7 +2078,7 @@ export default function App() {
   // Auto-save is always on now (the toggle was removed). Kept as a constant so
   // the existing "auto-saved" hints and the auto-save effect read true.
   const isAutoSaveEnabled = true;
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(initialLibraryRef.current.lastSavedAt);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(initialLibrary.lastSavedAt);
   const [highlightedSectionIds, setHighlightedSectionIds] = useState<string[]>([]);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [editorFocusRequest, setEditorFocusRequest] = useState<EditorFocusRequest | null>(null);
@@ -2347,7 +2119,7 @@ export default function App() {
   const [librarySortMode, setLibrarySortMode] = useState<LibrarySortMode>(loadLibrarySortPreference);
   const [showArchivedSongs, setShowArchivedSongs] = useState(false);
   const [setlistPanelView, setSetlistPanelView] = useState<SetlistPanelView>(
-    initialSetlistsRef.current.selectedSetlistId ? 'detail' : 'list'
+    initialSetlists.selectedSetlistId ? 'detail' : 'list'
   );
   const [isCreateSetlistOpen, setIsCreateSetlistOpen] = useState(false);
   const [newSetlistName, setNewSetlistName] = useState('');
@@ -2388,16 +2160,19 @@ export default function App() {
   const [isRevokingSetlistShare, setIsRevokingSetlistShare] = useState(false);
   const [pendingShareUrl, setPendingShareUrl] = useState<string | null>(null);
   const [isCreatingSongShare, setIsCreatingSongShare] = useState(false);
-  const [shareDialogContext, setShareDialogContext] = useState<{ resourceType: NotificationResourceType; resourceId: string } | null>(null);
+  const [shareDialogContext, setShareDialogContext] = useState<{ resourceType: ShareContactResourceType; resourceId: string } | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [shareContacts, setShareContacts] = useState<ShareContact[]>([]);
   const [isLoadingShareContacts, setIsLoadingShareContacts] = useState(false);
   const [isSharingToContacts, setIsSharingToContacts] = useState(false);
   const [cloudLibraries, setCloudLibraries] = useState<CloudLibrarySummary[]>([]);
   const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
+  const [workspaceOwnerId, setWorkspaceOwnerId] = useState<string | null>(null);
   const [isSwitchingLibrary, setIsSwitchingLibrary] = useState(false);
   const [activeCloudMutationCount, setActiveCloudMutationCount] = useState(0);
   const [teamManagement, setTeamManagement] = useState<TeamManagementSnapshot | null>(null);
+  const [pendingTeamInvites, setPendingTeamInvites] = useState<PendingTeamInvite[]>([]);
+  const [pendingTeamInviteActionId, setPendingTeamInviteActionId] = useState<string | null>(null);
   const [isTeamManagementOpen, setIsTeamManagementOpen] = useState(false);
   const [isLoadingTeamManagement, setIsLoadingTeamManagement] = useState(false);
   const [isWorkspacePanelOpen, setIsWorkspacePanelOpen] = useState(false);
@@ -2597,6 +2372,18 @@ export default function App() {
   const setlistIsDirty = serializeSetlists(setlists) !== serializeSetlists(savedSetlists);
   const projectIsDirty = serializeProjects(projects) !== serializeProjects(savedProjects);
   const workspaceIsDirty = libraryIsDirty || setlistIsDirty || projectIsDirty;
+  const teamDraft = useTeamWorkspaceDraft({
+    userId: authenticatedUser?.id, libraryId: activeLibraryId, enabled: isTeamWorkspace && workspaceOwnerId === authenticatedUser?.id,
+    loading: isLoadingCloudWorkspace || isSwitchingLibrary,
+    dirty: workspaceIsDirty,
+    workspace: { songs, setlists, projects },
+    baseline: { songs: savedSongs, setlists: savedSetlists, projects: savedProjects },
+  });
+  React.useLayoutEffect(() => {
+    setRecoverySnapshot({ version: 1, exportedAt: Date.now(), songs, setlists, projects, previewEditSession });
+  }, [songs, setlists, projects, previewEditSession]);
+  useEffect(() => () => setRecoverySnapshot(null), []);
+
   const workspaceIsDirtyRef = useRef(workspaceIsDirty);
   workspaceIsDirtyRef.current = workspaceIsDirty;
   const previewEditSessionRef = useRef(previewEditSession);
@@ -3793,20 +3580,37 @@ export default function App() {
     nextSetlists: Setlist[],
     nextProjects: Project[] = projects
   ) => {
-    const savedAt = Date.now();
-
-    if (!isTeamWorkspace) {
+    let localSavedAt: number | null = null;
+    let localStorageError: unknown = null;
+    if (isTeamWorkspace && authenticatedUser && activeLibraryId) {
+      if (teamDraft.pending) throw new Error('請先處理本機團隊草稿。');
       try {
-        window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
-        window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(nextSetlists));
-        window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(nextProjects));
-        window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
-      } catch {
-        // Ignore local cache failures and keep the app usable.
+        writeTeamDraft(authenticatedUser.id, activeLibraryId,
+          { songs: nextSongs, setlists: nextSetlists, projects: nextProjects },
+          { songs: savedSongs, setlists: savedSetlists, projects: savedProjects });
+      } catch (error) {
+        // A full local disk must not prevent an available cloud save.
+        localStorageError = error;
       }
     }
 
+    if (!isTeamWorkspace) {
+      try {
+        localSavedAt = persistLocalWorkspaceSnapshot(nextSongs, nextSetlists, nextProjects);
+      } catch (error) {
+        localStorageError = error;
+      }
+    }
+    const savedAt = localSavedAt ?? Date.now();
+
     if (!authenticatedUser || !cloudRepositoryRef.current) {
+      if (localStorageError) {
+        setSyncStatus('failed');
+        const detail = localStorageError instanceof Error ? localStorageError.message : '';
+        throw new Error(language === 'zh'
+          ? `本機儲存失敗，畫面中的變更尚未安全保存。${detail ? `\n\n${detail}` : ''}`
+          : `Local save failed. The changes visible on screen have not been stored safely.${detail ? `\n\n${detail}` : ''}`);
+      }
       setSavedSongs(cloneSong(nextSongs));
       setSavedSetlists(cloneSong(nextSetlists));
       setSavedProjects(cloneSong(nextProjects));
@@ -3817,15 +3621,27 @@ export default function App() {
 
     if (!navigator.onLine) {
       if (isTeamWorkspace) {
-        setSyncStatus('offline');
-        throw new Error(language === 'zh' ? '團隊區需要連線才能儲存。' : 'Team workspaces require an internet connection to save.');
+        setSyncStatus(localStorageError ? 'failed' : 'offline');
+        if (localStorageError) throw new Error(language === 'zh' ? '目前沒有連線，而且本機草稿寫入失敗。請保留頁面並下載目前修改。' : 'Offline and unable to save a local draft. Keep this page open and download your changes.');
+        throw new Error(language === 'zh' ? '修改已保留為本機團隊草稿，恢復連線後請再次儲存。' : 'Changes are saved as a local team draft. Save again when online.');
       }
-      savePendingSync({
-        songs: cloneSong(nextSongs),
-        setlists: cloneSong(nextSetlists),
-        projects: cloneSong(nextProjects),
-        savedAt
-      });
+      try {
+        savePendingSync({
+          userId: authenticatedUser.id,
+          libraryId: activeLibraryId ?? undefined,
+          deletions: collectWorkspaceDeletions({ songs: nextSongs, setlists: nextSetlists, projects: nextProjects }, { songs: savedSongs, setlists: savedSetlists, projects: savedProjects }),
+          songs: cloneSong(nextSongs),
+          setlists: cloneSong(nextSetlists),
+          projects: cloneSong(nextProjects),
+          savedAt
+        });
+      } catch (error) {
+        setSyncStatus('failed');
+        const detail = error instanceof Error ? error.message : '';
+        throw new Error(language === 'zh'
+          ? `離線變更無法加入待同步佇列。${detail ? `\n\n${detail}` : ''}`
+          : `Offline changes could not be added to the pending sync queue.${detail ? `\n\n${detail}` : ''}`);
+      }
       setSyncStatus('offline');
       return;
     }
@@ -3841,27 +3657,52 @@ export default function App() {
         savedSetlists,
         savedProjects
       });
-      savePendingSync(null);
-      setSavedSongs(cloneSong(nextSongs));
-      setSavedSetlists(cloneSong(nextSetlists));
-      setSavedProjects(cloneSong(nextProjects));
-      setLastSavedAt(savedAt);
-      setSyncStatus('saved');
     } catch (error) {
+      let pendingSyncError: unknown = null;
       if (!isTeamWorkspace) {
-        savePendingSync({
-          songs: cloneSong(nextSongs),
-          setlists: cloneSong(nextSetlists),
-          projects: cloneSong(nextProjects),
-          savedAt
-        });
+        try {
+          savePendingSync({
+            userId: authenticatedUser.id,
+            libraryId: activeLibraryId ?? undefined,
+            deletions: collectWorkspaceDeletions({ songs: nextSongs, setlists: nextSetlists, projects: nextProjects }, { songs: savedSongs, setlists: savedSetlists, projects: savedProjects }),
+            songs: cloneSong(nextSongs),
+            setlists: cloneSong(nextSetlists),
+            projects: cloneSong(nextProjects),
+            savedAt
+          });
+        } catch (pendingError) {
+          pendingSyncError = pendingError;
+        }
       }
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       const fallbackMessage = language === 'zh'
         ? '雲端儲存失敗，請確認網路後再試一次。'
         : 'Cloud save failed. Please check your connection and try again.';
       const detail = error instanceof Error && error.message.trim() ? error.message.trim() : '';
-      throw new Error(detail ? `${fallbackMessage}\n\n${detail}` : fallbackMessage);
+      const pendingDetail = pendingSyncError
+        ? (language === 'zh' ? '此外，變更也無法加入本機待同步佇列。' : 'The changes also could not be queued locally for sync.')
+        : '';
+      throw new Error([fallbackMessage, detail, pendingDetail].filter(Boolean).join('\n\n'));
+    }
+
+    try {
+      if (isTeamWorkspace && authenticatedUser && activeLibraryId) {
+        removeTeamDraft(authenticatedUser.id, activeLibraryId, { songs: nextSongs, setlists: nextSetlists, projects: nextProjects });
+      } else {
+        savePendingSync(null, { userId: authenticatedUser.id, libraryId: activeLibraryId! });
+      }
+    } catch {
+      toast.info(language === 'zh' ? '雲端已儲存，但無法清除本機待同步記錄。' : 'Saved to the cloud, but the local pending-sync record could not be cleared.');
+    }
+    setSavedSongs(cloneSong(nextSongs));
+    setSavedSetlists(cloneSong(nextSetlists));
+    setSavedProjects(cloneSong(nextProjects));
+    setLastSavedAt(savedAt);
+    setSyncStatus('saved');
+    if (localStorageError) {
+      toast.info(language === 'zh' ? '雲端已儲存，但本機備份寫入失敗。' : 'Saved to the cloud, but the local backup could not be written.', {
+        id: 'local-workspace-cache-warning'
+      });
     }
   };
 
@@ -3880,7 +3721,7 @@ export default function App() {
     const previousPersistence = workspacePersistenceInFlightRef.current;
     const operation = (async () => {
       if (previousPersistence) {
-        await previousPersistence;
+        await previousPersistence.catch(() => undefined);
       }
       await performWorkspacePersistence(nextSongs, nextSetlists, nextProjects);
     })();
@@ -4050,8 +3891,8 @@ export default function App() {
   const handleSaveLibrary = async () => {
     try {
       await persistWorkspace(songs, setlists);
-    } catch {
-      toast.error(copy.cloudSyncFailed);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
     }
   };
 
@@ -4119,8 +3960,11 @@ export default function App() {
     workspace: { songs: StoredSong[]; setlists: Setlist[]; joinedSetlists: JoinedSetlist[]; projects: Project[]; joinedProjects?: JoinedProject[]; lastSavedAt: number | null },
     libraryId = activeLibraryId
   ) => {
-    setSongs(workspace.songs);
-    setSavedSongs(cloneSong(workspace.songs));
+    const workspaceSongs = libraryId === personalCloudLibrary?.id
+      ? addLocalSymbolTestPages(workspace.songs, initialLibrary.songs)
+      : workspace.songs.filter((song) => !isLocalOnlySymbolTestSong(song));
+    setSongs(workspaceSongs);
+    setSavedSongs(cloneSong(workspaceSongs));
     setSetlists(workspace.setlists);
     setSavedSetlists(cloneSong(workspace.setlists));
     setProjects(workspace.projects);
@@ -4132,7 +3976,7 @@ export default function App() {
     setSetlistSongHistories({});
     setSelectedLibrarySongIds([]);
     setIsLibraryEditing(false);
-    setSelectedSongId(pickAvailableSongId(workspace.songs, [
+    setSelectedSongId(pickAvailableSongId(workspaceSongs, [
       getStoredSelectedSongId(libraryId),
       selectedSongId
     ]));
@@ -4357,6 +4201,9 @@ export default function App() {
       const inviteUrl = new URL(`team-invite/${invite.token}`, getAppBaseUrl()).toString();
       setTeamInviteShareUrl(inviteUrl);
       await copyShareUrlToClipboard(inviteUrl);
+      toast.success(invite.notificationSent
+        ? (language === 'zh' ? '已送出 App 通知，邀請連結也已複製。' : 'An in-app notification was sent and the invite link was copied.')
+        : (language === 'zh' ? '邀請連結已複製；對方建立帳號前，請先把連結傳給他。' : 'Invite link copied. Share it directly until the invitee has an account.'));
       setTeamInviteEmail('');
       setTeamInviteRole('setlist_manager');
       await loadTeamManagement();
@@ -5186,11 +5033,6 @@ export default function App() {
     void repository.saveCapoOverride(setlistSongId, capo)
       .then(() => {
         const savedAt = Date.now();
-        try {
-          window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
-        } catch {
-          // Ignore local cache failures; the override has already reached cloud storage.
-        }
         setLastSavedAt(savedAt);
         setSyncStatus('saved');
       })
@@ -5486,6 +5328,17 @@ export default function App() {
     }
   };
 
+  const refreshPendingTeamInvites = async () => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) return;
+    try {
+      const list = await repository.getPendingTeamInvites();
+      setPendingTeamInvites(list);
+    } catch {
+      // Transient; the next focus/refresh will retry.
+    }
+  };
+
   const refreshShareContacts = async () => {
     const repository = cloudRepositoryRef.current;
     if (!repository) return;
@@ -5501,10 +5354,47 @@ export default function App() {
   };
 
   const refreshNotificationsAndContacts = async () => {
-    await Promise.all([refreshNotifications(), refreshShareContacts()]);
+    await Promise.all([refreshNotifications(), refreshShareContacts(), refreshPendingTeamInvites()]);
   };
 
-  const handleShareToContacts = async (resourceType: NotificationResourceType, resourceId: string, userIds: string[]) => {
+  const handleAcceptPendingTeamInvite = async (invite: PendingTeamInvite) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || pendingTeamInviteActionId) return;
+    try {
+      setPendingTeamInviteActionId(invite.id);
+      const libraryId = await repository.acceptPendingTeamInvite(invite.id);
+      const libraries = await repository.listLibraries();
+      setCloudLibraries(libraries);
+      setPendingTeamInvites((current) => current.filter((item) => item.id !== invite.id));
+      setNotifications((current) => current.filter((item) => !(item.type === 'team_invite' && item.resourceId === invite.id)));
+      toast.success(language === 'zh' ? `已加入「${invite.libraryName}」。` : `Joined ${invite.libraryName}.`);
+      await handleSwitchCloudLibrary(libraryId);
+    } catch (error) {
+      toast.error(getTeamFeatureErrorMessage(error, language));
+      await refreshPendingTeamInvites();
+    } finally {
+      setPendingTeamInviteActionId(null);
+    }
+  };
+
+  const handleDeclinePendingTeamInvite = async (invite: PendingTeamInvite) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository || pendingTeamInviteActionId) return;
+    try {
+      setPendingTeamInviteActionId(invite.id);
+      await repository.declinePendingTeamInvite(invite.id);
+      setPendingTeamInvites((current) => current.filter((item) => item.id !== invite.id));
+      setNotifications((current) => current.filter((item) => !(item.type === 'team_invite' && item.resourceId === invite.id)));
+      toast.success(language === 'zh' ? '已婉拒團隊邀請。' : 'Team invitation declined.');
+    } catch (error) {
+      toast.error(getTeamFeatureErrorMessage(error, language));
+      await refreshPendingTeamInvites();
+    } finally {
+      setPendingTeamInviteActionId(null);
+    }
+  };
+
+  const handleShareToContacts = async (resourceType: ShareContactResourceType, resourceId: string, userIds: string[]) => {
     const repository = cloudRepositoryRef.current;
     if (!repository || userIds.length === 0 || isSharingToContacts) return;
     try {
@@ -5542,6 +5432,19 @@ export default function App() {
       if (repository) {
         void repository.markNotificationsRead([notification.id]);
       }
+    }
+
+    if (notification.type === 'team_invite' || notification.resourceType === 'team') {
+      await refreshPendingTeamInvites();
+      setIsWorkspacePanelOpen(true);
+      setIsTeamManagementOpen(false);
+      if (isPhoneViewport) {
+        setIsMobileNavOpen(true);
+      } else {
+        setIsSidebarPinned(true);
+        setIsSidebarHovered(true);
+      }
+      return;
     }
 
     // "Removed from a resource" notifications have nothing to open — the access
@@ -5584,6 +5487,7 @@ export default function App() {
     if (!authenticatedUser) {
       setNotifications([]);
       setShareContacts([]);
+      setPendingTeamInvites([]);
       return;
     }
 
@@ -5599,7 +5503,7 @@ export default function App() {
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
         return;
       }
-      void refreshNotifications();
+      void Promise.all([refreshNotifications(), refreshPendingTeamInvites()]);
     };
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleFocus);
@@ -5624,13 +5528,15 @@ export default function App() {
         demoted: copy.notificationDemoted,
         removedSetlist: copy.notificationRemovedSetlist,
         removedProject: copy.notificationRemovedProject,
+        teamInvite: language === 'zh' ? '邀請你加入團隊' : 'invited you to join a team',
+        reviewInvite: language === 'zh' ? '確認邀請' : 'Review invite',
       }}
       onOpen={(notification) => void handleOpenNotification(notification)}
       onMarkAllRead={handleMarkAllNotificationsRead}
     />
   ) : null;
 
-  const renderShareContactPicker = (resourceType: NotificationResourceType, resourceId: string) => (
+  const renderShareContactPicker = (resourceType: ShareContactResourceType, resourceId: string) => (
     <ShareContactPicker
       contacts={shareContacts}
       loading={isLoadingShareContacts}
@@ -6527,8 +6433,9 @@ export default function App() {
       setIsTeamSongImportOpen(true);
       setIsLoadingPersonalImportSongs(true);
       const personalWorkspace = await repository.loadPersonalWorkspace();
-      setPersonalImportSongs(personalWorkspace.songs);
-      if (personalWorkspace.songs.filter((item) => !item.archivedAt).length === 0) {
+      const importableSongs = personalWorkspace.songs.filter((item) => !isLocalOnlySymbolTestSong(item));
+      setPersonalImportSongs(importableSongs);
+      if (importableSongs.filter((item) => !item.archivedAt).length === 0) {
         toast.info(language === 'zh' ? '個人區目前沒有可匯入的歌曲。' : 'Your personal workspace has no songs to import.');
       }
     } catch (error) {
@@ -7070,15 +6977,17 @@ export default function App() {
       setSyncStatus('syncing');
       const syncedSong = await repository.syncPersonalSongFromTeam(targetSong);
       const nextSongs = songs.map((item) => item.id === syncedSong.id ? syncedSong : item);
+      let savedAt = Date.now();
       try {
-        window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
-        window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(Date.now()));
+        savedAt = persistLocalWorkspaceSnapshot(nextSongs, setlists, projects);
       } catch {
-        // Ignore local cache failures and keep the app usable.
+        toast.info(language === 'zh' ? '雲端已同步，但本機備份寫入失敗。' : 'Synced from the cloud, but the local backup could not be written.', {
+          id: 'local-workspace-cache-warning'
+        });
       }
       setSongs(nextSongs);
       setSavedSongs(cloneSong(nextSongs));
-      setLastSavedAt(Date.now());
+      setLastSavedAt(savedAt);
       setSongHistories((currentHistory) => ({
         ...currentHistory,
         [syncedSong.id]: { past: [], future: [] }
@@ -7449,204 +7358,12 @@ export default function App() {
     editorScrollRoot.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const collectExportPages = React.useCallback((captureHost: HTMLElement): ExportPageDescriptor[] => {
-    const pages = Array.from(captureHost.querySelectorAll('[data-print-page]')) as HTMLElement[];
-
-    return pages.map((page) => {
-      const songContainer = page.closest<HTMLElement>('[data-export-song-container]');
-      const songIndex = parsePositiveIntegerAttribute(songContainer?.dataset.exportSongIndex ?? null) ?? 1;
-      const totalSongs = parsePositiveIntegerAttribute(songContainer?.dataset.exportTotalSongs ?? null) ?? 1;
-      const pageInSong = parsePositiveIntegerAttribute(page.dataset.exportPageIndex ?? null) ?? 1;
-      const totalPagesInSong = parsePositiveIntegerAttribute(page.dataset.exportPageTotal ?? null) ?? 1;
-      const sectionIndex = parsePositiveIntegerAttribute(page.dataset.exportSectionIndex ?? null);
-      const songTitle = songContainer?.dataset.exportSongTitle?.trim() || page.dataset.exportSongTitle?.trim() || APP_NAME;
-      const sectionTitle = page.dataset.exportSectionTitle?.trim() || null;
-
-      return {
-        element: page,
-        songIndex,
-        totalSongs,
-        songTitle,
-        sectionIndex,
-        sectionTitle,
-        pageInSong,
-        totalPagesInSong
-      };
-    });
-  }, []);
-
   const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName: string) => {
-    try {
-      await waitForAppFontsReady();
-    } catch {
-      // Continue with a best-effort export if font readiness isn't available.
-    }
-
-    await new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => resolve());
-      });
+    const { exportCaptureHostToPdf: exportPdf } = await import('./lib/pdfExport');
+    return exportPdf(captureHost, fileName, {
+      isCancelled: () => pdfExportCancelRequestedRef.current,
+      onProgress: setPdfExportProgress,
     });
-
-    const pages = collectExportPages(captureHost);
-    if (pages.length === 0) {
-      throw new Error('No preview pages found for PDF export.');
-    }
-
-    const fontEmbedCSSParts: string[] = [];
-    try {
-      const appFontEmbedCSS = await getAppFontEmbedCSS();
-      if (appFontEmbedCSS) {
-        fontEmbedCSSParts.push(appFontEmbedCSS);
-      }
-    } catch {
-      // Continue with html-to-image's stylesheet font capture.
-    }
-    try {
-      const capturedFontEmbedCSS = await getFontEmbedCSS(captureHost);
-      if (capturedFontEmbedCSS) {
-        fontEmbedCSSParts.push(capturedFontEmbedCSS);
-      }
-    } catch {
-      // Fall back to per-page font embedding if pre-fetch fails.
-    }
-    const fontEmbedCSS = fontEmbedCSSParts.length > 0 ? fontEmbedCSSParts.join('\n') : undefined;
-
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'pt',
-      format: 'a4',
-      compress: true,
-    });
-
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-
-    const createRenderOptions = (pixelRatio: number) => ({
-      backgroundColor: '#ffffff',
-      cacheBust: false,
-      pixelRatio,
-      skipAutoScale: true,
-      fontEmbedCSS,
-    });
-
-    const renderPageElement = async (pageElement: HTMLElement): Promise<PdfRenderedImage> => {
-      const pageSize = getElementExportSize(pageElement);
-      const primaryPixelRatio = getSafePdfPixelRatio(pageSize.width, pageSize.height);
-      const fallbackPixelRatios = Array.from(new Set([
-        primaryPixelRatio,
-        Math.min(primaryPixelRatio, 2),
-        1,
-      ])).filter((pixelRatio) => pixelRatio > 0);
-
-      for (const pixelRatio of fallbackPixelRatios) {
-        try {
-          const canvas = await toCanvas(pageElement, {
-            ...createRenderOptions(pixelRatio),
-            width: pageSize.width,
-            height: pageSize.height,
-          });
-
-          if (canvasHasVisibleContent(canvas)) {
-            return {
-              data: canvas.toDataURL('image/jpeg', 0.92),
-              format: 'JPEG',
-            };
-          }
-        } catch {
-          // Try the next smaller, safer canvas size.
-        }
-      }
-
-      return {
-        data: await toPng(pageElement, {
-          ...createRenderOptions(1),
-          width: pageSize.width,
-          height: pageSize.height,
-        }),
-        format: 'PNG',
-      };
-    };
-
-    // Group pages by their [data-export-song-container] so we can render each
-    // song's pages in a single toCanvas() call instead of one per page.
-    // DOM serialisation (clone + style-inline + SVG generation) is the main
-    // mobile bottleneck — doing it once per song instead of once per page gives
-    // an N-fold reduction for multi-page songs.
-    const songContainerGroups: { container: HTMLElement; pageIndices: number[] }[] = [];
-    for (let i = 0; i < pages.length; i += 1) {
-      const container =
-        pages[i].element.closest<HTMLElement>('[data-export-song-container]') ??
-        captureHost;
-      const group = songContainerGroups.find((g) => g.container === container);
-      if (group) {
-        group.pageIndices.push(i);
-      } else {
-        songContainerGroups.push({ container, pageIndices: [i] });
-      }
-    }
-
-    let globalPageCount = 0;
-    for (const { pageIndices } of songContainerGroups) {
-      if (pdfExportCancelRequestedRef.current) {
-        throw new PdfExportCancelledError();
-      }
-
-      for (const pageIndex of pageIndices) {
-        if (pdfExportCancelRequestedRef.current) {
-          throw new PdfExportCancelledError();
-        }
-
-        const page = pages[pageIndex];
-        flushSync(() => {
-          setPdfExportProgress({
-            totalPages: pages.length,
-            completedPages: globalPageCount,
-            currentPage: pageIndex + 1,
-            songIndex: page.songIndex,
-            totalSongs: page.totalSongs,
-            songTitle: page.songTitle,
-            sectionIndex: page.sectionIndex,
-            sectionTitle: page.sectionTitle,
-            pageInSong: page.pageInSong,
-            totalPagesInSong: page.totalPagesInSong,
-            cancelRequested: pdfExportCancelRequestedRef.current,
-          });
-        });
-        await waitForPaint();
-
-        if (pdfExportCancelRequestedRef.current) {
-          throw new PdfExportCancelledError();
-        }
-
-        // Render each printable page directly. The old whole-song canvas path
-        // was faster, but slicing pages out of a tall off-screen canvas could
-        // drift when the capture DOM used different spacing or font bounds.
-        const renderedImage = await renderPageElement(page.element);
-
-        if (pdfExportCancelRequestedRef.current) {
-          throw new PdfExportCancelledError();
-        }
-
-        if (globalPageCount > 0) {
-          pdf.addPage();
-        }
-        pdf.addImage(renderedImage.data, renderedImage.format, 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-        globalPageCount += 1;
-
-        flushSync(() => {
-          setPdfExportProgress((current) =>
-            current ? { ...current, completedPages: globalPageCount } : current
-          );
-        });
-      }
-    }
-
-    if (pdfExportCancelRequestedRef.current) {
-      throw new PdfExportCancelledError();
-    }
-
-    await savePdfDocument(pdf, fileName);
   };
 
   const handleExportPdf = async () => {
@@ -8111,7 +7828,7 @@ export default function App() {
           return;
         }
 
-        const hasLocalData = initialLibraryRef.current.songs.length > 0 || initialSetlistsRef.current.setlists.length > 0;
+        const hasLocalData = initialLibrary.songs.length > 0 || initialSetlists.setlists.length > 0;
         const migrationCompleted = hasCompletedMigration(authenticatedUser.id);
         const loadingTeamWorkspace = targetLibrary?.kind === 'team';
         const shouldUseCloudWorkspace = loadingTeamWorkspace || cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || cloudWorkspace.joinedSetlists.length > 0 || (cloudWorkspace.joinedProjects ?? []).length > 0 || migrationCompleted || !hasLocalData;
@@ -8120,9 +7837,17 @@ export default function App() {
         setTeamFeatureError(libraryListError);
         setAuthUiError(null);
         setActiveLibraryId(targetLibrary?.id ?? null);
+        setWorkspaceOwnerId(authenticatedUser.id);
 
         if (shouldUseCloudWorkspace) {
-          const nextSongs = cloudWorkspace.songs.length > 0 || loadingTeamWorkspace ? cloudWorkspace.songs : initialLibraryRef.current.songs;
+          const remoteUserSongs = cloudWorkspace.songs.filter((item) => !isLocalOnlySymbolTestSong(item));
+          const fallbackLocalSongs = initialLibrary.songs.filter((item) => !isLocalOnlySymbolTestSong(item));
+          const baseSongs = remoteUserSongs.length > 0 || loadingTeamWorkspace
+            ? remoteUserSongs
+            : fallbackLocalSongs;
+          const nextSongs = loadingTeamWorkspace
+            ? baseSongs
+            : addLocalSymbolTestPages(baseSongs, initialLibrary.songs);
           const nextSetlists = cloudWorkspace.setlists;
           const nextJoinedSetlists = cloudWorkspace.joinedSetlists;
           const requestedSetlistId = typeof window !== 'undefined'
@@ -8166,15 +7891,11 @@ export default function App() {
           ]));
           if (targetLibrary?.kind === 'personal') {
             try {
-              window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(nextSongs));
-              window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(nextSetlists));
-              if (cloudWorkspace.lastSavedAt !== null) {
-                window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(cloudWorkspace.lastSavedAt));
-              } else {
-                window.localStorage.removeItem(LAST_SAVED_AT_STORAGE_KEY);
-              }
+              persistLocalWorkspaceSnapshot(nextSongs, nextSetlists, nextProjects);
             } catch {
-              // Ignore local cache failures; the cloud workspace is already loaded in memory.
+              toast.info(language === 'zh' ? '雲端資料已載入，但本機備份寫入失敗。' : 'Cloud data loaded, but the local backup could not be written.', {
+                id: 'local-workspace-cache-warning'
+              });
             }
           }
           setSelectedSetlistId(nextSelectedSetlist?.id ?? null);
@@ -8228,21 +7949,28 @@ export default function App() {
     };
   }, [authenticatedUser, language]);
 
+  const pendingSyncWorkspaceRef = useRef({ songs, setlists, projects });
+  pendingSyncWorkspaceRef.current = { songs, setlists, projects };
   useEffect(() => {
-    if (!authenticatedUser || !cloudRepositoryRef.current) {
+    if (!authenticatedUser || !cloudRepositoryRef.current || !activeLibraryId || isTeamWorkspace || isLoadingCloudWorkspace) {
       return;
     }
 
-    const flushPending = async () => {
-      const pending = loadPendingSync();
-      if (!pending || !navigator.onLine) {
+    const performPendingFlush = async () => {
+      const pending = loadPendingSync({ userId: authenticatedUser.id, libraryId: activeLibraryId! });
+      if (!pending || !navigator.onLine || workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
+        || (pending.userId && pending.userId !== authenticatedUser.id)
+        || (pending.libraryId && pending.libraryId !== activeLibraryId)) {
         return;
       }
 
+      const repository = cloudRepositoryRef.current!;
+      const release = beginCloudMutation();
+      const initialWorkspace = pendingSyncWorkspaceRef.current;
       try {
-        const repository = cloudRepositoryRef.current!;
         setSyncStatus('syncing');
-        const remoteWorkspace = await repository.loadWorkspace();
+        const remoteWorkspace = await repository.loadLibraryWorkspace(activeLibraryId);
+        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId) return;
         const mergedWorkspace = mergeWorkspaceByUpdatedAt(pending, remoteWorkspace);
         const savedAt = Math.max(
           pending.savedAt,
@@ -8262,14 +7990,27 @@ export default function App() {
           savedProjects: remoteWorkspace.projects
         });
 
-        savePendingSync(null);
+        // Do not replace edits or clear a newer queued snapshot created while
+        // the request was in flight (including pagehide/offline saves).
+        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId
+          || pendingSyncWorkspaceRef.current.songs !== initialWorkspace.songs
+          || pendingSyncWorkspaceRef.current.setlists !== initialWorkspace.setlists
+          || pendingSyncWorkspaceRef.current.projects !== initialWorkspace.projects
+          || JSON.stringify(loadPendingSync({ userId: authenticatedUser.id, libraryId: activeLibraryId! })) !== JSON.stringify(pending)) {
+          if (cloudRepositoryRef.current === repository) setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+          return;
+        }
         try {
-          window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(mergedWorkspace.songs));
-          window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(mergedWorkspace.setlists));
-          window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(mergedWorkspace.projects));
-          window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
+          savePendingSync(null, { userId: authenticatedUser.id, libraryId: activeLibraryId! });
         } catch {
-          // Ignore local cache failures and keep the synced state in memory.
+          toast.info(language === 'zh' ? '雲端已同步，但無法清除本機待同步記錄。' : 'Synced to the cloud, but the local pending-sync record could not be cleared.');
+        }
+        try {
+          persistLocalWorkspaceSnapshot(mergedWorkspace.songs, mergedWorkspace.setlists, mergedWorkspace.projects);
+        } catch {
+          toast.info(language === 'zh' ? '離線變更已同步到雲端，但本機備份寫入失敗。' : 'Offline changes synced to the cloud, but the local backup could not be written.', {
+            id: 'local-workspace-cache-warning'
+          });
         }
         setSongs(mergedWorkspace.songs);
         setSavedSongs(cloneSong(mergedWorkspace.songs));
@@ -8283,7 +8024,17 @@ export default function App() {
         setSyncStatus('saved');
       } catch {
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-      }
+      } finally { release(); }
+    };
+
+    const flushPending = () => {
+      if (workspacePersistenceInFlightRef.current) return;
+      const operation = performPendingFlush();
+      workspacePersistenceInFlightRef.current = operation;
+      const releaseOperation = () => {
+        if (workspacePersistenceInFlightRef.current === operation) workspacePersistenceInFlightRef.current = null;
+      };
+      void operation.then(releaseOperation, releaseOperation);
     };
 
     const handleOnline = () => {
@@ -8293,7 +8044,7 @@ export default function App() {
     void flushPending();
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, [authenticatedUser]);
+  }, [authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, language, toast]);
 
   useEffect(() => {
     if (!isAutoSaveEnabled || !workspaceIsDirty) {
@@ -8321,8 +8072,8 @@ export default function App() {
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
-  const exitFlushRef = useRef({ songs, setlists, projects, isDirty: workspaceIsDirty, isTeam: isTeamWorkspace, isCloud: isCloudMode });
-  exitFlushRef.current = { songs, setlists, projects, isDirty: workspaceIsDirty, isTeam: isTeamWorkspace, isCloud: isCloudMode };
+  const exitFlushRef = useRef({ songs, setlists, projects, isDirty: workspaceIsDirty, isTeam: isTeamWorkspace, isCloud: isCloudMode, userId: authenticatedUser?.id, libraryId: activeLibraryId, baseline: { songs: savedSongs, setlists: savedSetlists, projects: savedProjects } });
+  exitFlushRef.current = { songs, setlists, projects, isDirty: workspaceIsDirty, isTeam: isTeamWorkspace, isCloud: isCloudMode, userId: authenticatedUser?.id, libraryId: activeLibraryId, baseline: { songs: savedSongs, setlists: savedSetlists, projects: savedProjects } };
 
   // Persist unsaved edits when the tab/app is hidden or closed. Without this,
   // leaving while the workspace is dirty (and before the next save or song
@@ -8333,30 +8084,39 @@ export default function App() {
   useEffect(() => {
     const flushOnExit = () => {
       const snapshot = exitFlushRef.current;
-      if (!snapshot.isDirty || snapshot.isTeam) {
+      if (!snapshot.isDirty || snapshot.isTeam || (snapshot.isCloud && (!snapshot.userId || !snapshot.libraryId))) {
         return;
       }
       const savedAt = Date.now();
+      let safelyStored = false;
       // Cloud users: queue for the merge-by-updatedAt path on next load. (For
       // anonymous users the local cache below is enough, and a pending blob
       // would otherwise muddy the sign-in import flow.)
       if (snapshot.isCloud) {
-        savePendingSync({
-          songs: cloneSong(snapshot.songs),
-          setlists: cloneSong(snapshot.setlists),
-          projects: cloneSong(snapshot.projects),
-          savedAt
-        });
+        try {
+          savePendingSync({
+            userId: snapshot.userId,
+            libraryId: snapshot.libraryId ?? undefined,
+            deletions: collectWorkspaceDeletions(snapshot, snapshot.baseline),
+            songs: cloneSong(snapshot.songs),
+            setlists: cloneSong(snapshot.setlists),
+            projects: cloneSong(snapshot.projects),
+            savedAt
+          });
+          safelyStored = true;
+        } catch {
+          // The full local snapshot below is the second recovery path.
+        }
       }
       // Refresh the local cache so the next launch (and the pre-auth first
       // render) reflects the unsaved edits instead of stale last-saved data.
       try {
-        window.localStorage.setItem(SONG_LIBRARY_STORAGE_KEY, JSON.stringify(snapshot.songs));
-        window.localStorage.setItem(SETLIST_STORAGE_KEY, JSON.stringify(snapshot.setlists));
-        window.localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(snapshot.projects));
-        window.localStorage.setItem(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
+        persistLocalWorkspaceSnapshot(snapshot.songs, snapshot.setlists, snapshot.projects);
+        safelyStored = true;
       } catch {
-        // Ignore cache write failures; pendingSync still carries the edits.
+        if (!safelyStored) {
+          setSyncStatus('failed');
+        }
       }
     };
 
@@ -10278,7 +10038,7 @@ export default function App() {
       : activeNavigationPreviewSong ?? song) as StoredSong;
 
     return (
-      <ChordSheet
+      <RecoveryBoundary label="譜面預覽"><ChordSheet
         song={renderedSong}
         language={language}
         currentKey={renderedSong.currentKey}
@@ -10297,7 +10057,7 @@ export default function App() {
         onPreviewBarContextMenu={canOpenEditor ? handlePreviewBarContextMenu : undefined}
         previewIdentity={song.id}
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
-      />
+      /></RecoveryBoundary>
     );
   }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, language, song]);
 
@@ -10372,7 +10132,7 @@ export default function App() {
               isSelected ? 'ring-2 ring-indigo-300 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'ring-2 ring-transparent'
             }`}
           >
-            <ChordSheet
+            <RecoveryBoundary label="譜面預覽"><ChordSheet
               song={previewSong}
               language={language}
               currentKey={previewSong.currentKey}
@@ -10390,7 +10150,7 @@ export default function App() {
               onPreviewBarContextMenu={isSelected && canOpenEditor ? handlePreviewBarContextMenu : undefined}
               previewIdentity={item.id}
               onSectionReorder={isSelected && canEditSelectedSetlist ? handlePreviewSectionReorder : undefined}
-            />
+            /></RecoveryBoundary>
           </div>
         ))}
       </div>
@@ -10834,7 +10594,7 @@ export default function App() {
     setPreviewScale(previewFitHeightScale, 'fit-height');
   };
 
-  const getTouchDistance = (touches: TouchList) => {
+  const getTouchDistance = (touches: ArrayLike<{ clientX: number; clientY: number }>) => {
     const firstTouch = touches[0];
     const secondTouch = touches[1];
     if (!firstTouch || !secondTouch) {
@@ -10844,7 +10604,7 @@ export default function App() {
     return Math.hypot(secondTouch.clientX - firstTouch.clientX, secondTouch.clientY - firstTouch.clientY);
   };
 
-  const getTouchCenter = (touches: TouchList) => {
+  const getTouchCenter = (touches: ArrayLike<{ clientX: number; clientY: number }>) => {
     const firstTouch = touches[0];
     const secondTouch = touches[1];
     if (!firstTouch || !secondTouch) {
@@ -11092,6 +10852,11 @@ export default function App() {
       if (!song) {
         throw new Error(language === 'zh' ? '找不到目前歌曲。' : 'Current song was not found.');
       }
+      if (isLocalOnlySymbolTestSong(song)) {
+        throw new Error(language === 'zh'
+          ? '符號測試頁只保留在這台裝置，不會上傳或建立分享連結。'
+          : 'Symbol test pages stay on this device and cannot be uploaded or shared.');
+      }
 
       await repository.saveSong(song);
       assertRequestIsCurrent();
@@ -11116,6 +10881,11 @@ export default function App() {
       const requiredSongs = projectSetlists
         .flatMap((sl) => sl.songs.map((ss) => songs.find((item) => item.id === ss.songId)))
         .filter((item): item is StoredSong => Boolean(item));
+      if (requiredSongs.some(isLocalOnlySymbolTestSong)) {
+        throw new Error(language === 'zh'
+          ? '這個專案含有本機限定的符號測試頁；請先從歌單移除測試頁再分享。'
+          : 'This project contains a local-only symbol test page. Remove it from the setlist before sharing.');
+      }
 
       await repository.saveProject(project);
       assertRequestIsCurrent();
@@ -11167,6 +10937,11 @@ export default function App() {
     const requiredSongs = selectedSetlist.songs
       .map((setlistSong) => songs.find((item) => item.id === setlistSong.songId))
       .filter((item): item is StoredSong => Boolean(item));
+    if (requiredSongs.some(isLocalOnlySymbolTestSong)) {
+      throw new Error(language === 'zh'
+        ? '這份歌單含有本機限定的符號測試頁；請先移除測試頁再分享。'
+        : 'This setlist contains a local-only symbol test page. Remove it before sharing.');
+    }
 
     for (const requiredSong of requiredSongs) {
       await repository.saveSong(requiredSong);
@@ -11316,7 +11091,13 @@ export default function App() {
     }
 
     const selectedIds = new Set(selectedLibrarySongIds);
-    const orderedSongs = filteredSongs.filter((item) => selectedIds.has(item.id));
+    const selectedSongs = filteredSongs.filter((item) => selectedIds.has(item.id));
+    const orderedSongs = selectedSongs.filter((item) => !isLocalOnlySymbolTestSong(item));
+    if (orderedSongs.length !== selectedSongs.length) {
+      toast.info(language === 'zh'
+        ? '符號測試頁只保留在本機，已從分享內容排除。'
+        : 'Local-only symbol test pages were excluded from the share.');
+    }
     if (orderedSongs.length === 0) return;
 
     const releaseCloudMutation = beginCloudMutation();
@@ -11934,8 +11715,55 @@ export default function App() {
         )}
       </button>
 
-      {isWorkspacePanelOpen ? (
+      {isWorkspacePanelOpen && !(isPhoneViewport && isTeamManagementOpen) ? (
         <div className="mt-2">
+          {pendingTeamInvites.length > 0 ? (
+            <div className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-indigo-700">
+                  {language === 'zh' ? '等待你確認' : 'Awaiting your response'}
+                </div>
+                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-indigo-700">
+                  {pendingTeamInvites.length}
+                </span>
+              </div>
+              <div className="mt-2 space-y-2">
+                {pendingTeamInvites.map((invite) => {
+                  const isUpdating = pendingTeamInviteActionId === invite.id;
+                  return (
+                    <div key={invite.id} className="rounded-lg border border-indigo-100 bg-white p-2.5">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-bold text-gray-900">{invite.libraryName}</div>
+                        <div className="mt-0.5 truncate text-[11px] text-gray-500">
+                          {(invite.inviterName || invite.inviterEmail)} · {getTeamRoleLabel(invite.role, language)}
+                        </div>
+                      </div>
+                      <div className="mt-2 grid grid-cols-[auto_1fr] gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleDeclinePendingTeamInvite(invite)}
+                          disabled={Boolean(pendingTeamInviteActionId)}
+                          className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-600 disabled:cursor-wait disabled:opacity-50"
+                        >
+                          {language === 'zh' ? '婉拒' : 'Decline'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleAcceptPendingTeamInvite(invite)}
+                          disabled={Boolean(pendingTeamInviteActionId)}
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-bold text-white disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {isUpdating ? <LoaderCircle size={13} className="animate-spin" /> : <Check size={13} />}
+                          {language === 'zh' ? '確認加入團隊' : 'Join team'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <button
             type="button"
             onClick={() => {
@@ -12051,11 +11879,12 @@ export default function App() {
   ) : null;
 
   const teamManagementPanel = isWorkspacePanelOpen && isTeamManagementOpen && canManageActiveTeam ? (
-    <div className="max-h-[70vh] shrink-0 overflow-y-auto border-b border-gray-200 bg-white px-4 py-3">
+    <div className={`${isPhoneViewport ? 'min-h-0 flex-1 overscroll-contain' : 'max-h-[70vh] shrink-0'} overflow-y-auto border-b border-gray-200 bg-white px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]`}>
       <div className="flex items-center justify-between gap-2">
         <div>
-          <div className="text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
-            {language === 'zh' ? '團隊成員與權限' : 'Team Members & Roles'}
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
+            <span>{language === 'zh' ? '團隊成員與權限' : 'Team Members & Roles'}</span>
+            {isLoadingTeamManagement ? <LoaderCircle size={13} className="animate-spin text-indigo-600" /> : null}
           </div>
           <div className="mt-0.5 text-xs font-semibold text-gray-600">
             {activeCloudLibrary?.name}
@@ -12066,19 +11895,18 @@ export default function App() {
         </div>
         <button
           type="button"
-          onClick={() => void loadTeamManagement()}
-          disabled={isLoadingTeamManagement}
-          className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-600 disabled:cursor-wait disabled:opacity-60"
+          onClick={() => setIsTeamManagementOpen(false)}
+          className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-semibold text-gray-600"
         >
-          {isLoadingTeamManagement ? copy.cloudSyncSyncing : copy.setlistSharingRefresh}
+          {language === 'zh' ? '完成' : 'Done'}
         </button>
       </div>
 
-      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
-        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
-          {language === 'zh' ? '權限說明' : 'Role guide'}
-        </div>
-        <div className="mt-2 space-y-2">
+      <details className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <summary className="cursor-pointer text-[11px] font-bold text-gray-700">
+          {language === 'zh' ? '查看權限說明' : 'View role guide'}
+        </summary>
+        <div className="mt-2 space-y-2 border-t border-gray-200 pt-2">
           {EDITABLE_TEAM_ROLES.map((role) => (
             <div key={role}>
               <div className="text-[11px] font-bold text-gray-800">{getTeamRoleLabel(role, language)}</div>
@@ -12086,7 +11914,7 @@ export default function App() {
             </div>
           ))}
         </div>
-      </div>
+      </details>
 
       <div className="mt-3 grid grid-cols-1 gap-2">
         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
@@ -12123,8 +11951,16 @@ export default function App() {
           {getTeamRoleDescription(teamInviteRole, language)}
         </div>
         {teamInviteShareUrl ? (
-          <div className="break-all rounded-xl bg-indigo-50 px-3 py-2 text-[11px] font-medium text-indigo-700">
-            {teamInviteShareUrl}
+          <div className="flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2 text-[11px] font-medium text-indigo-700">
+            <span className="min-w-0 flex-1 truncate">{teamInviteShareUrl}</span>
+            <button
+              type="button"
+              onClick={() => void copyShareUrlToClipboard(teamInviteShareUrl)}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-2 py-1 font-bold text-indigo-700"
+            >
+              <Copy size={12} />
+              {language === 'zh' ? '複製' : 'Copy'}
+            </button>
           </div>
         ) : null}
       </div>
@@ -12135,47 +11971,39 @@ export default function App() {
         </div>
         {(teamManagement?.members ?? []).map((member) => (
           <div key={member.userId} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-            <div className="flex min-w-0 items-start gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-bold text-gray-900">{member.name || member.email}</div>
                 <div className="truncate text-[11px] text-gray-500">{member.email}</div>
               </div>
-              {member.role !== 'owner' ? (
-                <button
-                  type="button"
-                  onClick={() => void handleRemoveTeamMember(member.userId)}
-                  disabled={Boolean(updatingTeamMemberUserId)}
-                  className="rounded-lg px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-40"
-                >
-                  {copy.delete}
-                </button>
-              ) : null}
-            </div>
-            {member.role === 'owner' ? (
-              <div className="mt-2 rounded-lg border border-gray-200 bg-white px-2.5 py-2">
-                <div className="text-[11px] font-bold text-gray-700">{getTeamRoleLabel(member.role, language)}</div>
-                <div className="mt-0.5 text-[10px] font-medium leading-4 text-gray-500">{getTeamRoleDescription(member.role, language)}</div>
-              </div>
-            ) : (
-              <div className="mt-2">
-                <select
-                  value={member.role}
-                  onChange={(event) => void handleUpdateTeamMemberRole(member.userId, event.target.value as Exclude<LibraryRole, 'owner'>)}
-                  disabled={Boolean(updatingTeamMemberUserId)}
-                  aria-label={language === 'zh' ? `調整 ${member.name || member.email} 的權限` : `Change role for ${member.name || member.email}`}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-[11px] font-bold text-gray-700 outline-none focus:border-indigo-300 disabled:cursor-wait disabled:opacity-60"
-                >
-                  {EDITABLE_TEAM_ROLES.map((role) => (
-                    <option key={role} value={role}>{getTeamRoleLabel(role, language)}</option>
-                  ))}
-                </select>
-                <div className="mt-1 text-[10px] font-medium leading-4 text-gray-500">
-                  {updatingTeamMemberUserId === member.userId
-                    ? (language === 'zh' ? '正在更新權限…' : 'Updating role…')
-                    : getTeamRoleDescription(member.role, language)}
+              {member.role === 'owner' ? (
+                <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[10px] font-bold text-gray-600 ring-1 ring-gray-200">
+                  {getTeamRoleLabel(member.role, language)}
+                </span>
+              ) : (
+                <div className="flex shrink-0 items-center gap-1">
+                  <select
+                    value={member.role}
+                    onChange={(event) => void handleUpdateTeamMemberRole(member.userId, event.target.value as Exclude<LibraryRole, 'owner'>)}
+                    disabled={Boolean(updatingTeamMemberUserId)}
+                    aria-label={language === 'zh' ? `調整 ${member.name || member.email} 的權限` : `Change role for ${member.name || member.email}`}
+                    className="max-w-28 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-bold text-gray-700 outline-none focus:border-indigo-300 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {EDITABLE_TEAM_ROLES.map((role) => (
+                      <option key={role} value={role}>{getTeamRoleLabel(role, language)}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleRemoveTeamMember(member.userId)}
+                    disabled={Boolean(updatingTeamMemberUserId)}
+                    className="rounded-lg px-2 py-1.5 text-[11px] font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-40"
+                  >
+                    {copy.delete}
+                  </button>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -12192,6 +12020,19 @@ export default function App() {
                 <div className="truncate text-[11px] font-semibold text-gray-600">{getTeamRoleLabel(invite.role, language)}</div>
                 <div className="mt-0.5 text-[10px] leading-4 text-gray-400">{getTeamRoleDescription(invite.role, language)}</div>
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const inviteUrl = new URL(`team-invite/${invite.token}`, getAppBaseUrl()).toString();
+                  setTeamInviteShareUrl(inviteUrl);
+                  void copyShareUrlToClipboard(inviteUrl).then((didCopy) => {
+                    if (didCopy) toast.success(language === 'zh' ? '邀請連結已複製。' : 'Invite link copied.');
+                  });
+                }}
+                className="rounded-lg px-2 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50"
+              >
+                {language === 'zh' ? '複製連結' : 'Copy link'}
+              </button>
               <button
                 type="button"
                 onClick={() => void handleRevokeTeamInvite(invite.id)}
@@ -13295,6 +13136,21 @@ export default function App() {
         paddingRight: 'env(safe-area-inset-right)'
       }}
     >
+      <LegacyDraftRecovery userId={authenticatedUser?.id} libraryId={activeLibraryId} account={authenticatedUser?.email}
+        enabled={!isTeamWorkspace && !isLoadingCloudWorkspace && !workspaceIsDirty && workspaceOwnerId === authenticatedUser?.id} />
+      <TeamDraftRecovery draft={teamDraft.pending} error={teamDraft.error} onDiscard={teamDraft.dismiss} onRestore={() => {
+        if (!teamDraft.pending) return;
+        const restored = restoreTeamDraft(teamDraft.pending, { songs, setlists, projects });
+        if (restored.conflicts > 0 && !window.confirm(`有 ${restored.conflicts} 個項目同時在雲端被修改。恢復會以草稿內容取代這些項目，確定繼續？`)) return;
+        const now = Date.now();
+        const renew = <T extends { id: string; updatedAt: number }>(items: T[], saved: T[]) => items.map((item) =>
+          saved.some((other) => other.id === item.id && JSON.stringify(other) === JSON.stringify(item)) ? item : { ...item, updatedAt: now });
+        setSongs(renew(restored.workspace.songs, savedSongs));
+        setSetlists(renew(restored.workspace.setlists, savedSetlists));
+        setProjects(renew(restored.workspace.projects, savedProjects));
+        teamDraft.restored();
+      }} />
+
       {isSwitchingLibrary && (
         <div
           className="absolute inset-0 z-[300] flex items-center justify-center bg-white/70 backdrop-blur-[2px] dark:bg-stone-950/65"
@@ -13646,7 +13502,7 @@ export default function App() {
             {showSidebarWorkspacePanels ? librarySwitcherPanel : null}
             {showSidebarWorkspacePanels ? teamManagementPanel : null}
 
-            {isSetlistMode ? (
+            {isPhoneViewport && isTeamManagementOpen ? null : isSetlistMode ? (
               <SetlistNavigator
                 view={setlistPanelView}
                 list={desktopSetlistListPanel}
@@ -14275,6 +14131,8 @@ export default function App() {
                 >
                   <MoreHorizontal size={18} />
                 </button>
+
+                {notificationBell}
               </div>
 
               {isSheetView ? (
@@ -15303,7 +15161,7 @@ export default function App() {
                             onChange={handleSetlistSongContentChange}
                           />
                         ) : (
-                          <SongEditor
+                          <RecoveryBoundary label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><SongEditor
                             key={`${selectedSetlistSong.id}-song`}
                             song={activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong}
                             language={language}
@@ -15331,7 +15189,7 @@ export default function App() {
                             onFocusRequestHandled={(requestId) => {
                               setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
                             }}
-                          />
+                          /></React.Suspense></RecoveryBoundary>
                         )}
                       </div>
                     ) : isSetlistMode ? (
@@ -15353,7 +15211,7 @@ export default function App() {
                             onChange={handleSongChange}
                           />
                         ) : (
-                          <SongEditor
+                          <RecoveryBoundary label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><SongEditor
                             key={song.id}
                             song={(activeDraftEditorSong ?? song) as StoredSong}
                             language={language}
@@ -15373,7 +15231,7 @@ export default function App() {
                             onFocusRequestHandled={(requestId) => {
                               setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
                             }}
-                          />
+                          /></React.Suspense></RecoveryBoundary>
                         )}
                       </div>
                     )}
@@ -15613,7 +15471,7 @@ export default function App() {
               );
             })()}
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
-              <PreviewWysiwygEditor
+              <RecoveryBoundary label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><PreviewWysiwygEditor
                 song={activeEditorSong}
                 language={language}
                 target={previewMetaEditTarget}
@@ -15651,7 +15509,7 @@ export default function App() {
                   }
                 }}
                 onClose={() => setPreviewMetaEditTarget(null)}
-              />
+              /></React.Suspense></RecoveryBoundary>
             )}
             {isSetlistMode && showPreviewBackToTop && (
               <div className={`pointer-events-none absolute z-40 ${
@@ -16808,20 +16666,20 @@ export default function App() {
 	              <div ref={performanceSheetRef}>
 	                {isSetlistMode ? (
 	                  activeSetlistPreviewSong && (
-	                    <ChordSheet
+	                    <RecoveryBoundary label="譜面預覽"><ChordSheet
 	                      song={activeSetlistPreviewSong}
 	                      language={language}
 	                      currentKey={activeSetlistPreviewSong.currentKey}
 	                      previewIdentity={selectedSetlistSong?.id ?? null}
-	                    />
+	                    /></RecoveryBoundary>
 	                  )
 	                ) : (
-	                  <ChordSheet
+	                  <RecoveryBoundary label="譜面預覽"><ChordSheet
 	                    song={song}
 	                    language={language}
 	                    currentKey={song.currentKey}
 	                    previewIdentity={song.id}
-	                  />
+	                  /></RecoveryBoundary>
 	                )}
               </div>
             </div>

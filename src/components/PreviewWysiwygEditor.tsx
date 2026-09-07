@@ -311,7 +311,7 @@ export default function PreviewWysiwygEditor({
   const copy = getUiCopy(language);
   const zh = language === 'zh';
   const editorInputId = React.useId();
-  const panelRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLElement>(null);
   const cancelCloseRef = React.useRef(false);
   const finishedRef = React.useRef(false);
   const [titleDraft, setTitleDraft] = React.useState(song.title);
@@ -558,7 +558,7 @@ export default function PreviewWysiwygEditor({
 
   const chrome = (children: React.ReactNode, title: string, fullMetadata = false) => (
     <div
-      ref={panelRef}
+      ref={(node) => { panelRef.current = node; }}
       role={fullMetadata ? 'dialog' : undefined}
       aria-label={fullMetadata ? title : undefined}
       className={`flex max-h-full flex-col border border-gray-200 bg-white shadow-2xl ${isTouchLayout ? 'rounded-t-[24px] sm:rounded-[24px]' : 'rounded-xl'}`}
@@ -606,7 +606,7 @@ export default function PreviewWysiwygEditor({
 
     return (
       <div
-        ref={panelRef}
+        ref={(node) => { panelRef.current = node; }}
         className={inlineShellClassName}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
@@ -637,7 +637,7 @@ export default function PreviewWysiwygEditor({
 
   const renderCredits = () => (
     <form
-      ref={panelRef}
+      ref={(node) => { panelRef.current = node; }}
       className={`${inlineShellClassName} flex h-6 items-center gap-0.5 p-0.5`}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
@@ -700,7 +700,7 @@ export default function PreviewWysiwygEditor({
 
   const renderKey = () => (
     <div
-      ref={panelRef}
+      ref={(node) => { panelRef.current = node; }}
       className={`${valueOverlayShellClassName} overflow-visible`}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
@@ -742,7 +742,7 @@ export default function PreviewWysiwygEditor({
 
     return (
     <div
-      ref={panelRef}
+      ref={(node) => { panelRef.current = node; }}
       className={`${valueOverlayShellClassName} relative overflow-visible`}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
@@ -827,7 +827,7 @@ export default function PreviewWysiwygEditor({
   const renderTimeSignature = () => {
     return (
       <div
-        ref={panelRef}
+        ref={(node) => { panelRef.current = node; }}
         className={`${valueOverlayShellClassName} flex items-center`}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
@@ -906,7 +906,7 @@ export default function PreviewWysiwygEditor({
       showReferenceFields={showReferenceFields}
       variant={usesFullSongInfoPanel ? 'default' : 'preview-header'}
       deviceLayout={deviceLayout}
-      initialFocusField={target.field === 'metadata' ? undefined : target.field}
+      initialFocusField={target.field === 'metadata' ? undefined : target.field === 'performanceKey' ? 'key' : target.field}
       initialAdvancedOpen={usesFullSongInfoPanel}
       canEditKey={canEditKey}
     />,

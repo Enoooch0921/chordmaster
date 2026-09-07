@@ -259,7 +259,7 @@ export const getSongTimeSignatureStates = (song: Song): SongTimeSignatureStates 
   };
 };
 
-export const getEffectiveTimeSignatureForBar = (song: Song, targetBar: Bar): string => {
+export const getEffectiveTimeSignatureForBar = (song: Song, targetBar: Pick<Bar, 'id' | 'timeSignature'>): string => {
   const states = getSongTimeSignatureStates(song);
   for (let sectionIndex = 0; sectionIndex < song.sections.length; sectionIndex += 1) {
     const barIndex = song.sections[sectionIndex].bars.findIndex((bar) => (

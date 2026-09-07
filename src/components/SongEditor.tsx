@@ -40,7 +40,7 @@ import {
   type JianpuPitchContext
 } from '../lib/jianpuEditing';
 
-type FocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'marker';
+type FocusField = 'sectionName' | 'lyrics' | 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'marker';
 
 interface FocusRequest {
   sIdx: number;
@@ -504,7 +504,7 @@ const SectionNavigationChip: React.FC<SectionNavigationChipProps> = ({
     clearLongPressTimer();
   }, []);
 
-  const handlePointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+  const handlePointerDownCapture = (event: React.PointerEvent<HTMLElement>) => {
     if (!isPhoneViewport || event.pointerType === 'mouse' || event.button !== 0) {
       return;
     }
@@ -525,7 +525,7 @@ const SectionNavigationChip: React.FC<SectionNavigationChipProps> = ({
     }, MOBILE_SECTION_REORDER_LONG_PRESS_MS);
   };
 
-  const handlePointerMoveCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+  const handlePointerMoveCapture = (event: React.PointerEvent<HTMLElement>) => {
     const pointerStart = pointerStartRef.current;
     if (!pointerStart || pointerStart.pointerId !== event.pointerId || isLongPressDragging) {
       return;
@@ -2118,7 +2118,7 @@ const SongEditor: React.FC<Props> = ({
     return relativeX < rect.width / 2 ? 'before' : 'after';
   };
 
-  const handleBarDrop = (event: React.DragEvent, sIdx: number, bIdx: number) => {
+  const handleBarDrop = (event: React.DragEvent<HTMLElement>, sIdx: number, bIdx: number) => {
     event.preventDefault();
     const payload = getDraggedBar(event);
     setDragOverTarget(null);

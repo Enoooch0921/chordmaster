@@ -1,13 +1,14 @@
-import { StrictMode } from 'react';
+import { StrictMode, lazy, Suspense } from 'react';
+import RecoveryBoundary from './components/RecoveryBoundary';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import App from './App.tsx';
-import AuthCallbackPage from './pages/AuthCallbackPage.tsx';
-import SharedChartPage from './pages/SharedChartPage.tsx';
-import TeamInvitePage from './pages/TeamInvitePage.tsx';
+const App = lazy(() => import('./App.tsx'));
+const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage.tsx'));
+const SharedChartPage = lazy(() => import('./pages/SharedChartPage.tsx'));
+const TeamInvitePage = lazy(() => import('./pages/TeamInvitePage.tsx'));
 import { ToastProvider } from './components/Toast.tsx';
 import { registerAppFontFaces, waitForAppFontsReady } from './lib/fontFaceAssets.ts';
 import './index.css';
@@ -126,12 +127,16 @@ const renderApp = () => {
     <StrictMode>
       <BrowserRouter basename={routerBasename}>
         <ToastProvider>
+          <RecoveryBoundary>
+          <Suspense fallback={<div role="status" className="p-8 text-center">正在載入歌譜…</div>}>
           <Routes>
             <Route path="/" element={<App />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
             <Route path="/share/:token" element={<SharedChartPage />} />
             <Route path="/team-invite/:token" element={<TeamInvitePage />} />
           </Routes>
+          </Suspense>
+          </RecoveryBoundary>
         </ToastProvider>
       </BrowserRouter>
     </StrictMode>,

@@ -1,34 +1,9 @@
 import { Project, Setlist, StoredSong } from '../types';
 import { PendingSyncPayload, savePendingSync, serializeProjects, serializeSetlists, serializeSongLibrary } from './workspace';
 import { WorkspaceRepository } from './repository';
+import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
 
-const pickNewestByUpdatedAt = <T extends { id: string; updatedAt: number }>(localItem: T | undefined, remoteItem: T | undefined, localDeletedAt?: number) => {
-  if (!localItem && remoteItem && typeof localDeletedAt === 'number') {
-    return remoteItem.updatedAt > localDeletedAt ? remoteItem : undefined;
-  }
-  if (!localItem) return remoteItem;
-  if (!remoteItem) return localItem;
-  return localItem.updatedAt >= remoteItem.updatedAt ? localItem : remoteItem;
-};
-
-const mergeByUpdatedAt = <T extends { id: string; updatedAt: number }>(localItems: T[], remoteItems: T[], localDeletedAt?: number) => {
-  const ids = new Set([...localItems.map((item) => item.id), ...remoteItems.map((item) => item.id)]);
-  const localById = new Map(localItems.map((item) => [item.id, item] as const));
-  const remoteById = new Map(remoteItems.map((item) => [item.id, item] as const));
-
-  return Array.from(ids)
-    .map((id) => pickNewestByUpdatedAt(localById.get(id), remoteById.get(id), localDeletedAt))
-    .filter((item): item is T => Boolean(item));
-};
-
-export const mergeWorkspaceByUpdatedAt = (
-  localWorkspace: { songs: StoredSong[]; setlists: Setlist[]; projects: Project[]; savedAt?: number },
-  remoteWorkspace: { songs: StoredSong[]; setlists: Setlist[]; projects: Project[] }
-) => ({
-  songs: mergeByUpdatedAt(localWorkspace.songs, remoteWorkspace.songs, localWorkspace.savedAt),
-  setlists: mergeByUpdatedAt(localWorkspace.setlists, remoteWorkspace.setlists, localWorkspace.savedAt),
-  projects: mergeByUpdatedAt(localWorkspace.projects, remoteWorkspace.projects, localWorkspace.savedAt)
-});
+export { mergeWorkspaceByUpdatedAt } from './workspaceMerge';
 
 const diffSongs = (currentSongs: StoredSong[], savedSongs: StoredSong[]) => {
   const savedById = new Map(savedSongs.map((song) => [song.id, song] as const));
@@ -118,10 +93,26 @@ export const syncWorkspaceDiff = async (params: {
   savedSetlists: Setlist[];
   savedProjects: Project[];
 }) => {
-  const songDiff = diffSongs(params.songs, params.savedSongs);
-  const setlistDiff = diffSetlists(params.setlists, params.savedSetlists);
+  const cloudSongs = params.songs.filter((song) => !isLocalOnlySymbolTestSong(song));
+  const cloudSavedSongs = params.savedSongs.filter((song) => !isLocalOnlySymbolTestSong(song));
+  const localOnlySongIds = new Set(
+    params.songs
+      .filter(isLocalOnlySymbolTestSong)
+      .map((song) => song.id)
+  );
+  const sanitizeSetlistForCloud = (setlist: Setlist): Setlist => ({
+    ...setlist,
+    songs: setlist.songs.filter((setlistSong) => (
+      !localOnlySongIds.has(setlistSong.songId)
+      && !(setlistSong.songData && isLocalOnlySymbolTestSong(setlistSong.songData))
+    ))
+  });
+  const cloudSetlists = params.setlists.map(sanitizeSetlistForCloud);
+  const cloudSavedSetlists = params.savedSetlists.map(sanitizeSetlistForCloud);
+  const songDiff = diffSongs(cloudSongs, cloudSavedSongs);
+  const setlistDiff = diffSetlists(cloudSetlists, cloudSavedSetlists);
   const projectDiff = diffProjects(params.projects, params.savedProjects);
-  const savedSetlistById = new Map(params.savedSetlists.map((item) => [item.id, item] as const));
+  const savedSetlistById = new Map(cloudSavedSetlists.map((item) => [item.id, item] as const));
 
   // Phase 1: deletes (parallel; songs and setlists deletes are independent).
   await Promise.all([
@@ -137,7 +128,8 @@ export const syncWorkspaceDiff = async (params: {
 
   // Phase 3: song upserts must complete before setlist upserts so each
   // setlist_song.song_id FK target exists.
-  const embeddedSongs = collectEmbeddedSetlistSongs(params.setlists, params.songs);
+  const embeddedSongs = collectEmbeddedSetlistSongs(cloudSetlists, cloudSongs)
+    .filter((song) => !isLocalOnlySymbolTestSong(song));
   await Promise.all([
     ...songDiff.changed.map((song) => params.repository.saveSong(song)),
     ...embeddedSongs.map((song) => params.repository.saveSong(song))
