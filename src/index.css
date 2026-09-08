@@ -378,6 +378,31 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 }
 
 /* Chord edit cues inherit the owning section palette from each bar. */
+[data-preview-bar-hover] {
+  display: none;
+}
+
+/* Hover previews a target without changing selection, hit areas, or layout.
+   Keep it off touch screens and printed sheets; PDF clones remove the overlay. */
+@media screen and (hover: hover) and (pointer: fine) {
+  .sheet-bar[data-preview-hoverable]:hover:not([data-preview-active-bar]):not([data-preview-selected-bar]) > [data-preview-bar-hover] {
+    display: block;
+    position: absolute;
+    inset: 2px;
+    z-index: 1;
+    pointer-events: none;
+    border: 1px dashed var(--section-selection-hover-stroke);
+    border-radius: 4px;
+    background: var(--section-selection-hover-fill);
+  }
+
+  .sheet-bar[data-preview-hoverable] [data-preview-hover-field]:hover {
+    outline: 1px solid var(--section-selection-hover-stroke);
+    outline-offset: -1px;
+    background-image: linear-gradient(var(--section-selection-fill), var(--section-selection-fill));
+  }
+}
+
 .preview-section-active-chord {
   background: var(--section-selection-fill);
   box-shadow: inset 0 0 0 2px var(--section-selection-stroke), 0 0 0 1px rgba(255, 255, 255, 0.88);

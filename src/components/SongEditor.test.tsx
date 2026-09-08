@@ -1,8 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
 import type { JianpuPitchContext } from '../lib/jianpuEditing';
 import SongEditor from './SongEditor';
+import PreviewBarEditor from './preview-edit/PreviewBarEditor';
+import { createPreviewEditSession } from '../lib/previewEditSession';
+import { useSongHistoryShortcuts } from '../hooks/useSongHistoryShortcuts';
 
 beforeAll(() => {
   vi.stubGlobal('ResizeObserver', class {
@@ -51,6 +54,45 @@ const renderEditor = (song: Song, jianpuPitchContext?: JianpuPitchContext) => {
 };
 
 describe('SongEditor shared notation commands', () => {
+  it('handles history exactly once with both editors open and still works after closing both', () => {
+    const song = makeSong({});
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    renderHook(() => useSongHistoryShortcuts({ enabled: true, onUndo, onRedo }));
+    const fullEditor = render(<SongEditor song={song} language="zh" history={{ past: [], future: [] }}
+      onUndo={onUndo} onRedo={onRedo} onChange={vi.fn()} />);
+    const session = createPreviewEditSession({
+      song,
+      inputMode: 'letters',
+      target: {
+        kind: 'bar', previewIdentity: 'song-1', sectionId: 'section-1', barId: 'bar-1',
+        field: 'chords', slotIndex: 0, rawChordIndex: 0,
+        anchorKey: 'song-1|section-1|bar-1|chords|0',
+        anchorRect: { left: 20, top: 20, right: 40, bottom: 40, width: 20, height: 20 }
+      }
+    });
+    const previewEditor = render(<PreviewBarEditor session={session} language="zh" deviceLayout="desktop"
+      storedKey="C" displayedKey="C" storageMode="letters" onApplyDraft={vi.fn()}
+      onInputModeChange={vi.fn()} onNotationModeChange={vi.fn()} onNotationCursorChange={vi.fn()}
+      onJianpuInputAbsoluteChange={vi.fn()} onNavigate={vi.fn()} onStructure={vi.fn()}
+      onUndo={onUndo} onRedo={onRedo} onDone={vi.fn()} onCancel={vi.fn()} />);
+
+    const chordInput = screen.getByRole('textbox', { name: '和弦直接輸入' });
+    expect(fireEvent.keyDown(chordInput, { key: 'z', metaKey: true })).toBe(false);
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(fireEvent.keyDown(chordInput, { key: 'Z', metaKey: true, shiftKey: true })).toBe(false);
+    expect(onRedo).toHaveBeenCalledTimes(1);
+
+    previewEditor.unmount();
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(2);
+    fullEditor.unmount();
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    fireEvent.keyDown(window, { key: 'Z', metaKey: true, shiftKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(3);
+    expect(onRedo).toHaveBeenCalledTimes(2);
+  });
+
   it('routes regular-bar rhythm replacement through the semantic rhythm rules', () => {
     const onChange = renderEditor(makeSong({ rhythm: 'q.^~' }));
 

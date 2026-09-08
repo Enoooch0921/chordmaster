@@ -1038,19 +1038,35 @@ describe('PreviewBarEditor', () => {
     expect(nextSong.sections[0].bars[0].chords[1]).toBe('Bb/Db');
   });
 
-  it('places the desktop text caret at the end and reserves plain arrows for chord text editing', () => {
+  it('moves between beats with plain arrows while the desktop chord capture owns focus', () => {
     const chordSong: Song = {
       ...song,
       sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C', 'C11', '', ''] }] }]
     };
     const chordSession = createPreviewEditSession({ song: chordSong, target, inputMode: 'letters' });
-    const { onNavigate } = renderEditor({ session: chordSession, deviceLayout: 'desktop' });
+    const { onNavigate, onApplyDraft } = renderEditor({ session: chordSession, deviceLayout: 'desktop' });
     const capture = screen.getByRole('textbox', { name: '和弦直接輸入' }) as HTMLInputElement;
 
     expect(capture.selectionStart).toBe(3);
     expect(capture.selectionEnd).toBe(3);
-    fireEvent.keyDown(capture, { key: 'ArrowLeft' });
-    fireEvent.keyDown(capture, { key: 'ArrowRight' });
+    expect(capture).toHaveFocus();
+    expect(fireEvent.keyDown(capture, { key: 'ArrowLeft' })).toBe(false);
+    expect(onNavigate).toHaveBeenNthCalledWith(1, 'previous');
+    expect(fireEvent.keyDown(capture, { key: 'ArrowRight' })).toBe(false);
+    expect(onNavigate).toHaveBeenNthCalledWith(2, 'next');
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+    expect(onApplyDraft).not.toHaveBeenCalled();
+    expect(capture).toHaveValue('C11');
+  });
+
+  it('leaves modified arrows and IME arrows to native chord text input', () => {
+    const { onNavigate } = renderEditor();
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+    for (const key of ['ArrowLeft', 'ArrowRight']) {
+      for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }, { isComposing: true }]) {
+        expect(fireEvent.keyDown(capture, { key, ...modifier })).toBe(true);
+      }
+    }
     expect(onNavigate).not.toHaveBeenCalled();
   });
 

@@ -567,11 +567,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       const meta = event.metaKey || event.ctrlKey;
       const isChordEditing = notationMode === 'chords' && session.target.field === 'chords';
       if (event.defaultPrevented) return;
-      if (meta && event.key.toLowerCase() === 'z') {
-        event.preventDefault();
-        if (event.shiftKey) onRedo(); else onUndo();
-        return;
-      }
       if (event.key === 'Escape') {
         event.preventDefault();
         onDone();
@@ -1606,6 +1601,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             } else if (!meta && !event.altKey && !event.shiftKey && applyChordBarMarkerShortcut(event.key, event.code)) {
               event.preventDefault();
               event.stopPropagation();
+            } else if (!meta && !event.altKey && !event.shiftKey && !event.nativeEvent.isComposing && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+              event.preventDefault();
+              event.stopPropagation();
+              onNavigate(event.key === 'ArrowLeft' ? 'previous' : 'next');
             } else if (event.shiftKey && event.key === ' ') {
               event.preventDefault();
               event.stopPropagation();

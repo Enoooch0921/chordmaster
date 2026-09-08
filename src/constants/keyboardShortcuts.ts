@@ -33,12 +33,12 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
       {
         keys: ['Ctrl/Cmd + Z'],
         action: { en: 'Undo', zh: '復原' },
-        context: { en: 'Editor and preview quick editor', zh: '編輯器與預覽快捷編輯' }
+        context: { en: 'Song and setlist sheets, including after closing the editor', zh: '歌曲與歌單譜面，關閉編輯器後仍可使用' }
       },
       {
         keys: ['Ctrl/Cmd + Shift + Z', 'Ctrl/Cmd + Y'],
         action: { en: 'Redo', zh: '重做' },
-        context: { en: 'Editor and preview quick editor', zh: '編輯器與預覽快捷編輯' }
+        context: { en: 'Song and setlist sheets, including after closing the editor', zh: '歌曲與歌單譜面，關閉編輯器後仍可使用' }
       },
       {
         keys: ['Esc'],
@@ -73,8 +73,23 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
     },
     shortcuts: [
       {
+        keys: ['Ctrl/Cmd + C'],
+        action: { en: 'Copy selected bars, or the hovered notation lane', zh: '複製選取的小節，或滑鼠預選的內容區' },
+        context: { en: 'Whole-bar selection takes priority; text selection keeps normal copy', zh: '整小節選取優先；選取文字時維持文字複製' }
+      },
+      {
+        keys: ['Ctrl/Cmd + V'],
+        action: { en: 'Paste into the hovered bar, or the selected destination', zh: '貼到滑鼠所在小節，或選取的目的小節' },
+        context: { en: 'Notation replaces only its own lane; whole bars fill an empty bar or insert after an occupied bar', zh: '只替換複製的內容區；整小節填入空白處，或插在已有內容的小節後方' }
+      },
+      {
         keys: ['Space'],
         action: { en: 'Move to the next beat or notation position', zh: '移到下一拍或下一個記譜位置' }
+      },
+      {
+        keys: ['ArrowLeft', 'ArrowRight'],
+        action: { en: 'Move to the previous or next beat', zh: '移到前一拍或下一拍' },
+        context: { en: 'Chord mode', zh: '和弦模式' }
       },
       {
         keys: ['Enter'],

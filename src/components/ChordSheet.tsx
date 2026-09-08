@@ -789,6 +789,7 @@ export interface ChordSheetPreviewBarTarget extends ChordSheetElementClickMeta {
 export interface ChordSheetPreviewBarContextMenuTarget extends ChordSheetPreviewBarTarget {
   clientX: number;
   clientY: number;
+  appendToSection?: boolean;
 }
 
 export const getChordSheetMetaAnchorKey = (
@@ -1030,6 +1031,7 @@ const NavigationMarkerIcon: React.FC<{
 
   return (
     <div
+      data-preview-hover-field={interactive ? 'marker' : undefined}
       className={`absolute top-0 z-[1100] select-none leading-none text-gray-900 ${side === 'left' ? 'left-0' : 'right-0'} ${interactive ? 'cursor-pointer pointer-events-auto' : 'pointer-events-none'}`}
       style={{
         transform: `translate(${side === 'left' ? `calc(-50% + ${offsetPx}px)` : `calc(50% + ${offsetPx}px)`}, -54%)`
@@ -1072,6 +1074,7 @@ const NavigationTextTag: React.FC<{
   onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }> = ({ text, side, placement = 'top', className = '', variant = 'plain', onClick }) => (
   <div
+    data-preview-hover-field={onClick ? 'marker' : undefined}
     className={`absolute z-20 max-w-[calc(100%-8px)] whitespace-nowrap ${onClick ? 'cursor-pointer pointer-events-auto' : ''} ${side === 'left' ? 'left-1' : 'right-1'} ${
       placement === 'top'
         ? '-top-[12px]'
@@ -3007,6 +3010,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       <div
                         data-preview-inline-time-signature-label={options?.inlineTimeSignature ? true : undefined}
                         data-preview-bar-label
+                        data-preview-hover-field={onElementClick ? 'label' : undefined}
                         data-preview-label-lane={labelLane}
                         data-preview-suppress-pan={canDragLabelLane ? true : undefined}
                         className={`${className} select-none ${canDragLabelLane ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
@@ -3100,6 +3104,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       '--section-selection-stroke': String(getSectionBadgeStyle(colors.accent).borderColor),
                       '--section-selection-fill': activeTone.barFill,
                       '--section-selection-glow': activeTone.barGlow,
+                      '--section-selection-hover-fill': activeTone.fill,
+                      '--section-selection-hover-stroke': activeTone.barStroke,
                       gridColumn: `${bIdx + 1} / span ${restSpan}`,
                       paddingBottom: `${barPaddingBottom}px`,
                       ...(isActiveBar ? {
@@ -3117,6 +3123,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                      <div
 	                        key={bIdx}
                           data-preview-selected-bar={isPreviewSelectedBar ? true : undefined}
+                          data-preview-hoverable={bar && onElementClick ? true : undefined}
+                          data-preview-clipboard-identity={previewIdentity ?? undefined}
+                          data-preview-clipboard-section={previewBarSectionId}
+                          data-preview-clipboard-bar={previewBarId}
+                          data-preview-active-bar={isActiveBar || isActivePreviewEditBar ? true : undefined}
 	                        data-preview-lower-lanes={onElementClick ? lowerLaneCount : undefined}
 	                        data-preview-three-notation-rows={hasThreeNotationRows ? true : undefined}
                         className={`sheet-bar relative min-h-0 px-1 pt-1.5 flex flex-col min-w-0 ${leftBorderClass} ${rightBorderClass} ${bar?.repeatStart ? 'sheet-has-repeat-start' : ''} ${
@@ -3128,15 +3139,28 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         onClickCapture={(event) => emitPreviewBarMetaClick(event, previewBarSectionId, previewBarId)}
                         onContextMenu={(event) => emitPreviewBarContextMenu(event, previewBarSectionId, previewBarId)}
                       >
+                        {bar && onElementClick && <span data-preview-edit-ui data-preview-bar-hover aria-hidden="true" />}
                         {showAddBarButton && (
                           <button
                             type="button"
                             data-preview-only-control="true"
                             data-preview-add-bar-after={section?.id}
+                            data-preview-clipboard-identity={previewIdentity ?? undefined}
                             className="group/addbar absolute inset-0 z-[1100] flex items-center justify-center"
                             aria-label={language === 'zh' ? '新增小節' : 'Add bar'}
                             onMouseDown={(event) => event.stopPropagation()}
                             onTouchStart={(event) => event.stopPropagation()}
+                            onContextMenu={(event) => {
+                              if (!onPreviewBarContextMenu || !section?.id) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onPreviewBarContextMenu({
+                                ...getPreviewBarActionTarget(event.currentTarget, section.id, ''),
+                                clientX: event.clientX,
+                                clientY: event.clientY,
+                                appendToSection: true
+                              });
+                            }}
                             onClick={() => onAddBarClick(row.sIdx)}
                           >
                             <span className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-gray-300 text-gray-300 transition-colors group-hover/addbar:border-emerald-400 group-hover/addbar:bg-emerald-50 group-hover/addbar:text-emerald-600">
@@ -3251,6 +3275,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             {/* Annotation */}
                             {bar.annotation && (
                               <div
+                                data-preview-hover-field={onElementClick ? 'annotation' : undefined}
                                 className={`absolute -top-[10px] z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap cursor-pointer transition-colors ${
                                   showKeyChangeTag
                                     ? 'right-1'
@@ -3299,7 +3324,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               renderBarLabelBadge(
                                 `absolute ${inlineTimeSignatureLabelBottomClass} z-10 flex h-[14px] w-[30px] items-center justify-center rounded-sm border border-black bg-gray-300/70 px-1 mix-blend-multiply leading-none transition-colors ${
                                   bar.repeatStart ? 'left-1.5' : 'left-0.5'
-                                } ${onElementClick ? 'cursor-pointer hover:bg-indigo-200/70' : ''}`,
+                                } ${onElementClick ? 'cursor-pointer' : ''}`,
                                 { shrink: true, inlineTimeSignature: true }
                               )
                             )}
@@ -3311,7 +3336,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       return (
                                         <div
                                           data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|rhythm|all`}
-                                          className={`relative z-[30] flex flex-1 items-center justify-center w-full h-full cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${notationLaneHitClass} ${contentLeftInsetClass}`}
+                                          data-preview-hover-field={onElementClick ? 'rhythm' : undefined}
+                                          className={`relative z-[30] flex flex-1 items-center justify-center w-full h-full cursor-pointer transition-colors rounded ${notationLaneHitClass} ${contentLeftInsetClass}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'rhythm')}
                                         >
                                           <div className="relative z-[1] w-full max-w-full overflow-visible">
@@ -3356,6 +3382,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       : null;
                                     const renderBeatSlotChordGrid = (className: string) => (
                                       <div
+                                        data-preview-hover-field={onElementClick ? 'chords' : undefined}
                                         className={className}
                                         style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
                                         onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
@@ -3503,6 +3530,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         <div
                                           data-preview-token-span={beatsPerBar}
                                           data-preview-owner-slot="0"
+                                          data-preview-hover-field={onElementClick ? 'chords' : undefined}
                                           className={`relative flex-1 flex items-center justify-center w-full h-full cursor-pointer rounded ${contentLeftInsetClass}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
@@ -3523,7 +3551,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         <div
                                           data-preview-token-span={beatsPerBar}
                                           data-preview-owner-slot="0"
-                                          className={`relative flex flex-1 h-full w-full items-center justify-center cursor-pointer rounded transition-colors hover:bg-indigo-50/50 ${contentLeftInsetClass}`}
+                                          data-preview-hover-field={onElementClick ? 'chords' : undefined}
+                                          className={`relative flex flex-1 h-full w-full items-center justify-center cursor-pointer rounded transition-colors ${contentLeftInsetClass}`}
                                           onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                         >
                                           {isCenteredSpecialSelected && <span data-preview-edit-ui className={PREVIEW_CENTERED_CHORD_ACTIVE_CLASS} />}
@@ -3542,12 +3571,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
                                     return (
                                       renderBeatSlotChordGrid(
-                                        `flex-1 grid w-full content-start items-start pt-[3px] cursor-pointer hover:bg-indigo-50/50 transition-colors rounded ${contentLeftInsetClass}`
+                                        `flex-1 grid w-full content-start items-start pt-[3px] cursor-pointer transition-colors rounded ${contentLeftInsetClass}`
                                       )
                                     );
                                   })()}
                             {hasBarLabelInContentLane && !labelSharesNotationLane && (
-                              renderBarLabelBadge(`absolute bottom-[6px] left-1 z-10 border border-black px-1 rounded-sm flex h-[14px] items-center bg-gray-300/70 mix-blend-multiply cursor-pointer transition-colors hover:bg-indigo-200/70 ${contentLeftInsetClass}`)
+                              renderBarLabelBadge(`absolute bottom-[6px] left-1 z-10 border border-black px-1 rounded-sm flex h-[14px] items-center bg-gray-300/70 mix-blend-multiply cursor-pointer transition-colors ${contentLeftInsetClass}`)
                             )}
                             {showBottomLane && (
                               <div
@@ -3564,14 +3593,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       >
                                         <div className={`${sharedLaneClass} flex items-end`}>
                                           {labelLane === 'rhythm' ? (
-                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors')
+                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors')
                                           ) : (
                                             <span className="mb-0.5 h-[14px]" aria-hidden="true" />
                                           )}
                                         </div>
                                         <div className={`${sharedLaneClass} flex items-end`}>
                                           {labelLane === 'riff' ? (
-                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors')
+                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors')
                                           ) : (
                                             <span className="mb-0.5 h-[14px]" aria-hidden="true" />
                                           )}
@@ -3583,7 +3612,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                      <div className="flex items-end">
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|rhythm|all`}
-	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${notationLaneHitClass} flex-1`}
+	                                          data-preview-hover-field={onElementClick ? 'rhythm' : undefined}
+	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass} flex-1`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'rhythm');
@@ -3613,7 +3643,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                      <div className="flex items-end">
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|jianpu|all`}
-	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
+	                                          data-preview-hover-field={onElementClick ? 'jianpu' : undefined}
+	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
@@ -3646,13 +3677,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 ) : labelUsesStandaloneRhythmLane ? (
                                   <div className="flex flex-col gap-1.5 overflow-visible">
                                     <div className="flex h-[14px] items-end gap-1 overflow-visible">
-                                      {renderBarLabelBadge('border border-black px-1 rounded-sm flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors')}
+                                      {renderBarLabelBadge('border border-black px-1 rounded-sm flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors')}
                                     </div>
 
                                     <div className="flex items-end gap-1 h-[18px] overflow-visible">
                                       <div
                                         data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|jianpu|all`}
-                                        className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
+                                        data-preview-hover-field={onElementClick ? 'jianpu' : undefined}
+                                        className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
@@ -3684,13 +3716,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 ) : (
                                   <div className="flex items-end gap-1 h-[18px] overflow-visible">
                                     {hasBarLabelInContentLane && (
-                                      renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer hover:bg-indigo-200/70 transition-colors')
+                                      renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors')
                                     )}
 
                                     {(showBottomRhythmLane || hasRiff) && (
                                       <div
                                         data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|${showBottomRhythmLane ? 'rhythm' : 'jianpu'}|all`}
-                                        className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer hover:bg-indigo-200/70 transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
+                                        data-preview-hover-field={onElementClick ? (showBottomRhythmLane ? 'rhythm' : 'jianpu') : undefined}
+                                        className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           emitElementClick(e, row.sIdx, row.startBIdx + bIdx, showBottomRhythmLane ? 'rhythm' : 'riff');
@@ -3753,7 +3786,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 type="button"
                                 data-preview-edit-ui
                                 data-preview-lower-hit
-                                className="absolute bottom-1 left-1 right-1 z-[2] h-[18px] rounded-sm border border-dashed border-indigo-200/0 bg-transparent transition-colors hover:border-indigo-300 hover:bg-indigo-50/55 focus-visible:border-indigo-400 focus-visible:bg-indigo-50/70 focus-visible:outline-none"
+                                data-preview-hover-field="lower"
+                                className="absolute bottom-1 left-1 right-1 z-[2] h-[18px] rounded-sm border border-dashed border-indigo-200/0 bg-transparent transition-colors focus-visible:border-indigo-400 focus-visible:bg-indigo-50/70 focus-visible:outline-none"
                                 onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'lower')}
                                 aria-label={language === 'zh' ? '在下方輸入節奏或簡譜' : 'Enter rhythm or jianpu below'}
                               >

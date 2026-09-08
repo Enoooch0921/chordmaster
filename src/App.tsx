@@ -53,6 +53,9 @@ import { getEffectiveTimeSignature, parseTimeSignature } from './utils/rhythmUti
 import { hasPlayableReference, normalizeSongReferences } from './utils/referenceUtils';
 import { normalizeTempoBpm } from './utils/tempoUtils';
 import { useThemeMode } from './hooks/useThemeMode';
+import { useSongHistoryShortcuts } from './hooks/useSongHistoryShortcuts';
+import { rememberPreviewClipboard, usePreviewClipboardShortcuts, type PreviewClipboardTarget, type RememberedPreviewClipboard } from './hooks/usePreviewClipboardShortcuts';
+import { appendPreviewContent, copyPreviewContent, pastePreviewContent, type PreviewClipboard, type PreviewClipboardKind } from './lib/previewClipboard';
 import { useToast } from './components/Toast';
 import { PdfExportCancelledError, type PdfExportProgressState } from './lib/pdfExportTypes';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
@@ -1105,6 +1108,7 @@ interface PreviewBarContextMenuState extends PreviewBarSelectionTarget {
   clientX: number;
   clientY: number;
   anchorRect: PreviewAnchorRect;
+  appendToSection?: boolean;
 }
 
 interface PreviewBarClipboard {
@@ -1996,6 +2000,7 @@ export default function App() {
   const [previewCopiedBar, setPreviewCopiedBar] = useState<Bar | null>(null);
   const [previewSelectedBars, setPreviewSelectedBars] = useState<PreviewBarSelectionTarget[]>([]);
   const [previewBarClipboard, setPreviewBarClipboard] = useState<PreviewBarClipboard | null>(null);
+  const previewClipboardRef = useRef<RememberedPreviewClipboard | null>(null);
   const [previewBarContextMenu, setPreviewBarContextMenu] = useState<PreviewBarContextMenuState | null>(null);
   const [previewCopiedJianpu, setPreviewCopiedJianpu] = useState<string | null>(null);
   const [previewCopiedRhythm, setPreviewCopiedRhythm] = useState<string | null>(null);
@@ -7366,6 +7371,33 @@ export default function App() {
     }));
   };
 
+  const handleActiveUndo = () => {
+    if (activePreviewEditSession) {
+      setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current);
+    } else if (isSetlistMode) {
+      handleSetlistUndo();
+    } else {
+      handleUndo();
+    }
+  };
+
+  const handleActiveRedo = () => {
+    if (activePreviewEditSession) {
+      setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current);
+    } else if (isSetlistMode) {
+      handleSetlistRedo();
+    } else {
+      handleRedo();
+    }
+  };
+
+  useSongHistoryShortcuts({
+    enabled: isSheetView && canOpenEditor && !isPerformanceMode && !isKeyboardShortcutsOpen
+      && !isSwitchingLibrary && !isLoadingCloudWorkspace,
+    onUndo: handleActiveUndo,
+    onRedo: handleActiveRedo
+  });
+
   const handleScrollEditorToTop = () => {
     const editorScrollRoot = document.querySelector<HTMLElement>('[data-editor-scroll-root]');
     if (!editorScrollRoot) return;
@@ -8817,6 +8849,8 @@ export default function App() {
     if (!current || current.target.kind !== 'bar') return;
     const located = findSongBar(current.draftSong, current.target);
     if (!located) return;
+    const content = copyPreviewContent(current.draftSong, [current.target], 'jianpu');
+    if (content) rememberPreviewClipboard(previewClipboardRef, content, true);
     setPreviewCopiedJianpu(located.bar.riff ?? '');
   }, [previewEditSession]);
 
@@ -8842,6 +8876,8 @@ export default function App() {
     if (!current || current.target.kind !== 'bar') return;
     const located = findSongBar(current.draftSong, current.target);
     if (!located) return;
+    const content = copyPreviewContent(current.draftSong, [current.target], 'rhythm');
+    if (content) rememberPreviewClipboard(previewClipboardRef, content, true);
     setPreviewCopiedRhythm(located.bar.rhythm ?? '');
   }, [previewEditSession]);
 
@@ -9111,6 +9147,16 @@ export default function App() {
   }, [findPreviewAnchorRect, makePreviewTargetAnchorKey, refreshPreviewEditAnchorRect]);
 
   const handlePreviewEditStructure = React.useCallback((action: 'insert-before' | 'insert-after' | 'duplicate' | 'copy-bar' | 'paste-bar-after' | 'delete' | 'split-section' | 'insert-section-after') => {
+    if (action === 'copy-bar') {
+      const current = previewEditSession;
+      if (!current || current.target.kind !== 'bar') return;
+      const content = copyPreviewContent(current.draftSong, [current.target], 'bars');
+      if (!content) return;
+      rememberPreviewClipboard(previewClipboardRef, content, true);
+      setPreviewCopiedBar(structuredClone(content.items[0].bar));
+      setPreviewBarClipboard({ bars: content.items.map(({ bar }) => structuredClone(bar)) });
+      return;
+    }
     if (action === 'split-section' || action === 'insert-section-after') {
       const current = previewEditSession;
       if (!current || current.target.kind !== 'bar') return;
@@ -9151,11 +9197,6 @@ export default function App() {
       if (!located) return current;
       let draftSong = current.draftSong;
       let targetBarId = current.target.barId;
-
-      if (action === 'copy-bar') {
-        setPreviewCopiedBar(structuredClone(located.bar));
-        return current;
-      }
 
       if (action === 'insert-before' || action === 'insert-after') {
         const newBar = createEmptyBar();
@@ -9345,13 +9386,14 @@ export default function App() {
       barId: target.barId,
       clientX: target.clientX,
       clientY: target.clientY,
-      anchorRect: target.anchorRect
+      anchorRect: target.anchorRect,
+      appendToSection: target.appendToSection
     };
     const menuTargetKey = getPreviewBarSelectionKey(menuTarget);
     const isAlreadySelected = activePreviewSelectedBars.some((candidate) => (
       getPreviewBarSelectionKey(candidate) === menuTargetKey
     ));
-    if (!isAlreadySelected) {
+    if (!target.appendToSection && !isAlreadySelected) {
       setPreviewSelectedBars([menuTarget]);
     }
     setPreviewBarContextMenu(menuTarget);
@@ -9362,6 +9404,8 @@ export default function App() {
     if (!sourceSong) return;
     const copiedBars = copyBarsForClipboard(sourceSong, getPreviewBatchTargets(previewBarContextMenu));
     if (copiedBars.length === 0) return;
+    const content = copyPreviewContent(sourceSong, getPreviewBatchTargets(previewBarContextMenu), 'bars');
+    if (content) rememberPreviewClipboard(previewClipboardRef, content, true);
     setPreviewBarClipboard({ bars: copiedBars });
     if (copiedBars.length === 1) {
       setPreviewCopiedBar(structuredClone(copiedBars[0]));
@@ -9401,6 +9445,95 @@ export default function App() {
     })));
     setPreviewBarContextMenu(null);
   }, [commitPreviewBarBatchSong, getPreviewBatchSong, previewBarClipboard, previewBarContextMenu]);
+
+  const clipboardKindLabel = (kind: PreviewClipboardKind) => ({
+    bars: language === 'zh' ? '完整小節' : 'bars',
+    chords: language === 'zh' ? '和弦' : 'chords',
+    rhythm: language === 'zh' ? '節奏' : 'rhythm',
+    jianpu: language === 'zh' ? '簡譜' : 'jianpu',
+    label: language === 'zh' ? '標籤' : 'labels',
+    annotation: language === 'zh' ? '備註' : 'annotations',
+    marker: language === 'zh' ? '導覽記號' : 'navigation markers'
+  })[kind];
+
+  const resolveClipboardHover = (hovered: PreviewClipboardTarget | null) => {
+    if (hovered && hovered.previewIdentity !== activePreviewIdentity) {
+      toast.info(language === 'zh' ? '請先點選這首歌，再複製或貼上。' : 'Select this song before copying or pasting.');
+      return false;
+    }
+    return true;
+  };
+
+  const copyHoveredPreviewContent = (hovered: PreviewClipboardTarget | null): PreviewClipboard | null => {
+    const sourceSong = getPreviewBatchSong();
+    if (!sourceSong) return null;
+    const selection = activePreviewSelectedBars.filter((target) => findSongBar(sourceSong, target));
+    if (!selection.length && hovered?.appendToSection) return null;
+    if (!selection.length && !resolveClipboardHover(hovered)) return null;
+    const fallback = getActivePreviewBarTarget(sourceSong);
+    const target = hovered ?? fallback;
+    if (!selection.length && !target) return null;
+    const field = selection.length ? 'bars' : hovered?.field ?? activePreviewEditSession?.notationMode ?? 'bars';
+    const kind = (field === 'lower' ? lastPreviewNonChordMode : field) as PreviewClipboardKind;
+    if (!['bars', 'chords', 'rhythm', 'jianpu', 'label', 'annotation', 'marker'].includes(kind)) return null;
+    const content = copyPreviewContent(sourceSong, selection.length ? selection : [target!], kind);
+    if (!content) return null;
+    if (kind === 'bars') {
+      setPreviewBarClipboard({ bars: content.items.map(({ bar }) => structuredClone(bar)) });
+      if (content.items.length === 1) setPreviewCopiedBar(structuredClone(content.items[0].bar));
+    } else if (kind === 'rhythm') setPreviewCopiedRhythm(content.items[0].bar.rhythm ?? '');
+    else if (kind === 'jianpu') setPreviewCopiedJianpu(content.items[0].bar.riff ?? '');
+    toast.success(language === 'zh'
+      ? `已複製 ${content.items.length} 小節的${clipboardKindLabel(kind)}`
+      : `Copied ${clipboardKindLabel(kind)} from ${content.items.length} bar(s)`, { id: 'preview-clipboard' });
+    return content;
+  };
+
+  const pasteHoveredPreviewContent = (content: PreviewClipboard, hovered: PreviewClipboardTarget | null) => {
+    const sourceSong = getPreviewBatchSong();
+    if (!sourceSong || !resolveClipboardHover(hovered)) return;
+    const hoverIsSelected = hovered && activePreviewSelectedBars.some((target) => (
+      target.sectionId === hovered.sectionId && target.barId === hovered.barId
+    ));
+    // Moving to a destination outside the original selection must paste there,
+    // not back into the bars that were just copied.
+    const targets = content.kind !== 'bars' && activePreviewSelectedBars.length && (!hovered || hoverIsSelected)
+      ? activePreviewSelectedBars
+      : hovered ? [hovered] : getPreviewBatchTargets(getActivePreviewBarTarget(sourceSong));
+    const result = hovered?.appendToSection
+      ? appendPreviewContent(sourceSong, hovered.sectionId, content)
+      : pastePreviewContent(sourceSong, targets, content);
+    if (result.error) {
+      const messages = {
+        'missing-target': ['請將滑鼠移到要貼上的小節，或先選取小節。', 'Hover over or select a destination bar.'],
+        'count-mismatch': ['來源與目的小節數不同，請選取相同數量的小節。', 'Select the same number of destination bars.'],
+        'time-signature': ['拍號不同，尚未貼上。請選擇相同拍號的小節。', 'Nothing pasted: choose bars with the same time signature.'],
+        'jianpu-mode': ['簡譜輸入模式不同，請先統一固定調／首調模式。', 'Use the same fixed/movable jianpu input mode before pasting.']
+      };
+      toast.info(messages[result.error][language === 'zh' ? 0 : 1], { id: 'preview-clipboard' });
+      return;
+    }
+    if (result.song !== sourceSong) {
+      if (activePreviewEditSession) applyPreviewEditDraft(result.song);
+      else commitPreviewBarBatchSong(result.song, sourceSong);
+    }
+    if (content.kind === 'bars') {
+      setPreviewSelectedBars(result.targets.map((target) => ({ ...target, previewIdentity: activePreviewIdentity! })));
+    } else if (hovered && !hoverIsSelected) setPreviewSelectedBars([]);
+    setPreviewBarContextMenu(null);
+    toast.success(language === 'zh'
+      ? `已${result.inserted ? '在後方插入' : '貼上'}${clipboardKindLabel(content.kind)}（${result.targets.length} 小節）`
+      : `Pasted ${clipboardKindLabel(content.kind)} (${result.targets.length} bar(s))`, { id: 'preview-clipboard' });
+  };
+
+  usePreviewClipboardShortcuts({
+    enabled: isSheetView && canOpenEditor && !isLyricsMode && !isPerformanceMode
+      && !isKeyboardShortcutsOpen && !isSwitchingLibrary && !isLoadingCloudWorkspace,
+    clipboardRef: previewClipboardRef,
+    onCopy: copyHoveredPreviewContent,
+    onPaste: pasteHoveredPreviewContent,
+    onUnavailable: () => toast.info(language === 'zh' ? '請先在譜面複製小節或內容。' : 'Copy chart bars or notation first.', { id: 'preview-clipboard' })
+  });
 
   React.useEffect(() => {
     const handlePreviewEndingShortcut = (event: KeyboardEvent) => {
@@ -15225,8 +15358,8 @@ export default function App() {
                                   past: currentSetlistSongHistory.past.map((snapshot) => snapshot.song),
                                   future: currentSetlistSongHistory.future.map((snapshot) => snapshot.song)
                                 }}
-                            onUndo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : handleSetlistUndo}
-                            onRedo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : handleSetlistRedo}
+                            onUndo={handleActiveUndo}
+                            onRedo={handleActiveRedo}
                             onChange={handleActiveEditorSongChange}
                             jianpuPitchContext={activeJianpuPitchContext}
                             metadataMode="setlist"
@@ -15270,8 +15403,8 @@ export default function App() {
                             language={language}
                             isPhoneViewport={isPhoneViewport}
                             history={activePreviewEditSession ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future } : currentSongHistory}
-                            onUndo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : handleUndo}
-                            onRedo={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : handleRedo}
+                            onUndo={handleActiveUndo}
+                            onRedo={handleActiveRedo}
                             onChange={handleActiveEditorSongChange}
                             jianpuPitchContext={activeJianpuPitchContext}
                             hideMetadataPanel
@@ -15300,7 +15433,7 @@ export default function App() {
                       <ChevronUp size={18} />
                     </button>
                     <button
-                      onClick={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current) : isSetlistMode ? handleSetlistUndo : handleUndo}
+                      onClick={handleActiveUndo}
                       disabled={activePreviewEditSession ? activePreviewEditSession.past.length === 0 : isSetlistMode ? currentSetlistSongHistory.past.length === 0 : currentSongHistory.past.length === 0}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
                       title={copy.undo}
@@ -15308,7 +15441,7 @@ export default function App() {
                       <Undo2 size={18} />
                     </button>
                     <button
-                      onClick={activePreviewEditSession ? () => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current) : isSetlistMode ? handleSetlistRedo : handleRedo}
+                      onClick={handleActiveRedo}
                       disabled={activePreviewEditSession ? activePreviewEditSession.future.length === 0 : isSetlistMode ? currentSetlistSongHistory.future.length === 0 : currentSongHistory.future.length === 0}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
                       title={copy.redo}
@@ -15407,8 +15540,8 @@ export default function App() {
                   hasCopiedRhythm={previewCopiedRhythm !== null}
                   onCopyRhythm={handlePreviewCopyRhythm}
                   onPasteRhythm={handlePreviewPasteRhythm}
-                  onUndo={() => setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current)}
-                  onRedo={() => setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current)}
+                  onUndo={handleActiveUndo}
+                  onRedo={handleActiveRedo}
                   onDone={() => commitPreviewEditSession()}
                   onCancel={() => setPreviewEditSession(null)}
                   onPanelHeightChange={handlePreviewEditorPanelHeightChange}
@@ -15473,6 +15606,15 @@ export default function App() {
                   style={{ left: menuLeft, top: menuTop }}
                   onContextMenu={(event) => event.preventDefault()}
                 >
+                  {previewBarContextMenu.appendToSection ? (
+                    <button type="button" role="menuitem" className={menuButtonClass} disabled={!previewClipboardRef.current} onClick={() => {
+                      const content = previewClipboardRef.current?.content;
+                      if (content) pasteHoveredPreviewContent(content, { ...previewBarContextMenu, field: 'bars' });
+                    }}>
+                      <ClipboardPaste size={14} />
+                      <span>{language === 'zh' ? '新增小節並貼上' : 'Add bars and paste'}</span>
+                    </button>
+                  ) : <>
                   <div className="mb-1 border-b border-slate-100 px-2 pb-2 text-[11px] font-black text-slate-500">
                     {language === 'zh' ? `已選 ${selectedCount} 小節` : `${selectedCount} bar${selectedCount === 1 ? '' : 's'} selected`}
                   </div>
@@ -15520,6 +15662,7 @@ export default function App() {
                       <span>{language === 'zh' ? '清除房子' : 'Clear ending'}</span>
                     </button>
                   </div>
+                  </>}
                 </div>
               );
             })()}

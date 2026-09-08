@@ -1773,6 +1773,7 @@ describe('ChordSheet preview input caret', () => {
   });
 
   it('places add-bar in the first measure cell and add-section in the row gutter', () => {
+    const onPreviewBarContextMenu = vi.fn();
     const fullFinalSong: Song = {
       ...song,
       sections: [{
@@ -1789,6 +1790,7 @@ describe('ChordSheet preview input caret', () => {
         language="zh"
         currentKey="C"
         previewIdentity="song-1"
+        onPreviewBarContextMenu={onPreviewBarContextMenu}
         onElementClick={vi.fn()}
         onAddBarClick={vi.fn()}
         onAddSectionAfterClick={vi.fn()}
@@ -1796,6 +1798,12 @@ describe('ChordSheet preview input caret', () => {
     );
 
     const addBarButton = screen.getByRole('button', { name: '新增小節' });
+    expect(addBarButton).toHaveAttribute('data-preview-clipboard-identity', 'song-1');
+    fireEvent.contextMenu(addBarButton, { clientX: 120, clientY: 250 });
+    expect(onPreviewBarContextMenu).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      previewIdentity: 'song-1', sectionId: fullFinalSong.sections[0].id,
+      barId: '', appendToSection: true, clientX: 120, clientY: 250
+    }));
     const addBarCell = addBarButton.closest('.sheet-bar');
     expect(addBarCell).toBeInTheDocument();
     expect(addBarCell?.parentElement?.children[0]).toBe(addBarCell);

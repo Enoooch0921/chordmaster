@@ -815,27 +815,6 @@ const SongEditor: React.FC<Props> = ({
     });
   };
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isMetaKey = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
-
-      if (isMetaKey && key === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) {
-          onRedo();
-        } else {
-          onUndo();
-        }
-      } else if (isMetaKey && key === 'y') {
-        e.preventDefault();
-        onRedo();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onRedo, onUndo]);
-
   const cleanInput = (val: string) => {
     return val
       .replace(/，/g, ',')
@@ -6435,7 +6414,7 @@ const SongEditor: React.FC<Props> = ({
   };
 
   return (
-    <div ref={rootRef} className="relative pb-12">
+    <div ref={rootRef} data-song-history-input className="relative pb-12">
       {!hideMetadataPanel && (
         <div className="mb-6 flex items-center justify-between">
           <h2 className="font-display text-2xl font-bold text-gray-800">{copy.editor.editSong}</h2>
