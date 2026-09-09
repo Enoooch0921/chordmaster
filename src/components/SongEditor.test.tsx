@@ -1,4 +1,4 @@
-import { fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
 import type { JianpuPitchContext } from '../lib/jianpuEditing';
@@ -54,6 +54,37 @@ const renderEditor = (song: Song, jianpuPitchContext?: JianpuPitchContext) => {
 };
 
 describe('SongEditor shared notation commands', () => {
+  it('keeps collapsed sections attached to their IDs when reordered without changing song data', () => {
+    const song = makeSong({});
+    song.sections.push({ id: 'section-2', title: 'Chorus', bars: [{ id: 'bar-2', chords: ['G'] }] });
+    const onChange = vi.fn();
+    const props = { song, language: 'zh' as const, history: { past: [], future: [] },
+      onUndo: vi.fn(), onRedo: vi.fn(), onChange };
+    const { rerender } = render(<SongEditor {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '收合段落 Verse' }));
+    expect(document.getElementById('editor-bar-0-b0')).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('Verse')).toBeVisible();
+    rerender(<SongEditor {...props} song={{ ...song, sections: [...song.sections].reverse() }} />);
+    expect(screen.getByRole('button', { name: '展開段落 Verse' })).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById('editor-bar-1-b0')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '全部收合' }));
+    expect(document.getElementById('editor-bar-0-b0')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '全部展開' }));
+    expect(document.getElementById('editor-bar-0-b0')).toBeInTheDocument();
+    expect(document.getElementById('editor-bar-1-b0')).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('reveals a collapsed section when the preview requests focus on its chord input', async () => {
+    const props = { song: makeSong({}), language: 'zh' as const, history: { past: [], future: [] },
+      onUndo: vi.fn(), onRedo: vi.fn(), onChange: vi.fn(), onFocusRequestHandled: vi.fn() };
+    const { rerender } = render(<SongEditor {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '全部收合' }));
+    rerender(<SongEditor {...props} focusRequest={{ sIdx: 0, bIdx: 0, field: 'chords', requestId: 1, instant: true }} />);
+    await waitFor(() => expect(document.getElementById('editor-s0-b0-chords')).toHaveFocus());
+    expect(screen.getByRole('button', { name: '收合段落 Verse' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('handles history exactly once with both editors open and still works after closing both', () => {
     const song = makeSong({});
     const onUndo = vi.fn();

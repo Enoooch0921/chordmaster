@@ -652,6 +652,8 @@ const SongEditor: React.FC<Props> = ({
   const [jianpuCursor, setJianpuCursor] = useState<JianpuCursor | null>(null);
   const [jianpuInputMode, setJianpuInputMode] = useState<JianpuInputMode>({ duration: 'quarter', octave: 0, dotted: false, triplet: false, accidental: '' });
   const [barPanels, setBarPanels] = useState<Record<string, BarPanelState>>({});
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(() => new Set());
+  const sectionContentIdPrefix = React.useId();
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
   const [isBarDragging, setIsBarDragging] = useState(false);
   const [copiedBarHighlight, setCopiedBarHighlight] = useState<CopiedBarHighlight | null>(null);
@@ -766,6 +768,29 @@ const SongEditor: React.FC<Props> = ({
     setRhythmCursor(null);
     setJianpuCursor(null);
     setJianpuDurationBlockedHint(null);
+  };
+
+  const toggleSectionCollapsed = (sectionId: string, sIdx: number) => {
+    if (!collapsedSectionIds.has(sectionId)) {
+      if (selection?.sIdx === sIdx) clearEditorSelectionState();
+      if (compactInspectorBar?.sIdx === sIdx) setCompactInspectorBar(null);
+    }
+    setCollapsedSectionIds((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+  };
+
+  const expandSection = (sIdx: number) => {
+    const sectionId = song.sections[sIdx]?.id || `section-${sIdx}`;
+    setCollapsedSectionIds((current) => {
+      if (!current.has(sectionId)) return current;
+      const next = new Set(current);
+      next.delete(sectionId);
+      return next;
+    });
   };
 
   const getSelectionScrollKey = (type: SelectionInfo['type'], sIdx: number, bIdx: number) => `${type}:${sIdx}:${bIdx}`;
@@ -1684,6 +1709,7 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const focusChordInputWithRetry = (sIdx: number, bIdx: number, attempt = 0) => {
+    if (attempt === 0) expandSection(sIdx);
     const input = document.getElementById(`editor-s${sIdx}-b${bIdx}-chords`) as HTMLInputElement | null;
     const barElement = document.getElementById(`editor-bar-${sIdx}-b${bIdx}`);
 
@@ -1735,10 +1761,10 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const focusFirstChordInputInSection = (sIdx: number) => {
-    const input = document.querySelector<HTMLInputElement>(`input[data-chord-input][data-sidx="${sIdx}"]`);
-    if (!input) return;
-
+    expandSection(sIdx);
     window.requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLInputElement>(`input[data-chord-input][data-sidx="${sIdx}"]`);
+      if (!input) return;
       try {
         input.focus({ preventScroll: true });
       } catch {
@@ -4861,6 +4887,10 @@ const SongEditor: React.FC<Props> = ({
 
     const { sIdx, bIdx, field, requestId, instant } = focusRequest;
     const focusScrollBehavior: ScrollBehavior = instant ? 'auto' : 'smooth';
+    // Preview-to-editor navigation must reveal the requested bar before focusing it.
+    if (field !== 'sectionName' && bIdx >= 0) {
+      expandSection(sIdx);
+    }
 
     // Clicking a section name in the preview focuses that section's title input.
     if (field === 'sectionName') {
@@ -6723,11 +6753,28 @@ const SongEditor: React.FC<Props> = ({
       </div>
 
       {/* Sections */}
+      {song.sections.length > 0 && (
+        <div className="mb-3 flex justify-end gap-2">
+          <button type="button" onClick={() => {
+            clearEditorSelectionState();
+            setCompactInspectorBar(null);
+            setCollapsedSectionIds(new Set(song.sections.map((section, index) => section.id || `section-${index}`)));
+          }} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+            {language === 'zh' ? '全部收合' : 'Collapse all'}
+          </button>
+          <button type="button" onClick={() => setCollapsedSectionIds(new Set())}
+            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+            {language === 'zh' ? '全部展開' : 'Expand all'}
+          </button>
+        </div>
+      )}
       <LayoutGroup id="song-editor-bars">
       <div className="space-y-5">
         {song.sections.map((section, sIdx) => {
           const colors = getSectionColor(section.title, true);
           const sectionId = section.id || `section-${sIdx}`;
+          const isSectionCollapsed = collapsedSectionIds.has(sectionId);
+          const sectionContentId = `${sectionContentIdPrefix}-${sectionId}-content`;
           const sectionStartKey = sectionBaseKeys[sIdx] || song.originalKey;
           const sectionWrittenKey = sectionActiveKeys[sIdx] || sectionStartKey;
           const sectionDisplayBaseKey = displayKeyStates.sectionBaseKeys[sIdx] ?? song.currentKey;
@@ -6756,8 +6803,18 @@ const SongEditor: React.FC<Props> = ({
               }`}
               style={isActiveSection ? { boxShadow: `0 0 0 2px ${accentHighlight.ring}, 0 16px 32px ${accentHighlight.glow}` } : undefined}
             >
-              <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+              <div className={`${isSectionCollapsed ? '' : 'mb-4'} flex flex-col justify-between gap-3 sm:flex-row sm:items-start`}>
                 <div className="flex items-start gap-3 flex-1">
+                  <button
+                    type="button"
+                    aria-expanded={!isSectionCollapsed}
+                    aria-controls={sectionContentId}
+                    aria-label={`${language === 'zh' ? (isSectionCollapsed ? '展開段落' : '收合段落') : (isSectionCollapsed ? 'Expand section' : 'Collapse section')} ${section.title || sIdx + 1}`}
+                    onClick={() => toggleSectionCollapsed(sectionId, sIdx)}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 shadow-sm transition-colors hover:bg-gray-50 hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  >
+                    <ChevronDown size={18} className={`transition-transform ${isSectionCollapsed ? '-rotate-90' : ''}`} />
+                  </button>
                   <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
                     <button onClick={() => moveSection(sIdx, -1)} disabled={sIdx === 0} className={`p-1 text-gray-400 hover:text-${colors.accent}-600 disabled:opacity-30 transition-colors`}><ChevronUp size={14} /></button>
                     <button onClick={() => moveSection(sIdx, 1)} disabled={sIdx === song.sections.length - 1} className={`p-1 text-gray-400 hover:text-${colors.accent}-600 disabled:opacity-30 transition-colors`}><ChevronDown size={14} /></button>
@@ -6985,7 +7042,9 @@ const SongEditor: React.FC<Props> = ({
             </div>
 
             {/* Bars Grid */}
+            {!isSectionCollapsed && (
             <motion.div
+              id={sectionContentId}
               layout
               transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
               className={barGridClassName}
@@ -8058,6 +8117,7 @@ const SongEditor: React.FC<Props> = ({
                 </button>
               </div>
             </motion.div>
+            )}
           </motion.div>
         );
       })}
