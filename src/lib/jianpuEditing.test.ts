@@ -3,6 +3,8 @@ import type { Bar, Song } from '../types';
 import { convertRelativeJianpuToAbsoluteNotation } from '../utils/jianpuUtils';
 import {
   DEFAULT_JIANPU_INPUT_MODE,
+  buildJianpuPitchContext,
+  getJianpuSectionPlayKey,
   applyJianpuCommand,
   getDefaultJianpuCursor,
   getJianpuBarLayout,
@@ -628,5 +630,22 @@ describe('slurs and semantic navigation', () => {
 
     const previous = applyJianpuCommand(song, target, next.cursor, { type: 'move', direction: -1 });
     expect(previous.cursor).toEqual(selected);
+  });
+});
+
+
+describe('jianpu modulation spelling', () => {
+  it('inherits bar modulations into the next section and keeps context paths consistent', () => {
+    const song: Song = { title: 'Modulation', timeSignature: '4/4', originalKey: 'F', currentKey: 'F', sections: [
+      { id: 'a', title: 'Verse', bars: [{ id: 'a1', chords: [] }, { id: 'a2', keyChangeTo: 'F#', chords: [] }] },
+      { id: 'b', title: 'Chorus', bars: [{ id: 'b1', chords: [] }, { id: 'b2', keyChangeTo: 'Gb', chords: [] }] }
+    ] };
+    expect(buildJianpuPitchContext(song)).toEqual({
+      playKeyBySectionId: { a: 'F', b: 'F#' },
+      playKeyByBarId: { a1: 'F', a2: 'F#', b1: 'F#', b2: 'Gb' },
+      pickupPlayKey: 'F'
+    });
+    expect(getJianpuSectionPlayKey(song, 'b')).toBe('F#');
+    expect(buildJianpuPitchContext({ ...song, capo: 2 }).playKeyByBarId).toEqual({ a1: 'Eb', a2: 'E', b1: 'E', b2: 'E' });
   });
 });

@@ -72,6 +72,16 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it('shows the inherited sharp key when reopening the following section', async () => {
+    const source: Song = { ...song, originalKey: 'F', currentKey: 'F', sections: [
+      { id: 'intro', title: 'Intro', bars: [{ id: 'intro-1', keyChangeTo: 'F#', chords: ['5'] }] },
+      { id: 'section-1', title: 'Chorus', bars: [{ id: 'bar-1', chords: ['1'] }] }
+    ] };
+    renderEditor({ session: createPreviewEditSession({ song: source, target, inputMode: 'letters' }), deviceLayout: 'phone' });
+    expect(screen.getByTitle('轉Key：沿用 F#')).toBeInTheDocument();
+    expect(screen.queryByTitle('轉Key：沿用 Gb')).not.toBeInTheDocument();
+  });
+
   it('auto-focuses the hidden desktop chord capture and expands visual keys on demand', async () => {
     const user = userEvent.setup();
     renderEditor();

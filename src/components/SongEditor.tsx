@@ -20,6 +20,7 @@ import {
   duplicateSection as duplicateSongSection,
   getEffectiveTimeSignatureForBar,
   getSongKeyStates,
+  getSongDisplayKeyStates,
   isBarCompletelyEmpty,
   mergeSectionToPrevious as mergeSongSectionToPrevious,
   normalizeChordBeatTokens,
@@ -706,37 +707,12 @@ const SongEditor: React.FC<Props> = ({
   const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
   const effectiveJianpuPitchContext = jianpuPitchContext ?? buildJianpuPitchContext(song);
 
-  const getExplicitKeySourceForPosition = (writtenKey: Key, sIdx: number, bIdx?: number): Key | undefined => {
-    if (sIdx < 0) return undefined;
-    let sourceKey: Key | undefined;
-
-    for (let sectionIndex = 0; sectionIndex <= sIdx; sectionIndex += 1) {
-      const section = song.sections[sectionIndex];
-      if (!section) continue;
-      if (section.keyChangeTo === writtenKey) {
-        sourceKey = section.keyChangeTo;
-      }
-
-      const lastBarIndex = sectionIndex < sIdx
-        ? section.bars.length - 1
-        : bIdx ?? -1;
-      for (let barIndex = 0; barIndex <= lastBarIndex; barIndex += 1) {
-        const barKey = section.bars[barIndex]?.keyChangeTo;
-        if (barKey === writtenKey) {
-          sourceKey = barKey;
-        }
-      }
-    }
-
-    return sourceKey;
-  };
-
-  const getDisplayKeyForPosition = (writtenKey: Key, sIdx: number, bIdx?: number): Key => {
-    const sourceKey = getExplicitKeySourceForPosition(writtenKey, sIdx, bIdx);
-    return sourceKey
-      ? transposeKeyPreservingSpelling(sourceKey, globalKeyShift)
-      : transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey);
-  };
+  const displayKeyStates = getSongDisplayKeyStates(song);
+  const getDisplayKeyForPosition = (sIdx: number, bIdx?: number): Key => (
+    bIdx !== undefined && bIdx >= 0
+      ? displayKeyStates.barActiveKeys[sIdx]?.[bIdx] ?? song.currentKey
+      : displayKeyStates.sectionActiveKeys[sIdx] ?? song.currentKey
+  );
 
   // Sounding key used to render/interpret absolute (1=C) jianpu for a section,
   // matching ChordSheet's sectionPlayKey (written key → current key → capo) so the
@@ -753,8 +729,7 @@ const SongEditor: React.FC<Props> = ({
       ? effectiveJianpuPitchContext.playKeyBySectionId?.[sectionId]
       : undefined;
     if (overriddenKey) return overriddenKey;
-    const writtenKey = barActiveKeys[sIdx]?.[bIdx] || sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
-    const currentKey = getDisplayKeyForPosition(writtenKey, sIdx, bIdx);
+    const currentKey = getDisplayKeyForPosition(sIdx, bIdx);
     return getPlayKey(currentKey, song.capo || 0);
   };
 
@@ -5672,9 +5647,9 @@ const SongEditor: React.FC<Props> = ({
     const panelState = getBarPanelState(bar, sIdx, bIdx);
     const barBaseKey = barBaseKeys[sIdx]?.[bIdx] || sectionActiveKeys[sIdx] || sectionBaseKeys[sIdx] || song.originalKey;
     const barWrittenKey = barActiveKeys[sIdx]?.[bIdx] || barBaseKey;
-    const barDisplayBaseKey = getDisplayKeyForPosition(barBaseKey, sIdx, bIdx - 1);
+    const barDisplayBaseKey = getDisplayKeyForPosition(sIdx, bIdx - 1);
     const barTargetKey = bar.keyChangeTo ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift) : undefined;
-    const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(barWrittenKey, sIdx, bIdx);
+    const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(sIdx, bIdx);
     const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
     const compactInspectorTitle = language === 'zh' ? `小節 ${globalBarNumber}` : `Bar ${globalBarNumber}`;
     const compactInspectorSubtitle = [getBarDisplayLabel(bar), bar.annotation].filter(Boolean).join(' · ');
@@ -6755,9 +6730,9 @@ const SongEditor: React.FC<Props> = ({
           const sectionId = section.id || `section-${sIdx}`;
           const sectionStartKey = sectionBaseKeys[sIdx] || song.originalKey;
           const sectionWrittenKey = sectionActiveKeys[sIdx] || sectionStartKey;
-          const sectionDisplayBaseKey = getDisplayKeyForPosition(sectionStartKey, sIdx - 1);
+          const sectionDisplayBaseKey = displayKeyStates.sectionBaseKeys[sIdx] ?? song.currentKey;
           const sectionTargetKey = section.keyChangeTo ? transposeKeyPreservingSpelling(section.keyChangeTo, globalKeyShift) : undefined;
-          const sectionDisplayKey = sectionTargetKey ?? getDisplayKeyForPosition(sectionWrittenKey, sIdx);
+          const sectionDisplayKey = sectionTargetKey ?? getDisplayKeyForPosition(sIdx);
           const isActiveSection = activeSectionId === sectionId;
           const accentHighlight = getAccentHighlight(colors.accent);
           const hasSectionTitleLineBreak = section.title.includes('\n');
@@ -7025,9 +7000,9 @@ const SongEditor: React.FC<Props> = ({
                   const panelState = getBarPanelState(bar, sIdx, bIdx);
                   const barBaseKey = barBaseKeys[sIdx]?.[bIdx] || sectionWrittenKey || sectionStartKey || song.originalKey;
                   const barWrittenKey = barActiveKeys[sIdx]?.[bIdx] || barBaseKey;
-                  const barDisplayBaseKey = getDisplayKeyForPosition(barBaseKey, sIdx, bIdx - 1);
+                  const barDisplayBaseKey = getDisplayKeyForPosition(sIdx, bIdx - 1);
                   const barTargetKey = bar.keyChangeTo ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift) : undefined;
-                  const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(barWrittenKey, sIdx, bIdx);
+                  const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(sIdx, bIdx);
                   const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
 
                   if (isSpaceConstrainedBarLayout) {

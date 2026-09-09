@@ -39,7 +39,7 @@ import {
   findSongBar,
   getEffectiveTimeSignatureForBar,
   getEffectiveTimeSignatureForTarget,
-  getSongKeyStates,
+  getSongDisplayKeyStates,
   type SongBarIdentity
 } from './songEditing';
 
@@ -533,16 +533,8 @@ export const getJianpuSectionPlayKey = (
 ): Key => {
   const overriddenKey = pitchContext?.playKeyBySectionId?.[sectionId];
   if (overriddenKey) return overriddenKey;
-  const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
-  let writtenKey = song.originalKey;
-  for (const section of song.sections) {
-    if (section.keyChangeTo) writtenKey = section.keyChangeTo;
-    if (section.id === sectionId) {
-      const currentKey = transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey);
-      return getPlayKey(currentKey, song.capo || 0);
-    }
-  }
-  const currentKey = transposeKeyWithPreference(song.originalKey, globalKeyShift, song.currentKey);
+  const sectionIndex = song.sections.findIndex((section) => section.id === sectionId);
+  const currentKey = getSongDisplayKeyStates(song).sectionActiveKeys[sectionIndex] ?? song.currentKey;
   return getPlayKey(currentKey, song.capo || 0);
 };
 
@@ -562,28 +554,16 @@ const getJianpuTargetPlayKey = (
   return getJianpuSectionPlayKey(song, target.sectionId, pitchContext);
 };
 
-const getJianpuSectionPlayKeys = (song: Song): Key[] => {
-  const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
-  const keyStates = getSongKeyStates(song);
-  return song.sections.map((_, sectionIndex) => {
-    const writtenKey = keyStates.sectionActiveKeys[sectionIndex] ?? song.originalKey;
-    return getPlayKey(
-      transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey),
-      song.capo || 0
-    );
-  });
-};
+const getJianpuSectionPlayKeys = (song: Song): Key[] => (
+  getSongDisplayKeyStates(song).sectionActiveKeys.map((key) => getPlayKey(key, song.capo || 0))
+);
 
 const getJianpuBarPlayKey = (song: Song, sectionIndex: number, barIndex: number): Key => {
-  const globalKeyShift = getTransposeOffset(song.originalKey, song.currentKey);
-  const keyStates = getSongKeyStates(song);
-  const writtenKey = keyStates.barActiveKeys[sectionIndex]?.[barIndex]
+  const keyStates = getSongDisplayKeyStates(song);
+  const currentKey = keyStates.barActiveKeys[sectionIndex]?.[barIndex]
     ?? keyStates.sectionActiveKeys[sectionIndex]
-    ?? song.originalKey;
-  return getPlayKey(
-    transposeKeyWithPreference(writtenKey, globalKeyShift, song.currentKey),
-    song.capo || 0
-  );
+    ?? song.currentKey;
+  return getPlayKey(currentKey, song.capo || 0);
 };
 
 export const getJianpuPickupPlayKey = (song: Song): Key => {
@@ -594,23 +574,23 @@ export const getJianpuPickupPlayKey = (song: Song): Key => {
   );
 };
 
-export const buildJianpuPitchContext = (song: Song): JianpuPitchContext => ({
-  playKeyBySectionId: Object.fromEntries(
-    song.sections
-      .filter((section) => Boolean(section.id))
-      .map((section) => [section.id!, getJianpuSectionPlayKey(song, section.id!)])
-  ),
-  playKeyByBarId: Object.fromEntries(
-    song.sections.flatMap((section, sectionIndex) => (
-      section.bars
-        .map((bar, barIndex) => (
-          bar.id ? [bar.id, getJianpuBarPlayKey(song, sectionIndex, barIndex)] as const : null
-        ))
-        .filter((entry): entry is readonly [string, Key] => Boolean(entry))
-    ))
-  ),
-  pickupPlayKey: getJianpuPickupPlayKey(song)
-});
+export const buildJianpuPitchContext = (song: Song): JianpuPitchContext => {
+  const keyStates = getSongDisplayKeyStates(song);
+  const capo = song.capo || 0;
+  return {
+    playKeyBySectionId: Object.fromEntries(
+      song.sections.flatMap((section, sectionIndex) => section.id
+        ? [[section.id, getPlayKey(keyStates.sectionActiveKeys[sectionIndex], capo)]]
+        : [])
+    ),
+    playKeyByBarId: Object.fromEntries(
+      song.sections.flatMap((section, sectionIndex) => section.bars.flatMap((bar, barIndex) => bar.id
+        ? [[bar.id, getPlayKey(keyStates.barActiveKeys[sectionIndex][barIndex], capo)]]
+        : []))
+    ),
+    pickupPlayKey: getJianpuPickupPlayKey(song)
+  };
+};
 
 /**
  * Changes the interpretation mode while keeping the visible numbers unchanged.

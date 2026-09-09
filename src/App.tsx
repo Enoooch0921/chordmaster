@@ -154,6 +154,7 @@ import {
   finalizeSectionTitleEdit,
   findSongBar,
   getBarStoredKey,
+  getBarDisplayKey,
   getBeatCount,
   getChordBeatSlots,
   getChordStorageModeForTarget,
@@ -15510,8 +15511,11 @@ export default function App() {
             />
             {activePreviewEditSession && activePreviewEditSession.target.field !== 'sectionName' && activeDraftNavigationPreviewSong && canOpenEditor && !isLyricsMode && (() => {
               const storedKey = getBarStoredKey(activePreviewEditSession.draftSong, activePreviewEditSession.target);
-              const globalOffset = getTransposeOffset(activePreviewEditSession.draftSong.originalKey, activeDraftNavigationPreviewSong.currentKey);
-              const displayedChartKey = transposeKeyWithPreference(storedKey, globalOffset, activeDraftNavigationPreviewSong.currentKey);
+              const displayedChartKey = getBarDisplayKey(
+                activePreviewEditSession.draftSong,
+                activePreviewEditSession.target,
+                activeDraftNavigationPreviewSong.currentKey
+              );
               const displayedKey = getPlayKey(displayedChartKey, activeDraftNavigationPreviewSong.capo ?? 0);
               const storageMode = getChordStorageModeForTarget(
                 activePreviewEditSession.draftSong,

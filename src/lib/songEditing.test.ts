@@ -21,6 +21,9 @@ import {
   getChordPlacementError,
   getMultiMeasureRestPlacementError,
   getSongKeyStates,
+  getSongDisplayKeyStates,
+  getBarDisplayKey,
+  applyBarKeyChange,
   getSongTimeSignatureStates,
   insertBar,
   insertChordBeatBeforeSlot,
@@ -856,5 +859,60 @@ describe('preview chord input mode', () => {
     expect(getChordStorageModeForTarget(mixedSong, {
       sectionId: 'section-1', barId: 'bar-1', slotIndex: 2
     })).toBe('letters');
+  });
+});
+
+
+describe('display key inheritance', () => {
+  it.each([
+    ['F', 'F', 'F#', 'F#'],
+    ['G', 'G', 'Gb', 'Gb'],
+    ['Eb', 'F', 'E', 'F#'],
+    ['D', 'C', 'Ab', 'Gb']
+  ] as const)('preserves %s → %s with explicit %s across bars and sections', (originalKey, currentKey, modulation, expected) => {
+    const song: Song = {
+      title: 'Inherited spelling', timeSignature: '4/4', originalKey, currentKey,
+      sections: [
+        { id: 'a', title: 'Verse', bars: [
+          { id: 'a1', chords: ['1'] },
+          { id: 'a2', keyChangeTo: modulation, chords: ['5'] },
+          { id: 'a3', chords: ['1/3'] }
+        ] },
+        { id: 'b', title: 'Chorus', bars: [{ id: 'b1', chords: ['1'] }] },
+        { id: 'c', title: 'Outro', keyChangeTo: originalKey, bars: [{ id: 'c1', chords: ['1'] }] }
+      ]
+    };
+    const before = JSON.stringify(song);
+    const states = getSongDisplayKeyStates(song);
+    expect(states.barActiveKeys.slice(0, 2)).toEqual([[currentKey, expected, expected], [expected]]);
+    expect(states.barBaseKeys.slice(0, 2)).toEqual([[currentKey, currentKey, expected], [expected]]);
+    expect(states.sectionBaseKeys).toEqual([currentKey, expected, expected]);
+    expect(getBarDisplayKey(song, { sectionId: 'b', barId: 'b1' })).toBe(expected);
+    expect(getSongKeyStates(song).barActiveKeys[1]).toEqual([modulation]);
+    expect(JSON.stringify(song)).toBe(before);
+  });
+
+  it('distinguishes an explicit enharmonic choice from the global display key', () => {
+    const song: Song = { title: 'Same pitch', timeSignature: '4/4', originalKey: 'F#', currentKey: 'Gb', sections: [
+      { id: 'a', title: 'Verse', bars: [
+        { id: 'a1', chords: ['1'] },
+        { id: 'a2', keyChangeTo: 'F#', chords: ['1'] },
+        { id: 'a3', chords: ['5'] },
+        { id: 'a4', keyChangeTo: 'Gb', chords: ['1'] }
+      ] }
+    ] };
+    expect(getSongDisplayKeyStates(song).barActiveKeys).toEqual([['Gb', 'F#', 'F#', 'Gb']]);
+  });
+
+  it('changes and removes the modulation without rewriting Nashville chords', () => {
+    const song: Song = { title: 'Video reproduction', timeSignature: '4/4', originalKey: 'F', currentKey: 'F', sections: [
+      { id: 'a', title: 'Verse', bars: [{ id: 'a1', chords: ['1'] }, { id: 'a2', chords: ['5'] }] },
+      { id: 'b', title: 'Chorus', bars: [{ id: 'b1', chords: ['1', '5', '6m', '4'] }] }
+    ] };
+    const changed = applyBarKeyChange(song, { sectionId: 'a', barId: 'a2' }, 'F#');
+    expect(getSongDisplayKeyStates(changed).barActiveKeys).toEqual([['F', 'F#'], ['F#']]);
+    expect(changed.sections[1].bars[0].chords).toEqual(song.sections[1].bars[0].chords);
+    const restored = applyBarKeyChange(changed, { sectionId: 'a', barId: 'a2' });
+    expect(getSongDisplayKeyStates(restored).barActiveKeys).toEqual([['F', 'F'], ['F']]);
   });
 });

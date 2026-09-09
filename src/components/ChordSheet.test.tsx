@@ -169,6 +169,39 @@ describe('ChordSheet preview input caret', () => {
     expect(screen.getByText('Key: E')).toBeInTheDocument();
   });
 
+  it.each([false, true])('keeps an F# modulation through page breaks (Nashville: %s)', (showNashvilleNumbers) => {
+    const source: Song = {
+      ...song, originalKey: 'F', currentKey: 'F', showNashvilleNumbers,
+      sections: [
+        { id: 'verse', title: 'Verse', bars: Array.from({ length: 40 }, (_, index) => ({
+          id: `v${index}`, chords: ['1'], ...(index === 39 ? { keyChangeTo: 'F#' as const } : {})
+        })) },
+        { id: 'chorus', title: 'Chorus', bars: [
+          { id: 'c1', chords: ['1'] }, { id: 'c2', chords: ['5'] },
+          { id: 'c3', chords: ['6m'] }, { id: 'c4', chords: ['4'] }
+        ] }
+      ]
+    };
+    const { container } = render(<ChordSheet song={source} language="en" currentKey="F" />);
+    expect(screen.getAllByText('Key: F#')).toHaveLength(1);
+    expect(container.textContent).not.toContain('Gb');
+    expect(container.textContent).not.toContain('G♭');
+    const chorusText = ['c1', 'c2', 'c3', 'c4'].map((id) => container.querySelector(`[data-preview-clipboard-bar="${id}"]`)?.textContent?.replace(/\s/g, ''));
+    const expected = showNashvilleNumbers ? ['1', '5', '6m', '4'] : ['F#', 'C#', 'D#m', 'B'];
+    expected.forEach((chord, index) => expect(chorusText[index]).toContain(chord));
+  });
+
+  it('inherits a section modulation and respects a later explicit flat key', () => {
+    const source: Song = { ...song, originalKey: 'Eb', currentKey: 'F', sections: [
+      { id: 'a', title: 'Verse', keyChangeTo: 'E', bars: [{ id: 'a1', chords: ['1'] }, { id: 'a2', chords: ['5'] }] },
+      { id: 'b', title: 'Chorus', bars: [{ id: 'b1', chords: ['1'] }, { id: 'b2', keyChangeTo: 'Ab', chords: ['1'] }] }
+    ] };
+    render(<ChordSheet song={source} language="en" currentKey="F" />);
+    expect(screen.getAllByText('Key: F#')).toHaveLength(1);
+    expect(screen.getByText('Key: Bb')).toBeInTheDocument();
+    expect(screen.queryByText('Key: Gb')).not.toBeInTheDocument();
+  });
+
   it('shows only the editable performance key while the chart is temporarily transposed', () => {
     const onMetaClick = vi.fn();
     const transposedSong: Song = {

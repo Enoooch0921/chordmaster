@@ -17,6 +17,7 @@ import {
   normalizeChordEnharmonic,
   parseNashvilleToChord,
   transposeChord,
+  transposeKeyPreservingSpelling,
   transposeKeyWithPreference
 } from '../utils/musicUtils';
 import { getEffectiveTimeSignature } from '../utils/rhythmUtils';
@@ -729,23 +730,26 @@ const isFormatNeutralChord = (chord: string) => {
     || /^0(?:_|h|w)?$/i.test(trimmed);
 };
 
-export const getSongKeyStates = (song: Song): SongKeyStates => {
+const collectSongKeyStates = (
+  song: Song,
+  resolveKey: (key: Key, explicit: boolean) => Key
+): SongKeyStates => {
   const sectionBaseKeys: Key[] = [];
   const sectionActiveKeys: Key[] = [];
   const barBaseKeys: Key[][] = [];
   const barActiveKeys: Key[][] = [];
-  let activeKey = song.originalKey;
+  let activeKey = resolveKey(song.originalKey, false);
 
   song.sections.forEach((section) => {
     sectionBaseKeys.push(activeKey);
-    if (section.keyChangeTo) activeKey = section.keyChangeTo;
+    if (section.keyChangeTo) activeKey = resolveKey(section.keyChangeTo, true);
     sectionActiveKeys.push(activeKey);
 
     const baseKeys: Key[] = [];
     const activeKeys: Key[] = [];
     section.bars.forEach((bar) => {
       baseKeys.push(activeKey);
-      if (bar.keyChangeTo) activeKey = bar.keyChangeTo;
+      if (bar.keyChangeTo) activeKey = resolveKey(bar.keyChangeTo, true);
       activeKeys.push(activeKey);
     });
     barBaseKeys.push(baseKeys);
@@ -753,6 +757,28 @@ export const getSongKeyStates = (song: Song): SongKeyStates => {
   });
 
   return { sectionBaseKeys, sectionActiveKeys, barBaseKeys, barActiveKeys };
+};
+
+export const getSongKeyStates = (song: Song): SongKeyStates => (
+  collectSongKeyStates(song, (key) => key)
+);
+
+/** An explicit modulation's spelling is inherited until the next key change. */
+export const getSongDisplayKeyStates = (song: Song, currentKey: Key = song.currentKey): SongKeyStates => {
+  const shift = getTransposeOffset(song.originalKey, currentKey);
+  return collectSongKeyStates(song, (key, explicit) => explicit
+    ? transposeKeyPreservingSpelling(key, shift)
+    : currentKey);
+};
+
+export const getBarDisplayKey = (
+  song: Song,
+  target: SongBarIdentity,
+  currentKey: Key = song.currentKey
+): Key => {
+  const located = findSongBar(song, target);
+  if (!located) return currentKey;
+  return getSongDisplayKeyStates(song, currentKey).barActiveKeys[located.sectionIndex][located.barIndex];
 };
 
 const getSectionActiveKeys = (song: Song) => getSongKeyStates(song).sectionActiveKeys;

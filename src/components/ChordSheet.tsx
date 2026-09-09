@@ -8,11 +8,12 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker, BarLabelLane } from '../types';
-import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, transposeKeyPreservingSpelling, transposeKeyWithPreference, normalizeKeySpelling } from '../utils/musicUtils';
+import { getTransposeOffset, transposeChordForDisplay, getSectionColor, getNashvilleNumber, isNashville, parseNashvilleToChord, getPlayKey, transposeKeyPreferFlats, normalizeKeySpelling } from '../utils/musicUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import {
   getEffectiveTimeSignatureForBar,
   getSongKeyStates,
+  getSongDisplayKeyStates,
   getSongTimeSignatureStates,
   isBarCompletelyEmpty
 } from '../lib/songEditing';
@@ -1826,7 +1827,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const capo = song.capo || 0;
   const displayedCurrentKey = normalizeKeySpelling(currentKey);
   const baseWrittenKey = transposeFromOriginal ? song.originalKey : displayedCurrentKey;
-  const globalKeyShift = transposeFromOriginal ? getTransposeOffset(song.originalKey, displayedCurrentKey) : 0;
   const songKeyStates = transposeFromOriginal
     ? getSongKeyStates(song)
     : {
@@ -1835,12 +1835,19 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       barBaseKeys: song.sections.map((section) => section.bars.map(() => baseWrittenKey)),
       barActiveKeys: song.sections.map((section) => section.bars.map(() => baseWrittenKey))
     };
+  const displayKeyStates = transposeFromOriginal
+    ? getSongDisplayKeyStates(song, displayedCurrentKey)
+    : songKeyStates;
   const sectionStartKeys = songKeyStates.sectionActiveKeys;
   const chartWrittenKeySequence = songKeyStates.barActiveKeys.flat().length > 0
     ? songKeyStates.barActiveKeys.flat()
     : (sectionStartKeys.length > 0 ? sectionStartKeys : [baseWrittenKey]);
   const displayedChartKeySequence = getConsecutiveKeySequence(
-    chartWrittenKeySequence.map((key) => transposeKeyWithPreference(key, globalKeyShift, displayedCurrentKey))
+    displayKeyStates.barActiveKeys.flat().length > 0
+      ? displayKeyStates.barActiveKeys.flat()
+      : displayKeyStates.sectionActiveKeys.length > 0
+        ? displayKeyStates.sectionActiveKeys
+        : [displayedCurrentKey]
   );
   const metadataKeySequence = showWrittenKeyInMetadata
     ? getConsecutiveKeySequence(chartWrittenKeySequence)
@@ -2286,7 +2293,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 );
               }
               const sectionWrittenKey = sectionStartKeys[row.sIdx] || song.originalKey;
-              const sectionCurrentKey = transposeKeyWithPreference(sectionWrittenKey, globalKeyShift, displayedCurrentKey);
+              const sectionCurrentKey = displayKeyStates.sectionActiveKeys[row.sIdx] ?? displayedCurrentKey;
               const sectionPlayKey = getPlayKey(sectionCurrentKey, capo);
               const colors = getSectionColor(section?.title || '', true);
               const activeTone = getSectionActiveTone(colors.accent);
@@ -2741,17 +2748,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const previousBar = row.bars[bIdx - 1];
                     const globalBarIndex = row.startBIdx + bIdx;
                     const barWrittenKey = songKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex] ?? sectionWrittenKey;
-                    const previousBarWrittenKey = globalBarIndex > 0
-                      ? songKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex - 1] ?? sectionWrittenKey
+                    const barCurrentKey = displayKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex] ?? sectionCurrentKey;
+                    const previousBarCurrentKey = globalBarIndex > 0
+                      ? displayKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex - 1] ?? sectionCurrentKey
                       : row.sIdx > 0
-                        ? songKeyStates.barActiveKeys[row.sIdx - 1]?.at(-1) ?? sectionStartKeys[row.sIdx - 1] ?? song.originalKey
-                        : song.originalKey;
-                    const barCurrentKey = bar?.keyChangeTo
-                      ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift)
-                      : transposeKeyWithPreference(barWrittenKey, globalKeyShift, displayedCurrentKey);
-                    const previousBarCurrentKey = globalBarIndex > 0 || row.sIdx > 0
-                      ? transposeKeyWithPreference(previousBarWrittenKey, globalKeyShift, displayedCurrentKey)
-                      : displayedCurrentKey;
+                        ? displayKeyStates.barActiveKeys[row.sIdx - 1]?.at(-1) ?? displayKeyStates.sectionActiveKeys[row.sIdx - 1] ?? displayedCurrentKey
+                        : displayedCurrentKey;
                     const barPlayKey = getPlayKey(barCurrentKey, capo);
                     const barOffset = getTransposeOffset(barWrittenKey, barPlayKey);
                     const showKeyChangeTag = Boolean(bar) && barCurrentKey !== previousBarCurrentKey;
@@ -2762,24 +2764,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const previewRiffNotation = song.showAbsoluteJianpu
                       ? convertRelativeJianpuToAbsoluteNotation(canonicalRiffNotation, barPlayKey)
                       : canonicalRiffNotation;
-                    const previousBarGlobalIndex = globalBarIndex - 1;
-                    const previousPlayKey = previousBarGlobalIndex >= 0
-                      ? getPlayKey(
-                        transposeKeyWithPreference(
-                          songKeyStates.barActiveKeys[row.sIdx]?.[previousBarGlobalIndex] ?? barWrittenKey,
-                          globalKeyShift,
-                          displayedCurrentKey
-                        ),
-                        capo
-                      )
+                    const previousPlayKey = globalBarIndex > 0
+                      ? getPlayKey(displayKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex - 1] ?? barCurrentKey, capo)
                       : barPlayKey;
-                    const nextBarGlobalIndex = globalBarIndex + 1;
                     const nextPlayKey = getPlayKey(
-                      transposeKeyWithPreference(
-                        songKeyStates.barActiveKeys[row.sIdx]?.[nextBarGlobalIndex] ?? barWrittenKey,
-                        globalKeyShift,
-                        displayedCurrentKey
-                      ),
+                      displayKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex + 1] ?? barCurrentKey,
                       capo
                     );
                     const previousCanonicalRiffNotation = getPreviewRiffNotation(

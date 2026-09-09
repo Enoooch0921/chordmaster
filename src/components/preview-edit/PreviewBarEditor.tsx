@@ -57,7 +57,7 @@ import {
   getChordPlacementError,
   getEffectiveTimeSignatureForBar,
   getMultiMeasureRestPlacementError,
-  getSongKeyStates,
+  getSongDisplayKeyStates,
   insertChordBeatBeforeSlot,
   isBarCompletelyEmpty,
   normalizeChordTextInput,
@@ -67,7 +67,7 @@ import {
   toggleEndingNumber,
   updateEditableBarFields
 } from '../../lib/songEditing';
-import { getTransposeOffset, transposeKeyPreservingSpelling, transposeKeyWithPreference } from '../../utils/musicUtils';
+import { getTransposeOffset, transposeKeyWithPreference } from '../../utils/musicUtils';
 import {
   JianpuInputGlyph,
   JianpuTripletKeyGlyph,
@@ -310,23 +310,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const effectiveBarTimeSignature = bar
     ? getEffectiveTimeSignatureForBar(session.draftSong, bar)
     : session.draftSong.timeSignature || '4/4';
-  const keyStates = getSongKeyStates(session.draftSong);
+  const keyStates = getSongDisplayKeyStates(session.draftSong);
   const sectionIndex = located?.sectionIndex ?? -1;
   const barIndex = located?.barIndex ?? -1;
   const globalKeyShift = getTransposeOffset(session.draftSong.originalKey, session.draftSong.currentKey);
-  const barBaseKey = sectionIndex >= 0 && barIndex >= 0
-    ? keyStates.barBaseKeys[sectionIndex]?.[barIndex]
-      ?? keyStates.sectionActiveKeys[sectionIndex]
-      ?? session.draftSong.originalKey
-    : session.draftSong.originalKey;
-  const barWrittenKey = sectionIndex >= 0 && barIndex >= 0
-    ? keyStates.barActiveKeys[sectionIndex]?.[barIndex] ?? barBaseKey
-    : barBaseKey;
-  const barDisplayBaseKey = transposeKeyWithPreference(barBaseKey, globalKeyShift, session.draftSong.currentKey);
-  const barTargetKey = bar?.keyChangeTo
-    ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift)
-    : undefined;
-  const barDisplayKey = barTargetKey ?? transposeKeyWithPreference(barWrittenKey, globalKeyShift, session.draftSong.currentKey);
+  const barDisplayBaseKey = keyStates.barBaseKeys[sectionIndex]?.[barIndex]
+    ?? session.draftSong.currentKey;
+  const barDisplayKey = keyStates.barActiveKeys[sectionIndex]?.[barIndex] ?? barDisplayBaseKey;
+  const barTargetKey = bar?.keyChangeTo ? barDisplayKey : undefined;
 
   React.useEffect(() => {
     setMode(modeForField(session.target.field));
