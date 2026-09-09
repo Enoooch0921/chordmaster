@@ -653,6 +653,7 @@ const SongEditor: React.FC<Props> = ({
   const [jianpuInputMode, setJianpuInputMode] = useState<JianpuInputMode>({ duration: 'quarter', octave: 0, dotted: false, triplet: false, accidental: '' });
   const [barPanels, setBarPanels] = useState<Record<string, BarPanelState>>({});
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(() => new Set());
+  const [chordOnlySectionIds, setChordOnlySectionIds] = useState<Set<string>>(() => new Set());
   const sectionContentIdPrefix = React.useId();
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
   const [isBarDragging, setIsBarDragging] = useState(false);
@@ -688,6 +689,12 @@ const SongEditor: React.FC<Props> = ({
   const shouldUseManualCompactInspector = isPhoneViewport && isSpaceConstrainedBarLayout;
   const compactInspectorTarget = shouldUseManualCompactInspector ? compactInspectorBar : activeBar;
   const barGridClassName = `grid gap-2.5 ${barLayoutMode === 'stacked' ? 'grid-cols-1' : 'grid-cols-4'}`;
+  const allSectionsCollapsed = song.sections.every((section, index) => collapsedSectionIds.has(section.id || `section-${index}`));
+  const allSectionsChordOnly = song.sections.every((section, index) =>
+    !collapsedSectionIds.has(section.id || `section-${index}`) && chordOnlySectionIds.has(section.id || `section-${index}`));
+  const allSectionsFull = song.sections.every((section, index) =>
+    !collapsedSectionIds.has(section.id || `section-${index}`) && !chordOnlySectionIds.has(section.id || `section-${index}`));
+  const sectionViewButtonClass = 'rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 aria-pressed:border-indigo-300 aria-pressed:bg-indigo-50 aria-pressed:text-indigo-700';
 
   const notifyChange = (newSong: Song) => {
     onChange(newSong);
@@ -786,6 +793,16 @@ const SongEditor: React.FC<Props> = ({
   const expandSection = (sIdx: number) => {
     const sectionId = song.sections[sIdx]?.id || `section-${sIdx}`;
     setCollapsedSectionIds((current) => {
+      if (!current.has(sectionId)) return current;
+      const next = new Set(current);
+      next.delete(sectionId);
+      return next;
+    });
+  };
+
+  const showFullSection = (sIdx: number) => {
+    const sectionId = song.sections[sIdx]?.id || `section-${sIdx}`;
+    setChordOnlySectionIds((current) => {
       if (!current.has(sectionId)) return current;
       const next = new Set(current);
       next.delete(sectionId);
@@ -4890,6 +4907,7 @@ const SongEditor: React.FC<Props> = ({
     // Preview-to-editor navigation must reveal the requested bar before focusing it.
     if (field !== 'sectionName' && bIdx >= 0) {
       expandSection(sIdx);
+      if (field !== 'chords') showFullSection(sIdx);
     }
 
     // Clicking a section name in the preview focuses that section's title input.
@@ -6754,16 +6772,27 @@ const SongEditor: React.FC<Props> = ({
 
       {/* Sections */}
       {song.sections.length > 0 && (
-        <div className="mb-3 flex justify-end gap-2">
-          <button type="button" onClick={() => {
+        <div className="mb-3 flex flex-wrap justify-end gap-2">
+          <button type="button" aria-pressed={allSectionsCollapsed} onClick={() => {
             clearEditorSelectionState();
             setCompactInspectorBar(null);
             setCollapsedSectionIds(new Set(song.sections.map((section, index) => section.id || `section-${index}`)));
-          }} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+          }} className={sectionViewButtonClass}>
             {language === 'zh' ? '全部收合' : 'Collapse all'}
           </button>
-          <button type="button" onClick={() => setCollapsedSectionIds(new Set())}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+          <button type="button" aria-pressed={allSectionsChordOnly} onClick={() => {
+            clearEditorSelectionState();
+            setCompactInspectorBar(null);
+            setChordOnlySectionIds(new Set(song.sections.map((section, index) => section.id || `section-${index}`)));
+            setCollapsedSectionIds(new Set());
+          }} className={sectionViewButtonClass}>
+            {language === 'zh' ? '只看和弦' : 'Chords only'}
+          </button>
+          <button type="button" aria-pressed={allSectionsFull} onClick={() => {
+            setChordOnlySectionIds(new Set());
+            setCollapsedSectionIds(new Set());
+          }}
+            className={sectionViewButtonClass}>
             {language === 'zh' ? '全部展開' : 'Expand all'}
           </button>
         </div>
@@ -6774,6 +6803,7 @@ const SongEditor: React.FC<Props> = ({
           const colors = getSectionColor(section.title, true);
           const sectionId = section.id || `section-${sIdx}`;
           const isSectionCollapsed = collapsedSectionIds.has(sectionId);
+          const isChordOnly = chordOnlySectionIds.has(sectionId);
           const sectionContentId = `${sectionContentIdPrefix}-${sectionId}-content`;
           const sectionStartKey = sectionBaseKeys[sIdx] || song.originalKey;
           const sectionWrittenKey = sectionActiveKeys[sIdx] || sectionStartKey;
@@ -7047,7 +7077,7 @@ const SongEditor: React.FC<Props> = ({
               id={sectionContentId}
               layout
               transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
-              className={barGridClassName}
+              className={isChordOnly ? 'grid grid-cols-2 gap-2.5 sm:grid-cols-4' : barGridClassName}
             >
               {section.bars.map((bar, bIdx) => (
                 (() => {
@@ -7064,9 +7094,9 @@ const SongEditor: React.FC<Props> = ({
                   const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(sIdx, bIdx);
                   const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
 
-                  if (isSpaceConstrainedBarLayout) {
+                  if (isSpaceConstrainedBarLayout || isChordOnly) {
                     const compactSummary = [getBarDisplayLabel(bar), bar.annotation].filter(Boolean).join(' · ');
-                    const shouldRenderInlineCompactEditor = compactEditorState?.anchorBarIndex === bIdx;
+                    const shouldRenderInlineCompactEditor = !isChordOnly && compactEditorState?.anchorBarIndex === bIdx;
 
                     return (
                       <React.Fragment key={`compact-fragment-${bar.id || `${sIdx}-${bIdx}`}`}>
@@ -7075,7 +7105,7 @@ const SongEditor: React.FC<Props> = ({
                           ref={node => setBarRef(bar.id, node)}
                           onMouseDownCapture={() => markActiveBar(sIdx, bIdx)}
                           onFocusCapture={() => {
-                            if (shouldUseManualCompactInspector) {
+                            if (shouldUseManualCompactInspector || isChordOnly) {
                               markActiveBar(sIdx, bIdx);
                               return;
                             }
@@ -7083,7 +7113,7 @@ const SongEditor: React.FC<Props> = ({
                             openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
                           }}
                           onClick={() => {
-                            if (!shouldUseManualCompactInspector) {
+                            if (!shouldUseManualCompactInspector && !isChordOnly) {
                               openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
                             }
                           }}
@@ -7125,6 +7155,7 @@ const SongEditor: React.FC<Props> = ({
                               <div className="inline-flex min-w-[1.75rem] items-center justify-center rounded-md border border-gray-100 bg-gray-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none tabular-nums text-gray-400">
                                 {globalBarNumber}
                               </div>
+                              {!isChordOnly && <>
                               <div className="inline-flex items-center rounded-md border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-indigo-600">
                                 {getBarTimeSignature(bar)}
                               </div>
@@ -7135,8 +7166,9 @@ const SongEditor: React.FC<Props> = ({
                               }`}>
                                 {barTargetKey ?? barDisplayKey}
                               </div>
+                              </>}
                             </div>
-                            {compactSummary ? (
+                            {!isChordOnly && compactSummary ? (
                               <div className="mt-1 truncate text-[10px] font-medium text-gray-400">
                                 {compactSummary}
                               </div>
@@ -7162,6 +7194,7 @@ const SongEditor: React.FC<Props> = ({
                               type="button"
                               onClick={e => {
                                 e.stopPropagation();
+                                showFullSection(sIdx);
                                 toggleCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
                               }}
                               className={`flex h-7 w-7 items-center justify-center rounded-full border transition-colors ${
@@ -7169,7 +7202,7 @@ const SongEditor: React.FC<Props> = ({
                                   ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
                                   : 'border-gray-200 bg-white text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
                               }`}
-                              title={copy.editor.more}
+                              title={isChordOnly ? (language === 'zh' ? '展開完整編輯' : 'Show full editor') : copy.editor.more}
                             >
                               <ArrowUpRight size={13} />
                             </button>
@@ -7192,7 +7225,7 @@ const SongEditor: React.FC<Props> = ({
                             onFocus={e => {
                               const input = e.currentTarget;
                               const len = input.value.length;
-                              if (!shouldUseManualCompactInspector) {
+                              if (!shouldUseManualCompactInspector && !isChordOnly) {
                                 openCompactBarInspector(section.id ?? null, bar, sIdx, bIdx);
                               } else {
                                 markActiveBar(sIdx, bIdx);
@@ -8091,7 +8124,7 @@ const SongEditor: React.FC<Props> = ({
                     : isBarDragging
                       ? 'bg-amber-50/70 border-amber-300 shadow-[0_0_0_3px_rgba(251,191,36,0.12),0_10px_26px_rgba(251,191,36,0.14)]'
                       : 'bg-white border-gray-300 hover:border-indigo-300 hover:bg-indigo-50'
-                } ${isSpaceConstrainedBarLayout ? 'min-h-[124px]' : 'min-h-[200px]'}`}
+                } ${isSpaceConstrainedBarLayout || isChordOnly ? 'min-h-[124px]' : 'min-h-[200px]'}`}
               >
                 <button
                   type="button"
@@ -8108,7 +8141,7 @@ const SongEditor: React.FC<Props> = ({
                       : isBarDragging
                         ? 'text-amber-600'
                         : 'text-gray-400 hover:text-indigo-500'
-                  } ${isSpaceConstrainedBarLayout ? 'min-h-[120px]' : 'min-h-[196px]'}`}
+                  } ${isSpaceConstrainedBarLayout || isChordOnly ? 'min-h-[120px]' : 'min-h-[196px]'}`}
                 >
                   <Plus size={24} className="mb-1" />
                   <span className="text-xs font-bold uppercase tracking-wider">
@@ -8138,7 +8171,7 @@ const SongEditor: React.FC<Props> = ({
 
       {/* Floating Toolbar for Selection */}
       <AnimatePresence>
-        {selection && (
+        {selection && (selection.bIdx < 0 || !chordOnlySectionIds.has(song.sections[selection.sIdx]?.id || `section-${selection.sIdx}`)) && (
           <motion.div
             ref={toolbarRef}
             initial={{ y: 100, opacity: 0 }}

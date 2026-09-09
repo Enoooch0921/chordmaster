@@ -54,6 +54,43 @@ const renderEditor = (song: Song, jianpuPitchContext?: JianpuPitchContext) => {
 };
 
 describe('SongEditor shared notation commands', () => {
+  it('edits chords without revealing or changing rhythm and jianpu in chords-only mode', () => {
+    const song = makeSong({ riff: '1 | 2 | 3 | 4', rhythm: 'q q q q', annotation: 'Keep this' });
+    const onChange = renderEditor(song);
+    fireEvent.click(screen.getByRole('button', { name: '只看和弦' }));
+    expect(screen.getByRole('button', { name: '只看和弦' })).toHaveAttribute('aria-pressed', 'true');
+    const input = document.getElementById('editor-s0-b0-chords')!;
+    fireEvent.focus(input);
+    fireEvent.click(input);
+    expect(screen.queryByText('全休止')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '簡譜 editor for bar 1' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Select rhythm note 1' })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'Dm' } });
+    const changed = onChange.mock.calls.at(-1)?.[0] as Song;
+    expect(changed.sections[0].bars[0]).toMatchObject({ chords: ['Dm'], riff: '1 | 2 | 3 | 4', rhythm: 'q q q q', annotation: 'Keep this' });
+    fireEvent.click(screen.getByRole('button', { name: '全部收合' }));
+    expect(document.getElementById('editor-s0-b0-chords')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '展開段落 Verse' }));
+    expect(document.getElementById('editor-s0-b0-chords')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '簡譜 editor for bar 1' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '全部展開' }));
+    expect(screen.getByRole('textbox', { name: '簡譜 editor for bar 1' })).toBeInTheDocument();
+  });
+
+  it('opens the requested notation field from chords-only mode without opening other sections', async () => {
+    const song = makeSong({ riff: '1 | 2 | 3 | 4' });
+    song.sections.push({ id: 'section-2', title: 'Chorus', bars: [{ id: 'bar-2', chords: ['G'], riff: '5' }] });
+    const props = { song, language: 'zh' as const, history: { past: [], future: [] },
+      onUndo: vi.fn(), onRedo: vi.fn(), onChange: vi.fn(), onFocusRequestHandled: vi.fn(), activeBar: { sIdx: 0, bIdx: 0 } };
+    const { rerender } = render(<SongEditor {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '只看和弦' }));
+    rerender(<SongEditor {...props} focusRequest={{ sIdx: 0, bIdx: 0, field: 'riff', requestId: 1, instant: true }} />);
+    await waitFor(() => expect(document.getElementById('editor-s0-b0-riff')).toHaveFocus());
+    expect(document.getElementById('editor-s1-b0-riff')).not.toBeInTheDocument();
+    expect(document.getElementById('editor-s1-b0-chords')).toBeInTheDocument();
+  });
+
   it('keeps collapsed sections attached to their IDs when reordered without changing song data', () => {
     const song = makeSong({});
     song.sections.push({ id: 'section-2', title: 'Chorus', bars: [{ id: 'bar-2', chords: ['G'] }] });
