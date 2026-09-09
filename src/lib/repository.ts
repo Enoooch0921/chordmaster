@@ -221,6 +221,7 @@ const upsertProfile = async (userId: string, email: string, name: string, pictur
 export interface WorkspaceRepository {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   loadLibraryWorkspace(libraryId: string): Promise<WorkspaceSnapshot>;
+  loadLibraryContent(libraryId: string, signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>>;
   loadLibrarySongs(libraryId: string): Promise<StoredSong[]>;
   loadPersonalWorkspace(): Promise<WorkspaceSnapshot>;
   loadJoinedWorkspace(): Promise<Pick<WorkspaceSnapshot, 'joinedSetlists' | 'joinedProjects'>>;
@@ -759,6 +760,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   async loadLibraryWorkspace() {
     return loadLocalWorkspaceSnapshot();
   },
+  async loadLibraryContent() {
+    return loadLocalWorkspaceSnapshot();
+  },
   async loadLibrarySongs() {
     return loadLocalWorkspaceSnapshot().songs;
   },
@@ -980,11 +984,12 @@ const ensureProfileAndLibrary = async (userId: string, email: string, name: stri
   };
 };
 
-const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<WorkspaceSnapshot> => {
+const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: AbortSignal): Promise<WorkspaceSnapshot> => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
 
+  const requestSignal = signal ?? new AbortController().signal;
   const [
     { data: songRows, error: songError },
     { data: setlistRows, error: setlistError },
@@ -994,16 +999,19 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
       .from('songs')
       .select(SONG_SELECT)
       .eq('library_id', libraryId)
+      .abortSignal(requestSignal)
       .returns<SongRow[]>(),
     supabase
       .from('setlists')
       .select('id, library_id, name, display_mode, show_lyrics, archived, project_id, client_legacy_id, created_by, updated_by, created_at, updated_at')
       .eq('library_id', libraryId)
+      .abortSignal(requestSignal)
       .returns<SetlistRow[]>(),
     supabase
       .from('projects')
       .select('id, library_id, name, archived, created_by, updated_by, created_at, updated_at')
       .eq('library_id', libraryId)
+      .abortSignal(requestSignal)
       .returns<ProjectRow[]>()
   ]);
 
@@ -1023,6 +1031,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
       .from('setlist_songs')
       .select('id, setlist_id, song_id, order_index, override_json')
       .in('setlist_id', setlistIds)
+      .abortSignal(requestSignal)
       .returns<SetlistSongRow[]>()
     : { data: [] as SetlistSongRow[], error: null };
 
@@ -1036,6 +1045,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
       .select('setlist_id, user_id')
       .in('setlist_id', setlistIds)
       .eq('user_id', userId)
+      .abortSignal(requestSignal)
       .returns<CurrentUserSetlistAssignmentRow[]>()
     : { data: [] as CurrentUserSetlistAssignmentRow[], error: null };
 
@@ -1050,6 +1060,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
       .select('setlist_song_id, capo, updated_at')
       .in('setlist_song_id', setlistSongIds)
       .eq('user_id', userId)
+      .abortSignal(requestSignal)
       .returns<UserSetlistCapoOverrideRow[]>()
     : { data: [] as UserSetlistCapoOverrideRow[], error: null };
 
@@ -1510,6 +1521,12 @@ export const createCloudRepository = (params: {
         isPersonal ? getJoinedProjects() : Promise.resolve([] as JoinedProject[])
       ]);
       return { ...workspace, joinedSetlists, joinedProjects };
+    },
+
+    async loadLibraryContent(libraryId, signal) {
+      // Read the active library without joined collections, cache writes, or
+      // changing the target library used by subsequent saves.
+      return getLibraryWorkspace(libraryId, params.userId, signal);
     },
 
     async loadLibrarySongs(libraryId) {

@@ -17,7 +17,7 @@ import { createCloudRepository } from './repository';
 
 const makeBuilder = (overrides: Record<string, unknown> = {}) => {
   const builder: Record<string, ReturnType<typeof vi.fn>> = {};
-  ['select', 'eq', 'in', 'order', 'limit', 'delete', 'update'].forEach((method) => {
+  ['select', 'eq', 'in', 'order', 'limit', 'delete', 'update', 'abortSignal'].forEach((method) => {
     builder[method] = vi.fn(() => builder);
   });
   builder.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
@@ -352,6 +352,47 @@ describe('cloud repository song creator integrity', () => {
 describe('cloud repository background library reads', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('reads owned setlist keys and personal Capo with scoped, cancellable queries and no writes', async () => {
+    const rows: Record<string, unknown[]> = {
+      songs: [{ id: 'song-1', library_id: 'personal-1', title: 'Alpha', content_json: makeSong(),
+        created_at: '2026-09-01', updated_at: '2026-09-09' }],
+      projects: [], setlist_editor_assignments: [],
+      setlists: [{ id: 'setlist-1', name: 'Sunday', library_id: 'personal-1',
+        display_mode: 'chord-fixed-key', created_at: '2026-09-01', updated_at: '2026-09-09' }],
+      setlist_songs: [{ id: 'entry-1', setlist_id: 'setlist-1', song_id: 'song-1', order_index: 0,
+        override_json: { overrideKey: 'D', songData: makeSong() } }],
+      user_setlist_capo_overrides: [{ setlist_song_id: 'entry-1', capo: 3 }]
+    };
+    const queries = new Map<string, ReturnType<typeof makeBuilder>>();
+    mocks.from.mockImplementation((table: string) => {
+      expect(table in rows).toBe(true);
+      const query = makeBuilder({ returns: vi.fn().mockResolvedValue({ data: rows[table], error: null }) });
+      queries.set(table, query);
+      return query;
+    });
+    const signal = new AbortController().signal;
+    const result = await createRepository().loadLibraryContent('personal-1', signal);
+    expect(result.setlists[0].songs[0]).toMatchObject({ overrideKey: 'D', personalCapoOverride: 3 });
+    for (const table of ['songs', 'setlists', 'projects']) {
+      expect(queries.get(table)?.eq).toHaveBeenCalledWith('library_id', 'personal-1');
+    }
+    expect(queries.get('user_setlist_capo_overrides')?.eq).toHaveBeenCalledWith('user_id', 'user-1');
+    expect(queries.get('setlist_songs')?.in).toHaveBeenCalledWith('setlist_id', ['setlist-1']);
+    for (const query of queries.values()) {
+      expect(query.abortSignal).toHaveBeenCalledWith(signal);
+      expect(query.upsert).not.toHaveBeenCalled();
+      expect(query.delete).not.toHaveBeenCalled();
+    }
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('rejects an incomplete background snapshot instead of clearing setlists on read failure', async () => {
+    mocks.from.mockImplementation((table: string) => makeBuilder({ returns: vi.fn().mockResolvedValue({
+      data: [], error: table === 'setlists' ? new Error('Connection lost') : null
+    }) }));
+    await expect(createRepository().loadLibraryContent('personal-1')).rejects.toThrow('Connection lost');
   });
 
   it('does not redirect later writes when another library is only loaded for refresh', async () => {

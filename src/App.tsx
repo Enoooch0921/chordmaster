@@ -3,6 +3,7 @@ import RecoveryBoundary from './components/RecoveryBoundary';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
 import { useJoinedWorkspaceRefresh } from './hooks/useJoinedWorkspaceRefresh';
+import { useLibraryWorkspaceRefresh } from './hooks/useLibraryWorkspaceRefresh';
 import { writeTeamDraft, removeTeamDraft, restoreTeamDraft } from './lib/teamDrafts';
 import { setRecoverySnapshot } from './lib/recovery';
 /**
@@ -2404,6 +2405,45 @@ export default function App() {
   songsRef.current = songs;
   const setlistsRef = useRef(setlists);
   setlistsRef.current = setlists;
+  const libraryWorkspaceRefreshFailed = useLibraryWorkspaceRefresh({
+    repository: cloudRepositoryRef.current,
+    scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
+    libraryId: activeLibraryId,
+    enabled: isCloudMode && workspaceOwnerId === authenticatedUser?.id
+      && !isLoadingCloudWorkspace && !isSwitchingLibrary,
+    paused: workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
+      || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
+      || Boolean(teamDraft.pending) || Boolean(teamDraft.error),
+    workspace: { songs, setlists, projects },
+    canApply: () => {
+      if (workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
+          || libraryTransitionOwnerRef.current || workspaceIsDirtyRef.current
+          || previewEditSessionRef.current?.dirty) return false;
+      // Offline edits must finish their existing merge/flush before a cloud read
+      // can become the new local baseline.
+      return isTeamWorkspace || !loadPendingSync({ userId: authenticatedUser!.id, libraryId: activeLibraryId! });
+    },
+    onUpdate: (remote) => {
+      const nextSongs = isTeamWorkspace ? remote.songs : addLocalSymbolTestPages(remote.songs, songs);
+      // Advance the visible data and its saved baseline together. Otherwise
+      // auto-save would interpret remote changes as local edits and write back.
+      if (JSON.stringify(nextSongs) !== JSON.stringify(songs)) {
+        setSongs(nextSongs);
+        setSavedSongs(nextSongs);
+        setSongHistories({});
+      }
+      if (JSON.stringify(remote.setlists) !== JSON.stringify(setlists)) {
+        setSetlists(remote.setlists);
+        setSavedSetlists(remote.setlists);
+        setSetlistSongHistories({});
+      }
+      if (JSON.stringify(remote.projects) !== JSON.stringify(projects)) {
+        setProjects(remote.projects);
+        setSavedProjects(remote.projects);
+      }
+      setLastSavedAt(remote.lastSavedAt);
+    }
+  });
   const joinedWorkspaceRefreshFailed = useJoinedWorkspaceRefresh({
     repository: cloudRepositoryRef.current,
     scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
@@ -14267,11 +14307,11 @@ export default function App() {
           </div>
         )}
 
-        {joinedWorkspaceRefreshFailed && isJoinedSetlist ? (
+        {libraryWorkspaceRefreshFailed || (joinedWorkspaceRefreshFailed && isJoinedSetlist) ? (
           <p role="status" className="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:px-6">
             {language === 'zh'
-              ? '共享歌單更新暫時中斷，目前保留上次載入的內容；稍後會自動重試。'
-              : 'Shared setlist updates are interrupted. Showing the last loaded version and retrying automatically.'}
+              ? '雲端更新暫時中斷，目前保留上次載入的內容；稍後會自動重試。'
+              : 'Cloud updates are interrupted. Showing the last loaded version and retrying automatically.'}
           </p>
         ) : null}
 
