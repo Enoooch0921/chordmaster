@@ -2,6 +2,7 @@ import LegacyDraftRecovery from './components/LegacyDraftRecovery';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
+import { useJoinedWorkspaceRefresh } from './hooks/useJoinedWorkspaceRefresh';
 import { writeTeamDraft, removeTeamDraft, restoreTeamDraft } from './lib/teamDrafts';
 import { setRecoverySnapshot } from './lib/recovery';
 /**
@@ -2403,6 +2404,20 @@ export default function App() {
   songsRef.current = songs;
   const setlistsRef = useRef(setlists);
   setlistsRef.current = setlists;
+  const joinedWorkspaceRefreshFailed = useJoinedWorkspaceRefresh({
+    repository: cloudRepositoryRef.current,
+    scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
+    enabled: isCloudMode && !isTeamWorkspace && !isLoadingCloudWorkspace && !isSwitchingLibrary,
+    paused: activeCloudMutationCount > 0 || syncStatus === 'syncing'
+      || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
+      || Boolean(leavingSharedSetlistId) || Boolean(leavingSharedProjectId),
+    joinedSetlists,
+    joinedProjects,
+    onUpdate: (workspace) => {
+      setJoinedSetlists(workspace.joinedSetlists);
+      setJoinedProjects(workspace.joinedProjects ?? []);
+    }
+  });
   const teamLibraryReloadIsUnsafe = libraryIsDirty || Boolean(previewEditSession?.dirty);
   const teamLibraryReloadIsUnsafeRef = useRef(teamLibraryReloadIsUnsafe);
   teamLibraryReloadIsUnsafeRef.current = teamLibraryReloadIsUnsafe;
@@ -4513,7 +4528,10 @@ export default function App() {
       };
     }));
     if (cloudRepositoryRef.current) {
-      void cloudRepositoryRef.current.setProjectSetlistSongKey(setlistSongId, key);
+      const release = beginCloudMutation();
+      void cloudRepositoryRef.current.setProjectSetlistSongKey(setlistSongId, key)
+        .catch((error) => toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed))
+        .finally(release);
     }
   };
 
@@ -5049,6 +5067,7 @@ export default function App() {
       return;
     }
 
+    const release = beginCloudMutation();
     setSyncStatus(navigator.onLine ? 'syncing' : 'offline');
     void repository.saveCapoOverride(setlistSongId, capo)
       .then(() => {
@@ -5058,7 +5077,8 @@ export default function App() {
       })
       .catch(() => {
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-      });
+      })
+      .finally(release);
   };
 
   const handleJoinedSetlistCapoChange = (setlistSongId: string, capo: number) => {
@@ -6031,7 +6051,10 @@ export default function App() {
   // Reorder within a *joined* project's setlist (manager only). Updates the local
   // joinedProjects copy and persists the new order via a role-checked RPC.
   const moveJoinedProjectSetlistSong = (sourceId: string, targetId: string) => {
-    let orderedIds: string[] | null = null;
+    if (!selectedSetlist || !cloudRepositoryRef.current) return;
+    const nextSongs = reorderSetlistSongs(selectedSetlist.songs, sourceId, targetId);
+    if (nextSongs === selectedSetlist.songs) return;
+    const orderedIds = nextSongs.map((item) => item.id);
     setJoinedProjects((current) => current.map((jp) => {
       if (!jp.setlists.some((sl) => sl.id === selectedSetlistId)) return jp;
       return {
@@ -6040,13 +6063,15 @@ export default function App() {
           if (sl.id !== selectedSetlistId) return sl;
           const reindexed = reorderSetlistSongs(sl.songs, sourceId, targetId);
           if (reindexed === sl.songs) return sl;
-          orderedIds = reindexed.map((item) => item.id);
           return { ...sl, songs: reindexed };
         })
       };
     }));
-    if (orderedIds && selectedSetlistId && cloudRepositoryRef.current) {
-      void cloudRepositoryRef.current.reorderProjectSetlist(selectedSetlistId, orderedIds);
+    if (selectedSetlistId) {
+      const release = beginCloudMutation();
+      void cloudRepositoryRef.current.reorderProjectSetlist(selectedSetlistId, orderedIds)
+        .catch((error) => toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed))
+        .finally(release);
     }
   };
 
@@ -14241,6 +14266,14 @@ export default function App() {
             </p>
           </div>
         )}
+
+        {joinedWorkspaceRefreshFailed && isJoinedSetlist ? (
+          <p role="status" className="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:px-6">
+            {language === 'zh'
+              ? '共享歌單更新暫時中斷，目前保留上次載入的內容；稍後會自動重試。'
+              : 'Shared setlist updates are interrupted. Showing the last loaded version and retrying automatically.'}
+          </p>
+        ) : null}
 
         {teamLibraryUpdatePending ? (
           <div className="flex flex-shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 sm:px-6">

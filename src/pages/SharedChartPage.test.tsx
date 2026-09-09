@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SharedResourcePayload } from '../types';
 import SharedChartPage from './SharedChartPage';
 
@@ -15,7 +15,8 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn()
 }));
 
-vi.mock('../lib/sharing', () => ({
+vi.mock('../lib/sharing', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/sharing')>(),
   resolveShareLink: mocks.resolveShareLink,
   inspectSharedSongImport: mocks.inspectSharedSongImport,
   importSharedSongs: mocks.importSharedSongs
@@ -98,6 +99,50 @@ describe('SharedChartPage song imports', () => {
       maybeSingle: vi.fn().mockResolvedValue({ data: null })
     });
     mocks.rpc.mockResolvedValue({ data: null, error: null });
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('updates an open public setlist after the owner changes a key and adds a song', async () => {
+    vi.useFakeTimers();
+    const source: SharedResourcePayload = { resourceType: 'setlist', setlist: {
+      id: 'sl', name: 'Live Sunday', displayMode: 'chord-movable-key',
+      songs: [{ id: 'a', title: 'Alpha', overrideKey: 'C', song: song('Alpha') }]
+    } };
+    mocks.resolveShareLink.mockResolvedValue(source);
+    renderPage();
+    await act(async () => { await Promise.resolve(); });
+    const title = screen.getByRole('heading', { name: 'Live Sunday' });
+    expect(screen.getByText('C · 96 BPM')).toBeInTheDocument();
+    mocks.resolveShareLink.mockResolvedValue({ ...source, setlist: { ...source.setlist!, songs: [
+      { ...source.setlist!.songs[0], overrideKey: 'D' },
+      { id: 'b', title: 'Beta', song: song('Beta') }
+    ] } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByText('D · 96 BPM')).toBeInTheDocument();
+    expect(screen.getByText('Beta')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Live Sunday' })).toBe(title);
+    expect(screen.queryByText('載入中...')).not.toBeInTheDocument();
+  });
+
+  it('preserves the selected bundle song and lyrics mode during updates', async () => {
+    vi.useFakeTimers();
+    const source: SharedResourcePayload = { resourceType: 'song_bundle', songBundle: { id: 'bundle', songs: [
+      { id: 'a', title: 'Alpha', song: song('Alpha') },
+      { id: 'b', title: 'Beta', song: { ...song('Beta'), lyricsDoc: { chinese: 'Lyrics' } } }
+    ] } };
+    mocks.resolveShareLink.mockResolvedValue(source);
+    renderPage();
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByRole('button', { name: /Beta/ }));
+    fireEvent.click(screen.getByRole('button', { name: '歌詞' }));
+    mocks.resolveShareLink.mockResolvedValue({ ...source, songBundle: { ...source.songBundle!, songs: [
+      source.songBundle!.songs[0],
+      { ...source.songBundle!.songs[1], song: { ...source.songBundle!.songs[1].song, title: 'Updated Beta' } }
+    ] } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByTestId('shared-lyrics')).toHaveTextContent('Updated Beta');
+    expect(screen.queryByTestId('shared-chart')).not.toBeInTheDocument();
   });
 
   it('imports a shared single song into the personal library', async () => {

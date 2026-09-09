@@ -223,6 +223,7 @@ export interface WorkspaceRepository {
   loadLibraryWorkspace(libraryId: string): Promise<WorkspaceSnapshot>;
   loadLibrarySongs(libraryId: string): Promise<StoredSong[]>;
   loadPersonalWorkspace(): Promise<WorkspaceSnapshot>;
+  loadJoinedWorkspace(): Promise<Pick<WorkspaceSnapshot, 'joinedSetlists' | 'joinedProjects'>>;
   listLibraries(): Promise<CloudLibrarySummary[]>;
   setActiveLibrary(libraryId: string | null): void;
   getPersonalLibraryId(): Promise<string>;
@@ -764,6 +765,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   async loadPersonalWorkspace() {
     return loadLocalWorkspaceSnapshot();
   },
+  async loadJoinedWorkspace() {
+    return { joinedSetlists: [], joinedProjects: [] };
+  },
   async listLibraries() {
     return [];
   },
@@ -1083,7 +1087,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string): Promise<
   };
 };
 
-const getJoinedProjects = async (): Promise<JoinedProject[]> => {
+const getJoinedProjects = async (throwOnError = false): Promise<JoinedProject[]> => {
   if (!supabase) return [];
   try {
     const { data, error } = await supabase.rpc('get_joined_projects');
@@ -1131,6 +1135,7 @@ const getJoinedProjects = async (): Promise<JoinedProject[]> => {
       })
       .filter((project): project is JoinedProject => Boolean(project));
   } catch (error) {
+    if (throwOnError) throw error;
     console.warn('Unable to load joined projects.', error);
     return [];
   }
@@ -1254,22 +1259,19 @@ const setlistSongsSignature = (songs: SetlistSong[]) => JSON.stringify(
   reindexSetlistSongs(songs).map(({ capo: _sharedCapo, personalCapoOverride: _personalCapo, ...rest }) => rest)
 );
 
-const persistSetlistSongs = async (setlist: Setlist) => {
+const persistSetlistSongs = async (setlist: Setlist, previousSetlist?: Setlist) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
 
-  const { error: deleteError } = await supabase
-    .from('setlist_songs')
-    .delete()
-    .eq('setlist_id', setlist.id);
-
-  if (deleteError) {
-    throw deleteError;
-  }
-
-  if (setlist.songs.length === 0) {
-    return;
+  // Keep existing song rows alive: delete-all briefly publishes an empty list
+  // to viewers and cascades deletion of everyone's personal Capo preferences.
+  let previousIds = previousSetlist?.songs.map((song) => song.id);
+  if (!previousIds) {
+    const { data, error } = await supabase.from('setlist_songs')
+      .select('id').eq('setlist_id', setlist.id).returns<Array<{ id: string }>>();
+    if (error) throw error;
+    previousIds = (data ?? []).map((song) => song.id);
   }
 
   const rows = reindexSetlistSongs(setlist.songs).map((song, index) => ({
@@ -1284,12 +1286,17 @@ const persistSetlistSongs = async (setlist: Setlist) => {
     }
   }));
 
-  const { error } = await supabase
-    .from('setlist_songs')
-    .upsert(rows, { onConflict: 'id' });
+  if (rows.length > 0) {
+    const { error } = await supabase.from('setlist_songs').upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+  }
 
-  if (error) {
-    throw error;
+  const retainedIds = new Set(rows.map((row) => row.id));
+  const removedIds = previousIds.filter((id) => !retainedIds.has(id));
+  if (removedIds.length > 0) {
+    const { error } = await supabase.from('setlist_songs')
+      .delete().eq('setlist_id', setlist.id).in('id', removedIds);
+    if (error) throw error;
   }
 };
 
@@ -1409,7 +1416,7 @@ export const createCloudRepository = (params: {
       updated_at: updatedAtIso
     };
 
-    // Skip rewriting setlist_songs (delete-all + bulk upsert) when the songs
+    // Skip rewriting setlist_songs when the songs
     // haven't actually changed — this turns pure metadata edits (rename,
     // archive, move-to-project) into a single round-trip instead of three.
     const songsUnchanged = previousSetlist
@@ -1423,7 +1430,7 @@ export const createCloudRepository = (params: {
     }
 
     if (!songsUnchanged) {
-      await persistSetlistSongs(setlist);
+      await persistSetlistSongs(setlist, previousSetlist);
     }
   };
 
@@ -1453,6 +1460,31 @@ export const createCloudRepository = (params: {
   };
 
   return {
+    async loadJoinedWorkspace() {
+      // Background reads must not reload or persist the user's own workspace.
+      // A failed project read must not look like revoked membership.
+      const [joinedSetlists, joinedProjects] = await Promise.all([
+        getJoinedSetlists(params.userId),
+        getJoinedProjects(true)
+      ]);
+      const songIds = [...new Set([
+        ...joinedSetlists.flatMap((setlist) => setlist.songs.map((song) => song.id)),
+        ...joinedProjects.flatMap((project) => project.setlists.flatMap((setlist) => setlist.songs.map((song) => song.id)))
+      ])];
+      if (!supabase || songIds.length === 0) return { joinedSetlists, joinedProjects };
+      const { data, error } = await supabase.from('user_setlist_capo_overrides')
+        .select('setlist_song_id, capo').eq('user_id', params.userId)
+        .in('setlist_song_id', songIds).returns<UserSetlistCapoOverrideRow[]>();
+      if (error) throw error;
+      const capoById = new Map((data ?? []).map((row) => [row.setlist_song_id, row.capo]));
+      const withPersonalCapo = <T extends Setlist>(setlist: T): T => ({
+        ...setlist, songs: setlist.songs.map((song) => ({ ...song, personalCapoOverride: capoById.get(song.id) }))
+      });
+      return {
+        joinedSetlists: joinedSetlists.map(withPersonalCapo),
+        joinedProjects: joinedProjects.map((project) => ({ ...project, setlists: project.setlists.map(withPersonalCapo) }))
+      };
+    },
     async loadWorkspace() {
       const libraryId = await ensureLibraryId();
       const [workspace, joinedSetlists, joinedProjects] = await Promise.all([

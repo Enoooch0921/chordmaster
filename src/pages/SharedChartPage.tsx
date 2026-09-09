@@ -5,15 +5,15 @@ import LyricsSheet from '../components/LyricsSheet';
 import { APP_NAME } from '../constants/appMeta';
 import {
   AppLanguage,
-  SharedResourcePayload,
   SharedSetlistPayload,
   SharedSongImportInspection,
   SharedSongImportResult,
   SongImportResolution
 } from '../types';
 import { signInWithGoogleRedirect } from '../lib/auth';
-import { importSharedSongs, inspectSharedSongImport, resolveShareLink } from '../lib/sharing';
+import { importSharedSongs, inspectSharedSongImport } from '../lib/sharing';
 import { supabase } from '../lib/supabase';
+import { useSharedResource } from '../hooks/useSharedResource';
 
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
@@ -73,9 +73,7 @@ export default function SharedChartPage() {
   const { token = '' } = useParams();
   const navigate = useNavigate();
   const [language, setLanguage] = useState<AppLanguage>('zh');
-  const [payload, setPayload] = useState<SharedResourcePayload | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { payload, errorMessage, isLoading, refreshFailed } = useSharedResource(token);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isMember, setIsMember] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
@@ -119,41 +117,6 @@ export default function SharedChartPage() {
       listener.subscription.unsubscribe();
     };
   }, []);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    const loadSharedResource = async () => {
-      try {
-        setIsLoading(true);
-        const response = await resolveShareLink(token);
-        if (!isCancelled) {
-          setPayload(response);
-          setErrorMessage(null);
-        }
-      } catch (error) {
-        if (!isCancelled) {
-          setErrorMessage(error instanceof Error ? error.message : 'Unable to load shared chart.');
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    if (token) {
-      void loadSharedResource();
-      return;
-    }
-
-    setIsLoading(false);
-    setErrorMessage('Missing share token.');
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [token]);
 
   useEffect(() => {
     const firstBundleSongId = payload?.songBundle?.songs[0]?.id ?? null;
@@ -507,6 +470,14 @@ export default function SharedChartPage() {
                   : (language === 'zh' ? '複製連結' : 'Copy link')}
               </button>
             </div>
+          )}
+
+          {payload && !errorMessage && (
+            <p role="status" className={`mb-3 text-xs ${refreshFailed ? 'text-amber-700' : 'text-stone-400'}`}>
+              {refreshFailed
+                ? (language === 'zh' ? '更新暫時中斷，顯示上次載入的內容；連線恢復後會自動更新。' : 'Updates interrupted. Showing the last loaded version; updates will resume automatically.')
+                : (language === 'zh' ? '自動更新中・管理員儲存後約 5 秒更新' : 'Auto-updating · Updates about 5 seconds after changes are saved')}
+            </p>
           )}
 
           {isLoading ? (

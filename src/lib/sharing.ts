@@ -174,19 +174,30 @@ export const createSongBundleShare = async (songIds: string[]) => {
   }
 };
 
-export const resolveShareLink = async (token: string) => {
+export class ShareLinkResolutionError extends Error {
+  constructor(message: string, public readonly status?: number) {
+    super(message);
+    this.name = 'ShareLinkResolutionError';
+  }
+}
+
+export const resolveShareLink = async (token: string, signal?: AbortSignal) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
 
   const { data, error } = await supabase.functions.invoke<SharedResourcePayload>('resolve-share-link', {
+    signal,
+    timeout: 15000,
     body: {
       token
     }
   });
 
   if (error) {
-    throw await normalizeFunctionError(error, SHARE_RESOLVE_FAILED_MESSAGE);
+    const normalized = await normalizeFunctionError(error, SHARE_RESOLVE_FAILED_MESSAGE);
+    const response = isRecord(error) && error.context instanceof Response ? error.context : null;
+    throw new ShareLinkResolutionError(normalized.message, response?.status);
   }
 
   if (!data) {

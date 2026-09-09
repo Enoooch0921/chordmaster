@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StoredSong, WorkspaceSnapshot } from '../types';
+import type { Setlist, StoredSong, WorkspaceSnapshot } from '../types';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -73,6 +73,42 @@ describe('cloud repository personal workspace imports', () => {
     vi.clearAllMocks();
     installLocalStorageMock();
     mocks.rpc.mockResolvedValue({ data: [], error: null });
+  });
+
+  it('refreshes joined data without reloading or persisting the owned workspace', async () => {
+    const repository = createRepository();
+    expect(await repository.loadJoinedWorkspace()).toEqual({ joinedSetlists: [], joinedProjects: [] });
+    expect(mocks.rpc).toHaveBeenCalledWith('get_joined_setlists');
+    expect(mocks.rpc).toHaveBeenCalledWith('get_joined_projects');
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(window.localStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('rejects background refresh when shared projects fail instead of reporting an empty collection', async () => {
+    mocks.rpc.mockImplementation((name: string) => Promise.resolve(name === 'get_joined_projects'
+      ? { data: null, error: new Error('Connection lost') }
+      : { data: [], error: null }));
+    await expect(createRepository().loadJoinedWorkspace()).rejects.toThrow('Connection lost');
+  });
+
+  it('loads only the current viewer’s Capo preferences for shared songs', async () => {
+    const sharedSetlist = {
+      id: 'shared-1', name: 'Shared', createdAt: 1, updatedAt: 1,
+      songs: [{ id: 'entry-1', songId: 'song-1', songData: makeSong() }]
+    };
+    mocks.rpc.mockImplementation((name: string) => Promise.resolve({ error: null, data:
+      name === 'get_joined_setlists' ? [sharedSetlist] : [{ id: 'project-1', setlists: [sharedSetlist] }]
+    }));
+    const capoQuery = makeBuilder({ returns: vi.fn().mockResolvedValue({
+      data: [{ setlist_song_id: 'entry-1', capo: 0 }], error: null
+    }) });
+    mocks.from.mockReturnValue(capoQuery);
+    const result = await createRepository().loadJoinedWorkspace();
+    expect(mocks.from).toHaveBeenCalledExactlyOnceWith('user_setlist_capo_overrides');
+    expect(capoQuery.eq).toHaveBeenCalledWith('user_id', 'user-1');
+    expect(capoQuery.in).toHaveBeenCalledWith('setlist_song_id', ['entry-1']);
+    expect(result.joinedSetlists[0].songs[0].personalCapoOverride).toBe(0);
+    expect(result.joinedProjects?.[0].setlists[0].songs[0].personalCapoOverride).toBe(0);
   });
 
   it('rejects a team destination before any per-record table is touched', async () => {
@@ -181,6 +217,64 @@ describe('cloud repository personal workspace imports', () => {
       createdBy: 'user-1',
       updatedBy: 'user-1'
     });
+  });
+});
+
+describe('cloud repository shared setlist updates', () => {
+  const makeSetlist = (ids: string[]): Setlist => ({
+    id: 'setlist-1', name: 'Shared', displayMode: 'chord-fixed-key', createdAt: 1, updatedAt: 2,
+    songs: ids.map((id, order) => ({ id, order, setlistId: 'setlist-1', songId: 'song-1',
+      overrideKey: 'D', sectionOrder: [], songData: makeSong() }))
+  });
+
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('upserts keys and additions before deleting only removed entries, preserving retained Capo foreign keys', async () => {
+    const entries = makeBuilder();
+    mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository();
+    repository.setActiveLibrary('personal-1');
+    await repository.saveSetlist(makeSetlist(['kept', 'added']), makeSetlist(['kept', 'removed']));
+    expect(entries.upsert).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'kept', override_json: expect.objectContaining({ overrideKey: 'D' }) }),
+      expect.objectContaining({ id: 'added' })
+    ], { onConflict: 'id' });
+    expect(entries.delete).toHaveBeenCalledTimes(1);
+    expect(entries.eq).toHaveBeenCalledWith('setlist_id', 'setlist-1');
+    expect(entries.in).toHaveBeenCalledExactlyOnceWith('id', ['removed']);
+    expect(entries.upsert.mock.invocationCallOrder[0]).toBeLessThan(entries.delete.mock.invocationCallOrder[0]);
+  });
+
+  it('does not delete entries if writing their replacements fails', async () => {
+    const entries = makeBuilder({ upsert: vi.fn().mockResolvedValue({ error: new Error('Write failed') }) });
+    mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository();
+    repository.setActiveLibrary('personal-1');
+    await expect(repository.saveSetlist(makeSetlist(['added']), makeSetlist(['kept'])))
+      .rejects.toThrow('Write failed');
+    expect(entries.delete).not.toHaveBeenCalled();
+  });
+
+  it('reads existing IDs when no prior snapshot is supplied and preserves retained entries', async () => {
+    const entries = makeBuilder({ returns: vi.fn().mockResolvedValue({
+      data: [{ id: 'kept' }, { id: 'removed' }], error: null
+    }) });
+    mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository();
+    repository.setActiveLibrary('personal-1');
+    await repository.saveSetlist(makeSetlist(['kept']));
+    expect(entries.select).toHaveBeenCalledWith('id');
+    expect(entries.in).toHaveBeenCalledWith('id', ['removed']);
+  });
+
+  it('can remove all songs without issuing a broad delete', async () => {
+    const entries = makeBuilder();
+    mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository();
+    repository.setActiveLibrary('personal-1');
+    await repository.saveSetlist(makeSetlist([]), makeSetlist(['removed']));
+    expect(entries.upsert).not.toHaveBeenCalled();
+    expect(entries.in).toHaveBeenCalledExactlyOnceWith('id', ['removed']);
   });
 });
 
