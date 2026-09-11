@@ -1,3 +1,4 @@
+import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
 import LegacyDraftRecovery from './components/LegacyDraftRecovery';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
@@ -10586,114 +10587,16 @@ export default function App() {
     }, 520);
   }, [activeEditorSong, findPreviewAnchorRect, focusEditorField, handleElementClick, isPreviewQuickEditEnabled, isSetlistMode, lastPreviewNonChordMode, makePreviewTargetAnchorKey, selectedSetlistSongId]);
 
-  useEffect(() => {
-    if (isPerformanceMode || !isSetlistMode || !selectedSetlistSongId || setlistPreviewSongs.length === 0) {
-      return;
-    }
-
-    if (skipNextSetlistPreviewAutoScrollRef.current) {
-      skipNextSetlistPreviewAutoScrollRef.current = false;
-      return;
-    }
-
-    preserveSetlistPreviewSelectionUntilRef.current = Math.max(
-      preserveSetlistPreviewSelectionUntilRef.current,
-      performance.now() + 1200
-    );
-
-    let frameId = window.requestAnimationFrame(() => {
-      frameId = window.requestAnimationFrame(() => {
-        const scrollRoot = previewRef.current;
-        if (!scrollRoot) return;
-
-        const target = scrollRoot.querySelector<HTMLElement>(`[data-setlist-preview-song-id="${selectedSetlistSongId}"]`);
-        if (!target) return;
-
-        const rootRect = scrollRoot.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        const offsetTop = targetRect.top - rootRect.top + scrollRoot.scrollTop;
-        const desiredTop = Math.max(0, offsetTop - Math.min(120, rootRect.height * 0.16));
-
-        if (Math.abs(scrollRoot.scrollTop - desiredTop) < 12) return;
-
-        scrollRoot.scrollTo({
-          top: desiredTop,
-          behavior: 'smooth'
-        });
-      });
-    });
-
-    return () => window.cancelAnimationFrame(frameId);
-  }, [isPerformanceMode, isSetlistMode, selectedSetlistSongId, setlistPreviewSongs.length]);
-
-  useEffect(() => {
-    // The scroll observer auto-selects the setlist song nearest the preview
-    // activation line as the user scrolls. Disabling it in edit mode is
-    // intentional: with the split editor pane open, the preview can be
-    // narrow and any reflow/scroll (including the auto-scroll-to-selected
-    // effect itself) would otherwise ping-pong the selection between two
-    // adjacent songs and re-mount the editor on each swap.
-    if (isPerformanceMode || !isSetlistMode || isLyricsMode || isEditing || previewEditSession || setlistPreviewSongs.length === 0) {
-      return;
-    }
-
-    const scrollRoot = previewRef.current;
-    if (!scrollRoot) {
-      return;
-    }
-
-    let frameId: number | null = null;
-    const updateActiveSetlistSongFromScroll = () => {
-      frameId = null;
-      if (preserveSetlistPreviewSelectionUntilRef.current > performance.now()) {
-        return;
-      }
-
-      const rootRect = scrollRoot.getBoundingClientRect();
-      const activationY = rootRect.top + Math.min(180, Math.max(72, rootRect.height * 0.28));
-      const songCards = Array.from(scrollRoot.querySelectorAll('[data-setlist-preview-song-id]')) as HTMLElement[];
-
-      let nextSetlistSongId: string | null = null;
-      let smallestDistance = Number.POSITIVE_INFINITY;
-
-      for (const card of songCards) {
-        const cardRect = card.getBoundingClientRect();
-        const containsActivationLine = cardRect.top <= activationY && cardRect.bottom >= activationY;
-        const distance = containsActivationLine
-          ? 0
-          : Math.min(Math.abs(cardRect.top - activationY), Math.abs(cardRect.bottom - activationY));
-
-        if (distance < smallestDistance) {
-          smallestDistance = distance;
-          nextSetlistSongId = card.dataset.setlistPreviewSongId ?? null;
-        }
-      }
-
-      if (nextSetlistSongId && nextSetlistSongId !== selectedSetlistSongId) {
-        skipNextSetlistPreviewAutoScrollRef.current = true;
-        setSelectedSetlistSongId(nextSetlistSongId);
-      }
-    };
-
-    const requestScrollUpdate = () => {
-      if (frameId !== null) {
-        return;
-      }
-      frameId = window.requestAnimationFrame(updateActiveSetlistSongFromScroll);
-    };
-
-    requestScrollUpdate();
-    scrollRoot.addEventListener('scroll', requestScrollUpdate, { passive: true });
-    window.addEventListener('resize', requestScrollUpdate);
-
-    return () => {
-      scrollRoot.removeEventListener('scroll', requestScrollUpdate);
-      window.removeEventListener('resize', requestScrollUpdate);
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-    };
-  }, [isPerformanceMode, isSetlistMode, isLyricsMode, isEditing, previewEditSession, selectedSetlistSongId, setlistPreviewSongs.length]);
+  useSetlistPreviewNavigation({
+    previewRef,
+    enabled: !isPerformanceMode && isSetlistMode,
+    trackScroll: !isLyricsMode && !isEditing && !previewEditSession,
+    selectedSongId: selectedSetlistSongId,
+    songCount: setlistPreviewSongs.length,
+    skipNextAutoScrollRef: skipNextSetlistPreviewAutoScrollRef,
+    preserveSelectionUntilRef: preserveSetlistPreviewSelectionUntilRef,
+    onSelectSong: setSelectedSetlistSongId
+  });
 
   const clearLivePreviewScaleStyles = () => {
     sheetRef.current?.style.removeProperty('--preview-live-scale');
