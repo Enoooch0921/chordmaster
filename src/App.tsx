@@ -65,7 +65,7 @@ import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
-import { EDITABLE_TEAM_ROLES, getTeamRoleDescription, getTeamRoleLabel } from './constants/teamRoles';
+import { getTeamRoleLabel } from './constants/teamRoles';
 import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, ChordSheetPreviewBarContextMenuTarget, ChordSheetPreviewBarTarget, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
@@ -87,6 +87,9 @@ import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
 import TeamSongImportDialog from './components/TeamSongImportDialog';
 import SetlistAssignmentDialog from './components/SetlistAssignmentDialog';
+import TeamManagementDialog from './components/TeamManagementDialog';
+import ShareDialog from './components/ShareDialog';
+import ResponsiveDialog from './components/ResponsiveDialog';
 import SetlistNavigator, {
   SETLIST_PROJECT_FILTER_STORAGE_KEY,
   SetlistPanelView,
@@ -682,7 +685,8 @@ const copyShareUrlToClipboard = async (shareUrl: string) => {
     : null;
 
   try {
-    document.body.appendChild(textArea);
+    // Keep the fallback selectable when a native modal makes the page inert.
+    (previousActiveElement?.closest('dialog[open]') ?? document.body).appendChild(textArea);
     textArea.focus({ preventScroll: true });
     textArea.select();
     textArea.setSelectionRange(0, shareUrl.length);
@@ -2143,6 +2147,7 @@ export default function App() {
   const [isGoogleAccountMenuOpen, setIsGoogleAccountMenuOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isMobileActionsSheetOpen, setIsMobileActionsSheetOpen] = useState(false);
+  const [mobileActionsSection, setMobileActionsSection] = useState<'sheet' | 'settings'>('sheet');
   const [isMobileMetadataOpen, setIsMobileMetadataOpen] = useState(false);
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const [mobileSwipeSetlist, setMobileSwipeSetlist] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
@@ -2185,6 +2190,7 @@ export default function App() {
   const [isSwitchingLibrary, setIsSwitchingLibrary] = useState(false);
   const [activeCloudMutationCount, setActiveCloudMutationCount] = useState(0);
   const [teamManagement, setTeamManagement] = useState<TeamManagementSnapshot | null>(null);
+  const [teamManagementError, setTeamManagementError] = useState<string | null>(null);
   const [pendingTeamInvites, setPendingTeamInvites] = useState<PendingTeamInvite[]>([]);
   const [pendingTeamInviteActionId, setPendingTeamInviteActionId] = useState<string | null>(null);
   const [isTeamManagementOpen, setIsTeamManagementOpen] = useState(false);
@@ -4254,12 +4260,14 @@ export default function App() {
       return;
     }
 
+    setTeamManagementError(null);
     try {
       setIsLoadingTeamManagement(true);
       const snapshot = await repository.getTeamManagement(activeCloudLibrary.id);
       setTeamManagement(snapshot);
       setAuthUiError(null);
     } catch (error) {
+      setTeamManagementError(getTeamFeatureErrorMessage(error, language));
       setTeamManagement(null);
       setAuthUiError(getTeamFeatureErrorMessage(error, language));
     } finally {
@@ -4271,6 +4279,7 @@ export default function App() {
     const repository = cloudRepositoryRef.current;
     if (!repository || !activeCloudLibrary || !teamInviteEmail.trim()) return;
 
+    setTeamManagementError(null);
     try {
       setIsCreatingTeamInvite(true);
       const invite = await repository.createTeamInvite(activeCloudLibrary.id, teamInviteEmail.trim(), teamInviteRole);
@@ -4284,6 +4293,7 @@ export default function App() {
       setTeamInviteRole('setlist_manager');
       await loadTeamManagement();
     } catch (error) {
+      setTeamManagementError(getTeamFeatureErrorMessage(error, language));
       toast.error(getTeamFeatureErrorMessage(error, language));
     } finally {
       setIsCreatingTeamInvite(false);
@@ -4293,10 +4303,12 @@ export default function App() {
   const handleRevokeTeamInvite = async (inviteId: string) => {
     const repository = cloudRepositoryRef.current;
     if (!repository) return;
+    setTeamManagementError(null);
     try {
       await repository.revokeTeamInvite(inviteId);
       await loadTeamManagement();
     } catch (error) {
+      setTeamManagementError(getTeamFeatureErrorMessage(error, language));
       toast.error(getTeamFeatureErrorMessage(error, language));
     }
   };
@@ -4304,6 +4316,7 @@ export default function App() {
   const handleUpdateTeamMemberRole = async (userId: string, role: Exclude<LibraryRole, 'owner'>) => {
     const repository = cloudRepositoryRef.current;
     if (!repository || !activeCloudLibrary || !canManageActiveTeam || updatingTeamMemberUserId) return;
+    setTeamManagementError(null);
     try {
       setUpdatingTeamMemberUserId(userId);
       await repository.updateTeamMemberRole(activeCloudLibrary.id, userId, role);
@@ -4315,6 +4328,7 @@ export default function App() {
         ? `已將成員權限改為「${getTeamRoleLabel(role, language)}」。`
         : `Member role changed to ${getTeamRoleLabel(role, language)}.`);
     } catch (error) {
+      setTeamManagementError(getTeamFeatureErrorMessage(error, language));
       toast.error(getTeamFeatureErrorMessage(error, language));
     } finally {
       setUpdatingTeamMemberUserId(null);
@@ -4326,10 +4340,12 @@ export default function App() {
     if (!repository || !activeCloudLibrary) return;
     const confirmed = window.confirm(language === 'zh' ? '要移除此團隊成員嗎？' : 'Remove this team member?');
     if (!confirmed) return;
+    setTeamManagementError(null);
     try {
       await repository.removeTeamMember(activeCloudLibrary.id, userId);
       await loadTeamManagement();
     } catch (error) {
+      setTeamManagementError(getTeamFeatureErrorMessage(error, language));
       toast.error(getTeamFeatureErrorMessage(error, language));
     }
   };
@@ -5477,18 +5493,19 @@ export default function App() {
 
   const handleShareToContacts = async (resourceType: ShareContactResourceType, resourceId: string, userIds: string[]) => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || userIds.length === 0 || isSharingToContacts) return;
+    if (!repository) throw new Error(copy.shareToContactsError);
+    if (userIds.length === 0 || isSharingToContacts) return;
     try {
       setIsSharingToContacts(true);
       const count = await repository.shareToContacts(resourceType, resourceId, userIds);
-      toast.success(language === 'zh' ? `已分享給 ${count} 人` : `Shared with ${count} ${count === 1 ? 'person' : 'people'}`);
       // Reflect the new participants in the open share-status panel.
       if (resourceType === 'setlist' && selectedSetlist?.id === resourceId) {
         void loadSetlistShareStatus(resourceId);
       }
+      return count;
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
-      toast.error(reason ? `${copy.shareToContactsError}\n\n${reason}` : copy.shareToContactsError);
+      throw new Error(reason ? `${copy.shareToContactsError}\n\n${reason}` : copy.shareToContactsError);
     } finally {
       setIsSharingToContacts(false);
     }
@@ -5600,6 +5617,7 @@ export default function App() {
       notifications={notifications}
       labels={{
         title: copy.notificationsTitle,
+        close: language === 'zh' ? '關閉通知' : 'Close notifications',
         empty: copy.notificationsEmpty,
         markAllRead: copy.notificationsMarkAllRead,
         open: copy.notificationOpen,
@@ -5619,6 +5637,7 @@ export default function App() {
 
   const renderShareContactPicker = (resourceType: ShareContactResourceType, resourceId: string) => (
     <ShareContactPicker
+      language={language}
       contacts={shareContacts}
       loading={isLoadingShareContacts}
       sharing={isSharingToContacts}
@@ -5628,7 +5647,7 @@ export default function App() {
         button: copy.shareToContactsButton,
         syncing: copy.cloudSyncSyncing,
       }}
-      onShare={(userIds) => void handleShareToContacts(resourceType, resourceId, userIds)}
+      onShare={(userIds) => handleShareToContacts(resourceType, resourceId, userIds)}
     />
   );
 
@@ -11870,7 +11889,7 @@ export default function App() {
         )}
       </button>
 
-      {isWorkspacePanelOpen && !(isPhoneViewport && isTeamManagementOpen) ? (
+      {isWorkspacePanelOpen ? (
         <div className="mt-2">
           {pendingTeamInvites.length > 0 ? (
             <div className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2.5">
@@ -12017,7 +12036,8 @@ export default function App() {
           {canManageActiveTeam ? (
             <button
               type="button"
-              onClick={() => setIsTeamManagementOpen((current) => !current)}
+              onClick={() => { setTeamManagementError(null); setIsTeamManagementOpen(true); }}
+              aria-haspopup="dialog"
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
             >
               <Users size={14} />
@@ -12028,175 +12048,6 @@ export default function App() {
               {language === 'zh' ? `目前權限：${getTeamRoleLabel(activeLibraryRole, language)}` : `Role: ${getTeamRoleLabel(activeLibraryRole, language)}`}
             </div>
           ) : null}
-        </div>
-      ) : null}
-    </div>
-  ) : null;
-
-  const teamManagementPanel = isWorkspacePanelOpen && isTeamManagementOpen && canManageActiveTeam ? (
-    <div className={`${isPhoneViewport ? 'min-h-0 flex-1 overscroll-contain' : 'max-h-[70vh] shrink-0'} overflow-y-auto border-b border-gray-200 bg-white px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]`}>
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
-            <span>{language === 'zh' ? '團隊成員與權限' : 'Team Members & Roles'}</span>
-            {isLoadingTeamManagement ? <LoaderCircle size={13} className="animate-spin text-indigo-600" /> : null}
-          </div>
-          <div className="mt-0.5 text-xs font-semibold text-gray-600">
-            {activeCloudLibrary?.name}
-          </div>
-          <div className="mt-1 text-[11px] font-medium leading-4 text-indigo-700">
-            {language === 'zh' ? '你可以隨時調整每位成員的權限。' : 'You can change each member’s role at any time.'}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setIsTeamManagementOpen(false)}
-          className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-semibold text-gray-600"
-        >
-          {language === 'zh' ? '完成' : 'Done'}
-        </button>
-      </div>
-
-      <details className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
-        <summary className="cursor-pointer text-[11px] font-bold text-gray-700">
-          {language === 'zh' ? '查看權限說明' : 'View role guide'}
-        </summary>
-        <div className="mt-2 space-y-2 border-t border-gray-200 pt-2">
-          {EDITABLE_TEAM_ROLES.map((role) => (
-            <div key={role}>
-              <div className="text-[11px] font-bold text-gray-800">{getTeamRoleLabel(role, language)}</div>
-              <div className="mt-0.5 text-[10px] font-medium leading-4 text-gray-500">{getTeamRoleDescription(role, language)}</div>
-            </div>
-          ))}
-        </div>
-      </details>
-
-      <div className="mt-3 grid grid-cols-1 gap-2">
-        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
-          {language === 'zh' ? '邀請新成員' : 'Invite a member'}
-        </div>
-        <input
-          value={teamInviteEmail}
-          onChange={(event) => setTeamInviteEmail(event.target.value)}
-          placeholder={language === 'zh' ? '受邀 Gmail / Email' : 'Invitee Gmail / Email'}
-          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-indigo-300 focus:bg-white"
-        />
-        <div className="flex gap-2">
-          <select
-            value={teamInviteRole}
-            onChange={(event) => setTeamInviteRole(event.target.value as Exclude<LibraryRole, 'owner'>)}
-            aria-label={language === 'zh' ? '新成員權限' : 'New member role'}
-            className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"
-          >
-            {EDITABLE_TEAM_ROLES.map((role) => (
-              <option key={role} value={role}>{getTeamRoleLabel(role, language)}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => void handleCreateTeamInvite()}
-            disabled={isCreatingTeamInvite || !teamInviteEmail.trim()}
-            className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {language === 'zh' ? '邀請' : 'Invite'}
-          </button>
-        </div>
-        <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] font-medium leading-4 text-indigo-800">
-          <span className="font-bold">{getTeamRoleLabel(teamInviteRole, language)}：</span>
-          {getTeamRoleDescription(teamInviteRole, language)}
-        </div>
-        {teamInviteShareUrl ? (
-          <div className="flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2 text-[11px] font-medium text-indigo-700">
-            <span className="min-w-0 flex-1 truncate">{teamInviteShareUrl}</span>
-            <button
-              type="button"
-              onClick={() => void copyShareUrlToClipboard(teamInviteShareUrl)}
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-2 py-1 font-bold text-indigo-700"
-            >
-              <Copy size={12} />
-              {language === 'zh' ? '複製' : 'Copy'}
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="mt-3 space-y-2">
-        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
-          {language === 'zh' ? '成員權限' : 'Member Roles'}
-        </div>
-        {(teamManagement?.members ?? []).map((member) => (
-          <div key={member.userId} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-bold text-gray-900">{member.name || member.email}</div>
-                <div className="truncate text-[11px] text-gray-500">{member.email}</div>
-              </div>
-              {member.role === 'owner' ? (
-                <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[10px] font-bold text-gray-600 ring-1 ring-gray-200">
-                  {getTeamRoleLabel(member.role, language)}
-                </span>
-              ) : (
-                <div className="flex shrink-0 items-center gap-1">
-                  <select
-                    value={member.role}
-                    onChange={(event) => void handleUpdateTeamMemberRole(member.userId, event.target.value as Exclude<LibraryRole, 'owner'>)}
-                    disabled={Boolean(updatingTeamMemberUserId)}
-                    aria-label={language === 'zh' ? `調整 ${member.name || member.email} 的權限` : `Change role for ${member.name || member.email}`}
-                    className="max-w-28 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-bold text-gray-700 outline-none focus:border-indigo-300 disabled:cursor-wait disabled:opacity-60"
-                  >
-                    {EDITABLE_TEAM_ROLES.map((role) => (
-                      <option key={role} value={role}>{getTeamRoleLabel(role, language)}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void handleRemoveTeamMember(member.userId)}
-                    disabled={Boolean(updatingTeamMemberUserId)}
-                    className="rounded-lg px-2 py-1.5 text-[11px] font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-40"
-                  >
-                    {copy.delete}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {(teamManagement?.invites ?? []).length > 0 ? (
-        <div className="mt-3 space-y-2">
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
-            {language === 'zh' ? '待接受邀請' : 'Pending Invites'}
-          </div>
-          {teamManagement!.invites.map((invite) => (
-            <div key={invite.id} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-bold text-gray-900">{invite.email}</div>
-                <div className="truncate text-[11px] font-semibold text-gray-600">{getTeamRoleLabel(invite.role, language)}</div>
-                <div className="mt-0.5 text-[10px] leading-4 text-gray-400">{getTeamRoleDescription(invite.role, language)}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const inviteUrl = new URL(`team-invite/${invite.token}`, getAppBaseUrl()).toString();
-                  setTeamInviteShareUrl(inviteUrl);
-                  void copyShareUrlToClipboard(inviteUrl).then((didCopy) => {
-                    if (didCopy) toast.success(language === 'zh' ? '邀請連結已複製。' : 'Invite link copied.');
-                  });
-                }}
-                className="rounded-lg px-2 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50"
-              >
-                {language === 'zh' ? '複製連結' : 'Copy link'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleRevokeTeamInvite(invite.id)}
-                className="rounded-lg px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50"
-              >
-                {copy.cancel}
-              </button>
-            </div>
-          ))}
         </div>
       ) : null}
     </div>
@@ -13655,9 +13506,8 @@ export default function App() {
             )}
 
             {showSidebarWorkspacePanels ? librarySwitcherPanel : null}
-            {showSidebarWorkspacePanels ? teamManagementPanel : null}
 
-            {isPhoneViewport && isTeamManagementOpen ? null : isSetlistMode ? (
+            {isSetlistMode ? (
               <SetlistNavigator
                 view={setlistPanelView}
                 list={desktopSetlistListPanel}
@@ -14284,6 +14134,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    setMobileActionsSection('sheet');
                     setIsMobileActionsSheetOpen(true);
                     setIsMobileNavOpen(false);
                     setIsMobileMetadataOpen(false);
@@ -15891,7 +15742,7 @@ export default function App() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={() => setIsMobileActionsSheetOpen(false)}
-                  className="absolute inset-0 z-[70] bg-stone-950/30 backdrop-blur-[1px]"
+                  className="fixed inset-0 z-[70] bg-stone-950/30 backdrop-blur-[1px]"
                   aria-label={copy.editor.more}
                 />
                 <motion.div
@@ -15899,24 +15750,31 @@ export default function App() {
                   animate={{ y: 0 }}
                   exit={{ y: '100%' }}
                   transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
-                  className="absolute inset-x-0 bottom-0 z-[80] max-h-[82dvh] overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-white shadow-[0_-24px_60px_rgba(15,23,42,0.18)]"
+                  role="dialog" aria-label={copy.editor.more}
+                  className="fixed inset-x-0 bottom-0 z-[80] flex max-h-[90dvh] flex-col overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-white shadow-[0_-24px_60px_rgba(15,23,42,0.18)]"
                 >
-                  <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-gray-200" />
-                  <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+                  <div className="mx-auto mt-2 h-1.5 shrink-0 w-12 rounded-full bg-gray-200" />
+                  <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
                     <div className="text-sm font-bold text-gray-900">{copy.editor.more}</div>
                     <button
                       type="button"
                       onClick={() => setIsMobileActionsSheetOpen(false)}
-                      className="rounded-lg px-2 py-1 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
+                      className="min-h-11 rounded-lg px-3 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
                     >
                       {copy.done}
                     </button>
                   </div>
 
-                  <div className="max-h-[calc(82dvh-4.5rem)] space-y-4 overflow-y-auto px-4 py-4">
-                    {isSheetView ? (
+                  {isSheetView ? (
+                    <nav aria-label={language === 'zh' ? '更多選項分類' : 'More options'} className="flex shrink-0 gap-2 border-b border-gray-100 px-4 py-3">
+                      <button type="button" aria-pressed={mobileActionsSection === 'sheet'} onClick={() => setMobileActionsSection('sheet')} className={`min-h-11 flex-1 rounded-xl px-3 text-sm font-semibold ${mobileActionsSection === 'sheet' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}>{language === 'zh' ? '譜面操作' : 'Sheet actions'}</button>
+                      <button type="button" aria-pressed={mobileActionsSection === 'settings'} onClick={() => setMobileActionsSection('settings')} className={`min-h-11 flex-1 rounded-xl px-3 text-sm font-semibold ${mobileActionsSection === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}>{language === 'zh' ? '帳號與設定' : 'Account & settings'}</button>
+                    </nav>
+                  ) : null}
+                  <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    {isSheetView && mobileActionsSection === 'sheet' ? (
                       <>
-                        <div className="grid grid-cols-1 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
                             onClick={() => {
@@ -15948,6 +15806,29 @@ export default function App() {
                             <div className="mt-1 text-sm font-bold text-gray-900">{copy.performanceMode}</div>
                           </button>
                         </div>
+
+                        {isAuthenticated ? <div className="grid gap-2">
+                        {activeAppView === 'sheet' && !isSetlistMode && hasSongs && (!isTeamWorkspace || canEditTeamSongs) && (
+                          <button
+                            type="button"
+                            onClick={() => { setIsMobileActionsSheetOpen(false); void handleCreateShareLink('song'); }}
+                            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                          >
+                            <Share2 size={14} />
+                            <span>{copy.shareCurrentSong}</span>
+                          </button>
+                        )}
+                        {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && canShareSelectedSetlist && (
+                          <button
+                            type="button"
+                            onClick={() => { setIsMobileActionsSheetOpen(false); void handleCreateShareLink('setlist'); }}
+                            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                          >
+                            <Share2 size={14} />
+                            <span>{copy.shareCurrentSetlist}</span>
+                          </button>
+                        )}
+                        </div> : null}
 
                         {!isSetlistMode && (
                           <div className="grid grid-cols-2 gap-2">
@@ -15983,6 +15864,7 @@ export default function App() {
                       </>
                     ) : null}
 
+                    <div className={!isSheetView || mobileActionsSection === 'settings' ? 'space-y-4' : 'hidden'}>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
                       <div className="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">{language === 'zh' ? '語言' : 'Language'}</div>
                       <div className="mt-3 inline-flex items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
@@ -16036,26 +15918,6 @@ export default function App() {
                             <div className="truncate text-xs text-gray-500">{authenticatedUser?.email}</div>
                           </div>
                         </div>
-                        {activeAppView === 'sheet' && !isSetlistMode && hasSongs && (!isTeamWorkspace || canEditTeamSongs) && (
-                          <button
-                            type="button"
-                            onClick={() => void handleCreateShareLink('song')}
-                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
-                          >
-                            <Share2 size={14} />
-                            <span>{copy.shareCurrentSong}</span>
-                          </button>
-                        )}
-                        {activeAppView === 'sheet' && isSetlistMode && selectedSetlist && canShareSelectedSetlist && (
-                          <button
-                            type="button"
-                            onClick={() => void handleCreateShareLink('setlist')}
-                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
-                          >
-                            <Share2 size={14} />
-                            <span>{copy.shareCurrentSetlist}</span>
-                          </button>
-                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -16122,6 +15984,7 @@ export default function App() {
                         ) : null}
                       </div>
                     ) : null}
+                    </div>
                   </div>
                 </motion.div>
               </>
@@ -16523,30 +16386,18 @@ export default function App() {
           </motion.div>
         )}
         {projectPicker && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
+          <ResponsiveDialog
+            title={projectPicker.mode === 'move' ? copy.projectPickerMoveTitle : copy.projectPickerCopyTitle}
+            subtitle={copy.projects}
+            closeLabel={copy.cancel}
+            onClose={() => setProjectPicker(null)}
           >
-            <motion.div
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
-            >
-              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.projects}</div>
-              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">
-                {projectPicker.mode === 'move' ? copy.projectPickerMoveTitle : copy.projectPickerCopyTitle}
-              </h2>
-              <div className="mt-4 max-h-[60vh] space-y-2 overflow-y-auto">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <button
                   type="button"
                   onClick={() => handleProjectPickerSelect(null)}
                   disabled={!canUseProjectPickerTarget(null)}
-                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-50"
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-50"
                 >
                   <div className="text-sm font-bold text-gray-900">{copy.ungroupedProject}</div>
                   <div className="text-xs text-gray-500">{ungroupedSetlistCount} {copy.setlists}</div>
@@ -16557,102 +16408,30 @@ export default function App() {
                     type="button"
                     onClick={() => handleProjectPickerSelect(project.id)}
                     disabled={!canUseProjectPickerTarget(project.id)}
-                    className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-50"
+                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-50"
                   >
-                    <div className="min-w-0 truncate text-sm font-bold text-gray-900">{project.name}</div>
+                    <div className="min-w-0 break-words text-sm font-bold text-gray-900">{project.name}</div>
                     <div className="shrink-0 text-xs text-gray-500">{projectSetlistCount(project.id)} {copy.setlists}</div>
                   </button>
                 ))}
-              </div>
-              <div className="mt-6 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setProjectPicker(null)}
-                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-                >
-                  {copy.cancel}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
+
+            </div>
+          </ResponsiveDialog>
         )}
         {pendingShareUrl && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
-          >
-            <motion.div
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="w-full max-w-lg rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
-            >
-              <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{APP_NAME}</div>
-              <h2 className="mt-2 text-xl font-bold tracking-tight text-gray-900">
-                {shareDialogContext ? copy.shareDialogTitle : (language === 'zh' ? '分享歌曲' : 'Share Songs')}
-              </h2>
-              <input
-                type="text"
-                readOnly
-                value={pendingShareUrl}
-                onFocus={(event) => event.currentTarget.select()}
-                className="mt-4 w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-800 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
-              />
-              {shareDialogContext && (
-                <>
-                  <p className="mt-3 text-[11px] leading-relaxed text-gray-500">{copy.shareDialogContactsHint}</p>
-                  {renderShareContactPicker(shareDialogContext.resourceType, shareDialogContext.resourceId)}
-                </>
-              )}
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => { setPendingShareUrl(null); setShareDialogContext(null); }}
-                  className="inline-flex items-center justify-center rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-                >
-                  {copy.done}
-                </button>
-                {(Capacitor.isNativePlatform() || (typeof navigator !== 'undefined' && typeof navigator.share === 'function')) && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const didShare = await openSystemShareSheet(
-                        pendingShareUrl,
-                        language === 'zh' ? `來自 ${APP_NAME} 的歌曲` : `Songs from ${APP_NAME}`
-                      );
-                      if (didShare) {
-                        setPendingShareUrl(null);
-                        setShareDialogContext(null);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
-                  >
-                    <Share2 size={14} />
-                    <span>{language === 'zh' ? '系統分享' : 'Share'}</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const didCopy = await copyShareUrlToClipboard(pendingShareUrl);
-                    if (didCopy) {
-                      setPendingShareUrl(null);
-                      setShareDialogContext(null);
-                      toast.success(copy.shareCopied);
-                    }
-                  }}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800"
-                >
-                  <Copy size={14} />
-                  <span>{language === 'zh' ? '複製連結' : 'Copy Link'}</span>
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
+          <ShareDialog
+            key={pendingShareUrl}
+            language={language}
+            title={shareDialogContext ? copy.shareDialogTitle : (language === 'zh' ? '分享歌曲' : 'Share songs')}
+            url={pendingShareUrl}
+            sharing={isSharingToContacts}
+            contacts={shareDialogContext ? renderShareContactPicker(shareDialogContext.resourceType, shareDialogContext.resourceId) : undefined}
+            onClose={() => { setPendingShareUrl(null); setShareDialogContext(null); }}
+            onCopy={() => copyShareUrlToClipboard(pendingShareUrl)}
+            onSystemShare={(Capacitor.isNativePlatform() || (typeof navigator !== 'undefined' && typeof navigator.share === 'function'))
+              ? () => openSystemShareSheet(pendingShareUrl, language === 'zh' ? `來自 ${APP_NAME} 的歌曲` : `Songs from ${APP_NAME}`)
+              : undefined}
+          />
         )}
       </AnimatePresence>
 
@@ -16760,6 +16539,32 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isTeamManagementOpen && canManageActiveTeam ? (
+        <TeamManagementDialog
+          key={activeCloudLibrary?.id}
+          language={language}
+          teamName={activeCloudLibrary?.name ?? ''}
+          snapshot={teamManagement}
+          loading={isLoadingTeamManagement}
+          error={teamManagementError}
+          inviteEmail={teamInviteEmail}
+          inviteRole={teamInviteRole}
+          inviteShareUrl={teamInviteShareUrl}
+          creatingInvite={isCreatingTeamInvite}
+          updatingUserId={updatingTeamMemberUserId}
+          onClose={() => setIsTeamManagementOpen(false)}
+          onRetry={() => void loadTeamManagement()}
+          onEmailChange={setTeamInviteEmail}
+          onRoleChange={setTeamInviteRole}
+          onCreateInvite={handleCreateTeamInvite}
+          onCopyUrl={copyShareUrlToClipboard}
+          onCopyInvite={(invite) => copyShareUrlToClipboard(new URL(`team-invite/${invite.token}`, getAppBaseUrl()).toString())}
+          onRevokeInvite={handleRevokeTeamInvite}
+          onUpdateRole={handleUpdateTeamMemberRole}
+          onRemoveMember={handleRemoveTeamMember}
+        />
+      ) : null}
 
       <TeamSongImportDialog
         open={isTeamSongImportOpen}

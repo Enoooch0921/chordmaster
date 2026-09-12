@@ -29,6 +29,17 @@ const snapshot: SetlistEditorAssignmentSnapshot = {
 };
 
 describe('SetlistAssignmentDialog', () => {
+  it('filters members without changing their assignments', () => {
+    const onToggle = vi.fn();
+    render(<SetlistAssignmentDialog open language="zh" setlistName="主日敬拜" snapshot={snapshot} loading={false} updatingUserId={null} onClose={vi.fn()} onRefresh={vi.fn()} onToggle={onToggle} />);
+    fireEvent.change(screen.getByRole('textbox', { name: '搜尋團隊成員' }), { target: { value: 'manager@example.com' } });
+    expect(screen.getByRole('button', { name: /小美/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: /大雄/ })).not.toBeInTheDocument();
+    expect(onToggle).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: '搜尋團隊成員' }), { target: { value: '' } });
+    expect(screen.getByRole('button', { name: /大雄/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('根據目前指派狀態移除或新增歌單協作者', () => {
     const onToggle = vi.fn();
 

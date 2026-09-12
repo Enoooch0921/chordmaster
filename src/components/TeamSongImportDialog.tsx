@@ -175,26 +175,26 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-stone-950/45 px-3 py-6 backdrop-blur-[2px]">
-      <div role="dialog" aria-modal="true" aria-label={language === 'zh' ? '從個人區匯入歌曲' : 'Import songs from personal library'} className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
-        <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-3">
+    <div className="fixed inset-0 z-[180] flex items-stretch justify-center bg-stone-950/45 sm:items-center sm:px-3 sm:py-6 backdrop-blur-[2px]">
+      <div role="dialog" aria-modal="true" aria-label={language === 'zh' ? '從個人區匯入歌曲' : 'Import songs from personal library'} className="flex h-[100dvh] max-h-[100dvh] w-full max-w-2xl flex-col overflow-hidden bg-white pt-[env(safe-area-inset-top)] shadow-2xl sm:h-[min(760px,90dvh)] sm:rounded-2xl sm:border sm:border-gray-200">
+        <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="text-base font-black text-gray-900">
               {language === 'zh' ? '從個人區匯入團隊曲庫' : 'Import from your personal library'}
             </div>
             <div className="mt-0.5 text-xs font-medium text-gray-500">
               {inspection
-                ? (language === 'zh' ? '確認同一來源歌曲的處理方式' : 'Resolve songs already imported from the same source')
-                : (language === 'zh' ? '歌名會完整保留，不會加上匯入尾碼' : 'Titles are preserved without import suffixes')}
+                ? (language === 'zh' ? '步驟 2 / 2 · 確認匯入方式' : 'Step 2 of 2 · Review import')
+                : (language === 'zh' ? '步驟 1 / 2 · 選擇要匯入的歌曲' : 'Step 1 of 2 · Select songs')}
             </div>
           </div>
-          <button type="button" onClick={onClose} disabled={isImporting} className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40" aria-label={language === 'zh' ? '關閉' : 'Close'}>
+          <button type="button" onClick={onClose} disabled={isImporting} className="flex size-11 shrink-0 items-center justify-center rounded-xl text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40" aria-label={language === 'zh' ? '關閉' : 'Close'}>
             <X size={18} />
           </button>
         </div>
 
         {error ? (
-          <div className="mx-4 mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-700">
+          <div role="alert" className="mx-4 mt-3 flex max-h-28 shrink-0 items-start overflow-y-auto gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-700">
             <AlertTriangle size={15} className="mt-0.5 shrink-0" />
             <span className="whitespace-pre-line">{error}</span>
           </div>
@@ -202,21 +202,21 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
 
         {!inspection ? (
           <>
-            <div className="border-b border-gray-100 px-4 py-3">
+            <div className="shrink-0 border-b border-gray-100 px-4 py-3">
               <label className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
                 <Search size={14} className="text-gray-400" />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={language === 'zh' ? '搜尋個人歌曲' : 'Search personal songs'} className="min-w-0 flex-1 bg-transparent text-sm text-gray-800 outline-none" autoFocus />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={language === 'zh' ? '搜尋個人歌曲' : 'Search personal songs'} aria-label={language === 'zh' ? '搜尋個人歌曲' : 'Search personal songs'} className="min-h-8 min-w-0 flex-1 bg-transparent text-base text-gray-800 outline-none" />
               </label>
               <div className="mt-2 flex items-center justify-between gap-2 text-xs font-bold">
                 <span className="text-gray-500">{language === 'zh' ? `已選 ${selectedIds.length} 首` : `${selectedIds.length} selected`}</span>
-                <button type="button" onClick={toggleAllVisible} disabled={visibleSongs.length === 0} className="rounded-lg px-2 py-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40">
+                <button type="button" onClick={toggleAllVisible} disabled={visibleSongs.length === 0} className="min-h-11 rounded-lg px-2 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40">
                   {allVisibleSelected
                     ? (language === 'zh' ? '取消全選' : 'Deselect results')
                     : (language === 'zh' ? '全選目前結果' : 'Select results')}
                 </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
               {loadingSongs ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-sm font-semibold text-gray-500"><LoaderCircle size={18} className="animate-spin" />{language === 'zh' ? '載入個人曲庫…' : 'Loading personal library…'}</div>
               ) : visibleSongs.length === 0 ? (
@@ -229,8 +229,8 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
                       <button key={song.id} type="button" onClick={() => toggleSong(song.id)} aria-pressed={selected} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${selected ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white hover:border-indigo-200'}`}>
                         <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${selected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 bg-white text-transparent'}`}><Check size={14} strokeWidth={3} /></span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-bold text-gray-900">{song.title || (language === 'zh' ? '未命名歌曲' : 'Untitled Song')}</span>
-                          <span className="mt-0.5 block truncate text-[11px] text-gray-500">{getSongSummary(song, language)}</span>
+                          <span className="block break-words text-sm font-bold text-gray-900">{song.title || (language === 'zh' ? '未命名歌曲' : 'Untitled Song')}</span>
+                          <span className="mt-0.5 block break-words text-xs leading-5 text-gray-500">{getSongSummary(song, language)}</span>
                         </span>
                       </button>
                     );
@@ -238,9 +238,9 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-4 py-3">
-              <button type="button" onClick={onClose} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50">{language === 'zh' ? '取消' : 'Cancel'}</button>
-              <button type="button" onClick={() => void startInspection()} disabled={selectedIds.length === 0 || isInspecting || loadingSongs} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-gray-200 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <button type="button" onClick={onClose} className="min-h-11 rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50">{language === 'zh' ? '取消' : 'Cancel'}</button>
+              <button type="button" onClick={() => void startInspection()} disabled={selectedIds.length === 0 || isInspecting || loadingSongs} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">
                 {isInspecting ? <LoaderCircle size={15} className="animate-spin" /> : <ChevronGlyph />}
                 <span>{language === 'zh' ? '下一步' : 'Continue'}</span>
               </button>
@@ -248,7 +248,7 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
           </>
         ) : (
           <>
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
               <div className="space-y-3">
                 {inspection.songs.map((item) => {
                   const sourceSong = selectedSongs.find((song) => song.id === item.sourceSongId);
@@ -267,7 +267,7 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
                   return (
                     <div key={item.sourceSongId} className="rounded-xl border border-gray-200 bg-white p-3">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-gray-900">{item.title}</div>
+                        <div className="break-words text-sm font-black text-gray-900">{item.title}</div>
                         {sourceSong ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{getSongSummary(sourceSong, language)}</div> : null}
                       </div>
                       {hasConflict ? (
@@ -357,9 +357,9 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
                 })}
               </div>
             </div>
-            <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-4 py-3">
-              <button type="button" onClick={() => { setInspection(null); setError(null); }} disabled={isImporting} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-40">{language === 'zh' ? '返回選擇' : 'Back'}</button>
-              <button type="button" onClick={() => void runImport()} disabled={isImporting} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-50">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-gray-200 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <button type="button" onClick={() => { setInspection(null); setError(null); }} disabled={isImporting} className="min-h-11 rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-40">{language === 'zh' ? '返回選擇' : 'Back'}</button>
+              <button type="button" onClick={() => void runImport()} disabled={isImporting} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-50">
                 {isImporting ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={15} />}
                 <span>{language === 'zh' ? `匯入 ${inspection.songs.length} 首` : `Import ${inspection.songs.length}`}</span>
               </button>

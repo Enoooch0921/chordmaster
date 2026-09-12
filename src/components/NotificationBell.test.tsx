@@ -1,10 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppNotification } from '../types';
 import { NotificationBell } from './NotificationBell';
 
 const labels = {
   title: '通知',
+  close: '關閉通知',
   empty: '沒有通知',
   markAllRead: '全部已讀',
   open: '開啟',
@@ -18,8 +19,24 @@ const labels = {
   reviewInvite: '確認邀請'
 };
 
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(20, 20, 36, 36));
+});
+
 describe('NotificationBell', () => {
-  it('shows team invitations and opens the confirmation flow', () => {
+  it('escapes sidebar clipping and can be dismissed with the keyboard', async () => {
+    const { container } = render(<NotificationBell notifications={[]} labels={labels} onOpen={vi.fn()} onMarkAllRead={vi.fn()} />);
+    const trigger = screen.getByRole('button', { name: '通知' });
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name: '通知' });
+    expect(container).not.toContainElement(dialog);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('shows team invitations and opens the confirmation flow', async () => {
     const onOpen = vi.fn();
     const notification: AppNotification = {
       id: 'notification-1',
@@ -47,7 +64,8 @@ describe('NotificationBell', () => {
     expect(screen.getByText('主日敬拜團')).toBeInTheDocument();
     expect(screen.getByText('確認邀請')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /小美/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /小美/ }));
     expect(onOpen).toHaveBeenCalledWith(notification);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
