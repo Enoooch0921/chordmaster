@@ -35,6 +35,8 @@ describe('TeamManagementDialog', () => {
     expect(container).not.toContainElement(dialog);
     expect(document.body.style.overflow).toBe('hidden');
     expect(screen.queryByLabelText('調整 Enoch 的權限')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('調整 Joseph 的權限')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '編輯 Joseph 的權限' }));
     await user.selectOptions(screen.getByLabelText('調整 Joseph 的權限'), 'editor');
     expect(props.onUpdateRole).toHaveBeenCalledWith('member', 'editor');
     await user.click(screen.getByRole('button', { name: '移除 Joseph' }));

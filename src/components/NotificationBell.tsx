@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAnchoredPortalPanel } from './useAnchoredPortalPanel';
 import { Bell, ListMusic, FolderTree, Users, X } from 'lucide-react';
@@ -32,7 +32,15 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => { setOpen(false); triggerRef.current?.focus({ preventScroll: true }); }, []);
+  const restoreTriggerFocus = useRef(false);
+  const close = useCallback(() => { restoreTriggerFocus.current = true; setOpen(false); }, []);
+  useLayoutEffect(() => {
+    // Restore focus after the portal is removed, so a pending positioning effect cannot steal it.
+    if (!open && restoreTriggerFocus.current) {
+      restoreTriggerFocus.current = false;
+      triggerRef.current?.focus({ preventScroll: true });
+    }
+  }, [open]);
   const { panelStyle, isPositioned } = useAnchoredPortalPanel({ isOpen: open, align: 'right', triggerRef, panelRef, onRequestClose: close, zIndex: 300 });
   useEffect(() => {
     if (open && isPositioned) panelRef.current?.focus({ preventScroll: true });

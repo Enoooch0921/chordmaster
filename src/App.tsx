@@ -88,6 +88,7 @@ import { ShareContactPicker } from './components/ShareContactPicker';
 import TeamSongImportDialog from './components/TeamSongImportDialog';
 import SetlistAssignmentDialog from './components/SetlistAssignmentDialog';
 import TeamManagementDialog from './components/TeamManagementDialog';
+import WorkspaceOptions from './components/WorkspaceOptions';
 import ShareDialog from './components/ShareDialog';
 import ResponsiveDialog from './components/ResponsiveDialog';
 import SetlistNavigator, {
@@ -2380,7 +2381,6 @@ export default function App() {
   );
   const canCreateTeamSetlists = !isTeamWorkspace || TEAM_SETLIST_CREATE_ROLES.has(activeLibraryRole);
   const canManageActiveTeam = isTeamWorkspace && activeLibraryRole === 'owner';
-  const hasTeamLibraries = cloudLibraries.some((library) => library.kind === 'team');
   // Keep the create-team form collapsed by default so it never permanently
   // compresses the sidebar; it only expands when the user opens it explicitly.
   const shouldShowCreateTeamForm = isCreateTeamOpen;
@@ -11881,7 +11881,7 @@ export default function App() {
         title={`${language === 'zh' ? '工作區' : 'Workspace'} · ${activeWorkspaceLabel}`}
       >
         <Users size={14} className="shrink-0 text-indigo-600" />
-        <span className="min-w-0 flex-1 truncate text-xs font-bold text-gray-800">{activeWorkspaceLabel}</span>
+        <span className="min-w-0 flex-1 truncate text-xs font-bold text-gray-800">{isWorkspacePanelOpen ? (language === 'zh' ? '切換工作區' : 'Switch workspace') : activeWorkspaceLabel}</span>
         {isWorkspacePanelOpen ? (
           <ChevronUp size={14} className="shrink-0 text-gray-400" />
         ) : (
@@ -11938,24 +11938,17 @@ export default function App() {
             </div>
           ) : null}
 
-          <button
-            type="button"
-            onClick={() => {
-              setIsWorkspacePanelOpen(true);
-              setIsCreateTeamOpen((current) => !current);
-            }}
-            className={`flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${
-              isCreateTeamOpen
-                ? 'border-indigo-200 bg-indigo-100 text-indigo-700'
-                : 'border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
-            }`}
-            title={language === 'zh' ? '建立團隊' : 'Create team'}
-            aria-label={language === 'zh' ? '建立團隊' : 'Create team'}
-            aria-expanded={isCreateTeamOpen}
-          >
-            <UserPlus size={14} />
-            <span>{language === 'zh' ? '建立團隊' : 'Create team'}</span>
-          </button>
+          <WorkspaceOptions
+            language={language}
+            libraries={workspaceLibraryButtons}
+            activeId={activeCloudLibrary?.id ?? workspaceLibraryButtons[0]?.id}
+            disabled={cloudLibraries.length === 0 || isSwitchingLibrary || activeCloudMutationCount > 0}
+            canManage={canManageActiveTeam}
+            createOpen={isCreateTeamOpen}
+            onSelect={(id) => { setIsWorkspacePanelOpen(false); void handleSwitchCloudLibrary(id); }}
+            onManage={() => { setTeamManagementError(null); setIsTeamManagementOpen(true); }}
+            onCreate={() => setIsCreateTeamOpen((current) => !current)}
+          />
 
           {shouldShowCreateTeamForm ? (
             <form onSubmit={handleCreateTeam} className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/70 p-2">
@@ -11992,62 +11985,13 @@ export default function App() {
             </form>
           ) : null}
 
-          {hasTeamLibraries ? (
-            <div className="mt-2 flex gap-1 overflow-x-auto pb-1 no-scrollbar">
-              {workspaceLibraryButtons.map((library) => {
-                const isPlaceholder = cloudLibraries.length === 0;
-                const isActive = isPlaceholder || library.id === activeCloudLibrary?.id;
-                return (
-                  <button
-                    key={library.id}
-                    type="button"
-                    onClick={() => {
-                      if (!isPlaceholder) {
-                        void handleSwitchCloudLibrary(library.id);
-                      }
-                    }}
-                    disabled={isPlaceholder || isSwitchingLibrary || activeCloudMutationCount > 0 || isActive}
-                    className={`inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors disabled:cursor-default ${
-                      isActive
-                        ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                        : 'border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-700'
-                    }`}
-                    title={library.name}
-                  >
-                    <Users size={12} />
-                    <span className="max-w-[120px] truncate">{library.kind === 'personal' ? (language === 'zh' ? '個人區' : 'Personal') : library.name}</span>
-                    {library.kind === 'team' ? (
-                      <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] text-gray-500">
-                        {getTeamRoleLabel(library.role, language)}
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-
           {teamFeatureError ? (
             <div className="mt-2 whitespace-pre-line rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-800">
               {teamFeatureError}
             </div>
           ) : null}
 
-          {canManageActiveTeam ? (
-            <button
-              type="button"
-              onClick={() => { setTeamManagementError(null); setIsTeamManagementOpen(true); }}
-              aria-haspopup="dialog"
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100"
-            >
-              <Users size={14} />
-              <span>{language === 'zh' ? '團隊成員與權限' : 'Team Members & Roles'}</span>
-            </button>
-          ) : isTeamWorkspace ? (
-            <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-500">
-              {language === 'zh' ? `目前權限：${getTeamRoleLabel(activeLibraryRole, language)}` : `Role: ${getTeamRoleLabel(activeLibraryRole, language)}`}
-            </div>
-          ) : null}
+
         </div>
       ) : null}
     </div>

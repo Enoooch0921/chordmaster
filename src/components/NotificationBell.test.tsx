@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppNotification } from '../types';
 import { NotificationBell } from './NotificationBell';
@@ -31,6 +31,17 @@ describe('NotificationBell', () => {
     const dialog = await screen.findByRole('dialog', { name: '通知' });
     expect(container).not.toContainElement(dialog);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await waitFor(() => expect(dialog).toHaveFocus());
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('restores focus when closed before the first positioning frame', () => {
+    vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(1);
+    render(<NotificationBell notifications={[]} labels={labels} onOpen={vi.fn()} onMarkAllRead={vi.fn()} />);
+    const trigger = screen.getByRole('button', { name: '通知' });
+    fireEvent.click(trigger);
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
