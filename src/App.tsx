@@ -2420,7 +2420,7 @@ export default function App() {
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
     paused: workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
-      || Boolean(teamDraft.pending) || Boolean(teamDraft.error),
+      || (isTeamWorkspace && !teamDraft.ready) || Boolean(teamDraft.pending) || Boolean(teamDraft.error),
     workspace: { songs, setlists, projects },
     canApply: () => {
       if (workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
@@ -3656,9 +3656,10 @@ export default function App() {
     let localSavedAt: number | null = null;
     let localStorageError: unknown = null;
     if (isTeamWorkspace && authenticatedUser && activeLibraryId) {
+      if (!teamDraft.ready) throw new Error('正在讀取本機團隊草稿，請稍候。');
       if (teamDraft.pending) throw new Error('請先處理本機團隊草稿。');
       try {
-        writeTeamDraft(authenticatedUser.id, activeLibraryId,
+        await writeTeamDraft(authenticatedUser.id, activeLibraryId,
           { songs: nextSongs, setlists: nextSetlists, projects: nextProjects },
           { songs: savedSongs, setlists: savedSetlists, projects: savedProjects });
       } catch (error) {
@@ -3760,7 +3761,7 @@ export default function App() {
 
     try {
       if (isTeamWorkspace && authenticatedUser && activeLibraryId) {
-        removeTeamDraft(authenticatedUser.id, activeLibraryId, { songs: nextSongs, setlists: nextSetlists, projects: nextProjects });
+        await removeTeamDraft(authenticatedUser.id, activeLibraryId, { songs: nextSongs, setlists: nextSetlists, projects: nextProjects });
       } else {
         savePendingSync(null, { userId: authenticatedUser.id, libraryId: activeLibraryId! });
       }
@@ -8197,7 +8198,7 @@ export default function App() {
   }, [authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, language, toast]);
 
   useEffect(() => {
-    if (!isAutoSaveEnabled || !workspaceIsDirty) {
+    if (!isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
       return;
     }
 
@@ -8218,7 +8219,7 @@ export default function App() {
         autoSaveTimeoutRef.current = null;
       }
     };
-  }, [isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty]);
+  }, [isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
