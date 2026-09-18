@@ -1,3 +1,5 @@
+import ChordBeatOffsetPicker from '../ChordBeatOffsetPicker';
+import { canOffsetChord, getChordBeatOffset } from '../../utils/chordBeatOffsets';
 import RhythmVoicesEditor from '../RhythmVoicesEditor';
 import React from 'react';
 import { createPortal } from 'react-dom';
@@ -66,6 +68,7 @@ import {
   normalizeChordTextInput,
   setBarChordText,
   setChordAtBeatSlot,
+  setChordBeatOffset,
   setMultiMeasureRestAtBar,
   toggleEndingNumber,
   updateEditableBarFields
@@ -909,7 +912,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const updateActiveChordMark = (nextMark: NonNullable<Bar['chordMarks']>[number] | undefined) => {
     if (!bar) return;
     const nextMarks = { ...(bar.chordMarks ?? {}) };
-    if (nextMark?.color || nextMark?.special) {
+    if (nextMark?.color || nextMark?.special || nextMark?.beatOffset) {
       nextMarks[activeChordMarkIndex] = nextMark;
     } else {
       delete nextMarks[activeChordMarkIndex];
@@ -920,11 +923,17 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     );
   };
 
+  const renderChordBeatOffsetPicker = () => <ChordBeatOffsetPicker
+    value={bar ? getChordBeatOffset(bar, activeChordMarkIndex) : undefined}
+    disabled={!canOffsetChord(storedChord)} language={language}
+    onChange={value => onApplyDraft(setChordBeatOffset(session.draftSong, session.target, value), { mergeKey: `chord-position:${bar?.id}:${session.target.slotIndex}` })}
+  />;
+
   const applyPreviewColor = (color: AnnotationColorId) => {
     if (!bar || previewColorDisabled) return;
     const shouldClear = selectedPreviewColor === color;
     if (notationMode === 'chords') {
-      updateActiveChordMark(shouldClear ? undefined : { color });
+      updateActiveChordMark({ ...activeChordMark, color: shouldClear ? undefined : color });
       return;
     }
     if (notationMode === 'rhythm') {
@@ -1047,7 +1056,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     quality: { width: 360, height: 210 },
     time: { width: 370, height: 174 },
     special: { width: 360, height: 126 },
-    articulation: { width: 270, height: 92 },
+    articulation: { width: 290, height: 146 },
     ending: { width: 190, height: 272 },
     navigation: { width: 360, height: 190 },
     barline: { width: 220, height: 108 },
@@ -1246,6 +1255,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
               {activePicker === 'articulation' && (
                 <div className="grid min-h-0 flex-1 grid-cols-4 gap-1.5">
+                  <div className="col-span-4">{renderChordBeatOffsetPicker()}</div>
                   <button type="button" className={`${buttonClass} min-h-0 ${trailingModifiers(displayedChord).includes('<') ? activeButtonClass : ''}`} onClick={() => toggleModifier('<')} aria-label={language === 'zh' ? '搶拍' : 'Push'}><ChordTimingArrow marker="<" className="h-6 w-8" strokeWidth={1.8} /></button>
                   <button type="button" className={`${buttonClass} min-h-0 ${trailingModifiers(displayedChord).includes('>') ? activeButtonClass : ''}`} onClick={() => toggleModifier('>')} aria-label={language === 'zh' ? '拖拍' : 'Pull'}><ChordTimingArrow marker=">" className="h-6 w-8" strokeWidth={1.8} /></button>
                   <button type="button" className={`${buttonClass} min-h-0 text-xl ${trailingModifiers(displayedChord).includes('^') ? activeButtonClass : ''}`} onClick={() => toggleModifier('^')} aria-label={language === 'zh' ? '重音' : 'Accent'}>&gt;</button>
@@ -1328,6 +1338,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             </div>
           </div>
 
+          {renderChordBeatOffsetPicker()}
           <div className="grid grid-cols-4 gap-1">
             <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('<') ? activeButtonClass : ''}`} onClick={() => toggleModifier('<')} aria-label={language === 'zh' ? '搶拍' : 'Push'}><ChordTimingArrow marker="<" className="h-6 w-8" strokeWidth={1.8} /></button>
             <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('>') ? activeButtonClass : ''}`} onClick={() => toggleModifier('>')} aria-label={language === 'zh' ? '拖拍' : 'Pull'}><ChordTimingArrow marker=">" className="h-6 w-8" strokeWidth={1.8} /></button>
