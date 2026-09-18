@@ -1239,6 +1239,7 @@ const AutoShrink: React.FC<{
   maxScale?: number;
   overflowVisible?: boolean;
   shrinkAxis?: 'uniform' | 'x-only';
+  startOffsetFraction?: number;
 }> = ({
   children,
   className = "",
@@ -1246,11 +1247,13 @@ const AutoShrink: React.FC<{
   minScale = 0.6,
   maxScale = 1,
   overflowVisible = false,
-  shrinkAxis = 'uniform'
+  shrinkAxis = 'uniform',
+  startOffsetFraction = 0
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const contentRef = React.useRef<HTMLDivElement>(null);
   const [scale, setScale] = React.useState(1);
+  const [startInset, setStartInset] = React.useState(0);
 
   React.useLayoutEffect(() => {
     const updateScale = () => {
@@ -1266,7 +1269,14 @@ const AutoShrink: React.FC<{
         const fittedScale = contentWidth > containerWidth && containerWidth > 30
           ? Math.max(minScale, (containerWidth - 2) / contentWidth)
           : 1;
-        setScale(Math.min(maxScale, fittedScale));
+        const nextScale = Math.min(maxScale, fittedScale);
+        setScale(nextScale);
+        // Keep the chord inside its allotted span. The beat label retains the
+        // exact onset when a long chord needs to move left near a barline.
+        setStartInset(Math.max(0, Math.min(
+          containerWidth * startOffsetFraction,
+          containerWidth - contentWidth * nextScale
+        )));
       }
     };
 
@@ -1287,7 +1297,7 @@ const AutoShrink: React.FC<{
       observer.disconnect();
       clearTimeout(timer);
     };
-  }, [children, minScale, maxScale]);
+  }, [children, minScale, maxScale, startOffsetFraction]);
 
   const justifyClass = align === 'left'
     ? 'justify-start'
@@ -1309,7 +1319,7 @@ const AutoShrink: React.FC<{
       <div
         ref={contentRef}
         style={{
-          transform: shrinkAxis === 'x-only' ? `scaleX(${scale})` : `scale(${scale})`,
+          transform: `${startOffsetFraction ? `translateX(${startInset}px) ` : ''}${shrinkAxis === 'x-only' ? `scaleX(${scale})` : `scale(${scale})`}`,
           transformOrigin,
           whiteSpace: 'nowrap',
           flexShrink: 0,
@@ -3485,15 +3495,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                   data-chord-beat-offset={beatOffset}
                                                   data-chord-beat-position={beatOffset ? chordBeatPositionLabel(anchor.slotIndex, beatOffset) : undefined}
 	                                                className="flex h-[24px] min-w-0 items-end px-[3px]"
-	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span ${anchor.span}`, gridRow: '1', position: 'relative', transform: beatOffset ? `translateX(${beatOffset / anchor.span * 100}%)` : undefined }}
+	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span ${anchor.span}`, gridRow: '1', position: 'relative' }}
 	                                                  onClick={(event) => {
 	                                                  event.stopPropagation();
 	                                                  emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords', anchor.slotIndex, anchor.chordIndex);
                                                 }}
                                               >
-                                                {beatOffset && <span data-chord-beat-label className="pointer-events-none absolute -top-[5px] left-[3px] text-[8px] font-medium leading-none text-slate-600">{chordBeatPositionLabel(anchor.slotIndex, beatOffset)}</span>}
+                                                {beatOffset && <span data-chord-beat-label style={{ left: `calc(${beatOffset / anchor.span * 100}% + 3px)` }} className="pointer-events-none absolute -top-[5px] text-[8px] font-medium leading-none text-slate-600">{chordBeatPositionLabel(anchor.slotIndex, beatOffset)}</span>}
                                                 <AutoShrink
                                                   align="left"
+                                                  startOffsetFraction={beatOffset ? beatOffset / anchor.span : 0}
                                                   minScale={minScale}
 	                                                  maxScale={maxScale}
 	                                                  overflowVisible
