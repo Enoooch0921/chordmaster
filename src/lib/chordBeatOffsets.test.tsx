@@ -39,5 +39,21 @@ it('keeps offsets through chord copying, transposition and undo/redo',()=>{
  const edited=applyPreviewDraft(session,s);expect(bar(undoPreviewDraft(edited).draftSong).chordMarks?.[1].beatOffset).toBeUndefined();expect(bar(redoPreviewDraft(undoPreviewDraft(edited)).draftSong).chordMarks?.[1].beatOffset).toBe(.25);
 });
 it('renders the explicit 2e anchor in every row layout, key and Nashville view used by preview and PDF',()=>{
- for(const rows of [1,2,3]as const)for(const numbers of [false,true]){const s={...setChordBeatOffset(song(),target,.25),barRowCount:rows,showNashvilleNumbers:numbers};const {container}=render(<ChordSheet song={s} currentKey="D" language="zh"/>);const anchor=container.querySelector('[data-chord-beat-position="2e"]') as HTMLElement;expect(anchor).not.toBeNull();expect(anchor.style.transform).toBe('translateX(25%)');expect(anchor.querySelector('[data-chord-beat-label]')?.textContent).toBe('2e');expect(container.querySelectorAll('[data-chord-beat-offset]')).toHaveLength(1);cleanup();}
+ for(const rows of [1,2,3]as const)for(const numbers of [false,true]){const s={...setChordBeatOffset(song(),target,.25),barRowCount:rows,showNashvilleNumbers:numbers};const {container}=render(<ChordSheet song={s} currentKey="D" language="zh"/>);const anchor=container.querySelector('[data-chord-beat-position="2e"]') as HTMLElement;expect(anchor).not.toBeNull();expect(anchor.style.transform).toBe('');expect((anchor.querySelector('[data-chord-beat-label]') as HTMLElement).style.left).toBe('calc(25% + 3px)');expect(anchor.querySelector('[data-chord-beat-label]')?.textContent).toBe('2e');expect(container.querySelectorAll('[data-chord-beat-offset]')).toHaveLength(1);cleanup();}
+});
+it('keeps late chord ink in its span while retaining the exact beat label',()=>{
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(44);
+ const natural=vi.spyOn(HTMLElement.prototype,'scrollWidth','get').mockReturnValue(38);
+ try {
+  const s=song();s.timeSignature='3/4';delete bar(s).rhythm;bar(s).chords=['Db','','Db/F'];bar(s).chordMarks={2:{beatOffset:.5}};
+  const {container}=render(<ChordSheet song={s} currentKey="E" language="zh"/>);
+  const anchor=container.querySelector('[data-chord-beat-offset="0.5"]') as HTMLElement;
+  expect(anchor.dataset.chordBeatPosition).toBe('3&');
+  expect((anchor.querySelector('[data-chord-beat-label]') as HTMLElement).style.left).toBe('calc(50% + 3px)');
+  expect((anchor.children[1].firstElementChild as HTMLElement).style.transform).toBe('translateX(6px) scaleX(1)');
+  cleanup();natural.mockReturnValue(12);
+  const shorter=render(<ChordSheet song={s} currentKey="E" language="zh"/>);
+  const next=shorter.container.querySelector('[data-chord-beat-offset="0.5"]') as HTMLElement;
+  expect((next.children[1].firstElementChild as HTMLElement).style.transform).toBe('translateX(22px) scaleX(1)');
+ } finally {cleanup();width.mockRestore();natural.mockRestore();}
 });

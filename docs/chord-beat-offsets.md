@@ -11,3 +11,5 @@ The preview editor exposes the menu with the articulation controls on desktop an
 Older clients do not render this metadata and may discard it when normalizing a save. Refresh web clients and update native builds before editing songs containing offsets. Native build validation does not install an updated app.
 
 Tests cover editing, invalid metadata, compact-to-grid remapping, insertion/deletion, arrow replacement, normalization and JSON reload, copy-paste with key changes, undo/redo, and all score row layouts in transposed letter/Nashville modes. Desktop and phone UI tests exercise the selection. A browser-generated PDF of the source song is also visually checked before release.
+
+The beat label stays at the exact onset. Chord text shifts within its existing grid span and stops before the span boundary, so a late slash chord cannot cross the barline; long text can begin left of its timing label. This changes engraving only, not the saved beat offset.
