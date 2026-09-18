@@ -1,3 +1,4 @@
+import RhythmVoicesEditor from '../RhythmVoicesEditor';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -256,6 +257,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [pickerAnchor, setPickerAnchor] = React.useState<PickerAnchor | null>(null);
   const [bassMode, setBassMode] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
+  const [rhythmVoicesExpanded, setRhythmVoicesExpanded] = React.useState(false);
   const [desktopKeysVisible, setDesktopKeysVisible] = React.useState(() => (
     deviceLayout !== 'desktop' || session.target.field !== 'chords'
   ));
@@ -850,9 +852,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               ? Math.min(340, viewportHeight - 24)
               : Math.min(190, viewportHeight - 24);
           const preferredBelow = session.target.anchorRect.bottom + 10;
-          const top = preferredBelow + estimatedHeight <= viewportTop + viewportHeight - 12
+          const preferredTop = preferredBelow + estimatedHeight <= viewportTop + viewportHeight - 12
             ? preferredBelow
-            : Math.max(viewportTop + 12, session.target.anchorRect.top - estimatedHeight - 10);
+            : session.target.anchorRect.top - estimatedHeight - 10;
+          const top = Math.max(viewportTop + 12, Math.min(preferredTop, viewportTop + viewportHeight - estimatedHeight - 12));
           const left = Math.max(viewportLeft + 12, Math.min(session.target.anchorRect.left, viewportLeft + viewportWidth - width - 12));
           return {
             position: 'fixed',
@@ -1359,7 +1362,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </div>
       )}
 
-      {notationMode === 'rhythm' && (
+      {notationMode === 'rhythm' && !rhythmVoicesExpanded && (
         <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr]'} gap-1.5`} data-keyboard-view="rhythm">
           <div className="grid min-h-0 grid-cols-5 gap-1.5" data-rhythm-key-row="notes" data-key-surface="character">
             {([['w', '全音符', 'Whole'], ['h', '二分音符', 'Half'], ['q', '四分音符', 'Quarter'], ['e', '八分音符', 'Eighth'], ['s', '十六分音符', 'Sixteenth']] as const).map(([token, zhLabel, enLabel]) => (
@@ -1434,6 +1437,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           </div>
           {renderPreviewColorControls('jianpu-color-controls')}
           {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
+        </div>
+      )}
+
+      {notationMode === 'rhythm' && (
+        <div className={rhythmVoicesExpanded ? "min-h-0 flex-1 overflow-y-auto" : "shrink-0"}>
+          <RhythmVoicesEditor expanded={rhythmVoicesExpanded} onExpandedChange={setRhythmVoicesExpanded} voices={bar.rhythmVoices} timeSignature={getEffectiveTimeSignatureForBar(session.draftSong, bar)} language={language} onChange={rhythmVoices => updateFields({ rhythmVoices })} />
         </div>
       )}
 

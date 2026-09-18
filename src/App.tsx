@@ -1,3 +1,4 @@
+import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
 import { CURRENT_CHORD_TIMING_VERSION, migrateChordTimingArrows } from './lib/chordTimingMigration';
 import LegacyDraftRecovery from './components/LegacyDraftRecovery';
@@ -1207,6 +1208,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
           labelLane: safeBar.labelLane === 'rhythm' || safeBar.labelLane === 'riff' ? safeBar.labelLane : undefined,
           riffLabel: normalizeOptionalText(safeBar.riffLabel),
           rhythmLabel: normalizeOptionalText(safeBar.rhythmLabel),
+          rhythmVoices: normalizeRhythmVoices(safeBar.rhythmVoices),
           annotation: normalizeOptionalText(safeBar.annotation),
           leftMarker: normalizeNavigationMarker(safeBar.leftMarker),
           rightMarker: normalizeNavigationMarker(safeBar.rightMarker),

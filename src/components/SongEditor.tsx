@@ -1,3 +1,4 @@
+import RhythmVoicesEditor from './RhythmVoicesEditor';
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure, AnnotationColorId } from '../types';
 import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpLeft, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
@@ -6225,6 +6226,9 @@ const SongEditor: React.FC<Props> = ({
                   );
                 })()}
 
+                <RhythmVoicesEditor voices={bar.rhythmVoices} timeSignature={getBarTimeSignature(bar)} language={language} onChange={rhythmVoices => {
+                  const bars = [...section.bars]; bars[bIdx] = { ...bar, rhythmVoices }; updateSection(sIdx, { ...section, bars });
+                }} />
                 <div className="mt-1 text-[10px] text-gray-400">
                   {copy.editor.rhythmHelp}
                 </div>
@@ -7941,7 +7945,10 @@ const SongEditor: React.FC<Props> = ({
                         );
                       })()}
 
-                      <div className="mt-1 text-[10px] text-gray-400">
+                      <RhythmVoicesEditor voices={bar.rhythmVoices} timeSignature={getBarTimeSignature(bar)} language={language} onChange={rhythmVoices => {
+                  const bars = [...section.bars]; bars[bIdx] = { ...bar, rhythmVoices }; updateSection(sIdx, { ...section, bars });
+                }} />
+                <div className="mt-1 text-[10px] text-gray-400">
                         {copy.editor.rhythmHelp}
                       </div>
                     </div>

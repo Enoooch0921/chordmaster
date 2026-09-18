@@ -72,6 +72,21 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it('edits an extra voice without overlapping the primary keyboard or changing its rhythm', async () => {
+    const user = userEvent.setup();
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], rhythm: 'qr q qr q', rhythmVoices: [{ id: 'kick', label: 'Kick', rhythm: 'q' }] }] }] };
+    const rhythmTarget = { ...target, field: 'rhythm' as const, slotIndex: 0, cursor: { kind: 'rhythm' as const, cursorUnit: 0 } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: rhythmTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
+    await user.click(screen.getByText('其他節奏聲部 (1)'));
+    expect(document.querySelector('[data-keyboard-view="rhythm"]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: /^重音$/ }));
+    const bar = onApplyDraft.mock.calls.at(-1)![0].sections[0].bars[0];
+    expect(bar.rhythm).toBe('qr q qr q');
+    expect(bar.rhythmVoices).toEqual([{ id: 'kick', label: 'Kick', rhythm: 'q^' }]);
+    await user.click(screen.getByText('其他節奏聲部 (1)'));
+    expect(document.querySelector('[data-keyboard-view="rhythm"]')).toBeInTheDocument();
+  });
+
   it('cycles a source crosshead without changing its duration or neighboring notes', async () => {
     const user = userEvent.setup();
     let draft: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], rhythm: 'e e e e e e e e' }] }] };

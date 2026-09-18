@@ -113,6 +113,7 @@ export type EditableBarFields = Pick<
   | 'ending'
   | 'chordMarks'
   | 'rhythmMark'
+  | 'rhythmVoices'
   | 'unisonMark'
 >;
 
@@ -135,6 +136,7 @@ export const isBarCompletelyEmpty = (bar?: Bar | null) => {
   return !bar.chords.some((chord) => chord.trim())
     && !bar.riff?.trim()
     && !bar.rhythm?.trim()
+    && !bar.rhythmVoices?.length
     && !bar.label?.trim()
     && !bar.riffLabel?.trim()
     && !bar.rhythmLabel?.trim()
