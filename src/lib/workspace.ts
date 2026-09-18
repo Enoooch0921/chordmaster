@@ -1,3 +1,4 @@
+import { normalizeChordBeatOffset, canOffsetChord } from '../utils/chordBeatOffsets';
 import { normalizeRhythmVoices } from '../utils/rhythmVoices';
 import { migrateChordTimingArrows } from './chordTimingMigration';
 import { parseWorkspaceDeletions, type WorkspaceDeletions } from './workspaceMerge';
@@ -120,7 +121,8 @@ const normalizeChordTokens = (value: unknown) => {
   return [];
 };
 
-const normalizeChordMarks = (value: unknown, chordCount: number) => {
+const normalizeChordMarks = (value: unknown, chords: string[]) => {
+  const chordCount = chords.length;
   if (!value || typeof value !== 'object' || chordCount <= 0) {
     return undefined;
   }
@@ -134,10 +136,11 @@ const normalizeChordMarks = (value: unknown, chordCount: number) => {
     const mark = rawMark as Record<string, unknown>;
     const normalizedMark = {
       color: isAnnotationColorId(mark.color) ? mark.color : undefined,
-      special: mark.special === true ? true : undefined
+      special: mark.special === true ? true : undefined,
+      beatOffset: canOffsetChord(chords[index]) && !/[<>]/.test(chords[index]) ? normalizeChordBeatOffset(mark.beatOffset) : undefined
     };
 
-    if (normalizedMark.color || normalizedMark.special) {
+    if (normalizedMark.color || normalizedMark.special || normalizedMark.beatOffset) {
       nextMarks[index] = normalizedMark;
     }
 
@@ -207,7 +210,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           rhythmLabel: normalizeOptionalText(safeBar.rhythmLabel),
           rhythmVoices: normalizeRhythmVoices(safeBar.rhythmVoices),
           annotation: normalizeOptionalText(safeBar.annotation),
-          chordMarks: normalizeChordMarks(safeBar.chordMarks, chords.length),
+          chordMarks: normalizeChordMarks(safeBar.chordMarks, chords),
           rhythmMark: normalizeRhythmMark(safeBar.rhythmMark, rhythm),
           unisonMark: normalizeUnisonMark(safeBar.unisonMark),
           leftMarker: normalizeNavigationMarker(safeBar.leftMarker),

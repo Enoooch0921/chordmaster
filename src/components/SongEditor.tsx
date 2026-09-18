@@ -1,3 +1,5 @@
+import ChordBeatOffsetPicker from './ChordBeatOffsetPicker';
+import { canOffsetChord, getChordBeatOffset, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
 import RhythmVoicesEditor from './RhythmVoicesEditor';
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure, AnnotationColorId } from '../types';
@@ -1465,7 +1467,7 @@ const SongEditor: React.FC<Props> = ({
     if (!marks || chordCount <= 0) return undefined;
     const nextMarks = Object.entries(marks).reduce<NonNullable<Bar['chordMarks']>>((result, [rawIndex, mark]) => {
       const index = Number(rawIndex);
-      if (Number.isInteger(index) && index >= 0 && index < chordCount && (mark.color || mark.special)) {
+      if (Number.isInteger(index) && index >= 0 && index < chordCount && (mark.color || mark.special || mark.beatOffset)) {
         result[index] = mark;
       }
       return result;
@@ -1520,7 +1522,7 @@ const SongEditor: React.FC<Props> = ({
 
     const updateChordMark = (chordIndex: number, nextMark: NonNullable<Bar['chordMarks']>[number] | undefined) => {
       const nextMarks = { ...(bar.chordMarks ?? {}) };
-      if (nextMark?.color || nextMark?.special) {
+      if (nextMark?.color || nextMark?.special || nextMark?.beatOffset) {
         nextMarks[chordIndex] = nextMark;
       } else {
         delete nextMarks[chordIndex];
@@ -1557,6 +1559,7 @@ const SongEditor: React.FC<Props> = ({
                   return (
                     <div key={`${index}-${chord}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1.5">
                       <div className="min-w-0 truncate font-mono text-xs font-bold text-gray-800">{chord}</div>
+                      <div className="col-span-2"><ChordBeatOffsetPicker value={getChordBeatOffset(bar, index)} disabled={!canOffsetChord(chord)} language={language} onChange={value => updateBar(sIdx, bIdx, setRawChordBeatOffset(bar, index, value))}/></div>
                       {renderAnnotationColorPicker(color, DEFAULT_SPECIAL_CHORD_COLOR, false, (nextColor) => {
                         updateChordMark(index, { ...(mark ?? {}), color: nextColor });
                       })}
@@ -1565,7 +1568,7 @@ const SongEditor: React.FC<Props> = ({
                           type="button"
                           onClick={() => {
                             updateChordMark(index, mark?.special
-                              ? { color: mark.color }
+                              ? { ...mark, special: undefined }
                               : { ...(mark ?? {}), color: mark?.color ?? DEFAULT_SPECIAL_CHORD_COLOR, special: true });
                           }}
                           className={`h-6 rounded-md border px-1.5 text-[10px] font-bold transition-colors ${
@@ -1579,7 +1582,7 @@ const SongEditor: React.FC<Props> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => updateChordMark(index, undefined)}
+                          onClick={() => updateChordMark(index, mark?.beatOffset ? { beatOffset: mark.beatOffset } : undefined)}
                           className="h-6 rounded-md border border-gray-200 bg-white px-1.5 text-[10px] font-bold text-gray-400 transition-colors hover:border-rose-200 hover:text-rose-600"
                           title={copy.editor.clearMark}
                         >

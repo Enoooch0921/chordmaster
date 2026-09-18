@@ -1,3 +1,4 @@
+import { canOffsetChord, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
 /**
  * Pure immutable commands shared by the legacy editor and preview-first editor.
  * Long-lived edit targets use section/bar ids; array indexes never leave this
@@ -375,7 +376,11 @@ const remapChordMarksByBeat = (
         ? undefined
         : oldBar.chordMarks?.[slotIndex];
     const nextEntry = nextEntries[slotIndex];
-    if (mark && nextEntry) nextMarks[nextEntry.rawIndex] = mark;
+    if (mark && nextEntry) {
+      const nextMark = { ...mark };
+      if (!canOffsetChord(nextEntry.chord) || /[<>]/.test(nextEntry.chord)) delete nextMark.beatOffset;
+      if (Object.values(nextMark).some(value => value !== undefined && value !== false)) nextMarks[nextEntry.rawIndex] = nextMark;
+    }
   });
   return Object.keys(nextMarks).length > 0 ? nextMarks : undefined;
 };
@@ -416,6 +421,13 @@ export const setChordAtBeatSlot = (song: Song, target: SongChordTarget, chord: s
         ? undefined
         : remapChordMarksByBeat(bar, chords, beatCount)
     };
+  })
+);
+
+export const setChordBeatOffset = (song: Song, target: SongChordTarget, value: number): Song => (
+  updateBarById(song, target, bar => {
+    const entry = getChordDisplaySlotEntries(bar.chords, getBeatCount(song, bar))[target.slotIndex];
+    return entry ? setRawChordBeatOffset(bar, entry.rawIndex, value) : bar;
   })
 );
 

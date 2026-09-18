@@ -1,3 +1,4 @@
+import { getChordBeatOffset, chordBeatPositionLabel } from '../utils/chordBeatOffsets';
 import RhythmVoiceStack from './RhythmVoiceStack';
 import { visibleRhythmVoices } from '../utils/rhythmVoices';
 import { getSectionBadgeStyle } from '../utils/sectionBadgeStyle';
@@ -3451,6 +3452,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
                                           return renderedAnchors.map((anchor) => {
                                             const { renderedChord, trimmedChord } = anchor;
+                                            const beatOffset = getChordBeatOffset(bar, anchor.chordIndex);
                                             const isSelectedChord = Boolean(
                                               resolvedActiveChordSlot
                                               && resolvedActiveChordSlot.sectionId === section?.id
@@ -3480,13 +3482,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                                                key={`${row.sIdx}-${row.startBIdx + bIdx}-slot-${anchor.slotIndex}`}
 	                                                data-preview-token-span={anchor.span}
 	                                                data-preview-owner-slot={anchor.slotIndex}
+                                                  data-chord-beat-offset={beatOffset}
+                                                  data-chord-beat-position={beatOffset ? chordBeatPositionLabel(anchor.slotIndex, beatOffset) : undefined}
 	                                                className="flex h-[24px] min-w-0 items-end px-[3px]"
-	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span ${anchor.span}`, gridRow: '1' }}
+	                                                style={{ gridColumn: `${anchor.slotIndex + 1} / span ${anchor.span}`, gridRow: '1', position: 'relative', transform: beatOffset ? `translateX(${beatOffset / anchor.span * 100}%)` : undefined }}
 	                                                  onClick={(event) => {
 	                                                  event.stopPropagation();
 	                                                  emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords', anchor.slotIndex, anchor.chordIndex);
                                                 }}
                                               >
+                                                {beatOffset && <span data-chord-beat-label className="pointer-events-none absolute -top-[5px] left-[3px] text-[8px] font-medium leading-none text-slate-600">{chordBeatPositionLabel(anchor.slotIndex, beatOffset)}</span>}
                                                 <AutoShrink
                                                   align="left"
                                                   minScale={minScale}

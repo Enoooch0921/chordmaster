@@ -72,6 +72,15 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it.each(['desktop', 'phone'] as const)('edits precise chord timing on %s without changing the chord or its color', deviceLayout => {
+    const source: Song = {...song, sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],chords:['C','G','',''],chordMarks:{1:{color:'rose'}}}]}]};
+    const session=createPreviewEditSession({song:source,target:{...target,rawChordIndex:1},inputMode:'letters'});
+    const {onApplyDraft}=renderEditor({session,deviceLayout});
+    fireEvent.click(screen.getByRole('button',{name:'選擇演奏記號'}));
+    fireEvent.change(screen.getByRole('combobox',{name:'和弦拍內位置'}),{target:{value:'0.25'}});
+    const changed=onApplyDraft.mock.calls.at(-1)?.[0];expect(changed.sections[0].bars[0].chordMarks).toEqual({1:{color:'rose',beatOffset:.25}});expect(changed.sections[0].bars[0].chords).toEqual(['C','G','','']);
+  });
+
   it('adds an unmetered grace note from the phone editor without changing the principal pitch', () => {
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '3 | 4 | 5 | 6' }] }] };
     const jianpuTarget = { ...target, field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 } };

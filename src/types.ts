@@ -29,6 +29,8 @@ export type AnnotationColorId = 'amber' | 'emerald' | 'sky' | 'rose' | 'violet' 
 export type BarLabelLane = 'rhythm' | 'riff';
 
 export interface ChordMark {
+  /** Fraction of the notated beat after this chord's grid slot. */
+  beatOffset?: 0.25 | 0.5 | 0.75;
   color?: AnnotationColorId;
   special?: boolean;
 }
