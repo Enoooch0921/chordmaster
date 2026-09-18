@@ -72,6 +72,28 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it('adds an unmetered grace note from the phone editor without changing the principal pitch', () => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '3 | 4 | 5 | 6' }] }] };
+    const jianpuTarget = { ...target, field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: jianpuTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
+    fireEvent.click(screen.getByRole('button', { name: '編輯簡譜裝飾音' }));
+    expect(screen.queryByRole('button', { name: '輸入簡譜 2' })).toBeNull();
+    fireEvent.change(screen.getByRole('combobox', { name: '裝飾音音高' }), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: '套用裝飾音' }));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].riff).toBe('{2}3 | 4 | 5 | 6');
+  });
+
+  it('closes the grace form with Escape without changing the score or finishing the editor', () => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '{2}3 | 4 | 5 | 6' }] }] };
+    const jianpuTarget = { ...target, field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 } };
+    const { onApplyDraft, onDone } = renderEditor({ session: createPreviewEditSession({ song: source, target: jianpuTarget, inputMode: 'letters' }) });
+    fireEvent.click(screen.getByRole('button', { name: '編輯簡譜裝飾音' }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('combobox', { name: '裝飾音音高' })).toBeNull();
+    expect(onApplyDraft).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
   it('toggles a selected sixteenth into a triplet without shifting its neighbor', () => {
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '1=2=3_ | 4 | 5 | 6' }] }] };
     const jianpuTarget = { ...target, field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 } };

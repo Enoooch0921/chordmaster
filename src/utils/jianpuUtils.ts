@@ -25,7 +25,15 @@ export interface JianpuInputMode {
   accidental: JianpuAccidental;
 }
 
+export interface JianpuGraceNote {
+  pitch: string;
+  accidental: string;
+  octave: JianpuOctave;
+}
+
 export interface JianpuNoteRange {
+  /** Unmetered ornament attached to this principal note. */
+  grace?: JianpuGraceNote;
   start: number;
   end: number;
   text: string;
@@ -50,7 +58,7 @@ export interface JianpuPlaceholderRange {
   units: number;
 }
 
-const JIANPU_NOTE_REGEX = /\(*[#b^_=]*[+-]?[0-7-][',]*[=_]*t?\.*\)*/g;
+const JIANPU_NOTE_REGEX = /\(*(?:\{[#b]?[1-7][',]*\})?[#b^_=]*[+-]?[0-7-][',]*[=_]*t?\.*\)*/g;
 const JIANPU_NOTE_CORE_REGEX = /^([#b^_=]*)([+-]?)([0-7-])([',]*)([=_]*)(t?)(\.*)$/;
 const JIANPU_PLACEHOLDER_REGEX = /[qesQESxy]/g;
 const PLACEHOLDER_MAP: Record<string, { duration: JianpuDuration; dotted: boolean; triplet: boolean; units?: number }> = {
@@ -231,7 +239,9 @@ export function findJianpuNoteRanges(value: string): JianpuNoteRange[] {
   return Array.from(value.matchAll(JIANPU_NOTE_REGEX))
     .map((match) => {
       const text = match[0];
-      const core = text.replace(/[()]/g, '');
+      const graceMatch = text.match(/\{([#b]?)([1-7])([',]*)\}/);
+      const grace = graceMatch ? { accidental: graceMatch[1], pitch: graceMatch[2], octave: getOctaveFromParts('', graceMatch[3]) } : undefined;
+      const core = text.replace(/[()]/g, '').replace(/\{[^}]*\}/, '');
       const parsed = core.match(JIANPU_NOTE_CORE_REGEX);
       if (!parsed) return null;
 
@@ -242,6 +252,7 @@ export function findJianpuNoteRanges(value: string): JianpuNoteRange[] {
         start: match.index || 0,
         end: (match.index || 0) + text.length,
         text,
+        ...(grace && /^[1-7]$/.test(pitch) ? { grace } : {}),
         accidental,
         pitch,
         dotted: !triplet && dots.length > 0,
@@ -337,7 +348,11 @@ export function buildJianpuPlaceholder(duration: JianpuDuration, dotted = false,
   return buildJianpuPlaceholderFromUnits(getJianpuDurationUnits(duration, dotted, triplet)) || 's';
 }
 
-export function rebuildJianpuNote(note: JianpuNoteRange, overrides: Partial<Pick<JianpuNoteRange, 'accidental' | 'pitch' | 'dotted' | 'triplet' | 'slurStart' | 'slurEnd' | 'duration' | 'octave'>>): string {
+export function buildJianpuGracePrefix(grace: JianpuGraceNote | undefined): string {
+  return grace ? `{${buildAccidentalPrefix(grace.accidental, grace.pitch)}${grace.pitch}${buildOctaveMarks(grace.octave, grace.pitch)}}` : '';
+}
+
+export function rebuildJianpuNote(note: JianpuNoteRange, overrides: Partial<Pick<JianpuNoteRange, 'accidental' | 'pitch' | 'dotted' | 'triplet' | 'slurStart' | 'slurEnd' | 'duration' | 'octave' | 'grace'>>): string {
   const accidental = overrides.accidental ?? note.accidental;
   const pitch = overrides.pitch ?? note.pitch;
   const duration = overrides.duration ?? note.duration;
@@ -346,8 +361,9 @@ export function rebuildJianpuNote(note: JianpuNoteRange, overrides: Partial<Pick
   const slurStart = overrides.slurStart ?? note.slurStart;
   const slurEnd = overrides.slurEnd ?? note.slurEnd;
   const octave = overrides.octave ?? note.octave;
+  const grace = Object.prototype.hasOwnProperty.call(overrides, 'grace') ? overrides.grace : note.grace;
 
-  return `${slurStart ? '(' : ''}${buildAccidentalPrefix(accidental, pitch)}${pitch}${buildOctaveMarks(octave, pitch)}${DURATION_MARKERS[duration]}${triplet ? 't' : ''}${dotted ? '.' : ''}${slurEnd ? ')' : ''}`;
+  return `${slurStart ? '(' : ''}${/^[1-7]$/.test(pitch) ? buildJianpuGracePrefix(grace) : ''}${buildAccidentalPrefix(accidental, pitch)}${pitch}${buildOctaveMarks(octave, pitch)}${DURATION_MARKERS[duration]}${triplet ? 't' : ''}${dotted ? '.' : ''}${slurEnd ? ')' : ''}`;
 }
 
 export function convertRelativeJianpuToAbsoluteNotation(notation: string | undefined, key: Key): string | undefined {
@@ -381,7 +397,8 @@ export function convertRelativeJianpuToAbsoluteNotation(notation: string | undef
     const semitoneClass = ((absoluteMidi - 60) % 12 + 12) % 12;
     const absoluteOctaveShift = Math.floor((absoluteMidi - 60) / 12);
     const fixedDoNote = (preferFlats ? FIXED_DO_FLAT_MAP : FIXED_DO_SHARP_MAP)[semitoneClass];
-    const replacement = `${note.slurStart ? '(' : ''}${fixedDoNote.accidental}${fixedDoNote.pitch}${buildAbsoluteOctaveMarks(absoluteOctaveShift, fixedDoNote.pitch)}${DURATION_MARKERS[note.duration]}${note.triplet ? 't' : ''}${note.dotted && !note.triplet ? '.' : ''}${note.slurEnd ? ')' : ''}`;
+    const grace = note.grace ? convertRelativeJianpuToAbsoluteNotation(`${note.grace.accidental}${note.grace.pitch}${buildOctaveMarks(note.grace.octave, note.grace.pitch)}`, key) : undefined;
+    const replacement = `${note.slurStart ? '(' : ''}${grace ? `{${grace}}` : ''}${fixedDoNote.accidental}${fixedDoNote.pitch}${buildAbsoluteOctaveMarks(absoluteOctaveShift, fixedDoNote.pitch)}${DURATION_MARKERS[note.duration]}${note.triplet ? 't' : ''}${note.dotted && !note.triplet ? '.' : ''}${note.slurEnd ? ')' : ''}`;
 
     nextNotation = replaceJianpuRange(nextNotation, note.start, note.end, replacement);
   });
@@ -470,7 +487,8 @@ export function convertAbsoluteJianpuToRelativeNotation(notation: string | undef
     const replacement = rebuildJianpuNote(note, {
       pitch: relative.pitch,
       accidental: relative.accidental,
-      octave: relative.octave
+      octave: relative.octave,
+      ...(note.grace ? { grace: absoluteJianpuPartsToRelative(note.grace.pitch, (note.grace.accidental || '') as JianpuAccidental, note.grace.octave, key) } : {})
     });
 
     nextNotation = replaceJianpuRange(nextNotation, note.start, note.end, replacement);
