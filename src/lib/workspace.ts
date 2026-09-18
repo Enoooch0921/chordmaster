@@ -1,3 +1,4 @@
+import { normalizeChordSubdivisions } from '../utils/chordSubdivisions';
 import { normalizeChordBeatOffset, canOffsetChord } from '../utils/chordBeatOffsets';
 import { normalizeRhythmVoices } from '../utils/rhythmVoices';
 import { migrateChordTimingArrows } from './chordTimingMigration';
@@ -211,6 +212,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           rhythmVoices: normalizeRhythmVoices(safeBar.rhythmVoices),
           annotation: normalizeOptionalText(safeBar.annotation),
           chordMarks: normalizeChordMarks(safeBar.chordMarks, chords),
+          chordSubdivisions: normalizeChordSubdivisions(safeBar.chordSubdivisions),
           rhythmMark: normalizeRhythmMark(safeBar.rhythmMark, rhythm),
           unisonMark: normalizeUnisonMark(safeBar.unisonMark),
           leftMarker: normalizeNavigationMarker(safeBar.leftMarker),

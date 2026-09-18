@@ -1,3 +1,4 @@
+import ChordSubdivisionsEditor from '../ChordSubdivisionsEditor';
 import ChordBeatOffsetPicker from '../ChordBeatOffsetPicker';
 import { canOffsetChord, getChordBeatOffset } from '../../utils/chordBeatOffsets';
 import RhythmVoicesEditor from '../RhythmVoicesEditor';
@@ -261,6 +262,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [pickerAnchor, setPickerAnchor] = React.useState<PickerAnchor | null>(null);
   const [bassMode, setBassMode] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
+  const [subdivisionsExpanded, setSubdivisionsExpanded] = React.useState(() => Boolean(findSongBar(session.draftSong, session.target)?.bar.chordSubdivisions?.length));
   const [rhythmVoicesExpanded, setRhythmVoicesExpanded] = React.useState(false);
   const [graceDraft, setGraceDraft] = React.useState<JianpuGraceNote | null>(null);
   const [desktopKeysVisible, setDesktopKeysVisible] = React.useState(() => (
@@ -924,6 +926,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   };
 
   const renderChordBeatOffsetPicker = () => <ChordBeatOffsetPicker
+    occupiedOffsets={bar?.chordSubdivisions?.filter(e=>e.beat===session.target.slotIndex).map(e=>e.offset)}
     value={bar ? getChordBeatOffset(bar, activeChordMarkIndex) : undefined}
     disabled={!canOffsetChord(storedChord)} language={language}
     onChange={value => onApplyDraft(setChordBeatOffset(session.draftSong, session.target, value), { mergeKey: `chord-position:${bar?.id}:${session.target.slotIndex}` })}
@@ -1091,7 +1094,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     ? Math.max(viewportTop + 8, pickerAnchor.top - pickerHeight - 8)
     : viewportTop + 8;
   const keyboardSurfaceMode = notationMode === 'chords' ? mode : notationMode;
-  const keyboardContent = (
+  const keyboardContent = notationMode === 'chords' && subdivisionsExpanded ? (
+    <div className="min-h-0 flex-1 overflow-y-auto p-2"><ChordSubdivisionsEditor bar={bar} beats={beatCount} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})}/></div>
+  ) : (
     <div data-keyboard-mode={keyboardSurfaceMode} data-notation-mode={notationMode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
       {notationMode === 'chords' && mode === 'common' && (
         <div className={`grid min-h-0 flex-1 ${compactHardwareMode ? 'grid-rows-3' : 'grid-rows-5'} gap-2`} data-keyboard-view="main" data-desktop-compact={compactHardwareMode ? 'true' : undefined}>
@@ -1599,6 +1604,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           <div className="truncate text-xs font-black text-slate-900">{headerValue}</div>
         </div>
         {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('next')} aria-label="Next beat"><ChevronRight size={16} /></button>}
+        {notationMode === 'chords' && <button type="button" className={toolbarButtonClass} aria-label={language === 'zh' ? '拍內追加和弦' : 'Additional chords within beats'} aria-pressed={subdivisionsExpanded} onClick={()=>setSubdivisionsExpanded(value=>!value)}>&amp;+</button>}
         {deviceLayout === 'desktop' && notationMode === 'chords' && (
           <button
             type="button"

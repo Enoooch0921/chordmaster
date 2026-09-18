@@ -35,6 +35,13 @@ export interface ChordMark {
   special?: boolean;
 }
 
+export interface ChordSubdivision {
+  /** Zero-based notated beat; independent of compact chord array indices. */
+  beat: number;
+  offset: 0.25 | 0.5 | 0.75;
+  chord: string;
+}
+
 export interface RhythmMark {
   color?: AnnotationColorId;
 }
@@ -75,6 +82,7 @@ export interface Bar {
   rhythmLabel?: string; // e.g., "Dr", "Rhythm", "Clap"
   annotation?: string; // e.g., "Kick In", "8 beat build"
   chordMarks?: Record<number, ChordMark>;
+  chordSubdivisions?: ChordSubdivision[];
   rhythmMark?: RhythmMark;
   unisonMark?: UnisonMark;
   leftMarker?: NavigationMarker; // e.g., segno at bar start

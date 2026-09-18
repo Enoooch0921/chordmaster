@@ -1,3 +1,4 @@
+import { reconcileChordSubdivisions, transposeChordSubdivisions } from '../utils/chordSubdivisions';
 import { canOffsetChord, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
 /**
  * Pure immutable commands shared by the legacy editor and preview-first editor.
@@ -113,6 +114,7 @@ export type EditableBarFields = Pick<
   | 'finalBar'
   | 'ending'
   | 'chordMarks'
+  | 'chordSubdivisions'
   | 'rhythmMark'
   | 'rhythmVoices'
   | 'unisonMark'
@@ -138,6 +140,7 @@ export const isBarCompletelyEmpty = (bar?: Bar | null) => {
     && !bar.riff?.trim()
     && !bar.rhythm?.trim()
     && !bar.rhythmVoices?.length
+    && !bar.chordSubdivisions?.length
     && !bar.label?.trim()
     && !bar.riffLabel?.trim()
     && !bar.rhythmLabel?.trim()
@@ -414,12 +417,12 @@ export const setChordAtBeatSlot = (song: Song, target: SongChordTarget, chord: s
       slots[targetSlotIndex] = normalizedChord;
     }
     const chords = serializeChordBeatSlots(slots, beatCount);
+    const chordMarks = isFullBarChordToken(normalizedChord) ? undefined : remapChordMarksByBeat(bar, chords, beatCount);
     return {
       ...bar,
       chords,
-      chordMarks: isFullBarChordToken(normalizedChord)
-        ? undefined
-        : remapChordMarksByBeat(bar, chords, beatCount)
+      chordMarks,
+      chordSubdivisions: reconcileChordSubdivisions({ ...bar, chords, chordMarks }, beatCount)
     };
   })
 );
@@ -427,7 +430,8 @@ export const setChordAtBeatSlot = (song: Song, target: SongChordTarget, chord: s
 export const setChordBeatOffset = (song: Song, target: SongChordTarget, value: number): Song => (
   updateBarById(song, target, bar => {
     const entry = getChordDisplaySlotEntries(bar.chords, getBeatCount(song, bar))[target.slotIndex];
-    return entry ? setRawChordBeatOffset(bar, entry.rawIndex, value) : bar;
+    if (!entry || bar.chordSubdivisions?.some(e => e.beat === target.slotIndex && e.offset === value)) return bar;
+    return setRawChordBeatOffset(bar, entry.rawIndex, value);
   })
 );
 
@@ -470,6 +474,7 @@ export const insertChordBeatBeforeSlot = (song: Song, target: SongChordTarget): 
     return {
       ...bar,
       chords,
+      chordSubdivisions: bar.chordSubdivisions?.map(e => ({...e, beat: e.beat < slotIndex ? e.beat : e.beat+1})).filter(e => e.beat < beatCount),
       chordMarks: Object.keys(chordMarks).length > 0 ? chordMarks : undefined
     };
   })
@@ -565,11 +570,13 @@ export const setBarChordText = (song: Song, target: SongBarIdentity, value: stri
   ));
   const chords = normalized.length === 0 ? [] : normalized;
   const hasFullBarToken = chords.some((token) => isFullBarChordToken(token));
+  const chordMarks = hasFullBarToken ? undefined : remapChordMarksByBeat(located.bar, chords, beatCount);
   return {
     song: replaceLocatedBar(song, located, {
       ...located.bar,
       chords,
-      chordMarks: hasFullBarToken ? undefined : remapChordMarksByBeat(located.bar, chords, beatCount)
+      chordSubdivisions: chords.length ? reconcileChordSubdivisions({ ...located.bar, chords, chordMarks }, beatCount) : undefined,
+      chordMarks
     }),
     chords,
     error: null
@@ -817,6 +824,7 @@ const transposeSectionLetterChords = (
     ...section,
     bars: section.bars.map((bar) => ({
       ...bar,
+      chordSubdivisions: transposeChordSubdivisions(bar.chordSubdivisions, offset, toKey, fromKey),
       chords: bar.chords.map((token) => (
         isFormatNeutralChord(token) || isNashville(token.trim())
           ? token
@@ -831,6 +839,7 @@ const transposeBarLetterChords = (bar: Bar, fromKey: Key, toKey: Key): Bar => {
   const offset = getTransposeOffset(fromKey, toKey);
   return {
     ...bar,
+    chordSubdivisions: transposeChordSubdivisions(bar.chordSubdivisions, offset, toKey, fromKey),
     chords: bar.chords.map((token) => (
       isFormatNeutralChord(token) || isNashville(token.trim())
         ? token
