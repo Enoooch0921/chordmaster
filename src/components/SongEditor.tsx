@@ -2259,6 +2259,7 @@ const SongEditor: React.FC<Props> = ({
         cursorUnits.push(cursor);
         cursor += 1;
       }
+      if (event.startUnit - cursor > 0.001 && Math.abs(cursor - Math.round(cursor)) > 0.001) cursorUnits.push(cursor);
       cursorUnits.push(event.startUnit);
       cursor = event.endUnit;
     });
@@ -2625,7 +2626,9 @@ const SongEditor: React.FC<Props> = ({
     { sixthUnits: 12, token: 'ex' },
     { sixthUnits: 9, token: 'sx.' },
     { sixthUnits: 8, token: 'e3x' },
-    { sixthUnits: 6, token: 'sx' }
+    { sixthUnits: 6, token: 'sx' },
+    { sixthUnits: 4, token: 's3x' },
+    { sixthUnits: 2, token: 'y' }
   ] as const;
 
   const buildHiddenGapTokens = (durationUnits: number): string[] => {
@@ -2852,8 +2855,8 @@ const SongEditor: React.FC<Props> = ({
     return { beats, beatUnits };
   };
 
-  const getJianpuNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'>) => (
-    getJianpuDurationUnitsFromUtils(note.duration, note.dotted, note.triplet)
+  const getJianpuNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'> & { units?: number }) => (
+    note.units ?? getJianpuDurationUnitsFromUtils(note.duration, note.dotted, note.triplet)
   );
 
   const getJianpuDurationUnits = (duration: JianpuDuration, dotted = false, triplet = false) => (
@@ -2863,7 +2866,7 @@ const SongEditor: React.FC<Props> = ({
   const canUseDottedJianpuDuration = (duration: JianpuDuration) => duration !== 'sixteenth';
 
   const normalizeJianpuInputModeForDuration = (mode: JianpuInputMode): JianpuInputMode => {
-    const triplet = mode.duration !== 'sixteenth' && mode.triplet;
+    const triplet = mode.triplet;
     return {
       ...mode,
       dotted: !triplet && mode.dotted && canUseDottedJianpuDuration(mode.duration),
@@ -2887,10 +2890,10 @@ const SongEditor: React.FC<Props> = ({
     }
 
     const fallbackDuration = (['quarter', 'eighth', 'sixteenth'] as JianpuDuration[])
-      .find((duration) => getJianpuDurationUnits(duration, false, normalizedMode.triplet && duration !== 'sixteenth') <= availableUnits + 0.001);
+      .find((duration) => getJianpuDurationUnits(duration, false, normalizedMode.triplet) <= availableUnits + 0.001);
 
     return fallbackDuration
-      ? { ...normalizedMode, duration: fallbackDuration, dotted: false, triplet: normalizedMode.triplet && fallbackDuration !== 'sixteenth' }
+      ? { ...normalizedMode, duration: fallbackDuration, dotted: false, triplet: normalizedMode.triplet }
       : normalizedMode;
   };
 
@@ -3724,11 +3727,11 @@ const SongEditor: React.FC<Props> = ({
         remainingUnits,
 	        canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted, jianpuInputMode.triplet),
 	        canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted, jianpuInputMode.triplet),
-	        canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false),
+	        canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false, jianpuInputMode.triplet),
 	        canDot: !jianpuInputMode.triplet &&
 	          canUseDottedJianpuDuration(jianpuInputMode.duration) &&
 	          remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true),
-	        canTriplet: jianpuInputMode.duration !== 'sixteenth' &&
+	        canTriplet:
 	          remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, false, true)
 	      };
     }
@@ -3739,11 +3742,11 @@ const SongEditor: React.FC<Props> = ({
       remainingUnits,
 	      canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted, jianpuInputMode.triplet),
 	      canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted, jianpuInputMode.triplet),
-	      canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false),
+	      canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false, jianpuInputMode.triplet),
 	      canDot: !jianpuInputMode.triplet &&
 	        canUseDottedJianpuDuration(jianpuInputMode.duration) &&
 	        remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true),
-	      canTriplet: jianpuInputMode.duration !== 'sixteenth' &&
+	      canTriplet:
 	        remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, false, true)
 	    };
   };
@@ -4041,7 +4044,7 @@ const SongEditor: React.FC<Props> = ({
 	  const selectedNote = getSelectedJianpuNote(selection, riff);
 	  const currentDuration = selectedNote?.duration ?? jianpuInputMode.duration;
 	  const nextDuration = currentDuration === duration ? 'quarter' : duration;
-	  const nextTriplet = nextDuration !== 'sixteenth' && (selectedNote?.triplet ?? jianpuInputMode.triplet);
+	  const nextTriplet = (selectedNote?.triplet ?? jianpuInputMode.triplet);
 	  const desiredDotted = selectedNote?.dotted ?? jianpuInputMode.dotted;
 	  const nextDotted = !nextTriplet && desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
@@ -4283,7 +4286,7 @@ const SongEditor: React.FC<Props> = ({
   const setSelectedJianpuDuration = (duration: JianpuDuration) => {
 	  const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
 	  const nextDuration = currentDuration === duration ? 'quarter' : duration;
-	  const nextTriplet = nextDuration !== 'sixteenth' && (selectedJianpuNote?.triplet ?? jianpuInputMode.triplet);
+	  const nextTriplet = (selectedJianpuNote?.triplet ?? jianpuInputMode.triplet);
 	  const desiredDotted = selectedJianpuNote?.dotted ?? jianpuInputMode.dotted;
 	  const nextDotted = !nextTriplet && desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
@@ -4433,8 +4436,6 @@ const SongEditor: React.FC<Props> = ({
 	  };
 
 	  const toggleSelectedJianpuTriplet = () => {
-	    const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
-	    if (currentDuration === 'sixteenth') return;
 
 	    if (applySharedJianpuAction({ type: 'toggle-triplet' })) return;
 
@@ -5243,7 +5244,7 @@ const SongEditor: React.FC<Props> = ({
 	  const effectiveJianpuTied = Boolean(selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd);
 	  const canUseEighthDuration = canApplyJianpuDurationChoice('eighth');
 	  const canUseSixteenthDuration = canApplyJianpuDurationChoice('sixteenth');
-	  const canUseTripletDuration = effectiveJianpuDuration !== 'sixteenth' &&
+	  const canUseTripletDuration =
 	    (!jianpuInsertAvailability || jianpuInsertAvailability.canTriplet || effectiveJianpuTriplet);
   const showEighthQuarterBlocked = effectiveJianpuDuration === 'eighth' && !canUseEighthDuration;
   const showSixteenthQuarterBlocked = effectiveJianpuDuration === 'sixteenth' && !canUseSixteenthDuration;
@@ -8799,6 +8800,18 @@ const SongEditor: React.FC<Props> = ({
                       <span className="absolute right-1 top-0.5 text-[9px] font-black leading-none">3</span>
                     </div>
                     <span className="text-[10px] font-bold text-gray-500">1/8 3</span>
+                  </button>
+
+                  <button
+                    onClick={() => insertRhythmToken('s3')}
+                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                    title={`${copy.editor.sixteenthNote} triplet`}
+                  >
+                    <div className="relative w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      <span className="font-rhythm text-lg leading-none">♬</span>
+                      <span className="absolute right-1 top-0.5 text-[9px] font-black leading-none">3</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-gray-500">1/16 3</span>
                   </button>
 
                   <button

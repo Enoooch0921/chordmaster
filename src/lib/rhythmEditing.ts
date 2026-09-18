@@ -97,7 +97,9 @@ const HIDDEN_GAP_TOKEN_CANDIDATES = [
   { sixthUnits: 12, token: 'ex' },
   { sixthUnits: 9, token: 'sx.' },
   { sixthUnits: 8, token: 'e3x' },
-  { sixthUnits: 6, token: 'sx' }
+  { sixthUnits: 6, token: 'sx' },
+  { sixthUnits: 4, token: 's3x' },
+  { sixthUnits: 2, token: 'y' }
 ] as const;
 
 const getBarTimeSignature = (song: Song, bar: Bar) => (
@@ -153,6 +155,7 @@ const getCursorUnitsForNotation = (notation: string, timeSignature: string): num
       cursorUnits.push(cursor);
       cursor += 1;
     }
+    if (event.startUnit - cursor > 0.001 && Math.abs(cursor - Math.round(cursor)) > 0.001) cursorUnits.push(cursor);
     cursorUnits.push(event.startUnit);
     cursor = event.endUnit;
   });

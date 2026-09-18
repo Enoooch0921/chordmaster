@@ -104,8 +104,8 @@ const getDurationLevel = (note: Pick<JianpuNoteRange, 'duration'>) => {
   return 0;
 };
 
-const getLayoutUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'>) => (
-  getJianpuDurationUnits(note.duration, note.dotted, note.triplet)
+const getLayoutUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'> & { units?: number }) => (
+  note.units ?? getJianpuDurationUnits(note.duration, note.dotted, note.triplet)
 );
 
 const getAnchorOffsetUnits = (
@@ -387,7 +387,7 @@ const Jianpu: React.FC<JianpuProps> = ({
 	            return;
 	          }
 	          const previous = tripletGroup[tripletGroup.length - 1] ?? null;
-	          if (previous && Math.abs(note.unitStart - previous.unitEnd) > 0.01) {
+	          if (previous && (tripletGroup.length === 3 || previous.duration !== note.duration || Math.abs(note.unitStart - previous.unitEnd) > 0.01)) {
 	            flushTripletGroup();
 	          }
 	          tripletGroup.push(note);

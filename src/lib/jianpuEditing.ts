@@ -206,7 +206,7 @@ const getNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'tripl
 );
 
 const normalizeInputMode = (mode: JianpuInputMode): JianpuInputMode => {
-  const triplet = mode.duration !== 'sixteenth' && Boolean(mode.triplet);
+  const triplet = Boolean(mode.triplet);
   return {
     ...mode,
     octave: Number.isFinite(mode.octave) ? Math.trunc(mode.octave) : 0,
@@ -232,8 +232,8 @@ export const fitJianpuInputModeToUnits = (
     return { ...normalized, dotted: false };
   }
   const duration = (['quarter', 'eighth', 'sixteenth'] as JianpuDuration[])
-    .find((candidate) => getJianpuDurationUnits(candidate, false, normalized.triplet && candidate !== 'sixteenth') <= availableUnits + EPSILON);
-  return duration ? { ...normalized, duration, dotted: false, triplet: normalized.triplet && duration !== 'sixteenth' } : normalized;
+    .find((candidate) => getJianpuDurationUnits(candidate, false, normalized.triplet) <= availableUnits + EPSILON);
+  return duration ? { ...normalized, duration, dotted: false, triplet: normalized.triplet } : normalized;
 };
 
 const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | null => {
@@ -265,7 +265,7 @@ const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | n
 	        kind: 'placeholder' as const,
 	        charStart: placeholder.start,
 	        charEnd: placeholder.end,
-	        units: getJianpuDurationUnits(placeholder.duration, placeholder.dotted, placeholder.triplet),
+	        units: placeholder.units,
 	        duration: placeholder.duration,
 	        dotted: placeholder.dotted,
 	        triplet: placeholder.triplet
@@ -517,11 +517,11 @@ export const getJianpuInputAvailability = (
     remainingUnits,
 	    canQuarter: remainingUnits + EPSILON >= getJianpuDurationUnits('quarter', mode.dotted, mode.triplet),
 	    canEighth: remainingUnits + EPSILON >= getJianpuDurationUnits('eighth', mode.dotted, mode.triplet),
-	    canSixteenth: remainingUnits + EPSILON >= getJianpuDurationUnits('sixteenth', false),
+	    canSixteenth: remainingUnits + EPSILON >= getJianpuDurationUnits('sixteenth', false, mode.triplet),
 	    canDot: !mode.triplet &&
 	      mode.duration !== 'sixteenth' &&
 	      remainingUnits + EPSILON >= getJianpuDurationUnits(mode.duration, true),
-	    canTriplet: mode.duration !== 'sixteenth' &&
+	    canTriplet:
 	      remainingUnits + EPSILON >= getJianpuDurationUnits(mode.duration, false, true)
 	  };
 };
@@ -1010,7 +1010,7 @@ const insertPitch = (
   }
 
   const availableUnits = getAvailableUnitsAtCursor(context, safeCursor);
-  if (availableUnits < 1 - EPSILON) {
+  if (availableUnits < (normalizedMode.triplet ? 2 / 3 : 1) - EPSILON) {
     return baseResult(song, target, safeCursor, normalizedMode, '這個位置沒有可用的簡譜空位。');
   }
   const fittedMode = fitJianpuInputModeToUnits(normalizedMode, availableUnits);
@@ -1111,7 +1111,7 @@ const setDuration = (
   if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
 	  const safeCursor = clampCursor(context, cursor);
 	  const selected = selectedNoteAtCursor(context, safeCursor);
-	  const triplet = duration !== 'sixteenth' && (selected?.note.triplet ?? inputMode.triplet);
+	  const triplet = (selected?.note.triplet ?? inputMode.triplet);
 	  const dotted = triplet || duration === 'sixteenth' ? false : (selected?.note.dotted ?? inputMode.dotted);
 	  const nextInput = normalizeInputMode({ ...inputMode, duration, dotted, triplet });
 	  if (!selected) {
@@ -1181,9 +1181,6 @@ const toggleTriplet = (
   const selected = selectedNoteAtCursor(context, safeCursor);
   const targetNote = selected ?? noteEndingAtCursor(context, safeCursor);
   const duration = targetNote?.note.duration ?? inputMode.duration;
-  if (duration === 'sixteenth') {
-    return baseResult(song, target, safeCursor, inputMode, '十六分音符不支援三連音。');
-  }
   const triplet = !(targetNote?.note.triplet ?? inputMode.triplet);
   const nextInput = normalizeInputMode({ ...inputMode, duration, dotted: false, triplet });
   if (!targetNote) {

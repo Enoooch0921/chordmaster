@@ -46,19 +46,23 @@ export interface JianpuPlaceholderRange {
   duration: JianpuDuration;
   dotted: boolean;
   triplet: boolean;
+  /** Exact duration in sixteenth units, including editing gaps. */
+  units: number;
 }
 
 const JIANPU_NOTE_REGEX = /\(*[#b^_=]*[+-]?[0-7-][',]*[=_]*t?\.*\)*/g;
 const JIANPU_NOTE_CORE_REGEX = /^([#b^_=]*)([+-]?)([0-7-])([',]*)([=_]*)(t?)(\.*)$/;
-const JIANPU_PLACEHOLDER_REGEX = /[qesQESx]/g;
-const PLACEHOLDER_MAP: Record<string, { duration: JianpuDuration; dotted: boolean; triplet: boolean }> = {
+const JIANPU_PLACEHOLDER_REGEX = /[qesQESxy]/g;
+const PLACEHOLDER_MAP: Record<string, { duration: JianpuDuration; dotted: boolean; triplet: boolean; units?: number }> = {
   q: { duration: 'quarter', dotted: false, triplet: false },
   e: { duration: 'eighth', dotted: false, triplet: false },
   s: { duration: 'sixteenth', dotted: false, triplet: false },
   Q: { duration: 'quarter', dotted: true, triplet: false },
   E: { duration: 'eighth', dotted: true, triplet: false },
   S: { duration: 'sixteenth', dotted: true, triplet: false },
-  x: { duration: 'sixteenth', dotted: false, triplet: true }
+  x: { duration: 'sixteenth', dotted: false, triplet: true },
+  // A third of a sixteenth left when toggling one ordinary sixteenth.
+  y: { duration: 'sixteenth', dotted: false, triplet: true, units: 1 / 3 }
 };
 
 const RELATIVE_MAJOR_SCALE_OFFSETS: Record<'1' | '2' | '3' | '4' | '5' | '6' | '7', number> = {
@@ -232,7 +236,7 @@ export function findJianpuNoteRanges(value: string): JianpuNoteRange[] {
       if (!parsed) return null;
 
       const [, accidental, octavePrefix, pitch, octaveMarks, durationMarks, tripletMarker, dots] = parsed;
-      const triplet = Boolean(tripletMarker) && !durationMarks.includes('=');
+      const triplet = Boolean(tripletMarker);
 
       return {
         start: match.index || 0,
@@ -264,7 +268,8 @@ export function findJianpuPlaceholderRanges(value: string): JianpuPlaceholderRan
         text,
         duration: mapped.duration,
         dotted: mapped.dotted,
-        triplet: mapped.triplet
+        triplet: mapped.triplet,
+        units: mapped.units ?? getJianpuDurationUnits(mapped.duration, mapped.dotted, mapped.triplet)
       };
     })
     .filter((placeholder): placeholder is JianpuPlaceholderRange => Boolean(placeholder));
@@ -294,7 +299,7 @@ export function replaceJianpuRange(value: string, start: number, end: number, re
 }
 
 export function buildJianpuNoteFromMode(pitch: string, mode: JianpuInputMode): string {
-  const triplet = mode.triplet && mode.duration !== 'sixteenth';
+  const triplet = mode.triplet;
   return `${buildAccidentalPrefix(mode.accidental, pitch)}${pitch}${buildOctaveMarks(mode.octave, pitch)}${DURATION_MARKERS[mode.duration]}${triplet ? 't' : ''}${mode.dotted && !triplet ? '.' : ''}`;
 }
 
@@ -316,6 +321,9 @@ export function buildJianpuPlaceholderFromUnits(units: number): string {
     } else if (thirdUnits % 3 === 0) {
       placeholder += 's';
       thirdUnits -= 3;
+    } else if (thirdUnits === 1) {
+      placeholder += 'y';
+      thirdUnits -= 1;
     } else {
       placeholder += 'x';
       thirdUnits -= 2;
@@ -333,7 +341,7 @@ export function rebuildJianpuNote(note: JianpuNoteRange, overrides: Partial<Pick
   const accidental = overrides.accidental ?? note.accidental;
   const pitch = overrides.pitch ?? note.pitch;
   const duration = overrides.duration ?? note.duration;
-  const triplet = duration !== 'sixteenth' && (overrides.triplet ?? note.triplet);
+  const triplet = (overrides.triplet ?? note.triplet);
   const dotted = !triplet && (overrides.dotted ?? note.dotted);
   const slurStart = overrides.slurStart ?? note.slurStart;
   const slurEnd = overrides.slurEnd ?? note.slurEnd;
