@@ -29,7 +29,7 @@ export interface CompactRhythmBeamGeometry {
 
 export interface CompactRhythmTripletGeometry {
   key: string;
-  base: 'q' | 'e';
+  base: 'q' | 'e' | 's';
   eventIndices: [number, number, number];
   startX: number;
   centerX: number;
@@ -119,7 +119,7 @@ const buildBeamGroups = (events: RhythmEvent[], beatUnits: number): BeamGroupDra
 };
 
 const buildTripletRuns = (events: RhythmEvent[]) => {
-  const runs: Array<{ key: string; base: 'q' | 'e'; events: [RhythmEvent, RhythmEvent, RhythmEvent] }> = [];
+  const runs: Array<{ key: string; base: 'q' | 'e' | 's'; events: [RhythmEvent, RhythmEvent, RhythmEvent] }> = [];
 
   for (let index = 0; index <= events.length - 3; index += 1) {
     const first = events[index];
@@ -127,7 +127,7 @@ const buildTripletRuns = (events: RhythmEvent[]) => {
     const third = events[index + 2];
     if (!first.triplet || !second.triplet || !third.triplet) continue;
     if (first.base !== second.base || first.base !== third.base) continue;
-    if (first.base !== 'q' && first.base !== 'e') continue;
+    if (first.base !== 'q' && first.base !== 'e' && first.base !== 's') continue;
     if (!rhythmUnitsEqual(first.endUnit, second.startUnit) || !rhythmUnitsEqual(second.endUnit, third.startUnit)) continue;
 
     runs.push({

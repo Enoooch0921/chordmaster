@@ -149,7 +149,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const tripletGroups = React.useMemo(() => {
     const groups: Array<{
       key: string;
-      base: 'q' | 'e';
+      base: 'q' | 'e' | 's';
       bracketStartUnit: number;
       bracketEndUnit: number;
       centerUnit: number;
@@ -160,7 +160,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       const [first, second, third] = run;
       if (!first.triplet || !second.triplet || !third.triplet) continue;
       if (first.base !== second.base || first.base !== third.base) continue;
-      if (first.base !== 'q' && first.base !== 'e') continue;
+      if (first.base !== 'q' && first.base !== 'e' && first.base !== 's') continue;
       if (!rhythmUnitsEqual(first.endUnit, second.startUnit) || !rhythmUnitsEqual(second.endUnit, third.startUnit)) continue;
 
       const getTripletAnchorUnit = (event: typeof visibleEvents[number]) => (
@@ -220,6 +220,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
         units.push(cursor);
         cursor += 1;
       }
+      if (event.startUnit - cursor > 0.001 && Math.abs(cursor - Math.round(cursor)) > 0.001) units.push(cursor);
       units.push(event.startUnit);
       cursor = event.endUnit;
     });
@@ -278,11 +279,11 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const unitToPercent = (unit: number) => `${(unit * 100) / Math.max(1, barUnits)}%`;
   const unitToPercentNumber = (unit: number) => (unit * 100) / Math.max(1, barUnits);
   const getEditorBeamAnchorUnit = (event: typeof visibleEvents[number]) => getHeadCenterUnit(event) + 0.18;
-  const getTripletLayout = (base: 'q' | 'e') => {
+  const getTripletLayout = (base: 'q' | 'e' | 's') => {
     const tripletVerticalLift = (compact ? 0 : 5.0) * scale;
     const rawBracketY = compact
-      ? (base === 'e' ? visualBeamTop : visualBeamTop - (2.6 * scale))
-      : Math.max(3.8 * scale, base === 'e' ? effectiveBeamTop - (2.6 * scale) : 5.2 * scale);
+      ? (base !== 'q' ? visualBeamTop : visualBeamTop - (2.6 * scale))
+      : Math.max(3.8 * scale, base !== 'q' ? effectiveBeamTop - (2.6 * scale) : 5.2 * scale);
     const bracketY = rawBracketY - tripletVerticalLift;
     const numberY = compact
       ? bracketY - (4.1 * scale)

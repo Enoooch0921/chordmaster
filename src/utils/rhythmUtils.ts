@@ -131,6 +131,8 @@ interface RhythmTokenParts {
 }
 
 function parseNormalizedRhythmTokenParts(token: string): RhythmTokenParts | null {
+  // Hidden one-third-sixteenth editing gap; never a rest or playable event.
+  if (token === 'y') return { base: 's', isRest: false, isHidden: true, isSlash: false, dotted: false, triplet: false, accent: false, tieAfter: false };
   if (token === '/') {
     return {
       base: 'q',
@@ -149,7 +151,7 @@ function parseNormalizedRhythmTokenParts(token: string): RhythmTokenParts | null
 
   const [, baseToken, tripletFlag, markerFlag, dotFlag, accentFlag, tieFlag] = match;
   const triplet = Boolean(tripletFlag);
-  if (triplet && baseToken !== 'q' && baseToken !== 'e') return null;
+  if (triplet && baseToken !== 'q' && baseToken !== 'e' && baseToken !== 's') return null;
   if (triplet && dotFlag) return null;
   if (markerFlag?.startsWith('c') && (baseToken === 'w' || baseToken === 'h')) return null;
 
@@ -189,7 +191,7 @@ export function normalizeRhythmToken(token: string): string {
 
   const [, base, tripletFlag, restFlag] = match;
   const triplet = Boolean(tripletFlag);
-  if (triplet && base !== 'q' && base !== 'e') {
+  if (triplet && base !== 'q' && base !== 'e' && base !== 's') {
     return sanitizeToken(trimmed);
   }
 
@@ -253,10 +255,10 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
     }
 
     const { base, isRest, isHidden, isSlash, crossHead, dotted, triplet, accent, tieAfter } = parsedToken;
-    const durationUnits = isSlash
+    const durationUnits = token === 'y' ? 1 / 3 : isSlash
       ? beatUnits
       : triplet
-      ? (base === 'q' ? 8 / 3 : 4 / 3)
+      ? (base === 'q' ? 8 / 3 : base === 'e' ? 4 / 3 : 2 / 3)
       : BASE_UNITS[base] + (dotted ? BASE_UNITS[base] / 2 : 0);
 
     events.push({

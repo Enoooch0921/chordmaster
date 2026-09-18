@@ -72,6 +72,22 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it('toggles a selected sixteenth into a triplet without shifting its neighbor', () => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '1=2=3_ | 4 | 5 | 6' }] }] };
+    const jianpuTarget = { ...target, field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: jianpuTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
+    fireEvent.click(screen.getByRole('button', { name: '切換簡譜三連音' }));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].riff).toBe('1=ty2=3_ | 4 | 5 | 6');
+  });
+
+  it('offers sixteenth triplet notes and rests in the rhythm keyboard', () => {
+    const rhythmTarget = { ...target, field: 'rhythm' as const, slotIndex: 0, cursor: { kind: 'rhythm' as const, cursorUnit: 0 } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song, target: rhythmTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
+    fireEvent.click(screen.getByRole('button', { name: /^十六分三連音$/ }));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].rhythm).toBe('s3');
+    expect(screen.getByRole('button', { name: /^十六分三連休止$/ })).toBeEnabled();
+  });
+
   it('edits an extra voice without overlapping the primary keyboard or changing its rhythm', async () => {
     const user = userEvent.setup();
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], rhythm: 'qr q qr q', rhythmVoices: [{ id: 'kick', label: 'Kick', rhythm: 'q' }] }] }] };
@@ -260,7 +276,7 @@ describe('PreviewBarEditor', () => {
     const modifiers = document.querySelector('[data-rhythm-key-row="modifiers"]');
     expect(notes?.querySelectorAll('[data-rhythm-staff-key-glyph]')).toHaveLength(5);
     expect(rests?.querySelectorAll('[data-rhythm-staff-key-glyph]')).toHaveLength(5);
-    expect(modifiers?.querySelectorAll('[data-rhythm-triplet-mark]')).toHaveLength(4);
+    expect(modifiers?.querySelectorAll('[data-rhythm-triplet-mark]')).toHaveLength(6);
     expect(document.querySelector('[data-rhythm-staff-line]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-rhythm-notation-label]')).not.toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '預覽快捷編輯' })).not.toHaveTextContent(/1\/2|1\/4|1\/8|1\/16/);
