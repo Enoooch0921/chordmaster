@@ -1,3 +1,4 @@
+import { normalizeRhythmVoices } from '../utils/rhythmVoices';
 import { migrateChordTimingArrows } from './chordTimingMigration';
 import { parseWorkspaceDeletions, type WorkspaceDeletions } from './workspaceMerge';
 import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
@@ -204,6 +205,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           labelLane: safeBar.labelLane === 'rhythm' || safeBar.labelLane === 'riff' ? safeBar.labelLane : undefined,
           riffLabel: normalizeOptionalText(safeBar.riffLabel),
           rhythmLabel: normalizeOptionalText(safeBar.rhythmLabel),
+          rhythmVoices: normalizeRhythmVoices(safeBar.rhythmVoices),
           annotation: normalizeOptionalText(safeBar.annotation),
           chordMarks: normalizeChordMarks(safeBar.chordMarks, chords.length),
           rhythmMark: normalizeRhythmMark(safeBar.rhythmMark, rhythm),

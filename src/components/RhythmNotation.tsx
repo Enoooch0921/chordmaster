@@ -338,8 +338,10 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       const rhythmRoots: HTMLElement[] = scope
         ? Array.from(scope.querySelectorAll<HTMLElement>('[data-rhythm-notation]'))
         : Array.from(document.querySelectorAll<HTMLElement>('[data-rhythm-notation]'));
-      const sourceIndex = rhythmRoots.indexOf(sourceRoot);
-      const nextRoot = sourceIndex >= 0 ? rhythmRoots[sourceIndex + 1] ?? null : null;
+      const voiceId = sourceRoot.closest<HTMLElement>('[data-rhythm-voice]')?.dataset.rhythmVoice ?? 'primary';
+      const sameVoiceRoots = rhythmRoots.filter(root => (root.closest<HTMLElement>('[data-rhythm-voice]')?.dataset.rhythmVoice ?? 'primary') === voiceId);
+      const sourceIndex = sameVoiceRoots.indexOf(sourceRoot);
+      const nextRoot = sourceIndex >= 0 ? sameVoiceRoots[sourceIndex + 1] ?? null : null;
       const firstNextGlyph = nextRoot?.querySelector<HTMLElement>('[data-rhythm-glyph]');
 
       if (!firstNextGlyph) {

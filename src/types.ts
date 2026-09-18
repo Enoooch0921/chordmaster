@@ -53,6 +53,12 @@ export interface SongReferences {
   vocal?: SongReference;
 }
 
+export interface RhythmVoice {
+  id: string;
+  label: string;
+  rhythm: string;
+}
+
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
   chords: string[]; // e.g., ["E", "C#m"]
@@ -60,6 +66,7 @@ export interface Bar {
   timeSignature?: string; // Per-bar override, e.g., "2/4"
   riff?: string;    // e.g., "3 - 4 - 5 - 7 1"
   rhythm?: string;  // e.g., "q e e qr"
+  rhythmVoices?: RhythmVoice[]; // Additional simultaneous voices; omitted beats stay unspecified
   label?: string; // Shared lane label, e.g. "Pno", "Dr", "EG"
   labelLane?: BarLabelLane; // Three-line preview placement: rhythm = row 2, riff = row 3
   riffLabel?: string; // e.g., "Riff", "Pno", "EG"
