@@ -72,6 +72,17 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it.each(['desktop','phone'] as const)('edits an additional chord on %s without overwriting the original beat chord', deviceLayout=>{
+    const source:Song={...song,sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],chordSubdivisions:[{beat:0,offset:.5,chord:'G/B'}]}]}]};
+    const session=createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'});
+    const {onApplyDraft}=renderEditor({session,deviceLayout});
+    fireEvent.change(screen.getByRole('textbox',{name:'追加和弦 1'}),{target:{value:'Am/C'}});
+    const changed=onApplyDraft.mock.calls.at(-1)?.[0];expect(changed.sections[0].bars[0].chords).toEqual(['C']);expect(changed.sections[0].bars[0].chordSubdivisions).toEqual([{beat:0,offset:.5,chord:'Am/C'}]);
+    fireEvent.change(screen.getByRole('combobox',{name:'追加和弦 1 拍位'}),{target:{value:'1.75'}});
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].chordSubdivisions[0]).toEqual({beat:1,offset:.75,chord:'G/B'});
+    fireEvent.click(screen.getByRole('button',{name:'移除追加和弦 1'}));expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].chordSubdivisions).toBeUndefined();
+  });
+
   it.each(['desktop', 'phone'] as const)('edits precise chord timing on %s without changing the chord or its color', deviceLayout => {
     const source: Song = {...song, sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],chords:['C','G','',''],chordMarks:{1:{color:'rose'}}}]}]};
     const session=createPreviewEditSession({song:source,target:{...target,rawChordIndex:1},inputMode:'letters'});

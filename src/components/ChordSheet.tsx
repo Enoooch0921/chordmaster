@@ -1,3 +1,4 @@
+import { getChordEvents, chordEventLabel } from '../utils/chordSubdivisions';
 import { getChordBeatOffset, chordBeatPositionLabel } from '../utils/chordBeatOffsets';
 import RhythmVoiceStack from './RhythmVoiceStack';
 import { visibleRhythmVoices } from '../utils/rhythmVoices';
@@ -1240,6 +1241,7 @@ const AutoShrink: React.FC<{
   overflowVisible?: boolean;
   shrinkAxis?: 'uniform' | 'x-only';
   startOffsetFraction?: number;
+  fitNarrow?: boolean;
 }> = ({
   children,
   className = "",
@@ -1248,7 +1250,8 @@ const AutoShrink: React.FC<{
   maxScale = 1,
   overflowVisible = false,
   shrinkAxis = 'uniform',
-  startOffsetFraction = 0
+  startOffsetFraction = 0,
+  fitNarrow = false
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const contentRef = React.useRef<HTMLDivElement>(null);
@@ -1266,7 +1269,7 @@ const AutoShrink: React.FC<{
         const contentWidth = contentRef.current.scrollWidth;
         contentRef.current.style.whiteSpace = originalWS;
 
-        const fittedScale = contentWidth > containerWidth && containerWidth > 30
+        const fittedScale = contentWidth > containerWidth && containerWidth > (fitNarrow ? 0 : 30)
           ? Math.max(minScale, (containerWidth - 2) / contentWidth)
           : 1;
         const nextScale = Math.min(maxScale, fittedScale);
@@ -1297,7 +1300,7 @@ const AutoShrink: React.FC<{
       observer.disconnect();
       clearTimeout(timer);
     };
-  }, [children, minScale, maxScale, startOffsetFraction]);
+  }, [children, minScale, maxScale, startOffsetFraction, fitNarrow]);
 
   const justifyClass = align === 'left'
     ? 'justify-start'
@@ -2944,7 +2947,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       && nextRhythmBar?.rhythm
                       && rhythmEndsWithTieToNext(bar.rhythm, effectiveTimeSignature)
                     );
-                    const hasChordContent = Boolean(bar && hasMeaningfulChordContent(bar.chords));
+                    const hasChordContent = Boolean(bar && (hasMeaningfulChordContent(bar.chords) || bar.chordSubdivisions?.length));
                     const showRhythmInChordLane = !hasChordContent && hasRhythm;
                     const showBottomRhythmLane = hasRhythm && !showRhythmInChordLane;
                     const showBottomLane = showBottomRhythmLane || hasRiff || labelSharesNotationLane;
@@ -3371,6 +3374,18 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                           </div>
                                         </div>
                                       );
+                                    }
+
+                                    if (bar.chordSubdivisions?.length) {
+                                      const events = getChordEvents(bar, beatsPerBar);
+                                      return <div data-subbeat-chord-row className={`grid w-full min-w-0 items-end ${contentLeftInsetClass}`} style={{gridTemplateColumns:`repeat(${events.length}, minmax(0, 1fr))`}}>
+                                        {events.map((entry,index) => <div key={index} data-chord-event-position={chordEventLabel(entry.beat,entry.offset)} data-chord-event-kind={entry.subdivisionIndex === null ? 'primary' : 'additional'} className="relative min-w-0 px-[2px] pt-[8px]" onClick={event=>{event.stopPropagation();emitElementClick(event,row.sIdx,row.startBIdx+bIdx,'chords',entry.beat,entry.rawIndex ?? undefined);}}>
+                                          <span className="absolute left-[2px] top-0 text-[8px] font-medium leading-none text-slate-600">{chordEventLabel(entry.beat,entry.offset)}</span>
+                                          <AutoShrink align="left" minScale={0} fitNarrow shrinkAxis="x-only" className="h-[24px] items-end">
+                                            <FormattedChord chordString={getDisplayedChordString(entry.chord,barOffset,barPlayKey,song.showNashvilleNumbers,false,barWrittenKey)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} color={entry.rawIndex === null ? undefined : getChordMarkTextColor(bar,entry.rawIndex)} specialLabel={entry.rawIndex === null ? undefined : getChordSpecialLabel(bar,entry.rawIndex,language)}/>
+                                          </AutoShrink>
+                                        </div>)}
+                                      </div>;
                                     }
 
                                       const chordSlotOwnership = getChordDisplaySlotOwnership(bar.chords, beatsPerBar);

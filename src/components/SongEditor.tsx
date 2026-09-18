@@ -1,3 +1,6 @@
+import { getChordAnchorSlotIndexes } from '../utils/chordSlots';
+import ChordSubdivisionsEditor from './ChordSubdivisionsEditor';
+import { reconcileChordSubdivisions, transposeChordSubdivisions } from '../utils/chordSubdivisions';
 import ChordBeatOffsetPicker from './ChordBeatOffsetPicker';
 import { canOffsetChord, getChordBeatOffset, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
 import RhythmVoicesEditor from './RhythmVoicesEditor';
@@ -1022,6 +1025,7 @@ const SongEditor: React.FC<Props> = ({
       ...section,
       bars: section.bars.map((bar) => ({
         ...bar,
+        chordSubdivisions: transposeChordSubdivisions(bar.chordSubdivisions, offset, toKey, fromKey),
         chords: bar.chords.map((token) => (
           isNashville(token) ? token : transposeChord(token, offset, toKey, false, fromKey)
         ))
@@ -1037,6 +1041,7 @@ const SongEditor: React.FC<Props> = ({
     const offset = getTransposeOffset(fromKey, toKey);
     return {
       ...bar,
+      chordSubdivisions: transposeChordSubdivisions(bar.chordSubdivisions, offset, toKey, fromKey),
       chords: bar.chords.map((token) => (
         isNashville(token) ? token : transposeChord(token, offset, toKey, false, fromKey)
       ))
@@ -1214,6 +1219,9 @@ const SongEditor: React.FC<Props> = ({
     const section = song.sections[sIdx];
     const newBars = [...section.bars];
     newBars[bIdx] = { ...section.bars[bIdx], ...updates };
+    if (updates.chords) newBars[bIdx].chordSubdivisions = updates.chords.length
+      ? reconcileChordSubdivisions(newBars[bIdx], Number(getEffectiveTimeSignatureForBar(song, section.bars[bIdx]).split('/')[0]) || 4)
+      : undefined;
     const newSections = [...song.sections];
     newSections[sIdx] = { ...section, bars: newBars };
     notifyChange({ ...song, sections: newSections });
@@ -1548,6 +1556,7 @@ const SongEditor: React.FC<Props> = ({
         </div>
 
         <div className="space-y-3">
+          <ChordSubdivisionsEditor bar={bar} beats={Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0]) || 4} language={language} onChange={chordSubdivisions => updateBar(sIdx,bIdx,{chordSubdivisions})}/>
           <div>
             <div className="mb-1 text-[10px] font-bold uppercase text-gray-400">{copy.editor.chordColors}</div>
             {visibleChordEntries.length > 0 ? (
@@ -1559,7 +1568,7 @@ const SongEditor: React.FC<Props> = ({
                   return (
                     <div key={`${index}-${chord}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1.5">
                       <div className="min-w-0 truncate font-mono text-xs font-bold text-gray-800">{chord}</div>
-                      <div className="col-span-2"><ChordBeatOffsetPicker value={getChordBeatOffset(bar, index)} disabled={!canOffsetChord(chord)} language={language} onChange={value => updateBar(sIdx, bIdx, setRawChordBeatOffset(bar, index, value))}/></div>
+                      <div className="col-span-2"><ChordBeatOffsetPicker occupiedOffsets={bar.chordSubdivisions?.filter(e=>e.beat===getChordAnchorSlotIndexes(bar.chords,Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0])||4)[index]).map(e=>e.offset)} value={getChordBeatOffset(bar, index)} disabled={!canOffsetChord(chord)} language={language} onChange={value => updateBar(sIdx, bIdx, setRawChordBeatOffset(bar, index, value))}/></div>
                       {renderAnnotationColorPicker(color, DEFAULT_SPECIAL_CHORD_COLOR, false, (nextColor) => {
                         updateChordMark(index, { ...(mark ?? {}), color: nextColor });
                       })}

@@ -1,3 +1,4 @@
+import { transposeChordSubdivisions, getChordEvents, chordEventLabel } from '../utils/chordSubdivisions';
 import type { Bar, Key, Song } from '../types';
 import { getTransposeOffset, transposeChord } from '../utils/musicUtils';
 import {
@@ -24,10 +25,11 @@ export function copyPreviewContent(song: Song, targets: SongBarIdentity[], kind:
 const markerFields = ['leftMarker', 'rightMarker', 'leftText', 'rightText', 'repeatStart', 'repeatEnd', 'finalBar', 'ending'] as const;
 
 export function previewClipboardText(clipboard: PreviewClipboard): string {
-  return clipboard.items.map(({ bar }) => {
+  return clipboard.items.map(({ bar, timeSignature }) => {
+    const chordText = bar.chordSubdivisions?.length ? getChordEvents(bar, Number(timeSignature.split('/')[0]) || 4).map(e => `${chordEventLabel(e.beat,e.offset)}: ${e.chord}`).join(' · ') : bar.chords.join(' ');
     switch (clipboard.kind) {
-      case 'bars': return `| ${bar.chords.join(' ')} |${bar.rhythm ? `\n${bar.rhythm}` : ''}${bar.riff ? `\n${bar.riff}` : ''}`;
-      case 'chords': return bar.chords.join(' ');
+      case 'bars': return `| ${chordText} |${bar.rhythm ? `\n${bar.rhythm}` : ''}${bar.riff ? `\n${bar.riff}` : ''}`;
+      case 'chords': return chordText;
       case 'rhythm': return bar.rhythm ?? '';
       case 'jianpu': return bar.riff ?? '';
       case 'label': return bar.label ?? bar.rhythmLabel ?? bar.riffLabel ?? '';
@@ -126,6 +128,7 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
         const offset = getTransposeOffset(source.key, key);
         bar.chords = source.bar.chords.map((chord) => offset ? transposeChord(chord, offset, key, false, source.key) : chord);
         bar.chordMarks = structuredClone(source.bar.chordMarks);
+        bar.chordSubdivisions = transposeChordSubdivisions(source.bar.chordSubdivisions, offset, key, source.key);
         break;
       }
       case 'rhythm':
