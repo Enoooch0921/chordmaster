@@ -3,6 +3,38 @@ import { describe, expect, it, vi } from 'vitest';
 import RhythmNotation from './RhythmNotation';
 
 describe('RhythmNotation', () => {
+  it('can clear and restore crosshead notation without changing hook order or losing layout width', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(240);
+    const { container, rerender } = render(<RhythmNotation notation="" timeSignature="4/4" compact />);
+    for (const notation of ['qc', '', 'ecu e']) {
+      rerender(<RhythmNotation notation={notation} timeSignature="4/4" compact />);
+      if (notation) await waitFor(() => expect(container.querySelector('[data-rhythm-geometry-svg]')).toHaveAttribute('viewBox', '0 0 240 16'));
+      else expect(container.textContent).toBe('No Rhythm');
+    }
+  });
+
+  it.each([true, false])('renders the Joy cross/solid pattern with four connected pairs (compact=%s)', (compact) => {
+    const { container } = render(<RhythmNotation notation="ecu e ecu e ecu e ecu e" timeSignature="4/4" compact={compact} />);
+    const crosses = container.querySelectorAll('[data-rhythm-cross-head="upper"]');
+    const solids = container.querySelectorAll('ellipse[data-rhythm-notehead]');
+    expect(crosses).toHaveLength(4);
+    expect(solids).toHaveLength(4);
+    expect(container.querySelectorAll('[data-rhythm-primary-beam]')).toHaveLength(4);
+    expect(container.querySelectorAll('[data-rhythm-stem]')).toHaveLength(8);
+    expect(container.querySelectorAll('[data-rhythm-flag]')).toHaveLength(0);
+    crosses.forEach((cross, index) => expect(Number(cross.getAttribute('data-rhythm-head-y'))).toBeLessThan(Number(solids[index].getAttribute('data-rhythm-head-y'))));
+  });
+
+  it('renders a cross quarter, rests and sixteenths without adding hidden-gap glyphs', () => {
+    const { container, rerender } = render(<RhythmNotation notation="qc qr er s s s s s s" timeSignature="4/4" compact />);
+    expect(container.querySelectorAll('[data-rhythm-cross-head]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-rhythm-glyph]')).toHaveLength(9);
+    expect(container.querySelectorAll('[data-rhythm-notehead]')).toHaveLength(7);
+    rerender(<RhythmNotation notation="qc ex sc" timeSignature="4/4" compact />);
+    expect(container.querySelectorAll('[data-rhythm-glyph]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-rhythm-flag]')).toHaveLength(2);
+  });
+
   it('anchors compact preview ties below the lower notehead contour', () => {
     const { container } = render(
       <RhythmNotation notation="q~ q q q" timeSignature="4/4" compact />

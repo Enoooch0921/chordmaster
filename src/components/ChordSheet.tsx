@@ -24,6 +24,7 @@ import { Repeat, ArrowUpRight, ArrowDownRight, SlidersHorizontal } from 'lucide-
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import BeatSlashGlyph from './BeatSlashGlyph';
+import ChordTimingArrow from './ChordTimingArrow';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
 import { getChordDisplaySlotEntries, getChordDisplaySlotOwnership } from '../utils/chordSlots';
@@ -362,10 +363,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
           data-chord-marker="push"
           data-ending-collision-offset={avoidEndingCollision ? true : undefined}
         >
-          <svg viewBox="0 0 32 24" className="w-full h-full text-gray-900 overflow-visible" fill="none" stroke="currentColor" strokeWidth={compactModifier ? 1.75 : 1.5} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M16 20c0-8 4-10 12-10" />
-            <path d="M25 7l3 3-3 3" />
-          </svg>
+          <ChordTimingArrow marker="<" className="w-full h-full text-gray-900 overflow-visible" strokeWidth={compactModifier ? 1.75 : 1.5} />
         </motion.div>
       )}
       {marker === 'pull' && (
@@ -376,10 +374,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
           data-chord-marker="pull"
           data-ending-collision-offset={avoidEndingCollision ? true : undefined}
         >
-          <svg viewBox="0 0 32 24" className="w-full h-full text-gray-900 overflow-visible" fill="none" stroke="currentColor" strokeWidth={compactModifier ? 1.75 : 1.5} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M16 20c0-8-4-10-12-10" />
-            <path d="M7 7l-3 3 3 3" />
-          </svg>
+          <ChordTimingArrow marker=">" className="w-full h-full text-gray-900 overflow-visible" strokeWidth={compactModifier ? 1.75 : 1.5} />
         </motion.div>
       )}
     </>

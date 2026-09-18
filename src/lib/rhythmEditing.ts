@@ -44,6 +44,7 @@ export interface RhythmEditableEvent {
   base: RhythmBase;
   isRest: boolean;
   isSlash: boolean;
+  crossHead?: 'normal' | 'upper';
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -57,6 +58,7 @@ export type RhythmEditAction =
   | { type: 'toggle-dot' }
   | { type: 'toggle-accent' }
   | { type: 'toggle-tie' }
+  | { type: 'cycle-cross-head' }
   | { type: 'delete'; mode?: RhythmDeleteMode }
   | { type: 'move'; direction: -1 | 1 }
   | { type: 'home' }
@@ -112,6 +114,7 @@ const toEditableEvents = (notation: string, timeSignature: string): RhythmEditab
       base: event.base,
       isRest: event.isRest,
       isSlash: event.isSlash,
+      ...(event.crossHead ? { crossHead: event.crossHead } : {}),
       dotted: event.dotted,
       triplet: event.triplet,
       accent: event.accent,
@@ -192,7 +195,7 @@ const getNextBoundary = (events: RhythmEditableEvent[], cursorUnit: number, barU
 const buildRhythmToken = (event: RhythmEditableEvent) => {
   if (event.isSlash) return '/';
   return normalizeRhythmToken(
-    `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
+    `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : event.crossHead === 'upper' ? 'cu' : event.crossHead ? 'c' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
   );
 };
 
@@ -211,6 +214,7 @@ const parseEditableToken = (token: string, timeSignature: string): RhythmEditabl
     base: event.base,
     isRest: event.isRest,
     isSlash: event.isSlash,
+    ...(event.crossHead ? { crossHead: event.crossHead } : {}),
     dotted: event.dotted,
     triplet: event.triplet,
     accent: event.accent,
@@ -255,6 +259,7 @@ const preserveEventModifiers = (
     dotted,
     durationUnits,
     endUnit: nextEvent.startUnit + durationUnits,
+    crossHead: nextEvent.crossHead ?? existingEvent.crossHead,
     accent: existingEvent.accent,
     tieAfter: existingEvent.tieAfter
   };
@@ -441,6 +446,9 @@ export const applyRhythmEdit = (
 
     if (existingIndex !== -1) {
       const existingEvent = context.events[existingIndex];
+      if (existingEvent.crossHead && !template.isRest && !template.isSlash && (template.base === 'w' || template.base === 'h')) {
+        return result(song, safeCursor, '請先取消叉形音頭，再改為全音符或二分音符。');
+      }
       const positionedTemplate = positionEvent(template, existingEvent.startUnit);
       const replacement = preserveEventModifiers(existingEvent, positionedTemplate, context.timeSignature);
       const nextBoundary = context.events[existingIndex + 1]?.startUnit ?? context.barUnits;
@@ -502,10 +510,24 @@ export const applyRhythmEdit = (
   if (targetIndex === -1) return result(song, safeCursor, null);
   const event = context.events[targetIndex];
 
+  if (action.type === 'cycle-cross-head') {
+    if (event.isRest || event.isSlash || event.base === 'w' || event.base === 'h') {
+      return result(song, safeCursor, '叉形音頭適用於四分、八分與十六分音符。');
+    }
+    const nextEvents = [...context.events];
+    nextEvents[targetIndex] = {
+      ...event,
+      crossHead: !event.crossHead ? 'normal' : event.crossHead === 'normal' ? 'upper' : undefined
+    };
+    const serialized = serializeEvents(nextEvents, context.timeSignature);
+    if (serialized.error) return result(song, safeCursor, serialized.error);
+    return result(writeNotation(song, target, serialized.notation), safeCursor, null, song);
+  }
+
   if (action.type === 'toggle-dot') {
     if (event.isSlash) return result(song, safeCursor, '/ 不能加附點。');
     if (event.triplet) return result(song, safeCursor, '三連音不能加附點。');
-    const token = `${event.base}${event.isRest ? 'r' : ''}${event.dotted ? '' : '.'}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`;
+    const token = `${event.base}${event.isRest ? 'r' : event.crossHead === 'upper' ? 'cu' : event.crossHead ? 'c' : ''}${event.dotted ? '' : '.'}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`;
     const nextEvent = parseEditableToken(token, context.timeSignature);
     if (!nextEvent) return result(song, safeCursor, '無效的節奏符號。');
     const positionedEvent = positionEvent(nextEvent, event.startUnit);

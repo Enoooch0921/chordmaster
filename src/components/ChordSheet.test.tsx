@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
 import { ensureSongEditingIds, reorderSection } from '../lib/songEditing';
 import ChordSheet from './ChordSheet';
+import { normalizeSongBars } from '../lib/workspace';
 
 vi.stubGlobal('ResizeObserver', class {
   observe() {}
@@ -19,6 +20,24 @@ const song: Song = {
 };
 
 describe('ChordSheet preview input caret', () => {
+  it.each(['C', 'D'] as const)('draws new arrows by their suffix and preserves legacy arrow directions in %s', (currentKey) => {
+    const source: Song = {
+      ...song,
+      chordTimingVersion: 2,
+      sections: [{ ...song.sections[0], bars: [{ chords: ['C<', 'G>'] }] }]
+    };
+    const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey={currentKey} />);
+    const arrowheads = () => Array.from(container.querySelectorAll('[data-chord-marker] svg path:last-child')).map((path) => path.getAttribute('d'));
+    expect(arrowheads()).toEqual(['M7 7l-3 3 3 3', 'M25 7l3 3-3 3']);
+
+    // Old C< was drawn right, old G> left. Migration must preserve that picture.
+    const migrated = normalizeSongBars({ ...source, chordTimingVersion: undefined });
+    rerender(<ChordSheet song={migrated} language="zh" currentKey={currentKey} />);
+    expect(arrowheads()).toEqual(['M25 7l3 3-3 3', 'M7 7l-3 3 3 3']);
+    rerender(<ChordSheet song={normalizeSongBars(JSON.parse(JSON.stringify(migrated)))} language="zh" currentKey={currentKey} />);
+    expect(arrowheads()).toEqual(['M25 7l3 3-3 3', 'M7 7l-3 3 3 3']);
+  });
+
   it('toggles preview bar multi-selection with command or control click without opening edit', () => {
     const onElementClick = vi.fn();
     const onPreviewBarMetaClick = vi.fn();

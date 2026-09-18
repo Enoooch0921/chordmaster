@@ -1,3 +1,4 @@
+import { migrateChordTimingArrows } from './chordTimingMigration';
 import { parseWorkspaceDeletions, type WorkspaceDeletions } from './workspaceMerge';
 import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from '../constants/nashvilleFonts';
@@ -231,7 +232,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
       }
     : undefined;
 
-  return repairSongStructure({
+  return migrateChordTimingArrows(repairSongStructure({
     ...song,
     title: normalizeText(song.title),
     lyricist: normalizeOptionalText(song.lyricist),
@@ -265,7 +266,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
         bars: [{ chords: [] }]
       }
     ]
-  } as T);
+  } as T));
 };
 
 const sanitizeSetlistSectionOrder = (order: string[], song: Song) => {
