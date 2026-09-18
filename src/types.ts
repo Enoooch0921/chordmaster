@@ -92,6 +92,8 @@ export interface PickupMeasure {
 }
 
 export interface Song {
+  // Missing/1 = legacy reversed arrows; 2 = < left/earlier, > right/later.
+  chordTimingVersion?: 1 | 2;
   title: string;
   lyricist?: string;
   composer?: string;

@@ -1,4 +1,5 @@
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
+import { CURRENT_CHORD_TIMING_VERSION, migrateChordTimingArrows } from './lib/chordTimingMigration';
 import LegacyDraftRecovery from './components/LegacyDraftRecovery';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
@@ -831,6 +832,7 @@ const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
 };
 
 const SYMBOL_TEST_SONG_TEMPLATE: Song = {
+  chordTimingVersion: CURRENT_CHORD_TIMING_VERSION,
   title: SYMBOL_TEST_SONG_LEGACY_TITLE,
   shuffle: true,
   originalKey: "Eb",
@@ -1230,7 +1232,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
       }
     : undefined;
 
-  return repairSongStructure({
+  return migrateChordTimingArrows(repairSongStructure({
     ...song,
     title: normalizeText(song.title),
     lyricist: normalizeOptionalText(song.lyricist),
@@ -1264,7 +1266,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
         bars: [{ chords: [] }]
       }
     ]
-  } as T);
+  } as T));
 };
 
 const createStoredSong = (song: Song, id = createSongId()): StoredSong => ({
@@ -1416,6 +1418,7 @@ const buildDuplicateSongTitle = (existingSongs: StoredSong[], originalTitle: str
 
 const createEmptySong = (title: string): StoredSong =>
   createStoredSong({
+    chordTimingVersion: CURRENT_CHORD_TIMING_VERSION,
     title,
     shuffle: false,
     originalKey: 'C',

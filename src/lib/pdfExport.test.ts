@@ -5,7 +5,25 @@ const mocks = vi.hoisted(() => ({ native: vi.fn(), write: vi.fn(), share: vi.fn(
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: mocks.native } }));
 vi.mock('@capacitor/filesystem', () => ({ Filesystem: { writeFile: mocks.write }, Directory: { Cache: 'CACHE' } }));
 vi.mock('@capacitor/share', () => ({ Share: { share: mocks.share } }));
-import { savePdfDocument } from './pdfExport';
+import { getPdfPageCaptureSize, savePdfDocument } from './pdfExport';
+
+describe('PDF page capture', () => {
+  it('keeps the A4 page dimensions when a long source annotation overflows', () => {
+    const page = document.createElement('div');
+    Object.defineProperties(page, {
+      offsetWidth: { value: 794 }, offsetHeight: { value: 1123 },
+      scrollWidth: { value: 1425 }, scrollHeight: { value: 1160 }
+    });
+    expect(getPdfPageCaptureSize(page)).toEqual({ width: 794, height: 1123 });
+  });
+
+  it('does not capture an additional preview zoom as the page size', () => {
+    const page = document.createElement('div');
+    Object.defineProperties(page, { offsetWidth: { value: 794 }, offsetHeight: { value: 1123 } });
+    vi.spyOn(page, 'getBoundingClientRect').mockReturnValue({ width: 397, height: 561.5 } as DOMRect);
+    expect(getPdfPageCaptureSize(page)).toEqual({ width: 794, height: 1123 });
+  });
+});
 
 describe('PDF delivery', () => {
   beforeEach(() => {

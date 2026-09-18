@@ -1,4 +1,5 @@
 export type RhythmBase = 'w' | 'h' | 'q' | 'e' | 's';
+export type RhythmCrossHead = 'normal' | 'upper';
 
 export interface RhythmEvent {
   index: number;
@@ -7,6 +8,7 @@ export interface RhythmEvent {
   isRest: boolean;
   isHidden: boolean;
   isSlash: boolean;
+  crossHead?: RhythmCrossHead;
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -121,6 +123,7 @@ interface RhythmTokenParts {
   isRest: boolean;
   isHidden: boolean;
   isSlash: boolean;
+  crossHead?: RhythmCrossHead;
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -141,19 +144,23 @@ function parseNormalizedRhythmTokenParts(token: string): RhythmTokenParts | null
     };
   }
 
-  const match = token.match(/^(w|h|q|e|s)(3)?(r|x)?(\.)?(\^)?(~)?$/);
+  const match = token.match(/^(w|h|q|e|s)(3)?(r|x|cu|c)?(\.)?(\^)?(~)?$/);
   if (!match) return null;
 
   const [, baseToken, tripletFlag, markerFlag, dotFlag, accentFlag, tieFlag] = match;
   const triplet = Boolean(tripletFlag);
   if (triplet && baseToken !== 'q' && baseToken !== 'e') return null;
   if (triplet && dotFlag) return null;
+  if (markerFlag?.startsWith('c') && (baseToken === 'w' || baseToken === 'h')) return null;
 
   return {
     base: baseToken as RhythmBase,
     isRest: markerFlag === 'r',
     isHidden: markerFlag === 'x',
     isSlash: false,
+    ...(markerFlag === 'c' || markerFlag === 'cu'
+      ? { crossHead: markerFlag === 'cu' ? 'upper' as const : 'normal' as const }
+      : {}),
     dotted: Boolean(dotFlag),
     triplet,
     accent: Boolean(accentFlag),
@@ -174,7 +181,7 @@ export function normalizeRhythmToken(token: string): string {
   const alias = TOKEN_ALIASES[raw] || raw;
   const hidden = alias.endsWith('x');
   const normalizedRaw = hidden ? alias.slice(0, -1) : alias;
-  const match = normalizedRaw.match(/^(w|h|q|e|s)(3)?(r)?$/);
+  const match = normalizedRaw.match(/^(w|h|q|e|s)(3)?(r|cu|c)?$/);
 
   if (!match) {
     return sanitizeToken(trimmed);
@@ -186,8 +193,9 @@ export function normalizeRhythmToken(token: string): string {
     return sanitizeToken(trimmed);
   }
 
-  const isRest = Boolean(restFlag);
-  const marker = hidden ? 'x' : isRest ? 'r' : '';
+  if (restFlag?.startsWith('c') && (hidden || base === 'w' || base === 'h')) return sanitizeToken(trimmed);
+  const isRest = restFlag === 'r';
+  const marker = hidden ? 'x' : restFlag || '';
   return `${base}${triplet ? '3' : ''}${marker}${dotted && !triplet ? '.' : ''}${!isRest && !hidden && accent ? '^' : ''}${!isRest && !hidden && tieAfter ? '~' : ''}`;
 }
 
@@ -244,7 +252,7 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
       return;
     }
 
-    const { base, isRest, isHidden, isSlash, dotted, triplet, accent, tieAfter } = parsedToken;
+    const { base, isRest, isHidden, isSlash, crossHead, dotted, triplet, accent, tieAfter } = parsedToken;
     const durationUnits = isSlash
       ? beatUnits
       : triplet
@@ -258,6 +266,7 @@ export function parseRhythmNotation(notation: string, timeSignature: string): Pa
       isRest,
       isHidden,
       isSlash,
+      ...(crossHead ? { crossHead } : {}),
       dotted,
       triplet,
       accent: isSlash ? false : accent,
@@ -341,9 +350,12 @@ export function getRestGlyph(base: RhythmBase): string {
   return REST_GLYPHS[base];
 }
 
-export function getRhythmEventGlyph(event: Pick<RhythmEvent, 'base' | 'isRest' | 'dotted' | 'isHidden' | 'isSlash'>): string {
+export function getRhythmEventGlyph(event: Pick<RhythmEvent, 'base' | 'isRest' | 'dotted' | 'isHidden' | 'isSlash' | 'crossHead'>): string {
   if (event.isHidden) return '';
   if (event.isSlash) return '/';
+  // Crosshead bars use vector stems/beams in RhythmNotation. Text consumers
+  // must not silently substitute a conventional pitched notehead.
+  if (event.crossHead && !event.isRest) return event.dotted ? '×·' : '×';
   const base = event.isRest ? REST_GLYPHS[event.base] : NOTE_GLYPHS[event.base];
   return event.dotted ? `${base}${BACH_DOT}` : base;
 }
@@ -434,7 +446,7 @@ const BACH_BEAM_PATTERN_MAP: Record<string, string> = {
 };
 
 function canBeamByRule(event: RhythmEvent): boolean {
-  if (event.isRest || event.isHidden || event.isSlash) return false;
+  if (event.isRest || event.isHidden || event.isSlash || event.crossHead) return false;
   if (event.base !== 'e' && event.base !== 's') return false;
   // Dotted sixteenth is rare and hard to read in beamed pop charts; keep it standalone.
   if (event.base === 's' && event.dotted) return false;

@@ -72,6 +72,41 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it('cycles a source crosshead without changing its duration or neighboring notes', async () => {
+    const user = userEvent.setup();
+    let draft: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], rhythm: 'e e e e e e e e' }] }] };
+    const rhythmTarget = { ...target, field: 'rhythm' as const, slotIndex: 0, cursor: { kind: 'rhythm' as const, cursorUnit: 0 } };
+    const session = () => createPreviewEditSession({ song: draft, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: session(), deviceLayout: 'phone' });
+    for (const expected of ['ec', 'ecu', 'e']) {
+      await user.click(screen.getByRole('button', { name: '切換叉形音頭：一般、上方、實心' }));
+      draft = onApplyDraft.mock.calls.at(-1)![0];
+      expect(draft.sections[0].bars[0].rhythm).toBe(`${expected} e e e e e e e`);
+      rerenderSession(session());
+    }
+  });
+
+  it.each([
+    ['搶拍', '<', 'M7 7l-3 3 3 3'],
+    ['拖拍', '>', 'M25 7l3 3-3 3']
+  ])('stores the matching suffix when choosing %s', async (label, suffix, arrowhead) => {
+    const user = userEvent.setup();
+    const session = createPreviewEditSession({
+      song: { ...song, chordTimingVersion: 2 },
+      target: { ...target, slotIndex: 0, rawChordIndex: 0 },
+      inputMode: 'letters'
+    });
+    const { onApplyDraft } = renderEditor({ session, deviceLayout: 'phone' });
+    await user.click(screen.getByRole('button', { name: '選擇演奏記號' }));
+    const button = screen.getByRole('button', { name: label });
+    expect(button.querySelector('svg path:last-child')).toHaveAttribute('d', arrowhead);
+    await user.click(button);
+    const edited = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    expect(edited.sections[0].bars[0].chords[0]).toBe(`C${suffix}`);
+    expect(edited.chordTimingVersion).toBe(2);
+    expect(song.sections[0].bars[0].chords).toEqual(['C']);
+  });
+
   it('shows the inherited sharp key when reopening the following section', async () => {
     const source: Song = { ...song, originalKey: 'F', currentKey: 'F', sections: [
       { id: 'intro', title: 'Intro', bars: [{ id: 'intro-1', keyChangeTo: 'F#', chords: ['5'] }] },

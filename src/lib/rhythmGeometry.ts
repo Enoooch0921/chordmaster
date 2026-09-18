@@ -156,8 +156,9 @@ export const buildCompactRhythmGeometry = (
   const centerX = (event: RhythmEvent) => unitToX(getCompactRhythmCenterUnit(event));
   const headRadiusX = 2.05 * scale;
   const headRadiusY = 1.42 * scale;
-  const headY = height - (4.6 * scale);
-  const stemHeight = 9.2 * scale;
+  const hasCrossHeads = visibleEvents.some((event) => event.crossHead);
+  const headY = hasCrossHeads ? (height / 2) + (8.5 * scale) : height - (4.6 * scale);
+  const stemHeight = (hasCrossHeads ? 13 : 9.2) * scale;
   const beamY = headY - stemHeight;
   const secondaryBeamY = beamY + (2.05 * scale);
   const stemXOffset = headRadiusX * 0.72;
@@ -168,24 +169,25 @@ export const buildCompactRhythmGeometry = (
 
   const events = visibleEvents.map((event): CompactRhythmEventGeometry => {
     const x = centerX(event);
+    const headOffsetY = event.crossHead === 'upper' ? -5 * scale : 0;
     const hasStem = !event.isRest && !event.isSlash && event.base !== 'w';
     const isBeamed = beamedIndices.has(event.index);
     const stem = hasStem
       ? {
           x: x + stemXOffset,
           top: beamY,
-          bottom: stemBottom
+          bottom: event.crossHead ? headY + headOffsetY - headRadiusY * 0.72 : stemBottom
         }
       : null;
 
     return {
       event,
-      head: { x, y: headY },
+      head: { x, y: headY + headOffsetY },
       headRadiusX,
       headRadiusY,
       stem,
       flagCount: !isBeamed && !event.isRest && !event.isSlash ? (event.base === 'e' ? 1 : event.base === 's' ? 2 : 0) : 0,
-      dot: event.dotted && !event.isSlash ? { x: x + (3.7 * scale), y: headY } : null,
+      dot: event.dotted && !event.isSlash ? { x: x + (3.7 * scale), y: headY + headOffsetY } : null,
       accent: event.accent && stem && !event.isSlash
         ? { x, y: stem.top - (3.25 * scale) }
         : null

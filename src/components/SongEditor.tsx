@@ -5,6 +5,7 @@ import { motion, AnimatePresence, Reorder, LayoutGroup, useDragControls } from '
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import BeatSlashGlyph from './BeatSlashGlyph';
+import ChordTimingArrow from './ChordTimingArrow';
 import { JianpuTripletKeyGlyph } from './preview-edit/NotationKeyGlyphs';
 import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
@@ -121,6 +122,7 @@ interface RhythmEditorEvent {
   base: 'w' | 'h' | 'q' | 'e' | 's';
   isRest: boolean;
   isSlash: boolean;
+  crossHead?: 'normal' | 'upper';
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -2231,6 +2233,7 @@ const SongEditor: React.FC<Props> = ({
         base: event.base,
         isRest: event.isRest,
         isSlash: event.isSlash,
+        ...(event.crossHead ? { crossHead: event.crossHead } : {}),
         dotted: event.dotted,
         triplet: event.triplet,
         accent: event.accent,
@@ -2265,11 +2268,11 @@ const SongEditor: React.FC<Props> = ({
 
   const parseToolbarRhythmToken = (sIdx: number, bIdx: number, token: string): RhythmEditorEvent | null => {
     const normalized = normalizeRhythmToken(token);
-    const match = normalized === '/' ? ['/' as const] : normalized.match(/^(w|h|q|e|s)(3)?(r)?(\.)?(\^)?(~)?$/);
+    const match = normalized === '/' ? ['/' as const] : normalized.match(/^(w|h|q|e|s)(3)?(r|cu|c)?(\.)?(\^)?(~)?$/);
     if (!match) return null;
     const parsed = parseRhythmNotation(normalized, getBarTimeSignature(getEditorBar(sIdx, bIdx)));
     const event = parsed.events[0];
-    if (!event) return null;
+    if (!event || parsed.invalidTokens.length) return null;
 
     return {
       startUnit: 0,
@@ -2277,6 +2280,7 @@ const SongEditor: React.FC<Props> = ({
       base: event.base,
       isRest: event.isRest,
       isSlash: event.isSlash,
+      ...(event.crossHead ? { crossHead: event.crossHead } : {}),
       dotted: event.dotted,
       triplet: event.triplet,
       accent: event.accent,
@@ -2287,7 +2291,7 @@ const SongEditor: React.FC<Props> = ({
   const buildRhythmEditorToken = (event: RhythmEditorEvent) => {
     if (event.isSlash) return '/';
     return normalizeRhythmToken(
-      `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
+      `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : event.crossHead === 'upper' ? 'cu' : event.crossHead ? 'c' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
     );
   };
 
@@ -2320,6 +2324,7 @@ const SongEditor: React.FC<Props> = ({
     return {
       ...nextEvent,
       dotted: nextEvent.triplet ? false : existingEvent.dotted,
+      crossHead: nextEvent.crossHead ?? existingEvent.crossHead,
       accent: existingEvent.accent,
       tieAfter: existingEvent.tieAfter
     };
@@ -2698,6 +2703,7 @@ const SongEditor: React.FC<Props> = ({
 
     if (existingIndex !== -1) {
       const existingEvent = events[existingIndex];
+      if (existingEvent.crossHead && !template.isRest && !template.isSlash && (template.base === 'w' || template.base === 'h')) return;
       const replacement = preserveRhythmEventModifiers(existingEvent, {
         ...template,
         startUnit: existingEvent.startUnit
@@ -2746,7 +2752,7 @@ const SongEditor: React.FC<Props> = ({
     const nextEvent = createRhythmEditorEvent(
       selection.sIdx,
       selection.bIdx,
-      `${event.base}${event.isRest ? 'r' : ''}${event.dotted ? '' : '.'}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`,
+      `${event.base}${event.isRest ? 'r' : event.crossHead === 'upper' ? 'cu' : event.crossHead ? 'c' : ''}${event.dotted ? '' : '.'}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`,
       event.startUnit
     );
     if (!nextEvent) return;
@@ -8611,10 +8617,7 @@ const SongEditor: React.FC<Props> = ({
                     title={copy.editor.pushTitle}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                      <svg viewBox="0 0 32 24" className="w-6 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M16 20c0-8 4-10 12-10" />
-                        <path d="M25 7l3 3-3 3" />
-                      </svg>
+                      <ChordTimingArrow marker="<" className="w-6 h-4.5" />
                     </div>
                     <span className={chordToolbarLabelClass}>{copy.editor.push}</span>
                   </button>
@@ -8625,10 +8628,7 @@ const SongEditor: React.FC<Props> = ({
                     title={copy.editor.pullTitle}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                      <svg viewBox="0 0 32 24" className="w-6 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M16 20c0-8-4-10-12-10" />
-                        <path d="M7 7l-3 3 3 3" />
-                      </svg>
+                      <ChordTimingArrow marker=">" className="w-6 h-4.5" />
                     </div>
                     <span className={chordToolbarLabelClass}>{copy.editor.pull}</span>
                   </button>
