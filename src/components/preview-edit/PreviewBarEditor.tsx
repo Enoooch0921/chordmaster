@@ -27,13 +27,14 @@ import {
 } from '../../lib/previewEditSession';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
 import { getRestGlyph, parseTimeSignature } from '../../utils/rhythmUtils';
-import type { JianpuInputMode } from '../../utils/jianpuUtils';
+import type { JianpuInputMode, JianpuGraceNote } from '../../utils/jianpuUtils';
 import KeyPicker from '../KeyPicker';
 import ChordTimingArrow from '../ChordTimingArrow';
 import {
   applyJianpuCommand,
   DEFAULT_JIANPU_INPUT_MODE,
   getJianpuInputModeAtCursor,
+  getJianpuSelectedNoteAtCursor,
   type JianpuPitchContext,
   type JianpuAction
 } from '../../lib/jianpuEditing';
@@ -258,6 +259,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [bassMode, setBassMode] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
   const [rhythmVoicesExpanded, setRhythmVoicesExpanded] = React.useState(false);
+  const [graceDraft, setGraceDraft] = React.useState<JianpuGraceNote | null>(null);
   const [desktopKeysVisible, setDesktopKeysVisible] = React.useState(() => (
     deviceLayout !== 'desktop' || session.target.field !== 'chords'
   ));
@@ -326,7 +328,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
   React.useEffect(() => {
     setBassMode(false);
-  }, [session.target.barId, session.target.slotIndex]);
+    setGraceDraft(null);
+  }, [session.target.barId, session.target.slotIndex, session.notationMode, jianpuCursor.beatIndex, jianpuCursor.noteIndex, jianpuCursor.unitIndex]);
 
   React.useEffect(() => {
     if (notationMode !== 'jianpu' || !bar) return;
@@ -553,6 +556,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       const meta = event.metaKey || event.ctrlKey;
       const isChordEditing = notationMode === 'chords' && session.target.field === 'chords';
       if (event.defaultPrevented) return;
+      if (graceDraft) {
+        if (event.key === 'Escape') { event.preventDefault(); setGraceDraft(null); }
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         onDone();
@@ -1401,7 +1408,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </div>
       )}
 
-      {notationMode === 'jianpu' && (
+      {notationMode === 'jianpu' && !graceDraft && (
         <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr]'} gap-1.5`} data-keyboard-view="jianpu">
           <div className="grid min-h-0 grid-cols-7 gap-1.5" data-jianpu-key-row="pitches" data-key-surface="character">
             {(['1', '2', '3', '4', '5', '6', '7'] as const).map((pitch) => (
@@ -1433,12 +1440,35 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'clear-formatting' })} aria-label={language === 'zh' ? '清除簡譜輸入格式' : 'Clear jianpu input formatting'}><Eraser size={21} aria-hidden="true" /></button>
             <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'delete', direction: 'backward' })} aria-label={language === 'zh' ? '刪除簡譜音符' : 'Delete jianpu note'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
           </div>
-          <div className="grid min-h-0 grid-cols-2 gap-1.5" data-jianpu-key-row="bar-actions" data-key-surface="utility">
+          <div className="grid min-h-0 grid-cols-3 gap-1.5" data-jianpu-key-row="bar-actions" data-key-surface="utility">
             <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyJianpu} aria-label={language === 'zh' ? '複製簡譜' : 'Copy jianpu'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製簡譜' : 'Copy jianpu'}</button>
             <button type="button" disabled={!hasCopiedJianpu} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteJianpu} aria-label={language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}</button>
+            <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-1 text-[11px]`} onClick={() => {
+              const selected = getJianpuSelectedNoteAtCursor(session.draftSong, session.target, { ...jianpuCursor, noteIndex: jianpuCursor.noteIndex ?? null }, jianpuPitchContext);
+              if (!selected || !/^[1-7]$/.test(selected.pitch)) { setNotationActionError(language === 'zh' ? '請先選取裝飾音要連接的主音。' : 'Select the principal note first.'); return; }
+              setNotationActionError(null);
+              setGraceDraft(selected.grace ?? { pitch: '2', accidental: '', octave: 0 });
+            }} aria-label={language === 'zh' ? '編輯簡譜裝飾音' : 'Edit jianpu grace note'}>{language === 'zh' ? '裝飾音' : 'Grace note'}</button>
           </div>
           {renderPreviewColorControls('jianpu-color-controls')}
           {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
+        </div>
+      )}
+
+      {notationMode === 'jianpu' && graceDraft && (
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2" data-jianpu-grace-editor>
+          <p className="text-sm font-semibold">{language === 'zh' ? '主音前的裝飾音，不另占拍數' : 'Grace note before the principal note, without adding beats'}</p>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="text-xs">{language === 'zh' ? '音高' : 'Pitch'}<select aria-label={language === 'zh' ? '裝飾音音高' : 'Grace pitch'} className="mt-1 h-11 w-full rounded-lg border bg-white px-2 text-base" value={graceDraft.pitch} onChange={event => setGraceDraft({ ...graceDraft, pitch: event.target.value })}>{['1','2','3','4','5','6','7'].map(pitch => <option key={pitch}>{pitch}</option>)}</select></label>
+            <label className="text-xs">{language === 'zh' ? '升降' : 'Accidental'}<select aria-label={language === 'zh' ? '裝飾音升降' : 'Grace accidental'} className="mt-1 h-11 w-full rounded-lg border bg-white px-2 text-base" value={graceDraft.accidental} onChange={event => setGraceDraft({ ...graceDraft, accidental: event.target.value })}><option value="">♮</option><option value="#">♯</option><option value="b">♭</option></select></label>
+            <label className="text-xs">{language === 'zh' ? '八度' : 'Octave'}<select aria-label={language === 'zh' ? '裝飾音八度' : 'Grace octave'} className="mt-1 h-11 w-full rounded-lg border bg-white px-2 text-base" value={graceDraft.octave} onChange={event => setGraceDraft({ ...graceDraft, octave: Number(event.target.value) })}>{[-2,-1,0,1,2].map(octave => <option key={octave} value={octave}>{octave > 0 ? `+${octave}` : octave}</option>)}</select></label>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <button type="button" className="h-11 rounded-lg bg-indigo-600 text-sm font-bold text-white" onClick={() => { if (!applyJianpuAction({ type: 'set-grace', grace: graceDraft }).error) setGraceDraft(null); }}>{language === 'zh' ? '套用裝飾音' : 'Apply grace'}</button>
+            <button type="button" className="h-11 rounded-lg border bg-white text-sm text-red-700" onClick={() => { if (!applyJianpuAction({ type: 'set-grace', grace: null }).error) setGraceDraft(null); }}>{language === 'zh' ? '移除裝飾音' : 'Remove grace'}</button>
+            <button type="button" className="h-11 rounded-lg border bg-white text-sm" onClick={() => setGraceDraft(null)}>{language === 'zh' ? '返回簡譜' : 'Back'}</button>
+          </div>
+          {notationActionError && <p role="status" className="text-xs text-amber-700">{notationActionError}</p>}
         </div>
       )}
 

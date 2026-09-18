@@ -8,7 +8,9 @@
 import type { Bar, Key, Song } from '../types';
 import {
   type JianpuAccidental,
+  MAX_RELATIVE_OCTAVE_SHIFT,
   type JianpuDuration,
+  type JianpuGraceNote,
   type JianpuInputMode,
   type JianpuNoteRange,
   type JianpuOctave,
@@ -56,6 +58,7 @@ export interface JianpuCursor {
 
 export type JianpuAction =
   | { type: 'insert-pitch'; pitch: JianpuPitch }
+  | { type: 'set-grace'; grace: JianpuGraceNote | null }
   | { type: 'insert-rest' }
   | { type: 'insert-hold' }
   | { type: 'set-duration'; duration: JianpuDuration }
@@ -856,6 +859,13 @@ const cursorInputModeFromNote = (
 };
 
 /** Return the visible input controls represented by a selected semantic note. */
+export const getJianpuSelectedNoteAtCursor = (song: Song, target: SongBarIdentity, cursor: JianpuCursor, pitchContext?: JianpuPitchContext): JianpuNoteRange | null => {
+  const context = buildContext(song, target);
+  if (!context) return null;
+  const selected = selectedNoteAtCursor(context, clampCursor(context, cursor));
+  return selected ? displayNoteForInputMode(song, target, selected.note, pitchContext) : null;
+};
+
 export const getJianpuInputModeAtCursor = (
   song: Song,
   target: SongBarIdentity,
@@ -1403,6 +1413,18 @@ const clearFormatting = (
   return baseResult(resized.song, target, safeCursor, resized.error ? inputMode : clearedMode, resized.error);
 };
 
+const setGrace = (song: Song, target: SongBarIdentity, cursor: JianpuCursor, inputMode: JianpuInputMode, grace: JianpuGraceNote | null, pitchContext?: JianpuPitchContext): JianpuCommandResult => {
+  const context = buildContext(song, target);
+  if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
+  const safeCursor = clampCursor(context, cursor);
+  const selected = selectedNoteAtCursor(context, safeCursor);
+  if (!selected || !/^[1-7]$/.test(selected.note.pitch)) return baseResult(song, target, safeCursor, inputMode, '請先選取裝飾音要連接的主音。');
+  if (grace && (!/^[1-7]$/.test(grace.pitch) || !['', '#', 'b'].includes(grace.accidental) || !Number.isInteger(grace.octave) || Math.abs(grace.octave) > MAX_RELATIVE_OCTAVE_SHIFT)) return baseResult(song, target, safeCursor, inputMode, '裝飾音格式不正確。');
+  const resolved = grace ? resolveInputParts(song, target, grace.pitch, normalizeAccidental(grace.accidental), grace.octave, pitchContext) : undefined;
+  const resized = resizeSelectedNote(song, target, context, selected, rebuildJianpuNote(selected.note, { grace: resolved }));
+  return baseResult(resized.song, target, safeCursor, inputMode, resized.error);
+};
+
 export const applyJianpuCommand = (
   song: Song,
   target: SongBarIdentity,
@@ -1418,6 +1440,8 @@ export const applyJianpuCommand = (
   switch (action.type) {
     case 'insert-pitch':
       return insertPitch(song, target, safeCursor, safeInputMode, action.pitch, pitchContext);
+    case 'set-grace':
+      return setGrace(song, target, safeCursor, safeInputMode, action.grace, pitchContext);
     case 'insert-rest':
       return insertPitch(song, target, safeCursor, safeInputMode, '0', pitchContext);
     case 'insert-hold':

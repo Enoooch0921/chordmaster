@@ -969,6 +969,14 @@ const Jianpu: React.FC<JianpuProps> = ({
 
         return (
           <React.Fragment key={`${note.tokenIndex}-${note.noteIndex}-${note.start}`}>
+            {note.grace && (
+              <svg data-jianpu-grace-note="true" aria-label={`Grace note ${note.grace.accidental}${note.grace.pitch}`} className="absolute pointer-events-none overflow-visible" viewBox="0 0 24 24" style={{ left: `calc(${centerLeft} - ${metrics.digitFontSize * (note.accidental ? 1.65 : 1.3)}px)`, top: `${metrics.digitCenterY - metrics.digitFontSize * 1.35}px`, width: `${metrics.digitFontSize * 1.6}px`, height: `${metrics.digitFontSize * 1.6}px`, color: symbolColor }}>
+                <text x="9" y="11" textAnchor="middle" fontSize="11" fontFamily={JIANPU_SYMBOL_FONT} fill="currentColor">{note.grace.pitch}</text>
+                {note.grace.accidental && <text x="0" y="10" fontSize="8" fontFamily={JIANPU_SYMBOL_FONT} fill="currentColor">{note.grace.accidental === '#' ? '♯' : '♭'}</text>}
+                {Array.from({ length: Math.min(3, Math.abs(note.grace.octave)) }, (_, index) => <circle key={index} cx="9" cy={note.grace!.octave > 0 ? 1 - index * 2.5 : 13 + index * 2.5} r="0.8" fill="currentColor" />)}
+                <path d="M9 17 Q15 22 22 19" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+              </svg>
+            )}
             {note.accidental && (
               <span
                 className="absolute leading-none"
