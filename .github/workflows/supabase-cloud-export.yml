@@ -1,0 +1,157 @@
+name: Supabase Cloud encrypted export
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      CLOUD_EXPORT_DB_PASSWORD: ${{ secrets.CLOUD_EXPORT_DB_PASSWORD }}
+      CLOUD_EXPORT_ARCHIVE_KEY: ${{ secrets.CLOUD_EXPORT_ARCHIVE_KEY }}
+      EXPORT_ROLE: chordmaster_export
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Validate protected credentials
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          test -n "$VITE_SUPABASE_URL"
+          test -n "$CLOUD_EXPORT_DB_PASSWORD"
+          test -n "$CLOUD_EXPORT_ARCHIVE_KEY"
+
+      - name: Create temporary read-only export login
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          ref=os.environ['VITE_SUPABASE_URL'].split('//',1)[1].split('.',1)[0]
+          role=os.environ['EXPORT_ROLE']
+          password=os.environ['CLOUD_EXPORT_DB_PASSWORD']
+          if not password.isalnum():
+              raise SystemExit('temporary password must be alphanumeric')
+          sql=f'''DO $cleanup$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN
+              EXECUTE 'REASSIGN OWNED BY {role} TO postgres';
+              EXECUTE 'DROP OWNED BY {role}';
+              EXECUTE 'DROP ROLE {role}';
+            END IF;
+          END $cleanup$;
+          CREATE ROLE {role} WITH LOGIN PASSWORD '{password}' INHERIT;
+          GRANT postgres TO {role};
+          GRANT pg_read_all_data TO {role};
+          ALTER ROLE {role} SET role TO postgres;'''
+          req=urllib.request.Request(
+              f'https://api.supabase.com/v1/projects/{ref}/database/query',
+              data=json.dumps({'query':sql}).encode(),
+              headers={'Authorization':'Bearer '+os.environ['SUPABASE_ACCESS_TOKEN'],'Content-Type':'application/json'},
+              method='POST')
+          with urllib.request.urlopen(req, timeout=60) as resp:
+              if resp.status != 201 and resp.status != 200:
+                  raise SystemExit(f'unexpected status {resp.status}')
+          print('temporary export login created')
+          PY
+
+      - name: Export roles, schema, and data
+        run: |
+          mkdir -p export/storage-objects export/edge-functions
+          PROJECT_REF="${VITE_SUPABASE_URL#https://}"
+          PROJECT_REF="${PROJECT_REF%%.*}"
+          DB_URL="postgresql://${EXPORT_ROLE}.${PROJECT_REF}:${CLOUD_EXPORT_DB_PASSWORD}@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres"
+          supabase db dump --db-url "$DB_URL" -f export/roles.sql --role-only
+          supabase db dump --db-url "$DB_URL" -f export/schema.sql
+          supabase db dump --db-url "$DB_URL" -f export/data.sql --use-copy --data-only
+          cp -R supabase/functions/. export/edge-functions/
+
+      - name: Export inventory and Storage object bodies
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.parse, urllib.request
+          root=pathlib.Path('export')
+          ref=os.environ['VITE_SUPABASE_URL'].split('//',1)[1].split('.',1)[0]
+          api=f'https://api.supabase.com/v1/projects/{ref}/database/query'
+          headers={'Authorization':'Bearer '+os.environ['SUPABASE_ACCESS_TOKEN'],'Content-Type':'application/json'}
+          def query(sql):
+              req=urllib.request.Request(api,data=json.dumps({'query':sql}).encode(),headers=headers,method='POST')
+              with urllib.request.urlopen(req,timeout=120) as resp:
+                  return json.load(resp)
+          inventory={
+            'server': query("select current_setting('server_version') as version"),
+            'extensions': query("select extname, extversion from pg_extension order by extname"),
+            'tables': query("select schemaname, relname as table_name, n_live_tup::bigint as estimated_rows from pg_stat_user_tables order by schemaname, relname"),
+            'exact_counts': query("select n.nspname as schema_name,c.relname as table_name,(xpath('/row/c/text()',query_to_xml(format('select count(*) as c from %I.%I',n.nspname,c.relname),false,true,'')))[1]::text::bigint as row_count from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relkind in ('r','p') and n.nspname in ('public','auth','storage') order by 1,2"),
+            'storage_objects': query("select bucket_id,name,metadata from storage.objects order by bucket_id,name"),
+          }
+          (root/'inventory.json').write_text(json.dumps(inventory,ensure_ascii=False,indent=2),encoding='utf-8')
+          service_headers={'Authorization':'Bearer '+os.environ['SUPABASE_SERVICE_ROLE_KEY'],'apikey':os.environ['SUPABASE_SERVICE_ROLE_KEY']}
+          downloaded=[]
+          for item in inventory['storage_objects']:
+              bucket=str(item['bucket_id']); name=str(item['name'])
+              url=os.environ['VITE_SUPABASE_URL'].rstrip('/')+'/storage/v1/object/authenticated/'+urllib.parse.quote(bucket,safe='')+'/'+urllib.parse.quote(name,safe='/')
+              req=urllib.request.Request(url,headers=service_headers)
+              out=root/'storage-objects'/bucket/name
+              out.parent.mkdir(parents=True,exist_ok=True)
+              with urllib.request.urlopen(req,timeout=120) as resp:
+                  out.write_bytes(resp.read())
+              downloaded.append({'bucket_id':bucket,'name':name,'path':str(out.relative_to(root))})
+          (root/'storage-files.json').write_text(json.dumps(downloaded,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('storage object bodies:',len(downloaded))
+          PY
+
+      - name: Package and encrypt export
+        run: |
+          (cd export && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          tar -C export -czf chordmaster-cloud-export.tar.gz .
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -in chordmaster-cloud-export.tar.gz \
+            -out chordmaster-cloud-export.tar.gz.enc \
+            -pass env:CLOUD_EXPORT_ARCHIVE_KEY
+          rm -f chordmaster-cloud-export.tar.gz
+
+      - name: Upload encrypted export
+        uses: actions/upload-artifact@v4
+        with:
+          name: chordmaster-cloud-export
+          path: chordmaster-cloud-export.tar.gz.enc
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Drop temporary export login
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          ref=os.environ['VITE_SUPABASE_URL'].split('//',1)[1].split('.',1)[0]
+          role=os.environ['EXPORT_ROLE']
+          sql=f'''DO $cleanup$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN
+              EXECUTE 'REASSIGN OWNED BY {role} TO postgres';
+              EXECUTE 'DROP OWNED BY {role}';
+              EXECUTE 'DROP ROLE {role}';
+            END IF;
+          END $cleanup$;'''
+          req=urllib.request.Request(
+              f'https://api.supabase.com/v1/projects/{ref}/database/query',
+              data=json.dumps({'query':sql}).encode(),
+              headers={'Authorization':'Bearer '+os.environ['SUPABASE_ACCESS_TOKEN'],'Content-Type':'application/json'},
+              method='POST')
+          with urllib.request.urlopen(req, timeout=60):
+              pass
+          print('temporary export login removed')
+          PY
