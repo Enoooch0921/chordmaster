@@ -47,8 +47,6 @@ jobs:
           sql=f'''DO $cleanup$
           BEGIN
             IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN
-              EXECUTE 'REASSIGN OWNED BY {role} TO postgres';
-              EXECUTE 'DROP OWNED BY {role}';
               EXECUTE 'DROP ROLE {role}';
             END IF;
           END $cleanup$;
@@ -72,9 +70,19 @@ jobs:
           PROJECT_REF="${VITE_SUPABASE_URL#https://}"
           PROJECT_REF="${PROJECT_REF%%.*}"
           DB_URL="postgresql://${EXPORT_ROLE}.${PROJECT_REF}:${CLOUD_EXPORT_DB_PASSWORD}@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres"
-          supabase db dump --db-url "$DB_URL" -f export/roles.sql --role-only
-          supabase db dump --db-url "$DB_URL" -f export/schema.sql
-          supabase db dump --db-url "$DB_URL" -f export/data.sql --use-copy --data-only
+          IMAGE="ghcr.io/supabase/postgres:17.6.1.167"
+          run_dump() {
+            local output="$1"; shift
+            local script="$(mktemp)"
+            supabase db dump --db-url "$DB_URL" --dry-run "$@" > "$script"
+            sed -i '/--role "postgres"/d' "$script"
+            chmod 700 "$script"
+            docker run --rm --network host -v "$script:/tmp/supabase-dump.sh:ro" "$IMAGE" bash /tmp/supabase-dump.sh > "$output"
+            shred -u "$script"
+          }
+          run_dump export/roles.sql --role-only
+          run_dump export/schema.sql
+          run_dump export/data.sql --use-copy --data-only
           cp -R supabase/functions/. export/edge-functions/
 
       - name: Export inventory and Storage object bodies
@@ -140,8 +148,6 @@ jobs:
           sql=f'''DO $cleanup$
           BEGIN
             IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN
-              EXECUTE 'REASSIGN OWNED BY {role} TO postgres';
-              EXECUTE 'DROP OWNED BY {role}';
               EXECUTE 'DROP ROLE {role}';
             END IF;
           END $cleanup$;'''
