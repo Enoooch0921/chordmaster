@@ -53,7 +53,6 @@ jobs:
             END IF;
           END $cleanup$;
           CREATE ROLE {role} WITH LOGIN PASSWORD '{password}' INHERIT;
-          GRANT postgres TO {role};
           GRANT pg_read_all_data TO {role};
           '''
           req=urllib.request.Request(
