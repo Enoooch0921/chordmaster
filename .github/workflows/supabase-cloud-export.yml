@@ -55,7 +55,7 @@ jobs:
           CREATE ROLE {role} WITH LOGIN PASSWORD '{password}' INHERIT;
           GRANT postgres TO {role};
           GRANT pg_read_all_data TO {role};
-          ALTER ROLE {role} SET role TO postgres;'''
+          '''
           req=urllib.request.Request(
               f'https://api.supabase.com/v1/projects/{ref}/database/query',
               data=json.dumps({'query':sql}).encode(),
