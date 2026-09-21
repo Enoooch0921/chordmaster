@@ -15,7 +15,7 @@ const remote: JoinedWorkspace = { joinedSetlists: [{ ...setlist, songs: [
   { ...setlist.songs[0], overrideKey: 'D', personalCapoOverride: undefined, order: 1 }
 ] }], joinedProjects: [] };
 const flush = () => act(async () => { await Promise.resolve(); });
-const tick = (ms = 5000) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+const tick = (ms = 5 * 60 * 1000) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
 beforeEach(() => {
   vi.useFakeTimers();

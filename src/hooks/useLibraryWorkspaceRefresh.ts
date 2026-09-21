@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceRepository } from '../lib/repository';
 import type { WorkspaceSnapshot } from '../types';
 
+const SUCCESS_REFRESH_MS = 5 * 60 * 1000;
+
 export type LibraryContent = Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>;
 
 interface Options {
@@ -61,7 +63,10 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
         clearTimeout(timeout);
         inFlight = false;
         if (!cancelled && canRefresh()) {
-          timer = setTimeout(() => void refresh(), Math.min(30000, 5000 * 2 ** Math.min(failures, 3)));
+          const delay = failures > 0
+            ? Math.min(30000, 5000 * 2 ** Math.min(failures, 3))
+            : SUCCESS_REFRESH_MS;
+          timer = setTimeout(() => void refresh(), delay);
         }
       }
     };
