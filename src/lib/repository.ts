@@ -120,6 +120,27 @@ interface UserSetlistCapoOverrideRow {
   updated_at?: string;
 }
 
+const TRANSIENT_FETCH_RETRY_DELAYS_MS = [400, 1200] as const;
+
+const isTransientFetchFailure = (error: unknown) => (
+  error instanceof TypeError
+  && /fetch|network|load/i.test(error.message)
+);
+
+const retryTransientFetch = async <T>(operation: () => Promise<T>): Promise<T> => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const delay = TRANSIENT_FETCH_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !isTransientFetchFailure(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+};
+
 interface CurrentUserSetlistAssignmentRow {
   setlist_id: string;
   user_id: string;
@@ -1506,7 +1527,7 @@ export const createCloudRepository = (params: {
     async loadWorkspace() {
       const libraryId = await ensureLibraryId();
       const [workspace, joinedSetlists, joinedProjects] = await Promise.all([
-        getLibraryWorkspace(libraryId, params.userId),
+        retryTransientFetch(() => getLibraryWorkspace(libraryId, params.userId)),
         getJoinedSetlists(params.userId),
         getJoinedProjects()
       ]);
@@ -1520,7 +1541,7 @@ export const createCloudRepository = (params: {
       // Loading is intentionally side-effect free. A real workspace switch
       // calls setActiveLibrary only after this complete snapshot succeeds;
       // background Realtime/access reads must never redirect later writes.
-      const workspace = await getLibraryWorkspace(libraryId, params.userId);
+      const workspace = await retryTransientFetch(() => getLibraryWorkspace(libraryId, params.userId));
       const personalLibraryId = await ensurePersonalLibraryId();
       const isPersonal = libraryId === personalLibraryId;
       const [joinedSetlists, joinedProjects] = await Promise.all([
