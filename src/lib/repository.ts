@@ -300,6 +300,7 @@ const getLibrarySongs = async (libraryId: string): Promise<StoredSong[]> => {
     .from('songs')
     .select(SONG_SELECT)
     .eq('library_id', libraryId)
+    .limit(1000)
     .returns<SongRow[]>();
 
   if (error) {
@@ -999,18 +1000,21 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: 
       .from('songs')
       .select(SONG_SELECT)
       .eq('library_id', libraryId)
+      .limit(1000)
       .abortSignal(requestSignal)
       .returns<SongRow[]>(),
     supabase
       .from('setlists')
       .select('id, library_id, name, display_mode, show_lyrics, archived, project_id, client_legacy_id, created_by, updated_by, created_at, updated_at')
       .eq('library_id', libraryId)
+      .limit(250)
       .abortSignal(requestSignal)
       .returns<SetlistRow[]>(),
     supabase
       .from('projects')
       .select('id, library_id, name, archived, created_by, updated_by, created_at, updated_at')
       .eq('library_id', libraryId)
+      .limit(250)
       .abortSignal(requestSignal)
       .returns<ProjectRow[]>()
   ]);
@@ -1031,6 +1035,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: 
       .from('setlist_songs')
       .select('id, setlist_id, song_id, order_index, override_json')
       .in('setlist_id', setlistIds)
+      .limit(1000)
       .abortSignal(requestSignal)
       .returns<SetlistSongRow[]>()
     : { data: [] as SetlistSongRow[], error: null };
@@ -1045,6 +1050,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: 
       .select('setlist_id, user_id')
       .in('setlist_id', setlistIds)
       .eq('user_id', userId)
+      .limit(1000)
       .abortSignal(requestSignal)
       .returns<CurrentUserSetlistAssignmentRow[]>()
     : { data: [] as CurrentUserSetlistAssignmentRow[], error: null };
@@ -1060,6 +1066,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: 
       .select('setlist_song_id, capo, updated_at')
       .in('setlist_song_id', setlistSongIds)
       .eq('user_id', userId)
+      .limit(1000)
       .abortSignal(requestSignal)
       .returns<UserSetlistCapoOverrideRow[]>()
     : { data: [] as UserSetlistCapoOverrideRow[], error: null };

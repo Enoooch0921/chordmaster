@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceRepository } from '../lib/repository';
 import { reconcileJoinedWorkspace, type JoinedWorkspace } from '../lib/joinedWorkspaceRefresh';
 
+const SUCCESS_REFRESH_MS = 5 * 60 * 1000;
+
 interface Options extends JoinedWorkspace {
   repository: WorkspaceRepository | null;
   scope: string;
@@ -47,7 +49,10 @@ export const useJoinedWorkspaceRefresh = (options: Options) => {
       } finally {
         inFlight = false;
         if (!cancelled && canRefresh()) {
-          timer = setTimeout(() => void refresh(), Math.min(30000, 5000 * 2 ** Math.min(failures, 3)));
+          const delay = failures > 0
+            ? Math.min(30000, 5000 * 2 ** Math.min(failures, 3))
+            : SUCCESS_REFRESH_MS;
+          timer = setTimeout(() => void refresh(), delay);
         }
       }
     };

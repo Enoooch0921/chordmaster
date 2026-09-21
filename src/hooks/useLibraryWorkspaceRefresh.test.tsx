@@ -19,7 +19,7 @@ const updated = (): LibraryContent => ({ ...initial,
   ] }], lastSavedAt: 2
 });
 const flush = () => act(async () => { await Promise.resolve(); });
-const tick = (ms = 5000) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+const tick = (ms = 5 * 60 * 1000) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -150,9 +150,9 @@ describe('owned library cross-device updates', () => {
     await flush();
     expect(result.current).toBe(true);
     expect(onUpdate).not.toHaveBeenCalled();
-    await tick();
+    await tick(9999);
     expect(load).toHaveBeenCalledOnce();
-    await tick();
+    await tick(1);
     expect(result.current).toBe(false);
     expect(onUpdate).toHaveBeenCalledOnce();
   });
