@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { createClient } from 'npm:@supabase/supabase-js@2.49.8';
+import { consumeRequestLimit } from '../_shared/rateLimit.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -7,13 +8,15 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Expose-Headers': 'Retry-After',
+  'Cache-Control': 'no-store',
   'Content-Type': 'application/json'
 };
 
-const jsonResponse = (body: unknown, status = 200) => (
+const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}) => (
   new Response(JSON.stringify(body), {
     status,
-    headers: corsHeaders
+    headers: { ...corsHeaders, ...headers }
   })
 );
 
@@ -33,6 +36,10 @@ Deno.serve(async (request) => {
         persistSession: false
       }
     });
+
+    if (!await consumeRequestLimit(supabase, request, 'resolve-share-ip', 120)) {
+      return jsonResponse({ error: 'Too many requests.' }, 429, { 'Retry-After': '60' });
+    }
 
     const { data: shareLink, error: shareError } = await supabase
       .from('share_links')
@@ -88,7 +95,8 @@ Deno.serve(async (request) => {
         .from('song_share_bundle_items')
         .select('song_id, order_index')
         .eq('bundle_id', bundle.id)
-        .order('order_index', { ascending: true });
+        .order('order_index', { ascending: true })
+        .limit(100);
       if (bundleItemsError) {
         return jsonResponse({ error: bundleItemsError.message }, 500);
       }
@@ -142,7 +150,8 @@ Deno.serve(async (request) => {
         .from('setlists')
         .select('id, name, display_mode, show_lyrics, created_at')
         .eq('project_id', shareLink.resource_id)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .limit(250);
 
       if (projectSetlistsError) {
         return jsonResponse({ error: projectSetlistsError.message }, 500);
@@ -155,6 +164,7 @@ Deno.serve(async (request) => {
           .select('id, setlist_id, song_id, order_index, override_json')
           .in('setlist_id', setlistIds)
           .order('order_index', { ascending: true })
+          .limit(1000)
         : { data: [], error: null };
 
       if (projectSetlistSongsError) {
@@ -226,7 +236,8 @@ Deno.serve(async (request) => {
       .from('setlist_songs')
       .select('id, song_id, order_index, override_json')
       .eq('setlist_id', setlist.id)
-      .order('order_index', { ascending: true });
+      .order('order_index', { ascending: true })
+      .limit(1000);
 
     if (setlistSongsError) {
       return jsonResponse({ error: setlistSongsError.message }, 500);
