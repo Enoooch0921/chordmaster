@@ -80,7 +80,7 @@ jobs:
             docker run --rm --network host -v "$script:/tmp/supabase-dump.sh:ro" "$IMAGE" bash /tmp/supabase-dump.sh > "$output"
             shred -u "$script"
           }
-          run_dump export/roles.sql --role-only
+          printf '%s\n' '-- No custom application roles are declared by this project.' 'RESET ALL;' > export/roles.sql
           run_dump export/schema.sql
           run_dump export/data.sql --use-copy --data-only
           cp -R supabase/functions/. export/edge-functions/
@@ -100,6 +100,7 @@ jobs:
           inventory={
             'server': query("select current_setting('server_version') as version"),
             'extensions': query("select extname, extversion from pg_extension order by extname"),
+            'non_system_roles': query("select rolname, rolcanlogin, rolinherit, rolcreaterole, rolcreatedb, rolbypassrls from pg_roles where rolname !~ '^(pg_|supabase_|authenticator$|authenticated$|anon$|service_role$|postgres$|dashboard_user$|pgbouncer$)' order by rolname"),
             'tables': query("select schemaname, relname as table_name, n_live_tup::bigint as estimated_rows from pg_stat_user_tables order by schemaname, relname"),
             'exact_counts': query("select n.nspname as schema_name,c.relname as table_name,(xpath('/row/c/text()',query_to_xml(format('select count(*) as c from %I.%I',n.nspname,c.relname),false,true,'')))[1]::text::bigint as row_count from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relkind in ('r','p') and n.nspname in ('public','auth','storage') order by 1,2"),
             'storage_objects': query("select bucket_id,name,metadata from storage.objects order by bucket_id,name"),
