@@ -54,6 +54,16 @@ const renderEditor = (song: Song, jianpuPitchContext?: JianpuPitchContext) => {
 };
 
 describe('SongEditor shared notation commands', () => {
+  it('marks a short bar as a partial measure without altering its written length', () => {
+    const onChange = renderEditor(makeSong({ timeSignature: '3/4' }));
+    const toggle = screen.getAllByRole('checkbox', { name: '不完全小節（此格之後沿用原拍號）' })[0];
+    expect(toggle).not.toBeDisabled();
+    fireEvent.click(toggle);
+    const changed = onChange.mock.calls.at(-1)?.[0] as Song;
+    expect(changed.timeSignature).toBe('4/4');
+    expect(changed.sections[0].bars[0]).toMatchObject({ timeSignature: '3/4', partialMeasure: true });
+  });
+
   it('edits chords without revealing or changing rhythm and jianpu in chords-only mode', () => {
     const song = makeSong({ riff: '1 | 2 | 3 | 4', rhythm: 'q q q q', annotation: 'Keep this' });
     const onChange = renderEditor(song);

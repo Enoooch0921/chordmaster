@@ -2,20 +2,21 @@ import { transposeChordSubdivisions, getChordEvents, chordEventLabel } from '../
 import type { Bar, Key, Song } from '../types';
 import { getTransposeOffset, transposeChord } from '../utils/musicUtils';
 import {
-  findSongBar, getBarsByIdentities, getBarStoredKey, getEffectiveTimeSignatureForBar,
+  findSongBar, getBarsByIdentities, getBarStoredKey, getEffectiveTimeSignatureForBar, getStructuralTimeSignatureForBar,
   isBarCompletelyEmpty, pasteBarsAtBar, type SongBarIdentity
 } from './songEditing';
 
 export type PreviewClipboardKind = 'bars' | 'chords' | 'rhythm' | 'jianpu' | 'label' | 'annotation' | 'marker';
 export interface PreviewClipboard {
   kind: PreviewClipboardKind;
-  items: Array<{ bar: Bar; timeSignature: string; key: Key; absoluteJianpu: boolean }>;
+  items: Array<{ bar: Bar; timeSignature: string; structuralTimeSignature?: string; key: Key; absoluteJianpu: boolean }>;
 }
 
 export function copyPreviewContent(song: Song, targets: SongBarIdentity[], kind: PreviewClipboardKind): PreviewClipboard | null {
   const items = getBarsByIdentities(song, targets).map(({ bar, target }) => ({
     bar: structuredClone(bar),
     timeSignature: getEffectiveTimeSignatureForBar(song, bar),
+    structuralTimeSignature: getStructuralTimeSignatureForBar(song, bar),
     key: getBarStoredKey(song, target),
     absoluteJianpu: Boolean(song.jianpuInputAbsolute)
   }));
@@ -71,17 +72,22 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
     if (clipboard.items.some((item) => item.bar.riff?.trim() && item.absoluteJianpu !== Boolean(song.jianpuInputAbsolute))) return failure('jianpu-mode');
     const destination = located[0];
     const mode = isBarCompletelyEmpty(destination.bar) ? 'replace-empty' : 'after';
-    let meter = getEffectiveTimeSignatureForBar(song, destination.bar);
+    let meter = getStructuralTimeSignatureForBar(song, destination.bar);
     let key = getBarStoredKey(song, destination.target);
     const bars = clipboard.items.map((item) => {
       const bar = structuredClone(item.bar);
-      if (item.timeSignature !== meter) bar.timeSignature = item.timeSignature;
+      if (bar.partialMeasure) {
+        if ((item.structuralTimeSignature ?? item.timeSignature) !== meter) return null;
+      } else if (item.timeSignature !== meter) {
+        bar.timeSignature = item.timeSignature;
+      }
       if (item.key !== key) bar.keyChangeTo = item.key;
-      meter = item.timeSignature;
+      if (!bar.partialMeasure) meter = item.timeSignature;
       key = item.key;
       return bar;
     });
-    const result = pasteBarsAtBar(song, destination.target, bars, mode);
+    if (bars.some((bar) => bar === null)) return failure('time-signature');
+    const result = pasteBarsAtBar(song, destination.target, bars as Bar[], mode);
     // Preserve inherited meter/key at the copy boundary, including when a
     // copied modulation would otherwise alter the untouched following bars.
     const allTargets = song.sections.flatMap((section) => section.bars.flatMap((bar) => (
@@ -91,9 +97,9 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
     const nextOriginal = nextTarget && findSongBar(song, nextTarget);
     const nextPasted = nextTarget && findSongBar(result.song, nextTarget);
     if (nextOriginal && nextPasted) {
-      const nextMeter = getEffectiveTimeSignatureForBar(song, nextOriginal.bar);
+      const nextMeter = getStructuralTimeSignatureForBar(song, nextOriginal.bar);
       const nextKey = getBarStoredKey(song, nextTarget);
-      const restoreMeter = getEffectiveTimeSignatureForBar(result.song, nextPasted.bar) !== nextMeter;
+      const restoreMeter = getStructuralTimeSignatureForBar(result.song, nextPasted.bar) !== nextMeter;
       const restoreKey = getBarStoredKey(result.song, nextTarget) !== nextKey;
       if (restoreMeter || restoreKey) {
         result.song = {

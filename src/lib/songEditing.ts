@@ -250,9 +250,12 @@ export const getSongTimeSignatureStates = (song: Song): SongTimeSignatureStates 
     section.bars.forEach((bar) => {
       baseTimeSignatures.push(activeTimeSignature);
       if (bar.timeSignature?.trim()) {
-        activeTimeSignature = getEffectiveTimeSignature(bar.timeSignature, activeTimeSignature);
+        const barTimeSignature = getEffectiveTimeSignature(bar.timeSignature, activeTimeSignature);
+        if (!bar.partialMeasure) activeTimeSignature = barTimeSignature;
+        activeTimeSignatures.push(barTimeSignature);
+      } else {
+        activeTimeSignatures.push(activeTimeSignature);
       }
-      activeTimeSignatures.push(activeTimeSignature);
     });
     barBaseTimeSignatures.push(baseTimeSignatures);
     barActiveTimeSignatures.push(activeTimeSignatures);
@@ -278,6 +281,21 @@ export const getEffectiveTimeSignatureForBar = (song: Song, targetBar: Pick<Bar,
     }
   }
   return getEffectiveTimeSignature(targetBar.timeSignature, song.timeSignature);
+};
+
+export const getStructuralTimeSignatureForBar = (song: Song, targetBar: Pick<Bar, 'id' | 'timeSignature' | 'partialMeasure'>): string => {
+  const states = getSongTimeSignatureStates(song);
+  for (let sectionIndex = 0; sectionIndex < song.sections.length; sectionIndex += 1) {
+    const barIndex = song.sections[sectionIndex].bars.findIndex((bar) => (
+      bar === targetBar || (Boolean(targetBar.id) && bar.id === targetBar.id)
+    ));
+    if (barIndex >= 0) {
+      return targetBar.partialMeasure
+        ? states.barBaseTimeSignatures[sectionIndex]?.[barIndex] ?? getEffectiveTimeSignature(song.timeSignature)
+        : states.barActiveTimeSignatures[sectionIndex]?.[barIndex] ?? getEffectiveTimeSignature(targetBar.timeSignature, song.timeSignature);
+    }
+  }
+  return getEffectiveTimeSignature(song.timeSignature);
 };
 
 export const getBeatCount = (song: Song, bar: Bar) => {

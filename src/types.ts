@@ -73,6 +73,7 @@ export interface Bar {
   chords: string[]; // e.g., ["E", "C#m"]
   keyChangeTo?: Key; // Per-bar key change starting at this bar
   timeSignature?: string; // Per-bar override, e.g., "2/4"
+  partialMeasure?: boolean; // This bar has a shorter duration without changing the continuing meter
   riff?: string;    // e.g., "3 - 4 - 5 - 7 1"
   rhythm?: string;  // e.g., "q e e qr"
   rhythmVoices?: RhythmVoice[]; // Additional simultaneous voices; omitted beats stay unspecified

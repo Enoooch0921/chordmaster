@@ -2363,7 +2363,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               const sectionStartEffectiveTimeSignature = getBarEffectiveTimeSignatureByIndex(row.sIdx, row.startBIdx, sectionStartBar);
               const sectionStartHasRhythm = Boolean(sectionStartBar?.rhythm?.trim());
               const sectionStartHasRiff = hasVisiblePreviewRiff(getPreviewRiffNotation(sectionStartBar?.riff, sectionStartEffectiveTimeSignature));
-              const sectionStartDefaultLabelLane: BarLabelLane = sectionStartHasRhythm && sectionStartHasRiff && !sectionStartBar?.timeSignature ? 'rhythm' : 'riff';
+              const sectionStartDefaultLabelLane: BarLabelLane = sectionStartHasRhythm && sectionStartHasRiff && (!sectionStartBar?.timeSignature || sectionStartBar.partialMeasure) ? 'rhythm' : 'riff';
               const sectionStartLabelLane: BarLabelLane = sectionStartBar?.labelLane === 'rhythm'
                 ? 'rhythm'
                 : sectionStartBar?.labelLane === 'riff'
@@ -2376,7 +2376,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 && (sectionStartHasRhythm || sectionStartHasRiff)
                 && sectionStartBarLabel
               );
-              const sectionStartTimeSignature = sectionStartBar?.timeSignature
+              const sectionStartTimeSignature = sectionStartBar?.timeSignature && !sectionStartBar.partialMeasure
                 ? splitDisplayTimeSignature(sectionStartEffectiveTimeSignature)
                 : null;
               const showSectionStartGutterTimeSignature = Boolean(
@@ -2818,7 +2818,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const extraRhythmHeight = extraVoices.length * 22;
                     const hasRhythm = Boolean(bar?.rhythm || extraVoices.length);
                     const hasRiff = hasVisiblePreviewRiff(previewRiffNotation);
-                    const hasInlineTimeSignature = Boolean(bar?.timeSignature);
+                    const hasInlineTimeSignature = Boolean(bar?.timeSignature && !bar.partialMeasure);
                     const isSectionLeadBar = Boolean(row.startBIdx === 0 && bIdx === 0 && section?.title.trim() && !hasPickupDisplay);
                     const showSectionGutterBarLabel = hasBarLabel && isSectionLeadBar;
                     const showSectionGutterTimeSignature = hasInlineTimeSignature && isSectionLeadBar;
@@ -3307,7 +3307,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                 {language === 'zh' ? '齊奏' : 'Unison'}
                               </div>
                             )}
-                            {bar.timeSignature && !showSectionGutterTimeSignature && (
+                            {bar.timeSignature && !bar.partialMeasure && !showSectionGutterTimeSignature && (
                               <div
                                 data-preview-inline-time-signature
                                 data-preview-suppress-pan={canDragLabelLane && showInlineTimeSignatureBarLabel ? true : undefined}
