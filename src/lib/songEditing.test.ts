@@ -700,6 +700,25 @@ describe('section commands', () => {
     expect(getBeatCount(song, song.sections[1].bars[0])).toBe(3);
   });
 
+  it('uses a partial measure length for one bar without changing the following meter', () => {
+    const song: Song = {
+      title: 'Pickup complement', originalKey: 'C', currentKey: 'C', timeSignature: '4/4',
+      sections: [
+        { id: 'verse', title: 'Verse', bars: [
+          { id: 'full', chords: ['C'] },
+          { id: 'short', chords: ['G'], timeSignature: '3/4', partialMeasure: true },
+          { id: 'next', chords: ['F'] }
+        ] },
+        { id: 'chorus', title: 'Chorus', bars: [{ id: 'later', chords: ['Dm'] }] }
+      ]
+    };
+    const states = getSongTimeSignatureStates(song);
+    expect(states.barBaseTimeSignatures).toEqual([['4/4', '4/4', '4/4'], ['4/4']]);
+    expect(states.barActiveTimeSignatures).toEqual([['4/4', '3/4', '4/4'], ['4/4']]);
+    expect(getBeatCount(song, song.sections[0].bars[1])).toBe(3);
+    expect(getBeatCount(song, song.sections[0].bars[2])).toBe(4);
+  });
+
   it('merges only a previously named non-first section when its title is cleared', () => {
     const base: Song = {
       ...sectionSong,

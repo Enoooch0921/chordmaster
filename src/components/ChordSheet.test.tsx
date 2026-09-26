@@ -2093,6 +2093,26 @@ describe('ChordSheet preview notation interactions', () => {
     expect(within(secondBarJianpu!).queryByRole('button', { name: 'Select jianpu beat 6' })).not.toBeInTheDocument();
   });
 
+  it('renders a short measure with three beats without displaying a meter change', () => {
+    const shortMeasureSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [
+        { id: 'bar-1', chords: ['C'], riff: '1 | 2 | 3 | 4' },
+        { id: 'bar-2', chords: ['G'], timeSignature: '3/4', partialMeasure: true, riff: '1 | 2 | 3' },
+        { id: 'bar-3', chords: ['F'], riff: '1 | 2 | 3 | 4' }
+      ] }]
+    };
+    const { container } = render(<ChordSheet song={shortMeasureSong} language="zh" currentKey="C" previewIdentity="song-1" onElementClick={vi.fn()} />);
+    const shortBar = container.querySelector<HTMLElement>('[data-preview-edit-anchor="song-1|section-1|bar-2|jianpu|all"]');
+    const nextBar = container.querySelector<HTMLElement>('[data-preview-edit-anchor="song-1|section-1|bar-3|jianpu|all"]');
+    expect(shortBar).not.toBeNull();
+    expect(nextBar).not.toBeNull();
+    expect(within(shortBar!).getByRole('button', { name: 'Select jianpu beat 3' })).toBeInTheDocument();
+    expect(within(shortBar!).queryByRole('button', { name: 'Select jianpu beat 4' })).not.toBeInTheDocument();
+    expect(within(nextBar!).getByRole('button', { name: 'Select jianpu beat 4' })).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-inline-time-signature]')).toBeNull();
+  });
+
   it('aligns the 6/8 preview cursor to grouped notation units', () => {
     const sixEightSong: Song = {
       ...song,

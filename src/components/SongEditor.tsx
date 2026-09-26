@@ -6102,7 +6102,7 @@ const SongEditor: React.FC<Props> = ({
                     const updateBarTimeSignature = (numerator: string, denominator: string) => {
                       const newBars = [...section.bars];
                       const value = buildTimeSignatureInput(numerator, denominator);
-                      newBars[bIdx] = { ...bar, timeSignature: value || undefined };
+                      newBars[bIdx] = { ...bar, timeSignature: value || undefined, partialMeasure: value ? bar.partialMeasure : undefined };
                       updateSection(sIdx, { ...section, bars: newBars });
                     };
 
@@ -6135,6 +6135,11 @@ const SongEditor: React.FC<Props> = ({
                   <div className="mt-1 text-[10px] text-gray-400">
                     {copy.editor.barTimeHelp}
                   </div>
+                  <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                    <input type="checkbox" checked={Boolean(bar.partialMeasure)} disabled={!bar.timeSignature}
+                      onChange={(event) => updateBar(sIdx, bIdx, { partialMeasure: event.target.checked || undefined })} />
+                    {copy.editor.partialMeasure}
+                  </label>
                 </div>
               </div>
             )}
@@ -7820,7 +7825,7 @@ const SongEditor: React.FC<Props> = ({
                           const updateBarTimeSignature = (numerator: string, denominator: string) => {
                             const newBars = [...section.bars];
                             const value = buildTimeSignatureInput(numerator, denominator);
-                            newBars[bIdx] = { ...bar, timeSignature: value || undefined };
+                            newBars[bIdx] = { ...bar, timeSignature: value || undefined, partialMeasure: value ? bar.partialMeasure : undefined };
                             updateSection(sIdx, { ...section, bars: newBars });
                           };
 
@@ -7853,6 +7858,11 @@ const SongEditor: React.FC<Props> = ({
                         <div className="mt-1 text-[10px] text-gray-400">
                           {copy.editor.barTimeHelp}
                         </div>
+                        <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                          <input type="checkbox" checked={Boolean(bar.partialMeasure)} disabled={!bar.timeSignature}
+                            onChange={(event) => updateBar(sIdx, bIdx, { partialMeasure: event.target.checked || undefined })} />
+                          {copy.editor.partialMeasure}
+                        </label>
                       </div>
                     </div>
                     )}
