@@ -62,9 +62,17 @@ it('keeps a second-half eighth rest visible and unchanged by transposition',()=>
 });
 it('adds an eighth rest at an available second-half position',()=>{
  const onChange=vi.fn();
- render(<ChordSubdivisionsEditor bar={{chords:['F','','','']}} beats={4} language="zh" onChange={onChange}/>);
+ render(<ChordSubdivisionsEditor bar={{chords:['F','','','']}} beats={4} timeSignature="4/4" language="zh" onChange={onChange}/>);
  fireEvent.click(screen.getByRole('button',{name:'新增八分休止'}));
  expect(onChange).toHaveBeenCalledWith([{beat:0,offset:.5,chord:'0_'}]);
+});
+it('does not offer an eighth rest at half of an eighth-note beat',()=>{
+ const onChange=vi.fn();
+ render(<ChordSubdivisionsEditor bar={{chords:['F','','','','',''],chordSubdivisions:[{beat:0,offset:.5,chord:'C'}]}} beats={6} timeSignature="6/8" language="zh" onChange={onChange}/>);
+ expect(screen.getByRole('button',{name:'新增八分休止'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'新增八分休止'}));
+ fireEvent.change(screen.getByRole('textbox',{name:'追加和弦 1'}),{target:{value:'0_'}});
+ expect(onChange).not.toHaveBeenCalled();
 });
 it('remaps compact primary timing before checking conflicts with additional events',()=>{
  const s=song();bar(s).chords=['C','G'];bar(s).chordMarks={1:{beatOffset:.5}};bar(s).chordSubdivisions=[{beat:1,offset:.5,chord:'Am'}];

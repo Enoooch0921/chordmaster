@@ -1556,7 +1556,7 @@ const SongEditor: React.FC<Props> = ({
         </div>
 
         <div className="space-y-3">
-          <ChordSubdivisionsEditor bar={bar} beats={Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0]) || 4} language={language} onChange={chordSubdivisions => updateBar(sIdx,bIdx,{chordSubdivisions})}/>
+          <ChordSubdivisionsEditor bar={bar} beats={Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0]) || 4} timeSignature={getEffectiveTimeSignatureForBar(song,bar)} language={language} onChange={chordSubdivisions => updateBar(sIdx,bIdx,{chordSubdivisions})}/>
           <div>
             <div className="mb-1 text-[10px] font-bold uppercase text-gray-400">{copy.editor.chordColors}</div>
             {visibleChordEntries.length > 0 ? (

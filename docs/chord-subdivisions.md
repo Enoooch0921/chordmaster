@@ -2,7 +2,7 @@
 
 `Bar.chordSubdivisions` adds an independent harmony event without replacing the ordinary `chords` slot. Each entry has a zero-based notated `beat`, an `offset` of `0.25`, `0.5` or `0.75`, and a `chord` in the bar's written key (letter or Nashville notation). These offsets divide the meter's notated beat; in 6/8 one beat is an eighth note.
 
-An entry with `"chord": "0_"` at `offset: 0.5` marks an eighth rest in the second half of a beat. It is the only rest accepted as an additional event. For example, `{"beat":0,"offset":0.5,"chord":"0_"}` displays F on beat 1 and an eighth rest on 1& while leaving the ordinary beat-2 chord in place.
+In a meter with a quarter note per notated beat, an entry with `"chord": "0_"` at `offset: 0.5` marks an eighth rest in the second half of a beat. It is the only rest accepted as an additional event. For example, `{"beat":0,"offset":0.5,"chord":"0_"}` displays F on beat 1 and an eighth rest on 1& while leaving the ordinary beat-2 chord in place. The editor does not offer this rest in 6/8, where half of an eighth-note beat is a sixteenth-note position.
 
 For Am at 1, Am/B at 1&, Am/C at 2 and G/D at 2& in 4/4:
 
