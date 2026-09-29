@@ -2,6 +2,8 @@
 
 `Bar.chordSubdivisions` adds an independent harmony event without replacing the ordinary `chords` slot. Each entry has a zero-based notated `beat`, an `offset` of `0.25`, `0.5` or `0.75`, and a `chord` in the bar's written key (letter or Nashville notation). These offsets divide the meter's notated beat; in 6/8 one beat is an eighth note.
 
+An entry with `"chord": "0_"` at `offset: 0.5` marks an eighth rest in the second half of a beat. It is the only rest accepted as an additional event. For example, `{"beat":0,"offset":0.5,"chord":"0_"}` displays F on beat 1 and an eighth rest on 1& while leaving the ordinary beat-2 chord in place.
+
 For Am at 1, Am/B at 1&, Am/C at 2 and G/D at 2& in 4/4:
 
 ```json
@@ -16,7 +18,7 @@ For Am at 1, Am/B at 1&, Am/C at 2 and G/D at 2& in 4/4:
 
 Chords with additional events use a sequence of equal-width engraving cells. Every cell prints its actual beat position (1, 1&, 2, 2&); horizontal spacing is for legibility, not proportional duration. The rhythm and riff lanes retain the original meter. Preview, shares and PDF use the same renderer, transposition and Nashville conversion.
 
-Use **&+ / 拍內追加和弦** in the preview editor, or the additional chord controls in the full editor's marks panel. Existing ordinary chords remain editable with the ordinary keyboard. Additional chords can be edited, moved or removed independently. The selector excludes occupied positions and rests. Structured chord/bar copies, undo/redo, saved JSON and key changes retain additional events. Plain-text clipboard output includes beat labels as readable text; structured paste is needed to preserve editing metadata.
+Use **&+ / 拍內追加和弦** in the preview editor, or the additional chord controls in the full editor's marks panel. The **Add eighth rest / 新增八分休止** button chooses the first free `&` position. Existing ordinary chords remain editable with the ordinary keyboard. Additional chords and the `0_` eighth rest can be edited, moved or removed independently. The selector excludes occupied positions and positions covered by ordinary rest tokens. Structured chord/bar copies, undo/redo, saved JSON and key changes retain additional events. Plain-text clipboard output includes beat labels as readable text; structured paste is needed to preserve editing metadata.
 
 A full-bar repeat/rest replaces all chord events; a two-beat rest removes additional events in those beats. Inserting a beat moves additional events with that beat; events shifted beyond the bar are removed consistently with ordinary slots. A meter change does not silently remove additional events: positions beyond the new meter remain visible and the editor flags them for correction.
 
