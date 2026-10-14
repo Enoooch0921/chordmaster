@@ -36,12 +36,12 @@ import {
 } from '../types';
 import {
   cloneValue,
-  loadLocalWorkspaceSnapshot,
+  loadPersistentWorkspaceSnapshot,
   normalizeMatchingTitle,
   normalizeSongBars,
   normalizeStoredProject,
   normalizeStoredSetlist,
-  persistLocalWorkspaceSnapshot,
+  persistPersistentWorkspaceSnapshot,
   reindexSetlistSongs
 } from './workspace';
 import {
@@ -802,19 +802,19 @@ const buildPersonalCopyTitle = (personalSongs: StoredSong[], sourceTitle: string
 
 export const createLocalRepository = (): WorkspaceRepository => ({
   async loadWorkspace() {
-    return loadLocalWorkspaceSnapshot();
+    return loadPersistentWorkspaceSnapshot();
   },
   async loadLibraryWorkspace() {
-    return loadLocalWorkspaceSnapshot();
+    return loadPersistentWorkspaceSnapshot();
   },
   async loadLibraryContent() {
-    return loadLocalWorkspaceSnapshot();
+    return loadPersistentWorkspaceSnapshot();
   },
   async loadLibrarySongs() {
-    return loadLocalWorkspaceSnapshot().songs;
+    return (await loadPersistentWorkspaceSnapshot()).songs;
   },
   async loadPersonalWorkspace() {
-    return loadLocalWorkspaceSnapshot();
+    return loadPersistentWorkspaceSnapshot();
   },
   async loadJoinedWorkspace() {
     return { joinedSetlists: [], joinedProjects: [] };
@@ -1534,7 +1534,7 @@ export const createCloudRepository = (params: {
         getJoinedProjects()
       ]);
       if (libraryId === cachedLibraryId || !activeLibraryId) {
-        persistLocalWorkspaceSnapshot(workspace.songs, workspace.setlists, workspace.projects);
+        await persistPersistentWorkspaceSnapshot(workspace.songs, workspace.setlists, workspace.projects);
       }
       return { ...workspace, joinedSetlists, joinedProjects };
     },
@@ -2066,7 +2066,7 @@ export const createCloudRepository = (params: {
         getJoinedSetlists(params.userId),
         getJoinedProjects()
       ]);
-      persistLocalWorkspaceSnapshot(workspace.songs, workspace.setlists, workspace.projects);
+      await persistPersistentWorkspaceSnapshot(workspace.songs, workspace.setlists, workspace.projects);
       return { ...workspace, joinedSetlists, joinedProjects };
     },
 

@@ -2,6 +2,7 @@ import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
 import { CURRENT_CHORD_TIMING_VERSION, migrateChordTimingArrows } from './lib/chordTimingMigration';
 import LegacyDraftRecovery from './components/LegacyDraftRecovery';
+import MobileSidebarNavigation from './components/MobileSidebarNavigation';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
@@ -118,17 +119,18 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus, Keyboard } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus, Keyboard } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
 import {
   consumeLocalWorkspaceRecoveryNotice,
   hasCompletedMigration,
-  loadLocalWorkspaceSnapshot,
+  loadPersistentWorkspaceSnapshot,
   loadPendingSync,
   markMigrationCompleted,
   persistLocalWorkspaceSnapshot,
+  persistPersistentWorkspaceSnapshot,
   savePendingSync
 } from './lib/workspace';
 import { syncWorkspaceDiff } from './lib/sync';
@@ -1986,6 +1988,23 @@ const loadGoogleIdentityScript = async () => {
 };
 
 export default function App() {
+  const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void loadPersistentWorkspaceSnapshot().then(
+      (snapshot) => { if (!cancelled) setWorkspace(snapshot); },
+      (cause) => { if (!cancelled) setError(cause); }
+    );
+    return () => { cancelled = true; };
+  }, []);
+  if (error) throw error;
+  return workspace
+    ? <WorkspaceApp initialWorkspace={workspace} />
+    : <div role="status" className="p-8 text-center">正在載入歌譜…</div>;
+}
+
+function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspace: WorkspaceSnapshot }) {
   const {
     user: rawAuthenticatedUser,
     session,
@@ -2037,7 +2056,7 @@ export default function App() {
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
   const toast = useToast();
   const initialWorkspaceRef = useRef<WorkspaceSnapshot | null>(null);
-  const initialWorkspace = initialWorkspaceRef.current ?? loadLocalWorkspaceSnapshot();
+  const initialWorkspace = initialWorkspaceRef.current ?? restoredWorkspace;
   initialWorkspaceRef.current = initialWorkspace;
   const initialLibraryRef = useRef<ReturnType<typeof loadSongLibrary> | null>(null);
   const initialLibrary = initialLibraryRef.current ?? loadSongLibrary(initialWorkspace);
@@ -2134,6 +2153,7 @@ export default function App() {
   const editorPaneLeftRef = useRef(0);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [setlistSearchQuery, setSetlistSearchQuery] = useState('');
+  const [isMobileSetlistToolsOpen, setIsMobileSetlistToolsOpen] = useState(false);
   const [setlistSongSearchQuery, setSetlistSongSearchQuery] = useState('');
   // Shared selection bag for the add-songs page. Repeated ids intentionally
   // represent duplicate additions of the same library song.
@@ -2760,14 +2780,6 @@ export default function App() {
       : isSetlistMode
         ? selectedSetlist?.name || copy.untitledSetlist
         : hasSongs ? song.title || copy.untitledSong : (activeCloudLibrary?.name ?? copy.songLibrary);
-  const mobileDrawerContextLabel = isSetlistMode ? copy.serviceSetlist : copy.songLibrary;
-  const mobileDrawerContextValue = isSetlistMode
-    ? setlistPanelView === 'detail' || setlistPanelView === 'addSongs'
-      ? (selectedSetlist?.name || copy.untitledSetlist)
-      : setlistPanelView === 'manageProjects'
-        ? (language === 'zh' ? '專案管理' : 'Manage projects')
-        : (language === 'zh' ? '歌單總覽' : 'Setlists')
-    : activeAppViewLabel;
   const workspaceModeBadge = isSetlistMode ? copy.setlistModeBadge : copy.songModeBadge;
   const syncStatusLabel = syncStatus === 'saved'
     ? copy.cloudSyncSaved
@@ -3675,7 +3687,7 @@ export default function App() {
 
     if (!isTeamWorkspace) {
       try {
-        localSavedAt = persistLocalWorkspaceSnapshot(nextSongs, nextSetlists, nextProjects);
+        localSavedAt = await persistPersistentWorkspaceSnapshot(nextSongs, nextSetlists, nextProjects);
       } catch (error) {
         localStorageError = error;
       }
@@ -7090,7 +7102,7 @@ export default function App() {
       const nextSongs = songs.map((item) => item.id === syncedSong.id ? syncedSong : item);
       let savedAt = Date.now();
       try {
-        savedAt = persistLocalWorkspaceSnapshot(nextSongs, setlists, projects);
+        savedAt = await persistPersistentWorkspaceSnapshot(nextSongs, setlists, projects);
       } catch {
         toast.info(language === 'zh' ? '雲端已同步，但本機備份寫入失敗。' : 'Synced from the cloud, but the local backup could not be written.', {
           id: 'local-workspace-cache-warning'
@@ -8047,7 +8059,7 @@ export default function App() {
           ]));
           if (targetLibrary?.kind === 'personal') {
             try {
-              persistLocalWorkspaceSnapshot(nextSongs, nextSetlists, nextProjects);
+              await persistPersistentWorkspaceSnapshot(nextSongs, nextSetlists, nextProjects);
             } catch {
               toast.info(language === 'zh' ? '雲端資料已載入，但本機備份寫入失敗。' : 'Cloud data loaded, but the local backup could not be written.', {
                 id: 'local-workspace-cache-warning'
@@ -8162,7 +8174,7 @@ export default function App() {
           toast.info(language === 'zh' ? '雲端已同步，但無法清除本機待同步記錄。' : 'Synced to the cloud, but the local pending-sync record could not be cleared.');
         }
         try {
-          persistLocalWorkspaceSnapshot(mergedWorkspace.songs, mergedWorkspace.setlists, mergedWorkspace.projects);
+          await persistPersistentWorkspaceSnapshot(mergedWorkspace.songs, mergedWorkspace.setlists, mergedWorkspace.projects);
         } catch {
           toast.info(language === 'zh' ? '離線變更已同步到雲端，但本機備份寫入失敗。' : 'Offline changes synced to the cloud, but the local backup could not be written.', {
             id: 'local-workspace-cache-warning'
@@ -8270,10 +8282,11 @@ export default function App() {
         persistLocalWorkspaceSnapshot(snapshot.songs, snapshot.setlists, snapshot.projects);
         safelyStored = true;
       } catch {
-        if (!safelyStored) {
-          setSyncStatus('failed');
-        }
+        // Large workspaces may exceed Web Storage; also start the durable write.
       }
+      void persistPersistentWorkspaceSnapshot(snapshot.songs, snapshot.setlists, snapshot.projects).catch(() => {
+        if (!safelyStored) setSyncStatus('failed');
+      });
     };
 
     const handleVisibilityChange = () => {
@@ -12010,14 +12023,14 @@ export default function App() {
   ];
 
   const desktopSetlistSavedFooter = (
-    <div className="border-t border-gray-200 px-5 py-4">
+    <div className={isPhoneViewport ? 'flex shrink-0 items-center justify-between gap-2 border-t border-gray-200 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]' : 'shrink-0 border-t border-gray-200 px-5 py-4'}>
       <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
         {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
       </div>
-      <div className="mt-1 text-xs text-gray-400">
+      {!isPhoneViewport && <div className="mt-1 text-xs text-gray-400">
         {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
-      </div>
-      <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+      </div>}
+      <div className={`${isPhoneViewport ? 'shrink-0 text-[10px]' : 'mt-2 text-[11px] tracking-[0.18em]'} font-semibold text-gray-400`}>
         v{APP_VERSION}
       </div>
     </div>
@@ -12256,9 +12269,125 @@ export default function App() {
     </>
   );
 
+  const setlistProjectPicker = (
+    <label className="min-w-0 flex-1">
+      <span className="sr-only">{language === 'zh' ? '專案篩選' : 'Project filter'}</span>
+      <select
+        value={serializeSetlistProjectFilter(setlistProjectFilter)}
+        onChange={(event) => {
+          const nextFilter = parseSetlistProjectFilter(event.target.value);
+          if (nextFilter) handleSetlistProjectFilterChange(nextFilter);
+        }}
+        className={`${isPhoneViewport ? 'h-11' : 'h-10'} w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300`}
+        aria-label={language === 'zh' ? '專案篩選' : 'Project filter'}
+      >
+        <option value="all">{language === 'zh' ? '全部歌單' : 'All setlists'}</option>
+        <option value="ungrouped">{copy.ungroupedProject}</option>
+        {activeProjects.length > 0 && (
+          <optgroup label={language === 'zh' ? '我的專案' : 'My projects'}>
+            {activeProjects.map((project) => (
+              <option key={project.id} value={`owned-project:${project.id}`}>{project.name}</option>
+            ))}
+          </optgroup>
+        )}
+        {joinedProjects.length > 0 && (
+          <optgroup label={language === 'zh' ? '共享專案' : 'Shared projects'}>
+            {joinedProjects.map((project) => (
+              <option key={project.id} value={`shared-project:${project.id}`}>{project.name}</option>
+            ))}
+          </optgroup>
+        )}
+        {joinedSetlists.length > 0 && (
+          <option value="shared-setlists">{copy.sharedWithMe}</option>
+        )}
+      </select>
+    </label>
+  );
+  const setlistSearchField = (
+    <label className={`${isPhoneViewport ? 'h-11' : ''} flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white`}>
+      <Search size={15} className="shrink-0 text-gray-400" />
+      <input
+        type="search"
+        value={setlistSearchQuery}
+        onChange={(event) => setSetlistSearchQuery(event.target.value)}
+        placeholder={copy.searchSetlists}
+        className={`${isPhoneViewport ? 'text-base' : 'text-sm'} min-w-0 flex-1 bg-transparent text-gray-700 outline-none placeholder:text-gray-400`}
+        aria-label={copy.searchSetlists}
+      />
+    </label>
+  );
+  const setlistSortPicker = (
+    <select
+      value={setlistSortMode}
+      onChange={(event) => setSetlistSortMode(event.target.value as SetlistSortMode)}
+      className={`${isPhoneViewport ? 'h-11' : 'h-8'} min-w-0 max-w-[9rem] shrink-0 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300`}
+      aria-label={copy.setlistSort}
+    >
+      {setlistSortOptions.map((option) => (
+        <option key={option.value} value={option.value}>{option.label}</option>
+      ))}
+    </select>
+  );
+
   const desktopSetlistListPanel = (
     <>
-      <div className="px-4 py-3 border-b border-gray-200">
+      {isPhoneViewport ? (
+        <div data-mobile-setlist-toolbar className="shrink-0 border-b border-gray-200 px-3 py-2 dark:border-[color:var(--color-border)]">
+          <div className="flex min-w-0 items-center gap-2">
+            {setlistSearchField}
+            {canCreateTeamSetlists && (
+              <button type="button" onClick={handleCreateSetlist} aria-label={copy.newSetlist} title={copy.newSetlist}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm hover:bg-indigo-500">
+                <Plus size={20} />
+              </button>
+            )}
+          </div>
+          <div className="mt-2 flex min-w-0 items-center gap-2">
+            {setlistProjectPicker}
+            <span className="shrink-0 text-xs font-semibold tabular-nums text-gray-500" aria-label={language === 'zh' ? '歌單數量' : 'Setlist count'}>
+              {normalizedSetlistSearchQuery
+                ? `${filteredSetlists.length + filteredJoinedSetlists.length}/${visibleSetlists.length + joinedSetlistsInScope.length}`
+                : visibleSetlists.length + joinedSetlistsInScope.length}
+            </span>
+            <button type="button" onClick={() => setIsMobileSetlistToolsOpen((current) => !current)}
+              aria-expanded={isMobileSetlistToolsOpen} aria-controls="mobile-setlist-tools"
+              aria-label={language === 'zh' ? '歌單篩選與管理' : 'Setlist filters and management'}
+              title={language === 'zh' ? '歌單篩選與管理' : 'Setlist filters and management'}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors ${isMobileSetlistToolsOpen || showArchivedSetlists
+                ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-500'}`}>
+              {isMobileSetlistToolsOpen ? <ChevronUp size={18} /> : <SlidersHorizontal size={18} />}
+            </button>
+          </div>
+          {isMobileSetlistToolsOpen && (
+            <div id="mobile-setlist-tools" className="mt-2 max-h-[28dvh] space-y-2 overflow-y-auto overscroll-contain border-t border-gray-200 pt-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-gray-500">{copy.setlistSort}</span>
+                {setlistSortPicker}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => { setIsMobileSetlistToolsOpen(false); setSetlistPanelView('manageProjects'); }}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700">
+                  <FolderTree size={15} />{language === 'zh' ? '管理專案' : 'Manage projects'}
+                </button>
+                {archivedSetlistCount > 0 && (
+                  <button type="button" onClick={() => setShowArchivedSetlists((current) => !current)} aria-pressed={showArchivedSetlists}
+                    className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold ${showArchivedSetlists ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
+                    <Archive size={14} />{showArchivedSetlists ? copy.hideArchivedSetlists : `${copy.showArchivedSetlists} (${archivedSetlistCount})`}
+                  </button>
+                )}
+                {selectedProjectShareTarget && canShareSelectedProject && (
+                  <button type="button" onClick={() => void handleCreateProjectShareLink(selectedProjectShareTarget.id)} disabled={creatingProjectShareLinkId === selectedProjectShareTarget.id}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 disabled:opacity-60">
+                    <Share2 size={15} />{language === 'zh' ? '分享專案' : 'Share project'}
+                  </button>
+                )}
+              </div>
+              {projectSharingPanel}
+            </div>
+          )}
+        </div>
+      ) : (
+      <div className="shrink-0 px-4 py-3 border-b border-gray-200">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex min-h-9 min-w-0 flex-1 items-center">
             <div className="flex min-w-0 items-center gap-2">
@@ -12287,38 +12416,7 @@ export default function App() {
         </div>
         {projectSharingPanel ? <div className="mt-3">{projectSharingPanel}</div> : null}
         <div className="mt-3 flex min-w-0 items-center gap-2">
-          <label className="min-w-0 flex-1">
-            <span className="sr-only">{language === 'zh' ? '專案篩選' : 'Project filter'}</span>
-            <select
-              value={serializeSetlistProjectFilter(setlistProjectFilter)}
-              onChange={(event) => {
-                const nextFilter = parseSetlistProjectFilter(event.target.value);
-                if (nextFilter) handleSetlistProjectFilterChange(nextFilter);
-              }}
-              className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300"
-              aria-label={language === 'zh' ? '專案篩選' : 'Project filter'}
-            >
-              <option value="all">{language === 'zh' ? '全部歌單' : 'All setlists'}</option>
-              <option value="ungrouped">{copy.ungroupedProject}</option>
-              {activeProjects.length > 0 && (
-                <optgroup label={language === 'zh' ? '我的專案' : 'My projects'}>
-                  {activeProjects.map((project) => (
-                    <option key={project.id} value={`owned-project:${project.id}`}>{project.name}</option>
-                  ))}
-                </optgroup>
-              )}
-              {joinedProjects.length > 0 && (
-                <optgroup label={language === 'zh' ? '共享專案' : 'Shared projects'}>
-                  {joinedProjects.map((project) => (
-                    <option key={project.id} value={`shared-project:${project.id}`}>{project.name}</option>
-                  ))}
-                </optgroup>
-              )}
-              {joinedSetlists.length > 0 && (
-                <option value="shared-setlists">{copy.sharedWithMe}</option>
-              )}
-            </select>
-          </label>
+          {setlistProjectPicker}
           <button
             type="button"
             onClick={() => setSetlistPanelView('manageProjects')}
@@ -12330,16 +12428,7 @@ export default function App() {
           </button>
         </div>
         <div className="mt-3 flex min-w-0 items-center gap-2">
-          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-            <Search size={15} className="shrink-0 text-gray-400" />
-            <input
-              type="text"
-              value={setlistSearchQuery}
-              onChange={(event) => setSetlistSearchQuery(event.target.value)}
-              placeholder={copy.searchSetlists}
-              className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-            />
-          </label>
+          {setlistSearchField}
         </div>
         {canCreateTeamSetlists && (
             <button
@@ -12358,16 +12447,7 @@ export default function App() {
               ? `${filteredSetlists.length + filteredJoinedSetlists.length}/${visibleSetlists.length + joinedSetlistsInScope.length}`
               : visibleSetlists.length + joinedSetlistsInScope.length}</span>
           </div>
-          <select
-            value={setlistSortMode}
-            onChange={(event) => setSetlistSortMode(event.target.value as SetlistSortMode)}
-            className="h-8 min-w-0 max-w-[9rem] shrink-0 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300"
-            aria-label={copy.setlistSort}
-          >
-            {setlistSortOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
+          {setlistSortPicker}
         </div>
         {archivedSetlistCount > 0 && (
           <button
@@ -12382,8 +12462,9 @@ export default function App() {
           </button>
         )}
       </div>
+      )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div data-setlist-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
         <div className="space-y-2">
           {filteredSetlists.length === 0 && filteredJoinedSetlists.length === 0 && (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -13158,7 +13239,7 @@ export default function App() {
           initial={false}
           animate={isPhoneViewport
             ? { x: isMobileNavOpen ? 0 : -phoneSidebarHiddenOffset, opacity: isMobileNavOpen ? 1 : 0.96 }
-            : { width: currentSidebarWidth }}
+            : { width: currentSidebarWidth, x: 0, opacity: 1 }}
           transition={isSidebarResizing
             ? { duration: 0 }
             : isPhoneViewport
@@ -13372,87 +13453,20 @@ export default function App() {
             style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           >
             {isPhoneViewport && (
-              <div className="border-b border-gray-200 px-4 py-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex items-center gap-3">
-                    <img src={logoSrc} alt="ChordMaster" className="h-10 w-10 rounded-xl shadow-sm ring-1 ring-gray-200" />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-bold text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</div>
-                      <div className="mt-0.5 truncate text-xs font-medium text-gray-500">
-                        {mobileDrawerContextLabel}
-                        {mobileDrawerContextValue ? ` · ${mobileDrawerContextValue}` : ''}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsMobileNavOpen(false)}
-                    className="rounded-lg px-2 py-1 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
-                  >
-                    {copy.done}
-                  </button>
-                </div>
-
-                <div className="mt-3 grid grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWorkspaceMode('songs');
-                      setActiveAppView('sheet');
-                    }}
-                    className={`min-w-0 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
-                      !isSetlistMode && isSheetView
-                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-                        : 'border border-gray-200 bg-white text-gray-700'
-                    }`}
-                  >
-                    {copy.songs}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWorkspaceMode('setlists');
-                      setActiveAppView('sheet');
-                      setSetlistPanelView(selectedSetlist ? 'detail' : 'list');
-                    }}
-                    className={`min-w-0 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
-                      isSetlistMode && isSheetView
-                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-                        : 'border border-gray-200 bg-white text-gray-700'
-                    }`}
-                  >
-                    {copy.setlists}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleAppViewChange('about');
-                      setIsMobileNavOpen(false);
-                    }}
-                    className={`min-w-0 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
-                      activeAppView === 'about'
-                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-                        : 'border border-gray-200 bg-white text-gray-700'
-                    }`}
-                  >
-                    {copy.about}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleAppViewChange('help');
-                      setIsMobileNavOpen(false);
-                    }}
-                    className={`min-w-0 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
-                      activeAppView === 'help'
-                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-                        : 'border border-gray-200 bg-white text-gray-700'
-                    }`}
-                  >
-                    {copy.help}
-                  </button>
-                </div>
-              </div>
+              <MobileSidebarNavigation
+                logoSrc={logoSrc} songsLabel={copy.songs} setlistsLabel={copy.setlists}
+                aboutLabel={copy.about} helpLabel={copy.help} doneLabel={copy.done}
+                moreLabel={language === 'zh' ? '更多導覽選項' : 'More navigation options'}
+                active={isSheetView ? (isSetlistMode ? 'setlists' : 'songs') : null}
+                onSongs={() => { setWorkspaceMode('songs'); setActiveAppView('sheet'); }}
+                onSetlists={() => {
+                  setWorkspaceMode('setlists'); setActiveAppView('sheet');
+                  setSetlistPanelView(selectedSetlist ? 'detail' : 'list');
+                }}
+                onAbout={() => { handleAppViewChange('about'); setIsMobileNavOpen(false); }}
+                onHelp={() => { handleAppViewChange('help'); setIsMobileNavOpen(false); }}
+                onClose={() => { setIsMobileNavOpen(false); setIsMobileSetlistToolsOpen(false); }}
+              />
             )}
 
             {showSidebarWorkspacePanels ? librarySwitcherPanel : null}
@@ -13965,17 +13979,7 @@ export default function App() {
                   })}
                 </div>
 
-                <div className="border-t border-gray-200 px-5 py-4">
-                  <div className={`text-xs font-medium ${workspaceIsDirty ? 'text-amber-600' : 'text-gray-500'}`}>
-                    {workspaceIsDirty ? copy.unsavedChanges : formatSavedAt(lastSavedAt, language)}
-                  </div>
-                  <div className="mt-1 text-xs text-gray-400">
-                    {isAutoSaveEnabled ? copy.autoSavedHint : copy.manualSaveHint}
-                  </div>
-                  <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
-                    v{APP_VERSION}
-                  </div>
-                </div>
+                {desktopSetlistSavedFooter}
               </>
             )}
           </motion.div>

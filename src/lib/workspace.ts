@@ -13,6 +13,7 @@ import { normalizeSongReferences } from '../utils/referenceUtils';
 import { normalizeTempoBpm } from '../utils/tempoUtils';
 import { isAnnotationColorId } from '../constants/annotationColors';
 import { repairSongStructure } from './songEditing';
+import { readWorkspaceDatabase, writeWorkspaceDatabase } from './workspaceDatabase';
 
 export const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 export const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -709,6 +710,63 @@ export const persistLocalWorkspaceSnapshot = (songs: StoredSong[], setlists: Set
   writeLegacyValue(PROJECT_STORAGE_KEY, JSON.stringify(projects));
   writeLegacyValue(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
   return savedAt;
+};
+
+// Normal saves use IndexedDB; the synchronous Web Storage path remains for
+// older installations and the best-effort flush when a page is being closed.
+export const loadPersistentWorkspaceSnapshot = async (): Promise<WorkspaceSnapshot> => {
+  let records: Awaited<ReturnType<typeof readWorkspaceDatabase>>;
+  try { records = await readWorkspaceDatabase(); }
+  catch { return loadLocalWorkspaceSnapshot(); }
+
+  const parse = (raw: unknown) => typeof raw === 'string' ? parseWorkspaceEnvelope(raw) : null;
+  const current = parse(records.current);
+  const previous = parse(records.previous);
+  // An older tab, a fallback save, or the synchronous exit flush may be newer.
+  try {
+    const legacy = parseWorkspaceEnvelope(window.localStorage.getItem(WORKSPACE_SNAPSHOT_STORAGE_KEY));
+    const durable = current ?? previous;
+    if (legacy && (!durable || legacy.savedAt > durable.savedAt)) {
+      if (records.current !== undefined && !current) pendingRecoveryNotice = 'recovered-legacy';
+      return normalizeWorkspaceEnvelope(legacy);
+    }
+  } catch { /* IndexedDB remains usable when Web Storage is unavailable. */ }
+  if (current) return normalizeWorkspaceEnvelope(current);
+  if (previous) {
+    pendingRecoveryNotice = 'recovered-backup';
+    return normalizeWorkspaceEnvelope(previous);
+  }
+  const legacy = loadLocalWorkspaceSnapshot();
+  if (records.current !== undefined && legacy.lastSavedAt === null) {
+    pendingRecoveryNotice = 'corrupt-unrecoverable';
+  }
+  return legacy;
+};
+
+let persistentWorkspaceWrite: Promise<unknown> = Promise.resolve();
+
+export const persistPersistentWorkspaceSnapshot = async (
+  songs: StoredSong[], setlists: Setlist[], projects: Project[] = []
+) => {
+  const savedAt = Date.now();
+  // Capture at invocation, before any asynchronous work can observe another edit.
+  const serialized = JSON.stringify(createWorkspaceEnvelope(songs, setlists, projects, savedAt));
+  let legacy: string | null = null;
+  try { legacy = window.localStorage.getItem(WORKSPACE_SNAPSHOT_STORAGE_KEY); }
+  catch { /* No Web Storage access is required for IndexedDB. */ }
+  const operation = persistentWorkspaceWrite.catch(() => undefined).then(async () => {
+    try {
+      await writeWorkspaceDatabase(serialized,
+        (raw) => typeof raw === 'string' && Boolean(parseWorkspaceEnvelope(raw)), legacy);
+      return savedAt;
+    } catch {
+      // A device that blocks IndexedDB can still use the verified legacy store.
+      const envelope = parseWorkspaceEnvelope(serialized)!;
+      return persistLocalWorkspaceSnapshot(envelope.songs, envelope.setlists, envelope.projects);
+    }
+  });
+  persistentWorkspaceWrite = operation;
+  return operation;
 };
 
 export const normalizeMatchingTitle = (title: string) => title.trim().toLowerCase().replace(/\s+/g, ' ');

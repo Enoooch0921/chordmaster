@@ -85,6 +85,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-14',
+        title: 'More room for mobile setlists and reliable local backups',
+        bullets: [
+          'Phone navigation and setlist controls use compact rows, with sorting, archived setlists, and project management available on demand.',
+          'Personal workspace backups use IndexedDB to support large libraries and repeated setlist key changes, with verified writes and previous-snapshot recovery.',
+          'Existing localStorage backups remain readable, and responsive sidebars reset their position when switching from phone to desktop layouts.'
+        ]
+      },
+      {
+        version: '0.9.9',
         date: '2026-09-07',
         title: 'Safer sync, draft recovery, and file-only PDF sharing',
         bullets: [
@@ -478,6 +488,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-14',
+        title: '手機歌單空間優化與本機備份修正',
+        bullets: [
+          '手機導覽與歌單工具列改為精簡排列；排序、已歸檔歌單與專案管理按需展開，讓列表保留更多滾動空間。',
+          '個人工作區備份改用 IndexedDB，支援大型曲庫與頻繁修改歌單 Key，保留寫入驗證與上一版快照復原。',
+          '持續支援讀取舊版 localStorage 備份，並修正手機切換至桌面寬度時的側欄位移。'
+        ]
+      },
+      {
+        version: '0.9.9',
         date: '2026-09-07',
         title: '同步安全、草稿救援與純 PDF 分享',
         bullets: [
