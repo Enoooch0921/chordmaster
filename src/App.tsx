@@ -3,6 +3,7 @@ import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation
 import { CURRENT_CHORD_TIMING_VERSION, migrateChordTimingArrows } from './lib/chordTimingMigration';
 import LegacyDraftRecovery from './components/LegacyDraftRecovery';
 import MobileSidebarNavigation from './components/MobileSidebarNavigation';
+import SetlistContextMenu from './components/SetlistContextMenu';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
@@ -123,6 +124,7 @@ import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, M
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
+import { loadActiveLibraryPreference, resolveInitialLibrary, saveActiveLibraryPreference } from './lib/activeLibraryPreference';
 import {
   consumeLocalWorkspaceRecoveryNotice,
   hasCompletedMigration,
@@ -2162,9 +2164,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [showArchivedSetlists, setShowArchivedSetlists] = useState(false);
   const [librarySortMode, setLibrarySortMode] = useState<LibrarySortMode>(loadLibrarySortPreference);
   const [showArchivedSongs, setShowArchivedSongs] = useState(false);
-  const [setlistPanelView, setSetlistPanelView] = useState<SetlistPanelView>(
-    initialSetlists.selectedSetlistId ? 'detail' : 'list'
-  );
+  const [setlistPanelView, setSetlistPanelView] = useState<SetlistPanelView>('list');
+  const [setlistContextMenu, setSetlistContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const setlistContextTriggerRef = useRef<HTMLElement | null>(null);
   const [isCreateSetlistOpen, setIsCreateSetlistOpen] = useState(false);
   const [newSetlistName, setNewSetlistName] = useState('');
   const [newSetlistProjectId, setNewSetlistProjectId] = useState('');
@@ -2643,6 +2645,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         : [...current, setlistId]
     ));
   };
+  const closeSetlistContextMenu = React.useCallback(() => {
+    setSetlistContextMenu(null);
+    setlistContextTriggerRef.current?.focus({ preventScroll: true });
+  }, []);
   // Owned project sharing follows team owner/editor rights. Joined project
   // managers get their own sharing path after selectedJoinedProject is known.
   const canCreateProject = canCreateTeamSetlists;
@@ -3352,12 +3358,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setSetlistPanelView((view) => (view === 'detail' || view === 'addSongs') ? 'list' : view);
       return;
     }
-
-    if (!isMobileNavOpen) {
-      setSetlistPanelView('detail');
-      setSetlistSongSearchQuery('');
-    }
-  }, [isMobileNavOpen, isPhoneSetlistDrawer, selectedSetlist?.id]);
+  }, [isPhoneSetlistDrawer, selectedSetlist?.id]);
 
   useEffect(() => {
     // The setlist list (with its swipe behind-buttons) is visible in two
@@ -3374,6 +3375,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setMobileSwipeSetlist(null);
     }
   }, [setlistPanelView, mobileSwipeSetlist, setlists]);
+
+  useEffect(() => {
+    setSetlistContextMenu(null);
+    setMultiSelectedSetlistIds([]);
+  }, [workspaceMode, setlistPanelView, setlistProjectFilter]);
+
+  useEffect(() => {
+    setMultiSelectedSetlistIds((current) => {
+      const valid = current.filter((id) => setlists.some((item) => item.id === id && canManageSetlist(item)));
+      return valid.length === current.length ? current : valid;
+    });
+  }, [setlists, isTeamWorkspace, activeLibraryRole, authenticatedUser?.id]);
 
   useEffect(() => {
     // Auto-collapse an open swipe after a few seconds of inactivity so a
@@ -4099,7 +4112,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       workspace.projects,
       workspace.joinedProjects ?? []
     ));
-    setWorkspaceMode(nextSetlist ? 'setlists' : 'songs');
+    // Library changes keep the current workspace mode, including empty teams.
+    // A remembered selection is only for the preview; navigation starts at the overview.
+    setSetlistPanelView('list');
+    setSetlistContextMenu(null);
+    setMultiSelectedSetlistIds([]);
+    setProjectPicker(null);
+    setMobileSwipeSetlist(null);
+    setSetlistSearchQuery('');
+    setShowArchivedSetlists(false);
   };
 
   const handleSwitchCloudLibrary = async (libraryId: string) => {
@@ -4200,6 +4221,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       if (previousLibraryId) {
         revokedLibraryIdsRef.current.delete(previousLibraryId);
       }
+      saveActiveLibraryPreference(authenticatedUser?.id, libraryId);
       setSyncStatus('saved');
     } catch (error) {
       if (switchWasActivated) {
@@ -5741,17 +5763,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const remainingSetlists = setlists.filter((item) => item.id !== setlistId);
     const nextSetlist = remainingSetlists[0] ?? null;
     setSetlists(remainingSetlists);
-    setSelectedSetlistId(nextSetlist?.id ?? null);
-    setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
-    if (isPhoneViewport) {
-      setSetlistPanelView(nextSetlist ? 'detail' : 'list');
+    if (selectedSetlistId === setlistId) {
+      setSelectedSetlistId(nextSetlist?.id ?? null);
+      setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
+      setSetlistPanelView((view) => view === 'list' ? 'list' : nextSetlist ? 'detail' : 'list');
       setSetlistSongSearchQuery('');
-    } else {
-      setSetlistPanelView(nextSetlist ? 'detail' : 'list');
-      setSetlistSongSearchQuery('');
-    }
-    if (remainingSetlists.length === 0) {
-      setWorkspaceMode('songs');
     }
 
     void persistWorkspace(songs, remainingSetlists).catch(() => {
@@ -6961,6 +6977,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         setIsEditing(false);
         setTeamLibraryUpdatePending(false);
         setIsRefreshingTeamLibrary(false);
+        saveActiveLibraryPreference(authenticatedUser.id, nextLibrary.id);
         setSyncStatus('saved');
 
         if (!currentLibrary) {
@@ -7981,11 +7998,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         const requestedTeamId = typeof window !== 'undefined'
           ? new URLSearchParams(window.location.search).get('team')
           : null;
-        const personalLibrary = libraries.find((library) => library.kind === 'personal') ?? null;
         const requestedTeam = requestedTeamId
           ? libraries.find((library) => library.id === requestedTeamId && library.kind === 'team') ?? null
           : null;
-        const targetLibrary = requestedTeam ?? personalLibrary ?? libraries[0] ?? null;
+        const targetLibrary = resolveInitialLibrary(libraries, {
+          requestedTeamId,
+          rememberedLibraryId: loadActiveLibraryPreference(authenticatedUser.id)
+        });
         if (targetLibrary) {
           repository.setActiveLibrary(targetLibrary.id);
         }
@@ -8005,6 +8024,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         setTeamFeatureError(libraryListError);
         setAuthUiError(null);
         setActiveLibraryId(targetLibrary?.id ?? null);
+        if (targetLibrary && !libraryListError) {
+          saveActiveLibraryPreference(authenticatedUser.id, targetLibrary.id);
+        }
         setWorkspaceOwnerId(authenticatedUser.id);
 
         if (shouldUseCloudWorkspace) {
@@ -12464,7 +12486,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       </div>
       )}
 
-      <div data-setlist-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
+      <div data-setlist-scroll className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 ${isMultiSelectMode ? 'pb-40' : ''}`}>
         <div className="space-y-2">
           {filteredSetlists.length === 0 && filteredJoinedSetlists.length === 0 && (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -12488,7 +12510,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               ? ''
               : swipeAction === 'delete' ? '-translate-x-20' : swipeAction === 'archive' ? 'translate-x-20' : 'translate-x-0';
             return (
-              <div key={item.id} className="relative overflow-hidden rounded-2xl">
+              <div key={item.id} className="relative overflow-hidden rounded-2xl"
+                onContextMenu={(event) => {
+                  if (!canManage) return;
+                  event.preventDefault();
+                  setMobileSwipeSetlist(null);
+                  setlistContextTriggerRef.current = event.currentTarget.querySelector('input[type="checkbox"]');
+                  setSetlistContextMenu({ id: item.id, x: event.clientX, y: event.clientY });
+                }}
+              >
                 {canManage && (
                   <div className="absolute inset-y-0 left-0 flex items-stretch">
                     <button
@@ -12552,9 +12582,20 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
                   className={`relative flex select-none items-start gap-2 border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
                 >
+                  {canManage && (
+                    <input
+                      type="checkbox"
+                      checked={multiSelectedSetlistIds.includes(item.id)}
+                      onChange={() => toggleMultiSelect(item.id)}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onTouchStart={(event) => event.stopPropagation()}
+                      aria-label={`${language === 'zh' ? '選取' : 'Select'} ${item.name || copy.untitledSetlist}`}
+                      className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-indigo-600"
+                    />
+                  )}
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(event) => {
                       if (mobileSetlistSwipeHandledRef.current) {
                         mobileSetlistSwipeHandledRef.current = false;
                         return;
@@ -12563,7 +12604,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                         setMobileSwipeSetlist(null);
                         return;
                       }
-                      if (isMultiSelectMode) {
+                      if (isMultiSelectMode || event.metaKey || event.ctrlKey) {
                         if (canManage) toggleMultiSelect(item.id);
                         return;
                       }
@@ -12571,17 +12612,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     }}
                     className="flex min-w-0 flex-1 items-start gap-2 text-left"
                   >
-                    {isMultiSelectMode && canManage && (
-                      <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
-                        multiSelectedSetlistIds.includes(item.id)
-                          ? 'border-indigo-500 bg-indigo-500'
-                          : 'border-gray-300 bg-white'
-                      }`}>
-                        {multiSelectedSetlistIds.includes(item.id) && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-white" />
-                        )}
-                      </span>
-                    )}
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <div className="min-w-0 truncate text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
@@ -13319,7 +13349,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   type="button"
                   onClick={() => {
                     setWorkspaceMode('setlists');
-                    setSetlistPanelView(selectedSetlist ? 'detail' : 'list');
+                    setSetlistPanelView('list');
                     if (usesOverlaySidebar && !hasFinePointer) {
                       setIsSidebarPinned(true);
                       setIsSidebarHovered(true);
@@ -13461,7 +13491,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 onSongs={() => { setWorkspaceMode('songs'); setActiveAppView('sheet'); }}
                 onSetlists={() => {
                   setWorkspaceMode('setlists'); setActiveAppView('sheet');
-                  setSetlistPanelView(selectedSetlist ? 'detail' : 'list');
+                  setSetlistPanelView('list');
                 }}
                 onAbout={() => { handleAppViewChange('about'); setIsMobileNavOpen(false); }}
                 onHelp={() => { handleAppViewChange('help'); setIsMobileNavOpen(false); }}
@@ -16276,6 +16306,31 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         )}
       </AnimatePresence>
 
+      {setlistContextMenu && isSetlistMode && setlistPanelView === 'list' && (() => {
+        const target = setlists.find((item) => item.id === setlistContextMenu.id);
+        if (!target || !canManageSetlist(target)) return null;
+        const usesSelection = multiSelectedSetlistIds.includes(target.id);
+        const ids = usesSelection ? multiSelectedSetlistIds : [target.id];
+        const targets = setlists.filter((item) => ids.includes(item.id));
+        const allArchived = targets.every((item) => item.archived);
+        return (
+          <SetlistContextMenu
+            key={target.id}
+            language={language}
+            title={ids.length > 1
+              ? (language === 'zh' ? `已選 ${ids.length} 份歌單` : `${ids.length} setlists selected`)
+              : target.name || copy.untitledSetlist}
+            archived={allArchived}
+            x={setlistContextMenu.x}
+            y={setlistContextMenu.y}
+            onClose={closeSetlistContextMenu}
+            onArchive={() => usesSelection ? handleBatchArchiveSelectedSetlists(!allArchived) : handleSetSetlistArchived(target.id, !allArchived)}
+            onMove={() => setProjectPicker({ mode: 'move', setlistIds: ids })}
+            onDelete={() => usesSelection ? handleBatchDeleteSelectedSetlists() : handleDeleteSetlist(target.id)}
+          />
+        );
+      })()}
+
       <AnimatePresence initial={false}>
         {isMultiSelectMode && (
           <motion.div
@@ -16285,7 +16340,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             transition={{ duration: 0.18, ease: 'easeOut' }}
             className="pointer-events-none fixed inset-x-0 bottom-4 z-[120] flex justify-center px-3"
           >
-            <div className="pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-[0_18px_44px_rgba(15,23,42,0.18)]">
+            <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-[0_18px_44px_rgba(15,23,42,0.18)]">
               <div className="px-2 text-sm font-bold text-gray-700">
                 {language === 'zh'
                   ? `已選 ${multiSelectedSetlistIds.length}`
