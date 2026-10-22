@@ -1,8 +1,10 @@
 import React from 'react';
 import {afterEach,expect,it,vi} from 'vitest';
-import {cleanup,render} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen} from '@testing-library/react';
 import type {Song} from '../types';
 import ChordSheet from '../components/ChordSheet';
+import ChordSubdivisionsEditor from '../components/ChordSubdivisionsEditor';
+import {getRestGlyph} from '../utils/rhythmUtils';
 import {normalizeStoredSong} from './workspace';
 import {getChordEvents,availableSubdivisionPositions} from '../utils/chordSubdivisions';
 import {applyBarKeyChange,insertChordBeatBeforeSlot,setChordAtBeatSlot,setChordBeatOffset,setBarChordText,isBarCompletelyEmpty,updateEditableBarFields} from './songEditing';
@@ -40,6 +42,37 @@ it('renders an additional-only harmony alongside rhythm rather than hiding it',(
 it('normalizes imported event data without accepting invalid timing or duplicate positions',()=>{
  const s=song();bar(s).chordSubdivisions=[{beat:1,offset:.5,chord:'G/D'},{beat:0,offset:.5,chord:' Am/B '},{beat:0,offset:.5,chord:'C'},{beat:-1,offset:.5,chord:'C'},{beat:0,offset:.3,chord:'C'},{beat:0,offset:.25,chord:'0w'},{beat:0,offset:.75,chord:'C>'}] as any;
  expect(bar(normalizeStoredSong(s,0)).chordSubdivisions).toEqual([{beat:0,offset:.5,chord:'Am/B'},{beat:1,offset:.5,chord:'G/D'}]);
+});
+it('keeps a second-half eighth rest visible and unchanged by transposition',()=>{
+ const s=song();bar(s).chordSubdivisions=[{beat:0,offset:.5,chord:'0_'}];
+ const normalized=normalizeStoredSong(JSON.parse(JSON.stringify(s)),0);
+ expect(bar(normalized).chordSubdivisions).toEqual([{beat:0,offset:.5,chord:'0_'}]);
+ expect(getChordEvents(bar(normalized),4).map(e=>[e.beat+e.offset,e.chord])).toEqual([[0,'Am'],[.5,'0_'],[1,'Am/C']]);
+ expect(bar(applyBarKeyChange(normalized,target,'A')).chordSubdivisions).toEqual([{beat:0,offset:.5,chord:'0_'}]);
+ const {container}=render(<ChordSheet song={normalized} currentKey="G" language="zh"/>);
+ const rest=[...container.querySelectorAll('[data-chord-event-position]')].find(e=>(e as HTMLElement).dataset.chordEventPosition==='1&');
+ expect(rest?.textContent).toContain(getRestGlyph('e'));
+ cleanup();
+ const {container:nashville}=render(<ChordSheet song={{...normalized,showNashvilleNumbers:true}} currentKey="A" language="zh"/>);
+ const nashvilleRest=[...nashville.querySelectorAll('[data-chord-event-position]')].find(e=>(e as HTMLElement).dataset.chordEventPosition==='1&');
+ expect(nashvilleRest?.textContent).toContain(getRestGlyph('e'));
+ cleanup();
+ bar(s).chordSubdivisions=[{beat:0,offset:.25,chord:'0_'}];
+ expect(bar(normalizeStoredSong(s,0)).chordSubdivisions).toBeUndefined();
+});
+it('adds an eighth rest at an available second-half position',()=>{
+ const onChange=vi.fn();
+ render(<ChordSubdivisionsEditor bar={{chords:['F','','','']}} beats={4} timeSignature="4/4" language="zh" onChange={onChange}/>);
+ fireEvent.click(screen.getByRole('button',{name:'新增八分休止'}));
+ expect(onChange).toHaveBeenCalledWith([{beat:0,offset:.5,chord:'0_'}]);
+});
+it('does not offer an eighth rest at half of an eighth-note beat',()=>{
+ const onChange=vi.fn();
+ render(<ChordSubdivisionsEditor bar={{chords:['F','','','','',''],chordSubdivisions:[{beat:0,offset:.5,chord:'C'}]}} beats={6} timeSignature="6/8" language="zh" onChange={onChange}/>);
+ expect(screen.getByRole('button',{name:'新增八分休止'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'新增八分休止'}));
+ fireEvent.change(screen.getByRole('textbox',{name:'追加和弦 1'}),{target:{value:'0_'}});
+ expect(onChange).not.toHaveBeenCalled();
 });
 it('remaps compact primary timing before checking conflicts with additional events',()=>{
  const s=song();bar(s).chords=['C','G'];bar(s).chordMarks={1:{beatOffset:.5}};bar(s).chordSubdivisions=[{beat:1,offset:.5,chord:'Am'}];

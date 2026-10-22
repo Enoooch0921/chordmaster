@@ -11,7 +11,8 @@ export function normalizeChordSubdivisions(value: unknown): ChordSubdivision[] |
     if (!entry || typeof entry !== 'object') continue;
     const offset = normalizeChordBeatOffset(entry.offset);
     const chord = typeof entry.chord === 'string' ? entry.chord.trim() : '';
-    if (!Number.isInteger(entry.beat) || entry.beat < 0 || entry.beat >= 32 || !offset || !canOffsetChord(chord) || /[<>\s]/.test(chord)) continue;
+    const eighthRest = chord === '0_' && offset === 0.5;
+    if (!Number.isInteger(entry.beat) || entry.beat < 0 || entry.beat >= 32 || !offset || (!eighthRest && !canOffsetChord(chord)) || /[<>\s]/.test(chord)) continue;
     const position = entry.beat + offset;
     if (seen.has(position)) continue;
     seen.add(position);

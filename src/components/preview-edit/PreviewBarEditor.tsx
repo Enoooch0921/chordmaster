@@ -1095,7 +1095,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     : viewportTop + 8;
   const keyboardSurfaceMode = notationMode === 'chords' ? mode : notationMode;
   const keyboardContent = notationMode === 'chords' && subdivisionsExpanded ? (
-    <div className="min-h-0 flex-1 overflow-y-auto p-2"><ChordSubdivisionsEditor bar={bar} beats={beatCount} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})}/></div>
+    <div className="min-h-0 flex-1 overflow-y-auto p-2"><ChordSubdivisionsEditor bar={bar} beats={beatCount} timeSignature={effectiveBarTimeSignature} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})}/></div>
   ) : (
     <div data-keyboard-mode={keyboardSurfaceMode} data-notation-mode={notationMode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
       {notationMode === 'chords' && mode === 'common' && (
