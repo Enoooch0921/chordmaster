@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PerformanceFullscreenControl from './PerformanceFullscreenControl';
 
@@ -10,22 +10,21 @@ beforeEach(() => {
 const props = {
   language: 'zh' as const, isFullscreen: false, isStandalone: false,
   canRequestFullscreen: false, isAppleMobile: true, visible: true,
-  onRequestFullscreen: vi.fn(),
+  onRequestFullscreen: vi.fn(), showInstallGuide: true, onOpenHomeScreenGuide: vi.fn(),
 };
 
 describe('performance fullscreen control', () => {
-  it('opens persistent Home Screen instructions instead of promising to hide Safari bars', () => {
-    render(<div data-testid="performance-overlay"><PerformanceFullscreenControl {...props} /></div>);
+  it('opens the shared illustrated guide on Apple mobile devices', () => {
+    const open = vi.fn();
+    render(<PerformanceFullscreenControl {...props} onOpenHomeScreenGuide={open} />);
     expect(screen.queryByRole('button', { name: '隱藏網址列' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '無網址列使用方式' }));
-    const dialog = screen.getByRole('dialog', { name: '不顯示瀏覽器網址列' });
-    expect(dialog).toHaveAttribute('open');
-    expect(screen.getByTestId('performance-overlay')).not.toContainElement(dialog);
-    expect(dialog).toHaveTextContent('演出模式無法直接將它移除');
-    expect(dialog).toHaveTextContent('以 Web App 開啟');
-    expect(dialog).toHaveTextContent('點 ChordMaster 圖示開啟');
-    fireEvent.click(within(dialog).getByRole('button', { name: '關閉使用說明' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it('does not repeat installation guidance after the user has added the app', () => {
+    render(<PerformanceFullscreenControl {...props} showInstallGuide={false} />);
+    expect(screen.queryByRole('button')).toBeNull();
   });
 
   it('requests supported fullscreen synchronously within the button click', () => {

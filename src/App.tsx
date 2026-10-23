@@ -3,6 +3,8 @@ import { normalizeJianpuVoices } from './utils/jianpuVoices';
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
 import { usePerformanceFullscreen } from './hooks/usePerformanceFullscreen';
 import PerformanceFullscreenControl from './components/PerformanceFullscreenControl';
+import HomeScreenGuide from './components/HomeScreenGuide';
+import { useHomeScreenInstall } from './hooks/useHomeScreenInstall';
 import { getPerformanceLayout, getPerformancePageRange, getPerformanceSpreadStart, PERFORMANCE_PAGE_GAP } from './utils/performanceLayout';
 import { CURRENT_CHORD_TIMING_VERSION, migrateChordTimingArrows } from './lib/chordTimingMigration';
 import LegacyDraftRecovery from './components/LegacyDraftRecovery';
@@ -2154,6 +2156,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
   const [performanceViewport, setPerformanceViewport] = useState({ width: viewportWidth, height: viewportHeight });
   const performanceFullscreen = usePerformanceFullscreen();
+  const homeScreenInstall = useHomeScreenInstall(Capacitor.isNativePlatform());
+  const [isHomeScreenGuideOpen, setIsHomeScreenGuideOpen] = useState(false);
   const [activeReferenceKind, setActiveReferenceKind] = useState<SongReferenceKind | null>(null);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
@@ -2518,9 +2522,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const { columns: performanceColumns, scale: performanceScale } = performanceLayout;
   const performanceSpreadStart = getPerformanceSpreadStart(performancePageIndex, performanceTotalPages, performanceColumns);
   const performancePageRange = getPerformancePageRange(performanceSpreadStart, performanceTotalPages, performanceColumns);
-  const isStandaloneDisplay = Capacitor.isNativePlatform()
-    || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches)
-    || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+  const isStandaloneDisplay = homeScreenInstall.isStandalone;
+  const homeScreenDevice = /iPad/i.test(previewEditorUserAgent)
+    || (previewEditorPlatform === 'MacIntel' && previewEditorTouchPoints > 1) ? 'ipad' : 'iphone';
+  const openHomeScreenGuide = () => {
+    setIsToolbarOverflowMenuOpen(false);
+    setIsMobileActionsSheetOpen(false);
+    setIsHomeScreenGuideOpen(true);
+  };
+  const homeScreenInstallMenuItem = homeScreenInstall.shouldShowInstallGuide ? (
+    <button type="button" data-home-screen-entry onClick={openHomeScreenGuide}
+      className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-indigo-700 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]">
+      <Download size={16} />
+      <span>{language === 'zh' ? '加入主畫面' : 'Add to Home Screen'}</span>
+    </button>
+  ) : null;
   const previewEditorDeviceLayout = resolvePreviewEditorDeviceLayout({
     viewportWidth,
     maxTouchPoints: previewEditorTouchPoints,
@@ -2919,6 +2935,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   );
   const toolbarOverflowPanel = isToolbarOverflowMenuOpen ? (
     <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
+      {homeScreenInstallMenuItem}
       <button
         type="button"
         onClick={() => {
@@ -15058,6 +15075,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                           </button>
                           {isToolbarOverflowMenuOpen && (
                             <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-48 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
+                              {homeScreenInstallMenuItem}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -15803,6 +15821,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     </nav>
                   ) : null}
                   <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    {homeScreenInstallMenuItem}
                     {isSheetView && mobileActionsSection === 'sheet' ? (
                       <>
                         <div className="grid grid-cols-2 gap-2">
@@ -16655,6 +16674,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         />
       )}
 
+      {isHomeScreenGuideOpen && homeScreenInstall.shouldShowInstallGuide && (
+        <HomeScreenGuide language={language} initialDevice={homeScreenDevice}
+          onClose={() => setIsHomeScreenGuideOpen(false)}
+          onAdded={() => { homeScreenInstall.markAsAdded(); setIsHomeScreenGuideOpen(false); }} />
+      )}
+
       {isPerformanceMode && (
         <div
           ref={performanceOverlayRef}
@@ -16762,6 +16787,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 isAppleMobile={/iPhone|iPad|iPod/i.test(previewEditorUserAgent) || (previewEditorPlatform === 'MacIntel' && previewEditorTouchPoints > 1)}
                 visible={performanceChromeVisible}
                 onRequestFullscreen={performanceFullscreen.requestFullscreen}
+                showInstallGuide={homeScreenInstall.shouldShowInstallGuide}
+                onOpenHomeScreenGuide={openHomeScreenGuide}
               />
 	            <button
 	              type="button"
