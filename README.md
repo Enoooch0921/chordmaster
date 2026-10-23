@@ -2,7 +2,7 @@
 
 ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器，聚焦在和弦譜、節奏譜與簡譜的整合編輯。專案使用 Vite + React 建構；本機工作區與個人曲庫備份預設儲存在瀏覽器 IndexedDB，保留上一版快照及舊版 `localStorage` 的讀取與備援路徑，登入後可切換到 Supabase 雲端同步。
 
-目前版本：`0.9.10`
+目前版本：`0.9.11`
 
 ## 特色
 
@@ -32,6 +32,8 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 - 公開唯讀分享：可產生歌曲 / 歌單分享連結，並支援受邀者加入 shared setlist
 
 ## 最近更新
+
+- 升級到 `0.9.11`：演出模式全螢幕與寬螢幕 A4 雙頁、中文／英文逐行混合歌詞；整合簡譜多聲部、裝飾音群、重音與樂句線、二分音符三連音、指定遍數和弦及未定拍位／調性的來源記錄。保留遠端最新的歌單導覽、本機復原與 NAS 查詢修正。
 
 - 升級到 `0.9.8`，修正手機／平板 PDF 附帶分享項目與離線同步誤刪，新增團隊草稿救援、錯誤復原、團隊邀請收件匣及發布檢查；分享頁、編輯器與 PDF 工具改為按需載入
 
@@ -96,7 +98,7 @@ ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器
 
 ### 需求
 
-- Node.js 18+ 建議
+- Node.js 22（與發布流程相同）
 - npm
 - Supabase CLI（部署 migration / functions 時需要）
 
@@ -228,12 +230,13 @@ public/
 
 這個專案可直接推到 GitHub 作為原始碼倉庫。
 
-### Cloudflare Pages
+### GitHub Pages
 
-建議設定：
+正式站：[ChordMaster](https://enoooch0921.github.io/chordmaster/)。推送 `main` 後，`.github/workflows/deploy.yml` 會依序執行型別檢查、測試、建置及 GitHub Pages 部署。
 
-- Build command: `npm run build`
-- Output directory: `dist`
+正式資料位於教會 NAS 的自架 Supabase：`https://supabase.living-water.familyds.com`。發布流程使用 GitHub Actions 中的 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_ANON_KEY`；不在儲存庫保存私密設定。部署前端不會執行歷史資料庫 migration 或轉錄腳本。
+
+`tmp/`、`output/` 與環境設定檔維持本機；正式型別檢查和應用程式測試排除暫存轉錄資料。
 
 ## 環境變數
 

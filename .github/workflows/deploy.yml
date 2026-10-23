@@ -25,7 +25,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -44,6 +44,10 @@ jobs:
         run: |
           test -n "$VITE_SUPABASE_URL" || (echo "Missing secret: VITE_SUPABASE_URL" && exit 1)
           test -n "$VITE_SUPABASE_ANON_KEY" || (echo "Missing secret: VITE_SUPABASE_ANON_KEY" && exit 1)
+          case "$VITE_SUPABASE_URL" in
+            https://supabase.living-water.familyds.com|https://supabase.living-water.familyds.com/) ;;
+            *) echo "::error::Production must use the church NAS Supabase endpoint."; exit 1 ;;
+          esac
 
       - name: Build
         env:

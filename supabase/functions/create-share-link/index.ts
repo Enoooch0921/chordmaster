@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { createClient } from 'npm:@supabase/supabase-js@2.49.8';
+import { consumeRequestLimit } from '../_shared/rateLimit.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -8,13 +9,15 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Expose-Headers': 'Retry-After',
+  'Cache-Control': 'no-store',
   'Content-Type': 'application/json'
 };
 
-const jsonResponse = (body: unknown, status = 200) => (
+const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}) => (
   new Response(JSON.stringify(body), {
     status,
-    headers: corsHeaders
+    headers: { ...corsHeaders, ...headers }
   })
 );
 
@@ -67,9 +70,24 @@ Deno.serve(async (request) => {
       }
     });
 
+    if (!await consumeRequestLimit(adminSupabase, request, 'create-share-ip', 120)) {
+      return jsonResponse({ error: 'Too many requests.' }, 429, { 'Retry-After': '60' });
+    }
+
     const { data: authData, error: authError } = await adminSupabase.auth.getUser(accessToken);
     if (authError || !authData.user) {
       return jsonResponse({ error: 'Unauthorized.' }, 401);
+    }
+
+    if (!await consumeRequestLimit(
+      adminSupabase,
+      request,
+      'create-share-user',
+      30,
+      60,
+      authData.user.id
+    )) {
+      return jsonResponse({ error: 'Too many requests.' }, 429, { 'Retry-After': '60' });
     }
 
     const { resourceType, resourceId, songIds } = await request.json();

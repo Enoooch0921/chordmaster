@@ -395,6 +395,47 @@ describe('cloud repository background library reads', () => {
     await expect(createRepository().loadLibraryContent('personal-1')).rejects.toThrow('Connection lost');
   });
 
+  it('batches large personal Capo reads so PostgREST URLs stay below reverse-proxy limits', async () => {
+    const setlistSongRows = Array.from({ length: 160 }, (_, index) => ({
+      id: `entry-${index}`,
+      setlist_id: 'setlist-1',
+      song_id: 'song-1',
+      order_index: index,
+      override_json: null
+    }));
+    const capoBatches: string[][] = [];
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'user_setlist_capo_overrides') {
+        const query = makeBuilder();
+        query.returns.mockImplementation(() => {
+          const ids = query.in.mock.calls.at(-1)?.[1] as string[];
+          capoBatches.push(ids);
+          return Promise.resolve({
+            data: [{ setlist_song_id: ids[0], capo: 2 }],
+            error: null
+          });
+        });
+        return query;
+      }
+
+      const rows: Record<string, unknown[]> = {
+        songs: [{ id: 'song-1', library_id: 'personal-1', title: 'Alpha', content_json: makeSong(),
+          created_at: '2026-09-01', updated_at: '2026-09-09' }],
+        setlists: [{ id: 'setlist-1', name: 'Sunday', library_id: 'personal-1',
+          display_mode: 'chord-fixed-key', created_at: '2026-09-01', updated_at: '2026-09-09' }],
+        projects: [],
+        setlist_songs: setlistSongRows,
+        setlist_editor_assignments: []
+      };
+      return makeBuilder({ returns: vi.fn().mockResolvedValue({ data: rows[table], error: null }) });
+    });
+
+    const result = await createRepository().loadLibraryContent('personal-1');
+    expect(capoBatches.map((batch) => batch.length)).toEqual([75, 75, 10]);
+    expect(capoBatches.flat()).toEqual(setlistSongRows.map((row) => row.id));
+    expect(result.setlists[0].songs.filter((song) => song.personalCapoOverride === 2)).toHaveLength(3);
+  });
+
   it('does not redirect later writes when another library is only loaded for refresh', async () => {
     const songUpsert = vi.fn().mockResolvedValue({ error: null });
     let songQueryCount = 0;

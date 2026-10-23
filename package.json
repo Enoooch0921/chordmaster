@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.9.10",
+  "version": "0.9.11",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -19,9 +19,9 @@
     "@capacitor/app": "^8.1.0",
     "@capacitor/browser": "^8.0.3",
     "@capacitor/clipboard": "^8.0.1",
-    "@capacitor/core": "^8.3.4",
+    "@capacitor/core": "^8.5.3",
     "@capacitor/filesystem": "^8.1.2",
-    "@capacitor/ios": "^8.3.4",
+    "@capacitor/ios": "^8.5.3",
     "@capacitor/share": "^8.0.1",
     "@supabase/supabase-js": "^2.112.4",
     "html-to-image": "^1.11.13",
@@ -34,7 +34,7 @@
     "react-router-dom": "^7.18.3"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.3.4",
+    "@capacitor/cli": "8.4.3",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -49,7 +49,7 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.4.3",
-    "vitest": "^4.1.10"
+    "vite": "^6.4.5",
+    "vitest": "^4.1.12"
   }
 }

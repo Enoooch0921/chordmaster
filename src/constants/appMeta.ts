@@ -85,6 +85,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-23',
+        title: 'Fullscreen performance, mixed bilingual lyrics, and richer notation',
+        bullets: [
+          'Performance Mode requests browser fullscreen and fits two A4 pages on wide screens, with spread navigation and single pages on phones and portrait tablets.',
+          'Mixed Chinese/English lyrics alternate Chinese above English, with complete sentence pairs kept together in reading views, setlists, performance, and PDF exports.',
+          'Charts support jianpu voices, grouped grace notes, accents and phrase arcs, half-note triplets, chord pass variants, and source chords with unspecified timing or key.',
+          'Includes the latest setlist navigation, workspace recovery, batched NAS queries, and transient fetch retries.'
+        ]
+      },
+      {
+        version: '0.9.10',
         date: '2026-10-14',
         title: 'More room for mobile setlists and reliable local backups',
         bullets: [
@@ -488,6 +499,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-23',
+        title: '全螢幕雙頁演出、中英混合歌詞與譜面記號擴充',
+        bullets: [
+          '演出模式會嘗試進入瀏覽器全螢幕；寬螢幕並排兩張 A4、一次翻兩頁，手機與直向平板維持單頁。',
+          '新增中文在上、英文在下的逐行混合版，保留原有左右中英對照；閱讀、歌單、演出與 PDF 都會完整保留句對。',
+          '整合簡譜多聲部、成組裝飾音、重音與樂句弧線、二分音符三連音、指定遍數和弦，以及未定拍位／調性的原譜和弦。',
+          '保留最新歌單導覽、本機備份、NAS 分批查詢與暫時性網路錯誤重試。'
+        ]
+      },
+      {
+        version: '0.9.10',
         date: '2026-10-14',
         title: '手機歌單空間優化與本機備份修正',
         bullets: [

@@ -1,0 +1,41 @@
+name: Supabase Cloud export probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+    steps:
+      - name: Validate protected credentials
+        shell: bash
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$VITE_SUPABASE_URL"
+      - name: Probe database query API
+        shell: bash
+        run: |
+          PROJECT_REF="${VITE_SUPABASE_URL#https://}"
+          PROJECT_REF="${PROJECT_REF%%.*}"
+          response=$(curl --fail-with-body --silent --show-error \
+            -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"query":"select current_setting('"'"'server_version'"'"') as server_version, (select count(*) from auth.users) as auth_users, (select count(*) from information_schema.tables where table_schema = '"'"'public'"'"' and table_type = '"'"'BASE TABLE'"'"') as public_tables"}')
+          RESPONSE="$response" python3 - <<'PY'
+          import json, os
+          rows=json.loads(os.environ['RESPONSE'])
+          if not isinstance(rows,list) or not rows:
+              raise SystemExit('unexpected empty response')
+          row=rows[0]
+          print('database query API: ok')
+          print('server major:', str(row.get('server_version','')).split('.')[0])
+          print('auth users:', row.get('auth_users'))
+          print('public tables:', row.get('public_tables'))
+          PY

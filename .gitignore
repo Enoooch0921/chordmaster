@@ -4,6 +4,7 @@ dist/
 coverage/
 /chordmaster-rescue-*/
 /output/
+/tmp/
 .DS_Store
 *.log
 .env*

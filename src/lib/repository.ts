@@ -120,6 +120,52 @@ interface UserSetlistCapoOverrideRow {
   updated_at?: string;
 }
 
+const TRANSIENT_FETCH_RETRY_DELAYS_MS = [400, 1200] as const;
+const POSTGREST_IN_FILTER_BATCH_SIZE = 75;
+
+const isTransientFetchFailure = (error: unknown) => (
+  error instanceof TypeError
+  && /fetch|network|load/i.test(error.message)
+);
+
+const retryTransientFetch = async <T>(operation: () => Promise<T>): Promise<T> => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const delay = TRANSIENT_FETCH_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !isTransientFetchFailure(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+};
+
+const getUserSetlistCapoOverrides = async (
+  setlistSongIds: string[],
+  userId: string,
+  signal?: AbortSignal
+): Promise<UserSetlistCapoOverrideRow[]> => {
+  if (!supabase || setlistSongIds.length === 0) return [];
+
+  const rows: UserSetlistCapoOverrideRow[] = [];
+  for (let start = 0; start < setlistSongIds.length; start += POSTGREST_IN_FILTER_BATCH_SIZE) {
+    const batch = setlistSongIds.slice(start, start + POSTGREST_IN_FILTER_BATCH_SIZE);
+    const query = supabase
+      .from('user_setlist_capo_overrides')
+      .select('setlist_song_id, capo, updated_at')
+      .in('setlist_song_id', batch)
+      .eq('user_id', userId)
+      .limit(batch.length);
+    const { data, error } = await (signal ? query.abortSignal(signal) : query)
+      .returns<UserSetlistCapoOverrideRow[]>();
+    if (error) throw error;
+    rows.push(...(data ?? []));
+  }
+  return rows;
+};
+
 interface CurrentUserSetlistAssignmentRow {
   setlist_id: string;
   user_id: string;
@@ -1060,20 +1106,9 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: 
   }
 
   const setlistSongIds = (setlistSongRows ?? []).map((row) => row.id);
-  const { data: personalCapoRows, error: personalCapoError } = userId && setlistSongIds.length > 0
-    ? await supabase
-      .from('user_setlist_capo_overrides')
-      .select('setlist_song_id, capo, updated_at')
-      .in('setlist_song_id', setlistSongIds)
-      .eq('user_id', userId)
-      .limit(1000)
-      .abortSignal(requestSignal)
-      .returns<UserSetlistCapoOverrideRow[]>()
-    : { data: [] as UserSetlistCapoOverrideRow[], error: null };
-
-  if (personalCapoError) {
-    throw personalCapoError;
-  }
+  const personalCapoRows = userId
+    ? await getUserSetlistCapoOverrides(setlistSongIds, userId, requestSignal)
+    : [];
 
   const personalCapoBySetlistSongId = new Map((personalCapoRows ?? []).map((row) => [row.setlist_song_id, row.capo] as const));
   const assignedSetlistIds = new Set((assignmentRows ?? []).map((row) => row.setlist_id));
@@ -1220,16 +1255,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
   if (songError) throw songError;
 
   const songItemIds = (ssRows ?? []).map((r) => r.id);
-  const { data: capoRows, error: capoError } = songItemIds.length > 0
-    ? await supabase
-      .from('user_setlist_capo_overrides')
-      .select('setlist_song_id, capo, updated_at')
-      .in('setlist_song_id', songItemIds)
-      .eq('user_id', userId)
-      .returns<UserSetlistCapoOverrideRow[]>()
-    : { data: [] as UserSetlistCapoOverrideRow[], error: null };
-
-  if (capoError) throw capoError;
+  const capoRows = await getUserSetlistCapoOverrides(songItemIds, userId);
 
   const capoByItemId = new Map((capoRows ?? []).map((r) => [r.setlist_song_id, r.capo]));
   const songRowById = new Map((songRows ?? []).map((r) => [r.id, r]));
@@ -1490,11 +1516,8 @@ export const createCloudRepository = (params: {
         ...joinedProjects.flatMap((project) => project.setlists.flatMap((setlist) => setlist.songs.map((song) => song.id)))
       ])];
       if (!supabase || songIds.length === 0) return { joinedSetlists, joinedProjects };
-      const { data, error } = await supabase.from('user_setlist_capo_overrides')
-        .select('setlist_song_id, capo').eq('user_id', params.userId)
-        .in('setlist_song_id', songIds).returns<UserSetlistCapoOverrideRow[]>();
-      if (error) throw error;
-      const capoById = new Map((data ?? []).map((row) => [row.setlist_song_id, row.capo]));
+      const data = await getUserSetlistCapoOverrides(songIds, params.userId);
+      const capoById = new Map(data.map((row) => [row.setlist_song_id, row.capo]));
       const withPersonalCapo = <T extends Setlist>(setlist: T): T => ({
         ...setlist, songs: setlist.songs.map((song) => ({ ...song, personalCapoOverride: capoById.get(song.id) }))
       });
@@ -1506,7 +1529,7 @@ export const createCloudRepository = (params: {
     async loadWorkspace() {
       const libraryId = await ensureLibraryId();
       const [workspace, joinedSetlists, joinedProjects] = await Promise.all([
-        getLibraryWorkspace(libraryId, params.userId),
+        retryTransientFetch(() => getLibraryWorkspace(libraryId, params.userId)),
         getJoinedSetlists(params.userId),
         getJoinedProjects()
       ]);
@@ -1520,7 +1543,7 @@ export const createCloudRepository = (params: {
       // Loading is intentionally side-effect free. A real workspace switch
       // calls setActiveLibrary only after this complete snapshot succeeds;
       // background Realtime/access reads must never redirect later writes.
-      const workspace = await getLibraryWorkspace(libraryId, params.userId);
+      const workspace = await retryTransientFetch(() => getLibraryWorkspace(libraryId, params.userId));
       const personalLibraryId = await ensurePersonalLibraryId();
       const isPersonal = libraryId === personalLibraryId;
       const [joinedSetlists, joinedProjects] = await Promise.all([

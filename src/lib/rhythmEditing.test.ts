@@ -106,7 +106,7 @@ describe('rhythm insertion and capacity', () => {
 
   it('rejects unsupported triplets and canonicalizes a triplet without a dot', () => {
     const song = makeSong();
-    expect(edit(song, 0, { type: 'insert', token: 'h3' }).error).toContain('無效');
+    expect(edit(song, 0, { type: 'insert', token: 'w3' }).error).toContain('無效');
     const canonicalized = edit(song, 0, { type: 'insert', token: 'q3.' });
     expect(canonicalized.error).toBeNull();
     expect(rhythmOf(canonicalized.song)).toBe('q3');
