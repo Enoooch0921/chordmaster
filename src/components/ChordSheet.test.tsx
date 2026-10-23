@@ -40,25 +40,35 @@ describe('ChordSheet preview input caret', () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 
-  it('keeps a labelled mid-section riff in its own full-width row', () => {
+  it.each([1, 2, 3] as const)('keeps a mid-section label before its melody in the same lane with %i chart rows', (barRowCount) => {
     const source: Song = {
       ...song,
+      barRowCount,
       sections: [{ ...song.sections[0], bars: [
         { id: 'bar-1', chords: ['C'] },
         { id: 'passing', chords: ['F'], riff: 'q | q | q | 4_5_', riffLabel: 'Passing notes（器樂）' }
       ] }]
     };
-    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" onElementClick={vi.fn()} />);
+    const onElementClick = vi.fn();
+    const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey="C" onElementClick={onElementClick} />);
     const bar = container.querySelector('[data-preview-clipboard-bar="passing"]')!;
     const label = bar.querySelector('[data-preview-bar-label]')!;
     const notation = bar.querySelector('[data-preview-hover-field="jianpu"]')!;
-    expect(label.parentElement).not.toBe(notation.parentElement);
-    expect(label.parentElement?.parentElement).toBe(notation.parentElement?.parentElement);
-    expect(label.parentElement?.parentElement).toHaveClass('flex-col');
+    expect(label.nextElementSibling).toBe(notation);
+    expect(label.parentElement).not.toHaveClass('flex-col');
+    expect(bar).toHaveAttribute('data-preview-lower-lanes', '1');
+    fireEvent.click(label);
+    expect(onElementClick.mock.calls.at(-1)?.slice(0, 3)).toEqual([0, 1, 'label']);
+    fireEvent.click(notation);
+    expect(onElementClick.mock.calls.at(-1)?.slice(0, 3)).toEqual([0, 1, 'riff']);
     const notes = Array.from(notation.querySelectorAll('button[aria-label^="Select jianpu note"]'));
     expect(notes.map(note => note.getAttribute('aria-label'))).toEqual([
       'Select jianpu note 1 in beat 4', 'Select jianpu note 2 in beat 4'
     ]);
+    // Export/read-only rendering must keep the same label/melody arrangement.
+    rerender(<ChordSheet song={source} language="zh" currentKey="C" />);
+    expect(container.querySelector('[data-preview-clipboard-bar="passing"] [data-preview-bar-label]')?.nextElementSibling)
+      .toHaveAttribute('data-preview-edit-anchor', 'preview|section-1|passing|jianpu|all');
   });
 
   it.each(['C', 'D'] as const)('draws new arrows by their suffix and preserves legacy arrow directions in %s', (currentKey) => {

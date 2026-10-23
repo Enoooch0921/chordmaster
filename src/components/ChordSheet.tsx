@@ -3095,18 +3095,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       )
                     );
                     const labelLane: BarLabelLane = bar?.labelLane === 'rhythm' ? 'rhythm' : 'riff';
-                    // A label beside a single riff can consume the whole bar on
-                    // phones. Give it a separate row so beat spacing stays usable.
-                    const labelUsesStandaloneNotationLane = hasBarLabelInContentLane && hasRiff && !showBottomRhythmLane;
                     const hasThreeNotationRows = hasChordContent && hasRhythm && hasRiff;
                     const lowerLaneCount = bar
                       ? hasThreeNotationRows
                         ? 2
                         : showBottomRhythmLane && hasRiff
                           ? 2
-                          : labelUsesStandaloneNotationLane
-                            ? 2
-                            : (labelSharesNotationLane || showBottomRhythmLane || hasRiff ? 1 : 0)
+                          : (labelSharesNotationLane || showBottomRhythmLane || hasRiff ? 1 : 0)
                       : 0;
                     const barPaddingBottom = hasThreeNotationRows
                       ? 58
@@ -3160,11 +3155,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           e.stopPropagation();
                           emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'label');
                         }}
-                        title={canDragLabelLane ? getLabelLaneDragTitle(language) : undefined}
+                        title={canDragLabelLane ? getLabelLaneDragTitle(language) : barLabel}
                       >
                         {options?.shrink ? (
-                          <AutoShrink align="center" minScale={0.64} className="h-full items-center overflow-visible">
-                            <span className="inline-flex -translate-y-[1.5px] items-center justify-center whitespace-nowrap text-[8px] font-bold uppercase leading-none text-black">
+                          <AutoShrink align="center" minScale={options.inlineTimeSignature ? 0.64 : 0} fitNarrow={!options.inlineTimeSignature} className={`h-full min-w-0 items-center ${options.inlineTimeSignature ? 'overflow-visible' : ''}`}>
+                            <span className={`${options.inlineTimeSignature ? 'inline-flex -translate-y-[1.5px]' : 'flex'} items-center justify-center whitespace-nowrap text-[8px] font-bold uppercase leading-none text-black`}>
                               {barLabel}
                             </span>
                           </AutoShrink>
@@ -3770,18 +3765,18 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                     {hasBarLabelInContentLane && (
                                       <div
                                         data-preview-bar-label-column
-                                        className={`flex flex-shrink-0 flex-col ${hasThreeNotationRows ? 'gap-1.5' : 'gap-0.5'}`}
+                                        className={`flex max-w-[35%] min-w-0 flex-shrink-0 flex-col ${hasThreeNotationRows ? 'gap-1.5' : 'gap-0.5'}`}
                                       >
                                         <div className={`${sharedLaneClass} flex items-end`}>
                                           {labelLane === 'rhythm' ? (
-                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors')
+                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 max-w-full min-w-0 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors', { shrink: true })
                                           ) : (
                                             <span className="mb-0.5 h-[14px]" aria-hidden="true" />
                                           )}
                                         </div>
                                         <div className={`${sharedLaneClass} flex items-end`}>
                                           {labelLane === 'riff' ? (
-                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors')
+                                            renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 max-w-full min-w-0 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors', { shrink: true })
                                           ) : (
                                             <span className="mb-0.5 h-[14px]" aria-hidden="true" />
                                           )}
@@ -3866,54 +3861,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       </div>
                                   </div>
                                 </div>
-                                ) : labelUsesStandaloneNotationLane ? (
-                                  <div className="flex flex-col gap-1.5 overflow-visible">
-                                    <div className="flex h-[14px] items-end gap-1 overflow-visible">
-                                      {renderBarLabelBadge('border border-black px-1 rounded-sm flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors')}
-                                    </div>
-
-                                    <div className="flex items-end gap-1 overflow-visible" style={{ height: 18 + extraJianpuHeight }}>
-                                      <div
-                                        data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|jianpu|all`}
-                                        data-preview-hover-field={onElementClick ? 'jianpu' : undefined}
-                                        className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
-                                        style={{ minHeight: 18 + extraJianpuHeight }}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          emitElementClick(e, row.sIdx, row.startBIdx + bIdx, 'riff');
-                                        }}
-                                      >
-                                        <div className="relative z-[1] w-full min-w-0">
-                                          {activeJianpuCursor && renderActiveNotationCursor()}
-                                          <JianpuVoiceStack
-                                            voices={extraRiffVoices}
-                                            showPrimary={hasVisiblePreviewRiff(previewRiffNotation)}
-                                            primaryLabel={bar.riffLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
-                                            notation={previewRiffNotation}
-                                            compact
-                                            scale={previewJianpuScale}
-                                            timeSignature={effectiveTimeSignature}
-                                            gridSlotCount={notationBeatUnits}
-                                            color={unisonMarkColor}
-                                            className="w-full min-w-0"
-                                            incomingPhraseCount={phraseCarries[row.sIdx]?.[globalBarIndex]?.primary ?? 0}
-                                              previousNotationForCrossBar={previewPreviousRiffNotation}
-                                            nextNotationForCrossBar={previewNextRiffNotation}
-                                            activeNote={activeJianpuCursor?.noteIndex != null ? {
-                                              tokenIndex: activeJianpuCursor.beatIndex,
-                                              noteIndex: activeJianpuCursor.noteIndex
-                                            } : null}
-                                            onTokenClick={onElementClick ? emitJianpuInsertSelection : undefined}
-                                            onNoteClick={onElementClick ? emitJianpuNoteSelection : undefined}
-                                          />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
                                 ) : (
-                                  <div className="flex items-end gap-1 overflow-visible" style={{ height: 18 + (showBottomRhythmLane ? extraRhythmHeight : 0) }}>
+                                  <div className="flex items-end gap-1 overflow-visible" style={{ height: 18 + (showBottomRhythmLane ? extraRhythmHeight : extraJianpuHeight) }}>
                                     {hasBarLabelInContentLane && (
-                                      renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors')
+                                      renderBarLabelBadge('border border-black px-1 rounded-sm mb-0.5 max-w-[35%] min-w-0 flex-shrink-0 bg-gray-300/70 mix-blend-multiply z-10 flex items-center h-[14px] cursor-pointer transition-colors', { shrink: true })
                                     )}
 
                                     {(showBottomRhythmLane || hasRiff) && (

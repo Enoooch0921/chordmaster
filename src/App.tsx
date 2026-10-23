@@ -2,6 +2,7 @@ import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { normalizeJianpuVoices } from './utils/jianpuVoices';
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
 import { usePerformanceFullscreen } from './hooks/usePerformanceFullscreen';
+import PerformanceFullscreenControl from './components/PerformanceFullscreenControl';
 import { getPerformanceLayout, getPerformancePageRange, getPerformanceSpreadStart, PERFORMANCE_PAGE_GAP } from './utils/performanceLayout';
 import { CURRENT_CHORD_TIMING_VERSION, migrateChordTimingArrows } from './lib/chordTimingMigration';
 import LegacyDraftRecovery from './components/LegacyDraftRecovery';
@@ -7705,6 +7706,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   };
 
   const focusPerformanceKeyboardCapture = () => {
+    // Native modal dialogs are above the performance overlay. Let their controls
+    // keep focus instead of periodically pulling it back to the page turner.
+    if (document.querySelector('dialog[open]')) return;
     const focusTarget = performanceKeyboardCaptureRef.current ?? performanceOverlayRef.current;
     if (!focusTarget || document.activeElement === focusTarget) return;
 
@@ -7903,6 +7907,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   useEffect(() => {
     if (!isPerformanceMode) return;
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || document.querySelector('dialog[open]')) return;
       const direction = getPerformancePageDirection(e);
       const signature = getPerformanceKeyboardSignature(e);
       const now = window.performance.now();
@@ -7924,7 +7929,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         e.preventDefault();
         lastPerformanceKeyboardEventRef.current = { signature, handledAt: now };
         handlePerformancePrevPageRef.current();
-      } else if (e.key === 'Escape') {
+      } else if (e.key === 'Escape' && e.type === 'keydown') {
         e.preventDefault();
         lastPerformanceKeyboardEventRef.current = { signature, handledAt: now };
         handleExitPerformanceMode();
@@ -16749,23 +16754,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 	              right: 'max(16px, env(safe-area-inset-right, 0px))'
 	            }}
 	          >
-              {!performanceFullscreen.isFullscreen && !isStandaloneDisplay && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (performanceFullscreen.canRequestFullscreen) performanceFullscreen.requestFullscreen();
-                    else toast.info(language === 'zh'
-                      ? '若要隱藏網址列：在 Safari 點「分享」→「加入主畫面」，再從主畫面開啟 ChordMaster。'
-                      : 'To hide the address bar: in Safari, tap Share → Add to Home Screen, then open ChordMaster from the Home Screen.',
-                    { duration: 8000 });
-                  }}
-                  className={`pointer-events-auto rounded-full bg-stone-900/70 px-4 py-2 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm ${performanceChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-                >
-                  {performanceFullscreen.canRequestFullscreen
-                    ? (language === 'zh' ? '全螢幕' : 'Full screen')
-                    : (language === 'zh' ? '隱藏網址列' : 'Hide address bar')}
-                </button>
-              )}
+              <PerformanceFullscreenControl
+                language={language}
+                isFullscreen={performanceFullscreen.isFullscreen}
+                isStandalone={isStandaloneDisplay}
+                canRequestFullscreen={performanceFullscreen.canRequestFullscreen}
+                isAppleMobile={/iPhone|iPad|iPod/i.test(previewEditorUserAgent) || (previewEditorPlatform === 'MacIntel' && previewEditorTouchPoints > 1)}
+                visible={performanceChromeVisible}
+                onRequestFullscreen={performanceFullscreen.requestFullscreen}
+              />
 	            <button
 	              type="button"
 	              onClick={handleExitPerformanceMode}
