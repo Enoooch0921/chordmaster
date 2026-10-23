@@ -1,5 +1,5 @@
 import React from 'react';
-import { type JianpuNoteRange, applyJianpuAutoDurationShorthand, findJianpuNoteRanges, findJianpuPlaceholderRanges, getJianpuDurationUnits } from '../utils/jianpuUtils';
+import { type JianpuNoteRange, applyJianpuAutoDurationShorthand, findJianpuNoteRanges, findJianpuPlaceholderRanges, getJianpuDurationUnits, getJianpuGraceNotes, getJianpuPhraseSegments, getJianpuOpenPhraseCount, splitJianpuTokens } from '../utils/jianpuUtils';
 import { parseTimeSignature } from '../utils/rhythmUtils';
 
 interface JianpuProps {
@@ -12,6 +12,8 @@ interface JianpuProps {
   timeSignature?: string;
   previousNotationForCrossBar?: string;
   nextNotationForCrossBar?: string;
+  /** Open phrase arcs from the section history, including across line breaks. */
+  incomingPhraseCount?: number;
   activeTokenIndex?: number | null;
   activeInsertPosition?: { tokenIndex: number; slotIndex: number; slotCount: number; spanSlots?: number } | null;
   gridSlotCount?: number;
@@ -54,6 +56,8 @@ interface SlurSegment {
   type: 'pair' | 'self' | 'incoming' | 'outgoing';
   start?: LayoutNote;
   end?: LayoutNote;
+  phrase?: boolean;
+  depth?: number;
 }
 
 interface LayoutPlaceholder {
@@ -95,7 +99,7 @@ const getTokenList = (notation?: string, tokens?: string[]) => {
   if (notation.includes('|')) {
     return notation.split('|').map((token) => token.trim());
   }
-  return notation.trim().split(/\s+/).filter(Boolean);
+  return splitJianpuTokens(notation);
 };
 
 const getDurationLevel = (note: Pick<JianpuNoteRange, 'duration'>) => {
@@ -104,8 +108,8 @@ const getDurationLevel = (note: Pick<JianpuNoteRange, 'duration'>) => {
   return 0;
 };
 
-const getLayoutUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'>) => (
-  getJianpuDurationUnits(note.duration, note.dotted, note.triplet)
+const getLayoutUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'> & { units?: number }) => (
+  note.units ?? getJianpuDurationUnits(note.duration, note.dotted, note.triplet)
 );
 
 const getAnchorOffsetUnits = (
@@ -124,6 +128,7 @@ const Jianpu: React.FC<JianpuProps> = ({
   timeSignature = '4/4',
   previousNotationForCrossBar,
   nextNotationForCrossBar,
+  incomingPhraseCount,
   activeTokenIndex = null,
   activeInsertPosition = null,
   gridSlotCount = TOKEN_CAPACITY_UNITS,
@@ -142,9 +147,24 @@ const Jianpu: React.FC<JianpuProps> = ({
     () => getTokenList(notation, tokens),
     [notation, tokens]
   );
+  const hasIncomingCrossBarSlur = React.useMemo(() => {
+    if (!compact) return false;
+    const previousTokens = getTokenList(previousNotationForCrossBar);
+    const previousNotes = findJianpuNoteRanges(previousTokens[previousTokens.length - 1] ?? '');
+    return Boolean(previousNotes[previousNotes.length - 1]?.slurStart);
+  }, [compact, previousNotationForCrossBar]);
   const hasCompactTripletNotes = React.useMemo(() => (
     compact && tokenList.some((token) => findJianpuNoteRanges(token).some((note) => note.triplet))
   ), [compact, tokenList]);
+  const phraseIncomingCount = incomingPhraseCount ?? getJianpuOpenPhraseCount(previousNotationForCrossBar);
+  const phraseLift = React.useMemo(() => {
+    const phrases = getJianpuPhraseSegments(tokenList.flatMap(findJianpuNoteRanges), phraseIncomingCount);
+    const layers = phrases.reduce((max, phrase) => Math.max(max, phrase.depth + 1), 0);
+    return layers * (compact ? 8 : 10) * scale;
+  }, [compact, phraseIncomingCount, scale, tokenList]);
+  const accentLift = React.useMemo(() => (
+    tokenList.some(token => findJianpuNoteRanges(token).some(note => note.accent)) ? 10 * scale : 0
+  ), [scale, tokenList]);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = React.useState<number | null>(null);
   const notationColor = color || '#334155';
@@ -161,7 +181,7 @@ const Jianpu: React.FC<JianpuProps> = ({
     ));
   }, []);
 
-  const metrics = React.useMemo(() => {
+  const baseMetrics = React.useMemo(() => {
     if (compact) {
       return {
         height: (hasCompactTripletNotes ? 24 : 20) * scale,
@@ -238,6 +258,16 @@ const Jianpu: React.FC<JianpuProps> = ({
       placeholderSize: 4 * scale
     };
   }, [compact, hasCompactTripletNotes, renderMode, scale]);
+  const metrics = React.useMemo(() => ({
+    ...baseMetrics,
+    height: baseMetrics.height + phraseLift + accentLift,
+    digitCenterY: baseMetrics.digitCenterY + phraseLift + accentLift,
+    highDotY: baseMetrics.highDotY + phraseLift + accentLift,
+    lowDotY: baseMetrics.lowDotY + phraseLift + accentLift,
+    underlineY: baseMetrics.underlineY + phraseLift + accentLift,
+    slurBaseY: baseMetrics.slurBaseY + phraseLift + accentLift,
+    tripletY: baseMetrics.tripletY + phraseLift + accentLift
+  }), [accentLift, baseMetrics, phraseLift]);
 
 	  const { layoutNotes, layoutPlaceholders, underlineSegments, tripletSegments, slurSegments } = React.useMemo(() => {
 	    const notes: LayoutNote[] = [];
@@ -245,7 +275,9 @@ const Jianpu: React.FC<JianpuProps> = ({
 	    const underlines: UnderlineSegment[] = [];
 	    const triplets: TripletSegment[] = [];
     const useCarryLayout = renderMode !== 'editor';
+    const timedNotes: { note: LayoutNote; startUnits: number; endUnits: number }[] = [];
     let carryUnits = 0;
+    let timingCarryUnits = 0;
 
     tokenList.forEach((token, tokenIndex) => {
       const beatStartUnits = tokenIndex * TOKEN_WIDTH_UNITS;
@@ -264,6 +296,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       ].sort((a, b) => a.start - b.start);
       if (slotItems.length === 0) {
         carryUnits = useCarryLayout ? Math.max(0, carryInUnits - tokenCapacityUnits) : 0;
+        timingCarryUnits = Math.max(0, timingCarryUnits - tokenCapacityUnits);
         return;
       }
 
@@ -367,39 +400,47 @@ const Jianpu: React.FC<JianpuProps> = ({
           });
 	        }
 
-	        let tripletGroup: LayoutNote[] = [];
-	        const flushTripletGroup = () => {
-	          if (tripletGroup.length === 0) return;
-	          const first = tripletGroup[0];
-	          const last = tripletGroup[tripletGroup.length - 1];
-	          triplets.push({
-	            key: `${tokenIndex}-triplet-${first.start}-${last.start}`,
-	            tokenIndex,
-	            leftUnits: first.underlineLeftUnits - 2,
-	            rightUnits: last.underlineRightUnits + 2
-	          });
-	          tripletGroup = [];
-	        };
-
-	        tokenNotes.forEach((note) => {
-	          if (!note.triplet) {
-	            flushTripletGroup();
-	            return;
-	          }
-	          const previous = tripletGroup[tripletGroup.length - 1] ?? null;
-	          if (previous && Math.abs(note.unitStart - previous.unitEnd) > 0.01) {
-	            flushTripletGroup();
-	          }
-	          tripletGroup.push(note);
-	        });
-	        flushTripletGroup();
 	      }
 
+      tokenNotes.forEach((note) => {
+        const timingOffset = tokenIndex * tokenCapacityUnits + timingCarryUnits - carryInUnits;
+        timedNotes.push({ note, startUnits: timingOffset + note.unitStart, endUnits: timingOffset + note.unitEnd });
+      });
+      timingCarryUnits = Math.max(0, timingCarryUnits + tokenTotalUnits - tokenCapacityUnits);
       notes.push(...tokenNotes);
     });
 
+    // Triplets can span beat tokens. Group by musical time even in the editor,
+    // whose visual positions intentionally remain within the input grid.
+    let tripletGroup: typeof timedNotes = [];
+    const flushTripletGroup = () => {
+      if (tripletGroup.length === 0) return;
+      const first = tripletGroup[0].note;
+      const last = tripletGroup[tripletGroup.length - 1].note;
+      triplets.push({
+        key: `${first.tokenIndex}-triplet-${first.start}-${last.tokenIndex}-${last.start}`,
+        tokenIndex: first.tokenIndex,
+        leftUnits: first.underlineLeftUnits - 2,
+        rightUnits: last.underlineRightUnits + 2
+      });
+      tripletGroup = [];
+    };
+    timedNotes.forEach((item) => {
+      if (!item.note.triplet) {
+        flushTripletGroup();
+        return;
+      }
+      const previous = tripletGroup[tripletGroup.length - 1];
+      if (previous && (tripletGroup.length === 3 || previous.note.duration !== item.note.duration || Math.abs(item.startUnits - previous.endUnits) > JIANPU_LAYOUT_EPSILON)) {
+        flushTripletGroup();
+      }
+      tripletGroup.push(item);
+    });
+    flushTripletGroup();
+
     const slurs: SlurSegment[] = [];
     let openSlur: LayoutNote | null = null;
+    const incomingCrossBarEnd = hasIncomingCrossBarSlur ? notes.find((note) => note.slurEnd) : null;
 
     notes.forEach((note) => {
       if (note.slurEnd && openSlur) {
@@ -410,7 +451,7 @@ const Jianpu: React.FC<JianpuProps> = ({
           end: note
         });
         openSlur = null;
-      } else if (note.slurStart && note.slurEnd) {
+      } else if (note.slurStart && note.slurEnd && note !== incomingCrossBarEnd) {
         slurs.push({ key: `self-${note.tokenIndex}-${note.noteIndex}`, type: 'self', start: note, end: note });
       } else if (note.slurEnd) {
         slurs.push({ key: `incoming-${note.tokenIndex}-${note.noteIndex}`, type: 'incoming', end: note });
@@ -429,6 +470,10 @@ const Jianpu: React.FC<JianpuProps> = ({
       });
     }
 
+    getJianpuPhraseSegments(notes, phraseIncomingCount).forEach((phrase, index) => {
+      slurs.push({ ...phrase, key: `phrase-${index}`, phrase: true });
+    });
+
     return {
 	      layoutNotes: notes,
 	      layoutPlaceholders: placeholders,
@@ -436,7 +481,7 @@ const Jianpu: React.FC<JianpuProps> = ({
 	      tripletSegments: triplets,
 	      slurSegments: slurs
 	    };
-  }, [metrics.noteHalfWidthUnits, metrics.tokenPaddingUnits, renderMode, tokenList, tokenCapacityUnits]);
+  }, [hasIncomingCrossBarSlur, metrics.noteHalfWidthUnits, metrics.tokenPaddingUnits, phraseIncomingCount, renderMode, tokenList, tokenCapacityUnits]);
 
   const tokenCount = Math.max(1, tokenList.length);
   const totalWidthUnits = tokenCount * TOKEN_WIDTH_UNITS;
@@ -456,10 +501,11 @@ const Jianpu: React.FC<JianpuProps> = ({
   }, [getTokenPixelBounds]);
   const useSnappedPixelCenter = compact || renderMode === 'editor';
   const getRenderedNoteCenterX = React.useCallback((note: Pick<LayoutNote, 'xUnits' | 'tokenIndex'>) => {
-    if (!(useSnappedPixelCenter && containerWidth !== null)) return note.xUnits;
+    if (containerWidth === null) return note.xUnits;
+    if (!useSnappedPixelCenter) return (note.xUnits / totalWidthUnits) * containerWidth;
     const noteLocalUnits = note.xUnits - (note.tokenIndex * TOKEN_WIDTH_UNITS);
     return getTokenAlignedPx(note.tokenIndex, noteLocalUnits) ?? note.xUnits;
-  }, [containerWidth, getTokenAlignedPx, useSnappedPixelCenter]);
+  }, [containerWidth, getTokenAlignedPx, totalWidthUnits, useSnappedPixelCenter]);
   const getProjectedPreviewNoteCenterX = React.useCallback((
     note: Pick<LayoutNote, 'xUnits' | 'tokenIndex'> & { xRatio: number; tokenCount: number },
     laneWidth: number
@@ -689,6 +735,7 @@ const Jianpu: React.FC<JianpuProps> = ({
             <span
               key={segment.key}
               className="absolute rounded-full bg-slate-700"
+              data-jianpu-underline={segment.level}
               style={{
                 left: snappedLeftPx !== null
                   ? `${snappedLeftPx}px`
@@ -923,6 +970,11 @@ const Jianpu: React.FC<JianpuProps> = ({
         const useDirectOctaveDotPlacement = renderMode === 'editor' || compact;
         const useDirectDottedPlacement = renderMode === 'editor';
         const durationLevel = getDurationLevel(note);
+        const graces = getJianpuGraceNotes(note);
+        const graceWidth = 24 + 14 * Math.max(0, graces.length - 1);
+        const graceBeamY = Math.max(14, ...graces.map(grace => grace.octave < 0 ? 15 + (Math.min(3, -grace.octave) - 1) * 2.5 : 14));
+        const graceArcY = graces.length > 1 ? graceBeamY + 3 : 17;
+        const graceHeight = Math.max(24, graceArcY + 7);
         const snappedOctaveDotSize = useDirectOctaveDotPlacement
           ? Math.max(2, Math.round(metrics.octaveDotSize))
           : metrics.octaveDotSize;
@@ -969,6 +1021,44 @@ const Jianpu: React.FC<JianpuProps> = ({
 
         return (
           <React.Fragment key={`${note.tokenIndex}-${note.noteIndex}-${note.start}`}>
+            {note.accent && (
+              <svg
+                data-jianpu-accent
+                data-jianpu-accent-token={note.tokenIndex}
+                data-jianpu-accent-note={note.noteIndex}
+                aria-label="Accent"
+                className="absolute pointer-events-none overflow-visible"
+                viewBox="0 0 6 4"
+                style={{
+                  left: centerLeft,
+                  top: `${Math.min(
+                    metrics.digitCenterY - metrics.digitFontSize * 0.52,
+                    highDots ? snappedHighDotTop - (highDots - 1) * octaveDotGap : Infinity,
+                    note.triplet ? metrics.tripletY : Infinity,
+                    note.slurStart || note.slurEnd ? metrics.slurBaseY - 4 * scale : Infinity
+                  ) - 8 * scale}px`,
+                  width: `${6 * scale}px`,
+                  height: `${4 * scale}px`,
+                  transform: 'translateX(-50%)',
+                  color: notationColor
+                }}
+              >
+                <path d="M0.5 0.5L5.5 2L0.5 3.5" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+            {graces.length > 0 && (
+              <svg data-jianpu-grace-note="true" aria-label={`${graces.length === 1 ? 'Grace note' : 'Grace notes'} ${graces.map(grace => `${grace.accidental}${grace.pitch}`).join(' ')}`} className="absolute pointer-events-none overflow-visible" viewBox={`0 0 ${graceWidth} ${graceHeight}`} style={{ left: `calc(${centerLeft} - ${metrics.digitFontSize * ((note.accidental ? 1.65 : 1.3) + 1.6 * (graceWidth - 24) / 24)}px)`, top: `${metrics.digitCenterY - metrics.digitFontSize * 1.35}px`, width: `${metrics.digitFontSize * 1.6 * graceWidth / 24}px`, height: `${metrics.digitFontSize * 1.6 * graceHeight / 24}px`, color: symbolColor }}>
+                {graces.map((grace, index) => (
+                  <g key={index} data-jianpu-grace-index={index}>
+                    <text data-jianpu-grace-pitch={grace.pitch} x={9 + index * 14} y="11" textAnchor="middle" fontSize="11" fontFamily={JIANPU_SYMBOL_FONT} fill="currentColor">{grace.pitch}</text>
+                    {grace.accidental && <text x={index * 14} y="10" fontSize="8" fontFamily={JIANPU_SYMBOL_FONT} fill="currentColor">{grace.accidental === '#' ? '♯' : '♭'}</text>}
+                    {Array.from({ length: Math.min(3, Math.abs(grace.octave)) }, (_, dot) => <circle key={dot} cx={9 + index * 14} cy={grace.octave > 0 ? 1 - dot * 2.5 : 13 + dot * 2.5} r="0.8" fill="currentColor" />)}
+                  </g>
+                ))}
+                {graces.length > 1 && <path data-jianpu-grace-beam="true" d={`M4 ${graceBeamY} H${14 + (graces.length - 1) * 14}`} fill="none" stroke="currentColor" strokeWidth="1" />}
+                <path d={`M9 ${graceArcY} Q${(graceWidth + 6) / 2} ${graceArcY + 5} ${graceWidth - 2} ${graceArcY + 2}`} fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+              </svg>
+            )}
             {note.accidental && (
               <span
                 className="absolute leading-none"
@@ -1108,7 +1198,9 @@ const Jianpu: React.FC<JianpuProps> = ({
             if (
               compact &&
               slur.type === 'incoming' &&
-              previousCrossBarNotes[previousCrossBarNotes.length - 1]?.slurStart
+              (slur.phrase
+                ? previousNotationForCrossBar !== undefined && phraseIncomingCount > 0
+                : previousCrossBarNotes[previousCrossBarNotes.length - 1]?.slurStart)
             ) {
               return null;
             }
@@ -1118,8 +1210,12 @@ const Jianpu: React.FC<JianpuProps> = ({
             const edgeOvershoot = renderMode === 'editor' ? 8 : compact ? 5 : 10;
             const startNote = resolveSlurAnchor(slur.start ?? null, layoutNotes);
             const endNote = resolveSlurAnchor(slur.end ?? null, layoutNotes);
+            const outgoingPhraseCount = slurSegments.filter(segment => segment.phrase && segment.type === 'outgoing').length;
             const markedCrossBarNextEnd = compact && slur.type === 'outgoing'
-              ? nextCrossBarNotes.find((note) => note.slurEnd) ?? null
+              ? slur.phrase
+                ? getJianpuPhraseSegments(nextCrossBarNotes, outgoingPhraseCount)
+                  .find(segment => segment.type === 'incoming' && segment.incomingIndex === slur.depth)?.end ?? null
+                : nextCrossBarNotes.find((note) => note.slurEnd) ?? null
               : null;
             const crossBarNextEnd = resolveSlurAnchor(markedCrossBarNextEnd, nextCrossBarNotes);
             const laneWidth = containerWidth ?? totalWidthUnits;
@@ -1141,13 +1237,17 @@ const Jianpu: React.FC<JianpuProps> = ({
               compact ? 10 : 18,
               Math.max(compact ? 4.6 : 7, span * (compact ? 0.24 : 0.22))
             );
-            const controlY = Math.max(compact ? -10 : 1, anchorY - curveLift);
+            const phraseLayers = slur.phrase
+              ? Math.max(1, Math.max(...slurSegments.filter(segment => segment.phrase).map(segment => segment.depth ?? 0)) + 1 - (slur.depth ?? 0))
+              : 0;
+            const controlY = Math.max(compact ? -10 : 1, anchorY - curveLift) - phraseLayers * (compact ? 8 : 10) * scale;
             const controlOffset = Math.max(4, span * 0.28);
 
             return (
               <path
                 key={slur.key}
-                data-jianpu-slur={slur.type}
+                data-jianpu-slur={slur.phrase ? undefined : slur.type}
+                data-jianpu-phrase={slur.phrase ? slur.type : undefined}
                 d={`M ${startX} ${anchorY} C ${startX + controlOffset} ${controlY} ${endX - controlOffset} ${controlY} ${endX} ${anchorY}`}
                 fill="none"
                 stroke={color ? notationColor : 'rgba(71, 85, 105, 0.9)'}

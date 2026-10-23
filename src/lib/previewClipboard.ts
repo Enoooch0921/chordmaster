@@ -1,20 +1,24 @@
+import { hasUnmeteredChords, unmeteredChordText, transposeUnmeteredChordLines } from '../utils/unmeteredChords';
+import { getChordPassEvents, transposeChordPassVariants } from '../utils/chordPassVariants';
+import { transposeChordSubdivisions, getChordEvents, chordEventLabel } from '../utils/chordSubdivisions';
 import type { Bar, Key, Song } from '../types';
 import { getTransposeOffset, transposeChord } from '../utils/musicUtils';
 import {
-  findSongBar, getBarsByIdentities, getBarStoredKey, getEffectiveTimeSignatureForBar,
+  findSongBar, getBarsByIdentities, getBarStoredKey, getEffectiveTimeSignatureForBar, getStructuralTimeSignatureForBar,
   isBarCompletelyEmpty, pasteBarsAtBar, type SongBarIdentity
 } from './songEditing';
 
 export type PreviewClipboardKind = 'bars' | 'chords' | 'rhythm' | 'jianpu' | 'label' | 'annotation' | 'marker';
 export interface PreviewClipboard {
   kind: PreviewClipboardKind;
-  items: Array<{ bar: Bar; timeSignature: string; key: Key; absoluteJianpu: boolean }>;
+  items: Array<{ bar: Bar; timeSignature: string; structuralTimeSignature?: string; key: Key; absoluteJianpu: boolean }>;
 }
 
 export function copyPreviewContent(song: Song, targets: SongBarIdentity[], kind: PreviewClipboardKind): PreviewClipboard | null {
   const items = getBarsByIdentities(song, targets).map(({ bar, target }) => ({
     bar: structuredClone(bar),
     timeSignature: getEffectiveTimeSignatureForBar(song, bar),
+    structuralTimeSignature: getStructuralTimeSignatureForBar(song, bar),
     key: getBarStoredKey(song, target),
     absoluteJianpu: Boolean(song.jianpuInputAbsolute)
   }));
@@ -24,10 +28,13 @@ export function copyPreviewContent(song: Song, targets: SongBarIdentity[], kind:
 const markerFields = ['leftMarker', 'rightMarker', 'leftText', 'rightText', 'repeatStart', 'repeatEnd', 'finalBar', 'ending'] as const;
 
 export function previewClipboardText(clipboard: PreviewClipboard): string {
-  return clipboard.items.map(({ bar }) => {
+  return clipboard.items.map(({ bar, timeSignature }) => {
+    const chordText = hasUnmeteredChords(bar) ? unmeteredChordText(bar.unmeteredChordLines!) : !bar.chordTimingUnspecified && bar.chordSubdivisions?.length ? getChordEvents(bar, Number(timeSignature.split('/')[0]) || 4).map(e => `${chordEventLabel(e.beat,e.offset)}: ${e.chord}`).join(' · ') : bar.chords.join(' ');
+    const alternatives = (bar.chordPassVariants ?? []).map(variant => `Pass ${variant.pass}: ${bar.chordTimingUnspecified ? variant.chords.join(' ') : getChordPassEvents(bar, Number(timeSignature.split('/')[0]) || 4, variant.pass).map(e => `${chordEventLabel(e.beat, e.offset)}: ${e.chord}`).join(' · ')}`).join('\n');
+    const allChordText = alternatives ? `${chordText}\n${alternatives}` : chordText;
     switch (clipboard.kind) {
-      case 'bars': return `| ${bar.chords.join(' ')} |${bar.rhythm ? `\n${bar.rhythm}` : ''}${bar.riff ? `\n${bar.riff}` : ''}`;
-      case 'chords': return bar.chords.join(' ');
+      case 'bars': return `${hasUnmeteredChords(bar) ? allChordText : `| ${allChordText} |`}${bar.rhythm ? `\n${bar.rhythm}` : ''}${bar.riff ? `\n${bar.riff}` : ''}`;
+      case 'chords': return allChordText;
       case 'rhythm': return bar.rhythm ?? '';
       case 'jianpu': return bar.riff ?? '';
       case 'label': return bar.label ?? bar.rhythmLabel ?? bar.riffLabel ?? '';
@@ -37,7 +44,7 @@ export function previewClipboardText(clipboard: PreviewClipboard): string {
   }).join('\n');
 }
 
-export type PreviewPasteError = 'missing-target' | 'count-mismatch' | 'time-signature' | 'jianpu-mode';
+export type PreviewPasteError = 'missing-target' | 'count-mismatch' | 'time-signature' | 'jianpu-mode' | 'unmetered-content';
 export interface PreviewPasteResult {
   song: Song;
   targets: SongBarIdentity[];
@@ -69,17 +76,22 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
     if (clipboard.items.some((item) => item.bar.riff?.trim() && item.absoluteJianpu !== Boolean(song.jianpuInputAbsolute))) return failure('jianpu-mode');
     const destination = located[0];
     const mode = isBarCompletelyEmpty(destination.bar) ? 'replace-empty' : 'after';
-    let meter = getEffectiveTimeSignatureForBar(song, destination.bar);
+    let meter = getStructuralTimeSignatureForBar(song, destination.bar);
     let key = getBarStoredKey(song, destination.target);
     const bars = clipboard.items.map((item) => {
       const bar = structuredClone(item.bar);
-      if (item.timeSignature !== meter) bar.timeSignature = item.timeSignature;
-      if (item.key !== key) bar.keyChangeTo = item.key;
-      meter = item.timeSignature;
-      key = item.key;
+      if (bar.partialMeasure) {
+        if ((item.structuralTimeSignature ?? item.timeSignature) !== meter) return null;
+      } else if (item.timeSignature !== meter) {
+        bar.timeSignature = item.timeSignature;
+      }
+      if (!bar.chordKeyUnspecified && item.key !== key) bar.keyChangeTo = item.key;
+      if (!bar.partialMeasure) meter = item.timeSignature;
+      if (!bar.chordKeyUnspecified) key = item.key;
       return bar;
     });
-    const result = pasteBarsAtBar(song, destination.target, bars, mode);
+    if (bars.some((bar) => bar === null)) return failure('time-signature');
+    const result = pasteBarsAtBar(song, destination.target, bars as Bar[], mode);
     // Preserve inherited meter/key at the copy boundary, including when a
     // copied modulation would otherwise alter the untouched following bars.
     const allTargets = song.sections.flatMap((section) => section.bars.flatMap((bar) => (
@@ -89,9 +101,9 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
     const nextOriginal = nextTarget && findSongBar(song, nextTarget);
     const nextPasted = nextTarget && findSongBar(result.song, nextTarget);
     if (nextOriginal && nextPasted) {
-      const nextMeter = getEffectiveTimeSignatureForBar(song, nextOriginal.bar);
+      const nextMeter = getStructuralTimeSignatureForBar(song, nextOriginal.bar);
       const nextKey = getBarStoredKey(song, nextTarget);
-      const restoreMeter = getEffectiveTimeSignatureForBar(result.song, nextPasted.bar) !== nextMeter;
+      const restoreMeter = getStructuralTimeSignatureForBar(result.song, nextPasted.bar) !== nextMeter;
       const restoreKey = getBarStoredKey(result.song, nextTarget) !== nextKey;
       if (restoreMeter || restoreKey) {
         result.song = {
@@ -116,7 +128,17 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
   const patches = new Map<string, Bar>();
   for (const [index, destination] of located.entries()) {
     const source = clipboard.items[clipboard.items.length === 1 ? 0 : index];
+    // A chord-only paste must not turn existing measured notation/navigation
+    // into hidden data. Whole-block paste remains available as an insertion.
+    if (clipboard.kind === 'chords' && hasUnmeteredChords(source.bar) !== hasUnmeteredChords(destination.bar)
+      && (destination.bar.rhythm?.trim() || destination.bar.riff?.trim()
+        || destination.bar.rhythmVoices?.length || destination.bar.riffVoices?.length
+        || destination.bar.leftMarker || destination.bar.rightMarker || destination.bar.leftText?.trim()
+        || destination.bar.rightText?.trim() || destination.bar.repeatStart || destination.bar.repeatEnd
+        || destination.bar.finalBar || destination.bar.ending?.trim())) return failure('unmetered-content');
+    if (hasUnmeteredChords(destination.bar) && ['rhythm', 'jianpu', 'marker'].includes(clipboard.kind)) return failure('unmetered-content');
     if (['chords', 'rhythm', 'jianpu'].includes(clipboard.kind)
+      && !(clipboard.kind === 'chords' && (hasUnmeteredChords(source.bar) || source.bar.chordTimingUnspecified))
       && source.timeSignature !== getEffectiveTimeSignatureForBar(song, destination.bar)) return failure('time-signature');
     if (clipboard.kind === 'jianpu' && source.absoluteJianpu !== Boolean(song.jianpuInputAbsolute)) return failure('jianpu-mode');
     const bar = { ...destination.bar };
@@ -124,8 +146,13 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
       case 'chords': {
         const key = getBarStoredKey(song, destination.target);
         const offset = getTransposeOffset(source.key, key);
-        bar.chords = source.bar.chords.map((chord) => offset ? transposeChord(chord, offset, key, false, source.key) : chord);
+        bar.chords = source.bar.chords.map((chord) => !source.bar.chordKeyUnspecified && offset ? transposeChord(chord, offset, key, false, source.key) : chord);
+        bar.chordTimingUnspecified = source.bar.chordTimingUnspecified;
+        bar.chordKeyUnspecified = source.bar.chordKeyUnspecified;
         bar.chordMarks = structuredClone(source.bar.chordMarks);
+        bar.chordSubdivisions = source.bar.chordKeyUnspecified ? structuredClone(source.bar.chordSubdivisions) : transposeChordSubdivisions(source.bar.chordSubdivisions, offset, key, source.key);
+        bar.chordPassVariants = source.bar.chordKeyUnspecified ? structuredClone(source.bar.chordPassVariants) : transposeChordPassVariants(source.bar.chordPassVariants, offset, key, source.key);
+        bar.unmeteredChordLines = source.bar.chordKeyUnspecified ? structuredClone(source.bar.unmeteredChordLines) : transposeUnmeteredChordLines(source.bar.unmeteredChordLines, offset, key, source.key);
         break;
       }
       case 'rhythm':

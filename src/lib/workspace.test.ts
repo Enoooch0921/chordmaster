@@ -3,6 +3,7 @@ import type { StoredSong } from '../types';
 import {
   consumeLocalWorkspaceRecoveryNotice,
   loadLocalWorkspaceSnapshot,
+  normalizeStoredSong,
   persistLocalWorkspaceSnapshot,
   SONG_LIBRARY_STORAGE_KEY,
   WORKSPACE_CORRUPT_SNAPSHOT_STORAGE_KEY,
@@ -39,6 +40,15 @@ describe('local workspace snapshots', () => {
     expect(restored.songs).toHaveLength(1);
     expect(restored.songs[0].title).toBe('First');
     expect(restored.lastSavedAt).toBe(savedAt);
+  });
+
+  it('preserves D.C. al Fine as a structured marker through normalization and storage', () => {
+    const song = makeSong('song-dc-fine', 'Return to Fine');
+    song.sections[0].bars[0].rightMarker = 'dc-al-fine';
+
+    expect(normalizeStoredSong(song, 0).sections[0].bars[0].rightMarker).toBe('dc-al-fine');
+    persistLocalWorkspaceSnapshot([song], [], []);
+    expect(loadLocalWorkspaceSnapshot().songs[0].sections[0].bars[0].rightMarker).toBe('dc-al-fine');
   });
 
   it('keeps the previous verified snapshot and restores it when the primary is corrupt', () => {

@@ -8,7 +8,9 @@
 import type { Bar, Key, Song } from '../types';
 import {
   type JianpuAccidental,
+  MAX_RELATIVE_OCTAVE_SHIFT,
   type JianpuDuration,
+  type JianpuGraceNote,
   type JianpuInputMode,
   type JianpuNoteRange,
   type JianpuOctave,
@@ -23,6 +25,7 @@ import {
   findJianpuNoteRanges,
   findJianpuPlaceholderRanges,
   getJianpuDurationUnits,
+  getJianpuPhraseSegments,
   getCanonicalJianpuBeatTokens,
   getCanonicalJianpuNotation,
   rebuildJianpuNote,
@@ -56,6 +59,8 @@ export interface JianpuCursor {
 
 export type JianpuAction =
   | { type: 'insert-pitch'; pitch: JianpuPitch }
+  | { type: 'set-grace'; grace: JianpuGraceNote | null }
+  | { type: 'set-graces'; graces: JianpuGraceNote[] }
   | { type: 'insert-rest' }
   | { type: 'insert-hold' }
   | { type: 'set-duration'; duration: JianpuDuration }
@@ -206,7 +211,7 @@ const getNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'tripl
 );
 
 const normalizeInputMode = (mode: JianpuInputMode): JianpuInputMode => {
-  const triplet = mode.duration !== 'sixteenth' && Boolean(mode.triplet);
+  const triplet = Boolean(mode.triplet);
   return {
     ...mode,
     octave: Number.isFinite(mode.octave) ? Math.trunc(mode.octave) : 0,
@@ -232,8 +237,8 @@ export const fitJianpuInputModeToUnits = (
     return { ...normalized, dotted: false };
   }
   const duration = (['quarter', 'eighth', 'sixteenth'] as JianpuDuration[])
-    .find((candidate) => getJianpuDurationUnits(candidate, false, normalized.triplet && candidate !== 'sixteenth') <= availableUnits + EPSILON);
-  return duration ? { ...normalized, duration, dotted: false, triplet: normalized.triplet && duration !== 'sixteenth' } : normalized;
+    .find((candidate) => getJianpuDurationUnits(candidate, false, normalized.triplet) <= availableUnits + EPSILON);
+  return duration ? { ...normalized, duration, dotted: false, triplet: normalized.triplet } : normalized;
 };
 
 const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | null => {
@@ -265,7 +270,7 @@ const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | n
 	        kind: 'placeholder' as const,
 	        charStart: placeholder.start,
 	        charEnd: placeholder.end,
-	        units: getJianpuDurationUnits(placeholder.duration, placeholder.dotted, placeholder.triplet),
+	        units: placeholder.units,
 	        duration: placeholder.duration,
 	        dotted: placeholder.dotted,
 	        triplet: placeholder.triplet
@@ -517,11 +522,11 @@ export const getJianpuInputAvailability = (
     remainingUnits,
 	    canQuarter: remainingUnits + EPSILON >= getJianpuDurationUnits('quarter', mode.dotted, mode.triplet),
 	    canEighth: remainingUnits + EPSILON >= getJianpuDurationUnits('eighth', mode.dotted, mode.triplet),
-	    canSixteenth: remainingUnits + EPSILON >= getJianpuDurationUnits('sixteenth', false),
+	    canSixteenth: remainingUnits + EPSILON >= getJianpuDurationUnits('sixteenth', false, mode.triplet),
 	    canDot: !mode.triplet &&
 	      mode.duration !== 'sixteenth' &&
 	      remainingUnits + EPSILON >= getJianpuDurationUnits(mode.duration, true),
-	    canTriplet: mode.duration !== 'sixteenth' &&
+	    canTriplet:
 	      remainingUnits + EPSILON >= getJianpuDurationUnits(mode.duration, false, true)
 	  };
 };
@@ -693,18 +698,35 @@ const sanitizeSectionSlurs = (song: Song, sectionIndex: number): Song => {
     return findJianpuNoteRanges(riff).map((note) => ({ barIndex, riff, note }));
   });
   const updates = new Map<number, Array<{ start: number; end: number; replacement: string }>>();
-  refs.forEach((ref, index) => {
-    if (ref.note.slurStart && ref.note.slurEnd) return;
-    const previous = refs[index - 1]?.note ?? null;
-    const next = refs[index + 1]?.note ?? null;
-    const slurStart = Boolean(ref.note.slurStart && next?.slurEnd);
-    const slurEnd = Boolean(ref.note.slurEnd && previous?.slurStart);
-    if (slurStart === ref.note.slurStart && slurEnd === ref.note.slurEnd) return;
+  const phraseCounts = new Map<JianpuNoteRange, { starts: number; ends: number }>();
+  const tiedNotes = refs.map(ref => ({
+    note: ref.note,
+    phraseStartCount: ref.note.slurStart ? 1 : 0,
+    phraseEndCount: ref.note.slurEnd ? 1 : 0
+  }));
+  const tieCounts = new Map<JianpuNoteRange, { starts: boolean; ends: boolean }>();
+  refs.forEach(ref => tieCounts.set(ref.note, { starts: false, ends: false }));
+  getJianpuPhraseSegments(tiedNotes).forEach(segment => {
+    if (!segment.start || !segment.end || segment.start.note.pitch === '0' || segment.end.note.pitch === '0') return;
+    tieCounts.get(segment.start.note)!.starts = true;
+    tieCounts.get(segment.end.note)!.ends = true;
+  });
+  refs.forEach(ref => phraseCounts.set(ref.note, { starts: 0, ends: 0 }));
+  getJianpuPhraseSegments(refs.map(ref => ref.note)).forEach(segment => {
+    if (!segment.start || !segment.end || !/^[1-7]$/.test(segment.start.pitch) || !/^[1-7]$/.test(segment.end.pitch)) return;
+    phraseCounts.get(segment.start)!.starts++;
+    phraseCounts.get(segment.end)!.ends++;
+  });
+  refs.forEach((ref) => {
+    const { starts: slurStart, ends: slurEnd } = tieCounts.get(ref.note)!;
+    const phrase = phraseCounts.get(ref.note)!;
+    if (slurStart === ref.note.slurStart && slurEnd === ref.note.slurEnd &&
+      phrase.starts === (ref.note.phraseStartCount ?? 0) && phrase.ends === (ref.note.phraseEndCount ?? 0)) return;
     const list = updates.get(ref.barIndex) ?? [];
     list.push({
       start: ref.note.start,
       end: ref.note.end,
-      replacement: rebuildJianpuNote(ref.note, { slurStart, slurEnd })
+      replacement: rebuildJianpuNote(ref.note, { slurStart, slurEnd, phraseStartCount: phrase.starts, phraseEndCount: phrase.ends })
     });
     updates.set(ref.barIndex, list);
   });
@@ -856,6 +878,13 @@ const cursorInputModeFromNote = (
 };
 
 /** Return the visible input controls represented by a selected semantic note. */
+export const getJianpuSelectedNoteAtCursor = (song: Song, target: SongBarIdentity, cursor: JianpuCursor, pitchContext?: JianpuPitchContext): JianpuNoteRange | null => {
+  const context = buildContext(song, target);
+  if (!context) return null;
+  const selected = selectedNoteAtCursor(context, clampCursor(context, cursor));
+  return selected ? displayNoteForInputMode(song, target, selected.note, pitchContext) : null;
+};
+
 export const getJianpuInputModeAtCursor = (
   song: Song,
   target: SongBarIdentity,
@@ -1010,7 +1039,7 @@ const insertPitch = (
   }
 
   const availableUnits = getAvailableUnitsAtCursor(context, safeCursor);
-  if (availableUnits < 1 - EPSILON) {
+  if (availableUnits < (normalizedMode.triplet ? 2 / 3 : 1) - EPSILON) {
     return baseResult(song, target, safeCursor, normalizedMode, '這個位置沒有可用的簡譜空位。');
   }
   const fittedMode = fitJianpuInputModeToUnits(normalizedMode, availableUnits);
@@ -1111,7 +1140,7 @@ const setDuration = (
   if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
 	  const safeCursor = clampCursor(context, cursor);
 	  const selected = selectedNoteAtCursor(context, safeCursor);
-	  const triplet = duration !== 'sixteenth' && (selected?.note.triplet ?? inputMode.triplet);
+	  const triplet = (selected?.note.triplet ?? inputMode.triplet);
 	  const dotted = triplet || duration === 'sixteenth' ? false : (selected?.note.dotted ?? inputMode.dotted);
 	  const nextInput = normalizeInputMode({ ...inputMode, duration, dotted, triplet });
 	  if (!selected) {
@@ -1181,9 +1210,6 @@ const toggleTriplet = (
   const selected = selectedNoteAtCursor(context, safeCursor);
   const targetNote = selected ?? noteEndingAtCursor(context, safeCursor);
   const duration = targetNote?.note.duration ?? inputMode.duration;
-  if (duration === 'sixteenth') {
-    return baseResult(song, target, safeCursor, inputMode, '十六分音符不支援三連音。');
-  }
   const triplet = !(targetNote?.note.triplet ?? inputMode.triplet);
   const nextInput = normalizeInputMode({ ...inputMode, duration, dotted: false, triplet });
   if (!targetNote) {
@@ -1406,6 +1432,18 @@ const clearFormatting = (
   return baseResult(resized.song, target, safeCursor, resized.error ? inputMode : clearedMode, resized.error);
 };
 
+const setGraces = (song: Song, target: SongBarIdentity, cursor: JianpuCursor, inputMode: JianpuInputMode, graces: JianpuGraceNote[], pitchContext?: JianpuPitchContext): JianpuCommandResult => {
+  const context = buildContext(song, target);
+  if (!context) return baseResult(song, target, cursor, inputMode, '找不到要編輯的小節。');
+  const safeCursor = clampCursor(context, cursor);
+  const selected = selectedNoteAtCursor(context, safeCursor);
+  if (!selected || !/^[1-7]$/.test(selected.note.pitch)) return baseResult(song, target, safeCursor, inputMode, '請先選取裝飾音要連接的主音。');
+  if (graces.some((grace) => !/^[1-7]$/.test(grace.pitch) || !['', '#', 'b'].includes(grace.accidental) || !Number.isInteger(grace.octave) || Math.abs(grace.octave) > MAX_RELATIVE_OCTAVE_SHIFT)) return baseResult(song, target, safeCursor, inputMode, '裝飾音格式不正確。');
+  const resolved = graces.map((grace) => resolveInputParts(song, target, grace.pitch, normalizeAccidental(grace.accidental), grace.octave, pitchContext));
+  const resized = resizeSelectedNote(song, target, context, selected, rebuildJianpuNote(selected.note, { graceNotes: resolved }));
+  return baseResult(resized.song, target, safeCursor, inputMode, resized.error);
+};
+
 export const applyJianpuCommand = (
   song: Song,
   target: SongBarIdentity,
@@ -1421,6 +1459,10 @@ export const applyJianpuCommand = (
   switch (action.type) {
     case 'insert-pitch':
       return insertPitch(song, target, safeCursor, safeInputMode, action.pitch, pitchContext);
+    case 'set-grace':
+      return setGraces(song, target, safeCursor, safeInputMode, action.grace ? [action.grace] : [], pitchContext);
+    case 'set-graces':
+      return setGraces(song, target, safeCursor, safeInputMode, action.graces, pitchContext);
     case 'insert-rest':
       return insertPitch(song, target, safeCursor, safeInputMode, '0', pitchContext);
     case 'insert-hold':

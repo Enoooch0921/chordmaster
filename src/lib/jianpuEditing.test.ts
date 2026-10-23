@@ -35,6 +35,31 @@ const insertion = (beatIndex = 0, unitIndex = 0): JianpuCursor => ({
 });
 
 describe('jianpu insertion commands', () => {
+  it('keeps quarter triplets over two beats when their first two notes share a token', () => {
+    const layout = getJianpuBarLayout(makeSong({ riff: '1t 7,t | 5,t | 3, | 5,' }), target)!;
+    const notes = layout.beats.flatMap((beat) => beat.notes.map((note) => ({
+      duration: note.duration,
+      onset: beat.beatIndex * beat.beatUnits + note.unitStart,
+      units: note.unitEnd - note.unitStart
+    })));
+
+    expect(notes.map((note) => note.duration)).toEqual(Array(5).fill('quarter'));
+    [0, 8 / 3, 16 / 3, 8, 12].forEach((onset, index) => {
+      expect(notes[index].onset).toBeCloseTo(onset);
+    });
+    [8 / 3, 8 / 3, 8 / 3, 4, 4].forEach((units, index) => {
+      expect(notes[index].units).toBeCloseTo(units);
+    });
+    expect(notes.reduce((sum, note) => sum + note.units, 0)).toBeCloseTo(16);
+  });
+
+  it('still fits unmarked pairs into one beat as eighth notes', () => {
+    const layout = getJianpuBarLayout(makeSong({ riff: '1 2 | 3 | 4 | 5' }), target)!;
+    expect(layout.beats[0].notes.map((note) => note.duration)).toEqual(['eighth', 'eighth']);
+    expect(layout.beats[0].usedUnits).toBe(4);
+    expect(layout.beats[1].notes[0].unitStart).toBe(0);
+  });
+
   it('uses an explicit time signature until the next explicit change', () => {
     const song: Song = {
       title: 'Inherited meter',

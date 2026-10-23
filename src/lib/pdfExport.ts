@@ -145,9 +145,12 @@ const getPdfCanvasLimits = (): PdfCanvasLimits => (
       }
 );
 
-const getElementExportSize = (element: HTMLElement) => ({
-  width: Math.max(1, Math.ceil(element.scrollWidth || element.offsetWidth || element.getBoundingClientRect().width)),
-  height: Math.max(1, Math.ceil(element.scrollHeight || element.offsetHeight || element.getBoundingClientRect().height)),
+// Capture the laid-out A4 page, not overflow from a long annotation. Scroll
+// dimensions can be much wider and would squeeze the entire score into A4.
+// offset dimensions also avoid applying preview transforms a second time.
+export const getPdfPageCaptureSize = (element: HTMLElement) => ({
+  width: Math.max(1, Math.ceil(element.offsetWidth || element.getBoundingClientRect().width || element.scrollWidth)),
+  height: Math.max(1, Math.ceil(element.offsetHeight || element.getBoundingClientRect().height || element.scrollHeight)),
 });
 
 const getSafePdfPixelRatio = (width: number, height: number, preferredRatio = PDF_EXPORT_PREFERRED_PIXEL_RATIO) => {
@@ -284,7 +287,7 @@ export const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName:
     });
 
     const renderPageElement = async (pageElement: HTMLElement): Promise<PdfRenderedImage> => {
-      const pageSize = getElementExportSize(pageElement);
+      const pageSize = getPdfPageCaptureSize(pageElement);
       const primaryPixelRatio = getSafePdfPixelRatio(pageSize.width, pageSize.height);
       const fallbackPixelRatios = Array.from(new Set([
         primaryPixelRatio,

@@ -1,3 +1,10 @@
+import { normalizeUnmeteredChordLines } from '../utils/unmeteredChords';
+import { normalizeChordPassVariants } from '../utils/chordPassVariants';
+import { normalizeChordSubdivisions } from '../utils/chordSubdivisions';
+import { normalizeChordBeatOffset, canOffsetChord } from '../utils/chordBeatOffsets';
+import { normalizeRhythmVoices } from '../utils/rhythmVoices';
+import { normalizeJianpuVoices } from '../utils/jianpuVoices';
+import { migrateChordTimingArrows } from './chordTimingMigration';
 import { parseWorkspaceDeletions, type WorkspaceDeletions } from './workspaceMerge';
 import { DEFAULT_CHORD_FONT_PRESET } from '../constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from '../constants/nashvilleFonts';
@@ -9,6 +16,7 @@ import { normalizeSongReferences } from '../utils/referenceUtils';
 import { normalizeTempoBpm } from '../utils/tempoUtils';
 import { isAnnotationColorId } from '../constants/annotationColors';
 import { repairSongStructure } from './songEditing';
+import { readWorkspaceDatabase, writeWorkspaceDatabase } from './workspaceDatabase';
 
 export const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 export const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -51,7 +59,8 @@ const VALID_NAVIGATION_MARKERS = new Set([
   'dc',
   'fine',
   'ds-al-coda',
-  'ds-al-fine'
+  'ds-al-fine',
+  'dc-al-fine'
 ]);
 const VALID_BAR_NUMBER_MODES = new Set(['none', 'line-start', 'all']);
 const VALID_NASHVILLE_FONT_PRESETS = new Set([
@@ -118,7 +127,8 @@ const normalizeChordTokens = (value: unknown) => {
   return [];
 };
 
-const normalizeChordMarks = (value: unknown, chordCount: number) => {
+const normalizeChordMarks = (value: unknown, chords: string[]) => {
+  const chordCount = chords.length;
   if (!value || typeof value !== 'object' || chordCount <= 0) {
     return undefined;
   }
@@ -132,10 +142,11 @@ const normalizeChordMarks = (value: unknown, chordCount: number) => {
     const mark = rawMark as Record<string, unknown>;
     const normalizedMark = {
       color: isAnnotationColorId(mark.color) ? mark.color : undefined,
-      special: mark.special === true ? true : undefined
+      special: mark.special === true ? true : undefined,
+      beatOffset: canOffsetChord(chords[index]) && !/[<>]/.test(chords[index]) ? normalizeChordBeatOffset(mark.beatOffset) : undefined
     };
 
-    if (normalizedMark.color || normalizedMark.special) {
+    if (normalizedMark.color || normalizedMark.special || normalizedMark.beatOffset) {
       nextMarks[index] = normalizedMark;
     }
 
@@ -193,18 +204,25 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           ...safeBar,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
           chords,
+          chordTimingUnspecified: safeBar.chordTimingUnspecified === true ? true : undefined,
+          chordKeyUnspecified: safeBar.chordKeyUnspecified === true ? true : undefined,
           keyChangeTo: typeof safeBar.keyChangeTo === 'string' && VALID_KEYS.has(safeBar.keyChangeTo)
             ? safeBar.keyChangeTo as Key
             : undefined,
           timeSignature: normalizeOptionalText(safeBar.timeSignature),
           riff: normalizeOptionalText(safeBar.riff),
+          riffVoices: normalizeJianpuVoices(safeBar.riffVoices),
           rhythm,
           label: normalizeOptionalText(safeBar.label),
           labelLane: safeBar.labelLane === 'rhythm' || safeBar.labelLane === 'riff' ? safeBar.labelLane : undefined,
           riffLabel: normalizeOptionalText(safeBar.riffLabel),
           rhythmLabel: normalizeOptionalText(safeBar.rhythmLabel),
+          rhythmVoices: normalizeRhythmVoices(safeBar.rhythmVoices),
           annotation: normalizeOptionalText(safeBar.annotation),
-          chordMarks: normalizeChordMarks(safeBar.chordMarks, chords.length),
+          chordMarks: normalizeChordMarks(safeBar.chordMarks, chords),
+          chordSubdivisions: normalizeChordSubdivisions(safeBar.chordSubdivisions),
+          chordPassVariants: normalizeChordPassVariants(safeBar.chordPassVariants),
+          unmeteredChordLines: normalizeUnmeteredChordLines(safeBar.unmeteredChordLines),
           rhythmMark: normalizeRhythmMark(safeBar.rhythmMark, rhythm),
           unisonMark: normalizeUnisonMark(safeBar.unisonMark),
           leftMarker: normalizeNavigationMarker(safeBar.leftMarker),
@@ -227,11 +245,12 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
     ? {
         id: typeof rawPickup.id === 'string' && rawPickup.id.trim() ? rawPickup.id : undefined,
         riff: normalizeOptionalText(rawPickup.riff),
+        riffVoices: normalizeJianpuVoices(rawPickup.riffVoices),
         rhythm: normalizeOptionalText(rawPickup.rhythm)
       }
     : undefined;
 
-  return repairSongStructure({
+  return migrateChordTimingArrows(repairSongStructure({
     ...song,
     title: normalizeText(song.title),
     lyricist: normalizeOptionalText(song.lyricist),
@@ -240,9 +259,11 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
     groove: normalizeOptionalText(song.groove),
     shuffle: normalizeBoolean(song.shuffle),
     originalKey,
+    originalKeyUnspecified: song.originalKeyUnspecified === true ? true : undefined,
     currentKey,
     tempo: normalizeTempoBpm(song.tempo),
     timeSignature: normalizeText(song.timeSignature, '4/4'),
+    timeSignatureUnspecified: song.timeSignatureUnspecified === true ? true : undefined,
     useSectionColors: normalizeBoolean(song.useSectionColors),
     showNashvilleNumbers: normalizeBoolean(song.showNashvilleNumbers),
     showAbsoluteJianpu: normalizeBoolean(song.showAbsoluteJianpu) ?? false,
@@ -257,7 +278,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
       : DEFAULT_CHORD_FONT_PRESET,
     capo: normalizeOptionalInteger(song.capo, 0, 12),
     references: normalizeSongReferences(song.references, VALID_KEYS),
-    pickup: pickup && (pickup.id || pickup.riff || pickup.rhythm) ? pickup : undefined,
+    pickup: pickup && (pickup.id || pickup.riff || pickup.riffVoices?.length || pickup.rhythm) ? pickup : undefined,
     sections: sections.length > 0 ? sections : [
       {
         id: undefined,
@@ -265,7 +286,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
         bars: [{ chords: [] }]
       }
     ]
-  } as T);
+  } as T));
 };
 
 const sanitizeSetlistSectionOrder = (order: string[], song: Song) => {
@@ -701,6 +722,63 @@ export const persistLocalWorkspaceSnapshot = (songs: StoredSong[], setlists: Set
   writeLegacyValue(PROJECT_STORAGE_KEY, JSON.stringify(projects));
   writeLegacyValue(LAST_SAVED_AT_STORAGE_KEY, String(savedAt));
   return savedAt;
+};
+
+// Normal saves use IndexedDB; the synchronous Web Storage path remains for
+// older installations and the best-effort flush when a page is being closed.
+export const loadPersistentWorkspaceSnapshot = async (): Promise<WorkspaceSnapshot> => {
+  let records: Awaited<ReturnType<typeof readWorkspaceDatabase>>;
+  try { records = await readWorkspaceDatabase(); }
+  catch { return loadLocalWorkspaceSnapshot(); }
+
+  const parse = (raw: unknown) => typeof raw === 'string' ? parseWorkspaceEnvelope(raw) : null;
+  const current = parse(records.current);
+  const previous = parse(records.previous);
+  // An older tab, a fallback save, or the synchronous exit flush may be newer.
+  try {
+    const legacy = parseWorkspaceEnvelope(window.localStorage.getItem(WORKSPACE_SNAPSHOT_STORAGE_KEY));
+    const durable = current ?? previous;
+    if (legacy && (!durable || legacy.savedAt > durable.savedAt)) {
+      if (records.current !== undefined && !current) pendingRecoveryNotice = 'recovered-legacy';
+      return normalizeWorkspaceEnvelope(legacy);
+    }
+  } catch { /* IndexedDB remains usable when Web Storage is unavailable. */ }
+  if (current) return normalizeWorkspaceEnvelope(current);
+  if (previous) {
+    pendingRecoveryNotice = 'recovered-backup';
+    return normalizeWorkspaceEnvelope(previous);
+  }
+  const legacy = loadLocalWorkspaceSnapshot();
+  if (records.current !== undefined && legacy.lastSavedAt === null) {
+    pendingRecoveryNotice = 'corrupt-unrecoverable';
+  }
+  return legacy;
+};
+
+let persistentWorkspaceWrite: Promise<unknown> = Promise.resolve();
+
+export const persistPersistentWorkspaceSnapshot = async (
+  songs: StoredSong[], setlists: Setlist[], projects: Project[] = []
+) => {
+  const savedAt = Date.now();
+  // Capture at invocation, before any asynchronous work can observe another edit.
+  const serialized = JSON.stringify(createWorkspaceEnvelope(songs, setlists, projects, savedAt));
+  let legacy: string | null = null;
+  try { legacy = window.localStorage.getItem(WORKSPACE_SNAPSHOT_STORAGE_KEY); }
+  catch { /* No Web Storage access is required for IndexedDB. */ }
+  const operation = persistentWorkspaceWrite.catch(() => undefined).then(async () => {
+    try {
+      await writeWorkspaceDatabase(serialized,
+        (raw) => typeof raw === 'string' && Boolean(parseWorkspaceEnvelope(raw)), legacy);
+      return savedAt;
+    } catch {
+      // A device that blocks IndexedDB can still use the verified legacy store.
+      const envelope = parseWorkspaceEnvelope(serialized)!;
+      return persistLocalWorkspaceSnapshot(envelope.songs, envelope.setlists, envelope.projects);
+    }
+  });
+  persistentWorkspaceWrite = operation;
+  return operation;
 };
 
 export const normalizeMatchingTitle = (title: string) => title.trim().toLowerCase().replace(/\s+/g, ' ');

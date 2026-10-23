@@ -59,10 +59,12 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
   const isFrameLoaded = videoId !== null && loadedVideoId === videoId;
   const isFrameTimedOut = videoId !== null && timedOutVideoId === videoId && !isFrameLoaded;
   const referenceBpm = activeReference?.bpm ?? song.tempo;
-  const effectiveBpm = typeof referenceBpm === 'number' ? Math.round(referenceBpm * playbackRate) : null;
-  const practiceBpm = typeof referenceBpm === 'number'
-    ? Math.max(20, Math.min(400, Math.round(referenceBpm * playbackRate)))
+  const effectiveBpm = typeof referenceBpm === 'number'
+    ? Math.round(referenceBpm * playbackRate * 100) / 100
     : null;
+  const practiceBpm = effectiveBpm === null
+    ? null
+    : Math.max(20, Math.min(400, effectiveBpm));
 
   React.useEffect(() => {
     if (!videoId) return;

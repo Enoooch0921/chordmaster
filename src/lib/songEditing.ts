@@ -1,3 +1,7 @@
+import { hasUnmeteredChords, transposeUnmeteredChordLines } from '../utils/unmeteredChords';
+import { transposeChordPassVariants } from '../utils/chordPassVariants';
+import { reconcileChordSubdivisions, transposeChordSubdivisions } from '../utils/chordSubdivisions';
+import { canOffsetChord, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
 /**
  * Pure immutable commands shared by the legacy editor and preview-first editor.
  * Long-lived edit targets use section/bar ids; array indexes never leave this
@@ -112,7 +116,14 @@ export type EditableBarFields = Pick<
   | 'finalBar'
   | 'ending'
   | 'chordMarks'
+  | 'chordSubdivisions'
+  | 'chordPassVariants'
+  | 'unmeteredChordLines'
+  | 'chordTimingUnspecified'
+  | 'chordKeyUnspecified'
   | 'rhythmMark'
+  | 'rhythmVoices'
+  | 'riffVoices'
   | 'unisonMark'
 >;
 
@@ -132,9 +143,14 @@ const hasObjectEntries = (value?: object | null) => Boolean(value && Object.keys
 
 export const isBarCompletelyEmpty = (bar?: Bar | null) => {
   if (!bar) return false;
-  return !bar.chords.some((chord) => chord.trim())
+  return !hasUnmeteredChords(bar) && !bar.chordTimingUnspecified && !bar.chordKeyUnspecified
+    && !bar.chords.some((chord) => chord.trim())
     && !bar.riff?.trim()
+    && !bar.riffVoices?.length
     && !bar.rhythm?.trim()
+    && !bar.rhythmVoices?.length
+    && !bar.chordSubdivisions?.length
+    && !bar.chordPassVariants?.length
     && !bar.label?.trim()
     && !bar.riffLabel?.trim()
     && !bar.rhythmLabel?.trim()
@@ -244,9 +260,12 @@ export const getSongTimeSignatureStates = (song: Song): SongTimeSignatureStates 
     section.bars.forEach((bar) => {
       baseTimeSignatures.push(activeTimeSignature);
       if (bar.timeSignature?.trim()) {
-        activeTimeSignature = getEffectiveTimeSignature(bar.timeSignature, activeTimeSignature);
+        const barTimeSignature = getEffectiveTimeSignature(bar.timeSignature, activeTimeSignature);
+        if (!bar.partialMeasure) activeTimeSignature = barTimeSignature;
+        activeTimeSignatures.push(barTimeSignature);
+      } else {
+        activeTimeSignatures.push(activeTimeSignature);
       }
-      activeTimeSignatures.push(activeTimeSignature);
     });
     barBaseTimeSignatures.push(baseTimeSignatures);
     barActiveTimeSignatures.push(activeTimeSignatures);
@@ -272,6 +291,21 @@ export const getEffectiveTimeSignatureForBar = (song: Song, targetBar: Pick<Bar,
     }
   }
   return getEffectiveTimeSignature(targetBar.timeSignature, song.timeSignature);
+};
+
+export const getStructuralTimeSignatureForBar = (song: Song, targetBar: Pick<Bar, 'id' | 'timeSignature' | 'partialMeasure'>): string => {
+  const states = getSongTimeSignatureStates(song);
+  for (let sectionIndex = 0; sectionIndex < song.sections.length; sectionIndex += 1) {
+    const barIndex = song.sections[sectionIndex].bars.findIndex((bar) => (
+      bar === targetBar || (Boolean(targetBar.id) && bar.id === targetBar.id)
+    ));
+    if (barIndex >= 0) {
+      return targetBar.partialMeasure
+        ? states.barBaseTimeSignatures[sectionIndex]?.[barIndex] ?? getEffectiveTimeSignature(song.timeSignature)
+        : states.barActiveTimeSignatures[sectionIndex]?.[barIndex] ?? getEffectiveTimeSignature(targetBar.timeSignature, song.timeSignature);
+    }
+  }
+  return getEffectiveTimeSignature(song.timeSignature);
 };
 
 export const getBeatCount = (song: Song, bar: Bar) => {
@@ -322,7 +356,7 @@ export const updateBarById = (
 };
 
 export const getChordBeatSlots = (bar: Bar, beatCount: number): ChordBeatSlot[] => (
-  getChordDisplaySlotEntries(bar.chords, beatCount).map((entry) => ({
+  bar.chordTimingUnspecified || hasUnmeteredChords(bar) ? [] : getChordDisplaySlotEntries(bar.chords, beatCount).map((entry) => ({
     chord: entry?.chord ?? '',
     rawChordIndex: entry?.rawIndex ?? null
   }))
@@ -373,13 +407,18 @@ const remapChordMarksByBeat = (
         ? undefined
         : oldBar.chordMarks?.[slotIndex];
     const nextEntry = nextEntries[slotIndex];
-    if (mark && nextEntry) nextMarks[nextEntry.rawIndex] = mark;
+    if (mark && nextEntry) {
+      const nextMark = { ...mark };
+      if (!canOffsetChord(nextEntry.chord) || /[<>]/.test(nextEntry.chord)) delete nextMark.beatOffset;
+      if (Object.values(nextMark).some(value => value !== undefined && value !== false)) nextMarks[nextEntry.rawIndex] = nextMark;
+    }
   });
   return Object.keys(nextMarks).length > 0 ? nextMarks : undefined;
 };
 
 export const setChordAtBeatSlot = (song: Song, target: SongChordTarget, chord: string): Song => (
   updateBarById(song, target, (bar) => {
+    if (bar.chordTimingUnspecified || hasUnmeteredChords(bar)) return bar;
     const beatCount = getBeatCount(song, bar);
     if (target.slotIndex < 0 || target.slotIndex >= beatCount) return bar;
     const normalizedChord = chord.trim();
@@ -407,13 +446,22 @@ export const setChordAtBeatSlot = (song: Song, target: SongChordTarget, chord: s
       slots[targetSlotIndex] = normalizedChord;
     }
     const chords = serializeChordBeatSlots(slots, beatCount);
+    const chordMarks = isFullBarChordToken(normalizedChord) ? undefined : remapChordMarksByBeat(bar, chords, beatCount);
     return {
       ...bar,
       chords,
-      chordMarks: isFullBarChordToken(normalizedChord)
-        ? undefined
-        : remapChordMarksByBeat(bar, chords, beatCount)
+      chordMarks,
+      chordSubdivisions: reconcileChordSubdivisions({ ...bar, chords, chordMarks }, beatCount)
     };
+  })
+);
+
+export const setChordBeatOffset = (song: Song, target: SongChordTarget, value: number): Song => (
+  updateBarById(song, target, bar => {
+    if (bar.chordTimingUnspecified || hasUnmeteredChords(bar)) return bar;
+    const entry = getChordDisplaySlotEntries(bar.chords, getBeatCount(song, bar))[target.slotIndex];
+    if (!entry || bar.chordSubdivisions?.some(e => e.beat === target.slotIndex && e.offset === value)) return bar;
+    return setRawChordBeatOffset(bar, entry.rawIndex, value);
   })
 );
 
@@ -434,6 +482,7 @@ export const getChordPlacementError = (
 
 export const insertChordBeatBeforeSlot = (song: Song, target: SongChordTarget): Song => (
   updateBarById(song, target, (bar) => {
+    if (bar.chordTimingUnspecified || hasUnmeteredChords(bar)) return bar;
     const beatCount = getBeatCount(song, bar);
     const slotIndex = Math.max(0, Math.min(beatCount - 1, target.slotIndex));
     const oldEntries = getChordDisplaySlotEntries(bar.chords, beatCount);
@@ -456,6 +505,17 @@ export const insertChordBeatBeforeSlot = (song: Song, target: SongChordTarget): 
     return {
       ...bar,
       chords,
+      chordSubdivisions: bar.chordSubdivisions?.map(e => ({...e, beat: e.beat < slotIndex ? e.beat : e.beat+1})).filter(e => e.beat < beatCount),
+      chordPassVariants: bar.chordPassVariants?.map(variant => {
+        const entries = getChordDisplaySlotEntries(variant.chords, beatCount);
+        const variantSlots = Array.from({ length: beatCount }, (_, beat) => entries[beat]?.chord ?? '');
+        variantSlots.splice(slotIndex, 0, '');
+        return {
+          ...variant,
+          chords: serializeChordBeatSlots(variantSlots, beatCount),
+          chordSubdivisions: variant.chordSubdivisions?.map(entry => ({ ...entry, beat: entry.beat < slotIndex ? entry.beat : entry.beat + 1 })).filter(entry => entry.beat < beatCount)
+        };
+      }),
       chordMarks: Object.keys(chordMarks).length > 0 ? chordMarks : undefined
     };
   })
@@ -543,6 +603,10 @@ export const parseChordBarText = (value: string, beatCount: number): ChordTextPa
 export const setBarChordText = (song: Song, target: SongBarIdentity, value: string): ChordTextParseResult & { song: Song } => {
   const located = findSongBar(song, target);
   if (!located) return { song, chords: [], error: '找不到要編輯的小節。' };
+  if (located.bar.chordTimingUnspecified) {
+    const chords=value.trim().split(/\s+/).filter(Boolean);
+    return {song:replaceLocatedBar(song,located,{...located.bar,chords}),chords,error:null};
+  }
   const beatCount = getBeatCount(song, located.bar);
   const parsed = parseChordBarText(value, beatCount);
   if (parsed.error) return { ...parsed, song };
@@ -551,11 +615,13 @@ export const setBarChordText = (song: Song, target: SongBarIdentity, value: stri
   ));
   const chords = normalized.length === 0 ? [] : normalized;
   const hasFullBarToken = chords.some((token) => isFullBarChordToken(token));
+  const chordMarks = hasFullBarToken ? undefined : remapChordMarksByBeat(located.bar, chords, beatCount);
   return {
     song: replaceLocatedBar(song, located, {
       ...located.bar,
       chords,
-      chordMarks: hasFullBarToken ? undefined : remapChordMarksByBeat(located.bar, chords, beatCount)
+      chordSubdivisions: chords.length ? reconcileChordSubdivisions({ ...located.bar, chords, chordMarks }, beatCount) : undefined,
+      chordMarks
     }),
     chords,
     error: null
@@ -803,6 +869,9 @@ const transposeSectionLetterChords = (
     ...section,
     bars: section.bars.map((bar) => ({
       ...bar,
+      chordSubdivisions: transposeChordSubdivisions(bar.chordSubdivisions, offset, toKey, fromKey),
+      chordPassVariants: transposeChordPassVariants(bar.chordPassVariants, offset, toKey, fromKey),
+      unmeteredChordLines: transposeUnmeteredChordLines(bar.unmeteredChordLines, offset, toKey, fromKey),
       chords: bar.chords.map((token) => (
         isFormatNeutralChord(token) || isNashville(token.trim())
           ? token
@@ -817,6 +886,9 @@ const transposeBarLetterChords = (bar: Bar, fromKey: Key, toKey: Key): Bar => {
   const offset = getTransposeOffset(fromKey, toKey);
   return {
     ...bar,
+    chordSubdivisions: transposeChordSubdivisions(bar.chordSubdivisions, offset, toKey, fromKey),
+      chordPassVariants: transposeChordPassVariants(bar.chordPassVariants, offset, toKey, fromKey),
+      unmeteredChordLines: transposeUnmeteredChordLines(bar.unmeteredChordLines, offset, toKey, fromKey),
     chords: bar.chords.map((token) => (
       isFormatNeutralChord(token) || isNashville(token.trim())
         ? token

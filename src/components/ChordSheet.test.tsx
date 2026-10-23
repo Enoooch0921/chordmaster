@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
 import { ensureSongEditingIds, reorderSection } from '../lib/songEditing';
 import ChordSheet from './ChordSheet';
+import { normalizeSongBars } from '../lib/workspace';
 
 vi.stubGlobal('ResizeObserver', class {
   observe() {}
@@ -19,6 +20,65 @@ const song: Song = {
 };
 
 describe('ChordSheet preview input caret', () => {
+  it('uses empty following beats for engraving while keeping chord ownership and exact offset labels', () => {
+    const source: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{
+        id: 'bar-1', chords: ['C/E', '', 'G/B', 'C'], chordMarks: { 0: { beatOffset: 0.75 } }
+      }] }]
+    };
+    const before = JSON.stringify(source);
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    const chords = Array.from(container.querySelectorAll<HTMLElement>('[data-preview-owner-slot]'));
+    expect(chords.map(chord => chord.dataset.previewOwnerSlot)).toEqual(['0', '2', '3']);
+    expect(chords.map(chord => chord.dataset.previewTokenSpan)).toEqual(['1', '1', '1']);
+    expect(chords.map(chord => chord.dataset.chordEngravingSpan)).toEqual(['2', '1', '1']);
+    expect(chords.map(chord => chord.style.gridColumn)).toEqual(['1 / span 2', '3 / span 1', '4 / span 1']);
+    expect(chords[0]).toHaveClass('pointer-events-none');
+    expect(chords[0].querySelector<HTMLElement>('[data-chord-beat-label]')?.style.left).toBe('calc(37.5% + 3px)');
+    expect(chords[0].querySelector('[data-chord-beat-label]')).toHaveTextContent('1a');
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it('keeps a labelled mid-section riff in its own full-width row', () => {
+    const source: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [
+        { id: 'bar-1', chords: ['C'] },
+        { id: 'passing', chords: ['F'], riff: 'q | q | q | 4_5_', riffLabel: 'Passing notes（器樂）' }
+      ] }]
+    };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" onElementClick={vi.fn()} />);
+    const bar = container.querySelector('[data-preview-clipboard-bar="passing"]')!;
+    const label = bar.querySelector('[data-preview-bar-label]')!;
+    const notation = bar.querySelector('[data-preview-hover-field="jianpu"]')!;
+    expect(label.parentElement).not.toBe(notation.parentElement);
+    expect(label.parentElement?.parentElement).toBe(notation.parentElement?.parentElement);
+    expect(label.parentElement?.parentElement).toHaveClass('flex-col');
+    const notes = Array.from(notation.querySelectorAll('button[aria-label^="Select jianpu note"]'));
+    expect(notes.map(note => note.getAttribute('aria-label'))).toEqual([
+      'Select jianpu note 1 in beat 4', 'Select jianpu note 2 in beat 4'
+    ]);
+  });
+
+  it.each(['C', 'D'] as const)('draws new arrows by their suffix and preserves legacy arrow directions in %s', (currentKey) => {
+    const source: Song = {
+      ...song,
+      chordTimingVersion: 2,
+      sections: [{ ...song.sections[0], bars: [{ chords: ['C<', 'G>'] }] }]
+    };
+    const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey={currentKey} />);
+    const arrowheads = () => Array.from(container.querySelectorAll('[data-chord-marker] svg path:last-child')).map((path) => path.getAttribute('d'));
+    expect(arrowheads()).toEqual(['M7 7l-3 3 3 3', 'M25 7l3 3-3 3']);
+
+    // Old C< was drawn right, old G> left. Migration must preserve that picture.
+    const migrated = normalizeSongBars({ ...source, chordTimingVersion: undefined });
+    rerender(<ChordSheet song={migrated} language="zh" currentKey={currentKey} />);
+    expect(arrowheads()).toEqual(['M25 7l3 3-3 3', 'M7 7l-3 3 3 3']);
+    rerender(<ChordSheet song={normalizeSongBars(JSON.parse(JSON.stringify(migrated)))} language="zh" currentKey={currentKey} />);
+    expect(arrowheads()).toEqual(['M25 7l3 3-3 3', 'M7 7l-3 3 3 3']);
+  });
+
   it('toggles preview bar multi-selection with command or control click without opening edit', () => {
     const onElementClick = vi.fn();
     const onPreviewBarMetaClick = vi.fn();
@@ -523,6 +583,15 @@ describe('ChordSheet preview input caret', () => {
     expect(screen.getByText('Vamp').parentElement).toHaveClass('-top-[12px]');
     expect(screen.getByText('Cue')).toHaveClass('-top-[10px]');
     expect(screen.getByText('Fine').parentElement).toHaveClass('-bottom-[16px]', 'right-1');
+  });
+
+  it('prints the full D.C. al Fine instruction from its structured marker', () => {
+    const navigationSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [{ id: 'dc-fine-bar', chords: ['C'], rightMarker: 'dc-al-fine' }] }]
+    };
+    render(<ChordSheet song={navigationSong} language="zh" currentKey="C" previewIdentity="song-1" />);
+    expect(screen.getByText('D.C. al Fine')).toBeInTheDocument();
   });
 
   it('keeps text-only navigation marks away from rhythm and jianpu lanes', () => {
@@ -2072,6 +2141,26 @@ describe('ChordSheet preview notation interactions', () => {
     expect(secondBarJianpu).not.toBeNull();
     expect(within(secondBarJianpu!).getByRole('button', { name: 'Select jianpu beat 5' })).toBeInTheDocument();
     expect(within(secondBarJianpu!).queryByRole('button', { name: 'Select jianpu beat 6' })).not.toBeInTheDocument();
+  });
+
+  it('renders a short measure with three beats without displaying a meter change', () => {
+    const shortMeasureSong: Song = {
+      ...song,
+      sections: [{ ...song.sections[0], bars: [
+        { id: 'bar-1', chords: ['C'], riff: '1 | 2 | 3 | 4' },
+        { id: 'bar-2', chords: ['G'], timeSignature: '3/4', partialMeasure: true, riff: '1 | 2 | 3' },
+        { id: 'bar-3', chords: ['F'], riff: '1 | 2 | 3 | 4' }
+      ] }]
+    };
+    const { container } = render(<ChordSheet song={shortMeasureSong} language="zh" currentKey="C" previewIdentity="song-1" onElementClick={vi.fn()} />);
+    const shortBar = container.querySelector<HTMLElement>('[data-preview-edit-anchor="song-1|section-1|bar-2|jianpu|all"]');
+    const nextBar = container.querySelector<HTMLElement>('[data-preview-edit-anchor="song-1|section-1|bar-3|jianpu|all"]');
+    expect(shortBar).not.toBeNull();
+    expect(nextBar).not.toBeNull();
+    expect(within(shortBar!).getByRole('button', { name: 'Select jianpu beat 3' })).toBeInTheDocument();
+    expect(within(shortBar!).queryByRole('button', { name: 'Select jianpu beat 4' })).not.toBeInTheDocument();
+    expect(within(nextBar!).getByRole('button', { name: 'Select jianpu beat 4' })).toBeInTheDocument();
+    expect(container.querySelector('[data-preview-inline-time-signature]')).toBeNull();
   });
 
   it('aligns the 6/8 preview cursor to grouped notation units', () => {

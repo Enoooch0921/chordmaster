@@ -1,3 +1,14 @@
+import UnmeteredChordsEditor from './UnmeteredChordsEditor';
+import { hasUnmeteredChords, transposeUnmeteredChordLines } from '../utils/unmeteredChords';
+import ChordPassVariantsEditor from './ChordPassVariantsEditor';
+import { transposeChordPassVariants } from '../utils/chordPassVariants';
+import { getChordAnchorSlotIndexes } from '../utils/chordSlots';
+import ChordSubdivisionsEditor from './ChordSubdivisionsEditor';
+import { reconcileChordSubdivisions, transposeChordSubdivisions } from '../utils/chordSubdivisions';
+import ChordBeatOffsetPicker from './ChordBeatOffsetPicker';
+import { canOffsetChord, getChordBeatOffset, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
+import RhythmVoicesEditor from './RhythmVoicesEditor';
+import JianpuVoicesEditor from './JianpuVoicesEditor';
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Song, Section, Bar, Key, AppLanguage, BarNumberMode, NavigationMarker, PickupMeasure, AnnotationColorId } from '../types';
 import { Plus, Trash2, ChevronDown, ChevronUp, Music2, Link, Hash, Copy, ArrowUpLeft, ArrowUpRight, ArrowDownRight, GripHorizontal } from 'lucide-react';
@@ -5,6 +16,7 @@ import { motion, AnimatePresence, Reorder, LayoutGroup, useDragControls } from '
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import BeatSlashGlyph from './BeatSlashGlyph';
+import ChordTimingArrow from './ChordTimingArrow';
 import { JianpuTripletKeyGlyph } from './preview-edit/NotationKeyGlyphs';
 import KeyPicker from './KeyPicker';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
@@ -121,6 +133,7 @@ interface RhythmEditorEvent {
   base: 'w' | 'h' | 'q' | 'e' | 's';
   isRest: boolean;
   isSlash: boolean;
+  crossHead?: 'normal' | 'upper';
   dotted: boolean;
   triplet: boolean;
   accent: boolean;
@@ -443,12 +456,13 @@ const LEFT_NAVIGATION_MARKER_OPTIONS: Array<{ value: NavigationMarker; label: 's
   { value: 'coda', label: 'coda' }
 ];
 
-const RIGHT_NAVIGATION_MARKER_OPTIONS: Array<{ value: NavigationMarker; label: 'coda' | 'ds' | 'dc' | 'fine' | 'dsAlCoda' | 'dsAlFine' }> = [
+const RIGHT_NAVIGATION_MARKER_OPTIONS: Array<{ value: NavigationMarker; label: 'coda' | 'ds' | 'dc' | 'fine' | 'dsAlCoda' | 'dsAlFine' | 'dcAlFine' }> = [
   { value: 'coda', label: 'coda' },
   { value: 'ds', label: 'ds' },
   { value: 'dc', label: 'dc' },
   { value: 'fine', label: 'fine' },
   { value: 'ds-al-fine', label: 'dsAlFine' },
+  { value: 'dc-al-fine', label: 'dcAlFine' },
   { value: 'ds-al-coda', label: 'dsAlCoda' }
 ];
 
@@ -1017,6 +1031,9 @@ const SongEditor: React.FC<Props> = ({
       ...section,
       bars: section.bars.map((bar) => ({
         ...bar,
+        chordSubdivisions: transposeChordSubdivisions(bar.chordSubdivisions, offset, toKey, fromKey),
+        chordPassVariants: transposeChordPassVariants(bar.chordPassVariants, offset, toKey, fromKey),
+        unmeteredChordLines: transposeUnmeteredChordLines(bar.unmeteredChordLines, offset, toKey, fromKey),
         chords: bar.chords.map((token) => (
           isNashville(token) ? token : transposeChord(token, offset, toKey, false, fromKey)
         ))
@@ -1032,6 +1049,9 @@ const SongEditor: React.FC<Props> = ({
     const offset = getTransposeOffset(fromKey, toKey);
     return {
       ...bar,
+      chordSubdivisions: transposeChordSubdivisions(bar.chordSubdivisions, offset, toKey, fromKey),
+        chordPassVariants: transposeChordPassVariants(bar.chordPassVariants, offset, toKey, fromKey),
+        unmeteredChordLines: transposeUnmeteredChordLines(bar.unmeteredChordLines, offset, toKey, fromKey),
       chords: bar.chords.map((token) => (
         isNashville(token) ? token : transposeChord(token, offset, toKey, false, fromKey)
       ))
@@ -1155,6 +1175,7 @@ const SongEditor: React.FC<Props> = ({
         if (isTargetBar) {
           return {
             ...nextBar,
+            chordKeyUnspecified: nextWrittenKey ? undefined : nextBar.chordKeyUnspecified,
             keyChangeTo: resolvedWrittenKey === baseWrittenKey ? undefined : resolvedWrittenKey
           };
         }
@@ -1200,6 +1221,7 @@ const SongEditor: React.FC<Props> = ({
       const nextPickup: PickupMeasure = {
         ...(song.pickup ?? createPickupMeasure()),
         ...(updates.riff !== undefined ? { riff: updates.riff } : {}),
+        ...('riffVoices' in updates ? { riffVoices: updates.riffVoices } : {}),
         ...(updates.rhythm !== undefined ? { rhythm: updates.rhythm } : {})
       };
       notifyChange({ ...song, pickup: nextPickup });
@@ -1209,6 +1231,9 @@ const SongEditor: React.FC<Props> = ({
     const section = song.sections[sIdx];
     const newBars = [...section.bars];
     newBars[bIdx] = { ...section.bars[bIdx], ...updates };
+    if (updates.chords) newBars[bIdx].chordSubdivisions = updates.chords.length
+      ? reconcileChordSubdivisions(newBars[bIdx], Number(getEffectiveTimeSignatureForBar(song, section.bars[bIdx]).split('/')[0]) || 4)
+      : undefined;
     const newSections = [...song.sections];
     newSections[sIdx] = { ...section, bars: newBars };
     notifyChange({ ...song, sections: newSections });
@@ -1296,6 +1321,7 @@ const SongEditor: React.FC<Props> = ({
       id: song.pickup.id,
       chords: [],
       riff: song.pickup.riff,
+      riffVoices: song.pickup.riffVoices,
       rhythm: song.pickup.rhythm
     };
   };
@@ -1462,7 +1488,7 @@ const SongEditor: React.FC<Props> = ({
     if (!marks || chordCount <= 0) return undefined;
     const nextMarks = Object.entries(marks).reduce<NonNullable<Bar['chordMarks']>>((result, [rawIndex, mark]) => {
       const index = Number(rawIndex);
-      if (Number.isInteger(index) && index >= 0 && index < chordCount && (mark.color || mark.special)) {
+      if (Number.isInteger(index) && index >= 0 && index < chordCount && (mark.color || mark.special || mark.beatOffset)) {
         result[index] = mark;
       }
       return result;
@@ -1517,7 +1543,7 @@ const SongEditor: React.FC<Props> = ({
 
     const updateChordMark = (chordIndex: number, nextMark: NonNullable<Bar['chordMarks']>[number] | undefined) => {
       const nextMarks = { ...(bar.chordMarks ?? {}) };
-      if (nextMark?.color || nextMark?.special) {
+      if (nextMark?.color || nextMark?.special || nextMark?.beatOffset) {
         nextMarks[chordIndex] = nextMark;
       } else {
         delete nextMarks[chordIndex];
@@ -1543,6 +1569,8 @@ const SongEditor: React.FC<Props> = ({
         </div>
 
         <div className="space-y-3">
+          {!bar.chordTimingUnspecified&&<ChordSubdivisionsEditor bar={bar} beats={Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0]) || 4} language={language} onChange={chordSubdivisions => updateBar(sIdx,bIdx,{chordSubdivisions})}/>}
+          {!bar.chordTimingUnspecified&&<ChordPassVariantsEditor bar={bar} beats={Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0]) || 4} language={language} onChange={chordPassVariants => updateBar(sIdx,bIdx,{chordPassVariants})}/>}
           <div>
             <div className="mb-1 text-[10px] font-bold uppercase text-gray-400">{copy.editor.chordColors}</div>
             {visibleChordEntries.length > 0 ? (
@@ -1554,6 +1582,7 @@ const SongEditor: React.FC<Props> = ({
                   return (
                     <div key={`${index}-${chord}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1.5">
                       <div className="min-w-0 truncate font-mono text-xs font-bold text-gray-800">{chord}</div>
+                      <div className="col-span-2"><ChordBeatOffsetPicker occupiedOffsets={bar.chordSubdivisions?.filter(e=>e.beat===getChordAnchorSlotIndexes(bar.chords,Number(getEffectiveTimeSignatureForBar(song,bar).split('/')[0])||4)[index]).map(e=>e.offset)} value={getChordBeatOffset(bar, index)} disabled={bar.chordTimingUnspecified||!canOffsetChord(chord)} language={language} onChange={value => updateBar(sIdx, bIdx, setRawChordBeatOffset(bar, index, value))}/></div>
                       {renderAnnotationColorPicker(color, DEFAULT_SPECIAL_CHORD_COLOR, false, (nextColor) => {
                         updateChordMark(index, { ...(mark ?? {}), color: nextColor });
                       })}
@@ -1562,7 +1591,7 @@ const SongEditor: React.FC<Props> = ({
                           type="button"
                           onClick={() => {
                             updateChordMark(index, mark?.special
-                              ? { color: mark.color }
+                              ? { ...mark, special: undefined }
                               : { ...(mark ?? {}), color: mark?.color ?? DEFAULT_SPECIAL_CHORD_COLOR, special: true });
                           }}
                           className={`h-6 rounded-md border px-1.5 text-[10px] font-bold transition-colors ${
@@ -1576,7 +1605,7 @@ const SongEditor: React.FC<Props> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => updateChordMark(index, undefined)}
+                          onClick={() => updateChordMark(index, mark?.beatOffset ? { beatOffset: mark.beatOffset } : undefined)}
                           className="h-6 rounded-md border border-gray-200 bg-white px-1.5 text-[10px] font-bold text-gray-400 transition-colors hover:border-rose-200 hover:text-rose-600"
                           title={copy.editor.clearMark}
                         >
@@ -1824,7 +1853,7 @@ const SongEditor: React.FC<Props> = ({
 
   const setSectionBarCount = (sIdx: number, rawCount: number) => {
     const section = song.sections[sIdx];
-    if (!section || !Number.isFinite(rawCount)) return;
+    if (!section || section.bars.some(hasUnmeteredChords) || !Number.isFinite(rawCount)) return;
 
     const targetCount = clampSectionBarCount(rawCount);
     const currentCount = section.bars.length;
@@ -2231,6 +2260,7 @@ const SongEditor: React.FC<Props> = ({
         base: event.base,
         isRest: event.isRest,
         isSlash: event.isSlash,
+        ...(event.crossHead ? { crossHead: event.crossHead } : {}),
         dotted: event.dotted,
         triplet: event.triplet,
         accent: event.accent,
@@ -2255,6 +2285,7 @@ const SongEditor: React.FC<Props> = ({
         cursorUnits.push(cursor);
         cursor += 1;
       }
+      if (event.startUnit - cursor > 0.001 && Math.abs(cursor - Math.round(cursor)) > 0.001) cursorUnits.push(cursor);
       cursorUnits.push(event.startUnit);
       cursor = event.endUnit;
     });
@@ -2265,11 +2296,11 @@ const SongEditor: React.FC<Props> = ({
 
   const parseToolbarRhythmToken = (sIdx: number, bIdx: number, token: string): RhythmEditorEvent | null => {
     const normalized = normalizeRhythmToken(token);
-    const match = normalized === '/' ? ['/' as const] : normalized.match(/^(w|h|q|e|s)(3)?(r)?(\.)?(\^)?(~)?$/);
+    const match = normalized === '/' ? ['/' as const] : normalized.match(/^(w|h|q|e|s)(3)?(r|cu|c)?(\.)?(\^)?(~)?$/);
     if (!match) return null;
     const parsed = parseRhythmNotation(normalized, getBarTimeSignature(getEditorBar(sIdx, bIdx)));
     const event = parsed.events[0];
-    if (!event) return null;
+    if (!event || parsed.invalidTokens.length) return null;
 
     return {
       startUnit: 0,
@@ -2277,6 +2308,7 @@ const SongEditor: React.FC<Props> = ({
       base: event.base,
       isRest: event.isRest,
       isSlash: event.isSlash,
+      ...(event.crossHead ? { crossHead: event.crossHead } : {}),
       dotted: event.dotted,
       triplet: event.triplet,
       accent: event.accent,
@@ -2287,7 +2319,7 @@ const SongEditor: React.FC<Props> = ({
   const buildRhythmEditorToken = (event: RhythmEditorEvent) => {
     if (event.isSlash) return '/';
     return normalizeRhythmToken(
-      `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
+      `${event.base}${event.triplet ? '3' : ''}${event.isRest ? 'r' : event.crossHead === 'upper' ? 'cu' : event.crossHead ? 'c' : ''}${event.dotted && !event.triplet ? '.' : ''}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`
     );
   };
 
@@ -2320,6 +2352,7 @@ const SongEditor: React.FC<Props> = ({
     return {
       ...nextEvent,
       dotted: nextEvent.triplet ? false : existingEvent.dotted,
+      crossHead: nextEvent.crossHead ?? existingEvent.crossHead,
       accent: existingEvent.accent,
       tieAfter: existingEvent.tieAfter
     };
@@ -2619,7 +2652,9 @@ const SongEditor: React.FC<Props> = ({
     { sixthUnits: 12, token: 'ex' },
     { sixthUnits: 9, token: 'sx.' },
     { sixthUnits: 8, token: 'e3x' },
-    { sixthUnits: 6, token: 'sx' }
+    { sixthUnits: 6, token: 'sx' },
+    { sixthUnits: 4, token: 's3x' },
+    { sixthUnits: 2, token: 'y' }
   ] as const;
 
   const buildHiddenGapTokens = (durationUnits: number): string[] => {
@@ -2698,6 +2733,7 @@ const SongEditor: React.FC<Props> = ({
 
     if (existingIndex !== -1) {
       const existingEvent = events[existingIndex];
+      if (existingEvent.crossHead && !template.isRest && !template.isSlash && (template.base === 'w' || template.base === 'h')) return;
       const replacement = preserveRhythmEventModifiers(existingEvent, {
         ...template,
         startUnit: existingEvent.startUnit
@@ -2746,7 +2782,7 @@ const SongEditor: React.FC<Props> = ({
     const nextEvent = createRhythmEditorEvent(
       selection.sIdx,
       selection.bIdx,
-      `${event.base}${event.isRest ? 'r' : ''}${event.dotted ? '' : '.'}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`,
+      `${event.base}${event.isRest ? 'r' : event.crossHead === 'upper' ? 'cu' : event.crossHead ? 'c' : ''}${event.dotted ? '' : '.'}${!event.isRest && event.accent ? '^' : ''}${!event.isRest && event.tieAfter ? '~' : ''}`,
       event.startUnit
     );
     if (!nextEvent) return;
@@ -2845,8 +2881,8 @@ const SongEditor: React.FC<Props> = ({
     return { beats, beatUnits };
   };
 
-  const getJianpuNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'>) => (
-    getJianpuDurationUnitsFromUtils(note.duration, note.dotted, note.triplet)
+  const getJianpuNoteUnits = (note: Pick<JianpuNoteRange, 'duration' | 'dotted' | 'triplet'> & { units?: number }) => (
+    note.units ?? getJianpuDurationUnitsFromUtils(note.duration, note.dotted, note.triplet)
   );
 
   const getJianpuDurationUnits = (duration: JianpuDuration, dotted = false, triplet = false) => (
@@ -2856,7 +2892,7 @@ const SongEditor: React.FC<Props> = ({
   const canUseDottedJianpuDuration = (duration: JianpuDuration) => duration !== 'sixteenth';
 
   const normalizeJianpuInputModeForDuration = (mode: JianpuInputMode): JianpuInputMode => {
-    const triplet = mode.duration !== 'sixteenth' && mode.triplet;
+    const triplet = mode.triplet;
     return {
       ...mode,
       dotted: !triplet && mode.dotted && canUseDottedJianpuDuration(mode.duration),
@@ -2880,10 +2916,10 @@ const SongEditor: React.FC<Props> = ({
     }
 
     const fallbackDuration = (['quarter', 'eighth', 'sixteenth'] as JianpuDuration[])
-      .find((duration) => getJianpuDurationUnits(duration, false, normalizedMode.triplet && duration !== 'sixteenth') <= availableUnits + 0.001);
+      .find((duration) => getJianpuDurationUnits(duration, false, normalizedMode.triplet) <= availableUnits + 0.001);
 
     return fallbackDuration
-      ? { ...normalizedMode, duration: fallbackDuration, dotted: false, triplet: normalizedMode.triplet && fallbackDuration !== 'sixteenth' }
+      ? { ...normalizedMode, duration: fallbackDuration, dotted: false, triplet: normalizedMode.triplet }
       : normalizedMode;
   };
 
@@ -3717,11 +3753,11 @@ const SongEditor: React.FC<Props> = ({
         remainingUnits,
 	        canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted, jianpuInputMode.triplet),
 	        canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted, jianpuInputMode.triplet),
-	        canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false),
+	        canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false, jianpuInputMode.triplet),
 	        canDot: !jianpuInputMode.triplet &&
 	          canUseDottedJianpuDuration(jianpuInputMode.duration) &&
 	          remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true),
-	        canTriplet: jianpuInputMode.duration !== 'sixteenth' &&
+	        canTriplet:
 	          remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, false, true)
 	      };
     }
@@ -3732,11 +3768,11 @@ const SongEditor: React.FC<Props> = ({
       remainingUnits,
 	      canQuarter: remainingUnits + 0.001 >= getJianpuDurationUnits('quarter', jianpuInputMode.dotted, jianpuInputMode.triplet),
 	      canEighth: remainingUnits + 0.001 >= getJianpuDurationUnits('eighth', jianpuInputMode.dotted, jianpuInputMode.triplet),
-	      canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false),
+	      canSixteenth: remainingUnits + 0.001 >= getJianpuDurationUnits('sixteenth', false, jianpuInputMode.triplet),
 	      canDot: !jianpuInputMode.triplet &&
 	        canUseDottedJianpuDuration(jianpuInputMode.duration) &&
 	        remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, true),
-	      canTriplet: jianpuInputMode.duration !== 'sixteenth' &&
+	      canTriplet:
 	        remainingUnits + 0.001 >= getJianpuDurationUnits(jianpuInputMode.duration, false, true)
 	    };
   };
@@ -4034,7 +4070,7 @@ const SongEditor: React.FC<Props> = ({
 	  const selectedNote = getSelectedJianpuNote(selection, riff);
 	  const currentDuration = selectedNote?.duration ?? jianpuInputMode.duration;
 	  const nextDuration = currentDuration === duration ? 'quarter' : duration;
-	  const nextTriplet = nextDuration !== 'sixteenth' && (selectedNote?.triplet ?? jianpuInputMode.triplet);
+	  const nextTriplet = (selectedNote?.triplet ?? jianpuInputMode.triplet);
 	  const desiredDotted = selectedNote?.dotted ?? jianpuInputMode.dotted;
 	  const nextDotted = !nextTriplet && desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
@@ -4276,7 +4312,7 @@ const SongEditor: React.FC<Props> = ({
   const setSelectedJianpuDuration = (duration: JianpuDuration) => {
 	  const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
 	  const nextDuration = currentDuration === duration ? 'quarter' : duration;
-	  const nextTriplet = nextDuration !== 'sixteenth' && (selectedJianpuNote?.triplet ?? jianpuInputMode.triplet);
+	  const nextTriplet = (selectedJianpuNote?.triplet ?? jianpuInputMode.triplet);
 	  const desiredDotted = selectedJianpuNote?.dotted ?? jianpuInputMode.dotted;
 	  const nextDotted = !nextTriplet && desiredDotted && canUseDottedJianpuDuration(nextDuration);
 
@@ -4426,8 +4462,6 @@ const SongEditor: React.FC<Props> = ({
 	  };
 
 	  const toggleSelectedJianpuTriplet = () => {
-	    const currentDuration = selectedJianpuNote?.duration ?? jianpuInputMode.duration;
-	    if (currentDuration === 'sixteenth') return;
 
 	    if (applySharedJianpuAction({ type: 'toggle-triplet' })) return;
 
@@ -5236,7 +5270,7 @@ const SongEditor: React.FC<Props> = ({
 	  const effectiveJianpuTied = Boolean(selectedJianpuNoteContext?.isTieStart || selectedJianpuNoteContext?.isTieEnd);
 	  const canUseEighthDuration = canApplyJianpuDurationChoice('eighth');
 	  const canUseSixteenthDuration = canApplyJianpuDurationChoice('sixteenth');
-	  const canUseTripletDuration = effectiveJianpuDuration !== 'sixteenth' &&
+	  const canUseTripletDuration =
 	    (!jianpuInsertAvailability || jianpuInsertAvailability.canTriplet || effectiveJianpuTriplet);
   const showEighthQuarterBlocked = effectiveJianpuDuration === 'eighth' && !canUseEighthDuration;
   const showSixteenthQuarterBlocked = effectiveJianpuDuration === 'sixteenth' && !canUseSixteenthDuration;
@@ -5405,7 +5439,7 @@ const SongEditor: React.FC<Props> = ({
   let accumulatedBarCount = 0;
   song.sections.forEach((section) => {
     sectionBarOffsets.push(accumulatedBarCount);
-    accumulatedBarCount += section.bars.length;
+    accumulatedBarCount += section.bars.filter(bar => !hasUnmeteredChords(bar)).length;
   });
   const pickupBar = getEditorBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
   const isPickupActive = activeBar?.sIdx === PICKUP_SECTION_INDEX && activeBar?.bIdx === PICKUP_BAR_INDEX;
@@ -5447,6 +5481,10 @@ const SongEditor: React.FC<Props> = ({
         align="left"
         buttonClassName="w-full"
       />
+      <label className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
+        <input type="checkbox" checked={song.originalKeyUnspecified === true} onChange={event => updateField('originalKeyUnspecified', event.target.checked || undefined)} />
+        {language === 'zh' ? '原調未定' : 'Original key unconfirmed'}
+      </label>
     </div>
   );
 
@@ -5456,10 +5494,10 @@ const SongEditor: React.FC<Props> = ({
       <input
         type="text"
         inputMode="decimal"
-        pattern="[0-9]*[.]?[0-9]?"
+        pattern="[0-9]*[.]?[0-9]{0,2}"
         min={20}
         max={400}
-        step={0.1}
+        step={0.01}
         value={tempoDraft}
         onChange={e => setTempoDraft(sanitizeTempoInput(e.target.value))}
         onFocus={e => {
@@ -5487,18 +5525,20 @@ const SongEditor: React.FC<Props> = ({
           <input
             type="text"
             inputMode="numeric"
-            value={songTimeSignatureParts.numerator}
+            value={song.timeSignatureUnspecified ? '' : songTimeSignatureParts.numerator}
+            disabled={song.timeSignatureUnspecified}
             onChange={e => updateField('timeSignature', buildTimeSignatureInput(e.target.value, songTimeSignatureParts.denominator))}
-            placeholder="4"
+            placeholder={song.timeSignatureUnspecified ? '?' : '4'}
             className="h-8 w-full border-0 bg-transparent px-1 text-center outline-none focus:ring-0"
           />
           <span className="px-0.5 text-sm font-semibold text-gray-400">/</span>
           <input
             type="text"
             inputMode="numeric"
-            value={songTimeSignatureParts.denominator}
+            value={song.timeSignatureUnspecified ? '' : songTimeSignatureParts.denominator}
+            disabled={song.timeSignatureUnspecified}
             onChange={e => updateField('timeSignature', buildTimeSignatureInput(songTimeSignatureParts.numerator, e.target.value))}
-            placeholder="4"
+            placeholder={song.timeSignatureUnspecified ? '?' : '4'}
             className="h-8 w-full border-0 bg-transparent px-1 text-center outline-none focus:ring-0"
           />
         </div>
@@ -5514,6 +5554,10 @@ const SongEditor: React.FC<Props> = ({
           <span className="text-[12px] font-medium leading-none text-gray-600">{copy.editor.shuffle}</span>
         </label>
       </div>
+      <label className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+        <input type="checkbox" checked={song.timeSignatureUnspecified === true} onChange={event => updateField('timeSignatureUnspecified', event.target.checked || undefined)} />
+        {language === 'zh' ? '拍號未定' : 'Time signature unspecified'}
+      </label>
     </div>
   );
 
@@ -5688,6 +5732,8 @@ const SongEditor: React.FC<Props> = ({
     const bar = section.bars[bIdx];
     if (!bar) return null;
 
+    if (hasUnmeteredChords(bar)) return <UnmeteredChordsEditor lines={bar.unmeteredChordLines!} language={language} onChange={unmeteredChordLines => updateBar(sIdx,bIdx,{unmeteredChordLines})}/>;
+
     const isPrimary = options?.isPrimary ?? false;
     const isDenseCompactControls = isPhoneViewport;
     const canMergeSection = sIdx !== 0 && bIdx === 0;
@@ -5698,7 +5744,7 @@ const SongEditor: React.FC<Props> = ({
     const barDisplayBaseKey = getDisplayKeyForPosition(sIdx, bIdx - 1);
     const barTargetKey = bar.keyChangeTo ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift) : undefined;
     const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(sIdx, bIdx);
-    const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
+    const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + section.bars.slice(0,bIdx).filter(bar => !hasUnmeteredChords(bar)).length + 1;
     const compactInspectorTitle = language === 'zh' ? `小節 ${globalBarNumber}` : `Bar ${globalBarNumber}`;
     const compactInspectorSubtitle = [getBarDisplayLabel(bar), bar.annotation].filter(Boolean).join(' · ');
 
@@ -5721,14 +5767,14 @@ const SongEditor: React.FC<Props> = ({
                 {compactInspectorTitle}
               </div>
               <div className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-500">
-                {getBarTimeSignature(bar)}
+                {song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)}
               </div>
               <div className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${
                 barTargetKey
                   ? 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700'
                   : 'border-gray-200 bg-gray-50 text-gray-500'
               }`}>
-                {barTargetKey ?? barDisplayKey}
+                {bar.chordKeyUnspecified ? (language==='zh'?'調性未標':'Key unspecified') : barTargetKey ?? barDisplayKey}
               </div>
               {isPrimary ? (
                 <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
@@ -5873,7 +5919,7 @@ const SongEditor: React.FC<Props> = ({
                   : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
               }`}
             >
-              <span className="text-[11px] font-bold leading-none">{barTargetKey ?? barDisplayKey}</span>
+              <span className="text-[11px] font-bold leading-none">{bar.chordKeyUnspecified ? (language==='zh'?'調性未標':'Key unspecified') : barTargetKey ?? barDisplayKey}</span>
             </button>
             <button
               type="button"
@@ -5886,7 +5932,7 @@ const SongEditor: React.FC<Props> = ({
               }`}
             >
               <span className="text-[11px] font-bold leading-none">
-                {getBarTimeSignature(bar)}
+                {song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)}
               </span>
             </button>
             <button
@@ -5936,7 +5982,7 @@ const SongEditor: React.FC<Props> = ({
                   clearLabel={copy.editor.noKeyChange}
                   originalKey={barDisplayBaseKey}
                   triggerMetaText={barDisplayBaseKey}
-                  panelMetaText={barTargetKey ? `${barDisplayBaseKey} → ${barDisplayKey}` : barDisplayBaseKey}
+                  panelMetaText={bar.chordKeyUnspecified ? (language==='zh'?'目的調未標 · 原譜級數':'Destination unspecified · source degrees') : barTargetKey ? `${barDisplayBaseKey} → ${barDisplayKey}` : barDisplayBaseKey}
                   align="left"
                   buttonClassName="w-full"
                   touchOptimized={isPhoneViewport}
@@ -6069,6 +6115,8 @@ const SongEditor: React.FC<Props> = ({
                     </div>
                   );
                 })()}
+                <JianpuVoicesEditor voices={bar.riffVoices} timeSignature={song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)}
+                  language={language} onChange={riffVoices => updateBar(sIdx, bIdx, { riffVoices })} />
               </div>
             )}
 
@@ -6082,7 +6130,7 @@ const SongEditor: React.FC<Props> = ({
                     const updateBarTimeSignature = (numerator: string, denominator: string) => {
                       const newBars = [...section.bars];
                       const value = buildTimeSignatureInput(numerator, denominator);
-                      newBars[bIdx] = { ...bar, timeSignature: value || undefined };
+                      newBars[bIdx] = { ...bar, timeSignature: value || undefined, partialMeasure: value ? bar.partialMeasure : undefined };
                       updateSection(sIdx, { ...section, bars: newBars });
                     };
 
@@ -6115,6 +6163,11 @@ const SongEditor: React.FC<Props> = ({
                   <div className="mt-1 text-[10px] text-gray-400">
                     {copy.editor.barTimeHelp}
                   </div>
+                  <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                    <input type="checkbox" checked={Boolean(bar.partialMeasure)} disabled={!bar.timeSignature}
+                      onChange={(event) => updateBar(sIdx, bIdx, { partialMeasure: event.target.checked || undefined })} />
+                    {copy.editor.partialMeasure}
+                  </label>
                 </div>
               </div>
             )}
@@ -6219,6 +6272,9 @@ const SongEditor: React.FC<Props> = ({
                   );
                 })()}
 
+                <RhythmVoicesEditor voices={bar.rhythmVoices} timeSignature={song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)} language={language} onChange={rhythmVoices => {
+                  const bars = [...section.bars]; bars[bIdx] = { ...bar, rhythmVoices }; updateSection(sIdx, { ...section, bars });
+                }} />
                 <div className="mt-1 text-[10px] text-gray-400">
                   {copy.editor.rhythmHelp}
                 </div>
@@ -6382,7 +6438,7 @@ const SongEditor: React.FC<Props> = ({
     const compactEditorState = getCompactEditorState(section, sIdx);
     if (!compactEditorState) return null;
 
-    const pairBarNumbers = compactEditorState.pairIndices.map((index) => (sectionBarOffsets[sIdx] ?? 0) + index + 1);
+    const pairBarNumbers = compactEditorState.pairIndices.map((index) => (sectionBarOffsets[sIdx] ?? 0) + section.bars.slice(0,index).filter(bar => !hasUnmeteredChords(bar)).length + 1);
     const compactEditorTitle = pairBarNumbers.length > 1
       ? (language === 'zh' ? `編輯小節 ${pairBarNumbers.join(' · ')}` : `Editing Bars ${pairBarNumbers.join(' · ')}`)
       : (language === 'zh' ? `編輯小節 ${pairBarNumbers[0]}` : `Editing Bar ${pairBarNumbers[0]}`);
@@ -6685,6 +6741,9 @@ const SongEditor: React.FC<Props> = ({
                     </div>
                   );
                 })()}
+
+                <JianpuVoicesEditor voices={pickupBar.riffVoices} timeSignature={song.timeSignature}
+                  language={language} onChange={riffVoices => updateBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX, { riffVoices })} />
 
                 <div>
                   <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -7014,7 +7073,11 @@ const SongEditor: React.FC<Props> = ({
                   >
                     {language === 'zh' ? '小節數' : 'Bars'}
                   </label>
-                  <input
+                  {section.bars.some(hasUnmeteredChords) ? <div className="text-xs font-semibold text-amber-700" aria-label={language === 'zh' ? '小節與未定拍位段落數' : 'Measures and unmeasured blocks'}>
+                    {language === 'zh'
+                      ? `${section.bars.filter(bar => !hasUnmeteredChords(bar)).length} 小節；${section.bars.filter(hasUnmeteredChords).length} 段拍位待核`
+                      : `${section.bars.filter(bar => !hasUnmeteredChords(bar)).length} measures; ${section.bars.filter(hasUnmeteredChords).length} unmeasured blocks`}
+                  </div> : <input
                     id={`section-${sIdx}-bar-count`}
                     type="number"
                     inputMode="numeric"
@@ -7028,7 +7091,7 @@ const SongEditor: React.FC<Props> = ({
                     }}
                     onFocus={(event) => event.currentTarget.select()}
                     className="h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-center text-sm font-bold tabular-nums text-gray-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
-                  />
+                  />}
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1 sm:min-w-[132px] sm:flex-none">
                   <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400">
@@ -7081,6 +7144,7 @@ const SongEditor: React.FC<Props> = ({
             >
               {section.bars.map((bar, bIdx) => (
                 (() => {
+                  if (hasUnmeteredChords(bar)) return <div key={bar.id || bIdx} className="col-span-full rounded-xl border border-slate-200 bg-white p-3"><UnmeteredChordsEditor lines={bar.unmeteredChordLines!} language={language} onChange={unmeteredChordLines => updateBar(sIdx,bIdx,{unmeteredChordLines})}/></div>;
                   const isActiveBar = activeBar?.sIdx === sIdx && activeBar?.bIdx === bIdx;
                   const isCopiedHighlight = copiedBarHighlight?.sIdx === sIdx && copiedBarHighlight?.bIdx === bIdx;
                   const isDragBeforeTarget = dragOverTarget === `bar-before-${sIdx}-${bIdx}`;
@@ -7092,7 +7156,7 @@ const SongEditor: React.FC<Props> = ({
                   const barDisplayBaseKey = getDisplayKeyForPosition(sIdx, bIdx - 1);
                   const barTargetKey = bar.keyChangeTo ? transposeKeyPreservingSpelling(bar.keyChangeTo, globalKeyShift) : undefined;
                   const barDisplayKey = barTargetKey ?? getDisplayKeyForPosition(sIdx, bIdx);
-                  const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + bIdx + 1;
+                  const globalBarNumber = (sectionBarOffsets[sIdx] ?? 0) + section.bars.slice(0,bIdx).filter(bar => !hasUnmeteredChords(bar)).length + 1;
 
                   if (isSpaceConstrainedBarLayout || isChordOnly) {
                     const compactSummary = [getBarDisplayLabel(bar), bar.annotation].filter(Boolean).join(' · ');
@@ -7157,14 +7221,14 @@ const SongEditor: React.FC<Props> = ({
                               </div>
                               {!isChordOnly && <>
                               <div className="inline-flex items-center rounded-md border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-indigo-600">
-                                {getBarTimeSignature(bar)}
+                                {song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)}
                               </div>
                               <div className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[9px] font-semibold leading-none ${
                                 barTargetKey
                                   ? 'border-fuchsia-100 bg-fuchsia-50 text-fuchsia-600'
                                   : 'border-gray-100 bg-gray-50 text-gray-400'
                               }`}>
-                                {barTargetKey ?? barDisplayKey}
+                                {bar.chordKeyUnspecified ? (language==='zh'?'調性未標':'Key unspecified') : barTargetKey ?? barDisplayKey}
                               </div>
                               </>}
                             </div>
@@ -7211,7 +7275,9 @@ const SongEditor: React.FC<Props> = ({
 
                         <div>
                           <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">{copy.editor.chords}</label>
-                          <input
+                          <label className="mb-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={Boolean(bar.chordKeyUnspecified)} onChange={e=>updateBar(sIdx,bIdx,{chordKeyUnspecified:e.target.checked?true:undefined})}/>{language==='zh'?'和弦調性未定（保留原譜級數）':'Chord key unspecified (source degrees)'}</label>
+<label className="mb-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={Boolean(bar.chordTimingUnspecified)} onChange={e=>updateBar(sIdx,bIdx,{chordTimingUnspecified:e.target.checked?true:undefined})}/>{language==='zh'?'和弦拍位未定':'Chord timing unspecified'}</label>
+{bar.chordTimingUnspecified ? <UnmeteredChordsEditor keyUnspecified={bar.chordKeyUnspecified} withinMeasure lines={[bar.chords]} language={language} onChange={lines=>updateBar(sIdx,bIdx,{chords:lines.flat()})}/> : (<input
                             id={`editor-s${sIdx}-b${bIdx}-chords`}
                             type="text"
                             value={bar.chords.join(' ')}
@@ -7313,7 +7379,7 @@ const SongEditor: React.FC<Props> = ({
                             }}
                             placeholder="e.g. C G/B Am"
                             className="h-10 w-full rounded-xl border border-gray-300 px-2.5 font-mono text-sm outline-none transition-colors focus:ring-1 focus:ring-indigo-500"
-                          />
+                          />)}
                         </div>
                         </motion.div>
                         {shouldRenderInlineCompactEditor ? renderInlineCompactBarInspector(section, sIdx) : null}
@@ -7428,9 +7494,11 @@ const SongEditor: React.FC<Props> = ({
                     <div>
                       <div className="mb-1 flex items-center justify-between">
                         <label className="block text-[10px] font-bold uppercase text-gray-400">{copy.editor.chords}</label>
-                        <span className="text-[10px] font-semibold text-gray-400">{getBarTimeSignature(bar)}</span>
+                        <span className="text-[10px] font-semibold text-gray-400">{song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)}</span>
                       </div>
-                      <input
+                      <label className="mb-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={Boolean(bar.chordKeyUnspecified)} onChange={e=>updateBar(sIdx,bIdx,{chordKeyUnspecified:e.target.checked?true:undefined})}/>{language==='zh'?'和弦調性未定（保留原譜級數）':'Chord key unspecified (source degrees)'}</label>
+<label className="mb-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={Boolean(bar.chordTimingUnspecified)} onChange={e=>updateBar(sIdx,bIdx,{chordTimingUnspecified:e.target.checked?true:undefined})}/>{language==='zh'?'和弦拍位未定':'Chord timing unspecified'}</label>
+{bar.chordTimingUnspecified ? <UnmeteredChordsEditor keyUnspecified={bar.chordKeyUnspecified} withinMeasure lines={[bar.chords]} language={language} onChange={lines=>updateBar(sIdx,bIdx,{chords:lines.flat()})}/> : (<input
                         id={`editor-s${sIdx}-b${bIdx}-chords`}
                         type="text"
                         value={bar.chords.join(' ')}
@@ -7551,7 +7619,7 @@ const SongEditor: React.FC<Props> = ({
                         }}
                         placeholder="e.g. C G/B Am"
                         className="h-9 w-full rounded-lg border border-gray-300 px-2.5 font-mono text-sm outline-none focus:ring-1 focus:ring-indigo-500"
-                      />
+                      />)}
                     </div>
 
                     <div className="grid grid-cols-3 items-center gap-1 sm:grid-cols-6">
@@ -7589,7 +7657,7 @@ const SongEditor: React.FC<Props> = ({
                             : 'bg-white border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'
                         }`}
                       >
-                        <span className="text-[11px] font-bold leading-none">{barTargetKey ?? barDisplayKey}</span>
+                        <span className="text-[11px] font-bold leading-none">{bar.chordKeyUnspecified ? (language==='zh'?'調性未標':'Key unspecified') : barTargetKey ?? barDisplayKey}</span>
                       </button>
                       <button
                         type="button"
@@ -7602,7 +7670,7 @@ const SongEditor: React.FC<Props> = ({
                         }`}
                       >
                         <span className="text-[11px] font-bold leading-none">
-                          {getBarTimeSignature(bar)}
+                          {song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)}
                         </span>
                       </button>
                       <button
@@ -7651,7 +7719,7 @@ const SongEditor: React.FC<Props> = ({
                         clearLabel={copy.editor.noKeyChange}
                         originalKey={barDisplayBaseKey}
                         triggerMetaText={barDisplayBaseKey}
-                        panelMetaText={barTargetKey ? `${barDisplayBaseKey} → ${barDisplayKey}` : barDisplayBaseKey}
+                        panelMetaText={bar.chordKeyUnspecified ? (language==='zh'?'目的調未標 · 原譜級數':'Destination unspecified · source degrees') : barTargetKey ? `${barDisplayBaseKey} → ${barDisplayKey}` : barDisplayBaseKey}
                         align="left"
                         buttonClassName="w-full"
                       />
@@ -7784,6 +7852,8 @@ const SongEditor: React.FC<Props> = ({
                           </div>
                         );
                       })()}
+                      <JianpuVoicesEditor voices={bar.riffVoices} timeSignature={song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)}
+                        language={language} onChange={riffVoices => updateBar(sIdx, bIdx, { riffVoices })} />
                     </div>
                     )}
 
@@ -7797,7 +7867,7 @@ const SongEditor: React.FC<Props> = ({
                           const updateBarTimeSignature = (numerator: string, denominator: string) => {
                             const newBars = [...section.bars];
                             const value = buildTimeSignatureInput(numerator, denominator);
-                            newBars[bIdx] = { ...bar, timeSignature: value || undefined };
+                            newBars[bIdx] = { ...bar, timeSignature: value || undefined, partialMeasure: value ? bar.partialMeasure : undefined };
                             updateSection(sIdx, { ...section, bars: newBars });
                           };
 
@@ -7830,6 +7900,11 @@ const SongEditor: React.FC<Props> = ({
                         <div className="mt-1 text-[10px] text-gray-400">
                           {copy.editor.barTimeHelp}
                         </div>
+                        <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                          <input type="checkbox" checked={Boolean(bar.partialMeasure)} disabled={!bar.timeSignature}
+                            onChange={(event) => updateBar(sIdx, bIdx, { partialMeasure: event.target.checked || undefined })} />
+                          {copy.editor.partialMeasure}
+                        </label>
                       </div>
                     </div>
                     )}
@@ -7935,7 +8010,10 @@ const SongEditor: React.FC<Props> = ({
                         );
                       })()}
 
-                      <div className="mt-1 text-[10px] text-gray-400">
+                      <RhythmVoicesEditor voices={bar.rhythmVoices} timeSignature={song.timeSignatureUnspecified&&!bar.timeSignature?(language==='zh'?'未標':'Unspecified'):getBarTimeSignature(bar)} language={language} onChange={rhythmVoices => {
+                  const bars = [...section.bars]; bars[bIdx] = { ...bar, rhythmVoices }; updateSection(sIdx, { ...section, bars });
+                }} />
+                <div className="mt-1 text-[10px] text-gray-400">
                         {copy.editor.rhythmHelp}
                       </div>
                     </div>
@@ -8611,10 +8689,7 @@ const SongEditor: React.FC<Props> = ({
                     title={copy.editor.pushTitle}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                      <svg viewBox="0 0 32 24" className="w-6 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M16 20c0-8 4-10 12-10" />
-                        <path d="M25 7l3 3-3 3" />
-                      </svg>
+                      <ChordTimingArrow marker="<" className="w-6 h-4.5" />
                     </div>
                     <span className={chordToolbarLabelClass}>{copy.editor.push}</span>
                   </button>
@@ -8625,10 +8700,7 @@ const SongEditor: React.FC<Props> = ({
                     title={copy.editor.pullTitle}
                   >
                     <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                      <svg viewBox="0 0 32 24" className="w-6 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M16 20c0-8-4-10-12-10" />
-                        <path d="M7 7l-3 3 3 3" />
-                      </svg>
+                      <ChordTimingArrow marker=">" className="w-6 h-4.5" />
                     </div>
                     <span className={chordToolbarLabelClass}>{copy.editor.pull}</span>
                   </button>
@@ -8792,6 +8864,18 @@ const SongEditor: React.FC<Props> = ({
                       <span className="absolute right-1 top-0.5 text-[9px] font-black leading-none">3</span>
                     </div>
                     <span className="text-[10px] font-bold text-gray-500">1/8 3</span>
+                  </button>
+
+                  <button
+                    onClick={() => insertRhythmToken('s3')}
+                    className="flex flex-col items-center gap-1 p-2 hover:bg-indigo-50 rounded-xl transition-colors group"
+                    title={`${copy.editor.sixteenthNote} triplet`}
+                  >
+                    <div className="relative w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                      <span className="font-rhythm text-lg leading-none">♬</span>
+                      <span className="absolute right-1 top-0.5 text-[9px] font-black leading-none">3</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-gray-500">1/16 3</span>
                   </button>
 
                   <button

@@ -1,7 +1,26 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
+@source not "../tmp";
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* Keep the original page DOM and pagination; arrange it into spread rows only
+   inside performance mode. Hidden lyric measurement nodes remain out of flow. */
+.performance-sheet :has(> [data-print-page]) {
+  display: grid;
+  grid-template-columns: repeat(var(--performance-columns, 1), 794px);
+  gap: 16px;
+  align-items: start;
+}
+
+.performance-sheet [data-print-page] {
+  margin: 0 !important;
+  width: 794px !important;
+  max-width: none !important;
+  height: 1123px;
+  overflow: hidden;
+  box-shadow: none;
+}
 
 @keyframes preview-chord-caret-blink {
   0%, 46% { opacity: 1; }
@@ -360,6 +379,9 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 }
 .lyrics-page { container-type: inline-size; }
 @container (max-width: 500px) {
+  .lyrics-page[data-lyrics-reading] .lyrics-pair {
+    column-gap: 12px !important;
+  }
   .lyrics-page[data-lyrics-reading] .lyrics-section {
     grid-template-columns: minmax(0, 1fr) !important;
     gap: 8px !important;

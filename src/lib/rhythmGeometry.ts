@@ -29,7 +29,7 @@ export interface CompactRhythmBeamGeometry {
 
 export interface CompactRhythmTripletGeometry {
   key: string;
-  base: 'q' | 'e';
+  base: 'h' | 'q' | 'e' | 's';
   eventIndices: [number, number, number];
   startX: number;
   centerX: number;
@@ -119,7 +119,7 @@ const buildBeamGroups = (events: RhythmEvent[], beatUnits: number): BeamGroupDra
 };
 
 const buildTripletRuns = (events: RhythmEvent[]) => {
-  const runs: Array<{ key: string; base: 'q' | 'e'; events: [RhythmEvent, RhythmEvent, RhythmEvent] }> = [];
+  const runs: Array<{ key: string; base: 'h' | 'q' | 'e' | 's'; events: [RhythmEvent, RhythmEvent, RhythmEvent] }> = [];
 
   for (let index = 0; index <= events.length - 3; index += 1) {
     const first = events[index];
@@ -127,7 +127,7 @@ const buildTripletRuns = (events: RhythmEvent[]) => {
     const third = events[index + 2];
     if (!first.triplet || !second.triplet || !third.triplet) continue;
     if (first.base !== second.base || first.base !== third.base) continue;
-    if (first.base !== 'q' && first.base !== 'e') continue;
+    if (first.base === 'w') continue;
     if (!rhythmUnitsEqual(first.endUnit, second.startUnit) || !rhythmUnitsEqual(second.endUnit, third.startUnit)) continue;
 
     runs.push({
@@ -156,8 +156,9 @@ export const buildCompactRhythmGeometry = (
   const centerX = (event: RhythmEvent) => unitToX(getCompactRhythmCenterUnit(event));
   const headRadiusX = 2.05 * scale;
   const headRadiusY = 1.42 * scale;
-  const headY = height - (4.6 * scale);
-  const stemHeight = 9.2 * scale;
+  const hasCrossHeads = visibleEvents.some((event) => event.crossHead);
+  const headY = hasCrossHeads ? (height / 2) + (8.5 * scale) : height - (4.6 * scale);
+  const stemHeight = (hasCrossHeads ? 13 : 9.2) * scale;
   const beamY = headY - stemHeight;
   const secondaryBeamY = beamY + (2.05 * scale);
   const stemXOffset = headRadiusX * 0.72;
@@ -168,24 +169,25 @@ export const buildCompactRhythmGeometry = (
 
   const events = visibleEvents.map((event): CompactRhythmEventGeometry => {
     const x = centerX(event);
+    const headOffsetY = event.crossHead === 'upper' ? -5 * scale : 0;
     const hasStem = !event.isRest && !event.isSlash && event.base !== 'w';
     const isBeamed = beamedIndices.has(event.index);
     const stem = hasStem
       ? {
           x: x + stemXOffset,
           top: beamY,
-          bottom: stemBottom
+          bottom: event.crossHead ? headY + headOffsetY - headRadiusY * 0.72 : stemBottom
         }
       : null;
 
     return {
       event,
-      head: { x, y: headY },
+      head: { x, y: headY + headOffsetY },
       headRadiusX,
       headRadiusY,
       stem,
       flagCount: !isBeamed && !event.isRest && !event.isSlash ? (event.base === 'e' ? 1 : event.base === 's' ? 2 : 0) : 0,
-      dot: event.dotted && !event.isSlash ? { x: x + (3.7 * scale), y: headY } : null,
+      dot: event.dotted && !event.isSlash ? { x: x + (3.7 * scale), y: headY + headOffsetY } : null,
       accent: event.accent && stem && !event.isSlash
         ? { x, y: stem.top - (3.25 * scale) }
         : null
@@ -223,7 +225,7 @@ export const buildCompactRhythmGeometry = (
     const first = geometryByIndex.get(run.events[0].index)!;
     const middle = geometryByIndex.get(run.events[1].index)!;
     const last = geometryByIndex.get(run.events[2].index)!;
-    const showBracket = run.base === 'q' || run.events.some((event) => event.isRest);
+    const showBracket = run.base === 'h' || run.base === 'q' || run.events.some((event) => event.isRest);
     const bracketY = showBracket ? beamY - (2.55 * scale) : beamY;
 
     return {

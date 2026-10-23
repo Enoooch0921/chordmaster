@@ -1,9 +1,11 @@
-import type { LyricsFragment, LyricsPage } from './lyricsDocument';
+import type { LyricsFragment, LyricsLanguage, LyricsPage } from './lyricsDocument';
 
 export interface MeasuredBookBlock {
   id: string;
   rowCount: number;
   lineHeight: number;
+  // Bilingual rows contain one source sentence pair, possibly several wraps.
+  heights?: number[];
   headingHeight: number;
   // The gathering and song titles belong only to the first fragment.
   titleHeight: number;
@@ -28,12 +30,18 @@ export function paginateLyricsBook(blocks: MeasuredBookBlock[], capacity: number
     let start = 0;
     while (start < block.rowCount) {
       const overhead = block.headingHeight + (start === 0 ? block.titleHeight : 0);
-      if (used && capacity - used < overhead + block.lineHeight) advance();
-      const available = Math.max(1, Math.floor((capacity - used - overhead) / block.lineHeight));
-      const end = Math.min(block.rowCount, start + available);
+      const heightAt = (index: number) => block.heights?.[index] ?? block.lineHeight;
+      if (used && capacity - used < overhead + heightAt(start)) advance();
+      let end = start;
+      let height = overhead;
+      while (end < block.rowCount && used + height + heightAt(end) <= capacity) {
+        height += heightAt(end++);
+      }
+      // An exceptionally tall pair gets a growing page, not a split translation.
+      if (end === start) height += heightAt(end++);
       const fragment: LyricsFragment = { blockId: block.id, start, end, continued: start > 0 };
       pages[pages.length - 1].columns[column].push(fragment);
-      used += overhead + (end - start) * block.lineHeight;
+      used += height;
       start = end;
       if (start < block.rowCount) advance();
     }
@@ -45,7 +53,7 @@ export interface LyricsBookSettings {
   fontSize: number;
   lineHeight: number;
   font: 'kaiti' | 'sans';
-  language: 'chinese' | 'english' | 'bilingual';
+  language: LyricsLanguage;
 }
 export const DEFAULT_LYRICS_BOOK_SETTINGS: LyricsBookSettings = {
   fontSize: 16 * 4 / 3,

@@ -2,7 +2,7 @@ import type { LyricsBlock, LyricsDoc } from '../types';
 import { parseLyricsBody, type LyricSection } from './lyricsFormat';
 import { lyricsSectionLabel } from './lyricsSections';
 
-export type LyricsLanguage = 'chinese' | 'english' | 'bilingual';
+export type LyricsLanguage = 'chinese' | 'english' | 'bilingual' | 'mixed';
 export const newLyricsBlock = (): LyricsBlock => ({ id: crypto.randomUUID(), marker: '', chinese: '', english: '' });
 const markerKey = (section: LyricSection) => lyricsSectionLabel(section.marker);
 

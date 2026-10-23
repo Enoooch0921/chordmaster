@@ -55,6 +55,9 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
   const secondaryBeamWidth = 1.05 * beamStrokeScale * scale;
   const secondaryBeamGap = 2.05 * scale;
   const fontSize = 17 * scale;
+  // A mixed cross/solid pattern shares vector anchors so its raised heads and
+  // connecting beams cannot drift with the music font's advance boxes.
+  const vectorNotes = geometry.events.some(({ event }) => event.crossHead);
   const beamedEventIndices = React.useMemo(
     () => new Set(geometry.beams.flatMap((beam) => beam.eventIndices)),
     [geometry.beams]
@@ -68,6 +71,15 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
     const measure = () => {
       if (cancelled) return;
       const next: MeasuredGlyphAnchors = {};
+      if (vectorNotes) geometry.events.forEach(({ event, head, headRadiusY, stem }) => {
+        if (event.isRest || event.isSlash) return;
+        next[event.index] = {
+          top: stem?.top ?? head.y - headRadiusY,
+          stemX: stem?.x ?? head.x,
+          noteheadTop: head.y - headRadiusY,
+          noteheadBottom: head.y + headRadiusY
+        };
+      });
       svg.querySelectorAll<SVGTextElement>('[data-rhythm-formal-symbol]').forEach((symbol) => {
         const eventIndex = Number(symbol.dataset.rhythmEventIndex);
         if (typeof symbol.getBBox !== 'function') return;
@@ -98,7 +110,7 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [geometry, fontSize, onGlyphAnchorsChange, BACH_QUARTER_STEM_RIGHT_INSET_EM]);
+  }, [geometry, fontSize, vectorNotes, onGlyphAnchorsChange]);
 
   const getBeamDisplay = (beam: CompactRhythmGeometry['beams'][number]) => {
     const first = measuredGlyphAnchors[beam.eventIndices[0]];
@@ -147,7 +159,7 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
       preserveAspectRatio="none"
       aria-hidden="true"
     >
-      {geometry.events.map(({ event, head, dot, accent }) => {
+      {geometry.events.map(({ event, head, headRadiusX, headRadiusY, stem, flagCount, dot, accent }) => {
         const isBeamed = beamedEventIndices.has(event.index);
         const displayBase = isBeamed ? 'q' : event.base;
         const anchor = event.isSlash ? { xEm: 0, yEm: 0 } : getBachGlyphAnchor(displayBase, event.isRest);
@@ -178,6 +190,34 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
                 color={color}
                 className="overflow-visible"
               />
+            ) : vectorNotes && !event.isRest ? (
+              <g data-rhythm-event-index={event.index} data-rhythm-vector-note>
+                {event.crossHead ? (
+                  <path
+                    data-rhythm-notehead="true"
+                    data-rhythm-cross-head={event.crossHead}
+                    data-rhythm-head-x={head.x}
+                    data-rhythm-head-y={head.y}
+                    d={`M ${head.x - headRadiusX} ${head.y - headRadiusY} L ${head.x + headRadiusX} ${head.y + headRadiusY} M ${head.x - headRadiusX} ${head.y + headRadiusY} L ${head.x + headRadiusX} ${head.y - headRadiusY}`}
+                    stroke={color} strokeWidth={0.85 * scale} strokeLinecap="round" fill="none"
+                  />
+                ) : (
+                  <ellipse
+                    data-rhythm-notehead="true"
+                    data-rhythm-head-x={head.x}
+                    data-rhythm-head-y={head.y}
+                    cx={head.x} cy={head.y} rx={headRadiusX} ry={headRadiusY}
+                    transform={`rotate(-20 ${head.x} ${head.y})`}
+                    fill={event.base === 'w' || event.base === 'h' ? 'none' : color}
+                    stroke={color} strokeWidth={0.65 * scale}
+                  />
+                )}
+                {stem && <line data-rhythm-stem x1={stem.x} x2={stem.x} y1={stem.top} y2={stem.bottom} stroke={color} strokeWidth={0.65 * scale} />}
+                {stem && Array.from({ length: flagCount }, (_, index) => {
+                  const y = stem.top + index * 3.2 * scale;
+                  return <path key={index} data-rhythm-flag d={`M ${stem.x} ${y} C ${stem.x + 1.2 * scale} ${y + 3 * scale} ${stem.x + 6 * scale} ${y + 3 * scale} ${stem.x + 2.2 * scale} ${y + 8 * scale} C ${stem.x + 4 * scale} ${y + 4 * scale} ${stem.x} ${y + 4 * scale} ${stem.x} ${y + 2 * scale} Z`} fill={color} />;
+                })}
+              </g>
             ) : (
               <text
                 data-rhythm-notehead={!event.isRest ? 'true' : undefined}

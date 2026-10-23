@@ -54,6 +54,49 @@ const renderEditor = (song: Song, jianpuPitchContext?: JianpuPitchContext) => {
 };
 
 describe('SongEditor shared notation commands', () => {
+  it('keeps raw degree chords and timing when manually clearing only the source key uncertainty', () => {
+    const source=makeSong({chords:['4','6m','5','1~'],chordKeyUnspecified:true,chordSubdivisions:[{beat:2,offset:.5,chord:'5'}]});
+    const onChange=renderEditor(source);
+    const toggle=screen.getAllByRole('checkbox',{name:'和弦調性未定（保留原譜級數）'})[0];
+    expect(toggle).toBeChecked();
+    expect(screen.getAllByText('調性未標').length).toBeGreaterThan(0);
+    fireEvent.click(toggle);
+    const edited=onChange.mock.calls.at(-1)![0] as Song;
+    expect(edited.sections[0].bars[0]).toMatchObject({chords:['4','6m','5','1~'],chordKeyUnspecified:undefined,chordSubdivisions:[{beat:2,offset:.5,chord:'5'}]});
+    expect(source.sections[0].bars[0].chordKeyUnspecified).toBe(true);
+  });
+  it('marks the whole-song meter as unspecified without changing its internal fallback or chords', () => {
+    const onChange=renderEditor({...makeSong({chords:[''],unmeteredChordLines:[['G','D']]}),timeSignatureUnspecified:true});
+    expect(screen.getByRole('checkbox',{name:'拍號未定'})).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox',{name:'拍號未定'}));
+    expect(onChange.mock.calls.at(-1)?.[0]).toMatchObject({timeSignature:'4/4',timeSignatureUnspecified:undefined});
+    expect(onChange.mock.calls.at(-1)?.[0].sections[0].bars[0].unmeteredChordLines).toEqual([['G','D']]);
+  });
+  it('edits an unmeasured source block without reporting it as one bar', () => {
+    const onChange=renderEditor(makeSong({chords:[''],unmeteredChordLines:[['G','Bm7'],['Em','D','C']]}));
+    expect(screen.getByLabelText('小節與未定拍位段落數')).toHaveTextContent('0 小節；1 段拍位待核');
+    expect(document.getElementById('section-0-bar-count')).toBeNull();
+    fireEvent.change(screen.getAllByRole('textbox',{name:'未定拍位和弦序列'})[0],{target:{value:'G Bm7\nEm D Cm9'}});
+    expect(onChange.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:[''],unmeteredChordLines:[['G','Bm7'],['Em','D','Cm9']]});
+  });
+
+  it('edits the second-pass harmony in the legacy marks panel without changing the first pass', () => {
+    const onChange=renderEditor(makeSong({chords:['C','','C/E',''],chordPassVariants:[{pass:2,chords:['C/E','','C7','']}]}));
+    fireEvent.click(screen.getAllByRole('button',{name:'標註'})[0]);
+    fireEvent.change(screen.getByRole('textbox',{name:'第2遍 第3拍和弦'}),{target:{value:'G7'}});
+    expect(onChange.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:['C','','C/E',''],chordPassVariants:[{pass:2,chords:['C/E','','G7','']}]});
+  });
+
+  it('marks a short bar as a partial measure without altering its written length', () => {
+    const onChange = renderEditor(makeSong({ timeSignature: '3/4' }));
+    const toggle = screen.getAllByRole('checkbox', { name: '不完全小節（此格之後沿用原拍號）' })[0];
+    expect(toggle).not.toBeDisabled();
+    fireEvent.click(toggle);
+    const changed = onChange.mock.calls.at(-1)?.[0] as Song;
+    expect(changed.timeSignature).toBe('4/4');
+    expect(changed.sections[0].bars[0]).toMatchObject({ timeSignature: '3/4', partialMeasure: true });
+  });
+
   it('edits chords without revealing or changing rhythm and jianpu in chords-only mode', () => {
     const song = makeSong({ riff: '1 | 2 | 3 | 4', rhythm: 'q q q q', annotation: 'Keep this' });
     const onChange = renderEditor(song);

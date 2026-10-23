@@ -72,6 +72,155 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it.each(['desktop', 'phone'] as const)('edits second-pass chords on %s while preserving first-pass harmony', deviceLayout => {
+    const source: Song = {...song, sections:[{...song.sections[0], bars:[{...song.sections[0].bars[0], chords:['C','','C/E',''], chordPassVariants:[{pass:2,chords:['C/E','','C7','']}]}]}]};
+    const session=createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'});
+    const {onApplyDraft}=renderEditor({session,deviceLayout});
+    fireEvent.change(screen.getByRole('textbox',{name:'第2遍 第3拍和弦'}),{target:{value:'G7'}});
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:['C','','C/E',''],chordPassVariants:[{pass:2,chords:['C/E','','G7','']}]});
+  });
+
+  it.each(['desktop', 'phone'] as const)('sets D.C. al Fine as one structured marker on %s', deviceLayout => {
+    const { onApplyDraft } = renderEditor({ deviceLayout });
+    fireEvent.click(screen.getByRole('button', { name: '選擇導引記號' }));
+    fireEvent.click(screen.getByRole('button', { name: 'D.C. al Fine' }));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].rightMarker).toBe('dc-al-fine');
+  });
+
+  it.each(['desktop','phone'] as const)('edits an additional chord on %s without overwriting the original beat chord', deviceLayout=>{
+    const source:Song={...song,sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],chordSubdivisions:[{beat:0,offset:.5,chord:'G/B'}]}]}]};
+    const session=createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'});
+    const {onApplyDraft}=renderEditor({session,deviceLayout});
+    fireEvent.change(screen.getByRole('textbox',{name:'追加和弦 1'}),{target:{value:'Am/C'}});
+    const changed=onApplyDraft.mock.calls.at(-1)?.[0];expect(changed.sections[0].bars[0].chords).toEqual(['C']);expect(changed.sections[0].bars[0].chordSubdivisions).toEqual([{beat:0,offset:.5,chord:'Am/C'}]);
+    fireEvent.change(screen.getByRole('combobox',{name:'追加和弦 1 拍位'}),{target:{value:'1.75'}});
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].chordSubdivisions[0]).toEqual({beat:1,offset:.75,chord:'G/B'});
+    fireEvent.click(screen.getByRole('button',{name:'移除追加和弦 1'}));expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].chordSubdivisions).toBeUndefined();
+  });
+
+  it.each(['desktop', 'phone'] as const)('edits precise chord timing on %s without changing the chord or its color', deviceLayout => {
+    const source: Song = {...song, sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],chords:['C','G','',''],chordMarks:{1:{color:'rose'}}}]}]};
+    const session=createPreviewEditSession({song:source,target:{...target,rawChordIndex:1},inputMode:'letters'});
+    const {onApplyDraft}=renderEditor({session,deviceLayout});
+    fireEvent.click(screen.getByRole('button',{name:'選擇演奏記號'}));
+    fireEvent.change(screen.getByRole('combobox',{name:'和弦拍內位置'}),{target:{value:'0.25'}});
+    const changed=onApplyDraft.mock.calls.at(-1)?.[0];expect(changed.sections[0].bars[0].chordMarks).toEqual({1:{color:'rose',beatOffset:.25}});expect(changed.sections[0].bars[0].chords).toEqual(['C','G','','']);
+  });
+
+  it('adds an unmetered grace note from the phone editor without changing the principal pitch', () => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '3 | 4 | 5 | 6' }] }] };
+    const jianpuTarget = { ...target, field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: jianpuTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
+    fireEvent.click(screen.getByRole('button', { name: '編輯簡譜裝飾音' }));
+    expect(screen.queryByRole('button', { name: '輸入簡譜 2' })).toBeNull();
+    fireEvent.change(screen.getByRole('combobox', { name: '裝飾音音高' }), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: '套用裝飾音' }));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].riff).toBe('{2}3 | 4 | 5 | 6');
+  });
+
+  it.each(['desktop','phone'] as const)('edits only the second ornament and preserves the group on %s', deviceLayout => {
+    const source:Song={...song,sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],riff:"{1'2'}3' | 4 | 5 | 6"}]}]};
+    const jianpuTarget={...target,field:'jianpu' as const,slotIndex:0,cursor:{kind:'jianpu' as const,beatIndex:0,unitIndex:0,noteIndex:0}};
+    const {onApplyDraft}=renderEditor({session:createPreviewEditSession({song:source,target:jianpuTarget,inputMode:'letters'}),deviceLayout});
+    fireEvent.click(screen.getByRole('button',{name:'編輯簡譜裝飾音'}));
+    expect(screen.getByRole('combobox',{name:'裝飾音 1 音高'})).toHaveValue('1');
+    expect(screen.getByRole('combobox',{name:'裝飾音 2 八度'})).toHaveValue('1');
+    fireEvent.change(screen.getByRole('combobox',{name:'裝飾音 2 音高'}),{target:{value:'4'}});
+    fireEvent.click(screen.getByRole('button',{name:'套用裝飾音'}));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].riff).toBe("{1'4'}3' | 4 | 5 | 6");
+  });
+
+  it('adds and removes an individual grace without applying intermediate drafts',()=>{
+    const source:Song={...song,sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],riff:'{1}3 | 4 | 5 | 6'}]}]};
+    const jianpuTarget={...target,field:'jianpu' as const,slotIndex:0,cursor:{kind:'jianpu' as const,beatIndex:0,unitIndex:0,noteIndex:0}};
+    const {onApplyDraft}=renderEditor({session:createPreviewEditSession({song:source,target:jianpuTarget,inputMode:'letters'}),deviceLayout:'phone'});
+    fireEvent.click(screen.getByRole('button',{name:'編輯簡譜裝飾音'}));
+    fireEvent.click(screen.getByRole('button',{name:'新增裝飾音'}));
+    fireEvent.change(screen.getByRole('combobox',{name:'裝飾音 2 音高'}),{target:{value:'4'}});
+    fireEvent.click(screen.getByRole('button',{name:'移除裝飾音 1'}));
+    expect(onApplyDraft).not.toHaveBeenCalled();
+    expect(screen.getByRole('combobox',{name:'裝飾音音高'})).toHaveValue('4');
+    fireEvent.click(screen.getByRole('button',{name:'套用裝飾音'}));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].riff).toBe('{4}3 | 4 | 5 | 6');
+  });
+
+  it('closes the grace form with Escape without changing the score or finishing the editor', () => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '{2}3 | 4 | 5 | 6' }] }] };
+    const jianpuTarget = { ...target, field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 } };
+    const { onApplyDraft, onDone } = renderEditor({ session: createPreviewEditSession({ song: source, target: jianpuTarget, inputMode: 'letters' }) });
+    fireEvent.click(screen.getByRole('button', { name: '編輯簡譜裝飾音' }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('combobox', { name: '裝飾音音高' })).toBeNull();
+    expect(onApplyDraft).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it('toggles a selected sixteenth into a triplet without shifting its neighbor', () => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '1=2=3_ | 4 | 5 | 6' }] }] };
+    const jianpuTarget = { ...target, field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: 0 } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: jianpuTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
+    fireEvent.click(screen.getByRole('button', { name: '切換簡譜三連音' }));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].riff).toBe('1=ty2=3_ | 4 | 5 | 6');
+  });
+
+  it('offers sixteenth triplet notes and rests in the rhythm keyboard', () => {
+    const rhythmTarget = { ...target, field: 'rhythm' as const, slotIndex: 0, cursor: { kind: 'rhythm' as const, cursorUnit: 0 } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song, target: rhythmTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
+    fireEvent.click(screen.getByRole('button', { name: /^十六分三連音$/ }));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0].rhythm).toBe('s3');
+    expect(screen.getByRole('button', { name: /^十六分三連休止$/ })).toBeEnabled();
+  });
+
+  it('edits an extra voice without overlapping the primary keyboard or changing its rhythm', async () => {
+    const user = userEvent.setup();
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], rhythm: 'qr q qr q', rhythmVoices: [{ id: 'kick', label: 'Kick', rhythm: 'q' }] }] }] };
+    const rhythmTarget = { ...target, field: 'rhythm' as const, slotIndex: 0, cursor: { kind: 'rhythm' as const, cursorUnit: 0 } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: rhythmTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
+    await user.click(screen.getByText('其他節奏聲部 (1)'));
+    expect(document.querySelector('[data-keyboard-view="rhythm"]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: /^重音$/ }));
+    const bar = onApplyDraft.mock.calls.at(-1)![0].sections[0].bars[0];
+    expect(bar.rhythm).toBe('qr q qr q');
+    expect(bar.rhythmVoices).toEqual([{ id: 'kick', label: 'Kick', rhythm: 'q^' }]);
+    await user.click(screen.getByText('其他節奏聲部 (1)'));
+    expect(document.querySelector('[data-keyboard-view="rhythm"]')).toBeInTheDocument();
+  });
+
+  it('cycles a source crosshead without changing its duration or neighboring notes', async () => {
+    const user = userEvent.setup();
+    let draft: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], rhythm: 'e e e e e e e e' }] }] };
+    const rhythmTarget = { ...target, field: 'rhythm' as const, slotIndex: 0, cursor: { kind: 'rhythm' as const, cursorUnit: 0 } };
+    const session = () => createPreviewEditSession({ song: draft, target: rhythmTarget, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: session(), deviceLayout: 'phone' });
+    for (const expected of ['ec', 'ecu', 'e']) {
+      await user.click(screen.getByRole('button', { name: '切換叉形音頭：一般、上方、實心' }));
+      draft = onApplyDraft.mock.calls.at(-1)![0];
+      expect(draft.sections[0].bars[0].rhythm).toBe(`${expected} e e e e e e e`);
+      rerenderSession(session());
+    }
+  });
+
+  it.each([
+    ['搶拍', '<', 'M7 7l-3 3 3 3'],
+    ['拖拍', '>', 'M25 7l3 3-3 3']
+  ])('stores the matching suffix when choosing %s', async (label, suffix, arrowhead) => {
+    const user = userEvent.setup();
+    const session = createPreviewEditSession({
+      song: { ...song, chordTimingVersion: 2 },
+      target: { ...target, slotIndex: 0, rawChordIndex: 0 },
+      inputMode: 'letters'
+    });
+    const { onApplyDraft } = renderEditor({ session, deviceLayout: 'phone' });
+    await user.click(screen.getByRole('button', { name: '選擇演奏記號' }));
+    const button = screen.getByRole('button', { name: label });
+    expect(button.querySelector('svg path:last-child')).toHaveAttribute('d', arrowhead);
+    await user.click(button);
+    const edited = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    expect(edited.sections[0].bars[0].chords[0]).toBe(`C${suffix}`);
+    expect(edited.chordTimingVersion).toBe(2);
+    expect(song.sections[0].bars[0].chords).toEqual(['C']);
+  });
+
   it('shows the inherited sharp key when reopening the following section', async () => {
     const source: Song = { ...song, originalKey: 'F', currentKey: 'F', sections: [
       { id: 'intro', title: 'Intro', bars: [{ id: 'intro-1', keyChangeTo: 'F#', chords: ['5'] }] },
@@ -210,7 +359,7 @@ describe('PreviewBarEditor', () => {
     const modifiers = document.querySelector('[data-rhythm-key-row="modifiers"]');
     expect(notes?.querySelectorAll('[data-rhythm-staff-key-glyph]')).toHaveLength(5);
     expect(rests?.querySelectorAll('[data-rhythm-staff-key-glyph]')).toHaveLength(5);
-    expect(modifiers?.querySelectorAll('[data-rhythm-triplet-mark]')).toHaveLength(4);
+    expect(modifiers?.querySelectorAll('[data-rhythm-triplet-mark]')).toHaveLength(6);
     expect(document.querySelector('[data-rhythm-staff-line]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-rhythm-notation-label]')).not.toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '預覽快捷編輯' })).not.toHaveTextContent(/1\/2|1\/4|1\/8|1\/16/);

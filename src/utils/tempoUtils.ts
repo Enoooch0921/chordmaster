@@ -6,7 +6,7 @@ export const sanitizeTempoInput = (value: string): string => {
   const [rawInteger = '', ...rawDecimalParts] = normalized.split('.');
   const integer = rawInteger.slice(0, 3);
   const hasDecimalPoint = normalized.includes('.');
-  const decimal = rawDecimalParts.join('').slice(0, 1);
+  const decimal = rawDecimalParts.join('').slice(0, 2);
 
   if (!hasDecimalPoint) {
     return integer;
@@ -24,7 +24,7 @@ export const normalizeTempoBpm = (tempo: unknown): number | undefined => {
   if (!Number.isFinite(normalizedTempo)) return undefined;
 
   const clampedTempo = Math.min(MAX_TEMPO_BPM, Math.max(MIN_TEMPO_BPM, normalizedTempo));
-  return Number((Math.round(clampedTempo * 10) / 10).toFixed(1));
+  return Number((Math.round(clampedTempo * 100) / 100).toFixed(2));
 };
 
 export const formatTempoBpm = (tempo?: number): string => {

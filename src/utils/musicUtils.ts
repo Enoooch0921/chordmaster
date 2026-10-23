@@ -126,7 +126,7 @@ function getLetterIndex(noteLetter: string): number {
 
 function getNashvilleNumberForNote(note: string, key: Key): string {
   const normalizedNote = NOTE_ALIASES[note] || note;
-  const noteMatch = normalizedNote.match(/^([A-G])([#b]?)/);
+  const noteMatch = note.match(/^([A-G])([#b]?)/);
   const keyMatch = key.match(/^([A-G])([#b]?)/);
   const noteIndex = getNoteIndex(normalizedNote);
   const keyIndex = getNoteIndex(key);
@@ -218,10 +218,25 @@ function getNoteFromIndexForKey(index: number, key: Key, isBass: boolean = false
   return getNoteFromIndex(index, spelling.accidental < 0);
 }
 
+/** Only a wrapper around a whole chord; quality parentheses such as C(add9) stay inside. */
+export function getParenthesizedChordInner(chord: string): string | null {
+  if (!chord.startsWith('(') || !chord.endsWith(')')) return null;
+  const inner = chord.slice(1, -1);
+  if (!/^(?:[A-G][#b]?|[#b]?[1-7][#b]?)/.test(inner)) return null;
+  let depth = 0;
+  for (const character of inner) {
+    if (character === '(') depth += 1;
+    if (character === ')' && --depth < 0) return null;
+  }
+  return depth === 0 ? inner : null;
+}
+
 export function normalizeChordEnharmonic(chord: string): string {
   if (!chord || chord === '%' || chord === '/') {
     return chord;
   }
+  const parenthesized = getParenthesizedChordInner(chord);
+  if (parenthesized) return `(${normalizeChordEnharmonic(parenthesized)})`;
 
   if (chord.includes('/')) {
     const [base, bass] = chord.split('/');
@@ -373,6 +388,8 @@ function transposeRootPreservingDegree(
 
 export function transposeChord(chord: string, offset: number, targetKey?: Key, isBass: boolean = false, sourceKey?: Key): string {
   if (!chord || chord === '%' || chord === '/') return chord;
+  const parenthesized = getParenthesizedChordInner(chord);
+  if (parenthesized) return `(${transposeChord(parenthesized, offset, targetKey, isBass, sourceKey)})`;
   const normalizedOffset = ((offset % 12) + 12) % 12;
   if (normalizedOffset === 0 && !targetKey) {
     return normalizeChordEnharmonic(chord);
@@ -421,7 +438,7 @@ export function transposeChord(chord: string, offset: number, targetKey?: Key, i
     ?? (targetKey
       ? getNoteFromIndexForKey(rootIndex + offset, targetKey, isBass)
       : getNoteFromIndex(rootIndex + offset, shouldPreferFlatsForChordRoot(root)));
-  return normalizeChordEnharmonic(newRoot + rest);
+  return degreePreservedRoot ? newRoot + rest : normalizeChordEnharmonic(newRoot + rest);
 }
 
 /** Preserve the user's chord spelling when preview does not actually change key. */
@@ -568,6 +585,8 @@ export function getSectionColor(title: string, useColors: boolean = true) {
 
 export function getNashvilleNumber(chord: string, key: Key, isBass: boolean = false): string {
   if (!chord || chord === '%' || chord === '/') return chord;
+  const parenthesized = getParenthesizedChordInner(chord);
+  if (parenthesized) return `(${getNashvilleNumber(parenthesized, key, isBass)})`;
 
   // Handle slash chords like E/G#
   if (chord.includes('/')) {
@@ -609,6 +628,8 @@ export function getNashvilleNumber(chord: string, key: Key, isBass: boolean = fa
 
 export function parseNashvilleToChord(input: string, key: Key): string {
   if (!input || input === '%' || input === '/') return input;
+  const parenthesized = getParenthesizedChordInner(input);
+  if (parenthesized) return `(${parseNashvilleToChord(parenthesized, key)})`;
 
   // Handle slash chords
   if (input.includes('/')) {
@@ -663,6 +684,8 @@ export function parseNashvilleToChord(input: string, key: Key): string {
 export function isNashville(chord: string): boolean {
   if (!chord || chord === '%' || chord === '/') return false;
   const trimmed = chord.trim();
+  const parenthesized = getParenthesizedChordInner(trimmed);
+  if (parenthesized) return isNashville(parenthesized);
   return /^([b#]?)([1-7])([#b]?)/.test(trimmed) || /^\/([b#]?)([1-7])([#b]?)/.test(trimmed);
 }
 

@@ -40,7 +40,7 @@ export default function LyricsDocEditor({ song, language, onChange }: LyricsDocE
         <p className="mt-2">{zh ? '段落標題使用 [Verse 1]、[Pre-Chorus]、[Chorus]、[Bridge] 等，放在歌詞上方。舊版數字與符號也能識別並轉成英文標題。中英文會優先依相同標題配對；未能確定的段落會提示檢查。套用會取代目前歌詞，並重新建立段落與分頁設定。' : 'Place headings such as [Verse 1], [Pre-Chorus], [Chorus] or [Bridge] above the lyrics. Old numbers and symbols are also recognized. Matching headings are paired first; uncertain pairs are flagged. Applying replaces the lyrics and rebuilds sections and page breaks.'}</p>
       </details>
       <button type="button" onClick={() => {
-        onChange({ ...song, lyricsDoc: { ...updateLyricsBlocks(song.lyricsDoc, importLyrics(chinese, english)), displayLanguage: english.trim() ? (chinese.trim() ? 'bilingual' : 'english') : 'chinese' } });
+        onChange({ ...song, lyricsDoc: { ...updateLyricsBlocks(song.lyricsDoc, importLyrics(chinese, english)), displayLanguage: song.lyricsDoc?.displayLanguage === 'mixed' ? 'mixed' : english.trim() ? (chinese.trim() ? 'bilingual' : 'english') : 'chinese' } });
         setApplied(true);
       }} className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white">
         {zh ? '套用整首歌詞' : 'Apply lyrics'}

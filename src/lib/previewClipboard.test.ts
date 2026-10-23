@@ -128,6 +128,23 @@ describe('preview clipboard commands', () => {
     expect(following.chords).toEqual([]);
   });
 
+  it('copies a partial measure without turning its short length into a continuing meter', () => {
+    const source = makeSong();
+    source.sections[0].bars[0] = { id: 'a', chords: ['C'], timeSignature: '3/4', partialMeasure: true, riff: '1 | 2 | 3' };
+    const clipboard = copyPreviewContent(source, [target('a')], 'bars')!;
+    expect(clipboard.items[0].timeSignature).toBe('3/4');
+    expect(clipboard.items[0].structuralTimeSignature).toBe('4/4');
+    const destination = makeSong();
+    const result = pastePreviewContent(destination, [target('b')], clipboard);
+    expect(result.error).toBeUndefined();
+    const pasted = result.song.sections[0].bars[2];
+    expect(pasted.partialMeasure).toBe(true);
+    expect(getEffectiveTimeSignatureForBar(result.song, pasted)).toBe('3/4');
+    expect(getEffectiveTimeSignatureForBar(result.song, result.song.sections[0].bars[3])).toBe('4/4');
+    const otherMeter = { ...destination, timeSignature: '6/8' };
+    expect(pastePreviewContent(otherMeter, [target('b')], clipboard).error).toBe('time-signature');
+  });
+
   it('rejects mismatched multi-lane counts without partial changes', () => {
     const song = makeSong();
     const result = pastePreviewContent(song, [target('c')], copyPreviewContent(song, [target('a'), target('b')], 'chords')!);

@@ -36,6 +36,27 @@ describe('Jianpu', () => {
     expect(tripletLines?.[1].style.top).toBe('5px');
   });
 
+  it.each(['preview', 'editor'] as const)('groups quarter triplets across beat tokens in %s', (renderMode) => {
+    const widthSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);
+    try {
+      const { container } = render(<Jianpu notation="1t 7,t | 5,t | 3, | 5," renderMode={renderMode} />);
+      const marks = container.querySelectorAll<HTMLElement>('[data-jianpu-triplet-mark]');
+      expect(marks).toHaveLength(1);
+      expect(parseFloat(marks[0].style.width)).toBeGreaterThan(renderMode === 'editor' ? 100 : 25);
+      // Quarter notes have no eighth-note underline.
+      expect(container.querySelectorAll('[data-jianpu-underline]')).toHaveLength(0);
+    } finally {
+      widthSpy.mockRestore();
+    }
+  });
+
+  it('keeps consecutive triplets in groups of three and breaks at a real gap', () => {
+    const consecutive = render(<Jianpu notation="1t 2t | 3t | 4t 5t | 6t" />);
+    expect(consecutive.container.querySelectorAll('[data-jianpu-triplet-mark]')).toHaveLength(2);
+    const gap = render(<Jianpu notation="1_t 2_t | 3_t | 4" />);
+    expect(gap.container.querySelectorAll('[data-jianpu-triplet-mark]')).toHaveLength(2);
+  });
+
   it('anchors a cross-bar slur on the sounded note before sustain dashes', () => {
     const widthSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);
     try {
@@ -54,5 +75,24 @@ describe('Jianpu', () => {
     } finally {
       widthSpy.mockRestore();
     }
+  });
+
+  it('does not draw a self slur when one note ends a cross-bar slur and starts the next', () => {
+    const { container } = render(
+      <Jianpu
+        notation="(4') | - | 4'_) 6_ | 7_ 1'_"
+        previousNotationForCrossBar="1' | - | 1'_ 2'_ | 3'_ (4'_"
+        compact
+      />
+    );
+
+    expect(container.querySelector('[data-jianpu-slur="self"]')).toBeNull();
+    expect(container.querySelectorAll('[data-jianpu-slur="pair"]')).toHaveLength(1);
+  });
+
+  it('still draws an explicitly self-contained slur without an incoming cross-bar slur', () => {
+    const { container } = render(<Jianpu notation="(1)" compact />);
+
+    expect(container.querySelectorAll('[data-jianpu-slur="self"]')).toHaveLength(1);
   });
 });

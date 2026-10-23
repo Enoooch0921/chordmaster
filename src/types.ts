@@ -6,7 +6,7 @@
 export type Key = 'C' | 'C#' | 'Db' | 'D' | 'Eb' | 'E' | 'F' | 'F#' | 'Gb' | 'G' | 'G#' | 'Ab' | 'A' | 'Bb' | 'B';
 export type AppLanguage = 'en' | 'zh';
 export type BarNumberMode = 'none' | 'line-start' | 'all';
-export type NavigationMarker = 'segno' | 'coda' | 'ds' | 'dc' | 'fine' | 'ds-al-coda' | 'ds-al-fine';
+export type NavigationMarker = 'segno' | 'coda' | 'ds' | 'dc' | 'fine' | 'ds-al-coda' | 'ds-al-fine' | 'dc-al-fine';
 export type NashvilleFontPreset =
   | 'ibm-plex-serif'
   | 'source-serif-4'
@@ -29,8 +29,24 @@ export type AnnotationColorId = 'amber' | 'emerald' | 'sky' | 'rose' | 'violet' 
 export type BarLabelLane = 'rhythm' | 'riff';
 
 export interface ChordMark {
+  /** Fraction of the notated beat after this chord's grid slot. */
+  beatOffset?: 0.25 | 0.5 | 0.75;
   color?: AnnotationColorId;
   special?: boolean;
+}
+
+export interface ChordSubdivision {
+  /** Zero-based notated beat; independent of compact chord array indices. */
+  beat: number;
+  offset: 0.25 | 0.5 | 0.75;
+  chord: string;
+}
+
+export interface ChordPassVariant {
+  /** The numbered performance pass; the bar's ordinary chords are pass 1. */
+  pass: number;
+  chords: string[];
+  chordSubdivisions?: ChordSubdivision[];
 }
 
 export interface RhythmMark {
@@ -53,23 +69,43 @@ export interface SongReferences {
   vocal?: SongReference;
 }
 
+export interface RhythmVoice {
+  id: string;
+  label: string;
+  rhythm: string;
+}
+
+export interface JianpuVoice {
+  id: string;
+  label: string;
+  riff: string;
+}
+
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
   chords: string[]; // e.g., ["E", "C#m"]
+  chordTimingUnspecified?: boolean; // Printed measure boundary is known; chords are ordered, with no confirmed beat positions.
+  chordKeyUnspecified?: boolean; // Source harmony has no confirmed key; preserve literal degrees instead of deriving pitches from the working key.
   keyChangeTo?: Key; // Per-bar key change starting at this bar
   timeSignature?: string; // Per-bar override, e.g., "2/4"
+  partialMeasure?: boolean; // Interpret this bar's timeSignature as its duration without changing the continuing meter
   riff?: string;    // e.g., "3 - 4 - 5 - 7 1"
+  riffVoices?: JianpuVoice[]; // Additional simultaneous pitched lines
   rhythm?: string;  // e.g., "q e e qr"
+  rhythmVoices?: RhythmVoice[]; // Additional simultaneous voices; omitted beats stay unspecified
   label?: string; // Shared lane label, e.g. "Pno", "Dr", "EG"
   labelLane?: BarLabelLane; // Three-line preview placement: rhythm = row 2, riff = row 3
   riffLabel?: string; // e.g., "Riff", "Pno", "EG"
   rhythmLabel?: string; // e.g., "Dr", "Rhythm", "Clap"
   annotation?: string; // e.g., "Kick In", "8 beat build"
   chordMarks?: Record<number, ChordMark>;
+  chordSubdivisions?: ChordSubdivision[];
+  chordPassVariants?: ChordPassVariant[];
+  unmeteredChordLines?: string[][]; // Source chord order/lines with no inferred beats; this block is not a measure.
   rhythmMark?: RhythmMark;
   unisonMark?: UnisonMark;
   leftMarker?: NavigationMarker; // e.g., segno at bar start
-  rightMarker?: NavigationMarker; // e.g., coda, D.S., D.C., Fine, or D.S. al Coda at bar end
+  rightMarker?: NavigationMarker; // e.g., coda, D.S., D.C. al Fine, or Fine at bar end
   leftText?: string; // e.g., "Vocal only"
   rightText?: string; // e.g., "D.S. al Coda"
   repeatStart?: boolean; // |:
@@ -88,10 +124,13 @@ export interface Section {
 export interface PickupMeasure {
   id?: string;
   riff?: string;
+  riffVoices?: JianpuVoice[];
   rhythm?: string;
 }
 
 export interface Song {
+  // Missing/1 = legacy reversed arrows; 2 = < left/earlier, > right/later.
+  chordTimingVersion?: 1 | 2;
   title: string;
   lyricist?: string;
   composer?: string;
@@ -99,9 +138,11 @@ export interface Song {
   groove?: string;
   shuffle?: boolean;
   originalKey: Key;
+  originalKeyUnspecified?: boolean; // Working key is provisional; the source does not confirm the original key.
   currentKey: Key;
   tempo?: number;
   timeSignature: string; // e.g., "4/4"
+  timeSignatureUnspecified?: boolean; // Internal fallback meter is not confirmed by the source.
   useSectionColors?: boolean;
   showNashvilleNumbers?: boolean;
   showAbsoluteJianpu?: boolean;
@@ -128,7 +169,7 @@ export interface LyricsDoc {
   chinese: string;       // Serialized Chinese body including markers
   english?: string;      // Serialized English body including markers
   blocks?: LyricsBlock[];
-  displayLanguage?: 'chinese' | 'english' | 'bilingual';
+  displayLanguage?: 'chinese' | 'english' | 'bilingual' | 'mixed';
   fontSize?: number;
   lineHeight?: number;
 }

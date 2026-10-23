@@ -775,7 +775,7 @@ export default function PreviewWysiwygEditor({
         data-wysiwyg-autofocus
         type="text"
         inputMode="decimal"
-        pattern="[0-9]*[.]?[0-9]?"
+        pattern="[0-9]*[.]?[0-9]{0,2}"
         enterKeyHint="done"
         autoComplete="off"
         autoCorrect="off"

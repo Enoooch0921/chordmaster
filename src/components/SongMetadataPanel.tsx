@@ -546,10 +546,10 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           <input
             type="text"
             inputMode="decimal"
-            pattern="[0-9]*[.]?[0-9]?"
+            pattern="[0-9]*[.]?[0-9]{0,2}"
             min={20}
             max={400}
-            step={0.1}
+            step={0.01}
             value={bpmDraft}
             onChange={(event) => {
               updateReferenceBpmDraft(kind, event.target.value, REFERENCE_BPM_INPUT_COMMIT_DELAY_MS);
@@ -671,6 +671,10 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         metaTextClassName={isWideLayout ? '' : 'hidden'}
         triggerIconSize={14}
       />
+      <label className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
+        <input type="checkbox" disabled={!canEditKey} checked={song.originalKeyUnspecified === true} onChange={event => updateField('originalKeyUnspecified', event.target.checked || undefined)} />
+        {language === 'zh' ? '原調未定' : 'Original key unconfirmed'}
+      </label>
     </div>
   );
 
@@ -707,10 +711,10 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       <input
         type="text"
         inputMode="decimal"
-        pattern="[0-9]*[.]?[0-9]?"
+        pattern="[0-9]*[.]?[0-9]{0,2}"
         min={20}
         max={400}
-        step={0.1}
+        step={0.01}
         value={tempoDraft}
         onChange={(event) => setTempoDraft(sanitizeTempoInput(event.target.value))}
         onBlur={commitTempoDraft}
@@ -732,21 +736,27 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         <input
           type="text"
           inputMode="numeric"
-          value={timeSignatureParts.numerator}
+          value={song.timeSignatureUnspecified ? '' : timeSignatureParts.numerator}
+          disabled={song.timeSignatureUnspecified}
           onChange={(event) => updateField('timeSignature', buildTimeSignatureInput(event.target.value, timeSignatureParts.denominator))}
-          placeholder="4"
+          placeholder={song.timeSignatureUnspecified ? '?' : '4'}
           className="h-full w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
         />
         <span className="px-0.5 text-sm font-semibold text-gray-400">/</span>
         <input
           type="text"
           inputMode="numeric"
-          value={timeSignatureParts.denominator}
+          value={song.timeSignatureUnspecified ? '' : timeSignatureParts.denominator}
+          disabled={song.timeSignatureUnspecified}
           onChange={(event) => updateField('timeSignature', buildTimeSignatureInput(timeSignatureParts.numerator, event.target.value))}
-          placeholder="4"
+          placeholder={song.timeSignatureUnspecified ? '?' : '4'}
           className="h-full w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
         />
       </div>
+      <label className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
+        <input type="checkbox" checked={song.timeSignatureUnspecified === true} onChange={event => updateField('timeSignatureUnspecified', event.target.checked || undefined)} />
+        {language === 'zh' ? '拍號未定' : 'Time signature unspecified'}
+      </label>
     </div>
   );
 
