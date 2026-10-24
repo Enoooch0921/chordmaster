@@ -49,7 +49,7 @@ describe.each(['sheet', 'book'] as const)('%s bilingual line layout', kind => {
   it('edits one source sentence without adding wrap newlines or changing either neighboring line or Chinese', () => {
     const onChange = vi.fn();
     show({ reading: true, onChange });
-    const label = kind === 'sheet' ? '英文歌詞 Verse 1 · 第2行' : '雙語對齊 · Verse 1 · English · 第2行';
+    const label = kind === 'sheet' ? '英文歌詞 Verse 1 · 第2行' : '雙語對齊 · Verse 1 · 英文 · 第2行';
     fireEvent.click(screen.getByRole('button', { name: label }));
     const input = screen.getByRole('textbox', { name: label });
     expect(input).toHaveValue('Next sentence');

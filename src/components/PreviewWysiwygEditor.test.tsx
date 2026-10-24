@@ -133,7 +133,7 @@ describe('PreviewWysiwygEditor song information panel', () => {
     const ebOption = screen.getByText('Eb').closest('button');
     expect(ebOption).not.toBeNull();
     fireEvent.click(ebOption!);
-    expect(onMetadataKeyChange).toHaveBeenCalledWith('Eb');
+    expect(onMetadataKeyChange).toHaveBeenCalledWith('Eb', 'major');
     expect(onKeyChange).not.toHaveBeenCalled();
   });
 
@@ -161,7 +161,7 @@ describe('PreviewWysiwygEditor song information panel', () => {
     const ebOption = screen.getByText('Eb').closest('button');
     expect(ebOption).not.toBeNull();
     fireEvent.click(ebOption!);
-    expect(onKeyChange).toHaveBeenCalledWith('Eb');
+    expect(onKeyChange).toHaveBeenCalledWith('Eb', 'major');
     expect(onMetadataKeyChange).not.toHaveBeenCalled();
   });
 

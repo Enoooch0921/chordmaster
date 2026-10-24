@@ -3,6 +3,8 @@ import { ExternalLink, Music2, Mic2, Pause, Play, RotateCcw, RotateCw, X } from 
 import { AppLanguage, Key, Song, SongReferenceKind } from '../types';
 import { getTransposeOffset } from '../utils/musicUtils';
 import { getYouTubeEmbedUrl, parseYouTubeVideoId } from '../utils/referenceUtils';
+import { getSongTempoPoints } from '../utils/tempoEvents';
+import { currentKeyMode, formatKeyName } from '../utils/keyMode';
 
 interface ReferencePlayerProps {
   song: Song;
@@ -54,6 +56,9 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
   const [timedOutVideoId, setTimedOutVideoId] = React.useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = React.useState(1);
   const [availableRates, setAvailableRates] = React.useState(FALLBACK_RATES);
+  const [tempoPointId, setTempoPointId] = React.useState('');
+  const tempoPoints = getSongTempoPoints(song);
+  const tempoPoint = tempoPoints.find(point => point.id === tempoPointId);
   const activeReference = song.references?.[activeKind];
   const videoId = parseYouTubeVideoId(activeReference?.url);
   const isFrameLoaded = videoId !== null && loadedVideoId === videoId;
@@ -324,6 +329,15 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
+            {tempoPoints.length > 0 && <div className="flex flex-wrap items-center gap-2 text-xs">
+              <select aria-label={language === 'zh' ? '譜面速度位置' : 'Chart tempo position'} value={tempoPoint?.id ?? ''} onChange={event => setTempoPointId(event.target.value)} className="max-w-64 rounded-lg border border-gray-200 bg-white px-2 py-2">
+                <option value="">{language === 'zh' ? '選擇譜面速度' : 'Choose chart tempo'}</option>
+                {tempoPoints.map(point => <option key={point.id} value={point.id}>{point.section} · {language === 'zh' ? '小節' : 'Bar'} {point.bar} · {point.bpm} BPM</option>)}
+              </select>
+              <button type="button" disabled={!tempoPoint || !referenceBpm} className="rounded-lg border border-gray-200 px-2 py-2 disabled:opacity-40" onClick={() => { if (tempoPoint && referenceBpm) handleRateChange(tempoPoint.bpm / referenceBpm); }}>
+                {language === 'zh' ? '套用練習速度' : 'Apply practice tempo'}
+              </button>
+            </div>}
             {typeof referenceBpm === 'number' ? (
               <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
                 {[-10, -5, -1].map((delta) => (
@@ -428,7 +442,7 @@ const ReferencePlayer: React.FC<ReferencePlayerProps> = ({
             </div>
             <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
               <div className="text-gray-400">{language === 'zh' ? '目前譜面' : 'Chart Key'}</div>
-              <div className="mt-0.5 text-sm font-bold text-gray-900">{currentKey}</div>
+              <div className="mt-0.5 text-sm font-bold text-gray-900">{formatKeyName(currentKey, currentKeyMode(song))}</div>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white px-2.5 py-2">
               <div className="text-gray-400">{language === 'zh' ? '相差半音' : 'Offset'}</div>

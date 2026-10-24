@@ -1,3 +1,4 @@
+import { normalizeKeyMode } from '../utils/keyMode';
 import { normalizeUnmeteredChordLines } from '../utils/unmeteredChords';
 import { normalizeChordPassVariants } from '../utils/chordPassVariants';
 import { normalizeChordSubdivisions } from '../utils/chordSubdivisions';
@@ -191,6 +192,8 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
 
     return {
       ...safeSection,
+      tempo: normalizeTempoBpm(safeSection.tempo),
+      resetTempo: safeSection.resetTempo === true || undefined,
       id: typeof safeSection.id === 'string' && safeSection.id.trim() ? safeSection.id : undefined,
       title: normalizeText(safeSection.title, `Section ${sectionIndex + 1}`),
       keyChangeTo: typeof safeSection.keyChangeTo === 'string' && VALID_KEYS.has(safeSection.keyChangeTo)
@@ -202,6 +205,8 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
         const rhythm = normalizeOptionalText(safeBar.rhythm);
         return {
           ...safeBar,
+          tempo: normalizeTempoBpm(safeBar.tempo),
+          resetTempo: safeBar.resetTempo === true || undefined,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
           chords,
           chordTimingUnspecified: safeBar.chordTimingUnspecified === true ? true : undefined,
@@ -262,6 +267,8 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
     originalKeyUnspecified: song.originalKeyUnspecified === true ? true : undefined,
     currentKey,
     tempo: normalizeTempoBpm(song.tempo),
+    originalKeyMode: normalizeKeyMode(song.originalKeyMode),
+    currentKeyMode: normalizeKeyMode(song.currentKeyMode),
     timeSignature: normalizeText(song.timeSignature, '4/4'),
     timeSignatureUnspecified: song.timeSignatureUnspecified === true ? true : undefined,
     useSectionColors: normalizeBoolean(song.useSectionColors),

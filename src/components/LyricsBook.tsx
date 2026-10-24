@@ -1,3 +1,4 @@
+import { lyricsLanguageName } from '../utils/lyricsLanguages';
 import { formatLyricsForDisplay } from '../utils/lyricsDisplay';
 import React from 'react';
 import type { AppLanguage, LyricsBlock, Song } from '../types';
@@ -124,7 +125,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
           gap={GAP} indent={indentFor(block, fontSize)} renderLine={(field, line, index) => {
             const formatted = item.formatted[field];
             const value = formatted.text.slice(line.start, line.end);
-            const fieldLabel = `${entry.song.title} · ${label || (zh ? '歌詞' : 'Lyrics')} · ${field === 'chinese' ? '中文' : 'English'}`;
+            const fieldLabel = `${entry.song.title} · ${label || (zh ? '歌詞' : 'Lyrics')} · ${field === 'chinese' ? (zh ? '中文' : 'Chinese') : lyricsLanguageName(entry.song.lyricsDoc?.translationLanguage, language)}`;
             return <InlineLyrics value={value} label={pairedBlocks.get(item.id)!.length > 1 ? `${fieldLabel} · ${zh ? '第' : 'Line '}${index + 1}${zh ? '行' : ''}` : fieldLabel} editable={editable}
               onFocus={() => { setEditing(true); onSelectSong?.(entry.id); }}
               onFinish={text => {
@@ -143,7 +144,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
           const separator = !isReading && raw.endsWith('\n') && end < formatted.text.length ? '\n' : '';
           const value = separator ? raw.slice(0, -1) : raw;
           return <div key={field} className="min-w-0" style={{ paddingLeft: indentFor(block, fontSize) }}>
-            <InlineLyrics value={value} label={`${entry.song.title} · ${label || (zh ? '歌詞' : 'Lyrics')} · ${field === 'chinese' ? '中文' : 'English'}`} editable={editable}
+            <InlineLyrics value={value} label={`${entry.song.title} · ${label || (zh ? '歌詞' : 'Lyrics')} · ${field === 'chinese' ? (zh ? '中文' : 'Chinese') : lyricsLanguageName(entry.song.lyricsDoc?.translationLanguage, language)}`} editable={editable}
               onFocus={() => { setEditing(true); onSelectSong?.(entry.id); }}
               onFinish={text => {
                 setEditing(false);
@@ -167,7 +168,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
       <select aria-label={zh ? '歌單歌詞字體' : 'Setlist lyrics font'} value={settings.font} onChange={e => onSettingsChange?.({ ...settings, font: e.target.value as LyricsBookSettings['font'] })}><option value="kaiti">{zh ? '楷體（聚會樣式）' : 'KaiTi (gathering)'}</option><option value="sans">{zh ? '黑體' : 'Sans serif'}</option></select>
       <select aria-label={zh ? '歌單歌詞字級' : 'Setlist lyrics size'} value={fontSize} onChange={e => onSettingsChange?.({ ...settings, fontSize: Number(e.target.value) })}>{[14, 16, 18, 20, 24].map(pt => <option key={pt} value={pt * 4 / 3}>{pt} pt</option>)}</select>
       <select aria-label={zh ? '歌單歌詞行距' : 'Setlist lyrics spacing'} value={settings.lineHeight} onChange={e => onSettingsChange?.({ ...settings, lineHeight: Number(e.target.value) })}>{[1.5, 1.875, 2].map(value => <option key={value} value={value}>{Number((fontSize * value * .75).toFixed(1))} pt {zh ? '行距' : 'leading'}</option>)}</select>
-      <select aria-label={zh ? '歌單歌詞語言' : 'Setlist lyrics language'} value={settings.language} onChange={e => onSettingsChange?.({ ...settings, language: e.target.value as LyricsBookSettings['language'] })}><option value="chinese">中文</option><option value="english">English</option><option value="bilingual">{zh ? '中英對照' : 'Bilingual'}</option><option value="mixed">{zh ? '中英混合（逐行）' : 'Chinese / English (alternating lines)'}</option></select>
+      <select aria-label={zh ? '歌單歌詞語言' : 'Setlist lyrics language'} value={settings.language} onChange={e => onSettingsChange?.({ ...settings, language: e.target.value as LyricsBookSettings['language'] })}><option value="chinese">中文</option><option value="english">{zh ? '對照語言' : 'Translation'}</option><option value="bilingual">{zh ? '雙語對照' : 'Bilingual'}</option><option value="mixed">{zh ? '雙語混合（逐行）' : 'Chinese / English (alternating lines)'}</option></select>
       <p className="w-full text-xs text-stone-500">{zh ? '按歌單順序接續排版，填滿左欄後接右欄及下一頁。點歌詞直接編輯，點歌名整理段落。' : 'Songs flow down the left column, then the right and subsequent pages. Click lyrics to edit, or a title to manage sections.'}{missingCount > 0 && ` ${zh ? `${missingCount} 首尚無所選語言歌詞。` : `${missingCount} songs have no lyrics in the selected language.`}`}</p>
     </div>}
     {!isReading && <div ref={measureRef} aria-hidden="true" data-preview-only-control style={{ position: 'absolute', visibility: 'hidden', left: -10000, top: 0, width: settings.language === 'bilingual' ? 2 * COLUMN_WIDTH + GAP : COLUMN_WIDTH, height: 0, overflow: 'hidden', fontSize, lineHeight: `${lineHeight}px` }}>

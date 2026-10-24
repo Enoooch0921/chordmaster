@@ -1,3 +1,5 @@
+import { currentKeyMode, normalizeKeyMode, formatKeyName } from './utils/keyMode';
+import type { TonalMode } from './types';
 import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { normalizeJianpuVoices } from './utils/jianpuVoices';
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
@@ -822,7 +824,7 @@ const formatSongLibraryCredits = (song: Song) => {
 const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
   const creditParts = formatSongLibraryCredits(song);
   const primary = [
-    song.currentKey,
+    formatKeyName(song.currentKey, currentKeyMode(song)),
     typeof song.tempo === 'number' ? `${song.tempo} BPM` : '',
     song.timeSignature
   ].filter(Boolean).join(' · ');
@@ -1198,6 +1200,8 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
 
     return {
       ...safeSection,
+      tempo: normalizeTempoBpm(safeSection.tempo),
+      resetTempo: safeSection.resetTempo === true || undefined,
       id: typeof safeSection.id === 'string' && safeSection.id.trim() ? safeSection.id : undefined,
       title: normalizeText(safeSection.title, `Section ${sectionIndex + 1}`),
       keyChangeTo: typeof safeSection.keyChangeTo === 'string' && VALID_KEYS.has(safeSection.keyChangeTo)
@@ -1207,6 +1211,8 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
         const safeBar = (bar && typeof bar === 'object' ? bar : {}) as Partial<Song['sections'][number]['bars'][number]> & Record<string, unknown>;
         return {
           ...safeBar,
+          tempo: normalizeTempoBpm(safeBar.tempo),
+          resetTempo: safeBar.resetTempo === true || undefined,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
           chords: normalizeChordTokens(safeBar.chords),
           keyChangeTo: typeof safeBar.keyChangeTo === 'string' && VALID_KEYS.has(safeBar.keyChangeTo)
@@ -1258,6 +1264,8 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
     originalKey,
     currentKey,
     tempo: normalizeTempoBpm(song.tempo),
+    originalKeyMode: normalizeKeyMode(song.originalKeyMode),
+    currentKeyMode: normalizeKeyMode(song.currentKeyMode),
     timeSignature: normalizeText(song.timeSignature, '4/4'),
     useSectionColors: normalizeBoolean(song.useSectionColors),
     showNashvilleNumbers: normalizeBoolean(song.showNashvilleNumbers),
@@ -3259,8 +3267,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const translator = displaySong.translator?.trim();
 
     return [
-      `${copy.editor.originalKey} ${displaySong.originalKey}`,
-      `${copy.key} ${effectiveKey}`,
+      `${copy.editor.originalKey} ${formatKeyName(displaySong.originalKey, displaySong.originalKeyMode)}`,
+      `${copy.key} ${formatKeyName(effectiveKey, currentKeyMode(displaySong))}`,
       `Capo ${effectiveCapo}`,
       typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
       displaySong.timeSignature,
@@ -4629,12 +4637,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     };
   }, []);
 
-  const handleKeyChange = (newKey: Key) => {
+  const handleKeyChange = (newKey: Key, mode?: TonalMode) => {
     const shouldUpdateCapoForKeyChange = song.currentKey !== newKey && (song.capo ?? 0) > 0;
 
     handleSongChange({
       ...song,
       currentKey: newKey,
+      currentKeyMode: mode ?? currentKeyMode(song),
       ...(shouldUpdateCapoForKeyChange ? { capo: getSuggestedGuitarCapo(newKey) } : {})
     });
   };
@@ -13039,6 +13048,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                           </div>
                           <KeyPicker
                             value={effectiveKey}
+                            mode={currentKeyMode(sourceSong)}
+                            originalMode={currentKeyMode(sourceSong)}
+                            language={language}
                             onChange={(key) => {
                               if (!key) return;
                               handleSetlistSongKeyChange(item.id, effectiveKey, effectiveCapo, key);
@@ -14226,7 +14238,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                    onChange={(key) => {
+                    mode={isSetlistMode && selectedSetlistSourceSong ? currentKeyMode(selectedSetlistSourceSong) : currentKeyMode(song)}
+                    originalMode={isSetlistMode && selectedSetlistSourceSong ? currentKeyMode(selectedSetlistSourceSong) : song.originalKeyMode ?? 'major'}
+                    language={language}
+                    onModeChange={!isSetlistMode ? mode => handleKeyChange(song.currentKey, mode) : undefined}
+                    onChange={(key, mode) => {
                       if (!key) {
                         return;
                       }
@@ -14234,7 +14250,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       if (isSetlistMode) {
                         handleSetlistKeyChange(key);
                       } else {
-                        handleKeyChange(key);
+                        handleKeyChange(key, mode);
                       }
                     }}
                     label={copy.key}
@@ -14369,7 +14385,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                    onChange={(key) => {
+                    mode={isSetlistMode && selectedSetlistSourceSong ? currentKeyMode(selectedSetlistSourceSong) : currentKeyMode(song)}
+                    originalMode={isSetlistMode && selectedSetlistSourceSong ? currentKeyMode(selectedSetlistSourceSong) : song.originalKeyMode ?? 'major'}
+                    language={language}
+                    onModeChange={!isSetlistMode ? mode => handleKeyChange(song.currentKey, mode) : undefined}
+                    onChange={(key, mode) => {
                       if (!key) {
                         return;
                       }
@@ -14377,7 +14397,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       if (isSetlistMode) {
                         handleSetlistKeyChange(key);
                       } else {
-                        handleKeyChange(key);
+                        handleKeyChange(key, mode);
                       }
                     }}
                     label={copy.key}
@@ -14629,7 +14649,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
                   <KeyPicker
                     value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                    onChange={(key) => {
+                    mode={isSetlistMode && selectedSetlistSourceSong ? currentKeyMode(selectedSetlistSourceSong) : currentKeyMode(song)}
+                    originalMode={isSetlistMode && selectedSetlistSourceSong ? currentKeyMode(selectedSetlistSourceSong) : song.originalKeyMode ?? 'major'}
+                    language={language}
+                    onModeChange={!isSetlistMode ? mode => handleKeyChange(song.currentKey, mode) : undefined}
+                    onChange={(key, mode) => {
                       if (!key) {
                         return;
                       }
@@ -14637,7 +14661,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       if (isSetlistMode) {
                         handleSetlistKeyChange(key);
                       } else {
-                        handleKeyChange(key);
+                        handleKeyChange(key, mode);
                       }
                     }}
                     label={copy.key}
@@ -14981,7 +15005,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
                     <KeyPicker
                       value={isSetlistMode ? currentSetlistKey : song.currentKey}
-                      onChange={(key) => {
+                      mode={isSetlistMode && selectedSetlistSourceSong ? currentKeyMode(selectedSetlistSourceSong) : currentKeyMode(song)}
+                    originalMode={isSetlistMode && selectedSetlistSourceSong ? currentKeyMode(selectedSetlistSourceSong) : song.originalKeyMode ?? 'major'}
+                    language={language}
+                    onModeChange={!isSetlistMode ? mode => handleKeyChange(song.currentKey, mode) : undefined}
+                    onChange={(key, mode) => {
                         if (!key) {
                           return;
                         }
@@ -14989,7 +15017,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                         if (isSetlistMode) {
                           handleSetlistKeyChange(key);
                         } else {
-                          handleKeyChange(key);
+                          handleKeyChange(key, mode);
                         }
                       }}
                     label={copy.key}
@@ -15555,11 +15583,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 currentKey={isSetlistMode ? currentSetlistKey : song.currentKey}
                 currentCapo={isSetlistMode ? currentSetlistCapo : currentCapo}
                 originalKey={isSetlistMode ? selectedSetlistSourceSong?.currentKey ?? null : song.originalKey}
+                canEditMode={!isSetlistMode}
                 canEditKey={isSetlistMode ? canEditSelectedSetlistKey : canEditTeamSongs}
                 metadataKeyValue={!isSetlistMode ? activeEditorSong.originalKey : undefined}
-                onMetadataKeyChange={!isSetlistMode ? (key) => handlePreviewWysiwygEditorChange({
+                onMetadataKeyChange={!isSetlistMode ? (key, mode) => handlePreviewWysiwygEditorChange({
                   ...activeEditorSong,
-                  originalKey: key
+                  originalKey: key, originalKeyMode: mode ?? activeEditorSong.originalKeyMode
                 }) : undefined}
                 metadataSuggestions={metadataSuggestions}
                 jianpuInputAbsolute={!isSetlistMode ? (activeEditorSong.jianpuInputAbsolute ?? false) : undefined}
@@ -15570,11 +15599,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 ) : undefined}
                 showReferenceFields={!isSetlistMode}
                 onChange={handlePreviewWysiwygEditorChange}
-                onKeyChange={(key) => {
+                onKeyChange={(key, mode) => {
                   if (isSetlistMode) {
                     handleSetlistKeyChange(key);
                   } else {
-                    handleKeyChange(key);
+                    handleKeyChange(key, mode);
                   }
                 }}
                 onCapoChange={(capo) => {
@@ -15879,6 +15908,27 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                           </button>
                         )}
                         </div> : null}
+
+                        {isSetlistMode && (
+                          <button
+                            type="button"
+                            onClick={() => setGuitaristMode((current) => !current)}
+                            aria-label={language === 'zh' ? '吉他手模式' : 'Guitarist mode'}
+                            aria-pressed={guitaristMode}
+                            className={`flex min-h-14 w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition-colors ${
+                              guitaristMode
+                                ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                : 'border-gray-200 bg-white text-gray-700'
+                            }`}
+                          >
+                            <Guitar size={20} className="shrink-0" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-bold">{language === 'zh' ? '吉他手模式' : 'Guitarist mode'}</span>
+                              <span className="mt-1 block text-xs text-gray-500">{language === 'zh' ? '自動選擇吉他友善 Capo' : 'Automatically choose guitar-friendly capo'}</span>
+                            </span>
+                            <span className="shrink-0 text-sm font-bold">{guitaristMode ? copy.on : copy.off}</span>
+                          </button>
+                        )}
 
                         {!isSetlistMode && (
                           <div className="grid grid-cols-2 gap-2">

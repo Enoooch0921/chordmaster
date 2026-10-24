@@ -1,3 +1,4 @@
+import TempoChangeControl from '../TempoChangeControl';
 import UnmeteredChordsEditor from '../UnmeteredChordsEditor';
 import { hasUnmeteredChords } from '../../utils/unmeteredChords';
 import ChordPassVariantsEditor from '../ChordPassVariantsEditor';
@@ -1438,6 +1439,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </div>
       )}
 
+
       {notationMode === 'jianpu' && !graceDraft && (
         <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr]'} gap-1.5`} data-keyboard-view="jianpu">
           <div className="grid min-h-0 grid-cols-7 gap-1.5" data-jianpu-key-row="pitches" data-key-surface="character">
@@ -1726,6 +1728,16 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
       {!collapsed && deviceLayout === 'desktop' && keyboardContent}
       {!collapsed && deviceLayout !== 'desktop' && keyboardContent}
+
+      {!collapsed && (
+          <details className="shrink-0 rounded-lg border border-slate-200 bg-white/80 px-2 text-xs">
+            <summary className="cursor-pointer py-1 font-semibold text-slate-600">{language === 'zh' ? '速度變化' : 'Tempo changes'}</summary>
+            <div className="flex max-h-28 flex-wrap gap-3 overflow-y-auto py-2">
+            <TempoChangeControl value={bar} language={language} label={language === 'zh' ? '小節速度' : 'Bar tempo'} onChange={patch => updateFields(patch)} />
+            {section && <TempoChangeControl value={section} language={language} label={language === 'zh' ? '段落速度' : 'Section tempo'} onChange={patch => onApplyDraft({ ...session.draftSong, sections: session.draftSong.sections.map(candidate => candidate.id === section.id ? { ...candidate, ...patch } : candidate) })} />}
+            </div>
+          </details>
+      )}
 
       {deviceLayout !== 'desktop' && (
         <footer className="relative flex shrink-0 items-stretch gap-2 border-t border-white/70 bg-slate-200/90 px-2.5 py-2">

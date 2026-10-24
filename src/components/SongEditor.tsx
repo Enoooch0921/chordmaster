@@ -1,3 +1,4 @@
+import TempoChangeControl from './TempoChangeControl';
 import UnmeteredChordsEditor from './UnmeteredChordsEditor';
 import { hasUnmeteredChords, transposeUnmeteredChordLines } from '../utils/unmeteredChords';
 import ChordPassVariantsEditor from './ChordPassVariantsEditor';
@@ -5473,7 +5474,11 @@ const SongEditor: React.FC<Props> = ({
       <label className="mb-1 block text-xs font-bold uppercase text-gray-500">{copy.editor.originalKey}</label>
       <KeyPicker
         value={song.originalKey}
-        onChange={(key) => key && updateField('originalKey', key)}
+        mode={song.originalKeyMode ?? 'major'}
+        originalMode={song.originalKeyMode ?? 'major'}
+        language={language}
+        onModeChange={mode => onChange({ ...song, originalKeyMode: mode })}
+        onChange={(key, mode) => key && onChange({ ...song, originalKey: key, originalKeyMode: mode ?? song.originalKeyMode })}
         label={copy.key}
         originalKey={song.originalKey}
         triggerMetaText={copy.original}
@@ -6122,6 +6127,7 @@ const SongEditor: React.FC<Props> = ({
 
             {panelState.barTime && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                <TempoChangeControl value={bar} language={language} label={language === 'zh' ? '小節速度' : 'Bar tempo'} onChange={patch => updateBar(sIdx, bIdx, patch)} />
                 <div className="mb-2">
                   <label className="mb-1 block text-[10px] font-bold uppercase text-gray-400">{copy.editor.barTimeSignature}</label>
                   {(() => {
@@ -7117,6 +7123,7 @@ const SongEditor: React.FC<Props> = ({
                     buttonClassName="w-full"
                   />
                 </div>
+                <TempoChangeControl value={section} language={language} label={language === 'zh' ? '段落速度' : 'Section tempo'} onChange={patch => onChange({ ...song, sections: song.sections.map((candidate, index) => index === sIdx ? { ...candidate, ...patch } : candidate) })} />
                 <button
                   onClick={() => duplicateSection(sIdx)}
                   className="text-indigo-500 hover:text-indigo-700 p-2 rounded hover:bg-indigo-50 transition-colors"
@@ -7859,6 +7866,7 @@ const SongEditor: React.FC<Props> = ({
 
                     {panelState.barTime && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                      <TempoChangeControl value={bar} language={language} label={language === 'zh' ? '小節速度' : 'Bar tempo'} onChange={patch => updateBar(sIdx, bIdx, patch)} />
                       <div className="mb-2">
                         <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">{copy.editor.barTimeSignature}</label>
                         {(() => {

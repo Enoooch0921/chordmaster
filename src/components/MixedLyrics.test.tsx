@@ -53,7 +53,7 @@ describe.each(['sheet', 'book'] as const)('%s mixed Chinese/English lyrics', kin
   it('preserves the raw languages and mixed view when editing one English sentence', () => {
     const onChange = vi.fn();
     show({ reading: true, onChange });
-    const label = kind === 'sheet' ? '英文歌詞 Verse 1 · 第2行' : '中英混合測試 · Verse 1 · English · 第2行';
+    const label = kind === 'sheet' ? '英文歌詞 Verse 1 · 第2行' : '中英混合測試 · Verse 1 · 英文 · 第2行';
     fireEvent.click(screen.getByRole('button', { name: label }));
     const input = screen.getByRole('textbox', { name: label });
     fireEvent.change(input, { target: { value: 'Updated English' } });
@@ -78,7 +78,7 @@ describe.each(['sheet', 'book'] as const)('%s mixed Chinese/English lyrics', kin
     show({ onChange });
     const select = screen.getByRole('combobox', { name: kind === 'sheet' ? '歌詞語言' : '歌單歌詞語言' });
     expect(select).toHaveValue('mixed');
-    expect(screen.getByRole('option', { name: '中英對照' })).toHaveValue('bilingual');
-    expect(screen.getByRole('option', { name: '中英混合（逐行）' })).toHaveValue('mixed');
+    expect(screen.getByRole('option', { name: /對照$/ })).toHaveValue('bilingual');
+    expect(screen.getByRole('option', { name: /混合（逐行）$/ })).toHaveValue('mixed');
   });
 });

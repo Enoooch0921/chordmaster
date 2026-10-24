@@ -1,3 +1,7 @@
+import { getSongTempoStates, hasTempoEvent } from '../utils/tempoEvents';
+import { formatTempoBpm } from '../utils/tempoUtils';
+import { currentKeyMode } from '../utils/keyMode';
+import type { TonalMode } from '../types';
 import { hasUnmeteredChords } from '../utils/unmeteredChords';
 import { getChordPassEvents } from '../utils/chordPassVariants';
 import { getChordEvents, chordEventLabel } from '../utils/chordSubdivisions';
@@ -190,14 +194,7 @@ const formatEndingDisplay = (ending: string | undefined) => {
   return /^\d+$/.test(trimmed) ? `${trimmed}.` : trimmed;
 };
 
-const formatBarAnnotation = (annotation: string) => (
-  annotation.split(' ').map(word => {
-    const upper = word.toUpperCase();
-    const abbreviations = ['AG', 'PNO', 'EG1', 'EG2', 'A.GTR', 'E.GTR', 'EG', 'GTR', 'DR', 'BS', 'KEY'];
-    if (abbreviations.includes(upper)) return upper;
-    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-  }).join(' ')
-);
+const formatBarAnnotation = (annotation: string) => annotation;
 
 const PREVIEW_EDIT_BAR_SHADOW = 'inset 0 0 0 2px var(--section-selection-stroke), inset 0 0 0 4px rgba(255, 255, 255, 0.86), 0 12px 24px var(--section-selection-glow)';
 const PREVIEW_EDIT_MULTI_SELECT_SHADOW = '0 0 0 3px var(--section-selection-glow)';
@@ -748,15 +745,16 @@ const areKeySequencesEqual = (left: Key[], right: Key[]) => (
 
 const FormattedKeySequence: React.FC<{
   keys: Key[];
+  mode?: TonalMode;
   nashvilleFontFamily?: string;
   chordFontFamily?: string;
-}> = ({ keys, nashvilleFontFamily, chordFontFamily }) => (
+}> = ({ keys, mode = 'major', nashvilleFontFamily, chordFontFamily }) => (
   <span className="inline-flex items-baseline whitespace-nowrap">
     {keys.map((key, index) => (
       <React.Fragment key={`${key}-${index}`}>
         {index > 0 && <span className="mx-1 text-gray-900 font-bold">-</span>}
         <FormattedChord
-          chordString={key}
+          chordString={`${key}${mode === 'minor' ? 'm' : ''}`}
           nashvilleFontFamily={nashvilleFontFamily}
           chordFontFamily={chordFontFamily}
         />
@@ -1890,10 +1888,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         ? displayKeyStates.sectionActiveKeys
         : [displayedCurrentKey]
   );
+  const tempoStates = getSongTempoStates(song);
   const metadataKeySequence = showWrittenKeyInMetadata
     ? getConsecutiveKeySequence(chartWrittenKeySequence)
     : displayedChartKeySequence;
-  const metadataPlayKeySequence = showWrittenKeyInMetadata && !areKeySequencesEqual(metadataKeySequence, displayedChartKeySequence)
+  const metadataPlayKeySequence = showWrittenKeyInMetadata && (!areKeySequencesEqual(metadataKeySequence, displayedChartKeySequence) || currentKeyMode(song) !== (song.originalKeyMode ?? 'major'))
     ? displayedChartKeySequence
     : null;
   const displayedPlayKeySequence = getConsecutiveKeySequence(
@@ -2238,6 +2237,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         >
                           <FormattedKeySequence
                             keys={metadataPlayKeySequence}
+                            mode={currentKeyMode(song)}
                             nashvilleFontFamily={nashvilleFontFamily}
                             chordFontFamily={chordFontFamily}
                           />
@@ -2255,6 +2255,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         >
                           <FormattedKeySequence
                             keys={metadataKeySequence}
+                            mode={showWrittenKeyInMetadata ? song.originalKeyMode ?? 'major' : currentKeyMode(song)}
                             nashvilleFontFamily={nashvilleFontFamily}
                             chordFontFamily={chordFontFamily}
                           />
@@ -2323,7 +2324,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           className={`flex items-center gap-1.5 shrink-0 ${onMetaClick ? 'cursor-pointer rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : ''}`}
                         >
                           <span className="text-indigo-600 font-semibold">Capo {capo}</span>
-                          <span className="text-gray-400 font-medium">(<FormattedKeySequence keys={displayedPlayKeySequence} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />)</span>
+                          <span className="text-gray-400 font-medium">(<FormattedKeySequence keys={displayedPlayKeySequence} mode={currentKeyMode(song)} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />)</span>
                         </div>
                       </>
                     )}
@@ -2357,6 +2358,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                   <div className="min-w-0 flex-1">
                     <div role={onElementClick ? 'button' : undefined} tabIndex={onElementClick ? 0 : undefined} data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${block.id || row.startBIdx}|chords|all`} className="min-w-0 space-y-2 rounded-lg p-1 text-left hover:bg-slate-50" onClick={event=>emitElementClick(event,row.sIdx,row.startBIdx,'chords')} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();event.currentTarget.click()}}} onContextMenu={event=>emitPreviewBarContextMenu(event,section?.id,block.id)}>
                       <div className="text-[10px] font-semibold text-amber-700">{language==='zh'?'和弦順序・拍位待核':'Chord order · timing unspecified'}</div>
+                      {(hasTempoEvent(block) || (row.startBIdx === 0 && hasTempoEvent(section))) && <div data-tempo-event={block.id} className="text-[10px] font-bold">{tempoStates.barTempos[row.sIdx]?.[row.startBIdx] !== undefined ? `♩ = ${formatTempoBpm(tempoStates.barTempos[row.sIdx][row.startBIdx])}` : (language === 'zh' ? '回到全曲速度' : 'Restore song tempo')}</div>}
                       {block.chordKeyUnspecified && <div data-chord-key-unspecified={block.id} className="text-[10px] text-amber-800">{language==='zh'?'調性未標 · 原譜級數':'Key unspecified · source degrees'}</div>}
                       {(block.keyChangeTo || (row.startBIdx === 0 && section?.keyChangeTo)) && <div data-unmetered-key-change className="text-xs font-bold text-amber-800">{language==='zh'?'轉調':'Key change'} · {playKey}</div>}
                       {block.unmeteredChordLines!.map((line,lineIndex)=><div key={lineIndex} data-unmetered-chord-line className="flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2 leading-7">
@@ -2540,11 +2542,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                   data-preview-section-start-lower-gutter={row.hasSectionStartLowerGutter ? true : undefined}
                   data-preview-layout-weight={row.layoutWeight}
                   data-preview-section-drop-target={row.startBIdx === 0 ? section?.id || '' : undefined}
-                  style={row.extraRhythmRows || row.extraJianpuRows || row.extraChordPassRows || row.bars.some(bar=>bar?.chordTimingUnspecified) ? {
+                  style={{
+                    ...(row.extraRhythmRows || row.extraJianpuRows || row.extraChordPassRows || row.bars.some(bar=>bar?.chordTimingUnspecified) ? {
                     minHeight: Math.max(row.bars.some(bar=>bar?.chordTimingUnspecified) ? row.hasThreeNotationRows ? 120 : row.hasLowerNotationRows ? 90 : 50 : 0, row.hasThreeNotationRows ? 94 : barRowCount === 1 ? row.hasLowerNotationRows ? 58 : 34 : 68)
                       + (row.extraRhythmRows ?? 0) * 22 + (row.extraJianpuRows ?? 0) * 24 + (row.extraChordPassRows ?? 0) * 36,
                     flexGrow: row.layoutWeight
-                  } : undefined}
+                  } : {}) }}
                   layout={!suppressSectionTransitions}
                   initial={false}
                   animate={{
@@ -2873,6 +2876,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                       ? abbreviateQuality ? abbreviateChordQualityForDisplay(chord) : chord
                       : getDisplayedChordString(chord, barOffset, barPlayKey, song.showNashvilleNumbers, abbreviateQuality, barWrittenKey);
                     const showKeyChangeTag = Boolean(bar) && barCurrentKey !== previousBarCurrentKey;
+                    const showTempoChangeTag = Boolean(bar) && (hasTempoEvent(bar) || (globalBarIndex === 0 && hasTempoEvent(section)));
                     const effectiveTimeSignature = bar
                       ? getBarEffectiveTimeSignatureByIndex(row.sIdx, globalBarIndex, bar)
                       : getEffectiveTimeSignature(undefined, song.timeSignature);
@@ -3305,9 +3309,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           </div>
                         )}
 
-                        {showKeyChangeTag && (
-                          <div className="pointer-events-none absolute left-1 -top-[10px] z-10 inline-flex items-center rounded-sm border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black tracking-[0.04em] leading-none text-amber-800 shadow-[0_1px_0_rgba(251,191,36,0.14)]">
-                            {copy.key}: {barCurrentKey}
+                        {(showKeyChangeTag || showTempoChangeTag) && (
+                          <div data-score-change-tag className="pointer-events-none absolute left-1 -top-[10px] z-10 inline-flex items-center rounded-sm border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black tracking-[0.04em] leading-none text-amber-800 shadow-[0_1px_0_rgba(251,191,36,0.14)]">
+                            {showKeyChangeTag && <span>{copy.key}: {barCurrentKey}</span>}
+                            {showKeyChangeTag && showTempoChangeTag && <span className="mx-1">·</span>}
+                            {showTempoChangeTag && <span data-tempo-event={bar.id}>
+                              {tempoStates.barTempos[row.sIdx]?.[globalBarIndex] !== undefined ? `♩ = ${formatTempoBpm(tempoStates.barTempos[row.sIdx][globalBarIndex])}` : (language === 'zh' ? '回到全曲速度' : 'Restore song tempo')}
+                            </span>}
                           </div>
                         )}
 
@@ -3404,7 +3412,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               <div
                                 data-preview-hover-field={onElementClick ? 'annotation' : undefined}
                                 className={`absolute -top-[10px] z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap cursor-pointer transition-colors ${
-                                  showKeyChangeTag
+                                  showKeyChangeTag || showTempoChangeTag
                                     ? 'right-1'
                                     : (isEndingStart ? 'left-7' : 'left-1')
                                 }`}
@@ -3420,7 +3428,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                             {unisonMarkStyle && (
                               <div
                                 className={`pointer-events-none absolute right-1 z-10 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-black tracking-[0.05em] leading-none whitespace-nowrap ${
-                                  bar.annotation || showKeyChangeTag || bar.ending ? 'top-[2px]' : '-top-4'
+                                  bar.annotation || showKeyChangeTag || showTempoChangeTag || bar.ending ? 'top-[2px]' : '-top-4'
                                 }`}
                                 style={unisonMarkStyle}
                               >
@@ -3509,7 +3517,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       return <div data-subbeat-chord-row className={`grid w-full min-w-0 items-end ${contentLeftInsetClass}`} style={{gridTemplateColumns:`repeat(${events.length}, minmax(0, 1fr))`}}>
                                         {events.map((entry,index) => <div key={index} data-chord-event-position={chordEventLabel(entry.beat,entry.offset)} data-chord-event-kind={entry.subdivisionIndex === null ? 'primary' : 'additional'} className="relative min-w-0 px-[2px] pt-[8px]" onClick={event=>{event.stopPropagation();emitElementClick(event,row.sIdx,row.startBIdx+bIdx,'chords',entry.beat,entry.rawIndex ?? undefined);}}>
                                           <span className="absolute left-[2px] top-0 text-[8px] font-medium leading-none text-slate-600">{chordEventLabel(entry.beat,entry.offset)}</span>
-                                          <AutoShrink align="left" minScale={0} fitNarrow shrinkAxis="x-only" className="h-[24px] items-end">
+                                          <AutoShrink align="left" minScale={0} fitNarrow overflowVisible shrinkAxis="x-only" className="h-[24px] items-end">
                                             <FormattedChord chordString={displayBarChord(entry.chord)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} color={entry.rawIndex === null ? undefined : getChordMarkTextColor(bar,entry.rawIndex)} specialLabel={entry.rawIndex === null ? undefined : getChordSpecialLabel(bar,entry.rawIndex,language)}/>
                                           </AutoShrink>
                                         </div>)}

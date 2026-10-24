@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export type TonalMode = 'major' | 'minor';
 export type Key = 'C' | 'C#' | 'Db' | 'D' | 'Eb' | 'E' | 'F' | 'F#' | 'Gb' | 'G' | 'G#' | 'Ab' | 'A' | 'Bb' | 'B';
 export type AppLanguage = 'en' | 'zh';
 export type BarNumberMode = 'none' | 'line-start' | 'all';
@@ -86,6 +87,8 @@ export interface Bar {
   chords: string[]; // e.g., ["E", "C#m"]
   chordTimingUnspecified?: boolean; // Printed measure boundary is known; chords are ordered, with no confirmed beat positions.
   chordKeyUnspecified?: boolean; // Source harmony has no confirmed key; preserve literal degrees instead of deriving pitches from the working key.
+  tempo?: number; // Tempo event, carried forward until the next event
+  resetTempo?: boolean; // Restore the song tempo at this point
   keyChangeTo?: Key; // Per-bar key change starting at this bar
   timeSignature?: string; // Per-bar override, e.g., "2/4"
   partialMeasure?: boolean; // Interpret this bar's timeSignature as its duration without changing the continuing meter
@@ -117,6 +120,8 @@ export interface Bar {
 export interface Section {
   id?: string; // Unique ID for reordering
   title: string; // e.g., "Intro", "Verse 1"
+  tempo?: number; // Tempo event, carried forward until the next event
+  resetTempo?: boolean; // Restore the song tempo at this point
   keyChangeTo?: Key;
   bars: Bar[];
 }
@@ -138,6 +143,8 @@ export interface Song {
   groove?: string;
   shuffle?: boolean;
   originalKey: Key;
+  originalKeyMode?: TonalMode;
+  currentKeyMode?: TonalMode;
   originalKeyUnspecified?: boolean; // Working key is provisional; the source does not confirm the original key.
   currentKey: Key;
   tempo?: number;
@@ -166,6 +173,7 @@ export interface Song {
 // Bilingual sections are the editable source; legacy text bodies remain populated
 // for sharing with older clients. Layout preferences are independent of content.
 export interface LyricsDoc {
+  translationLanguage?: string; // BCP-47 code; legacy english fields store the second language
   chinese: string;       // Serialized Chinese body including markers
   english?: string;      // Serialized English body including markers
   blocks?: LyricsBlock[];

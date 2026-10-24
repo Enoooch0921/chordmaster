@@ -1,7 +1,8 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
-import { Key } from '../types';
+import { Key, TonalMode, AppLanguage } from '../types';
+import { formatKeyName } from '../utils/keyMode';
 import { type PanelAlign, useAnchoredPortalPanel } from './useAnchoredPortalPanel';
 
 const KEY_PICKER_LAYOUT: Array<Array<Key | null>> = [
@@ -25,7 +26,11 @@ KEY_PICKER_LAYOUT.forEach((row, rowIndex) => {
 
 interface KeyPickerProps {
   value: Key | null;
-  onChange: (value: Key | null) => void;
+  onChange: (value: Key | null, mode?: TonalMode) => void;
+  mode?: TonalMode;
+  originalMode?: TonalMode;
+  onModeChange?: (mode: TonalMode) => void;
+  language?: AppLanguage;
   disabled?: boolean;
   label: string;
   originalKey?: Key | null;
@@ -74,6 +79,7 @@ const findNextKey = (currentKey: Key, rowStep: number, columnStep: number): Key 
 const KeyPicker: React.FC<KeyPickerProps> = ({
   value,
   onChange,
+  mode = 'major', originalMode = 'major', onModeChange, language = 'zh',
   disabled = false,
   label,
   originalKey = null,
@@ -159,9 +165,10 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   }, [isOpen, originalKey, value]);
 
   const handleSelect = React.useCallback((nextValue: Key | null) => {
-    onChange(nextValue);
+    if (onModeChange) onChange(nextValue, mode);
+    else onChange(nextValue);
     closePanel();
-  }, [closePanel, onChange]);
+  }, [closePanel, onChange, onModeChange, mode]);
 
   const handleOptionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, key: Key) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -207,7 +214,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
     zIndex: panelZIndex
   });
 
-  const triggerValueText = triggerLabel ?? value ?? clearLabel ?? label;
+  const triggerValueText = triggerLabel ?? (value ? formatKeyName(value, mode) : clearLabel ?? label);
   const resolvedPanelMetaText = panelMetaText ?? triggerMetaText;
 
   return (
@@ -263,6 +270,17 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
             ) : null}
           </div>
 
+          {onModeChange && <div className="mb-2 space-y-2">
+            <div className="flex gap-1" role="group" aria-label={language === 'zh' ? '大小調' : 'Tonal mode'}>
+              {(['major', 'minor'] as const).map(nextMode => <button key={nextMode} type="button" aria-pressed={mode === nextMode}
+                onClick={() => onModeChange(nextMode)} className={`flex-1 rounded-lg border px-2 py-2 text-xs font-semibold ${mode === nextMode ? 'border-indigo-400 bg-indigo-50 text-indigo-800' : 'border-gray-200'}`}>
+                {language === 'zh' ? (nextMode === 'major' ? '大調' : '小調') : (nextMode === 'major' ? 'Major' : 'Minor')}
+              </button>)}
+            </div>
+            {originalKey && <button type="button" className="w-full rounded-lg border border-gray-200 py-1 text-xs" onClick={() => { onChange(originalKey, originalMode); closePanel(); }}>
+              {language === 'zh' ? '還原原調' : 'Original'} {formatKeyName(originalKey, originalMode)}
+            </button>}
+          </div>}
           {clearLabel ? (
             <div className="mb-2">
               <button
@@ -301,7 +319,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                 }
 
                 const isSelectedKey = value === key;
-                const isOriginalKey = originalKey === key;
+                const isOriginalKey = originalKey === key && mode === originalMode;
 
                 return (
                   <button
@@ -325,7 +343,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                     {isOriginalKey ? (
                       <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-fuchsia-400" />
                     ) : null}
-                    {key}
+                    {formatKeyName(key, mode)}
                   </button>
                 );
               })

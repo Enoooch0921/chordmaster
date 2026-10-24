@@ -1,3 +1,5 @@
+import { currentKeyMode } from '../utils/keyMode';
+import type { TonalMode } from '../types';
 import React from 'react';
 import { X } from 'lucide-react';
 import type { AppLanguage, Key, Song } from '../types';
@@ -34,8 +36,9 @@ interface PreviewWysiwygEditorProps {
   currentCapo: number;
   originalKey: Key | null;
   canEditKey?: boolean;
+  canEditMode?: boolean;
   metadataKeyValue?: Key;
-  onMetadataKeyChange?: (key: Key) => void;
+  onMetadataKeyChange?: (key: Key, mode?: TonalMode) => void;
   metadataSuggestions?: {
     versions: string[];
     translators: string[];
@@ -44,7 +47,7 @@ interface PreviewWysiwygEditorProps {
   onJianpuInputAbsoluteChange?: (value: boolean) => void;
   showReferenceFields?: boolean;
   onChange: (song: Song) => void;
-  onKeyChange: (key: Key) => void;
+  onKeyChange: (key: Key, mode?: TonalMode) => void;
   onCapoChange: (capo: number) => void;
   onClose: () => void;
 }
@@ -297,6 +300,7 @@ export default function PreviewWysiwygEditor({
   currentCapo,
   originalKey,
   canEditKey = true,
+  canEditMode = true,
   metadataKeyValue,
   onMetadataKeyChange,
   metadataSuggestions,
@@ -336,20 +340,20 @@ export default function PreviewWysiwygEditor({
   const inlineKeyMetaText = isPerformanceKeyField
     ? (metadataKeyValue ?? originalKey ?? undefined)
     : metadataKeyMetaText;
-  const handleMetadataKeyChange = React.useCallback((key: Key) => {
+  const handleMetadataKeyChange = React.useCallback((key: Key, mode?: TonalMode) => {
     if (onMetadataKeyChange) {
-      onMetadataKeyChange(key);
+      onMetadataKeyChange(key, mode);
       return;
     }
-    onKeyChange(key);
+    onKeyChange(key, mode);
   }, [onKeyChange, onMetadataKeyChange]);
-  const handleInlineKeyChange = React.useCallback((key: Key) => {
+  const handleInlineKeyChange = React.useCallback((key: Key, mode?: TonalMode) => {
     if (isPerformanceKeyField) {
-      onKeyChange(key);
+      onKeyChange(key, mode);
       return;
     }
 
-    handleMetadataKeyChange(key);
+    handleMetadataKeyChange(key, mode);
   }, [handleMetadataKeyChange, isPerformanceKeyField, onKeyChange]);
 
   React.useEffect(() => {
@@ -709,9 +713,13 @@ export default function PreviewWysiwygEditor({
     >
       <KeyPicker
         value={inlineKeyValue}
-        onChange={(key) => {
+        mode={isPerformanceKeyField || !metadataKeyValue ? currentKeyMode(song) : song.originalKeyMode ?? 'major'}
+        originalMode={song.originalKeyMode ?? 'major'}
+        language={language}
+        onModeChange={canEditMode ? mode => handleInlineKeyChange(inlineKeyValue, mode) : undefined}
+        onChange={(key, mode) => {
           if (!key) return;
-          handleInlineKeyChange(key);
+          handleInlineKeyChange(key, mode);
           onClose();
         }}
         disabled={!canEditKey}

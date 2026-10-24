@@ -1,3 +1,5 @@
+import LyricsLanguagePicker from './LyricsLanguagePicker';
+import { lyricsLanguageName } from '../utils/lyricsLanguages';
 import { LYRICS_BOOK_FONT } from '../utils/lyricsBook';
 import { formatLyricsForDisplay } from '../utils/lyricsDisplay';
 import { getSectionColor } from '../utils/musicUtils';
@@ -83,6 +85,7 @@ export function InlineLyrics({ value, label, editable, onFocus, onFinish }: {
 export default function LyricsSheet({ song, language, onChange, reading: controlledReading, onReadingChange, exportMode = false }: LyricsSheetProps) {
   const zh = language === 'zh';
   const doc = song.lyricsDoc;
+  const translationName = lyricsLanguageName(doc?.translationLanguage, language);
   const blocks = React.useMemo(() => getLyricsBlocks(doc), [doc]);
   const formattedBlocks = React.useMemo(() => Object.fromEntries(blocks.map(block => [block.id, { chinese: formatLyricsForDisplay(block.chinese), english: formatLyricsForDisplay(block.english) }])), [blocks]);
   const [localReading, setLocalReading] = React.useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
@@ -188,7 +191,7 @@ export default function LyricsSheet({ song, language, onChange, reading: control
         gap={32} indent={lyricsIndent(block.marker, fontSize)} renderLine={(field, line, index) => {
           const formatted = formattedBlocks[block.id][field];
           const value = formatted.text.slice(line.start, line.end);
-          const label = zh ? `${field === 'chinese' ? '中文' : '英文'}歌詞${headingLabel ? ` ${headingLabel}` : ''}` : `${field === 'chinese' ? 'Chinese' : 'English'} lyrics ${headingLabel}`;
+          const label = zh ? `${field === 'chinese' ? '中文' : translationName}歌詞${headingLabel ? ` ${headingLabel}` : ''}` : `${field === 'chinese' ? 'Chinese' : translationName} lyrics ${headingLabel}`;
           return <InlineLyrics value={value} label={pairedBlocks[block.id].length > 1 ? `${label} · ${zh ? '第' : 'Line '}${index + 1}${zh ? '行' : ''}` : label}
             editable={Boolean(onChange) && !exportMode}
             onFocus={() => { selectBlock(block.id); setEditing(true); }}
@@ -206,7 +209,7 @@ export default function LyricsSheet({ song, language, onChange, reading: control
         const raw = formatted.text.slice(startOffset, endOffset);
         const trailingSeparator = !reading && raw.endsWith('\n') && endOffset < formatted.text.length ? '\n' : '';
         const value = trailingSeparator ? raw.slice(0, -1) : raw;
-        const label = zh ? `${field === 'chinese' ? '中文' : '英文'}歌詞${headingLabel ? ` ${headingLabel}` : ''}` : `${field === 'chinese' ? 'Chinese' : 'English'} lyrics ${headingLabel}`;
+        const label = zh ? `${field === 'chinese' ? '中文' : translationName}歌詞${headingLabel ? ` ${headingLabel}` : ''}` : `${field === 'chinese' ? 'Chinese' : translationName} lyrics ${headingLabel}`;
         return <div key={field} className="min-w-0" style={{ paddingLeft: lyricsIndent(block.marker, fontSize) }}>
           <div className="min-w-0">
             <InlineLyrics value={value} label={label} editable={Boolean(onChange) && !exportMode}
@@ -234,7 +237,7 @@ export default function LyricsSheet({ song, language, onChange, reading: control
           if (onReadingChange) onReadingChange(next); else setLocalReading(next);
         }}>{reading ? (zh ? '切換 A4 排版' : 'A4 layout') : (zh ? '大字閱讀' : 'Reading view')}</button>
         <select aria-label={zh ? '歌詞語言' : 'Lyrics language'} value={display} onChange={e => setDisplay(e.target.value as LyricsLanguage)} className={buttonClass}>
-          <option value="chinese">{zh ? '中文' : 'Chinese'}</option><option value="english">English</option><option value="bilingual">{zh ? '中英對照' : 'Bilingual'}</option><option value="mixed">{zh ? '中英混合（逐行）' : 'Chinese / English (alternating lines)'}</option>
+          <option value="chinese">{zh ? '中文' : 'Chinese'}</option><option value="english">{translationName}</option><option value="bilingual">{zh ? `中文／${translationName}對照` : 'Bilingual'}</option><option value="mixed">{zh ? `中文／${translationName}混合（逐行）` : `Chinese / ${translationName} (alternating lines)`}</option>
         </select>
         <label className="flex items-center gap-2 text-sm">{zh ? '字級' : 'Size'}<select aria-label={zh ? '歌詞字級' : 'Lyrics font size'} value={fontSize} onChange={e => setSetting('fontSize', Number(e.target.value))} className={buttonClass}>
           {Array.from(new Set([14, 16, 18, DEFAULT_LYRICS_FONT_SIZE, 20, 24, 28, 32, fontSize])).sort((a, b) => a - b).map(size => <option key={size} value={size}>{reading ? `${Math.round(size * 10) / 10} px` : `${Math.round(size * 0.75 * 10) / 10} pt`}</option>)}
@@ -244,8 +247,9 @@ export default function LyricsSheet({ song, language, onChange, reading: control
         </select></label>
       </div>
       {onChange && <div className="flex flex-wrap items-center gap-2">
+        <LyricsLanguagePicker value={doc?.translationLanguage} language={language} onChange={translationLanguage => onChange({ ...song, lyricsDoc: { ...doc, chinese: doc?.chinese ?? '', translationLanguage } })} />
         <button type="button" className={buttonClass} onClick={() => { const block = { ...newLyricsBlock(), marker: `Verse ${nextVerse}` }; save([...blocks, block]); selectBlock(block.id); }}>{zh ? '＋ 新增段落' : '+ Add section'}</button>
-        <button type="button" className={buttonClass} onClick={() => setDisplay('bilingual')}>{zh ? '添加英文對照' : 'Add English translation'}</button>
+        <button type="button" className={buttonClass} onClick={() => setDisplay('bilingual')}>{zh ? `添加${translationName}對照` : `Add ${translationName} translation`}</button>
         <button type="button" className={buttonClass} aria-expanded={showImport} onClick={() => setShowImport(!showImport)}>{zh ? '整首貼上' : 'Paste whole song'}</button>
         <p className="text-xs text-stone-500">{zh ? '點選歌詞直接編輯 · 點外面完成 · Esc 取消' : 'Click lyrics to edit · Click outside to finish · Esc to cancel'}</p>
       </div>}
@@ -268,15 +272,15 @@ export default function LyricsSheet({ song, language, onChange, reading: control
         <button type="button" className={buttonClass} onClick={() => { save(blocks.filter(block => block.id !== selected.id)); setSelectedId(null); }}>{zh ? '刪除段落' : 'Delete section'}</button>
       </div>}
       {onChange && (blocks.some(block => block.needsPairingReview) || (selected && paired)) && <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900" role="status">
-        <p>{blocks.some(block => block.needsPairingReview) ? (zh ? '標示「待配對」的段落需要確認。選擇對應中文段落即可移動英文；若已有英文，會互換並保留兩份內容。' : 'Sections marked for review need pairing. Choose the matching Chinese section to move its English. Existing translations will be swapped without losing text.') : (zh ? '中英文已按段落配對。需要調整時可在此交換英文。' : 'Translations are paired by section. You can swap them here.')}</p>
+        <p>{blocks.some(block => block.needsPairingReview) ? (zh ? `標示「待配對」的段落需要確認。選擇對應中文段落即可移動${translationName}；若已有對照歌詞，會互換並保留兩份內容。` : `Sections marked for review need pairing. Choose the matching Chinese section to move its ${translationName}. Existing translations will be swapped without losing text.`) : (zh ? `雙語已按段落配對。需要調整時可在此交換${translationName}。` : 'Translations are paired by section. You can swap them here.')}</p>
         {selected && <div className="mt-2 flex flex-wrap gap-2">
-          {selected.english && <><select aria-label={zh ? '英文配對至' : 'Pair English with'} className={buttonClass} value={pairTarget} onChange={e => setPairTarget(e.target.value)}>
+          {selected.english && <><select aria-label={zh ? `${translationName}配對至` : `Pair ${translationName} with`} className={buttonClass} value={pairTarget} onChange={e => setPairTarget(e.target.value)}>
             <option value="">{zh ? '選擇對應中文段落' : 'Choose Chinese section'}</option>
             {blocks.filter(block => block.id !== selected.id && block.chinese).map((block, index) => <option key={block.id} value={block.id}>{block.marker || index + 1} {block.chinese.slice(0, 24)}</option>)}
           </select><button type="button" className={buttonClass} disabled={!pairTarget} onClick={() => {
             save(blocks.map(block => block.id === pairTarget ? { ...block, english: selected.english, needsPairingReview: false } : block.id === selected.id ? { ...block, english: blocks.find(candidate => candidate.id === pairTarget)?.english ?? '', needsPairingReview: Boolean(block.chinese) } : block).filter(block => block.id !== selected.id || Boolean(block.chinese || block.english)));
             selectBlock(pairTarget);
-          }}>{zh ? '配對／交換英文' : 'Pair / swap English'}</button></>}
+          }}>{zh ? `配對／交換${translationName}` : `Pair / swap ${translationName}`}</button></>}
           <button type="button" className={buttonClass} onClick={() => patchSelected({ needsPairingReview: false })}>{zh ? '確認此段配對' : 'Confirm section pairing'}</button>
         </div>}
       </div>}

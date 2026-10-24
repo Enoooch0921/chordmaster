@@ -105,6 +105,8 @@ export const toggleEndingNumber = (ending: string | undefined, digit: string): s
 export type EditableBarFields = Pick<
   Bar,
   | 'timeSignature'
+  | 'tempo'
+  | 'resetTempo'
   | 'label'
   | 'annotation'
   | 'leftMarker'
