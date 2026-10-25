@@ -1,3 +1,4 @@
+import BarlineGlyph from './BarlineGlyph';
 import TempoChangeControl from './TempoChangeControl';
 import UnmeteredChordsEditor from './UnmeteredChordsEditor';
 import { hasUnmeteredChords, transposeUnmeteredChordLines } from '../utils/unmeteredChords';
@@ -29,6 +30,7 @@ import { formatInitialCaps } from '../utils/textUtils';
 import { formatTempoBpm, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import { ANNOTATION_COLOR_OPTIONS, DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
 import {
+  applyBarFieldPatch,
   deleteSection as deleteSongSection,
   duplicateSection as duplicateSongSection,
   getEffectiveTimeSignatureForBar,
@@ -1231,7 +1233,7 @@ const SongEditor: React.FC<Props> = ({
 
     const section = song.sections[sIdx];
     const newBars = [...section.bars];
-    newBars[bIdx] = { ...section.bars[bIdx], ...updates };
+    newBars[bIdx] = applyBarFieldPatch(section.bars[bIdx], updates);
     if (updates.chords) newBars[bIdx].chordSubdivisions = updates.chords.length
       ? reconcileChordSubdivisions(newBars[bIdx], Number(getEffectiveTimeSignatureForBar(song, section.bars[bIdx]).split('/')[0]) || 4)
       : undefined;
@@ -1477,6 +1479,7 @@ const SongEditor: React.FC<Props> = ({
         bar.rightText ||
         bar.repeatStart ||
         bar.repeatEnd ||
+        bar.doubleBar ||
         bar.finalBar ||
         bar.ending
       )
@@ -1975,6 +1978,7 @@ const SongEditor: React.FC<Props> = ({
         && !currentBar?.riff
         && !currentBar?.repeatStart
         && !currentBar?.repeatEnd
+        && !currentBar?.doubleBar
         && !currentBar?.finalBar
         && !currentBar?.ending
         && !currentBar?.label
@@ -6382,10 +6386,7 @@ const SongEditor: React.FC<Props> = ({
                     </button>
                     <button
                       onClick={() => {
-                        const newBars = [...section.bars];
-                        const nextRepeatEnd = !bar.repeatEnd;
-                        newBars[bIdx] = { ...bar, repeatEnd: nextRepeatEnd, finalBar: nextRepeatEnd ? false : bar.finalBar };
-                        updateSection(sIdx, { ...section, bars: newBars });
+                        updateBar(sIdx, bIdx, { repeatEnd: !bar.repeatEnd });
                       }}
                       className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.repeatEnd ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
                       title={copy.editor.endRepeat}
@@ -6393,16 +6394,22 @@ const SongEditor: React.FC<Props> = ({
                       <span className="text-[10px] font-bold">:|</span>
                     </button>
                     <button
+                      type="button"
+                      onClick={() => updateBar(sIdx, bIdx, { doubleBar: !bar.doubleBar })}
+                      className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.doubleBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                      title={copy.editor.doubleBar}
+                      aria-pressed={Boolean(bar.doubleBar)}
+                    >
+                      <BarlineGlyph />
+                    </button>
+                    <button
                       onClick={() => {
-                        const newBars = [...section.bars];
-                        const nextFinalBar = !bar.finalBar;
-                        newBars[bIdx] = { ...bar, finalBar: nextFinalBar, repeatEnd: nextFinalBar ? false : bar.repeatEnd };
-                        updateSection(sIdx, { ...section, bars: newBars });
+                        updateBar(sIdx, bIdx, { finalBar: !bar.finalBar });
                       }}
                       className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.finalBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
                       title={copy.editor.finalBar}
                     >
-                      <span className="text-[10px] font-bold">||</span>
+                      <BarlineGlyph final />
                     </button>
                   </div>
 
@@ -8127,10 +8134,7 @@ const SongEditor: React.FC<Props> = ({
                         </button>
                         <button
                           onClick={() => {
-                            const newBars = [...section.bars];
-                            const nextRepeatEnd = !bar.repeatEnd;
-                            newBars[bIdx] = { ...bar, repeatEnd: nextRepeatEnd, finalBar: nextRepeatEnd ? false : bar.finalBar };
-                            updateSection(sIdx, { ...section, bars: newBars });
+                            updateBar(sIdx, bIdx, { repeatEnd: !bar.repeatEnd });
                           }}
                           className={`w-7 h-7 flex items-center justify-center border rounded transition-colors ${bar.repeatEnd ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
                           title={copy.editor.endRepeat}
@@ -8138,16 +8142,22 @@ const SongEditor: React.FC<Props> = ({
                           <span className="font-bold text-[10px]">:|</span>
                         </button>
                         <button
+                          type="button"
+                          onClick={() => updateBar(sIdx, bIdx, { doubleBar: !bar.doubleBar })}
+                          className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.doubleBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                          title={copy.editor.doubleBar}
+                          aria-pressed={Boolean(bar.doubleBar)}
+                        >
+                          <BarlineGlyph />
+                        </button>
+                        <button
                           onClick={() => {
-                            const newBars = [...section.bars];
-                            const nextFinalBar = !bar.finalBar;
-                            newBars[bIdx] = { ...bar, finalBar: nextFinalBar, repeatEnd: nextFinalBar ? false : bar.repeatEnd };
-                            updateSection(sIdx, { ...section, bars: newBars });
+                            updateBar(sIdx, bIdx, { finalBar: !bar.finalBar });
                           }}
                           className={`w-7 h-7 flex items-center justify-center border rounded transition-colors ${bar.finalBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
                           title={copy.editor.finalBar}
                         >
-                          <span className="font-bold text-[10px]">||</span>
+                          <BarlineGlyph final />
                         </button>
                       </div>
 

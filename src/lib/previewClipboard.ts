@@ -25,7 +25,7 @@ export function copyPreviewContent(song: Song, targets: SongBarIdentity[], kind:
   return items.length ? { kind, items } : null;
 }
 
-const markerFields = ['leftMarker', 'rightMarker', 'leftText', 'rightText', 'repeatStart', 'repeatEnd', 'finalBar', 'ending'] as const;
+const markerFields = ['leftMarker', 'rightMarker', 'leftText', 'rightText', 'repeatStart', 'repeatEnd', 'doubleBar', 'finalBar', 'ending'] as const;
 
 export function previewClipboardText(clipboard: PreviewClipboard): string {
   return clipboard.items.map(({ bar, timeSignature }) => {
@@ -135,7 +135,7 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
         || destination.bar.rhythmVoices?.length || destination.bar.riffVoices?.length
         || destination.bar.leftMarker || destination.bar.rightMarker || destination.bar.leftText?.trim()
         || destination.bar.rightText?.trim() || destination.bar.repeatStart || destination.bar.repeatEnd
-        || destination.bar.finalBar || destination.bar.ending?.trim())) return failure('unmetered-content');
+        || destination.bar.doubleBar || destination.bar.finalBar || destination.bar.ending?.trim())) return failure('unmetered-content');
     if (hasUnmeteredChords(destination.bar) && ['rhythm', 'jianpu', 'marker'].includes(clipboard.kind)) return failure('unmetered-content');
     if (['chords', 'rhythm', 'jianpu'].includes(clipboard.kind)
       && !(clipboard.kind === 'chords' && (hasUnmeteredChords(source.bar) || source.bar.chordTimingUnspecified))

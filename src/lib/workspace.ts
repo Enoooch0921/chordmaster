@@ -236,6 +236,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           rightText: normalizeOptionalText(safeBar.rightText),
           repeatStart: Boolean(safeBar.repeatStart),
           repeatEnd: Boolean(safeBar.repeatEnd),
+          doubleBar: Boolean(safeBar.doubleBar),
           finalBar: Boolean(safeBar.finalBar),
           ending: normalizeOptionalText(safeBar.ending)
         };

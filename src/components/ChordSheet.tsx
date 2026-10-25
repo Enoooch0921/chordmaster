@@ -964,7 +964,7 @@ const splitDisplayTimeSignature = (timeSignature: string) => {
   };
 };
 
-const BarEdgeMarker: React.FC<{ type: 'repeat-start' | 'repeat-end' | 'final-bar' }> = ({ type }) => {
+const BarEdgeMarker: React.FC<{ type: 'repeat-start' | 'repeat-end' | 'double-bar' | 'final-bar' }> = ({ type }) => {
   const isStart = type === 'repeat-start';
   const isEnd = type === 'repeat-end';
   const printGlyph = type === 'repeat-start' ? '|:' : type === 'repeat-end' ? ':|' : '||';
@@ -972,7 +972,7 @@ const BarEdgeMarker: React.FC<{ type: 'repeat-start' | 'repeat-end' | 'final-bar
 
   return (
     <div
-      className={`sheet-repeat-marker absolute top-0 bottom-0 z-[999] w-[13px] pointer-events-none ${isStart ? 'sheet-repeat-start -left-[4px]' : ''} ${isEnd ? 'sheet-repeat-end -right-[4px]' : ''} ${type === 'final-bar' ? 'sheet-final-bar -right-[2px]' : ''}`}
+      className={`sheet-repeat-marker absolute top-0 bottom-0 z-[999] w-[13px] pointer-events-none ${isStart ? 'sheet-repeat-start -left-[4px]' : ''} ${isEnd ? 'sheet-repeat-end -right-[4px]' : ''} ${type === 'double-bar' ? 'sheet-double-bar -right-[1px]' : ''} ${type === 'final-bar' ? 'sheet-final-bar -right-[2px]' : ''}`}
       aria-hidden="true"
     >
       <div className="sheet-repeat-preview absolute inset-0" aria-hidden="true">
@@ -992,10 +992,10 @@ const BarEdgeMarker: React.FC<{ type: 'repeat-start' | 'repeat-end' | 'final-bar
             <span className="absolute inset-y-0 right-0 border-l-[3px] border-gray-900" />
           </>
         )}
-        {type === 'final-bar' && (
+        {(type === 'double-bar' || type === 'final-bar') && (
           <>
             <span className="absolute inset-y-0 right-[5.5px] border-l border-gray-900" />
-            <span className="absolute inset-y-0 right-0 border-l-[3px] border-gray-900" />
+            <span className={`absolute inset-y-0 right-0 border-gray-900 ${type === 'double-bar' ? 'border-l' : 'border-l-[3px]'}`} />
           </>
         )}
       </div>
@@ -1197,7 +1197,7 @@ const ENDING_RIGHT_OFFSETS = {
   finalMeasure: '-right-[2px]'
 } as const;
 
-const getEndingLeftOffsetClass = (type: 'section-start' | 'normal' | 'repeat-start' | 'after-repeat-end' | 'after-final-bar') => {
+const getEndingLeftOffsetClass = (type: 'section-start' | 'normal' | 'repeat-start' | 'after-repeat-end' | 'after-final-bar' | 'after-double-bar') => {
   switch (type) {
     case 'section-start':
       return ENDING_LEFT_OFFSETS.sectionStart;
@@ -1206,6 +1206,7 @@ const getEndingLeftOffsetClass = (type: 'section-start' | 'normal' | 'repeat-sta
     case 'after-repeat-end':
       return ENDING_LEFT_OFFSETS.afterRepeatEnd;
     case 'after-final-bar':
+    case 'after-double-bar':
       return ENDING_LEFT_OFFSETS.afterFinalBar;
     case 'normal':
     default:
@@ -3187,8 +3188,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         ? '-top-[8px]'
                         : '-top-[2px]';
                     const isActiveBar = activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
-                    const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar);
-                    const suppressRightBarline = lastBIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar);
+                    const suppressLeftBarline = Boolean(bar?.repeatStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar || previousBar?.doubleBar);
+                    const suppressRightBarline = lastBIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar || bar?.doubleBar);
                     const leftBorderClass = suppressLeftBarline
                       ? 'border-l-0'
                       : bIdx === 0
@@ -3199,18 +3200,20 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         ? 'border-r-0'
                         : 'border-r border-r-gray-900 border-r-2 sheet-bar-right-edge'
                       : 'border-r-0';
-                    const endingLeftBarlineType: 'section-start' | 'normal' | 'repeat-start' | 'after-repeat-end' | 'after-final-bar' =
+                    const endingLeftBarlineType: 'section-start' | 'normal' | 'repeat-start' | 'after-repeat-end' | 'after-final-bar' | 'after-double-bar' =
                       bar?.repeatStart
                         ? 'repeat-start'
                         : previousBar?.repeatEnd
                           ? 'after-repeat-end'
-                          : previousBar?.finalBar
-                            ? 'after-final-bar'
-                            : bIdx === 0
-                              ? 'section-start'
-                              : 'normal';
+                          : previousBar?.doubleBar
+                            ? 'after-double-bar'
+                            : previousBar?.finalBar
+                              ? 'after-final-bar'
+                              : bIdx === 0
+                                ? 'section-start'
+                                : 'normal';
                     const endingRightBarlineType: 'normal-measure' | 'repeat-measure' | 'final-measure' =
-                      bar?.repeatEnd || bar?.finalBar
+                      bar?.repeatEnd || bar?.finalBar || bar?.doubleBar
                         ? 'repeat-measure'
                         : bIdx === 3
                           ? 'final-measure'
@@ -3261,7 +3264,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 	                        data-preview-three-notation-rows={hasThreeNotationRows ? true : undefined}
                         className={`sheet-bar relative min-h-0 px-1 pt-1.5 flex flex-col min-w-0 ${leftBorderClass} ${rightBorderClass} ${bar?.repeatStart ? 'sheet-has-repeat-start' : ''} ${
                           previousBar?.repeatEnd ? 'sheet-after-repeat-end' : ''
-                        } ${previousBar?.finalBar ? 'sheet-after-final-bar' : ''} ${
+                        } ${previousBar?.finalBar ? 'sheet-after-final-bar' : ''} ${previousBar?.doubleBar ? 'sheet-after-double-bar' : ''} ${
                           suppressRightBarline ? 'sheet-has-terminal-right' : ''
                         } ${isActiveBar ? 'z-20' : projectsRhythmTieToNextBar ? 'z-10' : ''}`}
                         style={barStyle}
@@ -3332,6 +3335,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         {/* Final Bar || */}
                         {bar?.finalBar && !bar?.repeatEnd && (
                           <BarEdgeMarker type="final-bar" />
+                        )}
+
+                        {bar?.doubleBar && !bar?.repeatEnd && !bar?.finalBar && (
+                          <BarEdgeMarker type="double-bar" />
                         )}
 
                         {/* Ending 1. to 4. */}

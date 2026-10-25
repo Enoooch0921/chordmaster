@@ -20,6 +20,26 @@ const song: Song = {
 };
 
 describe('ChordSheet preview input caret', () => {
+  it('renders two thin lines within a row and at its edge without an extra neighboring border', () => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [
+      { id: 'double-mid', chords: ['C'], doubleBar: true },
+      { id: 'after-double', chords: ['F'] },
+      { id: 'final', chords: ['G'], finalBar: true },
+      { id: 'double-edge', chords: ['C'], doubleBar: true }
+    ] }] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    const markers = container.querySelectorAll('.sheet-double-bar');
+    expect(markers).toHaveLength(2);
+    for (const marker of markers) {
+      const lines = marker.querySelectorAll('.sheet-repeat-preview > span');
+      expect(lines).toHaveLength(2);
+      for (const line of lines) { expect(line).toHaveClass('border-l'); expect(line).not.toHaveClass('border-l-[3px]'); }
+    }
+    expect(container.querySelector('[data-preview-clipboard-bar="after-double"]')).toHaveClass('border-l-0', 'sheet-after-double-bar');
+    expect(container.querySelector('[data-preview-clipboard-bar="double-edge"]')).toHaveClass('border-r-0', 'sheet-has-terminal-right');
+    expect(container.querySelector('.sheet-final-bar .sheet-repeat-preview > span:last-child')).toHaveClass('border-l-[3px]');
+  });
+
   it('uses empty following beats for engraving while keeping chord ownership and exact offset labels', () => {
     const source: Song = {
       ...song,

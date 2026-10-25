@@ -51,6 +51,13 @@ describe('local workspace snapshots', () => {
     expect(loadLocalWorkspaceSnapshot().songs[0].sections[0].bars[0].rightMarker).toBe('dc-al-fine');
   });
 
+  it('preserves a double barline through normalization and a saved workspace reload', () => {
+    const song = makeSong('double-bar-song', 'Double barline');
+    song.sections[0].bars[0].doubleBar = true;
+    persistLocalWorkspaceSnapshot([song], [], []);
+    expect(loadLocalWorkspaceSnapshot().songs[0].sections[0].bars[0]).toMatchObject({ doubleBar: true, finalBar: false });
+  });
+
   it('keeps the previous verified snapshot and restores it when the primary is corrupt', () => {
     persistLocalWorkspaceSnapshot([makeSong('song-1', 'Previous')], [], []);
     persistLocalWorkspaceSnapshot([makeSong('song-1', 'Current')], [], []);

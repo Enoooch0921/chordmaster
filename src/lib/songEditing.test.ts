@@ -284,6 +284,15 @@ describe('bar commands', () => {
     expect(edited.sections[0].bars[0]).toMatchObject({ finalBar: true, repeatEnd: false });
   });
 
+  it.each(['repeatEnd', 'finalBar', 'doubleBar'] as const)('selects %s without leaving conflicting right barlines', (field) => {
+    const song = makeSong({ chords: ['C'], repeatStart: true, repeatEnd: true, finalBar: true, doubleBar: true });
+    const edited = updateEditableBarFields(song, { sectionId: 'section-1', barId: 'bar-1' }, { [field]: true });
+    const bar = edited.sections[0].bars[0];
+    for (const candidate of ['repeatEnd', 'finalBar', 'doubleBar'] as const) expect(bar[candidate]).toBe(candidate === field);
+    expect(bar.repeatStart).toBe(true);
+    expect(bar.chords).toEqual(['C']);
+  });
+
   it('allows repeat start and repeat end on the same bar', () => {
     const song = makeSong({ chords: [], repeatStart: true });
     const edited = updateEditableBarFields(song, { sectionId: 'section-1', barId: 'bar-1' }, { repeatEnd: true });

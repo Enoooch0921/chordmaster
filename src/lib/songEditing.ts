@@ -115,6 +115,7 @@ export type EditableBarFields = Pick<
   | 'rightText'
   | 'repeatStart'
   | 'repeatEnd'
+  | 'doubleBar'
   | 'finalBar'
   | 'ending'
   | 'chordMarks'
@@ -164,6 +165,7 @@ export const isBarCompletelyEmpty = (bar?: Bar | null) => {
     && !bar.rightMarker
     && !bar.repeatStart
     && !bar.repeatEnd
+    && !bar.doubleBar
     && !bar.finalBar
     && !bar.ending?.trim()
     && !hasObjectEntries(bar.chordMarks)
@@ -630,16 +632,28 @@ export const setBarChordText = (song: Song, target: SongBarIdentity, value: stri
   };
 };
 
+export const applyBarFieldPatch = (bar: Bar, patch: Partial<Bar>): Bar => {
+  const next = { ...bar, ...patch };
+  if (patch.repeatEnd === true) {
+    next.finalBar = false;
+    next.doubleBar = false;
+  }
+  if (patch.finalBar === true) {
+    next.repeatEnd = false;
+    next.doubleBar = false;
+  }
+  if (patch.doubleBar === true) {
+    next.repeatEnd = false;
+    next.finalBar = false;
+  }
+  return next;
+};
+
 export const updateEditableBarFields = (
   song: Song,
   target: SongBarIdentity,
   patch: Partial<EditableBarFields>
-): Song => updateBarById(song, target, (bar) => {
-  const next = { ...bar, ...patch };
-  if (patch.repeatEnd === true) next.finalBar = false;
-  if (patch.finalBar === true) next.repeatEnd = false;
-  return next;
-});
+): Song => updateBarById(song, target, (bar) => applyBarFieldPatch(bar, patch));
 
 export const insertBar = (
   song: Song,

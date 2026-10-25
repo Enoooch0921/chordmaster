@@ -308,6 +308,7 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 
   body.exporting-pdf [data-print-page] .sheet-bar.sheet-has-repeat-start,
   body.exporting-pdf [data-print-page] .sheet-bar.sheet-after-repeat-end,
+  body.exporting-pdf [data-print-page] .sheet-bar.sheet-after-double-bar,
   body.exporting-pdf [data-print-page] .sheet-bar.sheet-after-final-bar {
     border-left-width: 0 !important;
   }
@@ -318,6 +319,7 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 
   body.exporting-pdf [data-print-page] .sheet-repeat-start,
   body.exporting-pdf [data-print-page] .sheet-repeat-end,
+  body.exporting-pdf [data-print-page] .sheet-double-bar,
   body.exporting-pdf [data-print-page] .sheet-final-bar {
     inset-block: 1px !important;
   }
@@ -333,6 +335,7 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   }
 
   body.exporting-pdf [data-print-page] .sheet-repeat-end,
+  body.exporting-pdf [data-print-page] .sheet-double-bar,
   body.exporting-pdf [data-print-page] .sheet-final-bar {
     right: 0 !important;
   }
@@ -343,6 +346,14 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 
   body.exporting-pdf [data-print-page] .sheet-repeat-print-fallback {
     display: flex !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-double-bar .sheet-repeat-preview {
+    display: block !important;
+  }
+
+  body.exporting-pdf [data-print-page] .sheet-double-bar .sheet-repeat-print-fallback {
+    display: none !important;
   }
 
   body.exporting-pdf [data-print-page] .sheet-ending-bracket {

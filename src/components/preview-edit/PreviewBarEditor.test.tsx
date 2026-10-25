@@ -72,6 +72,27 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it.each(['phone', 'desktop'] as const)('selects and removes a double barline on %s', async (deviceLayout) => {
+    const user = userEvent.setup();
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], repeatStart: true, finalBar: true }] }] };
+    const { onApplyDraft, rerenderSession } = renderEditor({
+      session: createPreviewEditSession({ song: source, target, inputMode: 'letters' }), deviceLayout
+    });
+    const openBarlines = async () => {
+      const trigger = screen.queryByRole('button', { name: '選擇小節線與反覆' });
+      if (trigger) await user.click(trigger);
+    };
+    await openBarlines();
+    await user.click(screen.getByRole('button', { name: '雙小節線 ||' }));
+    const edited = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    expect(edited.sections[0].bars[0]).toMatchObject({ doubleBar: true, finalBar: false, repeatEnd: false, repeatStart: true });
+    rerenderSession(createPreviewEditSession({ song: edited, target, inputMode: 'letters' }));
+    await openBarlines();
+    expect(screen.getByRole('button', { name: '雙小節線 ||' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: '雙小節線 ||' }));
+    expect((onApplyDraft.mock.calls.at(-1)![0] as Song).sections[0].bars[0].doubleBar).toBe(false);
+  });
+
   it.each(['desktop', 'phone'] as const)('edits second-pass chords on %s while preserving first-pass harmony', deviceLayout => {
     const source: Song = {...song, sections:[{...song.sections[0], bars:[{...song.sections[0].bars[0], chords:['C','','C/E',''], chordPassVariants:[{pass:2,chords:['C/E','','C7','']}]}]}]};
     const session=createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'});

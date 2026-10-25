@@ -113,7 +113,8 @@ export interface Bar {
   rightText?: string; // e.g., "D.S. al Coda"
   repeatStart?: boolean; // |:
   repeatEnd?: boolean;   // :|
-  finalBar?: boolean;    // ending double barline
+  doubleBar?: boolean;  // two thin lines ||
+  finalBar?: boolean;    // final thin + thick barline
   ending?: string; // e.g. "1", "2", or "1,2"
 }
 

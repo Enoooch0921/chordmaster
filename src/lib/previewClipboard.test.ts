@@ -15,6 +15,15 @@ const makeSong = (): Song => ({
 });
 
 describe('preview clipboard commands', () => {
+  it.each(['marker', 'bars'] as const)('preserves a double barline when copying %s', (kind) => {
+    const song = makeSong();
+    song.sections[0].bars[0].doubleBar = true;
+    const clipboard = copyPreviewContent(song, [target('a')], kind)!;
+    const result = pastePreviewContent(song, [target('c')], clipboard);
+    expect(result.error).toBeUndefined();
+    expect(result.song.sections[0].bars[2].doubleBar).toBe(true);
+  });
+
   it('appends multiple complete bars without consuming the existing empty last bar', () => {
     const song = makeSong();
     const result = appendPreviewContent(song, 'verse', copyPreviewContent(song, [target('a'), target('b')], 'bars')!);

@@ -1,3 +1,4 @@
+import BarlineGlyph from '../BarlineGlyph';
 import TempoChangeControl from '../TempoChangeControl';
 import UnmeteredChordsEditor from '../UnmeteredChordsEditor';
 import { hasUnmeteredChords } from '../../utils/unmeteredChords';
@@ -1055,10 +1056,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     : bar.repeatEnd
       ? ':|'
       : bar.finalBar
-        ? '||'
-        : bar.repeatStart
-          ? '|:'
-          : '|';
+        ? <BarlineGlyph final />
+        : bar.doubleBar
+          ? <BarlineGlyph />
+          : bar.repeatStart
+            ? '|:'
+            : '|';
   const pickerTitles: Record<Exclude<KeyboardPicker, null>, string> = {
     quality: language === 'zh' ? '更多和弦種類' : 'More chord qualities',
     time: language === 'zh' ? '小節拍號' : 'Time signature',
@@ -1077,7 +1080,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     articulation: { width: 290, height: 146 },
     ending: { width: 190, height: 272 },
     navigation: { width: 360, height: 190 },
-    barline: { width: 220, height: 108 },
+    barline: { width: 260, height: 108 },
     structure: { width: 300, height: 160 },
     bar: { width: 350, height: 170 }
   };
@@ -1173,7 +1176,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" data-picker-trigger="articulation" className={`${utilityKeyClass} min-h-0 px-0 ${trailingModifiers(displayedChord) ? activeButtonClass : ''}`} onClick={(event) => openPicker('articulation', event.currentTarget)} aria-label={language === 'zh' ? '選擇演奏記號' : 'Choose articulation'}><ChordTimingArrow marker="<" className="h-6 w-8" strokeWidth={1.8} /></button>
             <button type="button" data-picker-trigger="ending" className={`${utilityKeyClass} min-h-0 overflow-hidden px-1 ${bar.ending ? activeButtonClass : ''}`} onClick={(event) => openPicker('ending', event.currentTarget)} aria-label={language === 'zh' ? '選擇房子記號' : 'Choose ending'} aria-keyshortcuts="Alt+1 Alt+2 Alt+3 Alt+4 Alt+5 Alt+6 Alt+7 Alt+8 Alt+9"><EndingGlyph value={bar.ending || '1'} /></button>
             <button type="button" data-picker-trigger="navigation" className={`${utilityKeyClass} min-h-0 px-0 ${bar.leftMarker || bar.rightMarker ? activeButtonClass : ''}`} onClick={(event) => openPicker('navigation', event.currentTarget)} aria-label={language === 'zh' ? '選擇導引記號' : 'Choose navigation marker'}><span className="flex items-center gap-0.5"><SegnoGlyph className="h-4 w-4" /><CodaGlyph className="h-4 w-4" /></span></button>
-            <button type="button" data-picker-trigger="barline" className={`${utilityKeyClass} min-h-0 px-0 text-base ${bar.repeatStart || bar.repeatEnd || bar.finalBar ? activeButtonClass : ''}`} onClick={(event) => openPicker('barline', event.currentTarget)} aria-label={language === 'zh' ? '選擇小節線與反覆' : 'Choose barline and repeat'}>{barlineGlyph}</button>
+            <button type="button" data-picker-trigger="barline" className={`${utilityKeyClass} min-h-0 px-0 text-base ${bar.repeatStart || bar.repeatEnd || bar.doubleBar || bar.finalBar ? activeButtonClass : ''}`} onClick={(event) => openPicker('barline', event.currentTarget)} aria-label={language === 'zh' ? '選擇小節線與反覆' : 'Choose barline and repeat'}>{barlineGlyph}</button>
             <button type="button" className={`${copyKeyClass} min-h-0 px-0`} onClick={() => onStructure('copy-bar')} aria-label={language === 'zh' ? '複製小節' : 'Copy bar'}><Copy size={17} aria-hidden="true" /></button>
             <button type="button" disabled={!hasCopiedBar} className={`${pasteKeyClass} min-h-0 px-0 disabled:cursor-not-allowed disabled:opacity-40`} onClick={() => onStructure('paste-bar-after')} aria-label={language === 'zh' ? '貼上小節' : 'Paste bar'}><ClipboardPaste size={17} aria-hidden="true" /></button>
             <button type="button" data-picker-trigger="structure" className={`${utilityKeyClass} min-h-0 px-0 text-base`} onClick={(event) => openPicker('structure', event.currentTarget)} aria-label={language === 'zh' ? '小節操作' : 'Bar actions'}>+│</button>
@@ -1213,10 +1216,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               )}
 
               {activePicker === 'barline' && (
-                <div className="grid min-h-0 flex-1 grid-cols-3 gap-1.5">
+                <div className="grid min-h-0 flex-1 grid-cols-4 gap-1.5">
                   <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.repeatStart ? activeButtonClass : ''}`} onClick={() => { updateFields({ repeatStart: !bar.repeatStart }); setActivePicker(null); }} aria-label="|: Repeat Start">|:</button>
                   <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.repeatEnd ? activeButtonClass : ''}`} onClick={() => { updateFields({ repeatEnd: !bar.repeatEnd }); setActivePicker(null); }} aria-label=":| Repeat End">:|</button>
-                  <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => { updateFields({ finalBar: !bar.finalBar }); setActivePicker(null); }} aria-label="|| Final">||</button>
+                  <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.doubleBar ? activeButtonClass : ''}`} onClick={() => { updateFields({ doubleBar: !bar.doubleBar }); setActivePicker(null); }} aria-label={language === 'zh' ? '雙小節線 ||' : 'Double barline ||'} aria-pressed={Boolean(bar.doubleBar)}><BarlineGlyph /></button>
+                  <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => { updateFields({ finalBar: !bar.finalBar }); setActivePicker(null); }} aria-label="|| Final"><BarlineGlyph final /></button>
                 </div>
               )}
 
@@ -1366,10 +1370,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('~') ? activeButtonClass : ''}`} onClick={() => toggleModifier('~')} aria-label={language === 'zh' ? '延長記號' : 'Fermata'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">ß</span></button>
           </div>
 
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-8 gap-1">
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.repeatStart ? activeButtonClass : ''}`} onClick={() => updateFields({ repeatStart: !bar.repeatStart })} aria-label="|: Repeat Start">|:</button>
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.repeatEnd ? activeButtonClass : ''}`} onClick={() => updateFields({ repeatEnd: !bar.repeatEnd })} aria-label=":| Repeat End">:|</button>
-            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => updateFields({ finalBar: !bar.finalBar })} aria-label="|| Final">||</button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.doubleBar ? activeButtonClass : ''}`} onClick={() => updateFields({ doubleBar: !bar.doubleBar })} aria-label={language === 'zh' ? '雙小節線 ||' : 'Double barline ||'} aria-pressed={Boolean(bar.doubleBar)}><BarlineGlyph /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => updateFields({ finalBar: !bar.finalBar })} aria-label="|| Final"><BarlineGlyph final /></button>
             {ENDINGS.map((ending) => <button key={ending} type="button" className={`${buttonClass} !min-h-7 overflow-hidden px-1 ${bar.ending === ending ? activeButtonClass : ''}`} onClick={() => updateFields({ ending: bar.ending === ending ? undefined : ending })} aria-label={`Ending ${ending}`}><EndingGlyph value={ending} /></button>)}
           </div>
 
