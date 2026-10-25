@@ -70,7 +70,7 @@ interface SongRow {
 
 const SONG_SELECT = 'id, library_id, title, content_json, client_legacy_id, archived_at, archived_by, created_by, updated_by, created_at, updated_at';
 
-interface SongIdentityRow {
+interface LibraryRowIdentity {
   id: string;
   library_id: string;
   created_by: string;
@@ -356,26 +356,50 @@ const getLibrarySongs = async (libraryId: string): Promise<StoredSong[]> => {
   return (data ?? []).map(mapSongRow);
 };
 
-const assertSongIdIsWritableInLibrary = async (songId: string, libraryId: string) => {
+type WritableLibraryTable = 'songs' | 'setlists' | 'projects';
+
+const getWritableLibraryRow = async (table: WritableLibraryTable, id: string, libraryId: string) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
 
   const { data, error } = await supabase
-    .from('songs')
+    .from(table)
     .select('id, library_id, created_by')
-    .eq('id', songId)
-    .maybeSingle<SongIdentityRow>();
+    .eq('id', id)
+    .maybeSingle<LibraryRowIdentity>();
 
   if (error) {
     throw error;
   }
 
   if (data && data.library_id !== libraryId) {
-    throw new Error('This song belongs to another workspace. Import it as a copy before saving.');
+    throw new Error('This item belongs to another workspace. Import it as a copy before saving.');
   }
 
   return data;
+};
+
+const persistLibraryRow = async (
+  table: WritableLibraryTable,
+  payload: { id: string; library_id: string; created_by: string } & Record<string, unknown>,
+  existingRow: LibraryRowIdentity | null
+) => {
+  if (!supabase) throw new Error('Supabase is not configured.');
+
+  // An upsert checks INSERT RLS even for an existing row. Collaborators must
+  // UPDATE existing items without proposing a new item in someone else's name.
+  if (existingRow) {
+    const { id, library_id, created_by: _creator, ...changes } = payload;
+    const { data, error } = await supabase.from(table)
+      .update(changes).eq('id', id).eq('library_id', library_id)
+      .select('id').maybeSingle<{ id: string }>();
+    if (error) throw error;
+    if (!data) throw new Error('The item could not be saved. Its permissions may have changed, or it may have been removed.');
+  } else {
+    const { error } = await supabase.from(table).insert(payload);
+    if (error) throw error;
+  }
 };
 
 const mapSetlistRows = (
@@ -1410,7 +1434,7 @@ export const createCloudRepository = (params: {
       return;
     }
 
-    const existingSong = await assertSongIdIsWritableInLibrary(song.id, libraryId);
+    const existingSong = await getWritableLibraryRow('songs', song.id, libraryId);
     const createdBy = existingSong?.created_by ?? params.userId;
     const now = new Date(song.updatedAt || Date.now()).toISOString();
     const contentJson = {
@@ -1429,13 +1453,7 @@ export const createCloudRepository = (params: {
       updated_at: now
     };
 
-    const { error } = await supabase
-      .from('songs')
-      .upsert(payload, { onConflict: 'id' });
-
-    if (error) {
-      throw error;
-    }
+    await persistLibraryRow('songs', payload, existingSong);
   };
 
   const saveSetlistToLibrary = async (
@@ -1447,6 +1465,7 @@ export const createCloudRepository = (params: {
       throw new Error('Supabase is not configured.');
     }
 
+    const existingSetlist = await getWritableLibraryRow('setlists', setlist.id, libraryId);
     const updatedAtIso = new Date(setlist.updatedAt || Date.now()).toISOString();
     const payload = {
       id: setlist.id,
@@ -1455,7 +1474,7 @@ export const createCloudRepository = (params: {
       display_mode: setlist.displayMode,
       archived: setlist.archived ?? false,
       project_id: setlist.projectId ?? null,
-      created_by: setlist.createdBy ?? params.userId,
+      created_by: existingSetlist?.created_by ?? params.userId,
       updated_by: params.userId,
       updated_at: updatedAtIso
     };
@@ -1466,12 +1485,7 @@ export const createCloudRepository = (params: {
     const songsUnchanged = previousSetlist
       && setlistSongsSignature(setlist.songs) === setlistSongsSignature(previousSetlist.songs);
 
-    const { error } = await supabase
-      .from('setlists')
-      .upsert(payload, { onConflict: 'id' });
-    if (error) {
-      throw error;
-    }
+    await persistLibraryRow('setlists', payload, existingSetlist);
 
     if (!songsUnchanged) {
       await persistSetlistSongs(setlist, previousSetlist);
@@ -1483,24 +1497,19 @@ export const createCloudRepository = (params: {
       throw new Error('Supabase is not configured.');
     }
 
+    const existingProject = await getWritableLibraryRow('projects', project.id, libraryId);
     const updatedAtIso = new Date(project.updatedAt || Date.now()).toISOString();
     const payload = {
       id: project.id,
       library_id: libraryId,
       name: project.name,
       archived: project.archived ?? false,
-      created_by: project.createdBy ?? params.userId,
+      created_by: existingProject?.created_by ?? params.userId,
       updated_by: params.userId,
       updated_at: updatedAtIso
     };
 
-    const { error } = await supabase
-      .from('projects')
-      .upsert(payload, { onConflict: 'id' });
-
-    if (error) {
-      throw error;
-    }
+    await persistLibraryRow('projects', payload, existingProject);
   };
 
   return {

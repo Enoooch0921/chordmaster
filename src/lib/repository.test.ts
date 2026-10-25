@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Setlist, StoredSong, WorkspaceSnapshot } from '../types';
+import type { Project, Setlist, StoredSong, WorkspaceSnapshot } from '../types';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -186,7 +186,7 @@ describe('cloud repository personal workspace imports', () => {
         }
         if (songReadCount === 3) {
           return makeBuilder({
-            upsert: vi.fn((payload: Record<string, unknown>) => {
+            insert: vi.fn((payload: Record<string, unknown>) => {
               songUpserts.push(payload);
               return Promise.resolve({ error: null });
             })
@@ -300,29 +300,29 @@ describe('cloud repository song creator integrity', () => {
   });
 
   it('uses the authenticated user for a newly created song', async () => {
-    const songUpsert = vi.fn().mockResolvedValue({ error: null });
+    const songInsert = vi.fn().mockResolvedValue({ error: null });
     let songQueryCount = 0;
     mocks.from.mockImplementation((table: string) => {
       expect(table).toBe('songs');
       songQueryCount += 1;
       return songQueryCount === 1
         ? makeBuilder({ maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) })
-        : makeBuilder({ upsert: songUpsert });
+        : makeBuilder({ insert: songInsert });
     });
 
     const repository = createRepository();
     repository.setActiveLibrary('team-1');
     await repository.saveSong(makeSong());
 
-    expect(songUpsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(songInsert).toHaveBeenCalledWith(expect.objectContaining({
       created_by: 'user-1',
       updated_by: 'user-1',
       content_json: expect.objectContaining({ createdBy: 'user-1' })
-    }), { onConflict: 'id' });
+    }));
   });
 
   it('preserves the database creator when updating an existing song', async () => {
-    const songUpsert = vi.fn().mockResolvedValue({ error: null });
+    const writer = makeBuilder({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'song-1' }, error: null }) });
     let songQueryCount = 0;
     mocks.from.mockImplementation((table: string) => {
       expect(table).toBe('songs');
@@ -334,18 +334,84 @@ describe('cloud repository song creator integrity', () => {
             error: null
           })
         })
-        : makeBuilder({ upsert: songUpsert });
+        : writer;
     });
 
     const repository = createRepository();
     repository.setActiveLibrary('team-1');
     await repository.saveSong(makeSong({ createdBy: 'incorrect-copied-user' }));
 
-    expect(songUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      created_by: 'original-creator',
+    expect(writer.update).toHaveBeenCalledWith(expect.objectContaining({
       updated_by: 'user-1',
       content_json: expect.objectContaining({ createdBy: 'original-creator' })
-    }), { onConflict: 'id' });
+    }));
+    expect(writer.update.mock.calls[0][0]).not.toHaveProperty('created_by');
+    expect(writer.eq).toHaveBeenCalledWith('id', 'song-1');
+    expect(writer.eq).toHaveBeenCalledWith('library_id', 'team-1');
+    expect(writer.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe.each(['songs', 'setlists', 'projects'] as const)('cloud repository %s collaboration', (table) => {
+  const item = { id: 'item-1', name: 'Shared', displayMode: 'chord-fixed-key',
+    createdBy: 'stale-creator', createdAt: 1, updatedAt: 2, songs: [] } as Setlist & Project;
+  const save = (repository: ReturnType<typeof createRepository>) => table === 'songs'
+    ? repository.saveSong(makeSong({ id: item.id }))
+    : table === 'setlists' ? repository.saveSetlist(item, item) : repository.saveProject(item);
+
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const install = (existingLibrary: string | null, writeResult: { data: { id: string } | null; error: unknown }) => {
+    const reader = makeBuilder({ maybeSingle: vi.fn().mockResolvedValue({ data: existingLibrary
+      ? { id: item.id, library_id: existingLibrary, created_by: 'original-creator' } : null, error: null }) });
+    const writer = makeBuilder({
+      maybeSingle: vi.fn().mockResolvedValue(writeResult),
+      upsert: vi.fn().mockResolvedValue({ error: new Error('INSERT RLS: creator must be the current user') })
+    });
+    let reads = 0;
+    mocks.from.mockImplementation((name: string) => {
+      expect(name).toBe(table);
+      return reads++ === 0 ? reader : writer;
+    });
+    const repository = createRepository();
+    repository.setActiveLibrary('team-1');
+    return { repository, writer };
+  };
+
+  it('lets an authorized collaborator save an existing item without changing its creator', async () => {
+    const { repository, writer } = install('team-1', { data: { id: item.id }, error: null });
+    await save(repository);
+    expect(writer.update).toHaveBeenCalledWith(expect.objectContaining({ updated_by: 'user-1' }));
+    expect(writer.update.mock.calls[0][0]).not.toHaveProperty('created_by');
+    expect(writer.eq).toHaveBeenCalledWith('id', item.id);
+    expect(writer.eq).toHaveBeenCalledWith('library_id', 'team-1');
+    expect(writer.insert).not.toHaveBeenCalled();
+    expect(writer.upsert).not.toHaveBeenCalled();
+  });
+
+  it('creates a new item under the authenticated user even when copied metadata has another creator', async () => {
+    const { repository, writer } = install(null, { data: null, error: null });
+    await save(repository);
+    expect(writer.insert).toHaveBeenCalledWith(expect.objectContaining({ created_by: 'user-1', updated_by: 'user-1' }));
+    expect(writer.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects an item from another library before writing', async () => {
+    const { repository, writer } = install('team-other', { data: { id: item.id }, error: null });
+    await expect(save(repository)).rejects.toThrow('another workspace');
+    expect(writer.update).not.toHaveBeenCalled();
+    expect(writer.insert).not.toHaveBeenCalled();
+  });
+
+  it('does not report success or recreate an item when RLS hides the update or it was concurrently deleted', async () => {
+    const { repository, writer } = install('team-1', { data: null, error: null });
+    await expect(save(repository)).rejects.toThrow('could not be saved');
+    expect(writer.insert).not.toHaveBeenCalled();
+  });
+
+  it('preserves a database permission failure', async () => {
+    const { repository } = install('team-1', { data: null, error: new Error('Permission denied') });
+    await expect(save(repository)).rejects.toThrow('Permission denied');
   });
 });
 
@@ -437,7 +503,7 @@ describe('cloud repository background library reads', () => {
   });
 
   it('does not redirect later writes when another library is only loaded for refresh', async () => {
-    const songUpsert = vi.fn().mockResolvedValue({ error: null });
+    const songInsert = vi.fn().mockResolvedValue({ error: null });
     let songQueryCount = 0;
     mocks.from.mockImplementation((table: string) => {
       if (table === 'songs') {
@@ -446,7 +512,7 @@ describe('cloud repository background library reads', () => {
         if (songQueryCount === 2) {
           return makeBuilder({ maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) });
         }
-        return makeBuilder({ upsert: songUpsert });
+        return makeBuilder({ insert: songInsert });
       }
       if (table === 'setlists' || table === 'projects') return makeBuilder();
       if (table === 'libraries') {
@@ -466,9 +532,9 @@ describe('cloud repository background library reads', () => {
     await repository.loadLibraryWorkspace('team-2');
     await repository.saveSong(makeSong());
 
-    expect(songUpsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(songInsert).toHaveBeenCalledWith(expect.objectContaining({
       library_id: 'team-1'
-    }), { onConflict: 'id' });
+    }));
   });
 });
 
