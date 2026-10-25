@@ -887,12 +887,13 @@ describe('PreviewBarEditor', () => {
     expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
   });
 
-  it('keeps one fixed main keyboard without a vertical scrolling surface', async () => {
+  it('keeps the phone key rows at their minimum height with a scroll fallback for short visual viewports', () => {
     renderEditor({ deviceLayout: 'phone' });
     const dialog = screen.getByRole('dialog', { name: '預覽快捷編輯' });
-    expect(dialog).toHaveAttribute('data-fixed-keyboard-height', '40dvh');
+    expect(dialog).toHaveAttribute('data-fixed-keyboard-height', 'adaptive');
     expect(dialog.querySelector('[data-keyboard-mode="common"]')).toHaveAttribute('data-keyboard-surface', 'system');
-    expect(dialog.querySelector('[data-keyboard-mode="common"]')).not.toHaveClass('overflow-y-auto');
+    expect(dialog.querySelector('[data-keyboard-mode="common"]')).toHaveClass('overflow-y-auto');
+    expect(dialog.querySelector('[data-keyboard-view="main"]')).toHaveClass('min-h-[192px]');
     expect(dialog.querySelector('[data-keyboard-view="main"]')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /切換鍵盤模式/ })).not.toBeInTheDocument();
     const roots = dialog.querySelector('[data-chord-key-row="roots"]');

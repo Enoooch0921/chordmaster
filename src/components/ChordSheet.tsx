@@ -994,7 +994,7 @@ const BarEdgeMarker: React.FC<{ type: 'repeat-start' | 'repeat-end' | 'double-ba
         )}
         {(type === 'double-bar' || type === 'final-bar') && (
           <>
-            <span className="absolute inset-y-0 right-[5.5px] border-l border-gray-900" />
+            <span className={`absolute inset-y-0 border-l border-gray-900 ${type === 'double-bar' ? 'right-[3px]' : 'right-[5.5px]'}`} />
             <span className={`absolute inset-y-0 right-0 border-gray-900 ${type === 'double-bar' ? 'border-l' : 'border-l-[3px]'}`} />
           </>
         )}

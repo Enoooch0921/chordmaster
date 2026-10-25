@@ -33,6 +33,7 @@ describe('ChordSheet preview input caret', () => {
     for (const marker of markers) {
       const lines = marker.querySelectorAll('.sheet-repeat-preview > span');
       expect(lines).toHaveLength(2);
+      expect(lines[0]).toHaveClass('right-[3px]');
       for (const line of lines) { expect(line).toHaveClass('border-l'); expect(line).not.toHaveClass('border-l-[3px]'); }
     }
     expect(container.querySelector('[data-preview-clipboard-bar="after-double"]')).toHaveClass('border-l-0', 'sheet-after-double-bar');
