@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-26',
+        title: 'Important: manual sync from setlist to song library',
+        bullets: [
+          'Setlist edits stay in the setlist. A Sync to song library button appears for owners and administrators only when the score differs; Key and Capo changes do not trigger it.',
+          'Original scores are backed up. If either version changes during confirmation, refresh the preview before syncing. Performance keys, Capo and setlist section order stay separate.',
+          'Name sorting recognizes Chinese numbers: meetings one, two, nine, ten and eleven now appear in numeric order.'
+        ]
+      },
+      {
+        version: '0.9.13',
+        date: '2026-10-26',
         title: '團隊總管理員與更清楚的共用歌單',
         bullets: [
           '擁有者可授予總管理員，管理全部曲庫、歌單、專案與一般成員權限。',
@@ -521,6 +531,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-26',
+        title: '重要改動：歌單譜面可手動同步回歌曲庫',
+        bullets: [
+          '平常只修改歌單；譜面與曲庫不同時，擁有者／總管理員才會看到「同步回歌曲庫」，預覽差異後再確認更新原曲。只改 Key、Capo 不會觸發。',
+          '原曲完整備份保存在 NAS；曲庫或歌單若在確認期間被修改，必須重新預覽。演出 Key、個人 Capo、段落演出順序及其他歌單副本各自保留。',
+          '歌單名稱排序辨識中文數字，聚會一、二、三、九、十、十一依數字順序排列。'
+        ]
+      },
+      {
+        version: '0.9.11',
         date: '2026-10-23',
         title: '全螢幕雙頁演出、中英混合歌詞與譜面記號擴充',
         bullets: [
