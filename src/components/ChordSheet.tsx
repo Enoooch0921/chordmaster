@@ -2039,6 +2039,23 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const previewBottomLaneClass = 'h-[18px] flex items-center overflow-visible';
   const notationLaneHitClass = 'before:absolute before:left-0 before:right-0 before:-top-2 before:-bottom-2 before:content-[""]';
 
+  const getNotationRowHeight = (row: PreviewSheetRow) => Math.max(
+    row.bars.some(bar => bar?.chordTimingUnspecified) ? row.hasThreeNotationRows ? 120 : row.hasLowerNotationRows ? 90 : 50 : 0,
+    row.hasThreeNotationRows ? 94 : barRowCount === 1 ? row.hasLowerNotationRows ? 58 : 34 : 68
+  ) + (row.extraRhythmRows ?? 0) * 22 + (row.extraJianpuRows ?? 0) * 24 + (row.extraChordPassRows ?? 0) * 36;
+  // A4 at 794 × 1123: reserve padding, header and footer before fitting rows.
+  // Two-line charts may tighten only the space BETWEEN rows, down to 20px.
+  // Keep explicit one-/three-line density and unmetered layouts unchanged.
+  const getPageMusicHeight = (pageIndex: number) => pageIndex === 0 ? 900 : 940;
+  const canFitTwoLineRows = (rows: PreviewSheetRow[]) => barRowCount === 2
+    && rows.every(row => row.kind !== 'closed-filler' && !row.unmetered && !row.bars.some(bar => bar.chordTimingUnspecified));
+  const fitsPage = (rows: PreviewSheetRow[], pageIndex: number) => canFitTwoLineRows(rows)
+    ? rows.length <= 10 && rows.reduce((sum, row) => sum + getNotationRowHeight(row), 0) + Math.max(0, rows.length - 1) * 20 <= getPageMusicHeight(pageIndex)
+    : rows.reduce((sum, row) => sum + row.layoutWeight, 0) <= (pageIndex === 0 ? ROWS_PER_PAGE_FIRST : ROWS_PER_PAGE_OTHER);
+  const getPageRowGap = (rows: PreviewSheetRow[], pageIndex: number) => canFitTwoLineRows(rows) && rows.length > 1
+    ? Math.max(20, Math.min(32, Math.floor((getPageMusicHeight(pageIndex) - rows.reduce((sum, row) => sum + getNotationRowHeight(row), 0)) / (rows.length - 1) / 4) * 4))
+    : null;
+
   const pages: PreviewSheetRow[][] = [];
   let activePageRows: PreviewSheetRow[] = [];
   let activePageWeight = 0;
@@ -2053,7 +2070,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       && nextRow.sIdx === row.sIdx;
     const wouldOrphanSectionStart = startsContinuingSection
       && activePageRows.length > 0
-      && activePageWeight + rowWeight + (nextRow.layoutWeight || 1) > activePageCapacity;
+      && !fitsPage([...activePageRows, row, nextRow], pages.length);
     if (wouldOrphanSectionStart) {
       const remainingPageWeight = activePageCapacity - activePageWeight;
       if (remainingPageWeight > 0) {
@@ -2076,7 +2093,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       activePageWeight = 0;
       activePageCapacity = ROWS_PER_PAGE_OTHER;
     }
-    if (activePageRows.length > 0 && activePageWeight + rowWeight > activePageCapacity) {
+    if (activePageRows.length > 0 && !fitsPage([...activePageRows, row], pages.length)) {
       pages.push(activePageRows);
       activePageRows = [];
       activePageWeight = 0;
@@ -2092,9 +2109,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   // Add editor controls only after music pagination, using the actual room
   // left after section-start moves and weighted notation rows. A choice row
   // must never create an otherwise empty printable page.
-  if ((allowAddBar || allowAddSectionAfter) && finalSection && finalSection.bars.length > 0
-    && activePageRows.length > 0 && activePageWeight + 1 <= activePageCapacity) {
-    activePageRows.push({
+  const addChoiceRow: PreviewSheetRow = {
       kind: 'add-choice',
       sectionTitle: null,
       bars: [],
@@ -2105,7 +2120,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       hasLowerNotationRows: false,
       hasSectionStartLowerGutter: false,
       layoutWeight: 1
-    });
+  };
+  if ((allowAddBar || allowAddSectionAfter) && finalSection && finalSection.bars.length > 0
+    && activePageRows.length > 0 && fitsPage([...activePageRows, addChoiceRow], pages.length - 1)) {
+    activePageRows.push(addChoiceRow);
   }
 
   // Ensure at least one page
@@ -2135,6 +2153,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         const currentSectionRow = pageRows.find((row) => row.sectionTitle) ?? pageRows[0] ?? null;
         const currentSectionIndex = currentSectionRow ? currentSectionRow.sIdx + 1 : 0;
         const currentSectionTitle = currentSectionRow?.sectionTitle ?? song.sections[currentSectionRow?.sIdx ?? 0]?.title ?? '';
+        const pageRowGap = getPageRowGap(pageRows, pIdx);
 
         // Obvious top-of-page "page x of n" marker, only when the song spans more
         // than one page — a clear performance cue so it's hard to lose your place.
@@ -2321,7 +2340,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
           {/* Content Area */}
           <div
             data-sheet-content-area
-            className={`flex-1 flex flex-col min-h-0 w-full ${barRowCount === 1 ? 'gap-y-4 sm:gap-y-5' : 'gap-y-6 sm:gap-y-8'}`}
+            className={`flex-1 flex flex-col min-h-0 w-full [--sheet-row-gap:24px] sm:[--sheet-row-gap:32px] ${barRowCount === 1 ? 'gap-y-4 sm:gap-y-5' : 'gap-y-6 sm:gap-y-8'}`}
+            style={pageRowGap !== null ? { rowGap: `min(var(--sheet-row-gap), ${pageRowGap}px)` } : undefined}
           >
             {pageRows.map((row, rIdx) => {
               const section = song.sections[row.sIdx];
@@ -2464,10 +2484,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
               // Keep notation attached to its chord row even when a sparse A4
               // page has spare height. Voice count still reserves its full space.
-              const notationRowHeight = Math.max(
-                row.bars.some(bar => bar?.chordTimingUnspecified) ? row.hasThreeNotationRows ? 120 : row.hasLowerNotationRows ? 90 : 50 : 0,
-                row.hasThreeNotationRows ? 94 : barRowCount === 1 ? row.hasLowerNotationRows ? 58 : 34 : 68
-              ) + (row.extraRhythmRows ?? 0) * 22 + (row.extraJianpuRows ?? 0) * 24 + (row.extraChordPassRows ?? 0) * 36;
+              const notationRowHeight = getNotationRowHeight(row);
 
               return (
                 <motion.div

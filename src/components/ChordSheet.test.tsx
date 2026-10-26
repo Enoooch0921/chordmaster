@@ -1457,6 +1457,39 @@ describe('ChordSheet preview input caret', () => {
     expect(pages[1].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(1);
   });
 
+  it('fits a 37-bar two-line chart with a two-voice intro by tightening row gaps', () => {
+    const source: Song = { ...song, barRowCount: 2, sections: [4, 8, 16, 9].map((count, sIdx) => ({
+      id: `section-${sIdx}`, title: ['Intro', 'Verse', 'Chorus', 'Bridge'][sIdx],
+      bars: Array.from({ length: count }, (_, bIdx) => ({
+        id: `bar-${sIdx}-${bIdx}`, chords: ['C'],
+        ...(sIdx === 0 ? { riff: '1 | 2 | 3 | 4', riffVoices: [{ id: 'bass', label: 'Bass', riff: '5 | 5 | 5 | 5' }] } : {})
+      }))
+    })) };
+    const before = JSON.stringify(source);
+    const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-preview-clipboard-bar]')).toHaveLength(37);
+    expect(container.querySelector('[data-sheet-content-area]')).toHaveStyle({ rowGap: 'min(var(--sheet-row-gap), 20px)' });
+    expect(container.querySelector('[data-preview-section-id="section-0"]')).toHaveStyle({ maxHeight: '92px' });
+    expect(container.querySelector('[data-preview-section-id="section-1"]')).toHaveStyle({ maxHeight: '68px' });
+    rerender(<ChordSheet song={source} language="zh" currentKey="C" onAddBarClick={vi.fn()} onAddSectionAfterClick={vi.fn()} />);
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
+    expect(container.querySelector('[data-preview-add-choice-row]')).toBeNull();
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it('starts another page when dense two-line notation cannot fit at the minimum row gap', () => {
+    const source: Song = { ...song, barRowCount: 2, sections: [{ ...song.sections[0], bars: Array.from({ length: 44 }, (_, index) => ({
+      id: `dense-${index}`, chords: ['C'], rhythm: 'q q q q', riff: '1 | 2 | 3 | 4'
+    })) }] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    const pages = container.querySelectorAll('[data-print-page]');
+    expect(pages).toHaveLength(2);
+    expect(pages[0].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(8);
+    expect(container.querySelectorAll('[data-preview-clipboard-bar]')).toHaveLength(44);
+    expect(pages[0].querySelector('[data-sheet-content-area]')).toHaveStyle({ rowGap: 'min(var(--sheet-row-gap), 20px)' });
+  });
+
   it('moves a continuing section start off the last row of a page', () => {
     const leadInBars = Array.from({ length: 36 }, (_, index) => ({
       id: `lead-${index + 1}`,

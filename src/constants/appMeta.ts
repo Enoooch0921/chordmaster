@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-27',
+        title: 'Fit two-line charts by their actual height',
+        bullets: ['Full pages tighten the gaps between rows while keeping bar heights and voice lanes intact. Preview, setlists and PDF export use the same page breaks.']
+      },
+      {
+        version: '0.9.20',
+        date: '2026-10-27',
         title: 'Restore two-line bar height',
         bullets: ['Chord-only bars respect the default or selected two-line height. Extra intro voices still add height only to their own row.']
       },
@@ -589,6 +595,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: '依實際高度善用一頁空間',
+        bullets: ['兩行譜面較滿時適度收緊列距，維持小節高度與完整聲部；預覽、歌單與 PDF 匯出共用分頁，減少最後一行被多聲部前奏擠到下一頁的情況。']
+      },
+      {
+        version: '0.9.20',
         date: '2026-10-27',
         title: '恢復兩行小節高度',
         bullets: ['修正兩行模式中只有和弦的小節被壓成一行，保留預設兩行高度；額外聲部只加高所在列。']
