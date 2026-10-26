@@ -1,3 +1,5 @@
+import { motion } from 'motion/react';
+import { useBottomSheetMotion } from '../hooks/useBottomSheetMotion';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { currentKeyMode } from '../utils/keyMode';
 import type { TonalMode } from '../types';
@@ -415,15 +417,22 @@ export default function PreviewWysiwygEditor({
     };
   }, [isTouchLayout, usesMetadataPanel]);
 
-  useModalFocus(usesMetadataPanel && isTouchLayout, panelRef);
+  const sheetMotion = useBottomSheetMotion(panelRef, usesMetadataPanel && isTouchLayout, () => finishClose());
 
-  const closeWithoutCommit = () => {
+  useModalFocus(usesMetadataPanel && isTouchLayout && sheetMotion.mounted, panelRef);
+
+  const finishClose = () => {
     if (finishedRef.current) {
       return;
     }
     finishedRef.current = true;
     cancelCloseRef.current = true;
     onClose();
+  };
+
+  const closeWithoutCommit = () => {
+    if (usesMetadataPanel && isTouchLayout) sheetMotion.dismiss();
+    else finishClose();
   };
 
   const markCommitted = () => {
@@ -567,8 +576,9 @@ export default function PreviewWysiwygEditor({
   const translatorListId = metadataSuggestions?.translators.length ? `${editorInputId}-translators` : undefined;
 
   const chrome = (children: React.ReactNode, title: string, fullMetadata = false) => (
-    <div
-      ref={(node) => { panelRef.current = node; }}
+    <motion.div
+      {...sheetMotion.motionProps}
+      ref={sheetMotion.attach}
       data-song-info-dialog={fullMetadata ? deviceLayout : undefined}
       role={fullMetadata ? 'dialog' : undefined}
       aria-modal={fullMetadata && isTouchLayout ? true : undefined}
@@ -581,8 +591,8 @@ export default function PreviewWysiwygEditor({
       onTouchStart={(event) => event.stopPropagation()}
       onKeyDown={handleEscape}
     >
-      {fullMetadata && deviceLayout === 'phone' ? <div aria-hidden="true" className="mx-auto mt-2.5 h-1 w-9 shrink-0 rounded-full bg-gray-200" /> : null}
-      <div data-song-info-heading className={`sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 rounded-t-[inherit] border-b border-gray-100 bg-white ${fullMetadata && deviceLayout === 'phone' ? 'px-5 pb-4 pt-3' : 'px-4 py-3'}`}>
+      {fullMetadata && deviceLayout === 'phone' ? <div data-sheet-drag-handle aria-hidden="true" className="mx-auto mt-2.5 h-1 w-9 shrink-0 rounded-full bg-gray-200" /> : null}
+      <div data-sheet-drag-handle data-song-info-heading className={`sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 rounded-t-[inherit] border-b border-gray-100 bg-white ${fullMetadata && deviceLayout === 'phone' ? 'px-5 pb-4 pt-3' : 'px-4 py-3'}`}>
         <div className={`flex min-w-0 ${fullMetadata && deviceLayout === 'phone' ? 'flex-col items-start gap-1' : 'items-center gap-2'}`}>
           <div className={`truncate font-bold text-gray-900 ${fullMetadata && deviceLayout === 'phone' ? 'text-lg tracking-tight' : 'text-sm'}`}>{title}</div>
           {fullMetadata && deviceLayout !== 'phone' ? (
@@ -607,7 +617,7 @@ export default function PreviewWysiwygEditor({
       <div data-preview-metadata-scroll={fullMetadata ? '' : undefined} className={`${fullMetadata ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain' : ''} ${fullMetadata && deviceLayout === 'phone' ? 'bg-[color:var(--color-surface)] px-5 pb-5' : 'space-y-3 p-4'}`}>
         {children}
       </div>
-    </div>
+    </motion.div>
   );
 
   const renderTitle = () => {

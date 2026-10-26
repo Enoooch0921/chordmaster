@@ -83,6 +83,16 @@ typography:
     fontSize: "12px"
     fontWeight: 500
     letterSpacing: "0em"
+  row-title:
+    fontFamily: "Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "16px"
+    fontWeight: 600
+    lineHeight: "24px"
+  row-meta:
+    fontFamily: "Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: "20px"
 rounded:
   field: "10px"
   control: "12px"
@@ -169,6 +179,16 @@ components:
     rounded: "{rounded.voice-control}"
     padding: "0 10px"
     height: "44px"
+  mobile-song-row:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    padding: "12px 0"
+  mobile-row-picker:
+    backgroundColor: "{colors.surface-muted}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.voice-control}"
+    padding: "0 12px"
+    height: "44px"
 ---
 
 # Design System: ChordMaster
@@ -232,6 +252,8 @@ System-following theme mode responds to OS preference changes and resynchronizes
 - **Field:** mobile text-entry value (16px, 500, 24px line height), keeping editable content easy to read.
 - **Tab:** direct section destinations (13px, 600).
 - **Label:** explicit field descriptions with ordinary casing and no added tracking (12px, 500).
+- **Row Title:** mobile song/project names, semibold (16px, 600, 24px line height).
+- **Row Metadata:** original musical facts and project counts (12px, 400, 20px line height).
 
 These roles describe the finished mobile controls. Dense desktop tools retain smaller incumbent sizes; this pass does not establish those sizes as mobile defaults.
 
@@ -241,13 +263,17 @@ The app is a chart workspace with sidebar, toolbar and independently scrollable 
 
 Spacing repeatedly uses compact (8px), field inset (12px), column gap (16px), mobile sheet inset (20px), section separation (24px) and layout-group separation (28px). Paired mobile fields use two equal `minmax(0, 1fr)` columns. Maintain shrinking and wrapping behavior for narrow phones.
 
+The screen app frame stays fixed while its own panes scroll. Its height and top follow the visual viewport through resize, focus and page restoration, including the software keyboard. Screen-only body/root containment and single-touch edge handling prevent an exhausted pane from moving the document; multi-touch chart pinches retain their own gesture. Print/export keeps its separate page flow.
+
 Mobile editing uses fixed sheet chrome and an inner `min-height: 0` scroll region with overscroll containment and safe-area padding. The song-information surface uses equal-width tabs, a sticky tab rail and visible completion action; that specific composition is documented in `.impeccable/surfaces/src-components-songmetadatapanel-tsx.md`, not prescribed for every screen. Desktop metadata retains its compact form.
 
 Rhythm, jianpu and bar-text panels size to their actual content across phone, tablet and desktop. Fixed key-row floors remain intact; a bounded center scrolls independently when the viewport is short while the header and footer stay visible. Empty filler below key rows is not part of this pattern. Phone and tablet panels have a (64px) top allowance; the visual viewport controls width and keyboard offset. Phone chord keys retain their separate flexible dock based on (40dvh) with a (360px) floor. Detailed compositions stay in `.impeccable/surfaces/src-components-preview-edit-previewbareditor-tsx.md` and `.impeccable/surfaces/ts-preview-edit-notationvoiceselector-tsx-8557ca32.md`.
 
-Timed notation-bearing chart rows have a content-derived maximum height so spare A4 space follows the musical rows rather than opening a gap between chords and melody/rhythm. The normal two-line row with one chord lane and one lower notation lane keeps its existing weight (1) and normal capacity (68px); the verified 40-bar single-melody fixture remains one page. Additional rhythm voices reserve (22px) each, additional jianpu voices (24px) each and chord-pass rows (36px) each. Three-lane content retains its larger base capacity. These are chart geometry values, not UI spacing tokens.
+Timed chart rows have content-derived height caps so spare A4 space follows the musical rows rather than stretching their content. Chord-only rows in one- and two-line modes cap at (34px). A normal two-line row with one chord lane and one lower notation lane retains weight (1) and capacity (68px); a second jianpu voice reserves the additional (24px), making the corresponding two-voice row (92px). The verified 40-bar single-melody fixture remains one page. Additional rhythm voices reserve (22px) each and chord-pass rows (36px) each. Explicit three-line handwriting space retains its existing geometry and pagination capacity; only content needing lower notation receives its extra height. These are chart geometry values, not UI spacing tokens.
 
 For timed bars, lower notation follows the actual chord/pass stack with nominal (7px) token clearance. The shared compact anchor adds (8px) for subdivided chord events and (36px) per additional pass row; measure lanes, section gutters and pickup use the same anchor calculation. Untimed and unmetered bars retain their special rendering and do not use the compact anchor or timed-row cap. Detailed composition and fixtures live in `.impeccable/surfaces/src-components-chordsheet-tsx.md`.
+
+Mobile sidebar songs and projects use flat divided rows rather than nested cards. Song names and project names share the row-title role, while original-key, meter, version and count information use row metadata. Overview previews remain plain text. Song controls sit in two equal columns aligned with the title; current Key/Capo values appear in those controls rather than being repeated in metadata. Desktop list composition retains its existing density.
 
 ## Elevation & Depth
 
@@ -255,7 +281,23 @@ Depth combines semantic tonal layers, thin borders and soft overlay shadows. Fie
 
 **The Chart Position Rule.** Opening and scrolling a mobile editor preserves the background chart position; closing restores access to that same position.
 
-Motion supports state changes. The mobile actions sheet uses a non-bouncing spring (0.35s); tap-tempo feedback uses an ease-out pulse (150ms). The mobile metadata stylesheet disables CSS transitions under reduced-motion preferences. These are observed local behaviors, not a universal animation duration.
+Motion explains occasional surfaces and feedback while reading, notation entry and rapid song choice stay immediate. The common ease-out curve is `cubic-bezier(0.23, 1, 0.32, 1)`; drawers use `cubic-bezier(0.32, 0.72, 0, 1)`. Existing Motion primitives carry the following profiles; no new layout, imagery or brand treatment is implied.
+
+| Interaction | Enter / exit | Motion |
+| --- | --- | --- |
+| Anchored popover | 160ms / 125ms | Opacity and scale from/to 0.97 around the measured trigger origin. |
+| Occasional prompt modal | 200ms / 160ms | Opacity and scale from/to 0.97; backdrop uses the same timings. |
+| Mobile sidebar and More actions drawer | 240ms / 200ms | Full transform from/to the drawer edge; sidebar width remains fixed. |
+| Workspace, filter and metadata disclosure | 200ms / 160ms | Height from/to zero, with 125ms opacity; height is the accordion exception to transform/opacity motion. |
+| Notification | 200ms / 160ms | Opacity and full vertical transform from/to 16px below; entry and exit share the bottom edge. |
+| Occasional pointer press | 100ms / 160ms release | Scale to 0.97; no new positional hover motion. |
+| Disclosure chevron | 160ms | Rotation follows its disclosure. |
+
+Shared profiles use live reduced-motion preferences: opacity (125ms), with transform duration explicitly zero; disclosure height snaps. Keyboard-initiated shared transitions and chevrons are instant. Changing the preference retargets even a closed sidebar immediately, without animating its hidden position. Pointer press uses opacity (0.8) under reduced motion, and keyboard presses do not acquire the pointer animation.
+
+Gesture-driven mobile/tablet detail sheets retain entry (240ms) and exit (200ms) with the drawer curve, short-pull spring settling (0.5s, bounce 0.2), and their existing reduced-motion opacity path (160ms). Their keyboard entry/dismissal is immediate; direct drag behavior remains intact. Tap-tempo feedback retains its local ease-out pulse (150ms). These are named interaction rules, not one duration applied to every control.
+
+**The Core Work Rule.** Keep score reading, notation input, explicit song selection and core editor geometry immediate; animate occasional panels and feedback only when their spatial or state relationship benefits from it.
 
 ## Shapes
 
@@ -305,6 +347,36 @@ Main and additional voices use the same rhythm or jianpu keys. Selecting a voice
 
 For regular bars, the header keeps Chords, Rhythm, Jianpu and Text in the same order in every keyboard. Text is the fourth destination, preserves notation mode and voice selection, and returns to that keyboard. Bar labels, annotations and left/right text belong to the whole bar and are explicitly described as shared by all voices. Voice naming has its own pencil action. Pickup editing retains its specialized rhythm/jianpu header rather than offering unsupported bar-text destinations.
 
+### Detail Sheets
+
+Mobile and tablet song details share the same entry, controlled exit and drag behavior. The sheet completes its exit before unmounting. Late-mounted content attaches to the same motion and focus lifecycle, so lazy loading does not skip the entrance or lose the original opener. Focus stays inside the modal and its portalled pickers, then returns to the opener without moving the chart.
+
+A downward gesture starts on the header/grip or content already at its top. Inputs, links, buttons and tabs keep their own interaction; content that is scrolled away from its top continues native scrolling. A short pull returns to rest; sufficient distance or a downward flick dismisses. Dragging does not move the background app frame or turn its release into a control click.
+
+### Chart Zoom
+
+The score point between two fingers stays under that focal point while the sheet scales and after release, including when the fitted sheet still lies within the viewport. During the gesture the sheet receives one transform update per animation frame; layout and zoom state commit once at release, with only the bounded leading/trailing pan space needed to keep the anchor reachable. Setlist selection tracking and automatic positioning remain paused throughout the gesture.
+
+The pinch owns its native nonpassive capture path only after a two-finger gesture starts. A remaining finger cannot turn the completed pinch into a pan, and the synthetic release click cannot open a notation editor. An ordinary fresh single-finger interaction resumes normally. Resize or chart-identity cancellation restores both the transform and the zoom label. Export clones clear preview translation and use relative positioning with zero left/top offsets so interactive pan does not shift the PDF.
+
+### Mobile Song and Project Rows
+
+Mobile song rows use quiet dividers, (12px) vertical padding, a semibold title (16px) and secondary facts (12px). Long titles can wrap to two lines. A numbered (44px) grip carries reorder affordance when permitted; a check and soft green background identify the current song without a duplicate status badge. Two equal (44px) Key/Capo picker columns begin beneath the title. Their dark backgrounds, borders and foregrounds explicitly use semantic roles, preserving legibility independently of utility compatibility.
+
+Song removal lives behind a labelled (44px) overflow trigger. Its anchored portal menu clamps or flips within the viewport, places focus on the action, dismisses on outside interaction, and returns focus to its trigger on Escape or Tab. The remove action retains the existing native confirmation. Row selection, control edits and reorder preserve their distinct targets.
+
+Owned, read-only and joined projects share the same flat mobile hierarchy: (16px) names, (12px) counts and (44px) rename/create controls. The management heading includes its count. Creation, filtering, rename, sharing, archive and delete remain governed by the existing permissions; consistent row styling does not grant management actions. Desktop rows retain their prior composition. Sidebar navigation uses explicit dark foreground/selection treatments; Done uses the brighter green-300 role in dark mode.
+
+### Anchored Menus, Disclosures and Feedback
+
+Key, Capo and song-action popovers measure a stationary shell and animate only its visual child. Position and trigger-relative origin are ready before the first visible frame, so scaling cannot change the anchoring measurement. Toolbar and setlist menus use the same popover profile. Key/Capo value commits and song-action choices close their popovers immediately; keyboard-initiated shared transitions are instant. Other menu operations execute immediately without waiting for their visual exit.
+
+Presence exits are visual only: departing surfaces become inert and hidden from assistive technology immediately, with pointer interception disabled for surface/backdrop exits. This includes More actions controls. Disclosures likewise make closing content inert while height/opacity finish, preserve their outer composition, and can reverse without a separate staged entrance.
+
+The mobile sidebar uses a fixed-width shell and a full transform on its visual surface; desktop sidebar geometry stays immediate. Core editor panes retain `transform: none`, and their floating selection toolbar has no positional entrance, preserving the fixed keyboard's coordinate space. These rules do not introduce song transitions, list staggers, score/lyrics animation or new pinch choreography.
+
+Notifications keep a stationary outer position-layout wrapper and animate the inner surface. Pending-to-success/error feedback keeps its stable ID and updates in place rather than replaying the entrance. Pointer-only press feedback is reserved for occasional actions; fast notation keys and routine input do not receive added motion. Input modality changes are tracked without making each keystroke rerender the score. Detailed scope and rejected candidates remain in `.impeccable/surfaces/src-components-ui-interactionmotion-tsx.md` and `.impeccable/review/animation-opportunities.md`.
+
 ### Chart Preview Consistency
 
 Selected and unselected setlist charts, including export, use the same saved item arrangement when present and fall back to the source song otherwise. Selection must not change the visible arrangement or its page count. This is a consistency rule for existing chart content, not an additional visual token.
@@ -326,6 +398,14 @@ Selected and unselected setlist charts, including export, use the same saved ite
 - **Do** keep timed lower notation close to its chord/pass stack and reserve real space for additional voices.
 - **Do** preserve untimed and unmetered rendering when applying compact chart geometry.
 - **Do** render the same saved setlist arrangement in selected previews, unselected previews and export.
+- **Do** keep sheet drag, native content scrolling and field/tab interactions distinct.
+- **Do** preserve the pinch focal point and keep the zoom label consistent through release or cancellation.
+- **Do** use flat divided mobile song/project rows with readable titles and aligned musical controls.
+- **Do** retain explicit three-line handwriting space while capping timed chord-only rows.
+- **Do** anchor popover motion to the trigger while measuring an untransformed shell.
+- **Do** make exiting surfaces inert immediately and keep action commits and keyboard interactions instant.
+- **Do** apply live reduced-motion preferences with zero transform duration and the scoped opacity fallback.
+- **Do** retain stable notification identity when pending feedback becomes success or error.
 
 ### Don't:
 
@@ -336,13 +416,23 @@ Selected and unselected setlist charts, including export, use the same saved ite
 - **Don't** let generic dark compatibility override dedicated component variants or printable chart content.
 - **Don't** reserve empty filler below notation keys; use content-sized panels with bounded center scrolling.
 - **Don't** distribute spare A4 height inside timed notation-bearing rows or inflate ordinary single-melody pagination.
+- **Don't** let a pinch change the current setlist item or trigger a synthetic editor click.
+- **Don't** expose destructive song actions as a competing row-level icon; use the labelled anchored overflow.
+- **Don't** allow scroll exhaustion to move the app frame or carry preview pan offsets into PDF output.
+- **Don't** animate core editor geometry, rapid song choice, score reading or notation input as part of occasional-surface motion.
+- **Don't** animate mobile sidebar width or add a transformed ancestor around its fixed notation keyboard.
+- **Don't** add list staggers, decorative reveals or new positional hover motion to this interaction system.
 
-Source: `src/components/ChordSheet.tsx`, `src/index.css`, `src/components/SongMetadataPanel.tsx`, `src/components/SongMetadataPanel.css`, `src/components/PreviewWysiwygEditor.tsx`, `src/components/SetlistCompactControls.tsx`, `src/lib/previewEditorLayout.ts`, `src/components/preview-edit/PreviewBarEditor.tsx`, `src/components/preview-edit/NotationVoiceSelector.tsx`, `src/lib/notationVoiceEditing.ts`, `src/components/JianpuVoiceStack.tsx`, `src/components/RhythmVoiceStack.tsx`, `src/components/PickupPreview.tsx`, `src/styles/dark-ui.css`, `src/hooks/useThemeMode.ts` and `src/App.tsx`.
+Source: `src/lib/uiMotion.ts`, `src/components/ui/InteractionMotion.tsx`, `src/hooks/useUiMotion.ts`, `src/hooks/useReducedMotionPreference.ts`, `src/components/useAnchoredPortalPanel.ts`, `src/components/Toast.tsx`, `src/components/KeyPicker.tsx`, `src/components/CapoPicker.tsx`, `src/components/SongEditor.tsx` (floating selection toolbar only), `src/hooks/usePreviewPinchZoom.ts`, `src/lib/previewZoom.ts`, `src/hooks/useBottomSheetMotion.ts`, `src/hooks/useAppViewport.ts`, `src/hooks/useModalFocus.ts`, `src/components/SetlistSongActions.tsx`, `src/components/MobileSidebarNavigation.tsx`, `src/components/ChordSheet.tsx`, `src/index.css`, `src/components/SongMetadataPanel.tsx`, `src/components/SongMetadataPanel.css`, `src/components/PreviewWysiwygEditor.tsx`, `src/components/SetlistCompactControls.tsx`, `src/lib/previewEditorLayout.ts`, `src/components/preview-edit/PreviewBarEditor.tsx`, `src/components/preview-edit/NotationVoiceSelector.tsx`, `src/lib/notationVoiceEditing.ts`, `src/components/JianpuVoiceStack.tsx`, `src/components/RhythmVoiceStack.tsx`, `src/components/PickupPreview.tsx`, `src/styles/dark-ui.css`, `src/hooks/useThemeMode.ts` and `src/App.tsx`.
 
 Evidence: `.impeccable/review/mobile.png`, `mobile-chart.png`, `mobile-audio.png`, `mobile-dark-details.png`, `mobile-dark.png`, `phone-small.png`, `desktop.png` and `interaction-verification.json` cover metadata layouts, independent scrolling, preserved chart coordinates and focus behavior. `keyboard-theme-verification.json`, `keyboard-normal-verification.json`, `keyboard-viewport-verification.json` and `switch-theme-verification.json` cover theme, key geometry, bounded scrolling and distinct switch states; the current content-sized keyboard supersedes the earlier fixed-dock snapshots.
 
 Voice evidence: `.impeccable/review/voices-{320,390,768,1440}-{chords,rhythm,jianpu,rename,text,dark}.png`, `voices-short-rename.png` and `voices-verification.json` cover phone through desktop, dark appearance, short-viewport renaming, preserved neighboring notation and shared-text round trips. Chart evidence: `chart-spacing-{320,390,768,1440}-{1,2,3}.png`, `chart-spacing-{390,1440}-solo.png`, `chart-spacing-390-dark.png` and `chart-spacing-{390,1440}-{subdivided,unmetered,untimed}.png` cover row modes, ordinary melody capacity and special notation rendering. Independent review returned ship for the scoped voice work and both material chart-spacing corrections. The verified setlist switch sequence retains the same arrangement page counts across selection changes.
 
-Latest supplied verification: 109 test files and 1,067 tests passed; lint and production build passed. Changes remain local and unpublished; UI work did not modify production NAS songs. Review screenshots are evidence, and no shipping raster assets were created. These scoped reviews do not certify every incumbent surface in the app.
+Interaction evidence: `pinch-matrix-final-verification.json`, `pinch-webkit-final-verification.json` and `pinch-cancel-verification.json` record browser-emulated focal release drift below (0.3 CSS px) in Chrome at 320/390/768/1024 widths and below (1 CSS px) for synthetic WebKit touches, plus restored zoom labels on cancellation. These measurements do not establish physical-device frame rates. Sheet behavior is recorded in `sheet-verify-verification.json`, `sheet-webkit-verification.json`, `sheet-focus-verification.json` and `secondary-sheet-verification.json`. Sidebar evidence includes `sidebar-verify-final-verification.json`, `sidebar-webkit-final-verification.json`, `sidebar-touch-verification.json`, `sidebar-{320,390,1280}.png`, `sidebar-dark-{320,390}.png`, `sidebar-menu-{320,390}.png`, `projects-{320,390,1280}.png` and `projects-dark-{320,390}.png`. Independent scoped reviews returned ship for anchored zoom, detail sheets/row caps and sidebar/project refinements.
+
+Motion evidence: `.impeccable/review/motion-{harness,harness-webkit,app-verify,app-verify-webkit,slow,verdict,verdict-webkit}-verification.json` covers Chrome/WebKit, phone/desktop, dark and live reduced preferences, stable anchored geometry at slowed playback, immediate action commits and inert exits. Independent scoped review returned ship for live preference retargeting, guarded exits and the shared interaction profiles. Temporary fixture styling is not part of this system.
+
+Latest verification: 114 test files and 1,090 tests passed; lint and production build passed. Changes remain local and unpublished; UI work did not modify production NAS songs. Review screenshots are evidence, and no shipping raster assets were created. These scoped reviews do not certify every incumbent surface in the app.
 
 Not canonized: tiny incumbent labels, local notation glyph sizes, uppercase eyebrow treatments and incidental colored/raised key shadows remain local implementation details. The supported legacy neutral utilities now have semantic dark compatibility; this pass does not claim that every hardcoded color in the app is covered. No incidental decoration or remaining advisory is promoted into a new global rule.

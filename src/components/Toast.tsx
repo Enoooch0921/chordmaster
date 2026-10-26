@@ -1,5 +1,7 @@
+import { useUiMotion } from '../hooks/useUiMotion';
+import { notificationVariants, UI_EASE_OUT, type UiMotionPreference } from '../lib/uiMotion';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useIsPresent } from 'motion/react';
 import { CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
 
 export type ToastVariant = 'success' | 'error' | 'loading' | 'info';
@@ -143,7 +145,7 @@ const variantStyles: Record<ToastVariant, { icon: typeof CheckCircle2; iconClass
   },
   loading: {
     icon: Loader2,
-    iconClass: 'text-[color:var(--color-indigo-600)] animate-spin',
+    iconClass: 'text-[color:var(--color-indigo-600)] animate-spin motion-reduce:animate-none',
     ringClass: 'ring-[color:var(--color-indigo-100)] dark:ring-[color:var(--color-indigo-900)]'
   },
   info: {
@@ -153,47 +155,32 @@ const variantStyles: Record<ToastVariant, { icon: typeof CheckCircle2; iconClass
   }
 };
 
-const ToastViewport = ({ items, onDismiss }: { items: ToastItem[]; onDismiss: (id: string) => void }) => (
-  <div
-    aria-live="polite"
-    aria-atomic="false"
-    className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[min(92vw,360px)] flex-col gap-2"
-  >
-    <AnimatePresence initial={false}>
-      {items.map((item) => {
-        const styles = variantStyles[item.variant];
-        const Icon = styles.icon;
-        return (
-          <motion.div
-            key={item.id}
-            layout
-            initial={{ opacity: 0, y: 16, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 24, transition: { duration: 0.18 } }}
-            transition={{ type: 'spring', bounce: 0.18, duration: 0.28 }}
-            className={`pointer-events-auto flex items-start gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-raised)] px-3.5 py-3 shadow-lg shadow-black/5 ring-1 ${styles.ringClass}`}
-            role={item.variant === 'error' ? 'alert' : 'status'}
-          >
-            <Icon size={18} className={`mt-0.5 shrink-0 ${styles.iconClass}`} />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-snug text-[color:var(--color-text)]">{item.message}</p>
-              {item.description ? (
-                <p className="mt-0.5 text-xs leading-relaxed text-[color:var(--color-text-muted)]">{item.description}</p>
-              ) : null}
-            </div>
-            {item.variant !== 'loading' ? (
-              <button
-                type="button"
-                onClick={() => onDismiss(item.id)}
-                className="-m-1 shrink-0 rounded-full p-1 text-[color:var(--color-text-faint)] transition-colors hover:bg-[color:var(--color-surface-muted)] hover:text-[color:var(--color-text)]"
-                aria-label="Dismiss notification"
-              >
-                <X size={14} />
-              </button>
-            ) : null}
-          </motion.div>
-        );
-      })}
+const ToastViewport = ({ items, onDismiss }: { items: ToastItem[]; onDismiss: (id: string) => void }) => {
+  const preference = useUiMotion();
+  return <div aria-live="polite" aria-atomic="false" className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[min(92vw,360px)] flex-col gap-2">
+    <AnimatePresence initial={false} custom={preference}>
+      {items.map(item => <ToastCard key={item.id} item={item} onDismiss={onDismiss} preference={preference} />)}
     </AnimatePresence>
-  </div>
-);
+  </div>;
+};
+
+function ToastCard({ item, onDismiss, preference }: { item: ToastItem; onDismiss: (id: string) => void; preference: UiMotionPreference }) {
+  const present = useIsPresent();
+  const styles = variantStyles[item.variant];
+  const Icon = styles.icon;
+  return <motion.div layout={preference.instant || preference.reduced ? false : 'position'}
+    transition={{ layout: { duration: 0.16, ease: UI_EASE_OUT } }} inert={!present ? true : undefined} aria-hidden={!present ? true : undefined}>
+    <motion.div data-ui-toast custom={preference} variants={notificationVariants} initial="hidden" animate="visible" exit="exit"
+      className={`pointer-events-auto flex items-start gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-raised)] px-3.5 py-3 shadow-lg shadow-black/5 ring-1 ${styles.ringClass}`}
+      role={item.variant === 'error' ? 'alert' : 'status'}>
+      <Icon size={18} className={`mt-0.5 shrink-0 ${styles.iconClass}`} />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold leading-snug text-[color:var(--color-text)]">{item.message}</p>
+        {item.description ? <p className="mt-0.5 text-xs leading-relaxed text-[color:var(--color-text-muted)]">{item.description}</p> : null}
+      </div>
+      {item.variant !== 'loading' ? <button type="button" onClick={() => onDismiss(item.id)}
+        className="ui-press -m-1 shrink-0 rounded-full p-1 text-[color:var(--color-text-faint)] transition-colors hover:bg-[color:var(--color-surface-muted)] hover:text-[color:var(--color-text)]"
+        aria-label="Dismiss notification"><X size={14} /></button> : null}
+    </motion.div>
+  </motion.div>;
+}

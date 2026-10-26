@@ -4,6 +4,20 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* The installed app owns its viewport; individual panes own their scrolling. */
+@media screen {
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  body { position: fixed; inset: 0; }
+  [data-print-preview-container], [data-editor-scroll-root] { overscroll-behavior: none; }
+  [data-sheet-drag-handle] { touch-action: none; }
+}
+
 /* Keep the original page DOM and pagination; arrange it into spread rows only
    inside performance mode. Hidden lyric measurement nodes remain out of flow. */
 .performance-sheet :has(> [data-print-page]) {
@@ -199,6 +213,9 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-preview] {
   -webkit-font-smoothing: antialiased;
   transform: none !important;
   transform-origin: top center !important;
+  position: relative !important;
+  left: 0 !important;
+  top: 0 !important;
   width: 794px !important;
   min-width: 794px !important;
   max-width: 794px !important;
@@ -278,6 +295,9 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   body.exporting-pdf [data-print-preview] {
     transform: none !important;
     transform-origin: top center !important;
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
     width: 794px !important;
     min-width: 794px !important;
     max-width: 794px !important;
@@ -456,3 +476,27 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   border-radius: 3px;
   background: transparent;
 }
+
+/* Occasional pointer actions acknowledge a press; keyboard/input work stays instant. */
+:root {
+  --ease-ui-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ui-press-duration: 100ms;
+  --ui-release-duration: 160ms;
+}
+[data-ui-input="pointer"] .ui-press {
+  transition-property: transform, opacity, background-color, border-color, color;
+  transition-duration: var(--ui-release-duration);
+  transition-timing-function: var(--ease-ui-out);
+}
+[data-ui-input="pointer"] .ui-press:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: var(--ui-press-duration);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-ui-input="pointer"] .ui-press { transition-property: opacity, background-color, border-color, color; }
+  [data-ui-input="pointer"] .ui-press:active:not(:disabled) { transform: none; opacity: 0.8; }
+}
+
+.ui-motion-chevron { transition: transform var(--ui-release-duration) var(--ease-ui-out); }
+[data-ui-input="keyboard"] .ui-motion-chevron { transition: none; }
+@media (prefers-reduced-motion: reduce) { .ui-motion-chevron { transition: none; } }

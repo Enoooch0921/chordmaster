@@ -8,12 +8,13 @@ interface Options {
   songCount: number;
   skipNextAutoScrollRef: RefObject<boolean>;
   preserveSelectionUntilRef: RefObject<number>;
+  gestureActiveRef?: RefObject<boolean>;
   onSelectSong: (id: string) => void;
 }
 
 export function useSetlistPreviewNavigation({
   previewRef, enabled, trackScroll, selectedSongId, songCount,
-  skipNextAutoScrollRef, preserveSelectionUntilRef, onSelectSong
+  skipNextAutoScrollRef, preserveSelectionUntilRef, gestureActiveRef, onSelectSong
 }: Options) {
   const navigatingRef = useRef(false);
 
@@ -45,6 +46,7 @@ export function useSetlistPreviewNavigation({
 
     frameId = window.requestAnimationFrame(() => {
       frameId = window.requestAnimationFrame(() => {
+        if (gestureActiveRef?.current) { finish(); return; }
         scrollRoot = previewRef.current;
         const target = scrollRoot?.querySelector<HTMLElement>(`[data-setlist-preview-song-id="${selectedSongId}"]`);
         if (!scrollRoot || !target) {
@@ -71,7 +73,7 @@ export function useSetlistPreviewNavigation({
       window.cancelAnimationFrame(frameId);
       finish();
     };
-  }, [enabled, selectedSongId, songCount, previewRef, skipNextAutoScrollRef]);
+  }, [enabled, selectedSongId, songCount, previewRef, skipNextAutoScrollRef, gestureActiveRef]);
 
   useEffect(() => {
     // Editor reflows must not change the song being edited.
@@ -81,7 +83,7 @@ export function useSetlistPreviewNavigation({
     let frameId: number | null = null;
     const updateFromScroll = () => {
       frameId = null;
-      if (navigatingRef.current || preserveSelectionUntilRef.current > performance.now()) return;
+      if (gestureActiveRef?.current || navigatingRef.current || preserveSelectionUntilRef.current > performance.now()) return;
       const rootRect = scrollRoot.getBoundingClientRect();
       const activationY = rootRect.top + Math.min(180, Math.max(72, rootRect.height * 0.28));
       const cards = scrollRoot.querySelectorAll<HTMLElement>('[data-setlist-preview-song-id]');
@@ -105,7 +107,7 @@ export function useSetlistPreviewNavigation({
     const requestUpdate = () => {
       // Ignore the event itself, too: its RAF can run after scrollend releases
       // the lock, when the activation line still intersects the previous song.
-      if (navigatingRef.current || frameId !== null) return;
+      if (gestureActiveRef?.current || navigatingRef.current || frameId !== null) return;
       frameId = window.requestAnimationFrame(updateFromScroll);
     };
     requestUpdate();
@@ -116,5 +118,5 @@ export function useSetlistPreviewNavigation({
       window.removeEventListener('resize', requestUpdate);
       if (frameId !== null) window.cancelAnimationFrame(frameId);
     };
-  }, [enabled, trackScroll, selectedSongId, songCount, previewRef, skipNextAutoScrollRef, preserveSelectionUntilRef, onSelectSong]);
+  }, [enabled, trackScroll, selectedSongId, songCount, previewRef, skipNextAutoScrollRef, preserveSelectionUntilRef, gestureActiveRef, onSelectSong]);
 }

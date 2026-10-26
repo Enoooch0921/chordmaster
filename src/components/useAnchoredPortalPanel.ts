@@ -19,13 +19,15 @@ interface AnchoredPanelState {
   left: number;
   placement: PanelPlacement;
   ready: boolean;
+  originX: number;
 }
 
 const DEFAULT_STATE: AnchoredPanelState = {
   top: 0,
   left: 0,
   placement: 'bottom',
-  ready: false
+  ready: false,
+  originX: 0
 };
 
 const approximatelyEqual = (a: number, b: number) => Math.abs(a - b) < 0.5;
@@ -53,6 +55,8 @@ export function useAnchoredPortalPanel({
 
     const triggerRect = trigger.getBoundingClientRect();
     const panelRect = panel.getBoundingClientRect();
+    // Wait for measurable geometry instead of treating a not-yet-laid-out trigger as dismissed.
+    if (triggerRect.width === 0 && triggerRect.height === 0) return;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
@@ -88,12 +92,14 @@ export function useAnchoredPortalPanel({
     const maxTop = Math.max(viewportPadding, viewportHeight - panelRect.height - viewportPadding);
     const top = Math.min(Math.max(rawTop, viewportPadding), maxTop);
 
+    const originX = Math.max(0, Math.min(panelRect.width, triggerRect.left + triggerRect.width / 2 - left));
     setPanelState((current) => {
       if (
         current.ready &&
         current.placement === placement &&
         approximatelyEqual(current.left, left) &&
-        approximatelyEqual(current.top, top)
+        approximatelyEqual(current.top, top) &&
+        approximatelyEqual(current.originX, originX)
       ) {
         return current;
       }
@@ -102,7 +108,8 @@ export function useAnchoredPortalPanel({
         left,
         top,
         placement,
-        ready: true
+        ready: true,
+        originX
       };
     });
   }, [align, isOpen, offset, onRequestClose, panelRef, triggerRef, viewportPadding]);
@@ -124,7 +131,8 @@ export function useAnchoredPortalPanel({
       });
     };
 
-    scheduleUpdate();
+    // Resolve the stationary shell before the first visible frame.
+    updatePosition();
 
     window.addEventListener('resize', scheduleUpdate, { passive: true });
     window.addEventListener('orientationchange', scheduleUpdate, { passive: true });
@@ -167,6 +175,7 @@ export function useAnchoredPortalPanel({
 
   return {
     panelStyle,
+    transformOrigin: `${panelState.originX}px ${panelState.placement === 'top' ? '100%' : '0%'}`,
     placement: panelState.placement,
     isPositioned: panelState.ready
   };

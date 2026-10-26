@@ -28,6 +28,7 @@ function setup() {
     songCount: 3,
     skipNextAutoScrollRef: { current: false },
     preserveSelectionUntilRef: { current: 0 },
+    gestureActiveRef: { current: false },
     onSelectSong: vi.fn()
   };
   const hook = renderHook(useSetlistPreviewNavigation, { initialProps: options });
@@ -126,6 +127,22 @@ describe('setlist preview navigation', () => {
     move(1904);
     advance();
     expect(options.onSelectSong).not.toHaveBeenCalled();
+  });
+
+  it('blocks selection and pending auto-positioning throughout a long pinch', () => {
+    const { root, options, hook, advance, move } = setup();
+    options.gestureActiveRef.current = true;
+    advance(5000);
+    move(1000);
+    advance();
+    expect(options.onSelectSong).not.toHaveBeenCalled();
+    hook.rerender({ ...options, selectedSongId: 'three' });
+    advance();
+    expect(root.scrollTo).not.toHaveBeenCalled();
+    options.gestureActiveRef.current = false;
+    move(1000);
+    advance();
+    expect(options.onSelectSong).toHaveBeenCalledExactlyOnceWith('two');
   });
 
   it('removes pending navigation work on unmount', () => {

@@ -57,7 +57,7 @@ export default function MobileSidebarNavigation(props: Props) {
           </button>
         </div>
       </details>
-      <button type="button" onClick={props.onClose} className="flex h-11 shrink-0 items-center justify-center rounded-lg px-2 text-sm font-bold text-indigo-600 hover:bg-indigo-50">
+      <button type="button" onClick={props.onClose} className="flex h-11 shrink-0 items-center justify-center rounded-lg px-2 text-sm font-bold text-indigo-600 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-950">
         {props.doneLabel}
       </button>
     </div>

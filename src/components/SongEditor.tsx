@@ -8329,9 +8329,10 @@ const SongEditor: React.FC<Props> = ({
         {selection && (selection.bIdx < 0 || !chordOnlySectionIds.has(song.sections[selection.sIdx]?.id || `section-${selection.sIdx}`)) && (
           <motion.div
             ref={toolbarRef}
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
+            initial={false}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0 } }}
+            transition={{ duration: 0 }}
             className={`fixed left-1/2 z-[100] flex -translate-x-1/2 rounded-2xl border border-gray-200 bg-white shadow-2xl ${
               isCompactJianpuSelectionToolbar
                 ? 'bottom-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col items-stretch gap-1 p-1.5'

@@ -1,3 +1,4 @@
+import { AnimatedPopover } from './ui/InteractionMotion';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
@@ -41,9 +42,11 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   const panelRef = React.useRef<HTMLDivElement>(null);
   const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   const [isOpen, setIsOpen] = React.useState(false);
+  const instantExit = React.useRef(false);
   const playKey = getPlayKey(currentKey, value);
 
-  const closePanel = React.useCallback(() => {
+  const closePanel = React.useCallback((immediate = false) => {
+    instantExit.current = immediate;
     setIsOpen(false);
   }, []);
 
@@ -125,7 +128,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
 
   const isCompactTrigger = triggerDensity === 'compact';
   const resolvedAlign = align as PanelAlign;
-  const { panelStyle, placement, isPositioned } = useAnchoredPortalPanel({
+  const { panelStyle, placement, isPositioned, transformOrigin } = useAnchoredPortalPanel({
     isOpen,
     align: resolvedAlign,
     triggerRef,
@@ -139,8 +142,8 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => !disabled && setIsOpen((open) => !open)}
-        className={`flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors ${
+        onClick={() => { if (!disabled) { instantExit.current = false; setIsOpen(open => !open); } }}
+        className={`ui-press flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors ${
           isCompactTrigger
             ? 'h-9 min-w-[82px] rounded-lg px-2.5'
             : 'h-10 min-w-[104px] rounded-xl px-3'
@@ -157,12 +160,12 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         <span className={`min-w-0 truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold text-gray-800 ${valueTextClassName}`}>
           {value}{showPlayKey ? <> <span className="text-gray-400">({playKey})</span></> : null}
         </span>
-        <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 ui-motion-chevron ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
-      {isOpen && typeof document !== 'undefined' && createPortal(
-        <div
-          ref={panelRef}
+      {typeof document !== 'undefined' && createPortal(
+        <AnimatedPopover open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
+          panelRef={panelRef}
           className={`${touchOptimized ? 'w-[248px] p-3' : 'w-[132px] p-2'} overflow-hidden rounded-[20px] border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
           data-placement={placement}
@@ -185,7 +188,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
                   type="button"
                   onClick={() => {
                     onChange(capo);
-                    closePanel();
+                    closePanel(true);
                   }}
                   onKeyDown={(event) => handleOptionKeyDown(event, capo)}
                   className={`flex w-full items-center rounded-xl px-2 text-left transition-colors ${touchOptimized ? 'min-h-11 py-2' : 'py-1.5'} ${
@@ -206,7 +209,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
               );
             })}
           </div>
-        </div>,
+        </AnimatedPopover>,
         document.body
       )}
     </div>

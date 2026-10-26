@@ -52,3 +52,42 @@ export const resolvePreviewZoomScrollPosition = ({
       : 0
   };
 };
+
+export interface PreviewZoomLayoutInput {
+  width: number;
+  height: number;
+  scale: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  contentRatioX: number;
+  contentRatioY: number;
+  focalX: number;
+  focalY: number;
+  preserveVerticalPosition?: boolean;
+}
+
+/** Allocate only the pan space needed to keep the focal point reachable. */
+export function resolvePreviewZoomLayout(input: PreviewZoomLayoutInput) {
+  const width = input.width * input.scale;
+  const height = input.height * input.scale;
+  const baseWidth = Math.max(width, input.viewportWidth);
+  const baseHeight = Math.max(height, input.viewportHeight);
+  const centeredLeft = (baseWidth - width) / 2;
+  const desiredLeft = centeredLeft + width * input.contentRatioX - input.focalX;
+  const desiredTop = input.preserveVerticalPosition === false ? 0 : height * input.contentRatioY - input.focalY;
+  const leadingX = Math.max(0, -desiredLeft);
+  const leadingY = Math.max(0, -desiredTop);
+  const scrollLeft = Math.max(0, desiredLeft);
+  const scrollTop = Math.max(0, desiredTop);
+  const canvasWidth = Math.max(baseWidth + leadingX, scrollLeft + input.viewportWidth);
+  const canvasHeight = Math.max(baseHeight + leadingY, scrollTop + input.viewportHeight);
+  return {
+    left: centeredLeft + leadingX, top: leadingY, canvasWidth, canvasHeight, scrollLeft, scrollTop,
+    pan: { left: leadingX, top: leadingY, extraWidth: canvasWidth - baseWidth, extraHeight: canvasHeight - baseHeight }
+  };
+}
+
+/** The sheet uses a top-left transform origin; no layout reads are needed. */
+export function getPreviewPinchTranslation(startScale: number, scale: number, pointX: number, pointY: number, deltaX: number, deltaY: number) {
+  return { x: deltaX + pointX * (startScale - scale), y: deltaY + pointY * (startScale - scale) };
+}

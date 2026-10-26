@@ -1,3 +1,9 @@
+import { AnimatedDisclosure, AnimatedPopover, PresenceSurface, PresenceBackdrop } from './components/ui/InteractionMotion';
+import { useUiMotion } from './hooks/useUiMotion';
+import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants } from './lib/uiMotion';
+import SetlistSongActions from './components/SetlistSongActions';
+import { useAppViewport } from './hooks/useAppViewport';
+import { useBottomSheetMotion } from './hooks/useBottomSheetMotion';
 import { useModalFocus } from './hooks/useModalFocus';
 import { useModalScrollLock } from './hooks/useModalScrollLock';
 import { usePerformanceKeyboardFocus } from './hooks/usePerformanceKeyboardFocus';
@@ -13,6 +19,7 @@ import type { TonalMode } from './types';
 import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { normalizeJianpuVoices } from './utils/jianpuVoices';
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
+import { usePreviewPinchZoom } from './hooks/usePreviewPinchZoom';
 import { usePerformanceFullscreen } from './hooks/usePerformanceFullscreen';
 import PerformanceFullscreenControl from './components/PerformanceFullscreenControl';
 import HomeScreenGuide from './components/HomeScreenGuide';
@@ -218,7 +225,7 @@ import {
   PreviewBarSelectionTarget,
   togglePreviewBarSelection
 } from './lib/previewBarSelection';
-import { getPreviewZoomContentRatio, resolvePreviewZoomScrollPosition } from './lib/previewZoom';
+import { getPreviewZoomContentRatio, resolvePreviewZoomLayout } from './lib/previewZoom';
 import {
   isLocalOnlySymbolTestSong,
   SYMBOL_TEST_SONG_LEGACY_TITLE,
@@ -1171,16 +1178,6 @@ interface PreviewDragState {
   moved: boolean;
 }
 
-interface PreviewPinchState {
-  startDistance: number;
-  startScale: number;
-  baseScale: number;
-  contentRatioX: number;
-  contentRatioY: number;
-  currentScale: number;
-  focalX: number;
-  focalY: number;
-}
 
 const inactiveSetlistShareStatus: SetlistShareStatus = {
   activeToken: null,
@@ -2088,6 +2085,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
   const toast = useToast();
+  const uiMotion = useUiMotion();
+  const previousReducedMotion = useRef(uiMotion.reduced);
+  const reducedPreferenceChanged = previousReducedMotion.current !== uiMotion.reduced;
+  React.useLayoutEffect(() => { previousReducedMotion.current = uiMotion.reduced; }, [uiMotion.reduced]);
+  const backdropMotion = { custom: uiMotion, variants: backdropVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
+  const modalMotion = { custom: uiMotion, variants: modalVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
+  const drawerMotion = { custom: uiMotion, variants: drawerVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
+  const feedbackMotion = { custom: uiMotion, variants: notificationVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
   const initialWorkspaceRef = useRef<WorkspaceSnapshot | null>(null);
   const initialWorkspace = initialWorkspaceRef.current ?? restoredWorkspace;
   initialWorkspaceRef.current = initialWorkspace;
@@ -2212,6 +2217,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [isToolbarOverflowMenuOpen, setIsToolbarOverflowMenuOpen] = useState(false);
   const [isGoogleAccountMenuOpen, setIsGoogleAccountMenuOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const sidebarInstantCloseRef = useRef(false);
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
+  const previousNavOpen = useRef(false);
+  React.useLayoutEffect(() => {
+    if (isMobileNavOpen) sidebarInstantCloseRef.current = false;
+    else if (previousNavOpen.current) mobileNavTriggerRef.current?.focus({ preventScroll: true });
+    previousNavOpen.current = isMobileNavOpen;
+  }, [isMobileNavOpen]);
   const [isMobileActionsSheetOpen, setIsMobileActionsSheetOpen] = useState(false);
   const [mobileActionsSection, setMobileActionsSection] = useState<'sheet' | 'settings'>('sheet');
   const [isMobileMetadataOpen, setIsMobileMetadataOpen] = useState(false);
@@ -2311,6 +2324,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     error?: string;
     isLoading?: boolean;
   }>>({});
+  const appViewportRef = useAppViewport();
   const previewRef = React.useRef<HTMLDivElement>(null);
   const mobileMetadataRef = React.useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLDivElement>(null);
@@ -2350,8 +2364,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     target?: ChordSheetElementTarget;
   } | null>(null);
   const previewDragStateRef = useRef<PreviewDragState | null>(null);
-  const previewPinchStateRef = useRef<PreviewPinchState | null>(null);
-  const previewPinchFrameRef = useRef<number | null>(null);
+  const previewPinchActiveRef = useRef(false);
+  const previewMeasureViewportRef = useRef<(() => void) | null>(null);
   const previewScaleCleanupFrameRef = useRef<number | null>(null);
   const previewSuppressClickTimeoutRef = useRef<number | null>(null);
   const skipNextSetlistPreviewAutoScrollRef = useRef(false);
@@ -2386,6 +2400,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const cloudRepositoryRef = useRef<ReturnType<typeof createCloudRepository> | null>(null);
   const [previewBaseScale, setPreviewBaseScale] = useState(1);
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewLayoutViewport, setPreviewLayoutViewport] = useState({ width: PREVIEW_TARGET_WIDTH, height: 1123 });
+  const [previewPan, setPreviewPan] = useState({ left: 0, top: 0, extraWidth: 0, extraHeight: 0 });
   const [previewViewportWidth, setPreviewViewportWidth] = useState(PREVIEW_TARGET_WIDTH);
   const [previewViewportHeight, setPreviewViewportHeight] = useState(1123);
   const [previewPageHeight, setPreviewPageHeight] = useState(PREVIEW_PAGE_HEIGHT);
@@ -2603,7 +2619,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       || (/Macintosh/i.test(previewEditorUserAgent) && previewEditorPlatform === 'MacIntel' && previewEditorTouchPoints > 1)
       || (Capacitor.getPlatform() === 'ios' && !previewEditorIsPhoneDevice && viewportWidth >= PHONE_VIEWPORT_BREAKPOINT)
   });
-  useModalFocus(isPhoneViewport && isMobileMetadataOpen, mobileMetadataRef);
+  const mobileMetadataMotion = useBottomSheetMotion(mobileMetadataRef, isPhoneViewport && isMobileMetadataOpen, () => setIsMobileMetadataOpen(false));
+  useModalFocus(isPhoneViewport && isMobileMetadataOpen && mobileMetadataMotion.mounted, mobileMetadataRef);
   useModalScrollLock(
     (isPhoneViewport && (isMobileActionsSheetOpen || isMobileMetadataOpen))
       || (previewEditorDeviceLayout !== 'desktop' && Boolean(previewMetaEditTarget)
@@ -2634,9 +2651,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     Math.min(responsiveSidebarMaxWidth, sidebarWidth)
   );
   const currentSidebarWidth = isSidebarExpanded ? resolvedSidebarWidth : collapsedSidebarWidth;
-  const phoneSidebarShellWidth = isMobileNavOpen ? resolvedSidebarWidth : 0;
-  const phoneSidebarHiddenOffset = resolvedSidebarWidth + 24;
   const sidebarShellWidth = usesOverlaySidebar ? collapsedSidebarWidth : currentSidebarWidth;
+  const sidebarMotionDuration = !isPhoneViewport || isSidebarResizing || uiMotion.instant || reducedPreferenceChanged || (!isMobileNavOpen && sidebarInstantCloseRef.current)
+    ? 0 : uiMotion.reduced ? 0.125 : isMobileNavOpen ? 0.24 : 0.2;
   const isPhoneSetlistDrawer = isPhoneViewport && isSetlistMode;
   const mainViewportWidth = Math.max(0, viewportWidth - sidebarShellWidth);
   // Desktop laptops (fine pointer) keep the side-by-side split far below the
@@ -3006,8 +3023,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       />
     ) : null
   );
-  const toolbarOverflowPanel = isToolbarOverflowMenuOpen ? (
-    <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
+  const toolbarOverflowPanel = (
+    <AnimatedPopover open={isToolbarOverflowMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
       {homeScreenInstallMenuItem}
       <button
         type="button"
@@ -3185,8 +3202,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           EN
         </button>
       </div>
-    </div>
-  ) : null;
+    </AnimatedPopover>
+  );
   const normalizedLibrarySearchQuery = normalizeSearchText(librarySearchQuery);
   const normalizedSetlistSearchQuery = normalizeSearchText(setlistSearchQuery);
   const normalizedSetlistSongSearchQuery = normalizeSearchText(setlistSongSearchQuery);
@@ -3275,7 +3292,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const previewScale = isLyricsMode && isLyricsReading ? 1 : Math.min(PREVIEW_MAX_SCALE, Math.max(PREVIEW_MIN_SCALE, previewBaseScale * previewZoom));
   const previewSheetWidth = sheetMetrics.width * previewScale;
   const previewSheetHeight = sheetMetrics.height * previewScale;
-  const previewCanvasWidth = Math.max(previewSheetWidth, previewViewportWidth);
+  const previewCanvasBaseWidth = Math.max(previewSheetWidth, previewLayoutViewport.width);
+  const previewCanvasWidth = previewCanvasBaseWidth + previewPan.extraWidth;
+  const previewCanvasHeight = Math.max(previewSheetHeight, previewLayoutViewport.height) + previewPan.extraHeight;
+  const previewSheetLeft = (previewCanvasBaseWidth - previewSheetWidth) / 2 + previewPan.left;
   const previewFitHeightScale = Math.min(
     PREVIEW_MAX_SCALE,
     Math.max(PREVIEW_MIN_SCALE, previewViewportHeight / Math.max(1, previewPageHeight))
@@ -4633,7 +4653,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   React.useEffect(() => {
     const updateScale = () => {
-      if (!previewRef.current) {
+      if (!previewRef.current || previewPinchActiveRef.current) {
         return;
       }
 
@@ -4641,8 +4661,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       const previewRootHeight = previewRef.current.offsetHeight;
       const horizontalPadding = previewRootWidth < 640 ? 24 : previewRootWidth < 960 ? 48 : 96;
       const verticalPadding = previewRootWidth < 640 ? 24 : previewRootWidth < 960 ? 40 : 96;
-      const containerWidth = Math.max(220, previewRootWidth - horizontalPadding - PREVIEW_SAFETY_MARGIN);
-      const containerHeight = Math.max(220, previewRootHeight - verticalPadding - PREVIEW_SAFETY_MARGIN);
+      const rootStyle = getComputedStyle(previewRef.current);
+      const paddingX = (parseFloat(rootStyle.paddingLeft) || 0) + (parseFloat(rootStyle.paddingRight) || 0);
+      const paddingY = (parseFloat(rootStyle.paddingTop) || 0) + (parseFloat(rootStyle.paddingBottom) || 0);
+      const availableWidth = previewRef.current.clientWidth > 0 ? previewRef.current.clientWidth - paddingX : Math.max(220, previewRootWidth - horizontalPadding);
+      const availableHeight = previewRef.current.clientHeight > 0 ? previewRef.current.clientHeight - paddingY : Math.max(220, previewRootHeight - verticalPadding);
+      setPreviewLayoutViewport(current => current.width === availableWidth && current.height === availableHeight ? current : { width: availableWidth, height: availableHeight });
+      const containerWidth = Math.max(220, availableWidth - PREVIEW_SAFETY_MARGIN);
+      const containerHeight = Math.max(220, availableHeight - PREVIEW_SAFETY_MARGIN);
       setPreviewViewportWidth(containerWidth);
       setPreviewViewportHeight(containerHeight);
 
@@ -4661,8 +4687,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       observer.observe(previewRef.current);
     }
 
+    previewMeasureViewportRef.current = updateScale;
     updateScale();
-    return () => observer.disconnect();
+    return () => { previewMeasureViewportRef.current = null; observer.disconnect(); };
   }, [isEditing]);
 
   React.useEffect(() => {
@@ -4700,9 +4727,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   React.useEffect(() => () => {
     if (previewSuppressClickTimeoutRef.current !== null) {
       window.clearTimeout(previewSuppressClickTimeoutRef.current);
-    }
-    if (previewPinchFrameRef.current !== null) {
-      window.cancelAnimationFrame(previewPinchFrameRef.current);
     }
     if (previewScaleCleanupFrameRef.current !== null) {
       window.cancelAnimationFrame(previewScaleCleanupFrameRef.current);
@@ -6200,6 +6224,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       // selection is actually accepted (quick-edit may defer the transition).
       if (shouldCollapseSetlistSidebar({ isPhoneViewport, usesOverlaySidebar, hasFinePointer })) {
         if (isPhoneViewport) {
+          sidebarInstantCloseRef.current = true;
           setIsMobileNavOpen(false);
         } else {
           setIsSidebarPinned(false);
@@ -7804,6 +7829,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         const previewClone = sheetRef.current.cloneNode(true) as HTMLDivElement;
         previewClone.style.transform = 'none';
         previewClone.style.transformOrigin = 'top center';
+        previewClone.style.position = 'relative';
+        previewClone.style.left = '0';
+        previewClone.style.top = '0';
         previewClone.style.width = '794px';
         previewClone.style.minWidth = '794px';
         previewClone.style.maxWidth = '794px';
@@ -10307,6 +10335,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   }, []);
 
   const handlePreviewScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    if (previewPinchActiveRef.current) return;
     const shouldShow = event.currentTarget.scrollTop > 240;
     setShowPreviewBackToTop((prev) => (prev === shouldShow ? prev : shouldShow));
     refreshPreviewEditAnchorRect();
@@ -10860,29 +10889,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     songCount: setlistPreviewSongs.length,
     skipNextAutoScrollRef: skipNextSetlistPreviewAutoScrollRef,
     preserveSelectionUntilRef: preserveSetlistPreviewSelectionUntilRef,
+    gestureActiveRef: previewPinchActiveRef,
     onSelectSong: setSelectedSetlistSongId
   });
 
-  const clearLivePreviewScaleStyles = () => {
-    sheetRef.current?.style.removeProperty('--preview-live-scale');
-    previewCanvasRef.current?.style.removeProperty('--preview-live-canvas-width');
-    previewCanvasRef.current?.style.removeProperty('--preview-live-canvas-height');
-  };
-
   const scheduleLivePreviewScaleCleanup = () => {
-    if (previewScaleCleanupFrameRef.current !== null) {
-      window.cancelAnimationFrame(previewScaleCleanupFrameRef.current);
-    }
-
-    // Wait for React to commit the matching scale before removing the temporary
-    // CSS variables. Keeping the live and committed values identical prevents a
-    // one-frame snap at the end of a pinch or toolbar zoom.
-    previewScaleCleanupFrameRef.current = window.requestAnimationFrame(() => {
-      previewScaleCleanupFrameRef.current = window.requestAnimationFrame(() => {
-        previewScaleCleanupFrameRef.current = null;
-        clearLivePreviewScaleStyles();
-        refreshPreviewEditAnchorRect();
-      });
+    if (previewScaleCleanupFrameRef.current !== null) cancelAnimationFrame(previewScaleCleanupFrameRef.current);
+    previewScaleCleanupFrameRef.current = requestAnimationFrame(() => {
+      previewScaleCleanupFrameRef.current = null;
+      if (!previewPinchActiveRef.current) refreshPreviewEditAnchorRect();
     });
   };
 
@@ -10913,44 +10928,28 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       previewScaleCleanupFrameRef.current = null;
     }
 
-    const scaledSheetWidth = sheetMetrics.width * scale;
-    const scaledSheetHeight = sheetMetrics.height * scale;
-    const canvasWidth = Math.max(scaledSheetWidth, previewViewportWidth);
-
-    sheet.style.setProperty('--preview-live-scale', String(scale));
-    canvas.style.setProperty('--preview-live-canvas-width', `${canvasWidth}px`);
-    canvas.style.setProperty('--preview-live-canvas-height', `${scaledSheetHeight}px`);
-
-    // Force just the preview shell to settle, then compensate by the observed
-    // on-screen delta. This handles responsive padding and the centered canvas
-    // correctly without guessing at scrollbar or safe-area geometry.
-    const sheetRect = sheet.getBoundingClientRect();
-    const rootRect = scrollRoot.getBoundingClientRect();
-    const position = resolvePreviewZoomScrollPosition({
-      currentScrollLeft: scrollRoot.scrollLeft,
-      currentScrollTop: scrollRoot.scrollTop,
-      sheetClientLeft: sheetRect.left,
-      sheetClientTop: sheetRect.top,
-      scaledSheetWidth,
-      scaledSheetHeight,
-      contentRatioX,
-      contentRatioY,
-      focalClientX: rootRect.left + focalX,
-      focalClientY: rootRect.top + focalY,
+    const rootStyle = getComputedStyle(scrollRoot);
+    const paddingLeft = parseFloat(rootStyle.paddingLeft) || 0;
+    const paddingTop = parseFloat(rootStyle.paddingTop) || 0;
+    const paddingX = paddingLeft + (parseFloat(rootStyle.paddingRight) || 0);
+    const paddingY = paddingTop + (parseFloat(rootStyle.paddingBottom) || 0);
+    const layout = resolvePreviewZoomLayout({
+      width: sheetMetrics.width, height: sheetMetrics.height, scale,
+      viewportWidth: Math.max(1, scrollRoot.clientWidth - paddingX),
+      viewportHeight: Math.max(1, scrollRoot.clientHeight - paddingY),
+      contentRatioX, contentRatioY, focalX: focalX - paddingLeft, focalY: focalY - paddingTop,
       preserveVerticalPosition
     });
-
-    // These writes affect only the preview shell. They avoid re-rendering the
-    // full App/ChordSheet tree for every touchmove on iPad.
-    if (previewZoomLabelRef.current) {
-      previewZoomLabelRef.current.textContent = `${Math.round((scale / previewFitHeightScale) * 100)}%`;
-    }
-
-    scrollRoot.scrollTo({
-      left: position.scrollLeft,
-      top: position.scrollTop,
-      behavior: 'auto'
-    });
+    // One layout change at commit, with enough pan range even when the page
+    // still fits inside the viewport. During a pinch only the transform changes.
+    sheet.style.transform = `scale(${scale})`;
+    sheet.style.left = `${layout.left}px`;
+    sheet.style.top = `${layout.top}px`;
+    canvas.style.width = `${layout.canvasWidth}px`;
+    canvas.style.height = `${layout.canvasHeight}px`;
+    setPreviewPan(layout.pan);
+    if (previewZoomLabelRef.current) previewZoomLabelRef.current.textContent = `${Math.round(scale / previewFitHeightScale * 100)}%`;
+    scrollRoot.scrollTo({ left: layout.scrollLeft, top: layout.scrollTop, behavior: 'instant' });
   };
 
   const setPreviewScale = (nextScale: number, mode: 'preserve' | 'fit-width' | 'fit-height' = 'preserve') => {
@@ -11014,135 +11013,47 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setPreviewScale(previewFitHeightScale, 'fit-height');
   };
 
-  const getTouchDistance = (touches: ArrayLike<{ clientX: number; clientY: number }>) => {
-    const firstTouch = touches[0];
-    const secondTouch = touches[1];
-    if (!firstTouch || !secondTouch) {
-      return 0;
-    }
-
-    return Math.hypot(secondTouch.clientX - firstTouch.clientX, secondTouch.clientY - firstTouch.clientY);
-  };
-
-  const getTouchCenter = (touches: ArrayLike<{ clientX: number; clientY: number }>) => {
-    const firstTouch = touches[0];
-    const secondTouch = touches[1];
-    if (!firstTouch || !secondTouch) {
-      return null;
-    }
-
-    return {
-      x: (firstTouch.clientX + secondTouch.clientX) / 2,
-      y: (firstTouch.clientY + secondTouch.clientY) / 2
-    };
-  };
-
-  const handlePreviewTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length !== 2 || !previewRef.current) {
-      return;
-    }
-
-    const distance = getTouchDistance(event.touches);
-    const center = getTouchCenter(event.touches);
-    if (!distance || !center) {
-      return;
-    }
-
-    event.preventDefault();
-    endPreviewDrag();
-
-    const scrollRoot = previewRef.current;
-    const rootRect = scrollRoot.getBoundingClientRect();
-    const sheetRect = sheetRef.current?.getBoundingClientRect() ?? null;
-    const focalX = center.x - rootRect.left;
-    const focalY = center.y - rootRect.top;
-
-    previewPinchStateRef.current = {
-      startDistance: distance,
-      startScale: previewScale,
-      baseScale: previewBaseScale,
-      contentRatioX: sheetRect
-        ? getPreviewZoomContentRatio(center.x, sheetRect.left, sheetRect.width, 0.5)
-        : 0.5,
-      contentRatioY: sheetRect
-        ? getPreviewZoomContentRatio(center.y, sheetRect.top, sheetRect.height, 0)
-        : 0,
-      currentScale: previewScale,
-      focalX,
-      focalY
-    };
-
-    if (isSetlistMode) {
-      preserveSetlistPreviewSelectionUntilRef.current = performance.now() + 1200;
-    }
-  };
-
-  const flushPreviewPinchFrame = () => {
-    previewPinchFrameRef.current = null;
-    const pinchState = previewPinchStateRef.current;
-    if (!pinchState) {
-      return;
-    }
-
-    applyLivePreviewScale({
-      scale: pinchState.currentScale,
-      contentRatioX: pinchState.contentRatioX,
-      contentRatioY: pinchState.contentRatioY,
-      focalX: pinchState.focalX,
-      focalY: pinchState.focalY
-    });
-  };
-
-  const handlePreviewTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    const pinchState = previewPinchStateRef.current;
-    const scrollRoot = previewRef.current;
-    if (!pinchState || !scrollRoot || event.touches.length !== 2) {
-      return;
-    }
-
-    const distance = getTouchDistance(event.touches);
-    const center = getTouchCenter(event.touches);
-    if (!distance || !center) {
-      return;
-    }
-
-    event.preventDefault();
-
-    const nextScale = Math.min(
-      PREVIEW_MAX_SCALE,
-      Math.max(PREVIEW_MIN_SCALE, pinchState.startScale * (distance / pinchState.startDistance))
-    );
-    const rootRect = scrollRoot.getBoundingClientRect();
-    const focalX = center.x - rootRect.left;
-    const focalY = center.y - rootRect.top;
-
-    pinchState.currentScale = nextScale;
-    pinchState.focalX = focalX;
-    pinchState.focalY = focalY;
-
-    // Touch events can arrive faster than the display refresh rate. Keep only
-    // the latest geometry and perform at most one DOM update per frame.
-    if (previewPinchFrameRef.current === null) {
-      previewPinchFrameRef.current = window.requestAnimationFrame(flushPreviewPinchFrame);
-    }
-  };
-
-  const handlePreviewTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length < 2) {
-      const pinchState = previewPinchStateRef.current;
-      if (previewPinchFrameRef.current !== null) {
-        window.cancelAnimationFrame(previewPinchFrameRef.current);
-        previewPinchFrameRef.current = null;
-        flushPreviewPinchFrame();
+  usePreviewPinchZoom({
+    rootRef: previewRef, sheetRef, activeRef: previewPinchActiveRef, labelRef: previewZoomLabelRef,
+    enabled: !(isLyricsMode && isLyricsReading),
+    identity: isSetlistMode ? selectedSetlist?.id ?? null : song?.id ?? null,
+    minScale: PREVIEW_MIN_SCALE, maxScale: PREVIEW_MAX_SCALE, fitHeightScale: previewFitHeightScale,
+    onStart: () => {
+      if (previewScaleCleanupFrameRef.current !== null) {
+        cancelAnimationFrame(previewScaleCleanupFrameRef.current);
+        previewScaleCleanupFrameRef.current = null;
       }
-      previewPinchStateRef.current = null;
-
-      if (pinchState) {
-        setPreviewZoom(pinchState.currentScale / pinchState.baseScale);
-        scheduleLivePreviewScaleCleanup();
+      if (previewDragStateRef.current) endPreviewDrag();
+      preserveSetlistPreviewSelectionUntilRef.current = Number.POSITIVE_INFINITY;
+      const root = previewRef.current;
+      if (root) root.scrollTo({ left: root.scrollLeft, top: root.scrollTop, behavior: 'instant' });
+    },
+    onCommit: value => {
+      applyLivePreviewScale(value);
+      setPreviewZoom(value.scale / previewBaseScale);
+      scheduleLivePreviewScaleCleanup();
+    },
+    onFinish: () => {
+      preserveSetlistPreviewSelectionUntilRef.current = performance.now() + 700;
+      requestAnimationFrame(() => previewMeasureViewportRef.current?.());
+    },
+    onSuppressClick: () => {
+      suppressPreviewClickRef.current = true;
+      if (previewSuppressClickTimeoutRef.current !== null) clearTimeout(previewSuppressClickTimeoutRef.current);
+      previewSuppressClickTimeoutRef.current = window.setTimeout(() => {
+        suppressPreviewClickRef.current = false;
+        previewSuppressClickTimeoutRef.current = null;
+      }, 400);
+    },
+    onSingleTouchStart: () => {
+      // A fresh intentional touch is different from the pinch's synthetic click.
+      suppressPreviewClickRef.current = false;
+      if (previewSuppressClickTimeoutRef.current !== null) {
+        clearTimeout(previewSuppressClickTimeoutRef.current);
+        previewSuppressClickTimeoutRef.current = null;
       }
     }
-  };
+  });
 
   const endPreviewDrag = () => {
     const dragState = previewDragStateRef.current;
@@ -12154,8 +12065,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         )}
       </button>
 
-      {isWorkspacePanelOpen ? (
-        <div className="mt-2">
+      <AnimatedDisclosure open={isWorkspacePanelOpen} className="mt-2">
           {pendingTeamInvites.length > 0 ? (
             <div className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2.5">
               <div className="flex items-center justify-between gap-2">
@@ -12259,8 +12169,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           ) : null}
 
 
-        </div>
-      ) : null}
+      </AnimatedDisclosure>
     </div>
   ) : null;
 
@@ -12303,7 +12212,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         : swipeAction === 'delete' ? '-translate-x-20' : swipeAction === 'archive' ? 'translate-x-20' : 'translate-x-0';
       const baseStyle = archived ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white';
       return (
-        <div key={project.id} className="relative overflow-hidden rounded-2xl">
+        <div key={project.id} data-project-id={project.id} className={`relative overflow-hidden ${isPhoneViewport ? 'border-b border-gray-200' : 'rounded-2xl'}`}>
           <div className="absolute inset-y-0 left-0 flex items-stretch">
             <button
               type="button"
@@ -12342,7 +12251,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             onPointerUp={(event) => projectSwipe.pointerEnd(project.id, event)}
             onPointerCancel={projectSwipe.reset}
             style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
-            className={`relative flex select-none items-start gap-2 border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
+            className={`relative flex select-none items-center gap-2 ${isPhoneViewport ? 'px-0 py-3' : 'border p-3'} transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
           >
             <button
               type="button"
@@ -12357,11 +12266,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 }
                 handleSelectProject(project.id);
               }}
-              className="flex min-w-0 flex-1 items-start gap-2 text-left"
+              className={`${isPhoneViewport ? 'min-h-11 items-center gap-3' : 'items-start gap-2'} flex min-w-0 flex-1 text-left`}
             >
+              {isPhoneViewport && <FolderTree size={20} className="ml-2 shrink-0 text-indigo-600" aria-hidden="true" />}
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
-                  <div className="min-w-0 truncate text-sm font-bold text-gray-900">{name}</div>
+                  <div className={`${isPhoneViewport ? 'text-base font-semibold' : 'text-sm font-bold'} min-w-0 truncate text-gray-900`}>{name}</div>
                   {archived && (
                     <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">{copy.archivedProjectBadge}</span>
                   )}
@@ -12377,7 +12287,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   const nextName = window.prompt(copy.renameProjectPrompt, project.name);
                   if (nextName !== null) handleRenameProject(project.id, nextName);
                 }}
-                className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                className={`${isPhoneViewport ? 'flex h-11 w-11 items-center justify-center' : 'p-1.5'} rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700`}
                 title={copy.renameProject}
                 aria-label={copy.renameProject}
               >
@@ -12407,21 +12317,25 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     return (
       <div
         key={projectId ?? '__ungrouped__'}
-        className={`rounded-2xl border border-gray-200 p-3 transition-all ${archived ? 'bg-gray-50' : 'bg-white'}`}
+        className={`${isPhoneViewport ? 'border-b border-gray-200 py-3' : 'rounded-2xl border border-gray-200 p-3'} transition-colors ${archived ? 'bg-gray-50' : 'bg-white'}`}
       >
         <div className="flex items-start gap-2">
           <button
             type="button"
             onClick={() => handleSelectProject(projectId)}
-            className="min-w-0 flex-1 text-left"
+            className={`${isPhoneViewport ? 'flex min-h-11 items-center gap-3 px-2' : ''} min-w-0 flex-1 text-left`}
           >
+            {isPhoneViewport && <FolderTree size={20} className="shrink-0 text-gray-500" aria-hidden="true" />}
+            <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
-              <div className="min-w-0 truncate text-sm font-bold text-gray-900">{name}</div>
+              <div className={`${isPhoneViewport ? 'text-base font-semibold' : 'text-sm font-bold'} min-w-0 truncate text-gray-900`}>{name}</div>
               {archived && (
                 <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">{copy.archivedProjectBadge}</span>
               )}
             </div>
             <div className="mt-1 text-xs text-gray-500">{count} {copy.setlists}</div>
+            </div>
+            {isPhoneViewport && <ChevronRight size={16} className="text-gray-400" aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -12442,8 +12356,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             <ChevronLeft size={18} />
           </button>
           <div className="min-w-0 flex-1">
-            <div className="text-base font-bold text-gray-900">{language === 'zh' ? '專案管理' : 'Manage projects'}</div>
-            <div className="mt-0.5 text-xs text-gray-500">{language === 'zh' ? '整理歌單，不影響目前譜面' : 'Organize setlists without changing the current sheet'}</div>
+            <div className={`${isPhoneViewport ? 'text-lg font-semibold' : 'text-base font-bold'} text-gray-900`}>{language === 'zh' ? '專案管理' : 'Manage projects'}</div>
+            <div className="mt-0.5 text-xs text-gray-500">{isPhoneViewport ? `${visibleProjects.length} ${language === 'zh' ? '個專案' : 'projects'}` : language === 'zh' ? '整理歌單，不影響目前譜面' : 'Organize setlists without changing the current sheet'}</div>
           </div>
         </div>
         {canCreateProject && (
@@ -12451,7 +12365,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             <button
               type="button"
               onClick={handleCreateProject}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+              className={`${isPhoneViewport ? 'min-h-11' : ''} flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500`}
             >
               <Plus size={16} />
               <span>{copy.newProject}</span>
@@ -12460,11 +12374,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         )}
       </div>
 
-      <div className="px-3 py-3 border-b border-gray-100">
-        <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
-          <span>{copy.projects}</span>
-          <span>{visibleProjects.length}</span>
-        </div>
+      <div className={`${isPhoneViewport ? archivedProjectsCount > 0 ? 'px-4 py-2' : 'hidden' : 'px-3 py-3'} border-b border-gray-100`}>
+        {!isPhoneViewport && <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400"><span>{copy.projects}</span><span>{visibleProjects.length}</span></div>}
         {archivedProjectsCount > 0 && (
           <button
             type="button"
@@ -12479,8 +12390,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        <div className="space-y-2">
+      <div data-project-scroll className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${isPhoneViewport ? 'px-4' : 'p-3'}`}>
+        <div className={isPhoneViewport ? '' : 'space-y-2'}>
           {renderProjectCard(null, { isUngrouped: true })}
           {visibleProjects.map((project) => renderProjectCard(project, { isUngrouped: false }))}
         </div>
@@ -12498,10 +12409,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   handleSetlistProjectFilterChange({ kind: 'shared-project', projectId: jp.id });
                   setSetlistPanelView('list');
                 }}
-                className="block w-full rounded-2xl border border-indigo-100 bg-white p-3 text-left transition-colors hover:bg-indigo-50/40"
+                className={`${isPhoneViewport ? 'min-h-[72px] border-b border-gray-200 py-3' : 'rounded-2xl border border-indigo-100 p-3'} block w-full bg-white text-left transition-colors hover:bg-indigo-50/40`}
               >
                 <div className="flex items-center gap-2">
-                  <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{jp.name}</div>
+                  <div className={`${isPhoneViewport ? 'text-base font-semibold' : 'text-sm font-bold'} min-w-0 flex-1 truncate text-gray-900`}>{jp.name}</div>
                   <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
                     {language === 'zh' ? '已加入' : 'Joined'}
                   </span>
@@ -12585,7 +12496,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             {setlistSearchField}
             {canCreateTeamSetlists && (
               <button type="button" onClick={handleCreateSetlist} aria-label={copy.newSetlist} title={copy.newSetlist}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm hover:bg-indigo-500">
+                className="ui-press flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm hover:bg-indigo-500">
                 <Plus size={20} />
               </button>
             )}
@@ -12606,8 +12517,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               {isMobileSetlistToolsOpen ? <ChevronUp size={18} /> : <SlidersHorizontal size={18} />}
             </button>
           </div>
-          {isMobileSetlistToolsOpen && (
-            <div id="mobile-setlist-tools" className="mt-2 max-h-[28dvh] space-y-2 overflow-y-auto overscroll-contain border-t border-gray-200 pt-2">
+          <AnimatedDisclosure open={isMobileSetlistToolsOpen} id="mobile-setlist-tools" className="mt-2 max-h-[28dvh] space-y-2 overflow-y-auto overscroll-contain border-t border-gray-200 pt-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-gray-500">{copy.setlistSort}</span>
                 {setlistSortPicker}
@@ -12631,8 +12541,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 )}
               </div>
               {projectSharingPanel}
-            </div>
-          )}
+          </AnimatedDisclosure>
         </div>
       ) : (
       <div className="shrink-0 px-4 py-3 border-b border-gray-200">
@@ -12840,7 +12749,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
-                        <div className="min-w-0 truncate text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
+                        <div className={`${isPhoneViewport ? 'text-base font-semibold' : 'text-sm font-bold'} min-w-0 truncate text-gray-900`}>{item.name || copy.untitledSetlist}</div>
                         {isActive && (
                           <span className="shrink-0 rounded-full bg-indigo-600 px-2 py-0.5 text-[9px] font-bold text-white">
                             {language === 'zh' ? '目前顯示' : 'Current'}
@@ -12855,7 +12764,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                         <span>{item.songs.length} {copy.setlistItems}</span>
                       </div>
                       {previewTitles.length > 0 && (
-                        <div className="mt-2 space-y-0.5 rounded-xl bg-white/70 px-2.5 py-2 text-[11px] text-gray-600">
+                        <div className={`${isPhoneViewport ? 'mt-2 space-y-1 text-xs leading-5' : 'mt-2 space-y-0.5 rounded-xl bg-white/70 px-2.5 py-2 text-[11px]'} text-gray-600`}>
                           {previewTitles.map((title, index) => (
                             <div key={`${item.id}-${index}`} className="truncate">{index + 1}. {title}</div>
                           ))}
@@ -12980,14 +12889,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             <ChevronLeft size={18} />
           </button>
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistDetails}</div>
+            {!isPhoneViewport && <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistDetails}</div>}
             {isJoinedSetlist || !canEditSelectedSetlist ? (
               <div className="mt-1 truncate text-base font-bold text-gray-900 dark:text-[color:var(--color-text)]">{selectedSetlist.name || copy.untitledSetlist}</div>
             ) : (
               <input
                 value={selectedSetlist.name}
                 onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
-                className="mt-1 w-full rounded-lg bg-transparent text-base font-bold text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50 dark:text-[color:var(--color-text)] dark:focus:bg-[color:var(--color-surface-raised)]"
+                className={`${isPhoneViewport ? 'text-lg font-semibold' : 'mt-1 text-base font-bold'} w-full rounded-lg bg-transparent text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50 dark:text-[color:var(--color-text)] dark:focus:bg-[color:var(--color-surface-raised)]`}
                 placeholder={copy.untitledSetlist}
               />
             )}
@@ -13009,8 +12918,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               >
                 <MoreHorizontal size={16} />
               </button>
-              {isSetlistActionsMenuOpen && (
-                <div className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+              <AnimatedPopover open={isSetlistActionsMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-20 mt-2" className="w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
                   {selectedSetlistJoinedProject ? (
                     <button
                       type="button"
@@ -13038,8 +12946,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       {copy.leaveSetlist}
                     </button>
                   )}
-                </div>
-              )}
+                </AnimatedPopover>
             </div>
           ) : canEditSelectedSetlist ? (
             <div ref={setlistActionsMenuRef} className="relative">
@@ -13051,8 +12958,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               >
                 <MoreHorizontal size={16} />
               </button>
-              {isSetlistActionsMenuOpen && (
-                <div className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+              <AnimatedPopover open={isSetlistActionsMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-20 mt-2" className="w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
                   <button
                     type="button"
                     onClick={() => {
@@ -13101,8 +13007,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     <Trash2 size={15} />
                     {copy.delete}
                   </button>
-                </div>
-              )}
+                </AnimatedPopover>
             </div>
           ) : (
             <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600">
@@ -13112,23 +13017,28 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div data-setlist-detail-scroll className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${isPhoneViewport ? 'px-4 py-1' : 'p-3'}`}>
         {canShareSelectedSetlist && setlistSharingPanel ? <div className="mb-3">{setlistSharingPanel}</div> : null}
         {joinedSetlistDisplayPreferencePanel ? <div className="mb-3">{joinedSetlistDisplayPreferencePanel}</div> : null}
 
-        <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>
+        {!isPhoneViewport && <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>}
         {setlistSongsWithSource.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
             {copy.noSetlistSongs}
           </div>
         ) : (
-          <div className="mt-3 space-y-2">
+          <div className={isPhoneViewport ? 'divide-y divide-[color:var(--color-border)]' : 'mt-3 space-y-2'}>
             {setlistSongsWithSource.map(({ item, sourceSong }, index) => {
               const isActive = item.id === selectedSetlistSong?.id;
               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
               const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode, setlistCapoResolutionOptions);
               const displaySong = item.songData ?? sourceSong;
-              const songInfoSummary = getSetlistSongInfoSummary(item, sourceSong);
+              const songInfoSummary = isPhoneViewport ? [
+                `${language === 'zh' ? '原調' : 'Original'} ${formatKeyName(displaySong.originalKey, displaySong.originalKeyMode)}`,
+                typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
+                displaySong.timeSignature,
+                getSongVersionSummary(displaySong), displaySong.translator?.trim()
+              ].filter(Boolean).join(' · ') : getSetlistSongInfoSummary(item, sourceSong);
               const isDropTarget = dragOverSetlistSongId === item.id;
               const isDragging = draggingSetlistSongId === item.id;
 
@@ -13136,9 +13046,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 <div
                   key={item.id}
                   data-setlist-song-id={item.id}
-                  className={`group select-none rounded-xl border px-2.5 py-2 transition-all ${
+                  className={`group select-none transition-colors ${isPhoneViewport ? 'py-3' : 'rounded-xl border px-2.5 py-2'} ${
                     isActive
-                      ? 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
+                      ? isPhoneViewport ? 'bg-indigo-50/60' : 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
                       : isDropTarget
                         ? 'border-indigo-200 bg-indigo-50/70'
                         : 'border-gray-200 bg-white hover:bg-gray-50/70'
@@ -13147,11 +13057,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   <div className="flex items-start gap-2">
                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <div className="flex min-w-0 items-center gap-2">
-                        <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-black ${
-                          isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'
+                        {(!isPhoneViewport || !canReorderSelectedSetlist) && <span className={`${isPhoneViewport ? 'h-11 w-11 text-sm font-semibold' : 'h-7 w-7 rounded-full text-[11px] font-black'} inline-flex shrink-0 items-center justify-center tabular-nums ${
+                          isActive ? isPhoneViewport ? 'text-indigo-700' : 'bg-indigo-600 text-white' : 'text-gray-500'
                         }`}>
                           {index + 1}
-                        </span>
+                        </span>}
                         {canReorderSelectedSetlist && (
                           <button
                             type="button"
@@ -13161,35 +13071,39 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                             onPointerCancel={finishSetlistSongPointerDrag}
                             onLostPointerCapture={finishSetlistSongPointerDrag}
                             onContextMenu={(event) => event.preventDefault()}
-                            className="touch-none cursor-grab rounded-lg border border-gray-200 bg-white p-2 text-gray-400 transition-colors group-hover:border-indigo-200 group-hover:text-indigo-500 active:cursor-grabbing"
+                            className={`${isPhoneViewport ? 'flex h-11 w-11 shrink-0 items-center justify-center gap-0.5 rounded-lg text-sm font-semibold tabular-nums' : 'rounded-lg border border-gray-200 bg-white p-2'} touch-none cursor-grab ${isActive ? 'text-indigo-700' : 'text-gray-500'} transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:cursor-grabbing`}
                             style={{ WebkitUserSelect: 'none' }}
                             title={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
                             aria-label={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
                           >
-                            <GripVertical size={14} />
+                            {isPhoneViewport && <span>{index + 1}</span>}<GripVertical size={isPhoneViewport ? 12 : 14} />
                           </button>
                         )}
-                        <button type="button" onClick={() => handleSelectSetlistSong(item.id)} className="min-w-0 flex-1 text-left">
+                        <button type="button" onClick={() => handleSelectSetlistSong(item.id)} aria-current={isActive ? 'true' : undefined} className={`${isPhoneViewport ? 'min-h-11' : ''} min-w-0 flex-1 text-left`}>
                           <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <div className="min-w-0 truncate text-sm font-bold text-gray-900">{displaySong.title || sourceSong.title || copy.untitledSong}</div>
+                            <div className={`${isPhoneViewport ? 'line-clamp-2 break-words text-base font-semibold leading-6' : 'truncate text-sm font-bold'} min-w-0 text-gray-900`}>{displaySong.title || sourceSong.title || copy.untitledSong}</div>
+                            {isActive && isPhoneViewport && <Check size={16} aria-label={language === 'zh' ? '目前顯示' : 'Current song'} className="shrink-0 text-indigo-700" />}
                             {sourceSong.archivedAt || item.sourceArchivedAt ? (
                               <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700">
                                 {language === 'zh' ? '已封存' : 'Archived'}
                               </span>
                             ) : null}
-                            {isActive && (
+                            {isActive && !isPhoneViewport && (
                               <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-bold text-indigo-700">
                                 {language === 'zh' ? '目前顯示' : 'Current'}
                               </span>
                             )}
                           </div>
                           {songInfoSummary ? (
-                            <div className="mt-0.5 break-words text-[11px] font-medium leading-4 text-gray-400">
+                            <div className={`${isPhoneViewport ? 'text-xs leading-5 text-gray-500' : 'text-[11px] font-medium leading-4 text-gray-400'} mt-0.5 break-words`}>
                               {songInfoSummary}
                             </div>
                           ) : null}
                         </button>
-                        {canEditSelectedSetlist && (
+                        {canEditSelectedSetlist && isPhoneViewport && (
+                          <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={() => handleRemoveSetlistSong(item.id)} />
+                        )}
+                        {canEditSelectedSetlist && !isPhoneViewport && (
                           <button
                             type="button"
                             onClick={() => handleRemoveSetlistSong(item.id)}
@@ -13200,9 +13114,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                           </button>
                         )}
                       </div>
-                      <div className="flex min-w-0 items-end gap-2 pl-9">
-                        <div className="w-[92px] shrink-0">
-                          <div className="mb-1 text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400">
+                      <div className={isPhoneViewport ? 'grid min-w-0 grid-cols-2 gap-3 pl-[52px]' : 'flex min-w-0 items-end gap-2 pl-9'}>
+                        <div className={isPhoneViewport ? 'min-w-0' : 'w-[92px] shrink-0'}>
+                          <div className={`${isPhoneViewport ? 'text-xs font-medium text-gray-500' : 'text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400'} mb-1`}>
                             {language === 'zh' ? '歌單 Key' : 'Setlist Key'}
                           </div>
                           <KeyPicker
@@ -13218,14 +13132,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                             originalKey={sourceSong.currentKey}
                             align="left"
                             disabled={!canEditSelectedSetlistKey}
-                            buttonClassName={`!h-8 !w-[92px] !min-w-0 !gap-1 !rounded-lg !border-gray-200 !bg-gray-50 !px-2 ${!canEditSelectedSetlistKey ? '!cursor-default !opacity-100' : ''}`}
-                            valueTextClassName="!text-xs !leading-none"
+                            buttonClassName={`${isPhoneViewport ? '!h-11 !w-full !px-3' : '!h-8 !w-[92px] !px-2'} !min-w-0 !gap-1 !rounded-lg !border-gray-200 !bg-gray-50 dark:!border-[color:var(--color-border)] dark:!bg-[color:var(--color-surface-raised)] ${!canEditSelectedSetlistKey ? '!cursor-default !opacity-100' : ''}`}
+                            valueTextClassName={`${isPhoneViewport ? '!text-sm' : '!text-xs'} !leading-none dark:!text-[color:var(--color-text)]`}
                             triggerIconSize={12}
                             touchOptimized={!hasFinePointer}
                           />
                         </div>
-                        <div className="w-[92px] shrink-0">
-                          <div className="mb-1 text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400">{isCloudMode ? (language === 'zh' ? '我的 Capo' : 'My Capo') : 'Capo'}</div>
+                        <div className={isPhoneViewport ? 'min-w-0' : 'w-[92px] shrink-0'}>
+                          <div className={`${isPhoneViewport ? 'text-xs font-medium text-gray-500' : 'text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400'} mb-1`}>{isCloudMode ? (language === 'zh' ? '我的 Capo' : 'My Capo') : 'Capo'}</div>
                           <CapoPicker
                             value={effectiveCapo}
                             currentKey={effectiveKey}
@@ -13236,8 +13150,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                               : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
                             label="Capo"
                             align="right"
-                            buttonClassName="!h-8 !w-[92px] !min-w-0 !gap-1 !rounded-lg !border-gray-200 !bg-gray-50 !px-2"
-                            valueTextClassName="!text-xs !leading-none"
+                            buttonClassName={`${isPhoneViewport ? '!h-11 !w-full !px-3' : '!h-8 !w-[92px] !px-2'} !min-w-0 !gap-1 !rounded-lg !border-gray-200 !bg-gray-50 dark:!border-[color:var(--color-border)] dark:!bg-[color:var(--color-surface-raised)]`}
+                            valueTextClassName={`${isPhoneViewport ? '!text-sm' : '!text-xs'} !leading-none dark:!text-[color:var(--color-text)]`}
                             showPlayKey={false}
                             triggerIconSize={12}
                             touchOptimized={!hasFinePointer}
@@ -13262,7 +13176,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               setSetlistAddSongSelection([]);
               setSetlistPanelView('addSongs');
             }}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
+            className="ui-press flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
           >
             <Plus size={16} />
             <span>{copy.addToSetlist}</span>
@@ -13404,7 +13318,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           type="button"
           disabled={setlistAddSongSelection.length === 0}
           onClick={() => handleAddSongsToSetlist(setlistAddSongSelection)}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none"
+          className="ui-press flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none"
         >
           <Plus size={16} />
           <span>
@@ -13427,9 +13341,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   return (
     <div
       data-app-root
+      ref={appViewportRef}
       inert={isSwitchingLibrary ? true : undefined}
       aria-busy={isSwitchingLibrary}
-      className="relative flex h-[100dvh] min-h-[100dvh] min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900 dark:bg-[color:var(--color-surface-muted)] dark:text-[color:var(--color-text)] dark:selection:bg-[color:var(--color-indigo-800)] dark:selection:text-[color:var(--color-indigo-100)]"
+      className="fixed inset-x-0 top-0 flex h-[100dvh] min-h-0 min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900 dark:bg-[color:var(--color-surface-muted)] dark:text-[color:var(--color-text)] dark:selection:bg-[color:var(--color-indigo-800)] dark:selection:text-[color:var(--color-indigo-100)]"
       style={{
         // Keep the app clear of the iOS status bar / notch (Capacitor). These are
         // 0 in a normal browser, so the web build is unaffected.
@@ -13490,26 +13405,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       )}
 
       {/* Navigation Rail / Sidebar */}
-      <motion.aside
+      <aside
         data-sidebar
-        initial={false}
-        animate={isPhoneViewport ? { width: phoneSidebarShellWidth } : { width: sidebarShellWidth }}
-        transition={isSidebarResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.32 }}
+        inert={isPhoneViewport && !isMobileNavOpen ? true : undefined}
+        aria-hidden={isPhoneViewport && !isMobileNavOpen ? true : undefined}
         className={isPhoneViewport
           ? 'absolute inset-y-0 left-0 z-50 overflow-hidden'
           : `relative z-50 flex-shrink-0 ${usesOverlaySidebar && !isSidebarExpanded ? 'overflow-hidden' : 'overflow-visible'}`}
-        style={isPhoneViewport ? { pointerEvents: isMobileNavOpen ? 'auto' : 'none' } : undefined}
+        style={{ width: isPhoneViewport ? resolvedSidebarWidth : sidebarShellWidth, ...(isPhoneViewport ? { pointerEvents: isMobileNavOpen ? 'auto' : 'none' } : {}) }}
       >
         <motion.div
           initial={false}
           animate={isPhoneViewport
-            ? { x: isMobileNavOpen ? 0 : -phoneSidebarHiddenOffset, opacity: isMobileNavOpen ? 1 : 0.96 }
-            : { width: currentSidebarWidth, x: 0, opacity: 1 }}
-          transition={isSidebarResizing
-            ? { duration: 0 }
-            : isPhoneViewport
-              ? { type: 'spring', bounce: 0, duration: 0.28 }
-              : { type: 'spring', bounce: 0, duration: 0.32 }}
+            ? { transform: uiMotion.reduced ? 'none' : isMobileNavOpen ? 'translate3d(0, 0, 0)' : 'translate3d(calc(-100% - 24px), 0, 0)', opacity: isMobileNavOpen || !uiMotion.reduced ? 1 : 0 }
+            : { transform: 'none', opacity: 1 }}
+          transition={{ duration: sidebarMotionDuration, ease: UI_DRAWER_EASE, transform: { duration: uiMotion.reduced ? 0 : sidebarMotionDuration, ease: UI_DRAWER_EASE } }}
           onMouseEnter={handleSidebarHoverTrigger}
           onMouseMove={handleSidebarHoverTrigger}
           onMouseLeave={() => {
@@ -13524,7 +13434,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
               : ''
           }`}
-          style={isPhoneViewport ? { width: `${resolvedSidebarWidth}px` } : undefined}
+          style={{ width: `${isPhoneViewport ? resolvedSidebarWidth : currentSidebarWidth}px` }}
         >
           {isSidebarExpanded && !usesOverlaySidebar && !isPhoneViewport && (
             <button
@@ -13709,11 +13619,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
           <motion.div
             initial={false}
-            animate={{
-              opacity: isSidebarExpanded ? 1 : 0,
-              x: isSidebarExpanded ? 0 : -20
-            }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            animate={{ opacity: isPhoneViewport || isSidebarExpanded ? 1 : 0 }}
+            transition={{ duration: isPhoneViewport || uiMotion.instant || !isSidebarExpanded ? 0 : 0.125, ease: UI_EASE_OUT }}
             className="min-w-0 min-h-0 flex-1 flex flex-col"
             style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           >
@@ -14258,7 +14165,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             )}
           </motion.div>
         </motion.div>
-      </motion.aside>
+      </aside>
 
       {/* Main Content */}
       <main data-main-panel className="flex min-w-0 flex-1 flex-col">
@@ -14345,16 +14252,17 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  ref={mobileNavTriggerRef}
                   onClick={() => {
                     setIsMobileNavOpen((current) => !current);
                     setIsMobileActionsSheetOpen(false);
                     setIsMobileMetadataOpen(false);
                   }}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                  className="ui-press inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-600"
                   aria-label={isMobileNavOpen ? copy.collapseSongList : copy.pinSongList}
                   title={isMobileNavOpen ? copy.collapseSongList : copy.pinSongList}
                 >
-                  <ChevronRight size={18} className={`transition-transform ${isMobileNavOpen ? 'rotate-180' : ''}`} />
+                  <ChevronRight size={18} className={`ui-motion-chevron ${isMobileNavOpen ? 'rotate-180' : ''}`} />
                 </button>
 
                 <img src={logoSrc} alt="ChordMaster" className="h-9 w-9 rounded-xl shadow-sm ring-1 ring-gray-200" />
@@ -14396,7 +14304,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     setIsMobileNavOpen(false);
                     setIsMobileMetadataOpen(false);
                   }}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-600"
+                  className="ui-press inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-600"
                   aria-label={copy.editor.more}
                   title={copy.editor.more}
                 >
@@ -15433,14 +15341,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           )}
 
           {/* Editor Pane */}
-          <AnimatePresence initial={false}>
+          <AnimatePresence initial={false} custom={uiMotion}>
             {isEditing && (
               <motion.div 
                 data-editor-pane
-                initial={shouldUseSplitEditor ? { width: 0, opacity: 0 } : { x: -32, opacity: 0 }}
-                animate={shouldUseSplitEditor ? { width: splitEditorWidth, opacity: 1 } : { x: 0, opacity: 1 }}
-                exit={shouldUseSplitEditor ? { width: 0, opacity: 0 } : { x: -32, opacity: 0 }}
-                transition={isEditorResizing ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.4 }}
+                initial={false}
+                animate={{ opacity: 1, transform: 'none' }}
+                exit={{ opacity: 0, transition: { duration: 0 } }}
+                transition={{ duration: 0 }}
                 className={`overflow-hidden border-r border-gray-200 bg-white shadow-xl ${
                   shouldUseSplitEditor
                     ? 'relative z-10 flex-shrink-0'
@@ -15448,7 +15356,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       ? 'absolute inset-0 z-30 max-w-full shadow-none'
                       : 'absolute inset-y-0 left-0 z-30 max-w-full rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
                 }`}
-                style={shouldUseSplitEditor ? undefined : { width: overlayEditorWidth > 0 ? `${overlayEditorWidth}px` : '100%' }}
+                style={{ width: shouldUseSplitEditor ? splitEditorWidth : overlayEditorWidth > 0 ? overlayEditorWidth : '100%' }}
               >
                 {shouldUseSplitEditor && !isPhoneViewport && hasFinePointer && (
                   <div
@@ -15588,10 +15496,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               ref={previewRef}
               data-print-preview-container
               onMouseDown={handlePreviewMouseDown}
-              onTouchStart={handlePreviewTouchStart}
-              onTouchMove={handlePreviewTouchMove}
-              onTouchEnd={handlePreviewTouchEnd}
-              onTouchCancel={handlePreviewTouchEnd}
               onClickCapture={handlePreviewClickCapture}
               onScroll={handlePreviewScroll}
               style={{
@@ -15602,22 +15506,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             >
               <div
                 ref={previewCanvasRef}
-                className="relative flex min-h-full min-w-full items-start justify-center"
+                className="relative min-h-full min-w-full"
                 style={{
-                  width: isLyricsMode && isLyricsReading ? '100%' : `var(--preview-live-canvas-width, ${previewCanvasWidth}px)`,
-                  height: `var(--preview-live-canvas-height, ${previewSheetHeight}px)`
+                  width: isLyricsMode && isLyricsReading ? '100%' : `${previewCanvasWidth}px`,
+                  height: `${isLyricsMode && isLyricsReading ? previewSheetHeight : previewCanvasHeight}px`
                 }}
               >
                 <div
                   ref={sheetRef}
                   data-print-preview
                   style={{ 
-                    transform: isLyricsMode && isLyricsReading ? 'none' : `scale(var(--preview-live-scale, ${previewScale}))`,
-                    transformOrigin: 'top center',
+                    transform: isLyricsMode && isLyricsReading ? 'none' : `scale(${previewScale})`,
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    left: isLyricsMode && isLyricsReading ? 0 : previewSheetLeft,
+                    top: isLyricsMode && isLyricsReading ? 0 : previewPan.top,
                     width: isLyricsMode && isLyricsReading ? '100%' : `${sheetMetrics.width}px`,
                     minWidth: isLyricsMode && isLyricsReading ? 0 : `${sheetMetrics.width}px`,
-                    marginLeft: 'auto',
-                    marginRight: 'auto'
                   }}
                   className="select-none"
                 >
@@ -16034,23 +15939,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
       {isPhoneViewport && (
         <>
-          <AnimatePresence initial={false}>
+          <AnimatePresence initial={false} custom={uiMotion}>
             {isMobileActionsSheetOpen && (
               <>
-                <motion.button
+                <PresenceBackdrop
                   type="button"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
+                  {...backdropMotion}
                   onClick={() => setIsMobileActionsSheetOpen(false)}
                   className="fixed inset-0 z-[70] bg-stone-950/30 backdrop-blur-[1px]"
                   aria-label={copy.editor.more}
                 />
-                <motion.div
-                  initial={{ y: '100%' }}
-                  animate={{ y: 0 }}
-                  exit={{ y: '100%' }}
-                  transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
+                <PresenceSurface
+                  {...drawerMotion}
                   role="dialog" aria-label={copy.editor.more}
                   className="fixed inset-x-0 bottom-0 z-[80] flex max-h-[90dvh] flex-col overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-white shadow-[0_-24px_60px_rgba(15,23,42,0.18)]"
                 >
@@ -16060,7 +15960,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     <button
                       type="button"
                       onClick={() => setIsMobileActionsSheetOpen(false)}
-                      className="min-h-11 rounded-lg px-3 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
+                      className="min-h-11 rounded-lg px-3 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-950"
                     >
                       {copy.done}
                     </button>
@@ -16309,43 +16209,38 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     ) : null}
                     </div>
                   </div>
-                </motion.div>
+                </PresenceSurface>
               </>
             )}
           </AnimatePresence>
 
-          <AnimatePresence initial={false}>
+          <>
             {isMobileMetadataOpen && canOpenEditor && metadataPanelContent && (
               <>
-                <motion.button
+                <PresenceBackdrop
                   type="button"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setIsMobileMetadataOpen(false)}
+                  {...backdropMotion}
+                  onClick={mobileMetadataMotion.dismiss}
                   className="absolute inset-0 z-[70] bg-stone-950/30 backdrop-blur-[1px]"
                   aria-label={mobileMetadataTitle}
                 />
                 <motion.div
-                  initial={{ y: '100%' }}
-                  animate={{ y: 0 }}
-                  exit={{ y: '100%' }}
-                  transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
-                  ref={mobileMetadataRef} role="dialog" aria-modal="true" aria-label={mobileMetadataTitle}
+                  {...mobileMetadataMotion.motionProps}
+                  ref={mobileMetadataMotion.attach} role="dialog" aria-modal="true" aria-label={mobileMetadataTitle}
                   onKeyDown={event => {
                     event.stopPropagation();
                     if (event.key === 'Escape' && !(event.target instanceof Element && event.target.closest('[data-placement]'))) {
-                      event.preventDefault(); setIsMobileMetadataOpen(false);
+                      event.preventDefault(); mobileMetadataMotion.dismiss();
                     }
                   }}
                   className="absolute inset-x-0 bottom-0 z-[80] flex max-h-[90dvh] flex-col overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-[#F5F5F4] shadow-[0_-24px_60px_rgba(15,23,42,0.18)] dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
                 >
-                  <div className="mx-auto mt-2 h-1.5 w-12 shrink-0 rounded-full bg-gray-300" />
-                  <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur-sm">
+                  <div data-sheet-drag-handle className="mx-auto mt-2 h-1.5 w-12 shrink-0 rounded-full bg-gray-300" />
+                  <div data-sheet-drag-handle className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur-sm">
                     <div className="text-sm font-bold text-gray-900">{mobileMetadataTitle}</div>
                     <button
                       type="button"
-                      onClick={() => setIsMobileMetadataOpen(false)}
+                      onClick={mobileMetadataMotion.dismiss}
                       className="min-h-11 rounded-lg px-3 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
                     >
                       {copy.done}
@@ -16358,7 +16253,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 </motion.div>
               </>
             )}
-          </AnimatePresence>
+                    </>
         </>
       )}
 
@@ -16437,19 +16332,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         </ResponsiveDialog>
       )}
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} custom={uiMotion}>
         {isImportPromptOpen && authenticatedUser && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+          <PresenceSurface
+            {...backdropMotion}
             className="absolute inset-0 z-[110] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
           >
-            <motion.div
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
+            <PresenceSurface
+              {...modalMotion}
               className="w-full max-w-lg rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
               <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{APP_NAME}</div>
@@ -16476,27 +16366,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {isImportingLocalWorkspace ? copy.cloudSyncSyncing : copy.importNow}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </PresenceSurface>
+          </PresenceSurface>
         )}
       </AnimatePresence>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} custom={uiMotion}>
         {isExportingPdf && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
+          <PresenceSurface
+            {...backdropMotion}
             className="absolute inset-0 z-[120] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
             aria-live="polite"
             aria-busy="true"
           >
-            <motion.div
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
+            <PresenceSurface
+              {...modalMotion}
               className="w-full max-w-sm rounded-[28px] border border-gray-200 bg-white/95 px-6 py-6 text-center shadow-[0_24px_60px_rgba(15,23,42,0.22)] backdrop-blur-sm"
             >
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-50">
@@ -16563,25 +16447,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   </button>
                 )}
               </div>
-            </motion.div>
-          </motion.div>
+            </PresenceSurface>
+          </PresenceSurface>
         )}
       </AnimatePresence>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} custom={uiMotion}>
         {pendingLeaveSharedSetlist && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
+          <PresenceSurface
+            {...backdropMotion}
             className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
           >
-            <motion.div
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
+            <PresenceSurface
+              {...modalMotion}
               className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
               <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.sharedWithMe}</div>
@@ -16605,22 +16483,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {leavingSharedSetlistId === pendingLeaveSharedSetlist.id ? copy.leavingSetlist : copy.leaveSetlist}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </PresenceSurface>
+          </PresenceSurface>
         )}
         {pendingLeaveSharedProject && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
+          <PresenceSurface
+            {...backdropMotion}
             className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
           >
-            <motion.div
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
+            <PresenceSurface
+              {...modalMotion}
               className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
               <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.sharedWithMe}</div>
@@ -16644,8 +16516,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {leavingSharedProjectId === pendingLeaveSharedProject.id ? copy.leavingProject : copy.leaveProject}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </PresenceSurface>
+          </PresenceSurface>
         )}
       </AnimatePresence>
 
@@ -16674,13 +16546,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         );
       })()}
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} custom={uiMotion}>
         {isMultiSelectMode && (
           <motion.div
-            initial={{ y: 24, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 16, opacity: 0 }}
-            transition={{ duration: 0.18, ease: 'easeOut' }}
+            {...feedbackMotion}
             className="pointer-events-none fixed inset-x-0 bottom-4 z-[120] flex justify-center px-3"
           >
             <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-[0_18px_44px_rgba(15,23,42,0.18)]">
@@ -16787,20 +16656,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         )}
       </AnimatePresence>
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} custom={uiMotion}>
         {pendingRevokeShareSetlist && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
+          <PresenceSurface
+            {...backdropMotion}
             className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
           >
-            <motion.div
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
+            <PresenceSurface
+              {...modalMotion}
               className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
             >
               <div className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-400">{copy.setlistSharingTitle}</div>
@@ -16824,26 +16687,22 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {isRevokingSetlistShare ? copy.cloudSyncSyncing : copy.setlistSharingCancel}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </PresenceSurface>
+          </PresenceSurface>
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
+      <AnimatePresence custom={uiMotion}>
         {isPreviewEditExitPromptOpen && previewEditSession?.dirty && (
-          <motion.div
+          <PresenceSurface
             className="fixed inset-0 z-[6000] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-[2px]"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            {...backdropMotion}
           >
-            <motion.div
+            <PresenceSurface
               role="alertdialog"
               aria-modal="true"
               aria-label={language === 'zh' ? '預覽編輯尚未完成' : 'Preview edit is unfinished'}
-              initial={{ y: 10, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
+              {...modalMotion}
               className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_28px_80px_rgba(15,23,42,0.3)]"
             >
               <h2 className="text-lg font-black text-slate-900">{language === 'zh' ? '預覽編輯尚未完成' : 'Preview edit is unfinished'}</h2>
@@ -16887,8 +16746,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {language === 'zh' ? '完成' : 'Finish'}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </PresenceSurface>
+          </PresenceSurface>
         )}
       </AnimatePresence>
 

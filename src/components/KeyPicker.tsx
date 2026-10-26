@@ -1,3 +1,4 @@
+import { AnimatedPopover } from './ui/InteractionMotion';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
@@ -108,8 +109,10 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   const optionRefs = React.useRef<Partial<Record<Key, HTMLButtonElement | null>>>({});
   const clearButtonRef = React.useRef<HTMLButtonElement>(null);
   const [isOpen, setIsOpen] = React.useState(false);
+  const instantExit = React.useRef(false);
 
-  const closePanel = React.useCallback(() => {
+  const closePanel = React.useCallback((immediate = false) => {
+    instantExit.current = immediate;
     setIsOpen(false);
   }, []);
 
@@ -167,7 +170,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   const handleSelect = React.useCallback((nextValue: Key | null) => {
     if (onModeChange) onChange(nextValue, mode);
     else onChange(nextValue);
-    closePanel();
+    closePanel(true);
   }, [closePanel, onChange, onModeChange, mode]);
 
   const handleOptionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, key: Key) => {
@@ -205,7 +208,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   };
   const isCompactTrigger = triggerDensity === 'compact';
   const resolvedAlign = align as PanelAlign;
-  const { panelStyle, placement, isPositioned } = useAnchoredPortalPanel({
+  const { panelStyle, placement, isPositioned, transformOrigin } = useAnchoredPortalPanel({
     isOpen,
     align: resolvedAlign,
     triggerRef,
@@ -223,8 +226,8 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
         ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => !disabled && setIsOpen((open) => !open)}
-        className={`flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors ${
+        onClick={() => { if (!disabled) { instantExit.current = false; setIsOpen(open => !open); } }}
+        className={`ui-press flex items-center justify-between gap-2 border border-gray-300 bg-white text-left outline-none transition-colors ${
           isCompactTrigger
             ? 'h-9 min-w-[74px] rounded-lg px-2.5'
             : 'h-10 min-w-[92px] rounded-xl px-3'
@@ -252,13 +255,13 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
           ) : null}
         </span>
         {!disabled && !hideTriggerIcon ? (
-          <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+          <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 ui-motion-chevron ${isOpen ? 'rotate-180' : ''}`} />
         ) : null}
       </button>
 
-      {isOpen && typeof document !== 'undefined' && createPortal(
-        <div
-          ref={panelRef}
+      {typeof document !== 'undefined' && createPortal(
+        <AnimatedPopover open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
+          panelRef={panelRef}
           className={`${touchOptimized ? 'w-[216px] p-3' : 'w-[184px] p-2.5'} rounded-[20px] border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
           data-placement={placement}
@@ -277,7 +280,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                 {language === 'zh' ? (nextMode === 'major' ? '大調' : '小調') : (nextMode === 'major' ? 'Major' : 'Minor')}
               </button>)}
             </div>
-            {originalKey && <button type="button" className="w-full rounded-lg border border-gray-200 py-1 text-xs" onClick={() => { onChange(originalKey, originalMode); closePanel(); }}>
+            {originalKey && <button type="button" className="w-full rounded-lg border border-gray-200 py-1 text-xs" onClick={() => { onChange(originalKey, originalMode); closePanel(true); }}>
               {language === 'zh' ? '還原原調' : 'Original'} {formatKeyName(originalKey, originalMode)}
             </button>}
           </div>}
@@ -300,7 +303,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                     handleSelect(null);
                   }
                 }}
-                className={`flex ${touchOptimized ? 'h-11 text-sm' : 'h-[34px] text-[12px]'} w-full items-center justify-center rounded-xl border font-semibold tracking-tight transition-all ${
+                className={`flex ${touchOptimized ? 'h-11 text-sm' : 'h-[34px] text-[12px]'} w-full items-center justify-center rounded-xl border font-semibold tracking-tight transition-colors ${
                   value === null
                     ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
                     : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-gray-50'
@@ -330,7 +333,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                     type="button"
                     onClick={() => handleSelect(key)}
                     onKeyDown={(event) => handleOptionKeyDown(event, key)}
-                    className={`relative flex ${touchOptimized ? 'h-12 text-[15px]' : 'h-[42px] text-[14px]'} items-center justify-center rounded-[12px] border font-semibold tracking-tight transition-all ${
+                    className={`relative flex ${touchOptimized ? 'h-12 text-[15px]' : 'h-[42px] text-[14px]'} items-center justify-center rounded-[12px] border font-semibold tracking-tight transition-colors ${
                       isSelectedKey
                         ? isOriginalKey
                           ? 'border-indigo-400 bg-indigo-100 text-indigo-800 shadow-sm shadow-indigo-100'
@@ -349,7 +352,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
               })
             )}
           </div>
-        </div>,
+        </AnimatedPopover>,
         document.body
       )}
     </div>

@@ -86,6 +86,18 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-26',
+        title: 'Mobile panels, anchored zoom and quiet interactions',
+        bullets: [
+          'Pinch zoom keeps the point between your fingers anchored and reduces repeated layout work during the gesture.',
+          'Song details slides from the bottom and supports pulling down to close; the app frame stays fixed while internal panes scroll.',
+          'Mobile setlists and projects use clearer rows, aligned Key/Capo controls and deliberate removal menus, including dark mode.',
+          'Chord-only rows stay compact while melody and additional voices reserve their own height.',
+          'Menus, disclosures and notifications have short, interruptible transitions. Keyboard input and song selection stay immediate; reduced motion updates live.'
+        ]
+      },
+      {
+        version: '0.9.18',
+        date: '2026-10-26',
         title: 'Mobile editing, continuous voices and stable setlist pages',
         bullets: [
           'Mobile song info has clear tabs and its own scroll area; the sign-in button is easier to find.',
@@ -571,6 +583,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-26',
+        title: '手機面板、縮放定位與俐落互動',
+        bullets: [
+          '雙指縮放以手指中心定位，手勢期間減少重複排版，放開後保留閱讀位置。',
+          '歌曲詳情從底部滑入，可向下拖曳關閉；固定 App 外框，讓內容在內部捲動。',
+          '手機歌單與專案統一列表層級、Key／Capo 對齊及移除選單，完善深色配色。',
+          '只有和弦的小節保持緊湊，旋律與額外聲部只增加所在列的必要高度。',
+          '選單、收合與通知加入短促且可中斷的動態；輸入、切歌與鍵盤操作保持即時，系統減少動態效果即時生效。'
+        ]
+      },
+      {
+        version: '0.9.18',
         date: '2026-10-26',
         title: '手機編輯、連續聲部操作與穩定歌單頁數',
         bullets: [

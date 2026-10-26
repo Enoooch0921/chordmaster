@@ -749,6 +749,18 @@ describe('ChordSheet preview input caret', () => {
     expect(container.querySelector('[data-preview-bottom-lane]')).toHaveStyle({ top: '40px' });
   });
 
+  it('keeps extra intro voices local without stretching chord-only verses', () => {
+    const source: Song = { ...song, barRowCount: 2, sections: [
+      { id: 'intro', title: 'Intro', bars: [{ id: 'intro-bar', chords: ['C'], riff: '1 | 2 | 3 | 4', riffVoices: [{ id: 'bass', riff: '5 | 5 | 5 | 5', label: 'Bass' }] }] },
+      { id: 'verse', title: 'Verse', bars: [{ id: 'verse-bar', chords: ['C'] }] }
+    ] };
+    const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    expect(container.querySelector('[data-preview-section-id="intro"]')).toHaveStyle({ maxHeight: '92px', minHeight: '92px' });
+    expect(container.querySelector('[data-preview-section-id="verse"]')).toHaveStyle({ maxHeight: '34px' });
+    rerender(<ChordSheet song={{ ...source, barRowCount: 3 }} language="zh" currentKey="C" />);
+    expect((container.querySelector('[data-preview-section-id="verse"]') as HTMLElement).style.maxHeight).toBe('');
+  });
+
   it('keeps sparse multi-voice notation near its chords while reserving every voice row', () => {
     const source: Song = { ...song, barRowCount: 3, sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'], rhythm: 'q q q q', riff: '1 | 2 | 3 | 4',
       rhythmVoices: [{ id: 'kick', label: 'Kick', rhythm: 'q' }], riffVoices: [{ id: 'bass', label: 'Bass', riff: '5' }, { id: 'flute', label: 'Flute', riff: '3' }]

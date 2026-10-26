@@ -111,13 +111,13 @@ describe('PreviewWysiwygEditor song information panel', () => {
     expect(layout).toHaveFocus();
   });
 
-  it('closes the phone panel from a keyboard-activated Done button', () => {
+  it('closes the phone panel from a keyboard-activated Done button', async () => {
     const onClose = vi.fn();
     render(<PreviewWysiwygEditor song={song} language="zh" target={makeTarget('metadata')}
       deviceLayout="phone" currentKey="C" currentCapo={0} originalKey="C"
       onChange={() => undefined} onKeyChange={() => undefined} onCapoChange={() => undefined} onClose={onClose} />);
     fireEvent.click(screen.getByRole('button', { name: '完成' }));
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('opens the complete song information panel from the metadata target', () => {
@@ -196,7 +196,7 @@ describe('PreviewWysiwygEditor song information panel', () => {
     expect(shell).toHaveStyle({ width: '900px' });
   });
 
-  it('closes the complete panel with Escape', () => {
+  it('closes the complete panel with Escape', async () => {
     const onClose = vi.fn();
     render(
       <PreviewWysiwygEditor
@@ -215,6 +215,6 @@ describe('PreviewWysiwygEditor song information panel', () => {
     );
 
     fireEvent.keyDown(screen.getByRole('dialog', { name: '歌曲資訊' }), { key: 'Escape' });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });

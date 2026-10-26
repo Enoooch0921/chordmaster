@@ -1,4 +1,4 @@
-import { createRef } from 'react';
+import { createRef, StrictMode } from 'react';
 import { fireEvent, renderHook, waitFor } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { useModalFocus } from './useModalFocus';
@@ -29,4 +29,14 @@ it('contains sheet focus, permits portalled pickers, and restores the opener', a
   option.focus(); expect(option).toHaveFocus();
   unmount(); await waitFor(() => expect(opener).toHaveFocus());
   opener.remove(); dialog.remove(); picker.remove();
+});
+
+it('restores the original opener after Strict Mode replays mount effects', async () => {
+  const opener = document.createElement('button'), dialog = document.createElement('div'), done = document.createElement('button');
+  dialog.append(done); document.body.append(opener, dialog); opener.focus();
+  const ref = createRef<HTMLElement>(); ref.current = dialog;
+  const { unmount } = renderHook(() => useModalFocus(true, ref), { wrapper: StrictMode });
+  await Promise.resolve(); expect(done).toHaveFocus();
+  unmount(); await waitFor(() => expect(opener).toHaveFocus());
+  opener.remove(); dialog.remove();
 });

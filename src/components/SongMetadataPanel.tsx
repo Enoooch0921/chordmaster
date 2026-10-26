@@ -1,3 +1,4 @@
+import { AnimatedDisclosure } from './ui/InteractionMotion';
 import React from 'react';
 import './SongMetadataPanel.css';
 import { AppLanguage, BarNumberMode, Key, SetlistDisplayMode, Song, SongReference, SongReferenceKind } from '../types';
@@ -972,7 +973,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className={`transition-transform ${isAdvancedOpen ? 'rotate-180' : ''}`}
+        className={`ui-motion-chevron ${isAdvancedOpen ? 'rotate-180' : ''}`}
         aria-hidden
       >
         <path d="M6 9l6 6 6-6" />
@@ -1071,8 +1072,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
           {advancedToggle}
 
-          {isAdvancedOpen ? (
-            <div className="space-y-1.5">
+          <AnimatedDisclosure open={isAdvancedOpen} className="space-y-1.5">
               <div className={`grid gap-2 ${isLibraryInputMode
                 ? '[grid-template-columns:minmax(6rem,1fr)_minmax(6rem,1fr)]'
                 : '[grid-template-columns:minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(4.5rem,0.7fr)]'}`}>
@@ -1088,8 +1088,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               </div>
 
               {showReferenceFields ? referencesField : null}
-            </div>
-          ) : null}
+          </AnimatedDisclosure>
         </div>
       ) : isStackedLayout ? (
         <div className="mt-2 space-y-2">
@@ -1105,8 +1104,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
           {advancedToggle}
 
-          {isAdvancedOpen ? (
-            <div className="space-y-2">
+          <AnimatedDisclosure open={isAdvancedOpen} className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
                 {versionField}
                 {translatorField}
@@ -1118,8 +1116,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               {barNumbersField}
               {barHeightField}
               {showReferenceFields ? referencesField : null}
-            </div>
-          ) : null}
+          </AnimatedDisclosure>
         </div>
       ) : (
         <div className="mt-2 space-y-2">
@@ -1133,8 +1130,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
           {advancedToggle}
 
-          {isAdvancedOpen ? (
-            <div className="space-y-2">
+          <AnimatedDisclosure open={isAdvancedOpen} className="space-y-2">
               <div className="grid grid-cols-12 gap-2">
                 <div className={isLibraryInputMode ? 'col-span-6' : 'col-span-4'}>{versionField}</div>
                 <div className={isLibraryInputMode ? 'col-span-6' : 'col-span-4'}>{translatorField}</div>
@@ -1148,8 +1144,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               </div>
 
               {showReferenceFields ? referencesField : null}
-            </div>
-          ) : null}
+          </AnimatedDisclosure>
         </div>
       )}
     </section>

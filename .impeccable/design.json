@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-26T13:04:12.233042+00:00",
+  "generatedAt": "2026-10-26T15:44:11.385636+00:00",
   "title": "Design System: ChordMaster",
   "extensions": {
     "colorMeta": {
@@ -743,6 +743,14 @@
       "label": {
         "displayName": "Label",
         "purpose": "Explicit mobile field labels."
+      },
+      "row-title": {
+        "displayName": "Row Title",
+        "purpose": "Semibold mobile song and project names."
+      },
+      "row-meta": {
+        "displayName": "Row Metadata",
+        "purpose": "Original musical facts and project counts."
       }
     },
     "shadows": [
@@ -764,9 +772,9 @@
     ],
     "motion": [
       {
-        "name": "actions-sheet-spring",
-        "value": "spring; bounce: 0; duration: 0.35s",
-        "purpose": "Observed mobile actions sheet entry and exit."
+        "name": "actions-sheet-drawer",
+        "value": "240ms enter / 200ms exit; cubic-bezier(0.32, 0.72, 0, 1)",
+        "purpose": "More actions sheet vertical edge entry/exit."
       },
       {
         "name": "tap-tempo-pulse",
@@ -777,6 +785,81 @@
         "name": "metadata-reduced-motion",
         "value": "transition-duration: 0s",
         "purpose": "Mobile metadata CSS under prefers-reduced-motion: reduce."
+      },
+      {
+        "name": "detail-sheet-enter",
+        "value": "240ms cubic-bezier(0.32, 0.72, 0, 1)",
+        "purpose": "Shared mobile/tablet detail sheet entrance."
+      },
+      {
+        "name": "detail-sheet-exit",
+        "value": "200ms cubic-bezier(0.32, 0.72, 0, 1)",
+        "purpose": "Controlled downward exit completed before unmount."
+      },
+      {
+        "name": "detail-sheet-settle",
+        "value": "spring; duration: 0.5s; bounce: 0.2",
+        "purpose": "Return a short downward pull to rest."
+      },
+      {
+        "name": "detail-sheet-reduced-motion",
+        "value": "160ms opacity",
+        "purpose": "Replace automatic spatial entrance/exit under reduced motion."
+      },
+      {
+        "name": "ease-ui-out",
+        "value": "cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "Common occasional-surface ease-out."
+      },
+      {
+        "name": "ease-ui-drawer",
+        "value": "cubic-bezier(0.32, 0.72, 0, 1)",
+        "purpose": "Drawer and gesture detail-sheet curve."
+      },
+      {
+        "name": "popover",
+        "value": "160ms enter / 125ms exit; scale(0.97) and opacity",
+        "purpose": "Animate visual child from measured trigger origin; measuring shell stays stationary."
+      },
+      {
+        "name": "prompt-modal",
+        "value": "200ms enter / 160ms exit; scale(0.97) and opacity",
+        "purpose": "Occasional prompt cards with guarded exits."
+      },
+      {
+        "name": "backdrop",
+        "value": "200ms enter / 160ms exit; opacity",
+        "purpose": "Companion backdrop with inert, non-intercepting exit."
+      },
+      {
+        "name": "mobile-sidebar",
+        "value": "240ms enter / 200ms exit; full transform",
+        "purpose": "Fixed-width shell; keyboard and explicit song choice close instantly."
+      },
+      {
+        "name": "disclosure",
+        "value": "height 200ms enter / 160ms exit; opacity 125ms",
+        "purpose": "Accordion exception; reduced height snaps and keyboard use is instant."
+      },
+      {
+        "name": "notification",
+        "value": "200ms enter / 160ms exit; translate3d(0,16px,0) and opacity",
+        "purpose": "Same bottom edge for entry/exit, stable ID across pending/success."
+      },
+      {
+        "name": "shared-reduced-motion",
+        "value": "125ms opacity; transform duration 0",
+        "purpose": "Live preference; keyboard shared interactions instead use duration 0."
+      },
+      {
+        "name": "pointer-press",
+        "value": "100ms press / 160ms release; scale(0.97)",
+        "purpose": "Occasional pointer actions; reduced opacity 0.8 with no transform, no animated keyboard press."
+      },
+      {
+        "name": "disclosure-chevron",
+        "value": "160ms cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "Keyboard and reduced preferences make the chevron instant."
       }
     ],
     "breakpoints": [
@@ -878,6 +961,14 @@
       "description": "In-place horizontal voice choices with direct rename and add controls.",
       "html": "<div class=\"ds-voice-selector\"><div class=\"ds-voice-choices\" role=\"group\" aria-label=\"選擇編輯聲部\"><button class=\"ds-voice-choice\" aria-pressed=\"false\">主聲部</button><button class=\"ds-voice-choice\" aria-pressed=\"true\">大鼓</button></div><button class=\"ds-voice-action\" aria-label=\"重新命名目前聲部\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.5zM15 5l4 4\"/></svg></button><button class=\"ds-voice-action\" aria-label=\"新增聲部\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"/></svg></button></div>",
       "css": ".ds-voice-selector{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--color-surface,#fff);color:var(--color-text,#111827);border-bottom:1px solid var(--color-border,#e5e7eb);}.ds-voice-choices{display:flex;flex:1;min-width:0;gap:4px;overflow-x:auto;}.ds-voice-choice{font-family:inherit;height:44px;max-width:160px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;border-radius:8px;padding:0 10px;font-size:12px;font-weight:600;background:transparent;color:var(--color-text-muted,#4b5563);}.ds-voice-choice:hover,.ds-voice-action:hover{background:var(--color-surface-muted,#f9fafb);}.ds-voice-choice[aria-pressed=\"true\"]{background:var(--color-indigo-100,#DAF1E5);color:var(--color-indigo-800,#1A5234);}.ds-voice-action{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex-shrink:0;border:0;border-radius:8px;background:transparent;color:var(--color-text-muted,#4b5563);}.ds-voice-choice:focus-visible,.ds-voice-action:focus-visible{outline:auto;}.ds-voice-action:disabled{opacity:.4;}:host-context(.dark) .ds-voice-choice[aria-pressed=\"true\"]{background:var(--color-indigo-950,#0D1F17);color:var(--color-indigo-200,#B6E3CA);}"
+    },
+    {
+      "name": "Mobile setlist song row",
+      "kind": "custom",
+      "refersTo": "mobile-song-row",
+      "description": "Flat current-song row with numbered grip, clear musical facts and equal picker columns.",
+      "html": "<div class=\"ds-song-row\" aria-current=\"true\"><div class=\"ds-song-top\"><button class=\"ds-song-grip\" aria-label=\"拖動排序\">1<svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><circle cx=\"9\" cy=\"5\" r=\"1\"/><circle cx=\"9\" cy=\"12\" r=\"1\"/><circle cx=\"9\" cy=\"19\" r=\"1\"/><circle cx=\"15\" cy=\"5\" r=\"1\"/><circle cx=\"15\" cy=\"12\" r=\"1\"/><circle cx=\"15\" cy=\"19\" r=\"1\"/></svg></button><button class=\"ds-song-select\" aria-current=\"true\"><span class=\"ds-song-title\">歌曲名稱 <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-label=\"目前顯示\"><path d=\"M20 6 9 17l-5-5\"/></svg></span><span class=\"ds-song-meta\">原調 C · 4/4</span></button><button class=\"ds-song-more\" aria-label=\"歌曲操作：歌曲名稱\" aria-haspopup=\"menu\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"12\" r=\"1\"/><circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"19\" cy=\"12\" r=\"1\"/></svg></button></div><div class=\"ds-song-pickers\"><label>歌單 Key<button class=\"ds-song-picker\" aria-label=\"歌單 Key\">C</button></label><label>Capo<button class=\"ds-song-picker\" aria-label=\"Capo\">0</button></label></div></div>",
+      "css": ".ds-song-row{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;padding:12px 0;border-bottom:1px solid var(--color-border,#e5e7eb);color:var(--color-text,#111827);background:color-mix(in oklab,var(--color-indigo-50,#F0FAF5) 60%,transparent);}.ds-song-top{display:flex;align-items:center;gap:8px;}.ds-song-grip,.ds-song-more{display:flex;align-items:center;justify-content:center;gap:2px;flex-shrink:0;width:44px;height:44px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--color-text-muted,#4b5563);}.ds-song-grip{touch-action:none;cursor:grab;font-size:14px;font-weight:600;}.ds-song-grip:active{cursor:grabbing;}.ds-song-grip:hover,.ds-song-more:hover{background:var(--color-surface-sunken,#f3f4f6);}.ds-song-select{font-family:inherit;flex:1;min-width:0;min-height:44px;padding:0;border:0;background:transparent;color:inherit;text-align:left;}.ds-song-title{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;line-height:24px;overflow-wrap:anywhere;}.ds-song-title svg{flex-shrink:0;color:var(--color-indigo-700,#236E48);}.ds-song-meta{display:block;margin-top:2px;font-size:12px;font-weight:400;line-height:20px;color:var(--color-text-muted,#4b5563);}.ds-song-pickers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding-left:52px;margin-top:6px;}.ds-song-pickers label{display:grid;gap:4px;min-width:0;color:var(--color-text-muted,#4b5563);font-size:12px;font-weight:500;}.ds-song-picker{font-family:inherit;min-width:0;width:100%;height:44px;padding:0 12px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;background:var(--color-surface-muted,#f9fafb);color:var(--color-text,#111827);font-size:14px;text-align:left;}.ds-song-row button:focus-visible{outline:auto;}:host-context(.dark) .ds-song-row{background:var(--color-indigo-950,#0D1F17);}:host-context(.dark) .ds-song-picker{background:var(--color-surface-raised,#1c2128);}:host-context(.dark) .ds-song-title svg{color:var(--color-indigo-200,#B6E3CA);}:host-context([data-ui-input=\"pointer\"]) .ds-song-more{transition-property:transform,opacity,background-color,border-color,color;transition-duration:var(--ui-release-duration,160ms);transition-timing-function:var(--ease-ui-out,cubic-bezier(.23,1,.32,1));}:host-context([data-ui-input=\"pointer\"]) .ds-song-more:active:not(:disabled){transform:scale(.97);transition-duration:var(--ui-press-duration,100ms);}@media(prefers-reduced-motion:reduce){:host-context([data-ui-input=\"pointer\"]) .ds-song-more{transition-property:opacity,background-color,border-color,color;}:host-context([data-ui-input=\"pointer\"]) .ds-song-more:active:not(:disabled){transform:none;opacity:.8;}}"
     }
   ],
   "narrative": {
@@ -909,6 +1000,11 @@
         "name": "The Paper and UI Rule",
         "body": "Theme changes affect interface chrome while printable chart paper and ink retain their established palette.",
         "section": "colors"
+      },
+      {
+        "name": "The Core Work Rule",
+        "body": "Keep score reading, notation input, explicit song selection and core editor geometry immediate; animate occasional panels and feedback only when their spatial or state relationship benefits from it.",
+        "section": "elevation"
       }
     ],
     "dos": [
@@ -924,7 +1020,15 @@
       "Do distinguish shared bar text from the name and notation of an individual voice.",
       "Do keep timed lower notation close to its chord/pass stack and reserve real space for additional voices.",
       "Do preserve untimed and unmetered rendering when applying compact chart geometry.",
-      "Do render the same saved setlist arrangement in selected previews, unselected previews and export."
+      "Do render the same saved setlist arrangement in selected previews, unselected previews and export.",
+      "Do keep sheet drag, native content scrolling and field/tab interactions distinct.",
+      "Do preserve the pinch focal point and keep the zoom label consistent through release or cancellation.",
+      "Do use flat divided mobile song/project rows with readable titles and aligned musical controls.",
+      "Do retain explicit three-line handwriting space while capping timed chord-only rows.",
+      "Do anchor popover motion to the trigger while measuring an untransformed shell.",
+      "Do make exiting surfaces inert immediately and keep action commits and keyboard interactions instant.",
+      "Do apply live reduced-motion preferences with zero transform duration and the scoped opacity fallback.",
+      "Do retain stable notification identity when pending feedback becomes success or error."
     ],
     "donts": [
       "Don't promote the mobile song editor's three-tab composition into a requirement for every screen.",
@@ -933,7 +1037,13 @@
       "Don't change chart or notation typography to match UI controls; export keeps its printable light appearance.",
       "Don't let generic dark compatibility override dedicated component variants or printable chart content.",
       "Don't reserve empty filler below notation keys; use content-sized panels with bounded center scrolling.",
-      "Don't distribute spare A4 height inside timed notation-bearing rows or inflate ordinary single-melody pagination."
+      "Don't distribute spare A4 height inside timed notation-bearing rows or inflate ordinary single-melody pagination.",
+      "Don't let a pinch change the current setlist item or trigger a synthetic editor click.",
+      "Don't expose destructive song actions as a competing row-level icon; use the labelled anchored overflow.",
+      "Don't allow scroll exhaustion to move the app frame or carry preview pan offsets into PDF output.",
+      "Don't animate core editor geometry, rapid song choice, score reading or notation input as part of occasional-surface motion.",
+      "Don't animate mobile sidebar width or add a transformed ancestor around its fixed notation keyboard.",
+      "Don't add list staggers, decorative reveals or new positional hover motion to this interaction system."
     ]
   }
 }

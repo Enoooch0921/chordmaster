@@ -1,11 +1,15 @@
-import { useLayoutEffect, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type RefObject } from 'react';
 
 /** Keep keyboard focus in a sheet, including its portalled pickers. */
 export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>) {
+  const opener = useRef<HTMLElement | null>(null);
+  const generation = useRef(0);
   useLayoutEffect(() => {
     const dialog = ref.current;
     if (!open || !dialog) return;
+    const currentGeneration = ++generation.current;
     const previous = document.activeElement;
+    if (previous instanceof HTMLElement && !dialog.contains(previous)) opener.current = previous;
     const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>(
       'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled)'
     ));
@@ -32,7 +36,9 @@ export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>)
       document.removeEventListener('keydown', onKey, true);
       // React restores selection during commit; restore the opener afterwards.
       queueMicrotask(() => {
-        if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
+        if (generation.current !== currentGeneration) return;
+        if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+        opener.current = null;
       });
     };
   }, [open, ref]);
