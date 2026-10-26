@@ -1,5 +1,6 @@
 import { StrictMode, lazy, Suspense } from 'react';
 import RecoveryBoundary from './components/RecoveryBoundary';
+import AppLoadingScreen from './components/AppLoadingScreen';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
@@ -129,7 +130,7 @@ const renderApp = () => {
       <BrowserRouter basename={routerBasename}>
         <ToastProvider>
           <RecoveryBoundary>
-          <Suspense fallback={<div role="status" className="p-8 text-center">正在載入歌譜…</div>}>
+          <Suspense fallback={<AppLoadingScreen />}>
           <Routes>
             <Route path="/" element={<App />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />

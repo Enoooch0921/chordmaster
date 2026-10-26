@@ -31,6 +31,7 @@
     <link rel="preconnect" href="https://i.ytimg.com" />
     <link rel="preconnect" href="https://s.ytimg.com" />
     <title>ChordMaster | 智能和弦與簡譜編輯器</title>
+    <link rel="stylesheet" href="/src/styles/app-loading.css" />
     <script>
       // Apply theme before React mounts to avoid a flash of light theme.
       (function () {
@@ -68,7 +69,16 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Keep in sync with AppLoadingScreen; visible before JavaScript/fonts load. -->
+      <div class="app-loading" role="status" aria-live="polite" aria-label="正在載入歌譜…">
+        <div class="app-loading__content" aria-hidden="true">
+          <img class="app-loading__logo" src="/logo.svg" width="80" height="80" alt="" />
+          <div class="app-loading__name">ChordMaster</div>
+          <div class="app-loading__message">正在載入歌譜…</div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

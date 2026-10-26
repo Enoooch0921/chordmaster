@@ -23,6 +23,7 @@ import LegacyDraftRecovery from './components/LegacyDraftRecovery';
 import MobileSidebarNavigation from './components/MobileSidebarNavigation';
 import SetlistContextMenu from './components/SetlistContextMenu';
 import RecoveryBoundary from './components/RecoveryBoundary';
+import AppLoadingScreen from './components/AppLoadingScreen';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
 import { useJoinedWorkspaceRefresh } from './hooks/useJoinedWorkspaceRefresh';
@@ -2033,7 +2034,7 @@ export default function App() {
   if (error) throw error;
   return workspace
     ? <WorkspaceApp initialWorkspace={workspace} />
-    : <div role="status" className="p-8 text-center">正在載入歌譜…</div>;
+    : <AppLoadingScreen />;
 }
 
 function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspace: WorkspaceSnapshot }) {
