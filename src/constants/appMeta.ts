@@ -85,6 +85,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: 'Restore two-line bar height',
+        bullets: ['Chord-only bars respect the default or selected two-line height. Extra intro voices still add height only to their own row.']
+      },
+      {
+        version: '0.9.19',
         date: '2026-10-26',
         title: 'Mobile panels, anchored zoom and quiet interactions',
         bullets: [
@@ -583,6 +589,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: '恢復兩行小節高度',
+        bullets: ['修正兩行模式中只有和弦的小節被壓成一行，保留預設兩行高度；額外聲部只加高所在列。']
+      },
+      {
+        version: '0.9.19',
         date: '2026-10-26',
         title: '手機面板、縮放定位與俐落互動',
         bullets: [

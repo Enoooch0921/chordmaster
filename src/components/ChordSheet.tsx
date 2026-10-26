@@ -2466,7 +2466,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               // page has spare height. Voice count still reserves its full space.
               const notationRowHeight = Math.max(
                 row.bars.some(bar => bar?.chordTimingUnspecified) ? row.hasThreeNotationRows ? 120 : row.hasLowerNotationRows ? 90 : 50 : 0,
-                row.hasThreeNotationRows ? 94 : row.hasLowerNotationRows ? barRowCount === 1 ? 58 : 68 : 34
+                row.hasThreeNotationRows ? 94 : barRowCount === 1 ? row.hasLowerNotationRows ? 58 : 34 : 68
               ) + (row.extraRhythmRows ?? 0) * 22 + (row.extraJianpuRows ?? 0) * 24 + (row.extraChordPassRows ?? 0) * 36;
 
               return (

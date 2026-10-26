@@ -756,9 +756,15 @@ describe('ChordSheet preview input caret', () => {
     ] };
     const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
     expect(container.querySelector('[data-preview-section-id="intro"]')).toHaveStyle({ maxHeight: '92px', minHeight: '92px' });
-    expect(container.querySelector('[data-preview-section-id="verse"]')).toHaveStyle({ maxHeight: '34px' });
+    expect(container.querySelector('[data-preview-section-id="verse"]')).toHaveStyle({ maxHeight: '68px' });
     rerender(<ChordSheet song={{ ...source, barRowCount: 3 }} language="zh" currentKey="C" />);
     expect((container.querySelector('[data-preview-section-id="verse"]') as HTMLElement).style.maxHeight).toBe('');
+  });
+
+  it.each([undefined, 2, 1] as const)('preserves the selected height for chord-only rows (setting %s)', barRowCount => {
+    const { container } = render(<ChordSheet song={{ ...song, barRowCount }} language="zh" currentKey="C" />);
+    expect(container.querySelector('[data-sheet-bar-row-count]')).toHaveAttribute('data-sheet-bar-row-count', String(barRowCount ?? 2));
+    expect(container.querySelector('[data-preview-section-id="section-1"]')).toHaveStyle({ maxHeight: barRowCount === 1 ? '34px' : '68px' });
   });
 
   it('keeps sparse multi-voice notation near its chords while reserving every voice row', () => {
