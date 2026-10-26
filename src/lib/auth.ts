@@ -59,6 +59,7 @@ export const signInWithGoogleRedirect = async (nextPath = '/') => {
     provider: 'google',
     options: {
       redirectTo: callbackUrl.toString(),
+      queryParams: { prompt: 'select_account' },
       skipBrowserRedirect: isNative
     }
   });

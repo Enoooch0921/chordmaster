@@ -86,6 +86,14 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-26',
+        title: 'Google account selection at sign-in',
+        bullets: [
+          'Google sign-in now asks which account to use each time, so signing out of a secondary account lets you choose your main account again.'
+        ]
+      },
+      {
+        version: '0.9.16',
+        date: '2026-10-26',
         title: 'Safe source tracking across multiple setlists',
         bullets: [
           'Each setlist copy tracks its own source baseline: distinguish setlist edits, a newer library source, conflicts, and unknown legacy versions.',
@@ -552,6 +560,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-26',
+        title: '登入時選擇 Google 帳號',
+        bullets: [
+          '每次 Google 登入都會顯示帳號選擇，修正登出副帳號後無法改回主帳號的問題。'
+        ]
+      },
+      {
+        version: '0.9.16',
         date: '2026-10-26',
         title: '同曲跨歌單的來源版本與衝突判斷',
         bullets: [
