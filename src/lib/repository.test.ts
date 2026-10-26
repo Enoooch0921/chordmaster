@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project, Setlist, StoredSong, WorkspaceSnapshot } from '../types';
+import type { LibraryRole, Project, Setlist, StoredSong, WorkspaceSnapshot } from '../types';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -14,6 +14,8 @@ vi.mock('./supabase', () => ({
 }));
 
 import { createCloudRepository } from './repository';
+import { normalizeStoredSetlist } from './workspace';
+import { syncWorkspaceDiff } from './sync';
 
 const makeBuilder = (overrides: Record<string, unknown> = {}) => {
   const builder: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -109,6 +111,22 @@ describe('cloud repository personal workspace imports', () => {
     expect(capoQuery.in).toHaveBeenCalledWith('setlist_song_id', ['entry-1']);
     expect(result.joinedSetlists[0].songs[0].personalCapoOverride).toBe(0);
     expect(result.joinedProjects?.[0].setlists[0].songs[0].personalCapoOverride).toBe(0);
+  });
+
+  it('preserves server timestamps for shared project setlists instead of resetting them on every read', async () => {
+    const createdAt = '2026-10-01T08:00:00.000Z';
+    const updatedAt = '2026-10-26T08:00:00.000Z';
+    mocks.rpc.mockImplementation((name: string) => Promise.resolve({ error: null, data:
+      name === 'get_joined_setlists' ? [] : [{
+        id: 'project-1', name: 'Sunday', createdAt, updatedAt,
+        setlists: [{ id: 'setlist-1', name: 'Morning', createdAt, updatedAt, songs: [] }]
+      }]
+    }));
+    const result = await createRepository().loadJoinedWorkspace();
+    expect(result.joinedProjects?.[0]).toMatchObject({
+      createdAt: Date.parse(createdAt), updatedAt: Date.parse(updatedAt),
+      setlists: [{ createdAt: Date.parse(createdAt), updatedAt: Date.parse(updatedAt) }]
+    });
   });
 
   it('rejects a team destination before any per-record table is touched', async () => {
@@ -228,6 +246,58 @@ describe('cloud repository shared setlist updates', () => {
   });
 
   beforeEach(() => { vi.clearAllMocks(); });
+
+  it.each(['setlist_manager', 'editor', undefined] as Array<LibraryRole | undefined>)('passes the preflight role %s through sync without storing it in the local score', async (teamRole) => {
+    const entries = makeBuilder();
+    mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository();
+    repository.setActiveLibrary(teamRole ? 'team-1' : 'personal-1');
+    const saveSetlist = vi.spyOn(repository, 'saveSetlist');
+    const previous = makeSetlist(['kept']);
+    const current = makeSetlist(['kept', 'added']);
+    const localSnapshot = structuredClone(current);
+    const librarySong = makeSong();
+    await syncWorkspaceDiff({ repository, songs: [librarySong], savedSongs: [librarySong],
+      setlists: [current], savedSetlists: [previous], projects: [], savedProjects: [],
+      ...(teamRole ? { teamRole } : {}) });
+    expect(saveSetlist.mock.calls[0]).toHaveLength(teamRole ? 3 : 2);
+    if (teamRole) expect(saveSetlist.mock.calls[0][2]).toEqual({ teamRole });
+    for (const row of entries.upsert.mock.calls[0][0]) {
+      if (teamRole) expect(row.override_json.expectedTeamRole).toBe(teamRole);
+      else expect(row.override_json).not.toHaveProperty('expectedTeamRole');
+      expect(row.override_json.songData).not.toHaveProperty('expectedTeamRole');
+    }
+    expect(current).toEqual(localSnapshot);
+  });
+
+  it('rejects sync when the server detects a role change and retains entries that would have been removed', async () => {
+    const entries = makeBuilder({ upsert: vi.fn().mockResolvedValue({ error: new Error('Team role changed; reload permissions') }) });
+    mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository();
+    repository.setActiveLibrary('team-1');
+    const librarySong = makeSong();
+    await expect(syncWorkspaceDiff({ repository, teamRole: 'editor', songs: [librarySong], savedSongs: [librarySong],
+      setlists: [makeSetlist(['kept'])], savedSetlists: [makeSetlist(['kept', 'removed'])], projects: [], savedProjects: [] }))
+      .rejects.toThrow('Team role changed');
+    expect(entries.upsert.mock.calls[0][0][0].override_json.expectedTeamRole).toBe('editor');
+    expect(entries.delete).not.toHaveBeenCalled();
+  });
+
+  it('preserves a duplicate source through local recovery and sends it only for copied entries', async () => {
+    const entries = makeBuilder();
+    mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
+    const source = makeSetlist(['original', 'duplicate']);
+    source.songs[1].copySourceId = 'original';
+    const restored = normalizeStoredSetlist(JSON.parse(JSON.stringify(source)), new Map([['song-1', makeSong()]]), 0);
+    expect(restored.songs[1].copySourceId).toBe('original');
+    const repository = createRepository();
+    repository.setActiveLibrary('team-1');
+    await repository.saveSetlist(restored);
+    const rows = entries.upsert.mock.calls[0][0];
+    expect(rows[0].override_json).not.toHaveProperty('sourceSetlistSongId');
+    expect(rows[1].override_json.sourceSetlistSongId).toBe('original');
+    expect(rows[1].override_json.songData).not.toHaveProperty('copySourceId');
+  });
 
   it('upserts keys and additions before deleting only removed entries, preserving retained Capo foreign keys', async () => {
     const entries = makeBuilder();

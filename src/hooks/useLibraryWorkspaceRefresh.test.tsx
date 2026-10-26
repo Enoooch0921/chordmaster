@@ -31,7 +31,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 const setup = (load = vi.fn().mockResolvedValue(updated())) => {
   const repository = { loadLibraryContent: load } as unknown as WorkspaceRepository;
   const onUpdate = vi.fn();
-  const options = { repository, scope: 'same-user:personal', libraryId: 'personal', enabled: true,
+  const options: Parameters<typeof useLibraryWorkspaceRefresh>[0] = { repository, scope: 'same-user:personal', libraryId: 'personal', enabled: true,
     paused: false, workspace: initial, canApply: () => true, onUpdate };
   return { ...renderHook((props) => useLibraryWorkspaceRefresh(props), { initialProps: options }), options, load, onUpdate };
 };
@@ -87,6 +87,67 @@ describe('owned library cross-device updates', () => {
     rerender(options);
     await tick();
     expect(onUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('refreshes team setlists every 15 seconds without downloading the song catalogue each time', async () => {
+    const load = vi.fn().mockResolvedValue(initial);
+    const collections = vi.fn().mockResolvedValue(updated());
+    const { rerender, options, onUpdate } = setup(load);
+    await flush();
+    const repository = { loadLibraryContent: load, loadLibraryCollections: collections } as unknown as WorkspaceRepository;
+    rerender({ ...options, repository, refreshCollections: true });
+    await flush();
+    load.mockClear();
+    onUpdate.mockClear();
+    await tick(14999);
+    expect(collections).not.toHaveBeenCalled();
+    await tick(1);
+    expect(collections).toHaveBeenCalledExactlyOnceWith('personal', initial.songs, expect.any(AbortSignal));
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith(updated());
+    expect(load).not.toHaveBeenCalled();
+    await tick(285000);
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it('coalesces realtime notifications and catches up immediately when an edit finishes', async () => {
+    const load = vi.fn().mockResolvedValue(initial);
+    const collections = vi.fn().mockResolvedValue(updated());
+    const repository = { loadLibraryContent: load, loadLibraryCollections: collections } as unknown as WorkspaceRepository;
+    const props = { repository, scope: 'team', libraryId: 'team', enabled: true, paused: true,
+      refreshCollections: true, refreshVersion: 0, workspace: initial, canApply: () => true, onUpdate: vi.fn() };
+    const { rerender } = renderHook((options) => useLibraryWorkspaceRefresh(options), { initialProps: props });
+    await flush();
+    rerender({ ...props, refreshVersion: 1 });
+    await tick(250);
+    expect(load).not.toHaveBeenCalled();
+    rerender({ ...props, paused: false, refreshVersion: 1 });
+    await tick(250);
+    expect(load).toHaveBeenCalledOnce();
+    rerender({ ...props, paused: false, refreshVersion: 2 });
+    await tick(100);
+    rerender({ ...props, paused: false, refreshVersion: 3 });
+    await tick(250);
+    expect(collections).toHaveBeenCalledOnce();
+  });
+
+  it('rechecks events that arrive during a read and preserves edits racing a collection response', async () => {
+    let resolve!: (value: LibraryContent) => void;
+    const load = vi.fn().mockResolvedValue(initial);
+    const collections = vi.fn().mockImplementationOnce(() => new Promise((done) => { resolve = done; }))
+      .mockResolvedValue(updated());
+    const repository = { loadLibraryContent: load, loadLibraryCollections: collections } as unknown as WorkspaceRepository;
+    const props = { repository, scope: 'team', libraryId: 'team', enabled: true, paused: false,
+      refreshCollections: true, refreshVersion: 0, workspace: initial, canApply: () => true, onUpdate: vi.fn() };
+    const { rerender } = renderHook((options) => useLibraryWorkspaceRefresh(options), { initialProps: props });
+    await flush();
+    props.onUpdate.mockClear();
+    await tick(15000);
+    rerender({ ...props, workspace: updated(), refreshVersion: 1 });
+    await act(async () => resolve(initial));
+    expect(props.onUpdate).not.toHaveBeenCalled();
+    await tick(250);
+    expect(collections).toHaveBeenCalledTimes(2);
+    expect(props.onUpdate).toHaveBeenCalledExactlyOnceWith(updated());
   });
 
   it('discards a read racing a local edit even when that edit has already been saved', async () => {

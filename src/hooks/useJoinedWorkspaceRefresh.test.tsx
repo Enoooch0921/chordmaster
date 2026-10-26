@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JoinedSetlist } from '../types';
 import type { WorkspaceRepository } from '../lib/repository';
 import { reconcileJoinedWorkspace, type JoinedWorkspace } from '../lib/joinedWorkspaceRefresh';
-import { useJoinedWorkspaceRefresh } from './useJoinedWorkspaceRefresh';
+import { JOINED_WORKSPACE_REFRESH_MS, useJoinedWorkspaceRefresh } from './useJoinedWorkspaceRefresh';
 
 const setlist: JoinedSetlist = {
   id: 'sl', name: 'Sunday', isJoined: true, displayMode: 'chord-movable-key', createdAt: 1, updatedAt: 1,
@@ -15,7 +15,7 @@ const remote: JoinedWorkspace = { joinedSetlists: [{ ...setlist, songs: [
   { ...setlist.songs[0], overrideKey: 'D', personalCapoOverride: undefined, order: 1 }
 ] }], joinedProjects: [] };
 const flush = () => act(async () => { await Promise.resolve(); });
-const tick = (ms = 5 * 60 * 1000) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+const tick = (ms = JOINED_WORKSPACE_REFRESH_MS) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -57,7 +57,9 @@ describe('joined setlist updates', () => {
     const { onUpdate, load } = setup();
     await flush();
     expect(onUpdate.mock.calls[0][0].joinedSetlists[0].songs).toHaveLength(2);
-    await tick();
+    await tick(4999);
+    expect(load).toHaveBeenCalledTimes(1);
+    await tick(1);
     expect(load).toHaveBeenCalledTimes(2);
   });
 
@@ -73,6 +75,17 @@ describe('joined setlist updates', () => {
     rerender(options);
     await tick();
     expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repeatedly poll an account with no joined collections', async () => {
+    const load = vi.fn().mockResolvedValue({ joinedSetlists: [], joinedProjects: [] });
+    const { rerender, options } = setup(load);
+    rerender({ ...options, joinedSetlists: [] });
+    await flush();
+    await tick(30000);
+    expect(load).toHaveBeenCalledTimes(1);
+    await tick(270000);
+    expect(load).toHaveBeenCalledTimes(2);
   });
 
   it('ignores a response when a local edit or leaving a setlist changed the snapshot', async () => {
@@ -120,5 +133,18 @@ describe('joined setlist updates', () => {
     act(() => window.dispatchEvent(new Event('focus')));
     await flush();
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes a restored page immediately and reports an initially offline connection', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const { load, result } = setup();
+    await flush();
+    expect(result.current).toBe(true);
+    expect(load).not.toHaveBeenCalled();
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    act(() => window.dispatchEvent(new Event('pageshow')));
+    await flush();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(result.current).toBe(false);
   });
 });

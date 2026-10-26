@@ -264,10 +264,16 @@ const upsertProfile = async (userId: string, email: string, name: string, pictur
   }
 };
 
+export interface SetlistSaveOptions {
+  // Captured at the caller's permission preflight, not re-read mid-save.
+  teamRole?: LibraryRole;
+}
+
 export interface WorkspaceRepository {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   loadLibraryWorkspace(libraryId: string): Promise<WorkspaceSnapshot>;
   loadLibraryContent(libraryId: string, signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>>;
+  loadLibraryCollections(libraryId: string, knownSongs: StoredSong[], signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>>;
   loadLibrarySongs(libraryId: string): Promise<StoredSong[]>;
   loadPersonalWorkspace(): Promise<WorkspaceSnapshot>;
   loadJoinedWorkspace(): Promise<Pick<WorkspaceSnapshot, 'joinedSetlists' | 'joinedProjects'>>;
@@ -296,7 +302,7 @@ export interface WorkspaceRepository {
   syncPersonalSongFromTeam(song: StoredSong): Promise<StoredSong>;
   savePersonalSong(song: StoredSong): Promise<void>;
   saveSong(song: StoredSong): Promise<void>;
-  saveSetlist(setlist: Setlist, previousSetlist?: Setlist): Promise<void>;
+  saveSetlist(setlist: Setlist, previousSetlist?: Setlist, options?: SetlistSaveOptions): Promise<void>;
   saveProject(project: Project): Promise<void>;
   deleteSong(id: string): Promise<void>;
   deleteSetlist(id: string): Promise<void>;
@@ -537,7 +543,7 @@ const normalizeJoinedSetlistRpcPayload = (payload: unknown): JoinedSetlist[] => 
     .filter((setlist): setlist is JoinedSetlist => Boolean(setlist));
 };
 
-const VALID_LIBRARY_ROLES = new Set<LibraryRole>(['owner', 'editor', 'setlist_manager', 'viewer']);
+const VALID_LIBRARY_ROLES = new Set<LibraryRole>(['owner', 'admin', 'editor', 'setlist_manager', 'viewer']);
 const VALID_LIBRARY_KINDS = new Set(['personal', 'team']);
 
 const normalizeLibrarySummary = (value: unknown): CloudLibrarySummary | null => {
@@ -834,6 +840,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   async loadLibraryContent() {
     return loadPersistentWorkspaceSnapshot();
   },
+  async loadLibraryCollections() {
+    return loadPersistentWorkspaceSnapshot();
+  },
   async loadLibrarySongs() {
     return (await loadPersistentWorkspaceSnapshot()).songs;
   },
@@ -1055,7 +1064,12 @@ const ensureProfileAndLibrary = async (userId: string, email: string, name: stri
   };
 };
 
-const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: AbortSignal): Promise<WorkspaceSnapshot> => {
+const getLibraryWorkspace = async (
+  libraryId: string,
+  userId?: string,
+  signal?: AbortSignal,
+  knownSongs?: StoredSong[]
+): Promise<WorkspaceSnapshot> => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
@@ -1066,7 +1080,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: 
     { data: setlistRows, error: setlistError },
     { data: projectRows, error: projectError }
   ] = await Promise.all([
-    supabase
+    knownSongs ? Promise.resolve({ data: [] as SongRow[], error: null }) : supabase
       .from('songs')
       .select(SONG_SELECT)
       .eq('library_id', libraryId)
@@ -1114,6 +1128,16 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: 
     throw setlistSongError;
   }
 
+  // A new source can arrive before its library notification. Always resolve it,
+  // even if the setlist embeds a score: sync must not mistake a missing local
+  // source for an imported song and try to re-create it with the viewer's role.
+  if (knownSongs) {
+    const knownIds = new Set(knownSongs.map((song) => song.id));
+    if ((setlistSongRows ?? []).some((entry) => !knownIds.has(entry.song_id))) {
+      return getLibraryWorkspace(libraryId, userId, requestSignal);
+    }
+  }
+
   const { data: assignmentRows, error: assignmentError } = userId && setlistIds.length > 0
     ? await supabase
       .from('setlist_editor_assignments')
@@ -1136,7 +1160,7 @@ const getLibraryWorkspace = async (libraryId: string, userId?: string, signal?: 
 
   const personalCapoBySetlistSongId = new Map((personalCapoRows ?? []).map((row) => [row.setlist_song_id, row.capo] as const));
   const assignedSetlistIds = new Set((assignmentRows ?? []).map((row) => row.setlist_id));
-  const songs = (songRows ?? []).map(mapSongRow);
+  const songs = knownSongs ?? (songRows ?? []).map(mapSongRow);
   const songsById = new Map(songs.map((song) => [song.id, song] as const));
   const setlists = mapSetlistRows(
     setlistRows ?? [],
@@ -1197,15 +1221,19 @@ const getJoinedProjects = async (throwOnError = false): Promise<JoinedProject[]>
           }
         }
         const setlists = rawSetlists.map((sl, slIndex) =>
-          normalizeStoredSetlist(sl, embeddedSongsById, slIndex)
+          normalizeStoredSetlist({
+            ...sl,
+            createdAt: parseRemoteTimestamp(sl.createdAt),
+            updatedAt: parseRemoteTimestamp(sl.updatedAt)
+          }, embeddedSongsById, slIndex)
         );
         return {
           id,
           name: typeof row.name === 'string' && row.name.trim() ? row.name : `Shared Project ${index + 1}`,
           archived: Boolean(row.archived),
           role: row.role === 'manager' ? 'manager' : 'viewer',
-          createdAt: row.createdAt ? new Date(row.createdAt as string).getTime() : Date.now(),
-          updatedAt: row.updatedAt ? new Date(row.updatedAt as string).getTime() : Date.now(),
+          createdAt: parseRemoteTimestamp(row.createdAt),
+          updatedAt: parseRemoteTimestamp(row.updatedAt),
           isJoined: true,
           setlists
         };
@@ -1327,7 +1355,7 @@ const setlistSongsSignature = (songs: SetlistSong[]) => JSON.stringify(
   reindexSetlistSongs(songs).map(({ capo: _sharedCapo, personalCapoOverride: _personalCapo, ...rest }) => rest)
 );
 
-const persistSetlistSongs = async (setlist: Setlist, previousSetlist?: Setlist) => {
+const persistSetlistSongs = async (setlist: Setlist, previousSetlist?: Setlist, options?: SetlistSaveOptions) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
@@ -1348,6 +1376,8 @@ const persistSetlistSongs = async (setlist: Setlist, previousSetlist?: Setlist) 
     song_id: song.songId,
     order_index: index,
     override_json: {
+      ...(song.copySourceId ? { sourceSetlistSongId: song.copySourceId } : {}),
+      ...(options?.teamRole ? { expectedTeamRole: options.teamRole } : {}),
       overrideKey: song.overrideKey,
       sectionOrder: song.sectionOrder,
       songData: song.songData
@@ -1459,7 +1489,8 @@ export const createCloudRepository = (params: {
   const saveSetlistToLibrary = async (
     setlist: Setlist,
     libraryId: string,
-    previousSetlist?: Setlist
+    previousSetlist?: Setlist,
+    options?: SetlistSaveOptions
   ) => {
     if (!supabase) {
       throw new Error('Supabase is not configured.');
@@ -1488,7 +1519,7 @@ export const createCloudRepository = (params: {
     await persistLibraryRow('setlists', payload, existingSetlist);
 
     if (!songsUnchanged) {
-      await persistSetlistSongs(setlist, previousSetlist);
+      await persistSetlistSongs(setlist, previousSetlist, options);
     }
   };
 
@@ -1566,6 +1597,12 @@ export const createCloudRepository = (params: {
       // Read the active library without joined collections, cache writes, or
       // changing the target library used by subsequent saves.
       return getLibraryWorkspace(libraryId, params.userId, signal);
+    },
+
+    async loadLibraryCollections(libraryId, knownSongs, signal) {
+      // Frequent team updates need setlist score copies, not the entire song
+      // catalogue. Keep the supplied songs intact until the next full refresh.
+      return getLibraryWorkspace(libraryId, params.userId, signal, knownSongs);
     },
 
     async loadLibrarySongs(libraryId) {
@@ -1787,10 +1824,37 @@ export const createCloudRepository = (params: {
         )
         .subscribe();
 
+      // Older self-hosted installations may not publish collection tables yet.
+      // Keep these bindings separate so their absence cannot break song or
+      // membership events. The collection polling path remains authoritative.
+      const collectionChannel = client
+        .channel(`library-collections:${libraryId}:${crypto.randomUUID()}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'setlists', filter: `library_id=eq.${libraryId}` },
+          () => { if (subscribed) onChange('setlists'); }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'projects', filter: `library_id=eq.${libraryId}` },
+          () => { if (subscribed) onChange('projects'); }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'setlist_songs' },
+          () => {
+            // Entries have no library_id. Reload only the active library,
+            // including entry updates that arrive after the parent save.
+            if (subscribed) onChange('setlists');
+          }
+        )
+        .subscribe();
+
       return () => {
         if (!subscribed) return;
         subscribed = false;
         void client.removeChannel(channel);
+        void client.removeChannel(collectionChannel);
       };
     },
 
@@ -1875,9 +1939,9 @@ export const createCloudRepository = (params: {
       await saveSongToLibrary(song, libraryId);
     },
 
-    async saveSetlist(setlist, previousSetlist) {
+    async saveSetlist(setlist, previousSetlist, options) {
       const libraryId = await ensureLibraryId();
-      await saveSetlistToLibrary(setlist, libraryId, previousSetlist);
+      await saveSetlistToLibrary(setlist, libraryId, previousSetlist, options);
     },
 
     async saveProject(project) {

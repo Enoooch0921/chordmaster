@@ -16,6 +16,7 @@ interface WorkspaceOptionsProps {
 
 export default function WorkspaceOptions({ language, libraries, activeId, disabled, canManage, createOpen, onSelect, onManage, onCreate }: WorkspaceOptionsProps) {
   const zh = language === 'zh';
+  const activeLibrary = libraries.find((library) => library.id === activeId);
   return (
     <div>
       <div aria-label={zh ? '切換工作區' : 'Switch workspace'} className="max-h-52 overflow-y-auto">
@@ -27,9 +28,10 @@ export default function WorkspaceOptions({ language, libraries, activeId, disabl
           </button>
         ))}
       </div>
+      {activeLibrary?.kind === 'team' ? <p className="px-2 py-2 text-xs leading-5 text-gray-500">{zh ? '團隊成員都能查看此工作區的歌譜與歌單。專案用來整理歌單；大家開啟同一份歌單，就能使用同一份編排。' : 'Team members can view the charts and setlists in this workspace. Projects organize setlists; open the same setlist to use the same arrangement.'}</p> : null}
       <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2 border-t border-gray-100">
-        {canManage ? <button type="button" onClick={onManage} aria-haspopup="dialog" className="inline-flex min-h-11 items-center gap-1.5 px-2 text-xs font-medium text-gray-600 hover:text-indigo-700"><Users size={14} />{zh ? '管理成員' : 'Manage members'}</button> : null}
-        <button type="button" onClick={onCreate} aria-expanded={createOpen} className="inline-flex min-h-11 items-center gap-1 px-2 text-xs text-gray-500 hover:text-indigo-700"><Plus size={14} />{zh ? '建立團隊' : 'Create team'}</button>
+        {canManage ? <button type="button" disabled={disabled} onClick={onManage} aria-haspopup="dialog" className="inline-flex min-h-11 items-center gap-1.5 px-2 text-xs font-medium text-gray-600 hover:text-indigo-700 disabled:opacity-40"><Users size={14} />{zh ? '管理成員' : 'Manage members'}</button> : null}
+        <button type="button" disabled={disabled} onClick={onCreate} aria-expanded={createOpen} className="inline-flex min-h-11 items-center gap-1 px-2 text-xs text-gray-500 hover:text-indigo-700 disabled:opacity-40"><Plus size={14} />{zh ? '建立團隊' : 'Create team'}</button>
       </div>
     </div>
   );

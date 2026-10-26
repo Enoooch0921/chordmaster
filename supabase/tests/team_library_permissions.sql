@@ -335,6 +335,7 @@ join public.songs song on song.id = tsi.team_song_id
 where tsi.team_library_id = 'test-team-a'
   and tsi.source_song_id = 'source-a'
   and tsi.is_primary;
+grant select on imported_structure_before to authenticated;
 
 insert into public.setlist_songs(id, setlist_id, song_id, override_json)
 select
@@ -440,10 +441,7 @@ select pg_temp.assert_true(
   public.inspect_team_song_import('test-team-a', array['source-a'])
     #>> '{songs,0,existingSong,songId}' = (
       select team_song_id
-      from public.team_song_imports
-      where team_library_id='test-team-a'
-        and source_song_id='source-a'
-        and is_primary
+      from imported_structure_before
     )
   and public.inspect_team_song_import('test-team-a', array['source-a'])
     #>> '{songs,0,existingSong,currentKey}' = 'F'

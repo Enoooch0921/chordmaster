@@ -66,16 +66,17 @@ select pg_temp.assert_true(
   'an existing invitee receives one in-app notification'
 );
 
-select id::text as live_invite_id
+create temporary table invite_fixture on commit drop as
+select id
 from public.team_invites
-where library_id = 'invite-inbox-team' and revoked_at is null
-\gset
+where library_id = 'invite-inbox-team' and revoked_at is null;
+grant select on invite_fixture to authenticated;
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '20000000-0000-0000-0000-000000000003', true);
 select pg_temp.assert_true(jsonb_array_length(public.get_my_team_invites()) = 0, 'another account cannot discover the invitation');
 select pg_temp.expect_error(
-  format('select public.accept_my_team_invite(%L::uuid)', :'live_invite_id'),
+  format('select public.accept_my_team_invite(%L::uuid)', (select id from invite_fixture)),
   'another account cannot accept the invitation'
 );
 reset role;
@@ -86,7 +87,7 @@ select pg_temp.assert_true(
   public.get_my_team_invites() #>> '{0,libraryName}' = 'Inbox Team',
   'the invitee sees the team invitation in their inbox'
 );
-select public.accept_my_team_invite(:'live_invite_id'::uuid);
+select public.accept_my_team_invite((select id from invite_fixture));
 reset role;
 
 select pg_temp.assert_true(

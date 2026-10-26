@@ -3,6 +3,8 @@ import type { WorkspaceRepository } from '../lib/repository';
 import type { WorkspaceSnapshot } from '../types';
 
 const SUCCESS_REFRESH_MS = 5 * 60 * 1000;
+const COLLECTION_REFRESH_MS = 15000;
+const CHANGE_DEBOUNCE_MS = 250;
 
 export type LibraryContent = Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>;
 
@@ -12,6 +14,10 @@ interface Options {
   libraryId: string | null;
   enabled: boolean;
   paused: boolean;
+  // Team setlist copies need frequent reads even when Realtime publication is
+  // unavailable, without repeatedly downloading the entire song catalogue.
+  refreshCollections?: boolean;
+  refreshVersion?: number;
   workspace: Pick<LibraryContent, 'songs' | 'setlists' | 'projects'>;
   // Check synchronous mutation/storage guards too, before React has rerendered.
   canApply: () => boolean;
@@ -23,22 +29,30 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
   const latest = useRef(options);
   latest.current = options;
   const [refreshFailed, setRefreshFailed] = useState(false);
-  const { repository, scope, libraryId, enabled } = options;
+  const requestRefreshRef = useRef<(() => void) | null>(null);
+  const triggerRef = useRef({ paused: options.paused, version: options.refreshVersion });
+  const { repository, scope, libraryId, enabled, refreshCollections = false } = options;
 
   useEffect(() => {
     setRefreshFailed(false);
     if (!repository || !libraryId || !enabled) return;
     let cancelled = false;
     let inFlight = false;
+    let queued = false;
+    let fullRefreshRequested = false;
     let failures = 0;
+    let lastFullRefreshAt: number | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
     const canRefresh = () => document.visibilityState !== 'hidden' && navigator.onLine !== false;
     const clearTimer = () => { clearTimeout(timer); timer = undefined; };
-    const refresh = async () => {
-      if (cancelled || inFlight || !canRefresh()) return;
+    const refresh = async (forceFull = false) => {
+      fullRefreshRequested ||= forceFull;
+      if (cancelled || !canRefresh()) return;
+      if (inFlight) { queued = true; return; }
       clearTimer();
       inFlight = true;
+      queued = false;
       const snapshot = latest.current;
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -46,7 +60,12 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
         controller = new AbortController();
         const requestController = controller;
         timeout = setTimeout(() => requestController.abort(), 15000);
-        const remote = await repository.loadLibraryContent(libraryId, controller.signal);
+        const fullRead = fullRefreshRequested || !refreshCollections || lastFullRefreshAt === null
+          || Date.now() - lastFullRefreshAt >= SUCCESS_REFRESH_MS;
+        fullRefreshRequested = false;
+        const remote = fullRead
+          ? await repository.loadLibraryContent(libraryId, controller.signal)
+          : await repository.loadLibraryCollections(libraryId, snapshot.workspace.songs, controller.signal);
         if (cancelled) return;
         failures = 0;
         setRefreshFailed(false);
@@ -56,6 +75,7 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
             || current.workspace.songs !== snapshot.workspace.songs
             || current.workspace.setlists !== snapshot.workspace.setlists
             || current.workspace.projects !== snapshot.workspace.projects) return;
+        if (fullRead) lastFullRefreshAt = Date.now();
         current.onUpdate(remote);
       } catch {
         if (!cancelled) { failures += 1; setRefreshFailed(true); }
@@ -65,12 +85,21 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
         if (!cancelled && canRefresh()) {
           const delay = failures > 0
             ? Math.min(30000, 5000 * 2 ** Math.min(failures, 3))
-            : SUCCESS_REFRESH_MS;
+            : queued && !latest.current.paused && latest.current.canApply()
+              ? CHANGE_DEBOUNCE_MS
+              : refreshCollections ? COLLECTION_REFRESH_MS : SUCCESS_REFRESH_MS;
           timer = setTimeout(() => void refresh(), delay);
         }
       }
     };
-    const resume = () => { clearTimer(); if (canRefresh()) void refresh(); };
+    const requestRefresh = () => {
+      if (cancelled || !canRefresh()) return;
+      if (inFlight) { queued = true; return; }
+      clearTimer();
+      timer = setTimeout(() => void refresh(), CHANGE_DEBOUNCE_MS);
+    };
+    requestRefreshRef.current = requestRefresh;
+    const resume = () => { clearTimer(); if (canRefresh()) void refresh(true); };
     const offline = () => { clearTimer(); setRefreshFailed(true); };
     void refresh();
     window.addEventListener('focus', resume);
@@ -82,13 +111,22 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
       cancelled = true;
       clearTimer();
       controller?.abort();
+      if (requestRefreshRef.current === requestRefresh) requestRefreshRef.current = null;
       window.removeEventListener('focus', resume);
       window.removeEventListener('online', resume);
       window.removeEventListener('offline', offline);
       window.removeEventListener('pageshow', resume);
       document.removeEventListener('visibilitychange', resume);
     };
-  }, [repository, scope, libraryId, enabled]);
+  }, [repository, scope, libraryId, enabled, refreshCollections]);
+
+  useEffect(() => {
+    const previous = triggerRef.current;
+    triggerRef.current = { paused: options.paused, version: options.refreshVersion };
+    if ((previous.paused && !options.paused) || previous.version !== options.refreshVersion) {
+      requestRefreshRef.current?.();
+    }
+  }, [options.paused, options.refreshVersion]);
 
   return refreshFailed;
 };

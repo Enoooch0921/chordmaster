@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceRepository } from '../lib/repository';
 import { reconcileJoinedWorkspace, type JoinedWorkspace } from '../lib/joinedWorkspaceRefresh';
 
-const SUCCESS_REFRESH_MS = 5 * 60 * 1000;
+export const JOINED_WORKSPACE_REFRESH_MS = 5000;
+const EMPTY_WORKSPACE_REFRESH_MS = 5 * 60 * 1000;
 
 interface Options extends JoinedWorkspace {
   repository: WorkspaceRepository | null;
@@ -49,19 +50,23 @@ export const useJoinedWorkspaceRefresh = (options: Options) => {
       } finally {
         inFlight = false;
         if (!cancelled && canRefresh()) {
+          const hasSharedContent = latest.current.joinedSetlists.length > 0
+            || Boolean(latest.current.joinedProjects?.length);
           const delay = failures > 0
             ? Math.min(30000, 5000 * 2 ** Math.min(failures, 3))
-            : SUCCESS_REFRESH_MS;
+            : hasSharedContent ? JOINED_WORKSPACE_REFRESH_MS : EMPTY_WORKSPACE_REFRESH_MS;
           timer = setTimeout(() => void refresh(), delay);
         }
       }
     };
     const resume = () => { clearTimer(); if (canRefresh()) void refresh(); };
     const offline = () => { clearTimer(); setRefreshFailed(true); };
-    void refresh();
+    if (navigator.onLine === false) setRefreshFailed(true);
+    else void refresh();
     window.addEventListener('focus', resume);
     window.addEventListener('online', resume);
     window.addEventListener('offline', offline);
+    window.addEventListener('pageshow', resume);
     document.addEventListener('visibilitychange', resume);
     return () => {
       cancelled = true;
@@ -69,6 +74,7 @@ export const useJoinedWorkspaceRefresh = (options: Options) => {
       window.removeEventListener('focus', resume);
       window.removeEventListener('online', resume);
       window.removeEventListener('offline', offline);
+      window.removeEventListener('pageshow', resume);
       document.removeEventListener('visibilitychange', resume);
     };
   }, [repository, scope, enabled]);

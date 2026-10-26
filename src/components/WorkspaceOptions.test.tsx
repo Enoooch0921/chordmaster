@@ -24,3 +24,19 @@ it('keeps switching, management and creation available without selecting the cur
   expect(screen.queryByRole('button', { name: '管理成員' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '個人區' })).toBeDisabled();
 });
+
+it('blocks management and creation while the workspace is switching or saving', async () => {
+  const user = userEvent.setup();
+  const onManage = vi.fn();
+  const onCreate = vi.fn();
+  const libraries = [{ id: 'team', kind: 'team' as const, name: 'TopWorship', role: 'owner' as const, ownerUserId: 'me', createdAt: '', updatedAt: '' }];
+  render(<WorkspaceOptions language="zh" libraries={libraries} activeId="team" disabled canManage createOpen={false} onSelect={vi.fn()} onManage={onManage} onCreate={onCreate} />);
+  const manage = screen.getByRole('button', { name: '管理成員' });
+  const create = screen.getByRole('button', { name: '建立團隊' });
+  expect(manage).toBeDisabled();
+  expect(create).toBeDisabled();
+  await user.click(manage);
+  await user.click(create);
+  expect(onManage).not.toHaveBeenCalled();
+  expect(onCreate).not.toHaveBeenCalled();
+});

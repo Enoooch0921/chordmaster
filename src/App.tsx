@@ -77,7 +77,10 @@ import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
 import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
-import { getTeamRoleLabel } from './constants/teamRoles';
+import { canManageTeamMember, DEFAULT_TEAM_INVITE_ROLE, getAssignableTeamRoles, getTeamRoleLabel } from './constants/teamRoles';
+import { resolveSetlistCopySourceId } from './lib/teamSetlistCopy';
+import { canArrangeTeamSetlist, canEditTeamSetlistScore, canManageTeamProject, isTeamAdministrator } from './lib/teamPermissions';
+import { assertTeamWorkspaceSaveAllowed, TeamWorkspacePermissionError } from './lib/teamWorkspacePermissions';
 import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, ChordSheetPreviewBarContextMenuTarget, ChordSheetPreviewBarTarget, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
@@ -538,8 +541,8 @@ interface GoogleUserSession {
   picture?: string;
 }
 
-const TEAM_EDIT_ROLES = new Set<LibraryRole>(['owner', 'editor']);
-const TEAM_SETLIST_CREATE_ROLES = new Set<LibraryRole>(['owner', 'editor', 'setlist_manager']);
+const TEAM_EDIT_ROLES = new Set<LibraryRole>(['owner', 'admin', 'editor']);
+const TEAM_SETLIST_CREATE_ROLES = new Set<LibraryRole>(['owner', 'admin', 'editor', 'setlist_manager']);
 
 const getUnknownErrorMessage = (error: unknown) => {
   if (error instanceof Error && error.message.trim()) {
@@ -1373,6 +1376,7 @@ const normalizeSetlistSong = (setlistId: string, setlistSong: Partial<SetlistSon
     id: typeof setlistSong.id === 'string' && setlistSong.id.trim() ? setlistSong.id : createSetlistSongId(),
     setlistId,
     songId,
+    copySourceId: typeof setlistSong.copySourceId === 'string' && setlistSong.copySourceId.trim() ? setlistSong.copySourceId : undefined,
     order: typeof setlistSong.order === 'number' && Number.isFinite(setlistSong.order) ? setlistSong.order : index,
     overrideKey: typeof setlistSong.overrideKey === 'string' && VALID_KEYS.has(setlistSong.overrideKey)
       ? setlistSong.overrideKey as Key
@@ -2260,7 +2264,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [teamLibraryUpdatePending, setTeamLibraryUpdatePending] = useState(false);
   const [isRefreshingTeamLibrary, setIsRefreshingTeamLibrary] = useState(false);
   const [teamInviteEmail, setTeamInviteEmail] = useState('');
-  const [teamInviteRole, setTeamInviteRole] = useState<Exclude<LibraryRole, 'owner'>>('setlist_manager');
+  const [teamInviteRole, setTeamInviteRole] = useState<Exclude<LibraryRole, 'owner'>>(DEFAULT_TEAM_INVITE_ROLE);
   const [isCreatingTeamInvite, setIsCreatingTeamInvite] = useState(false);
   const [updatingTeamMemberUserId, setUpdatingTeamMemberUserId] = useState<string | null>(null);
   const [teamInviteShareUrl, setTeamInviteShareUrl] = useState<string | null>(null);
@@ -2429,7 +2433,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     [songs]
   );
   const canCreateTeamSetlists = !isTeamWorkspace || TEAM_SETLIST_CREATE_ROLES.has(activeLibraryRole);
-  const canManageActiveTeam = isTeamWorkspace && activeLibraryRole === 'owner';
+  const canManageActiveTeam = isTeamWorkspace && isTeamAdministrator(activeLibraryRole);
   // Keep the create-team form collapsed by default so it never permanently
   // compresses the sidebar; it only expands when the user opens it explicitly.
   const shouldShowCreateTeamForm = isCreateTeamOpen;
@@ -2461,10 +2465,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   songsRef.current = songs;
   const setlistsRef = useRef(setlists);
   setlistsRef.current = setlists;
+  const [libraryRefreshVersion, setLibraryRefreshVersion] = useState(0);
   const libraryWorkspaceRefreshFailed = useLibraryWorkspaceRefresh({
     repository: cloudRepositoryRef.current,
     scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
     libraryId: activeLibraryId,
+    refreshCollections: isTeamWorkspace,
+    refreshVersion: libraryRefreshVersion,
     enabled: isCloudMode && workspaceOwnerId === authenticatedUser?.id
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
     paused: workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
@@ -2637,21 +2644,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     : firstAvailableSetlist;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
   const canEditOwnedTeamSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'> | null | undefined) => (
-    activeLibraryRole === 'owner'
-    || (
-      (activeLibraryRole === 'editor' || activeLibraryRole === 'setlist_manager')
-      && Boolean(setlist)
-      && (setlist?.createdBy === authenticatedUser?.id || setlist?.assignedToCurrentUser === true)
-    )
+    canArrangeTeamSetlist(activeLibraryRole, authenticatedUser?.id, setlist)
   );
   const canEditSelectedSetlist = !isTeamWorkspace
     ? !isJoinedSetlist
     : !isJoinedSetlist && canEditOwnedTeamSetlist(selectedSetlist);
+  const canEditSelectedSetlistContent = canEditSelectedSetlist && (!isTeamWorkspace
+    || canEditTeamSetlistScore(activeLibraryRole, authenticatedUser?.id, selectedSetlist));
   const canManageTeamSetlistAssignments = (setlist: Pick<Setlist, 'createdBy'> | null | undefined) => Boolean(
     isTeamWorkspace
     && setlist
     && (
-      activeLibraryRole === 'owner'
+      isTeamAdministrator(activeLibraryRole)
       || (
         (activeLibraryRole === 'editor' || activeLibraryRole === 'setlist_manager')
         && setlist.createdBy === authenticatedUser?.id
@@ -2692,8 +2696,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   // managers get their own sharing path after selectedJoinedProject is known.
   const canCreateProject = canCreateTeamSetlists;
   const canManageProject = (project: Pick<Project, 'createdBy'>) => !isTeamWorkspace
-    || activeLibraryRole === 'owner'
-    || ((activeLibraryRole === 'editor' || activeLibraryRole === 'setlist_manager') && project.createdBy === authenticatedUser?.id);
+    || canManageTeamProject(activeLibraryRole, authenticatedUser?.id, project);
   const canManageProjectById = (projectId: string | null | undefined) => !projectId
     || Boolean(projects.find((project) => project.id === projectId && canManageProject(project)));
   const canChangeSetlistProject = (
@@ -2707,7 +2710,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     && canCreateNewShareLink
     && canManageProject(project)
   );
-  const canOpenEditor = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs && hasSongs;
+  const canOpenEditor = isSetlistMode ? canEditSelectedSetlistContent : canEditTeamSongs && hasSongs;
   const canChangeCurrentKey = isSetlistMode ? canEditSelectedSetlistKey : canEditTeamSongs;
   // Cloud setlist capo is a per-account preference, so read-only setlist
   // viewers may still adjust it without mutating the shared setlist.
@@ -3792,6 +3795,29 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
     try {
       setSyncStatus('syncing');
+      const teamRoleAtSave = isTeamWorkspace ? activeLibraryRoleRef.current : undefined;
+      if (isTeamWorkspace) {
+        try {
+          assertTeamWorkspaceSaveAllowed(
+            teamRoleAtSave!,
+            authenticatedUser.id,
+            { songs: nextSongs, setlists: nextSetlists, projects: nextProjects },
+            { songs: savedSongs, setlists: savedSetlists, projects: savedProjects },
+          );
+        } catch (error) {
+          if (!(error instanceof TeamWorkspacePermissionError)) throw error;
+          const messages = {
+            'team-library-read-only': '目前權限無法儲存曲庫修改。',
+            'team-setlist-read-only': '目前權限無法儲存這份歌單，請確認協作指派。',
+            'team-project-read-only': '目前權限無法管理這個專案或移動其中的歌單。',
+            'team-score-read-only': '目前權限只能編排歌單與設定 Key，無法儲存和弦、歌詞或段落修改。',
+          };
+          const draftMessage = localStorageError
+            ? (language === 'zh' ? '本機草稿寫入失敗，請保留頁面並下載目前修改。' : 'The local draft could not be saved. Keep this page open and download your changes.')
+            : (language === 'zh' ? '修改已保留在本機團隊草稿，請由有權限的人協助處理。' : 'Changes remain in your local team draft. Ask someone with the required access to help.');
+          throw new Error(`${language === 'zh' ? messages[error.code] : error.message}\n\n${draftMessage}`);
+        }
+      }
       await syncWorkspaceDiff({
         repository: cloudRepositoryRef.current,
         songs: nextSongs,
@@ -3799,7 +3825,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         projects: nextProjects,
         savedSongs,
         savedSetlists,
-        savedProjects
+        savedProjects,
+        teamRole: teamRoleAtSave,
       });
     } catch (error) {
       let pendingSyncError: unknown = null;
@@ -3967,7 +3994,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     if (!selectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) {
       return;
     }
-    if (!canEditSelectedSetlist) {
+    if (!canEditSelectedSetlistContent) {
       return;
     }
 
@@ -3989,7 +4016,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   };
 
   const handleBookLyricsChange = (itemId: string, lyricsDoc: Song['lyricsDoc']) => {
-    if (!canEditSelectedSetlist) return;
+    if (!canEditSelectedSetlistContent) return;
     const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
     if (!entry) return;
     const previous = ensureSongEditingIds(normalizeSongBars(cloneSong(entry.item.songData ?? entry.sourceSong)));
@@ -4370,7 +4397,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         ? (language === 'zh' ? '已送出 App 通知，邀請連結也已複製。' : 'An in-app notification was sent and the invite link was copied.')
         : (language === 'zh' ? '邀請連結已複製；對方建立帳號前，請先把連結傳給他。' : 'Invite link copied. Share it directly until the invitee has an account.'));
       setTeamInviteEmail('');
-      setTeamInviteRole('setlist_manager');
+      setTeamInviteRole(DEFAULT_TEAM_INVITE_ROLE);
       await loadTeamManagement();
     } catch (error) {
       setTeamManagementError(getTeamFeatureErrorMessage(error, language));
@@ -4396,6 +4423,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const handleUpdateTeamMemberRole = async (userId: string, role: Exclude<LibraryRole, 'owner'>) => {
     const repository = cloudRepositoryRef.current;
     if (!repository || !activeCloudLibrary || !canManageActiveTeam || updatingTeamMemberUserId) return;
+    const target = teamManagement?.members.find((member) => member.userId === userId);
+    if (!target || !canManageTeamMember(activeLibraryRole, target.role)
+        || !getAssignableTeamRoles(activeLibraryRole).includes(role)) return;
     setTeamManagementError(null);
     try {
       setUpdatingTeamMemberUserId(userId);
@@ -4417,7 +4447,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   const handleRemoveTeamMember = async (userId: string) => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || !activeCloudLibrary) return;
+    if (!repository || !activeCloudLibrary || !canManageActiveTeam) return;
+    const target = teamManagement?.members.find((member) => member.userId === userId);
+    if (!target || !canManageTeamMember(activeLibraryRole, target.role)) return;
     const confirmed = window.confirm(language === 'zh' ? '要移除此團隊成員嗎？' : 'Remove this team member?');
     if (!confirmed) return;
     setTeamManagementError(null);
@@ -4788,6 +4820,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     };
 
     setSetlists((current) => [newSetlist, ...current]);
+    handleSetlistProjectFilterChange(newSetlist.projectId
+      ? { kind: 'owned-project', projectId: newSetlist.projectId }
+      : { kind: 'ungrouped' });
+    setSetlistSearchQuery('');
+    exitMultiSelect();
     setSelectedSetlistId(newSetlist.id);
     setSelectedSetlistSongId(null);
     setWorkspaceMode('setlists');
@@ -5028,6 +5065,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           updatedAt: now,
           songs: source.songs.map((song, index) => ({
             ...cloneSong(song),
+            copySourceId: isTeamWorkspace ? resolveSetlistCopySourceId(song, savedSetlists) : undefined,
             id: crypto.randomUUID(),
             setlistId: newSetlistId,
             order: index
@@ -5146,6 +5184,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       // Re-issue setlist_song ids so they don't collide with the original's rows.
       songs: target.songs.map((song, index) => ({
         ...cloneSong(song),
+        copySourceId: isTeamWorkspace ? resolveSetlistCopySourceId(song, savedSetlists) : undefined,
         id: crypto.randomUUID(),
         setlistId: newSetlistId,
         order: index
@@ -6690,15 +6729,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const handleOpenSetlistAssignments = (setlistId: string) => {
     const targetSetlist = setlists.find((item) => item.id === setlistId);
     if (!targetSetlist || !isTeamWorkspace || (
-      activeLibraryRole !== 'owner'
+      !isTeamAdministrator(activeLibraryRole)
       && !(
         (activeLibraryRole === 'editor' || activeLibraryRole === 'setlist_manager')
         && targetSetlist.createdBy === authenticatedUser?.id
       )
     )) {
       toast.error(language === 'zh'
-        ? '只有團隊擁有者或歌單建立者可以指派協作者。'
-        : 'Only the team owner or setlist creator can assign collaborators.');
+        ? '只有團隊擁有者、總管理員或歌單建立者可以指派協作者。'
+        : 'Only a team owner, administrator or setlist creator can assign collaborators.');
       return;
     }
 
@@ -6773,7 +6812,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             .filter((item) => (
               item.assignedToCurrentUser === true
               && assignmentBySetlistId.get(item.id) !== true
-              && activeLibraryRoleRef.current !== 'owner'
+              && !isTeamAdministrator(activeLibraryRoleRef.current)
               && item.createdBy !== authenticatedUser.id
             ))
             .map((item) => item.id)
@@ -7046,6 +7085,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     };
 
     const unsubscribe = repository.subscribeToLibraryChanges(activeLibraryId, (kind) => {
+      if (kind === 'setlists' || kind === 'projects') {
+        setLibraryRefreshVersion((version) => version + 1);
+        return;
+      }
       if (kind === 'songs') {
         void refreshActiveTeamSongs(false);
         return;
@@ -7476,7 +7519,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   };
 
   const handleSetlistUndo = () => {
-    if (!selectedSetlistSong || currentSetlistSongHistory.past.length === 0 || !canEditSelectedSetlist) {
+    if (!selectedSetlistSong || currentSetlistSongHistory.past.length === 0 || !canEditSelectedSetlistContent) {
       return;
     }
 
@@ -7505,7 +7548,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   };
 
   const handleSetlistRedo = () => {
-    if (!selectedSetlistSong || currentSetlistSongHistory.future.length === 0 || !canEditSelectedSetlist) {
+    if (!selectedSetlistSong || currentSetlistSongHistory.future.length === 0 || !canEditSelectedSetlistContent) {
       return;
     }
 
@@ -9478,7 +9521,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     if (!editableSong) return;
 
     if (isSetlistMode) {
-      if (!canEditSelectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) return;
+      if (!canEditSelectedSetlistContent || !selectedSetlistSong || !activeSetlistEditableSong) return;
       const displayedSong = activeDraftNavigationPreviewSong ?? activeNavigationPreviewSong ?? editableSong;
       const displayedOrder = getDefaultSectionOrder(displayedSong);
       const nextOrder = reorderSetlistSectionOrder(displayedOrder, sourceSectionId, targetSectionId, placement);
@@ -9508,7 +9551,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setPreviewEditSession(null);
     setActiveSectionId(sourceSectionId);
     setActiveBar(null);
-  }, [activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSetlistEditableSong, canEditSelectedSetlist, canEditTeamSongs, handleSongChange, handleUpdateSetlistSong, isSetlistMode, selectedSetlistSong]);
+  }, [activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSetlistEditableSong, canEditSelectedSetlistContent, canEditTeamSongs, handleSongChange, handleUpdateSetlistSong, isSetlistMode, selectedSetlistSong]);
 
   const getPreviewBatchSong = React.useCallback(() => (
     activePreviewEditSession?.draftSong ?? activeEditorSong ?? null
@@ -10184,7 +10227,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   // Clicking the empty "+" slot after a section's last bar in the preview adds a
   // new bar to that section (works in both song-library and setlist modes).
   const handleAddBarToSection = React.useCallback((previewSIdx: number) => {
-    const canEdit = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs;
+    const canEdit = isSetlistMode ? canEditSelectedSetlistContent : canEditTeamSongs;
     if (!canEdit || !activeEditorSong || !activeNavigationPreviewSong) {
       return;
     }
@@ -10236,10 +10279,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     };
 
     editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 60);
-  }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlist, canEditTeamSongs, focusEditorField, handleSetlistSongContentChange, handleSongChange, isEditing, isSetlistMode]);
+  }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlistContent, canEditTeamSongs, focusEditorField, handleSetlistSongContentChange, handleSongChange, isEditing, isSetlistMode]);
 
   const handleBarLabelLaneChange = React.useCallback((previewSIdx: number, previewBIdx: number, lane: BarLabelLane) => {
-    const canEdit = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs;
+    const canEdit = isSetlistMode ? canEditSelectedSetlistContent : canEditTeamSongs;
     const editableSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
     const navigationSong = activeDraftNavigationPreviewSong ?? activeNavigationPreviewSong ?? editableSong;
     if (!canEdit || !editableSong || !navigationSong) {
@@ -10306,10 +10349,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     } else {
       handleSongChange(nextSong);
     }
-  }, [activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, applyPreviewEditDraft, canEditSelectedSetlist, canEditTeamSongs, handleSetlistSongContentChange, handleSongChange, isSetlistMode]);
+  }, [activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, applyPreviewEditDraft, canEditSelectedSetlistContent, canEditTeamSongs, handleSetlistSongContentChange, handleSongChange, isSetlistMode]);
 
   const handleAddSectionAfterPreviewSection = React.useCallback((previewSIdx: number) => {
-    const canEdit = isSetlistMode ? canEditSelectedSetlist : canEditTeamSongs;
+    const canEdit = isSetlistMode ? canEditSelectedSetlistContent : canEditTeamSongs;
     const previewIdentity = getPreviewIdentityForCurrentMode();
     if (!canEdit || !activeEditorSong || !activeNavigationPreviewSong || !previewIdentity) {
       return;
@@ -10354,7 +10397,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setActiveBar(null);
     setPreviewEditSession(nextSession);
     window.requestAnimationFrame(() => window.requestAnimationFrame(refreshPreviewEditAnchorRect));
-  }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlist, canEditTeamSongs, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, isSetlistMode, refreshPreviewEditAnchorRect]);
+  }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlistContent, canEditTeamSongs, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, isSetlistMode, refreshPreviewEditAnchorRect]);
 
   const handlePreviewWysiwygEditorChange = React.useCallback((nextSong: Song) => {
     if (isSetlistMode) {
@@ -10523,9 +10566,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               currentKey={previewSong.currentKey}
               onElementClick={canOpenEditor ? (sIdx, bIdx, field, target) => handleSetlistElementClick(item.id, previewSong, sIdx, bIdx, field, target) : undefined}
               onMetaClick={isSelected && canOpenEditor ? handleMetaClick : undefined}
-              onAddBarClick={isSelected && canEditSelectedSetlist && !activePreviewEditSession ? handleAddBarToSection : undefined}
-              onAddSectionAfterClick={isSelected && canEditSelectedSetlist && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
-              onBarLabelLaneChange={isSelected && canEditSelectedSetlist ? handleBarLabelLaneChange : undefined}
+              onAddBarClick={isSelected && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddBarToSection : undefined}
+              onAddSectionAfterClick={isSelected && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
+              onBarLabelLaneChange={isSelected && canEditSelectedSetlistContent ? handleBarLabelLaneChange : undefined}
               highlightedSectionIds={isSelected ? highlightedSectionIds : []}
               activeSectionId={isSelected && (isEditing || activePreviewEditSession) ? activeSectionId : null}
               activeBar={isSelected && (isEditing || activePreviewEditSession) ? activeBar : null}
@@ -10534,13 +10577,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               onPreviewBarMetaClick={isSelected && canOpenEditor ? handlePreviewBarMetaClick : undefined}
               onPreviewBarContextMenu={isSelected && canOpenEditor ? handlePreviewBarContextMenu : undefined}
               previewIdentity={item.id}
-              onSectionReorder={isSelected && canEditSelectedSetlist ? handlePreviewSectionReorder : undefined}
+              onSectionReorder={isSelected && canEditSelectedSetlistContent ? handlePreviewSectionReorder : undefined}
             /></RecoveryBoundary>
           </div>
         ))}
       </div>
     );
-  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlist, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
+  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -11147,6 +11190,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           : 'Symbol test pages stay on this device and cannot be uploaded or shared.');
       }
 
+      if (isTeamWorkspace) {
+        await persistWorkspace(songs, setlists, projects);
+        assertRequestIsCurrent();
+        return;
+      }
       await repository.saveSong(song);
       assertRequestIsCurrent();
       setSavedSongs((current) => {
@@ -11176,6 +11224,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           : 'This project contains a local-only symbol test page. Remove it from the setlist before sharing.');
       }
 
+      if (isTeamWorkspace) {
+        // Team sharing must use the permission-aware diff. Rewriting every
+        // referenced song would deny a setlist manager's valid share request.
+        await persistWorkspace(songs, setlists, projects);
+        assertRequestIsCurrent();
+        return;
+      }
       await repository.saveProject(project);
       assertRequestIsCurrent();
       await Promise.all(requiredSongs.map((requiredSong) => repository.saveSong(requiredSong)));
@@ -11232,6 +11287,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         : 'This setlist contains a local-only symbol test page. Remove it before sharing.');
     }
 
+    if (isTeamWorkspace) {
+      await persistWorkspace(songs, setlists, projects);
+      assertRequestIsCurrent();
+      return;
+    }
     for (const requiredSong of requiredSongs) {
       await repository.saveSong(requiredSong);
       assertRequestIsCurrent();
@@ -12840,6 +12900,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               />
             )}
             <div className="mt-0.5 text-xs font-medium text-gray-500">{setlistSongsWithSource.length} {copy.setlistItems}</div>
+            {isCloudMode && <p className="mt-1 text-xs leading-5 text-gray-500">{language === 'zh'
+              ? '歌序與 Key 共用；Capo 只套用到自己。'
+              : 'Song order and keys are shared; Capo is personal.'}</p>}
+            {isTeamWorkspace && activeLibraryRole === 'setlist_manager' && <p className="mt-1 text-xs leading-5 text-indigo-600">{language === 'zh'
+              ? '可管理自己的或被指派的歌單；和弦與段落由歌曲管理員或總管理員維護。'
+              : 'Manage your own or assigned setlists; song managers and administrators maintain chords and sections.'}</p>}
           </div>
           {isJoinedSetlist ? (
             <div ref={setlistActionsMenuRef} className="relative">
@@ -13067,7 +13133,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                           />
                         </div>
                         <div className="w-[92px] shrink-0">
-                          <div className="mb-1 text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400">Capo</div>
+                          <div className="mb-1 text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400">{isCloudMode ? (language === 'zh' ? '我的 Capo' : 'My Capo') : 'Capo'}</div>
                           <CapoPicker
                             value={effectiveCapo}
                             currentKey={effectiveKey}
@@ -16093,7 +16159,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           </AnimatePresence>
 
           <AnimatePresence initial={false}>
-            {isMobileMetadataOpen && metadataPanelContent && (
+            {isMobileMetadataOpen && canOpenEditor && metadataPanelContent && (
               <>
                 <motion.button
                   type="button"
@@ -16133,31 +16199,29 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         </>
       )}
 
-      <AnimatePresence initial={false}>
-        {isCreateSetlistOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[115] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
-          >
-            <motion.form
-              initial={{ y: 12, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 8, opacity: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
+      {isCreateSetlistOpen && (
+        <ResponsiveDialog
+          title={language === 'zh' ? '先確認名稱與專案' : 'Name and organize this setlist'}
+          subtitle={`${language === 'zh' ? '新增歌單' : 'New setlist'} · ${activeCloudLibrary?.name ?? (language === 'zh' ? '本機工作區' : 'Local workspace')}`}
+          closeLabel={copy.cancel}
+          onClose={() => setIsCreateSetlistOpen(false)}
+        >
+          <form
               onSubmit={(event) => {
                 event.preventDefault();
                 handleConfirmCreateSetlist();
               }}
-              className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+              className="min-h-0 flex-1 overflow-y-auto px-5 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
             >
-              <div className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-500">
-                {language === 'zh' ? '新增歌單' : 'New setlist'}
-              </div>
-              <h2 className="mt-2 text-2xl font-bold tracking-tight text-gray-900">
-                {language === 'zh' ? '先確認名稱與專案' : 'Name and organize this setlist'}
-              </h2>
+              <p className="text-sm leading-6 text-gray-600">
+                {isTeamWorkspace
+                  ? (language === 'zh'
+                    ? '團隊成員都能看這份歌單。專案用來分類；大家開啟同一份歌單，就會看到共同的歌序、Key 與譜面。'
+                    : 'All team members can view this setlist. Projects organize setlists; opening the same setlist shares its song order, keys and charts.')
+                  : (language === 'zh'
+                    ? '建立後可分享歌單或整個專案，邀請其他人一起看譜。'
+                    : 'After creating a setlist, share it or its project to invite others to view the charts.')}
+              </p>
 
               <label className="mt-5 block">
                 <span className="text-xs font-bold text-gray-600">{language === 'zh' ? '歌單名稱' : 'Setlist name'}</span>
@@ -16206,10 +16270,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {language === 'zh' ? '建立歌單' : 'Create setlist'}
                 </button>
               </div>
-            </motion.form>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </form>
+        </ResponsiveDialog>
+      )}
 
       <AnimatePresence initial={false}>
         {isImportPromptOpen && authenticatedUser && (
@@ -16671,6 +16734,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           key={activeCloudLibrary?.id}
           language={language}
           teamName={activeCloudLibrary?.name ?? ''}
+          currentUserRole={activeLibraryRole}
           snapshot={teamManagement}
           loading={isLoadingTeamManagement}
           error={teamManagementError}

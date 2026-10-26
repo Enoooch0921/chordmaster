@@ -360,6 +360,9 @@ const normalizeSetlistSong = (
     id: typeof setlistSong.id === 'string' && setlistSong.id.trim() ? setlistSong.id : crypto.randomUUID(),
     setlistId,
     songId,
+    copySourceId: typeof setlistSong.copySourceId === 'string' && setlistSong.copySourceId.trim()
+      ? setlistSong.copySourceId
+      : undefined,
     order: typeof setlistSong.order === 'number' && Number.isFinite(setlistSong.order) ? setlistSong.order : index,
     overrideKey: typeof setlistSong.overrideKey === 'string' && VALID_KEYS.has(setlistSong.overrideKey)
       ? setlistSong.overrideKey as Key

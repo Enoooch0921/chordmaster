@@ -1,4 +1,4 @@
-import { Project, Setlist, StoredSong } from '../types';
+import { LibraryRole, Project, Setlist, StoredSong } from '../types';
 import { PendingSyncPayload, savePendingSync, serializeProjects, serializeSetlists, serializeSongLibrary } from './workspace';
 import { WorkspaceRepository } from './repository';
 import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
@@ -92,6 +92,7 @@ export const syncWorkspaceDiff = async (params: {
   savedSongs: StoredSong[];
   savedSetlists: Setlist[];
   savedProjects: Project[];
+  teamRole?: LibraryRole;
 }) => {
   const cloudSongs = params.songs.filter((song) => !isLocalOnlySymbolTestSong(song));
   const cloudSavedSongs = params.savedSongs.filter((song) => !isLocalOnlySymbolTestSong(song));
@@ -139,7 +140,9 @@ export const syncWorkspaceDiff = async (params: {
   // saveSetlist can skip rewriting setlist_songs when only metadata changed.
   if (setlistDiff.changed.length > 0) {
     await Promise.all(setlistDiff.changed.map((setlist) =>
-      params.repository.saveSetlist(setlist, savedSetlistById.get(setlist.id))
+      params.teamRole
+        ? params.repository.saveSetlist(setlist, savedSetlistById.get(setlist.id), { teamRole: params.teamRole })
+        : params.repository.saveSetlist(setlist, savedSetlistById.get(setlist.id))
     ));
   }
 

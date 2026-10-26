@@ -1,7 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SetlistEditorAssignmentSnapshot } from '../types';
 import SetlistAssignmentDialog from './SetlistAssignmentDialog';
+
+beforeEach(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function (this: HTMLDialogElement) { this.setAttribute('open', ''); } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function (this: HTMLDialogElement) { this.removeAttribute('open'); } });
+});
 
 const snapshot: SetlistEditorAssignmentSnapshot = {
   setlistId: 'setlist-1',
@@ -29,6 +34,44 @@ const snapshot: SetlistEditorAssignmentSnapshot = {
 };
 
 describe('SetlistAssignmentDialog', () => {
+  it('blocks stale assignment edits while refreshing and resumes with the refreshed assignment', () => {
+    const onToggle = vi.fn();
+    const props = { open: true, language: 'zh' as const, setlistName: '主日敬拜', snapshot, loading: true, updatingUserId: null, onClose: vi.fn(), onRefresh: vi.fn(), onToggle };
+    const { rerender } = render(<SetlistAssignmentDialog {...props} />);
+    const manager = screen.getByRole('button', { name: /小美/ });
+    expect(manager).toBeDisabled();
+    fireEvent.click(manager);
+    expect(onToggle).not.toHaveBeenCalled();
+
+    rerender(<SetlistAssignmentDialog {...props} loading={false} snapshot={{ ...snapshot, assignments: [] }} />);
+    expect(screen.getByRole('button', { name: /小美/ })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: /小美/ }));
+    expect(onToggle).toHaveBeenCalledWith('library-manager', true);
+  });
+
+  it('opens as a modal outside the editor and handles Escape without leaking editor shortcuts', () => {
+    const onClose = vi.fn();
+    const onEditorKeyDown = vi.fn();
+    const props = { open: true, language: 'zh' as const, setlistName: '主日敬拜', snapshot, loading: false, updatingUserId: null, onClose, onRefresh: vi.fn(), onToggle: vi.fn() };
+    const { container, rerender, unmount } = render(<div onKeyDown={onEditorKeyDown}><SetlistAssignmentDialog {...props} /></div>);
+    const dialog = screen.getByRole('dialog', { name: '歌單協作者' });
+    expect(dialog.tagName).toBe('DIALOG');
+    expect(dialog).toHaveAttribute('open');
+    expect(dialog.parentElement).toBe(document.body);
+    expect(container).not.toContainElement(dialog);
+    expect(document.body.style.overflow).toBe('hidden');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'ArrowRight' });
+    expect(onEditorKeyDown).not.toHaveBeenCalled();
+    fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    expect(onClose).toHaveBeenCalledOnce();
+
+    rerender(<SetlistAssignmentDialog {...props} updatingUserId="library-manager" />);
+    fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
+    expect(onClose).toHaveBeenCalledOnce();
+    unmount();
+    expect(document.body.style.overflow).toBe('');
+  });
+
   it('filters members without changing their assignments', () => {
     const onToggle = vi.fn();
     render(<SetlistAssignmentDialog open language="zh" setlistName="主日敬拜" snapshot={snapshot} loading={false} updatingUserId={null} onClose={vi.fn()} onRefresh={vi.fn()} onToggle={onToggle} />);
@@ -59,7 +102,7 @@ describe('SetlistAssignmentDialog', () => {
 
     expect(screen.getByText('8/2 主日敬拜')).toBeInTheDocument();
     expect(screen.getByText('歌曲管理員')).toBeInTheDocument();
-    expect(screen.getAllByText('歌單協作者')).toHaveLength(2);
+    expect(screen.getByText('歌單管理員')).toBeInTheDocument();
     expect(screen.getByText('manager@example.com')).toBeInTheDocument();
     expect(screen.getByText('editor@example.com')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '歌單協作者' })).toHaveAttribute('aria-busy', 'false');

@@ -217,7 +217,7 @@ describe('SharedChartPage song imports', () => {
     mocks.rpc.mockResolvedValue({ data: 'shared-setlist-1', error: null });
 
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: '導入到我的帳號' }));
+    fireEvent.click(await screen.findByRole('button', { name: '加入共享歌單' }));
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('join_shared_setlist', { p_token: 'test-token' }));
     expect(await screen.findByTestId('location')).toHaveTextContent('/?setlist=shared-setlist-1');
@@ -245,5 +245,41 @@ describe('SharedChartPage song imports', () => {
 
     expect(await screen.findByText('D · 128 BPM')).toBeInTheDocument();
     expect(screen.getByText('C · 96 BPM')).toBeInTheDocument();
+  });
+
+  it('ignores a previous account’s membership response after switching accounts', async () => {
+    const payload: SharedResourcePayload = { resourceType: 'setlist', setlist: {
+      id: 'shared-1', name: 'Sunday', displayMode: 'chord-movable-key', songs: []
+    } };
+    mocks.resolveShareLink.mockResolvedValue(payload);
+    let resolvePrevious!: (value: { data: { setlist_id: string } }) => void;
+    const maybeSingle = vi.fn()
+      .mockReturnValueOnce(new Promise((resolve) => { resolvePrevious = resolve; }))
+      .mockResolvedValue({ data: null });
+    mocks.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle });
+    renderPage();
+    await waitFor(() => expect(maybeSingle).toHaveBeenCalledTimes(1));
+    const authChanged = mocks.onAuthStateChange.mock.calls[0][0];
+    await act(async () => authChanged('SIGNED_IN', { user: { id: 'user-2' } }));
+    await waitFor(() => expect(maybeSingle).toHaveBeenCalledTimes(2));
+    await act(async () => resolvePrevious({ data: { setlist_id: 'shared-1' } }));
+    expect(screen.getByRole('button', { name: '加入共享歌單' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打開歌單' })).not.toBeInTheDocument();
+  });
+
+  it('clears a joined project membership when signing into a different account', async () => {
+    mocks.resolveShareLink.mockResolvedValue({ resourceType: 'project', project: {
+      id: 'project-1', name: 'Sunday', setlists: []
+    } });
+    const maybeSingle = vi.fn()
+      .mockResolvedValueOnce({ data: { project_id: 'project-1' } })
+      .mockReturnValue(new Promise(() => undefined));
+    mocks.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle });
+    renderPage();
+    expect(await screen.findByRole('button', { name: '打開專案' })).toBeInTheDocument();
+    const authChanged = mocks.onAuthStateChange.mock.calls[0][0];
+    await act(async () => authChanged('SIGNED_IN', { user: { id: 'user-2' } }));
+    expect(screen.getByRole('button', { name: '加入專案' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打開專案' })).not.toBeInTheDocument();
   });
 });

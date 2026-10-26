@@ -129,34 +129,26 @@ export default function SharedChartPage() {
   }, [payload?.songBundle?.id]);
 
   useEffect(() => {
-    if (!supabase || !authUserId || !payload?.setlist) return;
+    setIsMember(false);
+    const resourceId = payload?.project?.id ?? payload?.setlist?.id;
+    if (!supabase || !authUserId || !resourceId) return;
+    let cancelled = false;
+    const isProject = Boolean(payload?.project);
+    const idColumn = isProject ? 'project_id' : 'setlist_id';
 
     supabase
-      .from('user_setlist_memberships')
-      .select('setlist_id')
+      .from(isProject ? 'user_project_memberships' : 'user_setlist_memberships')
+      .select(idColumn)
       .eq('user_id', authUserId)
-      .eq('setlist_id', payload.setlist.id)
+      .eq(idColumn, resourceId)
       .maybeSingle()
-      .then(({ data }) => {
-        setIsMember(Boolean(data));
+      .then(({ data, error }) => {
+        if (!cancelled) setIsMember(!error && Boolean(data));
       });
-  }, [authUserId, payload?.setlist?.id]);
+    return () => { cancelled = true; };
+  }, [authUserId, payload?.setlist?.id, payload?.project?.id]);
 
-  useEffect(() => {
-    if (!supabase || !authUserId || !payload?.project) return;
-
-    supabase
-      .from('user_project_memberships')
-      .select('project_id')
-      .eq('user_id', authUserId)
-      .eq('project_id', payload.project.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setIsMember(Boolean(data));
-      });
-  }, [authUserId, payload?.project?.id]);
-
-  const handleImport = async () => {
+  const handleJoin = async () => {
     if (!supabase || !token) return;
     setIsJoining(true);
     setJoinError(null);
@@ -202,8 +194,8 @@ export default function SharedChartPage() {
         : (language === 'zh' ? '歌單' : 'setlist');
       setJoinError(
         reason
-          ? (language === 'zh' ? `無法導入${resourceLabel}：${reason}` : `Unable to import ${resourceLabel}: ${reason}`)
-          : (language === 'zh' ? `無法導入${resourceLabel}，請稍後再試。` : `Unable to import ${resourceLabel}. Please try again.`)
+          ? (language === 'zh' ? `無法加入${resourceLabel}：${reason}` : `Unable to join ${resourceLabel}: ${reason}`)
+          : (language === 'zh' ? `無法加入${resourceLabel}，請稍後再試。` : `Unable to join ${resourceLabel}. Please try again.`)
       );
       setIsJoining(false);
     }
@@ -493,9 +485,14 @@ export default function SharedChartPage() {
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
                 {language === 'zh' ? '歌單' : 'Setlist'}
               </div>
-              <h1 className="mb-5 text-2xl font-bold tracking-tight text-stone-900">
+              <h1 className="mb-2 text-2xl font-bold tracking-tight text-stone-900">
                 {payload.setlist.name}
               </h1>
+              <p className="mb-5 text-sm text-stone-500">
+                {language === 'zh'
+                  ? '加入後可在帳號中開啟同一份歌單；歌序、調性與譜面會跟隨管理員儲存的更新。Capo 可自行設定。'
+                  : 'Join to open this shared setlist in your account. Song order, keys and charts follow saved updates; Capo is personal.'}
+              </p>
 
               <div className="mb-6 overflow-hidden rounded-xl border border-stone-100 bg-stone-50 divide-y divide-stone-100">
                 {payload.setlist.songs.map((item, index) => (
@@ -524,13 +521,13 @@ export default function SharedChartPage() {
                   <>
                     <button
                       type="button"
-                      onClick={() => void handleImport()}
+                      onClick={() => void handleJoin()}
                       disabled={isJoining}
                       className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
                     >
                       {isJoining
-                        ? (language === 'zh' ? '導入中...' : 'Importing...')
-                        : (language === 'zh' ? '導入到我的帳號' : 'Import to My Account')}
+                        ? (language === 'zh' ? '加入中...' : 'Joining...')
+                        : (language === 'zh' ? '加入共享歌單' : 'Join Shared Setlist')}
                     </button>
                     {joinError && (
                       <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
@@ -540,7 +537,7 @@ export default function SharedChartPage() {
               ) : (
                 <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-4 text-center">
                   <p className="mb-3 text-sm text-stone-500">
-                    {language === 'zh' ? '登入後即可導入此歌單' : 'Sign in to import this setlist'}
+                    {language === 'zh' ? '登入後即可加入並開啟此歌單' : 'Sign in to join and open this setlist'}
                   </p>
                   <button
                     type="button"
@@ -563,9 +560,14 @@ export default function SharedChartPage() {
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
                 {language === 'zh' ? '專案' : 'Project'}
               </div>
-              <h1 className="mb-5 text-2xl font-bold tracking-tight text-stone-900">
+              <h1 className="mb-2 text-2xl font-bold tracking-tight text-stone-900">
                 {payload.project.name}
               </h1>
+              <p className="mb-5 text-sm text-stone-500">
+                {language === 'zh'
+                  ? '加入後可開啟專案中的共享歌單，並持續收到歌單與譜面的更新。Capo 可自行設定。'
+                  : 'Join to open the project’s shared setlists and receive saved setlist and chart updates. Capo is personal.'}
+              </p>
 
               <div className="mb-6 space-y-3">
                 {payload.project.setlists.length === 0 ? (
@@ -612,12 +614,12 @@ export default function SharedChartPage() {
                   <>
                     <button
                       type="button"
-                      onClick={() => void handleImport()}
+                      onClick={() => void handleJoin()}
                       disabled={isJoining}
                       className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
                     >
                       {isJoining
-                        ? (language === 'zh' ? '導入中...' : 'Importing...')
+                        ? (language === 'zh' ? '加入中...' : 'Joining...')
                         : (language === 'zh' ? '加入專案' : 'Join Project')}
                     </button>
                     {joinError && (

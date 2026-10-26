@@ -21,7 +21,7 @@ export type SetlistDisplayMode =
   | 'chord-fixed-key'
   | 'chord-movable-key';
 export type LibraryKind = 'personal' | 'team';
-export type LibraryRole = 'owner' | 'editor' | 'setlist_manager' | 'viewer';
+export type LibraryRole = 'owner' | 'admin' | 'editor' | 'setlist_manager' | 'viewer';
 // Role a user holds on a *shared project* they joined (distinct from team
 // LibraryRole). A manager may edit the project's shared key + song order.
 export type ProjectMemberRole = 'viewer' | 'manager';
@@ -213,6 +213,8 @@ export interface SetlistSong {
   id: string;
   setlistId: string;
   songId: string;
+  // Source entry for a new duplicate; the server copies its canonical score.
+  copySourceId?: string;
   order: number;
   overrideKey?: Key;
   capo?: number;
@@ -517,4 +519,4 @@ export interface TeamSongDeleteResult {
   songIds: string[];
 }
 
-export type LibraryChangeKind = 'songs' | 'membership' | 'assignments';
+export type LibraryChangeKind = 'songs' | 'setlists' | 'projects' | 'membership' | 'assignments';
