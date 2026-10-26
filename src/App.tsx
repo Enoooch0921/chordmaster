@@ -14,7 +14,7 @@ import { PICKUP_EDITOR_SECTION_ID, PICKUP_EDITOR_BAR_ID, normalizePickupTimeSign
 import { currentKeyMode, normalizeKeyMode, formatKeyName } from './utils/keyMode';
 import { compareNaturalNames } from './utils/naturalNameCompare';
 import SetlistSourceSyncControl from './components/SetlistSourceSyncControl';
-import { classifySetlistSource, hasSetlistSourceScoreChange } from './lib/setlistSourceSync';
+import { classifySetlistSource, createSetlistSourceCopy, hasSetlistSourceScoreChange } from './lib/setlistSourceSync';
 import type { TonalMode } from './types';
 import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { normalizeJianpuVoices } from './utils/jianpuVoices';
@@ -15308,6 +15308,22 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           <SetlistSourceSyncControl key={`${activeLibraryId}|${selectedSetlistSong.id}`}
             libraryId={activeLibraryId} entryId={selectedSetlistSong.id} language={language} status={selectedSetlistSourceStatus}
             prepare={flushTeamSongDraftsBeforeMutation}
+            onSaveAs={async (preview, title, id) => {
+              const repository = cloudRepositoryRef.current;
+              if (!repository || !canEditTeamSongs || preview.libraryId !== activeLibraryIdRef.current
+                || preview.entryId !== selectedSetlistSong.id) {
+                throw new Error(language === 'zh' ? '曲庫或權限已變更，請重新開啟另存新檔。' : 'The library or permissions changed. Open Save As again.');
+              }
+              const release = beginCloudMutation();
+              try {
+                const newSong = { ...createSetlistSourceCopy(preview, title, id), createdBy: authenticatedUser?.id, updatedBy: authenticatedUser?.id };
+                await repository.saveSong(newSong, { createOnly: true });
+                if (activeLibraryIdRef.current !== preview.libraryId || cloudRepositoryRef.current !== repository) return;
+                setSongs(current => [newSong, ...current.filter(item => item.id !== newSong.id)]);
+                setSavedSongs(current => [newSong, ...current.filter(item => item.id !== newSong.id)]);
+                toast.success(language === 'zh' ? `已另存「${newSong.title}」到歌曲庫。` : `Saved “${newSong.title}” to the song library.`);
+              } finally { release(); }
+            }}
             onReconciled={result => {
               if (activeLibraryIdRef.current !== activeLibraryId) return;
               const updated = result.source;

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { Song } from '../../types';
+import type { Key, Song } from '../../types';
 import { applyPreviewDraft, createPreviewEditSession, setPreviewNotationCursor } from '../../lib/previewEditSession';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
 import PreviewBarEditor from './PreviewBarEditor';
@@ -33,7 +33,9 @@ const renderEditor = ({
   deviceLayout = 'desktop' as PreviewEditorDeviceLayout,
   hasCopiedBar = false,
   hasCopiedJianpu = false,
-  hasCopiedRhythm = false
+  hasCopiedRhythm = false,
+  storedKey = 'C' as Key,
+  displayedKey = 'C' as Key
 } = {}) => {
   const callbacks = {
     onApplyDraft: vi.fn(),
@@ -57,8 +59,8 @@ const renderEditor = ({
       session={nextSession}
       language="zh"
       deviceLayout={deviceLayout}
-      storedKey="C"
-      displayedKey="C"
+      storedKey={storedKey}
+      displayedKey={displayedKey}
       storageMode="letters"
       hasCopiedBar={hasCopiedBar}
       hasCopiedJianpu={hasCopiedJianpu}
@@ -74,6 +76,17 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it.each(['C', 'Ab', 'Db'] as const)('keeps b6 in the input after applying a numeric chord in %s', key => {
+    const source: Song = { ...song, originalKey: key, currentKey: key };
+    const base = createPreviewEditSession({ song: source, target, inputMode: 'nashville' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: base, storedKey: key, displayedKey: key });
+    fireEvent.change(screen.getByRole('textbox', { name: '和弦直接輸入' }), { target: { value: 'b6' } });
+    const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(nextSong.sections[0].bars[0].chords[1]).toBe(key === 'C' ? 'Ab' : key === 'Ab' ? 'Fb' : 'b6');
+    rerenderSession({ ...base, draftSong: nextSong });
+    expect(screen.getByRole('textbox', { name: '和弦直接輸入' })).toHaveValue('b6');
+  });
+
   it.each(['phone', 'desktop'] as const)('selects and removes a double barline on %s', async (deviceLayout) => {
     const user = userEvent.setup();
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], repeatStart: true, finalBar: true }] }] };

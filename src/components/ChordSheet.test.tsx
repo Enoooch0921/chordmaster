@@ -20,6 +20,22 @@ const song: Song = {
 };
 
 describe('ChordSheet preview input caret', () => {
+  it.each(['G7', 'Cm7', 'Cmaj7', 'G7b9', 'G7(b9)', 'C6/9'])('separates raised extension figures from baseline quality words in %s', chord => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [chord] }] }] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    const number = container.querySelector('[data-preview-owner-slot="0"] [data-chord-quality-number]');
+    expect(number).toBeInTheDocument();
+    expect(number).toHaveClass('-translate-y-[0.7em]');
+    if (chord.includes('m')) expect(container.querySelector('[data-chord-quality-text]')).toHaveTextContent(chord.includes('maj') ? 'maj' : 'm');
+    if (chord.includes('b9')) expect(container.querySelector('[data-chord-quality-alterations]')).toHaveTextContent('(b9)');
+  });
+
+  it('retains flat-six degree spelling when the display key would require a double accidental', () => {
+    const source: Song = { ...song, showNashvilleNumbers: true, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['Ab', 'C/Ab', 'G#', 'C/G#'] }] }] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="Db" />);
+    expect([...container.querySelectorAll('[data-preview-owner-slot]')].map(e => e.textContent)).toEqual(['b6', '1/b6', '#5', '1/#5']);
+  });
+
   it('renders two thin lines within a row and at its edge without an extra neighboring border', () => {
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [
       { id: 'double-mid', chords: ['C'], doubleBar: true },

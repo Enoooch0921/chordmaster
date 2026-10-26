@@ -307,7 +307,7 @@ export interface WorkspaceRepository {
   loadTeamSourceSong(song: StoredSong): Promise<StoredSong | null>;
   syncPersonalSongFromTeam(song: StoredSong): Promise<StoredSong>;
   savePersonalSong(song: StoredSong): Promise<void>;
-  saveSong(song: StoredSong): Promise<void>;
+  saveSong(song: StoredSong, options?: { createOnly?: boolean }): Promise<void>;
   saveSetlist(setlist: Setlist, previousSetlist?: Setlist, options?: SetlistSaveOptions): Promise<void>;
   saveProject(project: Project): Promise<void>;
   deleteSong(id: string): Promise<void>;
@@ -1465,7 +1465,8 @@ export const createCloudRepository = (params: {
   const saveSongToLibrary = async (
     song: StoredSong,
     libraryId: string,
-    clientLegacyId?: string
+    clientLegacyId?: string,
+    createOnly = false
   ) => {
     if (!supabase) {
       throw new Error('Supabase is not configured.');
@@ -1478,6 +1479,7 @@ export const createCloudRepository = (params: {
     }
 
     const existingSong = await getWritableLibraryRow('songs', song.id, libraryId);
+    if (createOnly && existingSong) throw new Error('This new song already exists. Reload the library to check it.');
     const createdBy = existingSong?.created_by ?? params.userId;
     const now = new Date(song.updatedAt || Date.now()).toISOString();
     const contentJson = {
@@ -1956,9 +1958,9 @@ export const createCloudRepository = (params: {
       await saveSongToLibrary(song, personalLibraryId);
     },
 
-    async saveSong(song) {
+    async saveSong(song, options) {
       const libraryId = await ensureLibraryId();
-      await saveSongToLibrary(song, libraryId);
+      await saveSongToLibrary(song, libraryId, undefined, options?.createOnly);
     },
 
     async saveSetlist(setlist, previousSetlist, options) {

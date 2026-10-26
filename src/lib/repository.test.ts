@@ -354,6 +354,28 @@ describe('cloud repository song creator integrity', () => {
     vi.clearAllMocks();
   });
 
+  it('inserts a save-as song without an update or upsert', async () => {
+    const reader = makeBuilder(), writer = makeBuilder();
+    mocks.from.mockReturnValueOnce(reader).mockReturnValue(writer);
+    const repository = createRepository();
+    repository.setActiveLibrary('team-1');
+    await repository.saveSong(makeSong({ id: 'new-song' }), { createOnly: true });
+    expect(writer.insert).toHaveBeenCalledWith(expect.objectContaining({ id: 'new-song', library_id: 'team-1', created_by: 'user-1' }));
+    expect(writer.update).not.toHaveBeenCalled();
+    expect(writer.upsert).not.toHaveBeenCalled();
+  });
+
+  it('refuses to overwrite any existing identity during save-as', async () => {
+    const query = makeBuilder({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'song-1', library_id: 'team-1', created_by: 'user-1' }, error: null }) });
+    mocks.from.mockReturnValue(query);
+    const repository = createRepository();
+    repository.setActiveLibrary('team-1');
+    await expect(repository.saveSong(makeSong(), { createOnly: true })).rejects.toThrow('already exists');
+    expect(query.insert).not.toHaveBeenCalled();
+    expect(query.update).not.toHaveBeenCalled();
+    expect(query.upsert).not.toHaveBeenCalled();
+  });
+
   it('never writes bundled symbol test fixtures to a cloud library', async () => {
     const repository = createRepository();
     repository.setActiveLibrary('personal-1');

@@ -617,13 +617,9 @@ export function getNashvilleNumber(chord: string, key: Key, isBass: boolean = fa
 
   const number = getNashvilleNumberForNote(root, key);
 
-  // For slash bass notes, prefer the ascending spelling #5 over b6 (the pitch
-  // between scale degrees 5 and 6), which reads better for bass walk-ups.
-  const adjustedNumber = isBass && number === 'b6' ? '#5' : number;
-
   // Nashville numbers often use lowercase 'm' for minor, but we can keep the 'rest' part
   // e.g. Am -> 6m, G7 -> 57
-  return adjustedNumber + rest;
+  return number + rest;
 }
 
 export function parseNashvilleToChord(input: string, key: Key): string {
@@ -676,9 +672,16 @@ export function parseNashvilleToChord(input: string, key: Key): string {
       ? false
       : ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb'].includes(key);
   
-  const root = getNoteFromIndex(keyIndex + semitones, preferFlats);
-
-  return normalizeChordEnharmonic(root + rest);
+  const rootLetter = NOTE_LETTERS[(getLetterIndex(key[0]) + degree - 1) % 7];
+  const pitch = ((keyIndex + semitones) % 12 + 12) % 12;
+  let rootAccidental = (pitch - NATURAL_NOTE_INDEX[rootLetter] + 12) % 12;
+  if (rootAccidental > 6) rootAccidental -= 12;
+  // Keep the degree's letter: b6 in Ab is Fb, not E (#5). Use a conventional
+  // letter name only when this would require an unsupported double accidental.
+  const root = Math.abs(rootAccidental) <= 1
+    ? rootLetter + (rootAccidental === -1 ? 'b' : rootAccidental === 1 ? '#' : '')
+    : getNoteFromIndex(pitch, preferFlats);
+  return root + rest;
 }
 
 export function isNashville(chord: string): boolean {

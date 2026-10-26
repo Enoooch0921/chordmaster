@@ -69,7 +69,7 @@ const splitChordQualityDisplay = (quality: string) => {
     return { qualityText: '', extensionTokens: [] as string[] };
   }
 
-  const extensionMatch = trimmedQuality.match(/((?:[#b]\d+)+)$/i);
+  const extensionMatch = trimmedQuality.match(/\(?((?:[#b]\d+[\s,]*)+)\)?$/i);
   if (!extensionMatch || extensionMatch.index === undefined || extensionMatch.index === 0) {
     return { qualityText: trimmedQuality, extensionTokens: [] as string[] };
   }
@@ -96,14 +96,19 @@ const getMajorQualitySuffix = (qualityText: string) => {
 
 const MajorQualityGlyph: React.FC<{ qualityText: string; numeric?: boolean; abbreviate?: boolean }> = ({ qualityText, numeric = false, abbreviate = false }) => {
   const suffix = getMajorQualitySuffix(qualityText);
+  const renderQuality = (text: string) => text.split(/([#b]?\d+(?:\/\d+)?)/).filter(Boolean).map((token, index) => (
+    /\d/.test(token)
+      ? <span key={index} data-chord-quality-number className="relative inline-block -translate-y-[0.7em]">{token}</span>
+      : <span key={index} data-chord-quality-text>{token}</span>
+  ));
   if (suffix === null || !abbreviate) {
-    return <>{qualityText}</>;
+    return <>{renderQuality(qualityText)}</>;
   }
 
   return (
     <span className="inline-flex items-baseline tracking-[-0.04em]">
       <span className={numeric ? 'text-[1.12em] leading-none' : 'text-[1.16em] leading-none'}>△</span>
-      {suffix && <span className="-ml-[0.12em] leading-none">{suffix}</span>}
+      {suffix && <span className="-ml-[0.12em] leading-none">{renderQuality(suffix)}</span>}
     </span>
   );
 };
@@ -398,7 +403,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
           {accidentalGlyph}
         </span>
       )}
-      <span className={degreeClassName} style={degreeStyle}>
+      <span data-chord-degree className={degreeClassName} style={degreeStyle}>
         {degree}
       </span>
     </span>
@@ -477,7 +482,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   }
 
   // Parse chord: optional accidental + Root(A-G or 1-7) + optional accidental + Quality(...) / optional accidental + Bass(A-G or 1-7) + optional accidental
-  const match = cleanChord.match(/^([b#]?)([A-G1-7])([#b]?)([^/]*)(?:\/([b#]?)([A-G1-7])([#b]?))?$/);
+  const match = cleanChord.match(/^([b#]?)([A-G1-7])([#b]?)(.*?)(?:\/([b#]?)([A-G1-7])([#b]?))?$/);
 
   if (!match) {
     return withChordMark(
@@ -502,29 +507,6 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   const numericFigureStyle = isNumericRoot
     ? ({ fontVariantNumeric: 'lining-nums tabular-nums', fontFeatureSettings: '"lnum" 1, "tnum" 1' } as const)
     : undefined;
-  const qualityVisualLength = (() => {
-    if (!qualityText) return 0;
-    if (symbolicQuality) {
-      return 1 + (symbolicQuality.extension?.length ?? 0);
-    }
-    const majSuffix = getMajorQualitySuffix(qualityText);
-    if (majSuffix !== null) {
-      return 1 + majSuffix.length;
-    }
-    return qualityText.length;
-  })();
-  const numericQualityReserveEm = isNumericRoot && qualityText
-    ? Math.max(0.34, qualityVisualLength * 0.32)
-    : 0;
-  const numericBassReserveEm = isNumericRoot && bass
-    ? Math.max(0.7, (bassRoot.length + (bassAccidental ? 1 : 0)) * 0.42 + 0.46)
-    : 0;
-  const numericExtensionReserveEm = isNumericRoot && hasExtensionTokens
-    ? Math.max(0.88, extensionTokens.join(' ').length * 0.28 + 0.54)
-    : 0;
-  const numericSuffixReserveEm = isNumericRoot
-    ? numericQualityReserveEm + numericBassReserveEm + numericExtensionReserveEm
-    : 0;
   const numericRootStyle = isNumericRoot
     ? ({ ...numericFigureStyle } as const)
     : undefined;
@@ -546,19 +528,15 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   const symbolicQualityOffsetClass = hasExtensionTokens
     ? 'translate-y-[0.22em]'
     : 'translate-y-[0.08em]';
-  // Quality suffix (m7, maj7, 7, sus...) sits at the lower-right with its baseline
-  // flush against the chord root (no vertical raise).
+  // Quality words stay at the lower-right; their numeric extensions rise above
+  // that baseline, including dominant sevenths with no quality word.
   const plainQualityClass = qualityText === 'm'
     ? 'text-[12px]'
     : /^sus/i.test(qualityText)
       ? 'text-[11px]'
       : 'text-[10px]';
-  // Parenthetical alterations (b5, #5, b9, #11...) are stacked directly above the
-  // quality suffix; this small offset fine-tunes the gap above it.
-  const extensionRaiseClass = '-translate-y-[0.2em]';
   if (isNumericRoot) {
     const numericTextStyle = {
-      ...(numericSuffixReserveEm > 0 ? { paddingRight: `${numericSuffixReserveEm}em` } : {}),
       ...(nashvilleFontFamily ? { fontFamily: nashvilleFontFamily } : {})
     };
 
@@ -568,7 +546,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
           className="relative inline-flex items-baseline text-gray-900 font-bold font-serif whitespace-nowrap"
           style={numericTextStyle}
         >
-          <span className="relative inline-block leading-none text-lg">
+          <span className="relative inline-flex items-baseline leading-none text-lg">
             {renderNumericDegree({
               degree: root,
               accidentalGlyph: accidental,
@@ -576,7 +554,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
               degreeStyle: numericRootStyle
             })}
             {qualityText && (
-              <span className="absolute left-full bottom-0 ml-[0.03em] inline-flex items-end whitespace-nowrap">
+              <span data-chord-quality className="relative ml-[0.03em] inline-flex items-end whitespace-nowrap">
                 <span className={`relative inline-flex items-end ${numericQualityOffsetClass} ${numericQualityTextClass}`.trim()} style={numericQualityStyle}>
                   {symbolicQuality ? (
                     <span className={`inline-flex ${symbolicQualityOffsetClass} items-baseline leading-none`}>
@@ -592,7 +570,8 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
                   )}
                   {hasExtensionTokens && (
                       <span
-                        className={`absolute bottom-full left-1/2 -translate-x-1/2 ${extensionRaiseClass} inline-flex items-baseline text-[7px] leading-none tracking-[-0.02em] whitespace-nowrap`}
+                        data-chord-quality-alterations
+                        className="ml-[0.08em] inline-flex -translate-y-[0.7em] items-baseline text-[7px] leading-none tracking-[-0.02em] whitespace-nowrap"
                       >
                       <span>(</span>
                       {extensionTokens.map((token, index) => {
@@ -616,8 +595,8 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
             )}
             {bass && (
               <span
-                className="absolute left-full bottom-0 translate-y-[0.28em] inline-flex items-end gap-[0.03em] whitespace-nowrap"
-                style={qualityText ? { marginLeft: `${numericQualityReserveEm + 0.02}em` } : { marginLeft: '0.02em' }}
+                data-chord-bass
+                className="relative ml-[0.02em] translate-y-[0.28em] inline-flex items-end gap-[0.03em] whitespace-nowrap"
               >
                 <span className="text-lg font-bold text-gray-900 leading-none">/</span>
                 {renderNumericDegree({
@@ -644,10 +623,10 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   return withChordMark(
     <div className="relative inline-block">
       <span className="inline-flex items-baseline text-gray-900 font-bold font-serif whitespace-nowrap" style={chordFontFamily ? { fontFamily: chordFontFamily } : undefined}>
-        <span className="text-lg leading-none">{root}</span>
+        <span data-chord-root className="text-lg leading-none">{root}</span>
         {accidental && <span className="text-xs -translate-y-1.5 ml-[0.5px]">{accidental}</span>}
         {qualityText && (
-          <span className="relative inline-flex items-baseline leading-none ml-[0.5px]">
+          <span data-chord-quality className="relative inline-flex items-baseline leading-none ml-[0.5px]">
             {symbolicQuality ? (
               <span className={`inline-flex ${symbolicQualityOffsetClass} items-baseline leading-none`}>
                 <span className="text-[18px] leading-none">{symbolicQuality.symbol}</span>
@@ -664,7 +643,8 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
             )}
             {hasExtensionTokens && (
                 <span
-                  className={`absolute bottom-full left-1/2 -translate-x-1/2 ${extensionRaiseClass} inline-flex items-baseline text-[8px] leading-none tracking-[-0.02em] whitespace-nowrap`}
+                  data-chord-quality-alterations
+                  className="ml-[0.08em] inline-flex -translate-y-[0.7em] items-baseline text-[8px] leading-none tracking-[-0.02em] whitespace-nowrap"
                 >
                 <span>(</span>
                 {extensionTokens.map((token, index) => {
@@ -691,7 +671,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
           </span>
         )}
         {bass && (
-          <span className="inline-flex items-end ml-[0.01em]">
+          <span data-chord-bass className="inline-flex items-end ml-[0.01em]">
             <span className="text-lg font-bold text-gray-900 leading-none">/</span>
             <span className={`relative inline-flex items-end leading-none ml-[0.04em] ${bassAccidental ? 'pr-[0.12em]' : ''}`}>
 	              <span className={compactSlashBass ? 'text-[16px] leading-none' : 'text-lg leading-none'}>{bassRoot}</span>
@@ -1152,6 +1132,11 @@ const getDisplayedChordString = (
 ) => {
   if (isMultiMeasureRestChord(chord)) {
     return chord.trim();
+  }
+
+  if (useNashvilleNumbers && sectionWrittenKey) {
+    const displayed = isNashville(chord) ? chord : getNashvilleNumber(chord, sectionWrittenKey);
+    return abbreviateQuality ? abbreviateChordQualityForDisplay(displayed) : displayed;
   }
 
   const transposed = transposeChordForDisplay(chord, sectionOffset, sectionPlayKey, sectionWrittenKey);

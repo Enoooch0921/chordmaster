@@ -72,3 +72,37 @@ it('cancels without changing the source', async () => {
   expect(mocks.sync).not.toHaveBeenCalled();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
+it('saves the reviewed setlist version under a new name without reconciling the source', async () => {
+  const onSaveAs = vi.fn().mockResolvedValue(undefined), onReconciled = vi.fn();
+  render(<SetlistSourceSyncControl libraryId="team" entryId="entry" language="zh" status="setlist-changed" prepare={vi.fn()} onReconciled={onReconciled} onSaveAs={onSaveAs} />);
+  fireEvent.click(screen.getByRole('button', { name: '同步回歌曲庫' }));
+  fireEvent.click(await screen.findByRole('radio', { name: '另存成新歌曲，保留原曲' }));
+  const input = screen.getByRole('textbox', { name: '新歌曲名稱' });
+  fireEvent.change(input, { target: { value: '   ' } });
+  expect(screen.getByRole('button', { name: '確認另存新檔' })).toBeDisabled();
+  fireEvent.change(input, { target: { value: '  Song 新編版  ' } });
+  fireEvent.click(screen.getByRole('button', { name: '確認另存新檔' }));
+  await screen.findByText('已另存成新歌曲，原曲與目前歌單保持不變。');
+  expect(onSaveAs).toHaveBeenCalledWith(expect.objectContaining({ overrideJson: { songData: edited } }), 'Song 新編版', expect.any(String));
+  expect(onSaveAs.mock.calls[0][2]).not.toBe('song');
+  expect(mocks.sync).not.toHaveBeenCalled();
+  expect(onReconciled).not.toHaveBeenCalled();
+});
+it('retains the chosen name and new identity when refreshing after a failed save-as', async () => {
+  const onSaveAs = vi.fn().mockRejectedValueOnce(new Error('連線中斷')).mockResolvedValue(undefined);
+  render(<SetlistSourceSyncControl libraryId="team" entryId="entry" language="zh" status="setlist-changed" prepare={vi.fn()} onReconciled={vi.fn()} onSaveAs={onSaveAs} />);
+  fireEvent.click(screen.getByRole('button', { name: '同步回歌曲庫' }));
+  fireEvent.click(await screen.findByRole('radio', { name: '另存成新歌曲，保留原曲' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '新歌曲名稱' }), { target: { value: '保留的歌名' } });
+  fireEvent.click(screen.getByRole('button', { name: '確認另存新檔' }));
+  await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button', { name: '重新預覽' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '確認更新歌曲庫' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('radio', { name: '另存成新歌曲，保留原曲' }));
+  expect(screen.getByRole('textbox', { name: '新歌曲名稱' })).toHaveValue('保留的歌名');
+  fireEvent.click(screen.getByRole('button', { name: '確認另存新檔' }));
+  await waitFor(() => expect(onSaveAs).toHaveBeenCalledTimes(2));
+  expect(onSaveAs.mock.calls[1][2]).toBe(onSaveAs.mock.calls[0][2]);
+  expect(mocks.sync).not.toHaveBeenCalled();
+});

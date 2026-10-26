@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
 const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('./supabase', () => ({ supabase: mocks }));
-import { classifySetlistSource, describeSetlistSourceChanges, hasSetlistSourceScoreChange, previewSetlistSourceSync, syncSetlistSource, reconcileSetlistSource } from './setlistSourceSync';
+import { classifySetlistSource, createSetlistSourceCopy, describeSetlistSourceChanges, hasSetlistSourceScoreChange, previewSetlistSourceSync, syncSetlistSource, reconcileSetlistSource } from './setlistSourceSync';
 const song: Song = { title: 'Song', originalKey: 'C', currentKey: 'C', timeSignature: '4/4',
   sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'bar', chords: ['C'], riff: '1' }] }] };
 const row = { id: 'song', library_id: 'team', content_json: song, created_at: '2026-10-25T00:00:00Z', updated_at: '2026-10-26T00:00:00.123456Z', archived_at: null };
@@ -82,4 +82,19 @@ describe('manual source sync', () => {
     mocks.rpc.mockResolvedValueOnce({ data: null, error: conflict });
     await expect(syncSetlistSource(preview)).rejects.toEqual(conflict);
   });
+});
+
+it('builds a separate song from the edited score without changing the source or setlist', async () => {
+  const value = payload();
+  const edited = withChord('Dm7');
+  const preview = { libraryId: 'team', entryId: 'entry', source: { ...song, id: 'song', updatedAt: 1 }, sourceRevision: row.updated_at,
+    sourceContent: song, overrideJson: { ...value.entry.override_json, songData: edited }, setlistName: '聚會一', baseline: null, status: 'setlist-changed' as const };
+  const before = JSON.stringify(preview);
+  const copy = createSetlistSourceCopy(preview, ' 新編版 ', 'new-song', 100);
+  expect(copy).toMatchObject({ id: 'new-song', title: '新編版', currentKey: 'C', createdAt: 100, updatedAt: 100, archivedAt: null });
+  expect(copy.sections[0].bars[0].chords).toEqual(['Dm7']);
+  expect(copy.sections).not.toBe(edited.sections);
+  expect(JSON.stringify(preview)).toBe(before);
+  expect(() => createSetlistSourceCopy(preview, '新編版', 'song')).toThrow('own name and identity');
+  expect(() => createSetlistSourceCopy(preview, ' ', 'new-song')).toThrow('own name and identity');
 });

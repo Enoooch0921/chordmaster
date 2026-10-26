@@ -62,6 +62,16 @@ export interface SetlistSourceSyncPreview {
   baseline: SetlistSourceBaseline | null;
   status: SetlistSourceStatus;
 }
+
+/** A new library identity, containing the edited score rather than the source. */
+export const createSetlistSourceCopy = (preview: SetlistSourceSyncPreview, title: string, id: string, now = Date.now()): StoredSong => {
+  if (!title.trim() || !id || id === preview.source.id) throw new Error('A new song needs its own name and identity.');
+  return {
+    ...normalizeSongBars(structuredClone(preview.overrideJson.songData)),
+    id, title: title.trim(), createdAt: now, updatedAt: now,
+    createdBy: undefined, updatedBy: undefined, archivedAt: null, archivedBy: null, teamSource: undefined
+  };
+};
 const mapSource = (row: SourceRow): StoredSong => ({
   ...normalizeSongBars(structuredClone(row.content_json)), id: row.id,
   updatedAt: Date.parse(row.updated_at), createdAt: Date.parse(row.created_at),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Bar, Key, Song } from '../types';
 import { getChordDisplaySlotOwnership, getChordDisplaySlots, getChordTokenBeatSpan, getTwoChordSplitSlotIndex } from '../utils/chordSlots';
-import { getTransposeOffset, parseNashvilleToChord, transposeChord, transposeChordForDisplay } from '../utils/musicUtils';
+import { ALL_KEYS, getNashvilleNumber, getTransposeOffset, isNashville, parseNashvilleToChord, transposeChord, transposeChordForDisplay } from '../utils/musicUtils';
 import {
   clearChordAtBeatSlot,
   convertDisplayedChordToStoredChord,
@@ -783,6 +783,25 @@ describe('section commands', () => {
 });
 
 describe('edit what you see conversion', () => {
+  it.each(['b6', '#5', '1/b6', '1/#5', 'b6maj7', 'b6m7/3'])('keeps the explicit %s degree through storage and every key change', input => {
+    for (const storedKey of ALL_KEYS) for (const displayedKey of ALL_KEYS) {
+      for (const storageMode of ['letters', 'nashville'] as const) {
+        const stored = convertDisplayedChordToStoredChord({ input, inputMode: 'nashville', storageMode, storedKey, displayedKey });
+        const displayed = convertStoredChordToDisplayedChord({ chord: stored, storageMode: isNashville(stored) ? 'nashville' : 'letters', outputMode: 'nashville', storedKey, displayedKey });
+        expect(displayed, `${input} ${storedKey} → ${displayedKey} (${storageMode})`).toBe(input);
+      }
+    }
+  });
+
+  it('retains the distinction between flat six and sharp five in roots and slash basses', () => {
+    expect(parseNashvilleToChord('b6', 'Ab')).toBe('Fb');
+    expect(parseNashvilleToChord('#5', 'Ab')).toBe('E');
+    expect(getNashvilleNumber('Fb', 'Ab')).toBe('b6');
+    expect(getNashvilleNumber('E', 'Ab')).toBe('#5');
+    expect(getNashvilleNumber('C/Ab', 'C')).toBe('1/b6');
+    expect(getNashvilleNumber('C/G#', 'C')).toBe('1/#5');
+  });
+
   const displayStoredAgain = (stored: string, storedKey: Key, displayedKey: Key) => (
     transposeChord(stored, getTransposeOffset(storedKey, displayedKey), displayedKey, false, storedKey)
   );

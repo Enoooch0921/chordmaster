@@ -1272,6 +1272,7 @@ export const convertDisplayedChordToStoredChord = ({
   const trimmed = input.trim();
   if (!trimmed || ['%', '/', 'N.C.'].includes(trimmed) || /^\|\d+\|$/.test(trimmed)) return trimmed;
   const normalizedInput = normalizeChordTextInput(trimmed, inputMode);
+  if (inputMode === 'nashville' && storageMode === 'nashville') return normalizedInput;
   const inverseOffset = getTransposeOffset(displayedKey, storedKey);
   // When no inverse transposition is needed, preserve the spelling the user
   // explicitly entered (Cb, Fb, B#, E#) instead of collapsing it to an
@@ -1281,7 +1282,7 @@ export const convertDisplayedChordToStoredChord = ({
   }
   const displayedLetterChord = inputMode === 'nashville'
     ? parseNashvilleToChord(normalizedInput, displayedKey)
-    : normalizeChordEnharmonic(normalizedInput);
+    : normalizedInput;
   const storedLetterChord = transposeChord(
     displayedLetterChord,
     inverseOffset,
@@ -1289,6 +1290,9 @@ export const convertDisplayedChordToStoredChord = ({
     false,
     displayedKey
   );
+  // A numeric degree is invariant under transposition. Keep the original
+  // numeric token when a letter conversion would lose its explicit spelling.
+  if (inputMode === 'nashville' && getNashvilleNumber(storedLetterChord, storedKey) !== normalizedInput) return normalizedInput;
   return storageMode === 'nashville'
     ? getNashvilleNumber(storedLetterChord, storedKey)
     : storedLetterChord;
@@ -1312,12 +1316,13 @@ export const convertStoredChordToDisplayedChord = ({
     return trimmed;
   }
   const displayOffset = getTransposeOffset(storedKey, displayedKey);
+  if (outputMode === 'nashville') return storageMode === 'nashville' ? trimmed : getNashvilleNumber(trimmed, storedKey);
   if (storageMode === 'letters' && outputMode === 'letters' && displayOffset === 0) {
     return normalizeChordTextInput(trimmed, 'letters');
   }
   const storedLetterChord = storageMode === 'nashville'
     ? parseNashvilleToChord(trimmed, storedKey)
-    : normalizeChordEnharmonic(trimmed);
+    : trimmed;
   const displayedLetterChord = transposeChord(
     storedLetterChord,
     displayOffset,
@@ -1325,9 +1330,7 @@ export const convertStoredChordToDisplayedChord = ({
     false,
     storedKey
   );
-  return outputMode === 'nashville'
-    ? getNashvilleNumber(displayedLetterChord, displayedKey)
-    : displayedLetterChord;
+  return displayedLetterChord;
 };
 
 export const getSectionStoredKey = (song: Song, sectionId: string): Key => {

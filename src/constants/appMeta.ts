@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-27',
+        title: 'Raised chord extensions and preserved degree spelling',
+        bullets: ['Chord extension numbers sit at the upper right while quality words stay at the lower right; slash basses follow the actual suffix width.', 'Flat six and sharp five remain distinct through numeric input, transposition and slash-bass display.', 'Save an edited team-setlist score as a separately named library song while preserving the source and setlist link.']
+      },
+      {
+        version: '0.9.21',
+        date: '2026-10-27',
         title: 'Fit two-line charts by their actual height',
         bullets: ['Full pages tighten the gaps between rows while keeping bar heights and voice lanes intact. Preview, setlists and PDF export use the same page breaks.']
       },
@@ -595,6 +601,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: '和弦數字上標與級數拼寫修正',
+        bullets: ['和弦數字移至右上，m、maj 等英文性質保留在右下，轉位低音依實際字寬排列。', '保留輸入的降六與升五區別，修正不同調性、轉調與斜線低音造成的等音改寫。', '團隊歌單可另存成新歌曲並自訂名稱，保留原曲與歌單連結。']
+      },
+      {
+        version: '0.9.21',
         date: '2026-10-27',
         title: '依實際高度善用一頁空間',
         bullets: ['兩行譜面較滿時適度收緊列距，維持小節高度與完整聲部；預覽、歌單與 PDF 匯出共用分頁，減少最後一行被多聲部前奏擠到下一頁的情況。']
