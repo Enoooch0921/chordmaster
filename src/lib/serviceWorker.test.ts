@@ -8,7 +8,7 @@ const setup = () => {
   const caches = { open: vi.fn(async () => cache), keys: vi.fn(async () => ['chordmaster-pwa-old', 'unrelated']), delete: vi.fn(async () => true), match: vi.fn() };
   const self = { registration: { scope: 'https://example.test/chordmaster/' }, location: { href: 'https://example.test/chordmaster/sw.js', origin: 'https://example.test' }, skipWaiting: vi.fn(), clients: { claim: vi.fn() }, addEventListener: (type: string, callback: any) => { listeners[type] = callback; } };
   const response = { ok: true, clone() { return this; }, text: async () => '<script src="./assets/main.js"></script>' };
-  const fetch = vi.fn(async () => response);
+  const fetch = vi.fn(async (_url: string) => response);
   runInNewContext(source.replace('const BUILD_ASSETS = [];', "const BUILD_ASSETS = ['./assets/main.js'];"), { self, caches, fetch, URL, Set, Promise });
   return { listeners, cache, caches, self, fetch, response };
 };
