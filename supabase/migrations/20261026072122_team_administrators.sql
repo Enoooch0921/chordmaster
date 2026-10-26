@@ -538,4 +538,118 @@ revoke all on function public.reorder_project_setlist(text, jsonb) from public, 
 grant execute on function public.set_project_setlist_song_key(text, text) to authenticated;
 grant execute on function public.reorder_project_setlist(text, jsonb) to authenticated;
 
+-- Return the recipient's actual team editing scope, never the requesting
+-- administrator's broader access. Existing member/invite fields remain intact.
+create or replace function public.get_team_management(p_library_id text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_members jsonb;
+  v_invites jsonb;
+begin
+  if not public.can_manage_library_members(p_library_id) then
+    raise exception 'Access denied';
+  end if;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'userId', lm.user_id,
+        'email', coalesce(p.email, ''),
+        'name', coalesce(p.display_name, p.email, ''),
+        'picture', p.avatar_url,
+        'role', lm.role,
+        'joinedAt', lm.created_at,
+        'scope', jsonb_build_object(
+          'projects', coalesce((
+            select jsonb_agg(jsonb_build_object(
+              'id', project_row.id,
+              'name', project_row.name,
+              'archived', coalesce(project_row.archived, false)
+            ) order by coalesce(project_row.archived, false), project_row.name, project_row.id)
+            from public.projects project_row
+            where project_row.library_id = p_library_id
+              and (
+                lm.role in ('owner', 'admin')
+                or (lm.role in ('editor', 'setlist_manager') and project_row.created_by = lm.user_id)
+              )
+          ), '[]'::jsonb),
+          'setlists', coalesce((
+            select jsonb_agg(jsonb_build_object(
+              'id', setlist_row.id,
+              'name', setlist_row.name,
+              'projectId', setlist_row.project_id,
+              'archived', coalesce(setlist_row.archived, false),
+              'access', case
+                when setlist_row.created_by = lm.user_id then 'created'
+                when lm.role in ('owner', 'admin') then 'administrator'
+                else 'assigned'
+              end
+            ) order by coalesce(setlist_row.archived, false), setlist_row.name, setlist_row.id)
+            from public.setlists setlist_row
+            where setlist_row.library_id = p_library_id
+              and (
+                lm.role in ('owner', 'admin')
+                or (
+                  lm.role in ('editor', 'setlist_manager')
+                  and (
+                    setlist_row.created_by = lm.user_id
+                    or exists (
+                      select 1 from public.setlist_editor_assignments assignment_row
+                      where assignment_row.setlist_id = setlist_row.id
+                        and assignment_row.library_id = p_library_id
+                        and assignment_row.user_id = lm.user_id
+                    )
+                  )
+                )
+              )
+          ), '[]'::jsonb)
+        )
+      )
+      order by case lm.role when 'owner' then 0 when 'admin' then 1 else 2 end, lm.created_at, lm.user_id
+    ),
+    '[]'::jsonb
+  )
+  into v_members
+  from public.library_members lm
+  left join public.profiles p on p.id = lm.user_id
+  where lm.library_id = p_library_id;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', ti.id,
+        'email', ti.email,
+        'role', ti.role,
+        'token', ti.token,
+        'invitedBy', ti.invited_by,
+        'invitedAt', ti.created_at,
+        'expiresAt', ti.expires_at,
+        'acceptedAt', ti.accepted_at,
+        'revokedAt', ti.revoked_at
+      )
+      order by ti.created_at desc
+    ),
+    '[]'::jsonb
+  )
+  into v_invites
+  from public.team_invites ti
+  where ti.library_id = p_library_id
+    and ti.accepted_at is null
+    and ti.revoked_at is null
+    and (ti.expires_at is null or ti.expires_at > now());
+
+  return jsonb_build_object(
+    'members', v_members,
+    'invites', v_invites
+  );
+end;
+$$;
+
+revoke all on function public.get_team_management(text) from public, anon;
+grant execute on function public.get_team_management(text) to authenticated;
+
 notify pgrst, 'reload schema';

@@ -53,6 +53,7 @@ import {
 } from './sharing';
 import { supabase } from './supabase';
 import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
+import { normalizeTeamManagementScope } from './teamScope';
 
 interface SongRow {
   id: string;
@@ -626,7 +627,8 @@ const normalizeTeamManagementSnapshot = (payload: unknown): TeamManagementSnapsh
         name: typeof item.name === 'string' ? item.name : '',
         picture: typeof item.picture === 'string' ? item.picture : undefined,
         role,
-        joinedAt: typeof item.joinedAt === 'string' ? item.joinedAt : new Date().toISOString()
+        joinedAt: typeof item.joinedAt === 'string' ? item.joinedAt : new Date().toISOString(),
+        scope: normalizeTeamManagementScope(item.scope, role),
       };
     }).filter((member) => member.userId),
     invites: rawInvites.map(normalizeTeamInvite).filter((invite): invite is TeamInvite => Boolean(invite))

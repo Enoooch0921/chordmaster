@@ -16,7 +16,7 @@ const { pgcrypto } = await import(pathToFileURL(join(runtime, 'dist/contrib/pgcr
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const tests = process.argv.slice(3);
 if (tests.some((name) => !/^[a-z_]+\.sql$/.test(name))) throw new Error('Use SQL test filenames from supabase/tests.');
-if (!tests.length) tests.push('team_administrators.sql', 'team_library_permissions.sql', 'team_invite_inbox.sql');
+if (!tests.length) tests.push('team_administrators.sql', 'team_member_scopes.sql', 'team_library_permissions.sql', 'team_invite_inbox.sql');
 const db = new PGlite({ extensions: { pgcrypto } });
 try {
   // Minimal Supabase identity context, with real database roles, RLS, triggers,

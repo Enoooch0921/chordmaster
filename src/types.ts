@@ -406,6 +406,17 @@ export interface CloudLibrarySummary {
   updatedAt: string;
 }
 
+export interface TeamManagementScope {
+  projects: Array<{ id: string; name: string; archived: boolean }>;
+  setlists: Array<{
+    id: string;
+    name: string;
+    projectId: string | null;
+    archived: boolean;
+    access: 'created' | 'assigned' | 'administrator';
+  }>;
+}
+
 export interface TeamMember {
   userId: string;
   email: string;
@@ -413,6 +424,8 @@ export interface TeamMember {
   picture?: string;
   role: LibraryRole;
   joinedAt: string;
+  // Omitted by older servers; an omitted scope must not be shown as empty.
+  scope?: TeamManagementScope;
 }
 
 export interface TeamInvite {

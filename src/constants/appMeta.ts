@@ -89,7 +89,7 @@ const localizedMeta: Record<AppLanguage, {
         title: '團隊總管理員與更清楚的共用歌單',
         bullets: [
           '擁有者可授予總管理員，管理全部曲庫、歌單、專案與一般成員權限。',
-          '成員管理支援姓名／信箱搜尋、角色篩選與套用前的權限說明；邀請預設為僅可檢視。',
+          '成員角色可直接用下拉選單修改，支援搜尋、篩選與實際管理範圍；每個人也能查看自己的管轄範圍。',
           '歌單管理員負責選曲、歌序與共用 Key；和弦、歌詞與段落受到保護，Capo 保持個人設定。',
           '共用歌單更頻繁更新；新增歌單後自動調整專案篩選，角色變更時保留未儲存草稿。'
         ]
@@ -100,7 +100,7 @@ const localizedMeta: Record<AppLanguage, {
         title: 'Team administrators and clearer shared setlists',
         bullets: [
           'Owners can appoint team administrators to manage all charts, setlists, projects, and general members.',
-          'Find members by name or email, filter roles, and review permissions before applying a change. New invitations default to View Only.',
+          'Change roles directly from each member’s dropdown, with search, filters, and their actual project and setlist scope. New invitations default to View Only.',
           'Setlist managers choose songs, arrange their order, and set shared keys. Chart content stays protected, and Capo stays personal.',
           'Shared setlists refresh more frequently, project filters follow newly created setlists, and permission changes preserve unsaved drafts.'
         ]

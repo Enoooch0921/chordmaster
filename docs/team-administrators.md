@@ -24,6 +24,23 @@ Capo 是每位登入使用者自己的設定。外部分享專案的 `manager` �
 - 舊邀請接受時不覆寫既有成員角色，避免將已升級的管理員降級。
 - 新增及替換的函式明確撤銷 `PUBLIC`、`anon` 權限，必要 RPC 才授予 `authenticated` 執行權限；新的 trigger 函式不能直接呼叫。
 
+`get_team_management` 的每個成員新增 `scope`，直接由伺服器計算該成員目前可編輯的資源，避免把查詢者的總管理權限誤當成受指派人的權限：
+
+```ts
+{
+  projects: Array<{ id: string; name: string; archived: boolean }>;
+  setlists: Array<{
+    id: string;
+    name: string;
+    projectId: string | null;
+    archived: boolean;
+    access: 'created' | 'assigned' | 'administrator';
+  }>;
+}
+```
+
+擁有者／總管理員會取得團隊內全部專案與歌單；其他管理員只列出自己建立的專案及自己建立或獲指派的歌單；檢視者兩個陣列皆為空。自己建立且同時被指派的歌單只出現一次，標示 `created`。封存資源仍列出並帶旗標，排序先顯示有效項目；沒有截斷名單。查詢整份成員目錄仍限擁有者／總管理員，所有資源都限制在指定團隊，角色或指派變動會在下次讀取即時反映。
+
 歌單管理員寫入 `setlist_songs` 時，伺服器保留既有 `override_json` 的譜面、段落順序及其他內容，只接受新的 `overrideKey` 與歌曲排列位置。這採用保留伺服器原值的方式，因為前端正規化舊譜面後會傳回與資料庫 JSON 不完全一致的內容；不會把這種差異當成譜面更新。
 
 前端在儲存前檢查整份待儲存工作區，並將當時的角色以暫時欄位 `expectedTeamRole` 隨每筆歌單歌曲送出。如果伺服器認定使用者為歌單管理員，但欄位缺少或仍是 editor／admin，會明確拒絕儲存，讓前端保留本機草稿。這也讓舊版管理員介面在重整前收到錯誤，避免把忽略的譜面修改誤認為已儲存。欄位不會保留在資料庫；既有項目的 UPSERT 會先鎖定原項目，再由 UPDATE trigger 消耗標記。
@@ -43,9 +60,9 @@ npm install --prefix /tmp/chordmaster-sql-validation --no-audit --no-fund @elect
 node supabase/tests/run-permission-tests.mjs /tmp/chordmaster-sql-validation/node_modules/@electric-sql/pglite
 ```
 
-runner 使用暫存 PostgreSQL、`pgcrypto`、最小 Supabase 身分介面，以及真實資料庫角色、RLS、trigger 與函式權限。它依歷史依賴順序套用全部 migration；三份 SQL 測試都以交易回滾 fixture。
+runner 使用暫存 PostgreSQL、`pgcrypto`、最小 Supabase 身分介面，以及真實資料庫角色、RLS、trigger 與函式權限。它依歷史依賴順序套用全部 migration；四份 SQL 測試都以交易回滾 fixture。
 
-本次驗證：25 份 migration 成功；`team_administrators.sql` 117 個 SQL statement、`team_library_permissions.sql` 187 個、`team_invite_inbox.sql` 29 個全部成功。既有測試中直接讀取已撤權私有表的斷言改用明確授權的暫存 fixture；邀請測試的 psql 變數改為暫存 fixture，以便同時用 psql 與隔離 runner 執行。
+本次驗證：25 份 migration 成功；`team_administrators.sql` 117 個 SQL statement、`team_member_scopes.sql` 45 個、`team_library_permissions.sql` 187 個、`team_invite_inbox.sql` 29 個全部成功。既有測試中直接讀取已撤權私有表的斷言改用明確授權的暫存 fixture；邀請測試的 psql 變數改為暫存 fixture，以便同時用 psql 與隔離 runner 執行。
 
 可另行指定測試檔：
 

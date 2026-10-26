@@ -2244,6 +2244,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [isSwitchingLibrary, setIsSwitchingLibrary] = useState(false);
   const [activeCloudMutationCount, setActiveCloudMutationCount] = useState(0);
   const [teamManagement, setTeamManagement] = useState<TeamManagementSnapshot | null>(null);
+  const teamManagementRequestRef = useRef(0);
   const [teamManagementError, setTeamManagementError] = useState<string | null>(null);
   const [pendingTeamInvites, setPendingTeamInvites] = useState<PendingTeamInvite[]>([]);
   const [pendingTeamInviteActionId, setPendingTeamInviteActionId] = useState<string | null>(null);
@@ -4362,23 +4363,32 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   const loadTeamManagement = async () => {
     const repository = cloudRepositoryRef.current;
+    const requestId = ++teamManagementRequestRef.current;
+    const libraryId = activeCloudLibrary?.id;
+    const isCurrent = () => teamManagementRequestRef.current === requestId
+      && cloudRepositoryRef.current === repository && activeLibraryIdRef.current === libraryId;
     if (!repository || !activeCloudLibrary || !canManageActiveTeam) {
       setTeamManagement(null);
-      return;
+      return false;
     }
 
     setTeamManagementError(null);
     try {
       setIsLoadingTeamManagement(true);
       const snapshot = await repository.getTeamManagement(activeCloudLibrary.id);
+      if (!isCurrent()) return false;
       setTeamManagement(snapshot);
       setAuthUiError(null);
+      return true;
     } catch (error) {
+      if (!isCurrent()) return false;
       setTeamManagementError(getTeamFeatureErrorMessage(error, language));
-      setTeamManagement(null);
+      // A failed refresh must not erase the directory or a confirmed role
+      // change. Keep the last snapshot visible with the retryable error.
       setAuthUiError(getTeamFeatureErrorMessage(error, language));
+      return false;
     } finally {
-      setIsLoadingTeamManagement(false);
+      if (isCurrent()) setIsLoadingTeamManagement(false);
     }
   };
 
@@ -4424,24 +4434,36 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const repository = cloudRepositoryRef.current;
     if (!repository || !activeCloudLibrary || !canManageActiveTeam || updatingTeamMemberUserId) return;
     const target = teamManagement?.members.find((member) => member.userId === userId);
-    if (!target || !canManageTeamMember(activeLibraryRole, target.role)
+    if (!target || target.role === role || !canManageTeamMember(activeLibraryRole, target.role)
         || !getAssignableTeamRoles(activeLibraryRole).includes(role)) return;
+    const libraryId = activeCloudLibrary.id;
+    const isCurrent = () => cloudRepositoryRef.current === repository && activeLibraryIdRef.current === libraryId;
     setTeamManagementError(null);
     try {
       setUpdatingTeamMemberUserId(userId);
-      await repository.updateTeamMemberRole(activeCloudLibrary.id, userId, role);
-      await Promise.all([
+      await repository.updateTeamMemberRole(libraryId, userId, role);
+      if (!isCurrent()) return;
+      setTeamManagement((current) => current ? {
+        ...current,
+        members: current.members.map((member) => member.userId === userId
+          ? { ...member, role, scope: undefined } : member),
+      } : current);
+      await Promise.allSettled([
         loadTeamManagement(),
         refreshCloudLibraries()
       ]);
+      if (!isCurrent()) return;
       toast.success(language === 'zh'
         ? `已將成員權限改為「${getTeamRoleLabel(role, language)}」。`
         : `Member role changed to ${getTeamRoleLabel(role, language)}.`);
     } catch (error) {
+      if (!isCurrent()) return;
+      await loadTeamManagement();
+      if (!isCurrent()) return;
       setTeamManagementError(getTeamFeatureErrorMessage(error, language));
       toast.error(getTeamFeatureErrorMessage(error, language));
     } finally {
-      setUpdatingTeamMemberUserId(null);
+      if (isCurrent()) setUpdatingTeamMemberUserId(null);
     }
   };
 
@@ -5772,7 +5794,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   );
 
   useEffect(() => {
+    teamManagementRequestRef.current += 1;
+    setTeamManagement(null);
+    setIsLoadingTeamManagement(false);
+    setUpdatingTeamMemberUserId(null);
+  }, [activeLibraryId, authenticatedUser?.id]);
+
+  useEffect(() => {
     if (!isTeamManagementOpen || !canManageActiveTeam) {
+      teamManagementRequestRef.current += 1;
+      setIsLoadingTeamManagement(false);
       return;
     }
 
@@ -12117,6 +12148,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             language={language}
             libraries={workspaceLibraryButtons}
             activeId={activeCloudLibrary?.id ?? workspaceLibraryButtons[0]?.id}
+            activeScope={isTeamWorkspace && !isSwitchingLibrary && !isLoadingCloudWorkspace
+              ? { projects, setlists, userId: authenticatedUser?.id } : undefined}
             disabled={cloudLibraries.length === 0 || isSwitchingLibrary || activeCloudMutationCount > 0}
             canManage={canManageActiveTeam}
             createOpen={isCreateTeamOpen}

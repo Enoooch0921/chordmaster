@@ -35,11 +35,9 @@ describe('TeamManagementDialog', () => {
     expect(container).not.toContainElement(dialog);
     expect(document.body.style.overflow).toBe('hidden');
     expect(screen.queryByLabelText('調整 Enoch 的權限')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('調整 Joseph 的權限')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '編輯 Joseph 的權限' }));
+    expect(screen.getByLabelText('調整 Joseph 的權限')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '套用 Joseph 的權限' })).not.toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText('調整 Joseph 的權限'), 'editor');
-    expect(props.onUpdateRole).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: '套用 Joseph 的權限' }));
     expect(props.onUpdateRole).toHaveBeenCalledWith('member', 'editor');
     await user.click(screen.getByRole('button', { name: '移除 Joseph' }));
     expect(props.onRemoveMember).toHaveBeenCalledWith('member');
@@ -73,15 +71,11 @@ describe('TeamManagementDialog', () => {
     expect(props.onUpdateRole).not.toHaveBeenCalled();
   });
 
-  it('lets owners review and apply admin grants but never invites an admin directly', async () => {
+  it('lets owners change roles directly but never invites an admin directly', async () => {
     const props = makeProps();
     const user = userEvent.setup();
     render(<TeamManagementDialog {...props} />);
-    await user.click(screen.getByRole('button', { name: '編輯 Joseph 的權限' }));
     await user.selectOptions(screen.getByLabelText('調整 Joseph 的權限'), 'admin');
-    expect(props.onUpdateRole).not.toHaveBeenCalled();
-    expect(screen.getAllByText(/不能變更擁有者或其他總管理員/).length).toBeGreaterThan(0);
-    await user.click(screen.getByRole('button', { name: '套用 Joseph 的權限' }));
     expect(props.onUpdateRole).toHaveBeenCalledWith('member', 'admin');
     await user.click(screen.getByRole('button', { name: '邀請' }));
     expect(screen.getByRole('combobox', { name: '成員權限' })).toHaveValue('viewer');
@@ -93,42 +87,96 @@ describe('TeamManagementDialog', () => {
     const user = userEvent.setup();
     const snapshot = { ...props.snapshot!, members: [...props.snapshot!.members, { userId: 'admin', name: 'Team Admin', email: 'admin@example.com', role: 'admin' as const, joinedAt: '' }] };
     render(<TeamManagementDialog {...props} currentUserRole="admin" snapshot={snapshot} />);
-    expect(screen.queryByRole('button', { name: '編輯 Enoch 的權限' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '編輯 Team Admin 的權限' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '編輯 Joseph 的權限' }));
+    expect(screen.queryByRole('combobox', { name: '調整 Enoch 的權限' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '調整 Team Admin 的權限' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '移除 Team Admin' })).not.toBeInTheDocument();
     const role = screen.getByRole('combobox', { name: '調整 Joseph 的權限' });
     expect(within(role).queryByRole('option', { name: '總管理員' })).not.toBeInTheDocument();
     expect(within(role).queryByRole('option', { name: '團隊擁有者' })).not.toBeInTheDocument();
     await user.selectOptions(role, 'setlist_manager');
-    await user.click(screen.getByRole('button', { name: '套用 Joseph 的權限' }));
     expect(props.onUpdateRole).toHaveBeenCalledWith('member', 'setlist_manager');
   });
 
-  it('invalidates an unsubmitted admin grant if the acting owner loses owner access', async () => {
+  it('removes admin choices if the acting owner loses owner access', async () => {
     const props = makeProps();
     const user = userEvent.setup();
     const { rerender } = render(<TeamManagementDialog {...props} />);
-    await user.click(screen.getByRole('button', { name: '編輯 Joseph 的權限' }));
-    await user.selectOptions(screen.getByLabelText('調整 Joseph 的權限'), 'admin');
     rerender(<TeamManagementDialog {...props} currentUserRole="admin" />);
-    expect(screen.getByRole('button', { name: '套用 Joseph 的權限' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: '套用 Joseph 的權限' }));
+    const role = screen.getByRole('combobox', { name: '調整 Joseph 的權限' });
+    expect(within(role).queryByRole('option', { name: '總管理員' })).not.toBeInTheDocument();
+    fireEvent.change(role, { target: { value: 'admin' } });
+    expect(props.onUpdateRole).not.toHaveBeenCalled();
+    await user.selectOptions(role, 'viewer');
     expect(props.onUpdateRole).not.toHaveBeenCalled();
   });
 
-  it('keeps a failed role change reviewable and explains assignment removal on downgrade', async () => {
+  it('reverts failed role changes to the server snapshot and permits retry', async () => {
     const props = makeProps();
     const user = userEvent.setup();
     const onUpdateRole = vi.fn().mockRejectedValue(new Error('網路中斷'));
     const snapshot = { ...props.snapshot!, members: props.snapshot!.members.map((member) => member.userId === 'member' ? { ...member, role: 'editor' as const } : member) };
     render(<TeamManagementDialog {...props} snapshot={snapshot} onUpdateRole={onUpdateRole} />);
-    await user.click(screen.getByRole('button', { name: '編輯 Joseph 的權限' }));
     await user.selectOptions(screen.getByLabelText('調整 Joseph 的權限'), 'viewer');
-    expect(screen.getByText(/改為僅可檢視會移除原有的歌單協作指派/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '套用 Joseph 的權限' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('網路中斷');
-    expect(screen.getByRole('combobox', { name: '調整 Joseph 的權限' })).toHaveValue('viewer');
-    expect(screen.getByRole('button', { name: '套用 Joseph 的權限' })).toBeEnabled();
+    expect(screen.getByRole('combobox', { name: '調整 Joseph 的權限' })).toHaveValue('editor');
+    expect(screen.getByRole('combobox', { name: '調整 Joseph 的權限' })).toBeEnabled();
+    await user.selectOptions(screen.getByLabelText('調整 Joseph 的權限'), 'viewer');
+    expect(onUpdateRole).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks competing changes, removal, invitations and closing until a role change completes', async () => {
+    const props = makeProps();
+    let finish!: () => void;
+    const onUpdateRole = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const { rerender } = render(<TeamManagementDialog {...props} onUpdateRole={onUpdateRole} />);
+    const role = screen.getByRole('combobox', { name: '調整 Joseph 的權限' });
+    fireEvent.change(role, { target: { value: 'editor' } });
+    fireEvent.change(role, { target: { value: 'admin' } });
+    expect(onUpdateRole).toHaveBeenCalledExactlyOnceWith('member', 'editor');
+    expect(role).toBeDisabled();
+    expect(screen.getByRole('button', { name: '移除 Joseph' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '邀請' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '關閉團隊管理' })).toBeDisabled();
+    finish();
+    await waitFor(() => expect(role).toBeEnabled());
+    rerender(<TeamManagementDialog {...props} snapshot={{ ...props.snapshot!, members: props.snapshot!.members.map((member) => member.userId === 'member' ? { ...member, role: 'editor' as const } : member) }} />);
+    expect(role).toHaveValue('editor');
+  });
+
+  it('removes a recipient’s controls immediately when they become a protected administrator', () => {
+    const props = makeProps();
+    const { rerender } = render(<TeamManagementDialog {...props} currentUserRole="admin" />);
+    expect(screen.getByRole('combobox', { name: '調整 Joseph 的權限' })).toBeInTheDocument();
+    rerender(<TeamManagementDialog {...props} currentUserRole="admin" snapshot={{ ...props.snapshot!, members: props.snapshot!.members.map((member) => member.userId === 'member' ? { ...member, role: 'admin' as const } : member) }} />);
+    expect(screen.queryByRole('combobox', { name: '調整 Joseph 的權限' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '移除 Joseph' })).not.toBeInTheDocument();
+  });
+
+  it('shows actual recipient scope without putting scope disclosure in the role-editing path', async () => {
+    const props = makeProps();
+    const user = userEvent.setup();
+    const snapshot = { ...props.snapshot!, members: props.snapshot!.members.map((member) => member.userId === 'member' ? {
+      ...member, role: 'setlist_manager' as const,
+      scope: {
+        projects: [{ id: 'project', name: '青年敬拜', archived: false }],
+        setlists: [{ id: 'list', name: '週五歌單', projectId: 'project', archived: false, access: 'assigned' as const }],
+      },
+    } : member) };
+    const { rerender } = render(<TeamManagementDialog {...props} snapshot={snapshot} />);
+    const row = screen.getByText('Joseph').closest('li')!;
+    expect(within(row).getByText(/1 個專案 · 1 份歌單/)).toBeInTheDocument();
+    expect(within(row).getByRole('combobox', { name: '調整 Joseph 的權限' })).toBeEnabled();
+    await user.click(within(row).getByText(/1 個專案 · 1 份歌單/));
+    expect(within(row).getByText('青年敬拜')).toBeVisible();
+    expect(within(row).getByText('週五歌單')).toBeVisible();
+    expect(within(row).getByText('被指派')).toBeVisible();
+    expect(props.onUpdateRole).not.toHaveBeenCalled();
+    await user.selectOptions(within(row).getByRole('combobox', { name: '調整 Joseph 的權限' }), 'editor');
+    expect(props.onUpdateRole).toHaveBeenCalledExactlyOnceWith('member', 'editor');
+
+    rerender(<TeamManagementDialog {...props} snapshot={{ ...snapshot, members: snapshot.members.map((member) => member.userId === 'member' ? { ...member, role: 'editor' as const, scope: undefined } : member) }} />);
+    expect(within(row).queryByText(/1 個專案 · 1 份歌單/)).not.toBeInTheDocument();
+    expect(within(row).getByText(/全部歌曲 · 自建專案 · 自建或指派歌單/)).toBeInTheDocument();
   });
 
   it('switches to pending invitations and copies or revokes the selected invitation', async () => {
@@ -173,6 +221,10 @@ describe('TeamManagementDialog', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('載入失敗');
     await user.click(screen.getByRole('button', { name: '重新載入' }));
     expect(props.onRetry).toHaveBeenCalledOnce();
+    rerender(<TeamManagementDialog {...props} error="重新整理失敗" />);
+    expect(screen.getByRole('combobox', { name: '調整 Joseph 的權限' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '重新載入' }));
+    expect(props.onRetry).toHaveBeenCalledTimes(2);
     rerender(<TeamManagementDialog {...props} creatingInvite />);
     fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
     expect(props.onClose).not.toHaveBeenCalled();

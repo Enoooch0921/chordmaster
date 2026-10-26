@@ -32,4 +32,20 @@ describe('team administrator role normalization', () => {
     mocks.rpc.mockResolvedValue({ error: null, data: [{ id: 'invite', libraryId: 'team', email: 'admin@example.com', role: 'admin' }] });
     expect(await makeRepository().getPendingTeamInvites()).toEqual([expect.objectContaining({ role: 'admin' })]);
   });
+
+  it('preserves validated member scopes without treating older or invalid scope payloads as empty', async () => {
+    const scope = {
+      projects: [{ id: 'p', name: 'Sunday', archived: false }],
+      setlists: [{ id: 's', name: 'Worship', projectId: 'p', archived: true, access: 'assigned' }],
+    };
+    mocks.rpc.mockResolvedValue({ error: null, data: { members: [
+      { userId: 'manager', role: 'setlist_manager', scope },
+      { userId: 'legacy', role: 'editor' },
+      { userId: 'invalid', role: 'editor', scope: { projects: [], setlists: [null] } },
+      { userId: 'viewer', role: 'viewer', scope },
+    ] } });
+    const result = await makeRepository().getTeamManagement('team');
+    expect(result.members[0].scope).toEqual(scope);
+    expect(result.members.slice(1).map((member) => member.scope)).toEqual([undefined, undefined, undefined]);
+  });
 });
