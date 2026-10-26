@@ -43,6 +43,7 @@ export const CompactSegmentedControl = <T extends string,>({
           <button
             key={option.value}
             type="button"
+            aria-pressed={isActive}
             onClick={() => onChange(option.value)}
             className={`rounded-full font-bold transition-colors ${
               isExtraSmall

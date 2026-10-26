@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-27',
+        title: 'Personal setlist views and a tighter app header',
+        bullets: ['Nashville, fixed-do and movable-do setlist views are personal to this account/browser, including preview, performance mode and PDF export. Owners and viewers can choose independently.', 'Remove the empty status row above the team-setlist toolbar while preserving system safe areas and update notices.']
+      },
+      {
+        version: '0.9.22',
+        date: '2026-10-27',
         title: 'Raised chord extensions and preserved degree spelling',
         bullets: ['Chord extension numbers sit at the upper right while quality words stay at the lower right; slash basses follow the actual suffix width.', 'Flat six and sharp five remain distinct through numeric input, transposition and slash-bass display.', 'Save an edited team-setlist score as a separately named library song while preserving the source and setlist link.']
       },
@@ -601,6 +607,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: '歌單個人顯示與頂部留白修正',
+        bullets: ['級數、固定調、首調改為目前帳號與瀏覽器的個人選擇，預覽、演出與 PDF 都一致；管理者和唯讀團員互不影響。', '移除團隊歌單工具列上方空白狀態列，保留系統安全區與更新提醒。']
+      },
+      {
+        version: '0.9.22',
         date: '2026-10-27',
         title: '和弦數字上標與級數拼寫修正',
         bullets: ['和弦數字移至右上，m、maj 等英文性質保留在右下，轉位低音依實際字寬排列。', '保留輸入的降六與升五區別，修正不同調性、轉調與斜線低音造成的等音改寫。', '團隊歌單可另存成新歌曲並自訂名稱，保留原曲與歌單連結。']

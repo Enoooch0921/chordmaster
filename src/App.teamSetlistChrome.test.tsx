@@ -1,0 +1,44 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
+import App from './App';
+import { ToastProvider } from './components/Toast';
+import type { LibraryRole, WorkspaceSnapshot } from './types';
+const state = vi.hoisted(() => ({ refresh: vi.fn(() => false), role: 'viewer' as LibraryRole }));
+let fixture: WorkspaceSnapshot;
+vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: { id: 'review-user', email: 'review@example.invalid', name: 'Review', picture: '' }, session: { access_token: 'test-session' }, status: 'signed-in', isConfigured: true, signInWithGoogle: vi.fn(), signOut: vi.fn() }) }));
+vi.mock('./lib/workspace', async original => ({ ...await original<typeof import('./lib/workspace')>(), loadPersistentWorkspaceSnapshot: async () => fixture }));
+vi.mock('./lib/repository', () => ({ createCloudRepository: () => ({ listLibraries: async () => [{ id: 'team', name: '測試團隊', kind: 'team', role: state.role, ownerUserId: 'owner', createdAt: '', updatedAt: '' }], setActiveLibrary: vi.fn(), loadLibraryWorkspace: async () => fixture, getSetlistShareStatus: async () => ({ activeToken: null, activeCreatedAt: null, participantCount: 0, participants: [] }), getSetlistEditorAssignments: async () => ({ members: [], assignments: [] }), getNotifications: async () => [], getShareContacts: async () => [], getPendingTeamInvites: async () => [], subscribeToLibraryChanges: () => () => {} }) }));
+vi.mock('./hooks/useLibraryWorkspaceRefresh', () => ({ useLibraryWorkspaceRefresh: state.refresh }));
+vi.mock('./hooks/useJoinedWorkspaceRefresh', () => ({ useJoinedWorkspaceRefresh: () => false }));
+vi.mock('./hooks/useSongEditingPresence', () => ({ useSongEditingPresence: () => ({ editors: [], failed: false }) }));
+vi.mock('./hooks/useTeamWorkspaceDraft', () => ({ useTeamWorkspaceDraft: () => ({ ready: true, pending: null, error: null, dismiss: vi.fn(), restored: vi.fn() }) }));
+beforeAll(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  window.matchMedia = vi.fn().mockImplementation(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+  HTMLElement.prototype.scrollIntoView = vi.fn(); HTMLElement.prototype.scrollTo = vi.fn();
+});
+beforeEach(() => {
+  localStorage.clear(); vi.clearAllMocks();
+  const song = { id: 'song', updatedAt: 1, title: '團隊顯示檢查', originalKey: 'C' as const, currentKey: 'C' as const, timeSignature: '4/4', sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'bar', chords: ['C'] }] }] };
+  fixture = { songs: [song], setlists: [{ id: 'set', name: '團隊歌單', displayMode: 'chord-movable-key', createdBy: 'owner', createdAt: 1, updatedAt: 1, songs: [{ id: 'entry', setlistId: 'set', songId: song.id, order: 0, sectionOrder: [], songData: song }] }], projects: [], joinedProjects: [], joinedSetlists: [], lastSavedAt: 1 };
+  localStorage.setItem('chordmaster.workspace-mode.v1', 'setlists');
+  localStorage.setItem('chordmaster.selected-setlist-id.v1', 'set');
+  localStorage.setItem('chordmaster.active-library.review-user.v1', 'team');
+});
+afterEach(() => localStorage.clear());
+it.each(['owner', 'viewer'] as const)('removes empty team-setlist chrome and permits a personal view for %s', async role => {
+  state.role = role;
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  const latest = () => (state.refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0];
+  await waitFor(() => expect(latest().enabled && latest().libraryId === 'team').toBe(true), { timeout: 5000 });
+  expect(document.querySelector('[data-library-live-status]')).toBeNull();
+  expect(document.querySelector('[data-main-panel]')?.firstElementChild).toBe(document.querySelector('[data-topbar]'));
+  const before = JSON.stringify(latest().workspace.setlists);
+  const controls = screen.getByRole('group', { name: '個人顯示模式' });
+  expect(within(controls).getByRole('button', { name: '級數' })).toBeEnabled();
+  fireEvent.click(within(controls).getByRole('button', { name: '級數' }));
+  await waitFor(() => expect(document.querySelector('[data-setlist-preview-song-id="entry"] [data-preview-owner-slot="0"]')?.textContent).toBe('1'));
+  expect(JSON.stringify(latest().workspace.setlists)).toBe(before);
+  expect(localStorage.getItem('chordmaster.personal-setlist-display-modes.v1:user:review-user')).toContain('nashville-number-system');
+}, 15000);

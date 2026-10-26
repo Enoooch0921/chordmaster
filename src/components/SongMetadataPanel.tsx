@@ -854,8 +854,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   );
 
   const displayModeField = (
-    <div>
-      <label className={controlLabelClassName}>{copy.setlistEditor.displaySettings}</label>
+    <div title={language === 'zh' ? '只影響自己的顯示，不影響其他團員' : 'Only changes your view'}>
+      <label className={controlLabelClassName}>{language === 'zh' ? '個人顯示' : 'Personal display'}</label>
       <CompactSegmentedControl
         value={displayMode ?? 'chord-movable-key'}
         options={displayModeOptions}

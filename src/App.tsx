@@ -35,6 +35,7 @@ import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
 import { useJoinedWorkspaceRefresh } from './hooks/useJoinedWorkspaceRefresh';
 import { useLibraryWorkspaceRefresh } from './hooks/useLibraryWorkspaceRefresh';
+import { useSetlistDisplayModePreference } from './hooks/useSetlistDisplayModePreference';
 import { useSongEditingPresence } from './hooks/useSongEditingPresence';
 import { SongEditingNotice } from './components/SongEditingNotice';
 import { writeTeamDraft, removeTeamDraft, restoreTeamDraft } from './lib/teamDrafts';
@@ -2056,6 +2057,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rawAuthenticatedUser?.id]
   );
+  const personalSetlistDisplay = useSetlistDisplayModePreference(authenticatedUser?.id);
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
   const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
@@ -2785,12 +2787,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     selectedSetlist
     ? {
         ...selectedSetlist,
-        displayMode: isJoinedSetlist
-          ? joinedSetlistDisplayPreference.displayMode ?? selectedSetlist.displayMode
-          : selectedSetlist.displayMode
+        displayMode: personalSetlistDisplay.modes[selectedSetlist.id]
+          ?? joinedSetlistDisplayPreference.displayMode
+          ?? selectedSetlist.displayMode
       }
     : null
-  ), [selectedSetlist, isJoinedSetlist, joinedSetlistDisplayPreference.displayMode]);
+  ), [selectedSetlist, personalSetlistDisplay.modes, joinedSetlistDisplayPreference.displayMode]);
   const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
     ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId)
       ?? allJoinedProjectSetlists.find((item) => item.id === pendingLeaveSharedSetlistId)
@@ -3013,6 +3015,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     ?? 'none';
   const renderSetlistDisplayModeControl = (className = '', size: 'xs' | 'sm' = 'xs') => (
     isSetlistMode && effectiveSelectedSetlist ? (
+      <div role="group" aria-label={language === 'zh' ? '個人顯示模式' : 'Personal display mode'} title={language === 'zh' ? '只影響自己的顯示，不影響其他團員' : 'Only changes your view'} className="shrink-0">
       <CompactSegmentedControl
         value={currentSetlistDisplayMode}
         options={setlistDisplayModeOptions}
@@ -3021,6 +3024,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         className={`shrink-0 ${size === 'xs' ? '!h-9 rounded-lg bg-white shadow-sm' : ''} ${className}`}
         buttonClassName={size === 'xs' ? 'min-w-[42px]' : 'min-w-[54px]'}
       />
+      </div>
     ) : null
   );
   const toolbarOverflowPanel = (
@@ -5901,16 +5905,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }));
   };
 
-  const handleSetlistDisplaySettingsChange = (setlistId: string, updates: Partial<Pick<Setlist, 'displayMode'>>) => {
-    if (!canEditSelectedSetlist) {
-      return;
-    }
-    replaceSetlist(setlistId, (currentSetlist) => ({
-      ...currentSetlist,
-      ...updates
-    }));
-  };
-
   const handleJoinedSetlistDisplayPreferenceChange = (setlistId: string, updates: JoinedSetlistDisplayPreference) => {
     setJoinedSetlistDisplayPreferences((current) => {
       const next = {
@@ -5930,14 +5924,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
 
-    syncPreviewChordKeyboardWithDisplayMode(mode === 'nashville-number-system');
+    setPreviewEditSession(current => current
+      ? setPreviewEditChordInputMode(current, mode === 'nashville-number-system' ? 'nashville' : 'letters')
+      : current);
 
-    if (isJoinedSetlist) {
-      handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { displayMode: mode });
-      return;
-    }
-
-    handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode });
+    personalSetlistDisplay.setMode(selectedSetlist.id, mode);
   };
 
   const handleDeleteSetlist = (setlistId: string) => {
@@ -7764,7 +7755,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       document.body.appendChild(captureHost);
 
       if (isSetlistMode) {
-        if (!selectedSetlist || setlistSongsWithSource.length === 0) {
+        if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
           toast.error(copy.setlistExportEmptyError);
           return;
         }
@@ -7773,10 +7764,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         flushSync(() => {
           exportRoot?.render(
             <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
-              {isLyricsMode && isLyricsContinuous ? <LyricsBook title={selectedSetlist.name} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode /> : setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
+              {isLyricsMode && isLyricsContinuous ? <LyricsBook title={effectiveSelectedSetlist.name} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode /> : setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
                 const baseDerivedSong = applySetlistSongOverrides(
                   item.songData ?? sourceSong,
-                  selectedSetlist,
+                  effectiveSelectedSetlist,
                   item,
                   guitaristMode,
                   setlistCapoResolutionOptions
@@ -7809,7 +7800,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             </div>
           );
         });
-        await exportCaptureHostToPdf(captureHost, buildSetlistPdfFileName(selectedSetlist));
+        await exportCaptureHostToPdf(captureHost, buildSetlistPdfFileName(effectiveSelectedSetlist));
       } else if (isLyricsMode && song) {
         exportRoot = createRoot(captureHost);
         flushSync(() => {
@@ -11652,14 +11643,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           onKeyChange={isJoinedSetlist ? undefined : handleSetlistKeyChange}
           onCapoChange={handleSelectedSetlistCapoChange}
           displayMode={effectiveSelectedSetlist.displayMode}
-          onDisplayModeChange={(mode) => {
-            if (isJoinedSetlist) {
-              handleJoinedSetlistDisplayPreferenceChange(selectedSetlist.id, { displayMode: mode });
-              return;
-            }
-
-            handleSetlistDisplaySettingsChange(selectedSetlist.id, { displayMode: mode });
-          }}
+          onDisplayModeChange={handleSetlistDisplayModeChange}
           showReferenceFields={false}
         />
       ) : null)
@@ -14203,7 +14187,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           </p>
         ) : null}
 
-        {isTeamWorkspace ? (
+        {isTeamWorkspace && (teamLibraryUpdatePending || workspaceMode === 'songs') ? (
           <div className="relative h-12 shrink-0 border-b border-gray-200" data-library-live-status>
             {teamLibraryUpdatePending ? (
               <div className="absolute inset-0 flex items-center gap-3 bg-amber-50 px-3 py-2 text-amber-800 sm:px-6">
