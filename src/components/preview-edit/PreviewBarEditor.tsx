@@ -869,7 +869,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         }
       : (() => {
           const width = Math.min(520, viewportWidth - 24);
-          const estimatedHeight = hasUnmeteredChords(bar) || (bar.chordTimingUnspecified && notationMode === 'chords') || (notationMode === 'chords' && subdivisionsExpanded)
+          const estimatedHeight = hasUnmeteredChords(bar) || (bar?.chordTimingUnspecified && notationMode === 'chords') || (notationMode === 'chords' && subdivisionsExpanded)
             ? Math.min(420, viewportHeight - 24)
             : mode === 'text'
             ? Math.min(300, viewportHeight - 24)

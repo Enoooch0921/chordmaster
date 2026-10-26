@@ -1415,12 +1415,12 @@ describe('PreviewBarEditor', () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
-  it('only shows the deletion message for an explicitly deleted target', () => {
+  it.each(['desktop', 'tablet', 'phone'] as const)('handles a missing or deleted target without crashing on %s', (deviceLayout) => {
     const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
     const missingDraft = { ...song, sections: [{ ...song.sections[0], bars: [] }] };
     const { rerenderSession } = renderEditor({
       session: { ...base, draftSong: missingDraft, past: [song], dirty: true },
-      deviceLayout: 'tablet'
+      deviceLayout
     });
     expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument();
     expect(screen.getByText('正在恢復選取位置，請重新點選小節')).toBeInTheDocument();
@@ -1428,5 +1428,8 @@ describe('PreviewBarEditor', () => {
     rerenderSession({ ...base, draftSong: missingDraft, past: [song], dirty: true, targetStatus: 'deleted' });
     expect(screen.getByText('小節已刪除，可復原或完成這次編輯')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+    rerenderSession(base);
+    expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '預覽快捷編輯' })).toHaveAttribute('data-notation-mode', 'chords');
   });
 });
