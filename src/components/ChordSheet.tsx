@@ -1,3 +1,5 @@
+import PickupPreview from './PickupPreview';
+import { getPickupDisplay, PICKUP_EDITOR_SECTION_ID } from '../utils/pickupUtils';
 import { getSongTempoStates, hasTempoEvent } from '../utils/tempoEvents';
 import { formatTempoBpm } from '../utils/tempoUtils';
 import { currentKeyMode } from '../utils/keyMode';
@@ -152,33 +154,6 @@ const hasVisiblePreviewRiff = (notation: string | undefined) => {
   if (!trimmed) return false;
   if (trimmed === '-') return true;
   return findJianpuNoteRanges(trimmed).length > 0 || findJianpuPlaceholderRanges(trimmed).length > 0;
-};
-
-const getOccupiedTokenSpan = (tokens: string[]) => {
-  const firstIndex = tokens.findIndex((token) => token.trim());
-  if (firstIndex === -1) {
-    return {
-      firstIndex: -1,
-      lastIndex: -1,
-      span: 0,
-      trimmedTokens: [] as string[]
-    };
-  }
-
-  let lastIndex = firstIndex;
-  for (let index = tokens.length - 1; index >= firstIndex; index -= 1) {
-    if (tokens[index]?.trim()) {
-      lastIndex = index;
-      break;
-    }
-  }
-
-  return {
-    firstIndex,
-    lastIndex,
-    span: lastIndex - firstIndex + 1,
-    trimmedTokens: tokens.slice(firstIndex, lastIndex + 1)
-  };
 };
 
 const formatEndingDisplay = (ending: string | undefined) => {
@@ -2009,7 +1984,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
         sIdx === 0 && i === 0 ? visibleJianpuVoices(song.pickup?.riffVoices).length : 0);
       const extraChordPassRows = Math.max(0, ...rowBars.map(bar => bar.chordPassVariants?.length ?? 0));
       const hasThreeNotationRows = getRowHasThreeNotationRows(rowBars);
-      const hasLowerNotationRows = getRowHasLowerNotationRows(rowBars, i === 0);
+      const hasLowerNotationRows = getRowHasLowerNotationRows(rowBars, i === 0)
+        || Boolean(sIdx === 0 && i === 0 && song.pickup && getPickupDisplay(song.pickup, song.timeSignature).hasContent);
       const hasSectionStartLowerGutter = Boolean(
         barRowCount === 2
         && i === 0
@@ -2397,59 +2373,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               const isHighlighted = highlightedSectionIds.includes(section?.id || '');
               const isActiveSection = Boolean(section?.id) && section.id === activeSectionId;
               const pickup = row.sIdx === 0 && row.startBIdx === 0 ? song.pickup : undefined;
-              const pickupVoices = visibleJianpuVoices(pickup?.riffVoices);
-              const hasPickupPrimaryRiff = Boolean(pickup?.riff?.trim());
-              const hasPickupRiff = hasPickupPrimaryRiff || pickupVoices.length > 0;
-              const hasPickupRhythm = Boolean(pickup?.rhythm?.trim());
-              const hasPickupDisplay = hasPickupRiff || hasPickupRhythm;
-              const { beats: pickupBeatCount } = parseTimeSignature(song.timeSignature);
-              const pickupRiffTokens = hasPickupRiff
-                ? getCanonicalJianpuBeatTokens(pickup?.riff || pickupVoices[0]?.riff, song.timeSignature)
-                : [];
-              const pickupRiffSpan = getOccupiedTokenSpan(pickupRiffTokens);
-              const pickupMaxTokenItems = [pickup?.riff, ...pickupVoices.map(voice => voice.riff)]
-                .filter((riff): riff is string => Boolean(riff?.trim()))
-                .flatMap(riff => getCanonicalJianpuBeatTokens(riff, song.timeSignature))
-                .reduce((maxCount, token) => (
-                  Math.max(maxCount, findJianpuNoteRanges(token).length + findJianpuPlaceholderRanges(token).length)
-                ), 0);
-              const pickupPreviewNotation = hasPickupPrimaryRiff
-                ? (() => {
-                    const canonicalNotation = serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(pickup?.riff, song.timeSignature));
-                    return song.showAbsoluteJianpu
-                      ? convertRelativeJianpuToAbsoluteNotation(canonicalNotation, sectionPlayKey)
-                      : canonicalNotation;
-                  })()
-                : '';
-              const pickupDisplayVoices: DisplayJianpuVoice[] = pickupVoices.map(voice => {
-                const canonical = serializeJianpuBeatTokens(getCanonicalJianpuBeatTokens(voice.riff, song.timeSignature));
-                return { id: voice.id, label: voice.label, notation: song.showAbsoluteJianpu
-                  ? convertRelativeJianpuToAbsoluteNotation(canonical, sectionPlayKey) : canonical };
-              });
-              const pickupRiffHighlightStyle = pickupRiffSpan.firstIndex >= 0
-                ? {
-                    left: `calc(${(pickupRiffSpan.firstIndex / pickupBeatCount) * 100}% - 4px)`,
-                    width: `calc(${(pickupRiffSpan.span / pickupBeatCount) * 100}% + 4px)`
-                  }
-                : null;
-              const pickupRhythmParsed = hasPickupRhythm ? parseRhythmNotation(pickup?.rhythm || '', song.timeSignature) : null;
-              const pickupFirstVisibleRhythmEvent = pickupRhythmParsed?.events.find((event) => !event.isHidden) ?? null;
-              const pickupRhythmSpanBeats = pickupRhythmParsed
-                ? Math.max(
-                    1,
-                    Math.ceil(Math.max(0, pickupRhythmParsed.visibleEndUnit) / pickupRhythmParsed.beatUnits)
-                    - Math.floor((pickupFirstVisibleRhythmEvent?.startUnit ?? 0) / pickupRhythmParsed.beatUnits)
-                  )
-                : 0;
-              const pickupRhythmHighlightStyle = pickupRhythmParsed && pickupFirstVisibleRhythmEvent
-                ? {
-                    left: `calc(${(Math.floor(pickupFirstVisibleRhythmEvent.startUnit / pickupRhythmParsed.beatUnits) / pickupBeatCount) * 100}% - 4px)`,
-                    width: `calc(${(pickupRhythmSpanBeats / pickupBeatCount) * 100}% + 4px)`
-                  }
-                : null;
-              const pickupDisplayBeatSpan = Math.max(1, pickupRiffSpan.span, pickupRhythmSpanBeats);
-              const pickupDisplayWidthPx = Math.min(188, Math.max(96, pickupDisplayBeatSpan * 44, pickupMaxTokenItems * 24));
-              const isPickupActive = activeBar?.sIdx === 0 && activeBar?.bIdx === -1;
+              const hasPickupDisplay = Boolean(pickup && getPickupDisplay(pickup, song.timeSignature).hasContent);
+              const isPickupActive = Boolean(row.sIdx === 0 && row.startBIdx === 0 && resolvedActiveNotationTarget?.sectionId === PICKUP_EDITOR_SECTION_ID);
               const sectionStartBar = row.startBIdx === 0 ? row.bars[0] : undefined;
               const sectionStartBarLabel = getBarDisplayLabel(sectionStartBar);
               const sectionStartEffectiveTimeSignature = getBarEffectiveTimeSignatureByIndex(row.sIdx, row.startBIdx, sectionStartBar);
@@ -2770,56 +2695,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         )}
                       </div>
                     )}
-                    {hasPickupDisplay && (
-                      <div
-                        className={`absolute bottom-1 right-2 flex flex-col items-end space-y-0.5 overflow-visible transition-all ${isPickupActive ? 'scale-[1.01]' : ''}`}
-                        style={{
-                          width: `${pickupDisplayWidthPx}px`,
-                          ...(isPickupActive ? { filter: `drop-shadow(0 6px 12px ${activeTone.glow})` } : undefined)
-                        }}
-                      >
-                        {hasPickupRhythm && (
-                          <button
-                            type="button"
-                            onClick={(event) => emitElementClick(event, 0, -1, 'rhythm')}
-                            className={`block w-full rounded-sm text-left transition-colors ${isPickupActive ? 'ring-1 ring-indigo-200' : ''}`}
-                            style={{ boxShadow: isPickupActive ? `inset 0 0 0 1px ${activeTone.stroke}` : 'none' }}
-                          >
-                            <div className="relative w-full px-1 py-0">
-                              {pickupRhythmHighlightStyle && (
-                                <span
-                                  className="absolute inset-y-0 rounded-sm bg-gray-300/70 mix-blend-multiply"
-                                  style={pickupRhythmHighlightStyle}
-                                />
-                              )}
-                              <div className="relative z-10 w-full">
-                                <RhythmNotation notation={pickup?.rhythm || ''} timeSignature={song.timeSignature} compact />
-                              </div>
-                            </div>
-                          </button>
-                        )}
-                        {hasPickupRiff && (
-                          <button
-                            type="button"
-                            onClick={(event) => emitElementClick(event, 0, -1, 'riff')}
-                            className={`block w-full rounded-sm text-left transition-colors ${isPickupActive ? 'ring-1 ring-indigo-200' : ''}`}
-                            style={{ boxShadow: isPickupActive ? `inset 0 0 0 1px ${activeTone.stroke}` : 'none' }}
-                          >
-                            <div className="relative w-full px-1 py-0">
-                              {pickupRiffHighlightStyle && (
-                                <span
-                                  className="absolute inset-y-0 rounded-sm bg-gray-300/70 mix-blend-multiply"
-                                  style={pickupRiffHighlightStyle}
-                                />
-                              )}
-                              <JianpuVoiceStack voices={pickupDisplayVoices} primaryLabel={language === 'zh' ? '主聲部' : 'Main'}
-                                showPrimary={hasPickupPrimaryRiff} notation={pickupPreviewNotation} compact
-                                scale={previewJianpuScale} timeSignature={song.timeSignature} className="relative z-10 w-full min-w-0" />
-                            </div>
-                          </button>
-                        )}
-                      </div>
-                    )}
+                {row.sIdx === 0 && row.startBIdx === 0 && (hasPickupDisplay || onElementClick) && <PickupPreview pickup={pickup} meter={song.timeSignature}
+                  language={language} playKey={getPlayKey(displayedCurrentKey, capo)} absolute={song.showAbsoluteJianpu} active={isPickupActive}
+                  previewIdentity={previewIdentity ?? 'preview'} cursor={isPickupActive ? resolvedActiveNotationTarget?.cursor : undefined}
+                  nextRiff={sectionStartBar?.riff} nextRhythm={sectionStartBar?.rhythm}
+                  nextTimeSignature={sectionStartEffectiveTimeSignature}
+                  onSelect={onElementClick ? (event, field, cursor) => emitElementClick(event, 0, -1, field, undefined, undefined, cursor) : undefined} />}
                 </div>
 
                 {/* Right Column: Bars */}

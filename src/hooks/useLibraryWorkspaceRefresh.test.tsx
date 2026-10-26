@@ -94,7 +94,7 @@ describe('owned library cross-device updates', () => {
     const collections = vi.fn().mockResolvedValue(updated());
     const { rerender, options, onUpdate } = setup(load);
     await flush();
-    const repository = { loadLibraryContent: load, loadLibraryCollections: collections } as unknown as WorkspaceRepository;
+    const repository = { loadLibraryContent: load, loadLibraryCollections: collections, loadLibrarySongVersions: vi.fn().mockResolvedValue([{ id: 'song', updatedAt: 1 }]) } as unknown as WorkspaceRepository;
     rerender({ ...options, repository, refreshCollections: true });
     await flush();
     load.mockClear();
@@ -112,7 +112,7 @@ describe('owned library cross-device updates', () => {
   it('coalesces realtime notifications and catches up immediately when an edit finishes', async () => {
     const load = vi.fn().mockResolvedValue(initial);
     const collections = vi.fn().mockResolvedValue(updated());
-    const repository = { loadLibraryContent: load, loadLibraryCollections: collections } as unknown as WorkspaceRepository;
+    const repository = { loadLibraryContent: load, loadLibraryCollections: collections, loadLibrarySongVersions: vi.fn().mockResolvedValue([{ id: 'song', updatedAt: 1 }]) } as unknown as WorkspaceRepository;
     const props = { repository, scope: 'team', libraryId: 'team', enabled: true, paused: true,
       refreshCollections: true, refreshVersion: 0, workspace: initial, canApply: () => true, onUpdate: vi.fn() };
     const { rerender } = renderHook((options) => useLibraryWorkspaceRefresh(options), { initialProps: props });
@@ -135,7 +135,7 @@ describe('owned library cross-device updates', () => {
     const load = vi.fn().mockResolvedValue(initial);
     const collections = vi.fn().mockImplementationOnce(() => new Promise((done) => { resolve = done; }))
       .mockResolvedValue(updated());
-    const repository = { loadLibraryContent: load, loadLibraryCollections: collections } as unknown as WorkspaceRepository;
+    const repository = { loadLibraryContent: load, loadLibraryCollections: collections, loadLibrarySongVersions: vi.fn().mockResolvedValue([{ id: 'song', updatedAt: 1 }]) } as unknown as WorkspaceRepository;
     const props = { repository, scope: 'team', libraryId: 'team', enabled: true, paused: false,
       refreshCollections: true, refreshVersion: 0, workspace: initial, canApply: () => true, onUpdate: vi.fn() };
     const { rerender } = renderHook((options) => useLibraryWorkspaceRefresh(options), { initialProps: props });
@@ -244,4 +244,64 @@ describe('owned library cross-device updates', () => {
     await tick(30000);
     expect(load).toHaveBeenCalledTimes(2);
   });
+});
+
+it('loads song changes immediately, coalesces notifications, and keeps unchanged rows stable', async () => {
+  const other = { ...initial.songs[0], id: 'other', title: 'Unchanged' };
+  const workspace = { ...initial, songs: [...initial.songs, other] };
+  const remote = { ...workspace, songs: [{ ...initial.songs[0], title: 'New score', updatedAt: 2 }, { ...other }] };
+  const load = vi.fn().mockResolvedValueOnce(workspace).mockResolvedValue(remote);
+  const collections = vi.fn();
+  const repository = { loadLibraryContent: load, loadLibraryCollections: collections } as unknown as WorkspaceRepository;
+  const props = { repository, scope: 'team', libraryId: 'team', enabled: true, paused: false,
+    refreshCollections: true, songRefreshVersion: 0, workspace, canApply: () => true, onUpdate: vi.fn() };
+  const { rerender } = renderHook((options) => useLibraryWorkspaceRefresh(options), { initialProps: props });
+  await flush();
+  rerender({ ...props, songRefreshVersion: 1 });
+  await tick(100);
+  rerender({ ...props, songRefreshVersion: 2 });
+  await tick(250);
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(collections).not.toHaveBeenCalled();
+  const next = props.onUpdate.mock.calls.at(-1)![0] as LibraryContent;
+  expect(next.songs[0].title).toBe('New score');
+  expect(next.songs[1]).toBe(other);
+  expect(next.setlists).toBe(workspace.setlists);
+});
+
+it.each(['edit', 'archive', 'delete', 'add'])('catches missed %s events using lightweight song versions', async (kind) => {
+  const remote = { ...initial, songs: kind === 'delete' ? [] : kind === 'add'
+    ? [...initial.songs, { ...initial.songs[0], id: 'new' }]
+    : [{ ...initial.songs[0], updatedAt: 2, ...(kind === 'archive' ? { archivedAt: 2 } : { title: 'Changed' }) }] };
+  const load = vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(remote);
+  const versions = vi.fn().mockResolvedValue(remote.songs.map(({ id, updatedAt }) => ({ id, updatedAt })));
+  const collections = vi.fn();
+  const repository = { loadLibraryContent: load, loadLibrarySongVersions: versions, loadLibraryCollections: collections } as unknown as WorkspaceRepository;
+  const onUpdate = vi.fn();
+  renderHook(() => useLibraryWorkspaceRefresh({ repository, scope: 'team', libraryId: 'team', enabled: true,
+    paused: false, refreshCollections: true, workspace: initial, canApply: () => true, onUpdate }));
+  await flush();
+  await tick(15000);
+  expect(versions).toHaveBeenCalledExactlyOnceWith('team', expect.any(AbortSignal));
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(collections).not.toHaveBeenCalled();
+  expect(onUpdate.mock.calls.at(-1)![0].songs).toEqual(remote.songs);
+});
+
+it('defers a full song notification throughout a clean editing session and catches up on exit', async () => {
+  const load = vi.fn().mockResolvedValue(initial);
+  const repository = { loadLibraryContent: load, loadLibrarySongVersions: vi.fn(), loadLibraryCollections: vi.fn() } as unknown as WorkspaceRepository;
+  const props = { repository, scope: 'team', libraryId: 'team', enabled: true, paused: false,
+    refreshCollections: true, songRefreshVersion: 0, workspace: initial, canApply: () => true, onUpdate: vi.fn() };
+  const { rerender } = renderHook((options) => useLibraryWorkspaceRefresh(options), { initialProps: props });
+  await flush();
+  props.onUpdate.mockClear();
+  rerender({ ...props, paused: true, songRefreshVersion: 1 });
+  act(() => window.dispatchEvent(new Event('focus')));
+  await tick(30000);
+  expect(load).toHaveBeenCalledOnce();
+  expect(props.onUpdate).not.toHaveBeenCalled();
+  rerender({ ...props, paused: false, songRefreshVersion: 1 });
+  await tick(250);
+  expect(load).toHaveBeenCalledTimes(2);
 });

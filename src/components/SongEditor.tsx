@@ -1,3 +1,4 @@
+import { getPickupTimeSignature, pickupTimeSignatureForUnits, resizePickup } from '../utils/pickupUtils';
 import BarlineGlyph from './BarlineGlyph';
 import TempoChangeControl from './TempoChangeControl';
 import UnmeteredChordsEditor from './UnmeteredChordsEditor';
@@ -676,6 +677,8 @@ const SongEditor: React.FC<Props> = ({
   const [isBarDragging, setIsBarDragging] = useState(false);
   const [copiedBarHighlight, setCopiedBarHighlight] = useState<CopiedBarHighlight | null>(null);
   const [copiedJianpu, setCopiedJianpu] = useState<string | null>(null);
+  const [copiedJianpuMeter, setCopiedJianpuMeter] = useState<string>('4/4');
+  const [pickupPasteError, setPickupPasteError] = useState(false);
   const [copiedRhythm, setCopiedRhythm] = useState<string | null>(null);
   const [tempoDraft, setTempoDraft] = useState<string>(formatTempoBpm(song.tempo));
   const [barLayoutMode, setBarLayoutMode] = useState<BarLayoutMode>(() => getBarLayoutMode(0, isPhoneViewport));
@@ -886,6 +889,7 @@ const SongEditor: React.FC<Props> = ({
   });
 
   const createPickupMeasure = (): PickupMeasure => ({
+    timeSignature: pickupTimeSignatureForUnits(Math.min(4, parseTimeSignature(song.timeSignature).barUnits / 2)),
     id: createBarId()
   });
 
@@ -1223,9 +1227,9 @@ const SongEditor: React.FC<Props> = ({
     if (sIdx === PICKUP_SECTION_INDEX && bIdx === PICKUP_BAR_INDEX) {
       const nextPickup: PickupMeasure = {
         ...(song.pickup ?? createPickupMeasure()),
-        ...(updates.riff !== undefined ? { riff: updates.riff } : {}),
+        ...('riff' in updates ? { riff: updates.riff } : {}),
         ...('riffVoices' in updates ? { riffVoices: updates.riffVoices } : {}),
-        ...(updates.rhythm !== undefined ? { rhythm: updates.rhythm } : {})
+        ...('rhythm' in updates ? { rhythm: updates.rhythm } : {})
       };
       notifyChange({ ...song, pickup: nextPickup });
       return;
@@ -1322,6 +1326,8 @@ const SongEditor: React.FC<Props> = ({
 
     return {
       id: song.pickup.id,
+      timeSignature: getPickupTimeSignature(song.pickup, song.timeSignature),
+      partialMeasure: true,
       chords: [],
       riff: song.pickup.riff,
       riffVoices: song.pickup.riffVoices,
@@ -1388,6 +1394,7 @@ const SongEditor: React.FC<Props> = ({
     if (!song.pickup) return;
     clearEditorSelectionState();
     notifyChange({ ...song, pickup: undefined });
+    setPickupPasteError(false);
   };
 
   const handleCopyRhythm = (sIdx: number, bIdx: number) => {
@@ -1396,6 +1403,7 @@ const SongEditor: React.FC<Props> = ({
 
   const handleCopyJianpu = (sIdx: number, bIdx: number) => {
     setCopiedJianpu(getRiffValue(sIdx, bIdx));
+    setCopiedJianpuMeter(getBarTimeSignature(getEditorBar(sIdx, bIdx)));
   };
 
   const handlePasteJianpu = (sIdx: number, bIdx: number) => {
@@ -1403,6 +1411,13 @@ const SongEditor: React.FC<Props> = ({
       return;
     }
 
+    if (isPickupTarget(sIdx, bIdx) && song.pickup?.timeSignature) {
+      const pasted = resizePickup({ timeSignature: copiedJianpuMeter, riff: copiedJianpu }, song.timeSignature, song.pickup.timeSignature);
+      setPickupPasteError(!pasted);
+      if (!pasted) return;
+      updateBar(sIdx, bIdx, { riff: pasted.riff || undefined });
+      return;
+    }
     const nextRiff = getCanonicalRiffNotationForBar(copiedJianpu, sIdx, bIdx, true);
     const sanitizedRiff = applyRiffValue(sIdx, bIdx, nextRiff);
     setRiffCaretSelection(sIdx, bIdx, sanitizedRiff, sanitizedRiff.length);
@@ -1413,6 +1428,11 @@ const SongEditor: React.FC<Props> = ({
       return;
     }
 
+    if (isPickupTarget(sIdx, bIdx) && song.pickup?.timeSignature) {
+      const pasted = parseRhythmNotation(copiedRhythm, song.pickup.timeSignature);
+      setPickupPasteError(pasted.overflow || pasted.invalidTokens.length > 0);
+      if (pasted.overflow || pasted.invalidTokens.length > 0) return;
+    }
     updateBar(sIdx, bIdx, { rhythm: copiedRhythm || undefined });
     focusRhythmEditor(sIdx, bIdx);
   };
@@ -5447,6 +5467,18 @@ const SongEditor: React.FC<Props> = ({
     accumulatedBarCount += section.bars.filter(bar => !hasUnmeteredChords(bar)).length;
   });
   const pickupBar = getEditorBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
+  const pickupTimeSignature = getPickupTimeSignature(song.pickup, song.timeSignature);
+  const pickupDurationOptions = [1, 2, 3, 4, 6, 8, 10, 12, 14]
+    .filter(units => units < parseTimeSignature(song.timeSignature).barUnits)
+    .map(units => ({ units, meter: pickupTimeSignatureForUnits(units) }));
+  const changePickupDuration = (meter: string) => {
+    if (!song.pickup) return;
+    const pickup = resizePickup(song.pickup, song.timeSignature, meter);
+    if (!pickup) return;
+    setPickupPasteError(false);
+    clearEditorSelectionState();
+    notifyChange({ ...song, pickup });
+  };
   const isPickupActive = activeBar?.sIdx === PICKUP_SECTION_INDEX && activeBar?.bIdx === PICKUP_BAR_INDEX;
   const isSetlistMetadataMode = metadataMode === 'setlist';
 
@@ -6643,9 +6675,34 @@ const SongEditor: React.FC<Props> = ({
                   onClick={removePickupMeasure}
                   className="p-1 text-gray-300 transition-colors hover:text-red-500"
                   title={copy.editor.removePickupBar}
+                  aria-label={copy.editor.removePickupBar}
                 >
                   <Trash2 size={14} />
                 </button>
+              </div>
+
+              <div className="mb-3 space-y-2">
+                <label className="flex items-center justify-between gap-2 text-xs font-semibold text-emerald-800">
+                  <span>{language === 'zh' ? '弱起長度（♩ = 1 拍）' : 'Pickup length (♩ = 1 beat)'}</span>
+                  <select
+                    aria-label={language === 'zh' ? '弱起長度' : 'Pickup length'}
+                    value={song.pickup?.timeSignature ?? 'legacy'}
+                    onChange={event => changePickupDuration(event.target.value)}
+                    className="min-h-9 rounded-md border border-emerald-200 bg-white px-2 text-sm text-gray-800"
+                  >
+                    {!song.pickup?.timeSignature && <option value="legacy" disabled>{language === 'zh' ? '原有拍格' : 'Original grid'}</option>}
+                    {song.pickup?.timeSignature && !pickupDurationOptions.some(option => option.meter === song.pickup?.timeSignature) && (
+                      <option value={song.pickup.timeSignature}>{parseTimeSignature(song.pickup.timeSignature).barUnits / 4} {language === 'zh' ? '拍' : 'beats'}</option>
+                    )}
+                    {pickupDurationOptions.map(option => <option key={option.meter} value={option.meter}
+                      disabled={Boolean(song.pickup && !resizePickup(song.pickup, song.timeSignature, option.meter))}>
+                      {option.units / 4} {language === 'zh' ? '拍' : 'beats'}
+                    </option>)}
+                  </select>
+                </label>
+                <p className="text-[11px] leading-relaxed text-gray-500">{copy.editor.pickupBarHint}</p>
+                {pickupPasteError && <p role="alert" className="text-xs text-amber-700">{language === 'zh' ? '這段內容超出弱起長度或含無法轉換的記法，請調整後再貼上。' : 'This passage exceeds the pickup length or cannot be converted. Adjust it before pasting.'}</p>}
+                <p className="text-[10px] text-gray-400">{language === 'zh' ? '無法縮短時，請先移除超出長度的音符。' : 'Remove notes beyond the new length before shortening.'}</p>
               </div>
 
               <div className="space-y-3">
@@ -6730,6 +6787,8 @@ const SongEditor: React.FC<Props> = ({
                           <Jianpu
                             tokens={toDisplayBeatTokens(beatTokens, sIdx, bIdx)}
                             renderMode="editor"
+                            timeSignature={pickupTimeSignature}
+                            literalDurations={Boolean(song.pickup?.timeSignature)}
                             activeTokenIndex={activeInsertBeatIndex}
                             activeInsertPosition={activeInsertPosition}
                             gridSlotCount={jianpuBeatUnits}
@@ -6755,7 +6814,7 @@ const SongEditor: React.FC<Props> = ({
                   );
                 })()}
 
-                <JianpuVoicesEditor voices={pickupBar.riffVoices} timeSignature={song.timeSignature}
+                <JianpuVoicesEditor voices={pickupBar.riffVoices} timeSignature={pickupTimeSignature} literalDurations={Boolean(song.pickup?.timeSignature)}
                   language={language} onChange={riffVoices => updateBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX, { riffVoices })} />
 
                 <div>
@@ -6812,7 +6871,7 @@ const SongEditor: React.FC<Props> = ({
                       {pickupBar.rhythm || (selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX) ? (
                         <RhythmNotation
                           notation={pickupBar.rhythm || ''}
-                          timeSignature={song.timeSignature}
+                          timeSignature={pickupTimeSignature}
                           compact
 	                          renderMode="editor"
 	                          selectionMode="insert"
@@ -6825,7 +6884,7 @@ const SongEditor: React.FC<Props> = ({
                       )}
                     </div>
                   </div>
-                  <div className="text-[10px] text-gray-400">{copy.editor.pickupBarHint}</div>
+
                 </div>
               </div>
             </div>

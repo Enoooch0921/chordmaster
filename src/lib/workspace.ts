@@ -1,3 +1,4 @@
+import { normalizePickupTimeSignature } from '../utils/pickupUtils';
 import { normalizeKeyMode } from '../utils/keyMode';
 import { normalizeUnmeteredChordLines } from '../utils/unmeteredChords';
 import { normalizeChordPassVariants } from '../utils/chordPassVariants';
@@ -249,6 +250,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
     : null;
   const pickup = rawPickup
     ? {
+        timeSignature: normalizePickupTimeSignature(rawPickup.timeSignature),
         id: typeof rawPickup.id === 'string' && rawPickup.id.trim() ? rawPickup.id : undefined,
         riff: normalizeOptionalText(rawPickup.riff),
         riffVoices: normalizeJianpuVoices(rawPickup.riffVoices),
@@ -286,7 +288,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
       : DEFAULT_CHORD_FONT_PRESET,
     capo: normalizeOptionalInteger(song.capo, 0, 12),
     references: normalizeSongReferences(song.references, VALID_KEYS),
-    pickup: pickup && (pickup.id || pickup.riff || pickup.riffVoices?.length || pickup.rhythm) ? pickup : undefined,
+    pickup: pickup && (pickup.id || pickup.timeSignature || pickup.riff || pickup.riffVoices?.length || pickup.rhythm) ? pickup : undefined,
     sections: sections.length > 0 ? sections : [
       {
         id: undefined,

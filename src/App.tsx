@@ -1,3 +1,6 @@
+import { openPickupPreviewSession } from './lib/pickupEditing';
+import type { PreviewEditTarget } from './lib/previewEditSession';
+import { PICKUP_EDITOR_SECTION_ID, PICKUP_EDITOR_BAR_ID, normalizePickupTimeSignature } from './utils/pickupUtils';
 import { currentKeyMode, normalizeKeyMode, formatKeyName } from './utils/keyMode';
 import type { TonalMode } from './types';
 import { normalizeRhythmVoices } from './utils/rhythmVoices';
@@ -17,6 +20,8 @@ import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
 import { useJoinedWorkspaceRefresh } from './hooks/useJoinedWorkspaceRefresh';
 import { useLibraryWorkspaceRefresh } from './hooks/useLibraryWorkspaceRefresh';
+import { useSongEditingPresence } from './hooks/useSongEditingPresence';
+import { SongEditingNotice } from './components/SongEditingNotice';
 import { writeTeamDraft, removeTeamDraft, restoreTeamDraft } from './lib/teamDrafts';
 import { setRecoverySnapshot } from './lib/recovery';
 /**
@@ -1250,6 +1255,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
     : null;
   const pickup = rawPickup
     ? {
+        timeSignature: normalizePickupTimeSignature(rawPickup.timeSignature),
         id: typeof rawPickup.id === 'string' && rawPickup.id.trim() ? rawPickup.id : undefined,
         riff: normalizeOptionalText(rawPickup.riff),
         riffVoices: normalizeJianpuVoices(rawPickup.riffVoices),
@@ -1285,7 +1291,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
       : DEFAULT_CHORD_FONT_PRESET,
     capo: normalizeOptionalInteger(song.capo, 0, 12),
     references: normalizeSongReferences(song.references, VALID_KEYS),
-    pickup: pickup && (pickup.id || pickup.riff || pickup.riffVoices?.length || pickup.rhythm) ? pickup : undefined,
+    pickup: pickup && (pickup.id || pickup.timeSignature || pickup.riff || pickup.riffVoices?.length || pickup.rhythm) ? pickup : undefined,
     sections: sections.length > 0 ? sections : [
       {
         id: undefined,
@@ -2141,6 +2147,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pdfExportProgress, setPdfExportProgress] = useState<PdfExportProgressState | null>(null);
   const [isLibraryEditing, setIsLibraryEditing] = useState(false);
+  const [libraryTitleEditingSongId, setLibraryTitleEditingSongId] = useState<string | null>(null);
   const [activeAppView, setActiveAppView] = useState<AppView>('sheet');
   // Auto-save is always on now (the toggle was removed). Kept as a constant so
   // the existing "auto-saved" hints and the auto-save effect read true.
@@ -2467,22 +2474,44 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const setlistsRef = useRef(setlists);
   setlistsRef.current = setlists;
   const [libraryRefreshVersion, setLibraryRefreshVersion] = useState(0);
+  const [librarySongRefreshVersion, setLibrarySongRefreshVersion] = useState(0);
+  // Preview metadata has local input drafts before it changes the workspace.
+  // Keep the same protection as bar/section quick-edit sessions from open to close.
+  const isPreviewEditingActive = Boolean(previewEditSession || previewMetaEditTarget);
+  const previewEditingActiveRef = useRef(isPreviewEditingActive);
+  previewEditingActiveRef.current = isPreviewEditingActive;
+  const songPresence = useSongEditingPresence({
+    libraryId: activeLibraryId,
+    user: authenticatedUser,
+    enabled: isCloudMode && isTeamWorkspace && workspaceOwnerId === authenticatedUser?.id
+      && !isLoadingCloudWorkspace && !isSwitchingLibrary,
+    editingSongId: workspaceMode === 'songs' && canEditTeamSongs && activeAppView === 'sheet' && !isPerformanceMode
+      ? isLibraryEditing ? libraryTitleEditingSongId : (isPreviewEditingActive || isEditing) ? song.id : null
+      : null
+  });
+  const songEditorsById = React.useMemo(() => {
+    const grouped = new Map<string, typeof songPresence.editors>();
+    for (const editor of songPresence.editors) grouped.set(editor.songId, [...(grouped.get(editor.songId) ?? []), editor]);
+    return grouped;
+  }, [songPresence.editors]);
   const libraryWorkspaceRefreshFailed = useLibraryWorkspaceRefresh({
     repository: cloudRepositoryRef.current,
     scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
     libraryId: activeLibraryId,
     refreshCollections: isTeamWorkspace,
     refreshVersion: libraryRefreshVersion,
+    songRefreshVersion: librarySongRefreshVersion,
     enabled: isCloudMode && workspaceOwnerId === authenticatedUser?.id
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
-    paused: workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
+    paused: isPreviewEditingActive || workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
+      || (isTeamWorkspace && (isEditing || isLibraryEditing || isPerformanceMode))
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
       || (isTeamWorkspace && !teamDraft.ready) || Boolean(teamDraft.pending) || Boolean(teamDraft.error),
     workspace: { songs, setlists, projects },
     canApply: () => {
       if (workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
           || libraryTransitionOwnerRef.current || workspaceIsDirtyRef.current
-          || previewEditSessionRef.current?.dirty) return false;
+          || previewEditingActiveRef.current) return false;
       // Offline edits must finish their existing merge/flush before a cloud read
       // can become the new local baseline.
       return isTeamWorkspace || !loadPendingSync({ userId: authenticatedUser!.id, libraryId: activeLibraryId! });
@@ -2494,7 +2523,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       if (JSON.stringify(nextSongs) !== JSON.stringify(songs)) {
         setSongs(nextSongs);
         setSavedSongs(nextSongs);
-        setSongHistories({});
+        const unchangedIds = new Set(nextSongs.filter((item) => songs.includes(item)).map((item) => item.id));
+        setSongHistories((current) => Object.fromEntries(Object.entries(current).filter(([id]) => unchangedIds.has(id))));
+        setTeamLibraryUpdatePending(false);
       }
       if (JSON.stringify(remote.setlists) !== JSON.stringify(setlists)) {
         setSetlists(remote.setlists);
@@ -2512,7 +2543,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     repository: cloudRepositoryRef.current,
     scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
     enabled: isCloudMode && !isTeamWorkspace && !isLoadingCloudWorkspace && !isSwitchingLibrary,
-    paused: activeCloudMutationCount > 0 || syncStatus === 'syncing'
+    paused: isPreviewEditingActive || activeCloudMutationCount > 0 || syncStatus === 'syncing'
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
       || Boolean(leavingSharedSetlistId) || Boolean(leavingSharedProjectId),
     joinedSetlists,
@@ -2522,7 +2553,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setJoinedProjects(workspace.joinedProjects ?? []);
     }
   });
-  const teamLibraryReloadIsUnsafe = libraryIsDirty || Boolean(previewEditSession?.dirty);
+  const teamLibraryReloadIsUnsafe = libraryIsDirty || isPreviewEditingActive;
   const teamLibraryReloadIsUnsafeRef = useRef(teamLibraryReloadIsUnsafe);
   teamLibraryReloadIsUnsafeRef.current = teamLibraryReloadIsUnsafe;
   const teamLibraryRefreshGenerationRef = useRef(0);
@@ -6665,11 +6696,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   };
 
   useEffect(() => {
-    if (!teamLibraryUpdatePending || syncStatus !== 'saved' || teamLibraryReloadIsUnsafe) return;
+    if (!teamLibraryUpdatePending || syncStatus !== 'saved' || teamLibraryReloadIsUnsafe || isPreviewEditingActive || isEditing || isLibraryEditing || isPerformanceMode) return;
     void refreshActiveTeamSongs(false);
     // refreshActiveTeamSongs intentionally reads the latest values through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncStatus, teamLibraryReloadIsUnsafe, teamLibraryUpdatePending]);
+  }, [syncStatus, teamLibraryReloadIsUnsafe, teamLibraryUpdatePending, isPreviewEditingActive, isEditing, isLibraryEditing, isPerformanceMode]);
 
   const handleOpenTeamSongImport = async () => {
     const repository = cloudRepositoryRef.current;
@@ -7121,7 +7152,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         return;
       }
       if (kind === 'songs') {
-        void refreshActiveTeamSongs(false);
+        setLibrarySongRefreshVersion((version) => version + 1);
         return;
       }
       if (kind === 'assignments') {
@@ -7132,7 +7163,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     });
 
     const handleWindowFocus = () => {
-      void refreshActiveTeamSongs(false);
+      setLibrarySongRefreshVersion((version) => version + 1);
       void refreshAssignmentAccess();
       void reconcileActiveMembership();
     };
@@ -9903,6 +9934,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setActiveBar({ sIdx: nextSectionIndex, bIdx });
     setPreviewMetaEditTarget(null);
     if (!canOpenEditor) {
+      return;
+    }
+
+    if (sIdx === 0 && bIdx === -1 && (field === 'riff' || field === 'rhythm' || field === 'lower')) {
+      const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
+      if (!previewIdentity) return;
+      const mode = field === 'rhythm' ? 'rhythm' : 'jianpu';
+      const cursor: PreviewNotationCursor = target?.cursor && target.cursor.kind !== 'chord'
+        ? target.cursor : mode === 'rhythm' ? { kind: 'rhythm', cursorUnit: 0 }
+        : { kind: 'jianpu', beatIndex: 0, unitIndex: 0, noteIndex: null };
+      const anchorKey = `${previewIdentity}|${PICKUP_EDITOR_SECTION_ID}|${PICKUP_EDITOR_BAR_ID}|${mode}|all`;
+      const nextTarget: PreviewEditTarget = { kind: 'bar', previewIdentity, sectionId: PICKUP_EDITOR_SECTION_ID,
+        barId: PICKUP_EDITOR_BAR_ID, field: mode, cursor, slotIndex: 0, rawChordIndex: null,
+        anchorKey, anchorRect: findPreviewAnchorRect(anchorKey) ?? target?.anchorRect
+          ?? { left: 16, top: 120, right: 80, bottom: 160, width: 64, height: 40 } };
+      setPreviewEditSession(current => openPickupPreviewSession(editorSong, nextTarget, current));
+      window.requestAnimationFrame(refreshPreviewEditAnchorRect);
       return;
     }
 
@@ -13972,7 +14020,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                                 <input
                                   value={item.title}
                                   onChange={(event) => handleSongListTitleChange(item.id, event.target.value)}
-                                  onBlur={(event) => handleSongListTitleCommit(item.id, event.target.value)}
+                                  onFocus={() => setLibraryTitleEditingSongId(item.id)}
+                                  onBlur={(event) => {
+                                    setLibraryTitleEditingSongId(null);
+                                    handleSongListTitleCommit(item.id, event.target.value);
+                                  }}
                                   onKeyDown={(event) => {
                                     if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                                       event.currentTarget.blur();
@@ -14072,6 +14124,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                             </div>
                           </button>
                         )}
+                        {isTeamWorkspace ? (
+                          <div className="h-6 px-3" data-song-editing-status={item.id}>
+                            <SongEditingNotice editors={songEditorsById.get(item.id) ?? []} language={language} compact />
+                          </div>
+                        ) : null}
                         {!isLibraryEditing && (
                           <div className="absolute right-2 top-1/2 flex w-6 -translate-y-1/2 flex-col items-center justify-center gap-0">
                             {canEditTeamSongs ? (
@@ -14220,7 +14277,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           </div>
         )}
 
-        {libraryWorkspaceRefreshFailed || (joinedWorkspaceRefreshFailed && isJoinedSetlist) ? (
+        {!isTeamWorkspace && (libraryWorkspaceRefreshFailed || (joinedWorkspaceRefreshFailed && isJoinedSetlist)) ? (
           <p role="status" className="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:px-6">
             {language === 'zh'
               ? '雲端更新暫時中斷，目前保留上次載入的內容；稍後會自動重試。'
@@ -14228,23 +14285,39 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           </p>
         ) : null}
 
-        {teamLibraryUpdatePending ? (
-          <div className="flex flex-shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 sm:px-6">
-            <RefreshCw size={15} className="shrink-0" />
-            <p className="min-w-0 flex-1 text-xs font-semibold sm:text-sm">
-              {language === 'zh'
-                ? '團隊曲庫有新版本。先儲存目前的歌曲修改，再載入更新。'
-                : 'The team library has an update. Save the current song changes before loading it.'}
-            </p>
-            <button
-              type="button"
-              onClick={() => void handleApplyPendingTeamLibraryUpdate()}
-              disabled={isRefreshingTeamLibrary}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-amber-600 disabled:cursor-wait disabled:opacity-60"
-            >
-              {isRefreshingTeamLibrary ? <LoaderCircle size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-              <span>{language === 'zh' ? '儲存並載入' : 'Save & load'}</span>
-            </button>
+        {isTeamWorkspace ? (
+          <div className="relative h-12 shrink-0 border-b border-gray-200" data-library-live-status>
+            {teamLibraryUpdatePending ? (
+              <div className="absolute inset-0 flex items-center gap-3 bg-amber-50 px-3 py-2 text-amber-800 sm:px-6">
+                <RefreshCw size={15} className="shrink-0" />
+                <p className="min-w-0 flex-1 text-xs font-semibold sm:text-sm">
+                  {language === 'zh'
+                    ? '團隊曲庫有新版本。先儲存目前的歌曲修改，再載入更新。'
+                    : 'The team library has an update. Save the current song changes before loading it.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleApplyPendingTeamLibraryUpdate()}
+                  disabled={isRefreshingTeamLibrary}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-amber-600 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isRefreshingTeamLibrary ? <LoaderCircle size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                  <span>{language === 'zh' ? '儲存並載入' : 'Save & load'}</span>
+                </button>
+              </div>
+            ) : null}
+
+            {!teamLibraryUpdatePending && workspaceMode === 'songs' ? (
+              <div className="absolute inset-0 flex items-center px-3 text-xs text-gray-500 sm:px-6">
+                {libraryWorkspaceRefreshFailed
+                  ? (language === 'zh' ? '雲端更新暫時中斷，保留目前內容並自動重試' : 'Cloud updates interrupted. Keeping the current score and retrying.')
+                  : songPresence.failed
+                  ? (language === 'zh' ? '編輯狀態暫時中斷，正在重新連線' : 'Editor status unavailable. Reconnecting.')
+                  : songEditorsById.has(song.id)
+                    ? <SongEditingNotice editors={songEditorsById.get(song.id)!} language={language} compact />
+                    : (language === 'zh' ? '歌曲庫自動同步' : 'Song library sync is automatic')}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

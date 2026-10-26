@@ -129,6 +129,7 @@ export interface Section {
 
 export interface PickupMeasure {
   id?: string;
+  timeSignature?: string; // Pickup duration/grouping only; does not change the continuing song meter.
   riff?: string;
   riffVoices?: JianpuVoice[];
   rhythm?: string;

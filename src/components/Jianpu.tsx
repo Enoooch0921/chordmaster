@@ -10,6 +10,7 @@ interface JianpuProps {
   className?: string;
   renderMode?: 'preview' | 'editor';
   timeSignature?: string;
+  literalDurations?: boolean; // Pickup notes retain their value across changes in beat grouping.
   previousNotationForCrossBar?: string;
   nextNotationForCrossBar?: string;
   /** Open phrase arcs from the section history, including across line breaks. */
@@ -126,6 +127,7 @@ const Jianpu: React.FC<JianpuProps> = ({
   className = '',
   renderMode = 'preview',
   timeSignature = '4/4',
+  literalDurations = false,
   previousNotationForCrossBar,
   nextNotationForCrossBar,
   incomingPhraseCount,
@@ -284,7 +286,7 @@ const Jianpu: React.FC<JianpuProps> = ({
       const carryInUnits = useCarryLayout ? carryUnits : 0;
       const rawNotes = findJianpuNoteRanges(token);
       const parsedPlaceholders = findJianpuPlaceholderRanges(token);
-      const parsedNotes = applyJianpuAutoDurationShorthand(
+      const parsedNotes = literalDurations ? rawNotes : applyJianpuAutoDurationShorthand(
         rawNotes,
         rawNotes.length + parsedPlaceholders.length,
         parsedPlaceholders.length > 0,
@@ -481,7 +483,7 @@ const Jianpu: React.FC<JianpuProps> = ({
 	      tripletSegments: triplets,
 	      slurSegments: slurs
 	    };
-  }, [hasIncomingCrossBarSlur, metrics.noteHalfWidthUnits, metrics.tokenPaddingUnits, phraseIncomingCount, renderMode, tokenList, tokenCapacityUnits]);
+  }, [literalDurations, hasIncomingCrossBarSlur, metrics.noteHalfWidthUnits, metrics.tokenPaddingUnits, phraseIncomingCount, renderMode, tokenList, tokenCapacityUnits]);
 
   const tokenCount = Math.max(1, tokenList.length);
   const totalWidthUnits = tokenCount * TOKEN_WIDTH_UNITS;
