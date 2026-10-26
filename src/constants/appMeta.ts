@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-26',
+        title: 'Reliable on-stage page turning, preview pickups and live libraries',
+        bullets: [
+          'Performance mode holds background score updates and reconnect sync until you exit, preserving the current song and page while offline.',
+          'iPad home-screen mode renews page-turner focus through idle and foreground return. Long pedal holds and touch swipes no longer produce a second turn on release.',
+          'App updates wait until open pages close so an on-stage session keeps its offline assets.',
+          'Edit pickup lengths directly in preview. Team song updates and editing indicators preserve active preview drafts and cursor positions.'
+        ]
+      },
+      {
+        version: '0.9.14',
+        date: '2026-10-26',
         title: 'Important: manual sync from setlist to song library',
         bullets: [
           'Setlist edits stay in the setlist. A Sync to song library button appears for owners and administrators only when the score differs; Key and Capo changes do not trigger it.',
@@ -531,6 +542,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-26',
+        title: '演出翻譜穩定性、預覽弱起拍與曲庫即時同步',
+        bullets: [
+          '演出期間暫緩背景曲譜更新及重新連線同步，斷網時保留目前歌單、歌曲與頁面，退出演出後再補同步。',
+          'iPad 主畫面版本定時恢復翻譜器焦點，切回前景立即恢復接收；修正長按放開及滑動後可能連翻兩頁。',
+          '新版更新等待已開啟頁面關閉，避免演出途中替換快取或移除舊版離線檔案。',
+          '可直接在預覽編輯第 0 小節弱起長度；曲庫更新與他人編輯提示保留正在輸入的預覽草稿與游標。'
+        ]
+      },
+      {
+        version: '0.9.14',
         date: '2026-10-26',
         title: '重要改動：歌單譜面可手動同步回歌曲庫',
         bullets: [

@@ -3889,4 +3889,4 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   );
 };
 
-export default ChordSheet;
+export default React.memo(ChordSheet);

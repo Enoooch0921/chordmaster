@@ -1,3 +1,5 @@
+import { usePerformanceKeyboardFocus } from './hooks/usePerformanceKeyboardFocus';
+import { createPerformanceKeyGate } from './lib/performanceKeyGate';
 import { openPickupPreviewSession } from './lib/pickupEditing';
 import type { PreviewEditTarget } from './lib/previewEditSession';
 import { PICKUP_EDITOR_SECTION_ID, PICKUP_EDITOR_BAR_ID, normalizePickupTimeSignature } from './utils/pickupUtils';
@@ -531,11 +533,6 @@ const getPerformancePageDirection = (event: KeyboardEvent): PerformancePageDirec
   }
 
   return null;
-};
-
-const getPerformanceKeyboardSignature = (event: KeyboardEvent) => {
-  const legacyKeyCode = event.keyCode || event.which || 0;
-  return `${event.key}:${event.code}:${legacyKeyCode}:${event.shiftKey ? 'shift' : ''}`;
 };
 
 const isLineInAppBrowser = () => (
@@ -2174,6 +2171,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       : false
   ));
   const [isPerformanceMode, setIsPerformanceMode] = useState(false);
+  const isPerformanceModeRef = useRef(isPerformanceMode);
+  isPerformanceModeRef.current = isPerformanceMode;
   const [performancePageIndex, setPerformancePageIndex] = useState(0);
   const [performanceChromeVisible, setPerformanceChromeVisible] = useState(true);
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
@@ -2374,7 +2373,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const performancePageIndexRef = useRef(0);
   const performancePageOffsetsRef = useRef<number[]>([]);
   const performanceTouchRef = useRef<{ x: number; y: number } | null>(null);
-  const lastPerformanceKeyboardEventRef = useRef<{ signature: string; handledAt: number } | null>(null);
+  const performanceSuppressClickRef = useRef(false);
+  const performanceKeyGateRef = useRef(createPerformanceKeyGate());
   // Performance-mode chrome (exit / references / page indicator / arrows) auto-hides
   // after a short idle so it stops covering the sheet; any touch reveals it again.
   const performanceChromeHideTimerRef = useRef<number | null>(null);
@@ -2506,7 +2506,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     songRefreshVersion: librarySongRefreshVersion,
     enabled: isCloudMode && workspaceOwnerId === authenticatedUser?.id
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
-    paused: isPreviewEditingActive || workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
+    paused: isPerformanceMode || isPreviewEditingActive || workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
       || (isTeamWorkspace && (isEditing || isLibraryEditing || isPerformanceMode))
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
       || (isTeamWorkspace && !teamDraft.ready) || Boolean(teamDraft.pending) || Boolean(teamDraft.error),
@@ -2514,7 +2514,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     canApply: () => {
       if (workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
           || libraryTransitionOwnerRef.current || workspaceIsDirtyRef.current
-          || previewEditingActiveRef.current) return false;
+          || previewEditingActiveRef.current || isPerformanceModeRef.current) return false;
       // Offline edits must finish their existing merge/flush before a cloud read
       // can become the new local baseline.
       return isTeamWorkspace || !loadPendingSync({ userId: authenticatedUser!.id, libraryId: activeLibraryId! });
@@ -2546,7 +2546,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     repository: cloudRepositoryRef.current,
     scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
     enabled: isCloudMode && !isTeamWorkspace && !isLoadingCloudWorkspace && !isSwitchingLibrary,
-    paused: isPreviewEditingActive || activeCloudMutationCount > 0 || syncStatus === 'syncing'
+    paused: isPerformanceMode || isPreviewEditingActive || activeCloudMutationCount > 0 || syncStatus === 'syncing'
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
       || Boolean(leavingSharedSetlistId) || Boolean(leavingSharedProjectId),
     joinedSetlists,
@@ -2753,14 +2753,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const joinedSetlistDisplayPreference = isJoinedSetlist && selectedSetlist
     ? joinedSetlistDisplayPreferences[selectedSetlist.id] ?? {}
     : {};
-  const effectiveSelectedSetlist = selectedSetlist
+  const effectiveSelectedSetlist = React.useMemo(() => (
+    selectedSetlist
     ? {
         ...selectedSetlist,
         displayMode: isJoinedSetlist
           ? joinedSetlistDisplayPreference.displayMode ?? selectedSetlist.displayMode
           : selectedSetlist.displayMode
       }
-    : null;
+    : null
+  ), [selectedSetlist, isJoinedSetlist, joinedSetlistDisplayPreference.displayMode]);
   const pendingLeaveSharedSetlist = pendingLeaveSharedSetlistId
     ? joinedSetlists.find((item) => item.id === pendingLeaveSharedSetlistId)
       ?? allJoinedProjectSetlists.find((item) => item.id === pendingLeaveSharedSetlistId)
@@ -2773,10 +2775,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     ? setlists.find((item) => item.id === pendingRevokeShareSetlistId) ?? null
     : null;
   const selectedSetlistSong = selectedSetlist?.songs.find((item) => item.id === selectedSetlistSongId) ?? selectedSetlist?.songs[0] ?? null;
-  const selectedSetlistSourceSong = selectedSetlistSong
+  const selectedSetlistSourceSong = React.useMemo(() => (
+    selectedSetlistSong
     ? songs.find((item) => item.id === selectedSetlistSong.songId)
       ?? (selectedSetlistSong.songData ? { ...selectedSetlistSong.songData, id: selectedSetlistSong.songId, updatedAt: 0 } as StoredSong : null)
-    : null;
+    : null
+  ), [selectedSetlistSong, songs]);
   const currentSetlistSongHistory = setlistSongHistories[selectedSetlistSong?.id || ''] ?? { past: [], future: [] };
   const activeSetlistEditableSong = React.useMemo(() => (
     selectedSetlistSong
@@ -2786,7 +2790,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const activeLibraryEditableSong = React.useMemo(() => (
     song ? ensureSongEditingIds(song) : null
   ), [song]);
-  const activeSetlistPreviewSong = selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
+  const activeSetlistPreviewSong = React.useMemo(() => (
+    selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
     ? {
         ...applySetlistSongOverrides(
           activeSetlistEditableSong ?? selectedSetlistSourceSong,
@@ -2803,7 +2808,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           ? { barRowCount: joinedSetlistDisplayPreference.barRowCount }
           : {})
       }
-    : null;
+    : null
+  ), [selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, activeSetlistEditableSong, guitaristMode, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistDisplayPreference.barNumberMode, joinedSetlistDisplayPreference.barRowCount]);
   const activeEditorSong = isSetlistMode
     ? (activeSetlistEditableSong ?? selectedSetlistSourceSong ?? null)
     : activeLibraryEditableSong;
@@ -2834,7 +2840,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const hasSelectedSetlistSourceChanges = React.useMemo(() => (
     hasSetlistSourceScoreChange(selectedSetlistSourceSong ?? undefined, activeDraftEditorSong ?? undefined)
   ), [selectedSetlistSourceSong, activeDraftEditorSong]);
-  const activeDraftNavigationPreviewSong = isSetlistMode
+  const activeDraftNavigationPreviewSong = React.useMemo(() => (
+    isSetlistMode
     ? (activeDraftEditorSong && selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
         ? {
             ...applySetlistSongOverrides(
@@ -2853,7 +2860,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               : {})
           }
         : activeNavigationPreviewSong)
-    : activeDraftEditorSong;
+    : activeDraftEditorSong
+  ), [isSetlistMode, activeDraftEditorSong, selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, guitaristMode, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistDisplayPreference.barNumberMode, joinedSetlistDisplayPreference.barRowCount, activeNavigationPreviewSong]);
   const activeJianpuPitchContext = React.useMemo(() => (
     activeDraftNavigationPreviewSong
       ? buildJianpuPitchContext(activeDraftNavigationPreviewSong)
@@ -6659,6 +6667,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const refreshActiveTeamSongs = async (force = false) => {
     const repository = cloudRepositoryRef.current;
     if (!repository || !isTeamWorkspace || !activeLibraryId) return;
+    if (isPerformanceModeRef.current) { setTeamLibraryUpdatePending(true); return; }
     if (teamLibraryReloadIsUnsafeRef.current && !force) {
       setTeamLibraryUpdatePending(true);
       return;
@@ -6670,7 +6679,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       const nextSongs = await repository.loadLibrarySongs(activeLibraryId);
       if (requestGeneration !== teamLibraryRefreshGenerationRef.current) return;
       if (activeLibraryIdRef.current !== activeLibraryId) return;
-      if (teamLibraryReloadIsUnsafeRef.current) {
+      if (teamLibraryReloadIsUnsafeRef.current || isPerformanceModeRef.current) {
         setTeamLibraryUpdatePending(true);
         return;
       }
@@ -6864,11 +6873,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     let cancelled = false;
     let membershipRefreshInFlight = false;
     const refreshAssignmentAccess = async () => {
+      if (isPerformanceModeRef.current) return;
       const requestGeneration = ++assignmentAccessRefreshGenerationRef.current;
       const requestLibraryId = activeLibraryId;
       try {
         const workspace = await repository.loadLibraryWorkspace(requestLibraryId);
-        if (cancelled) return;
+        if (cancelled || isPerformanceModeRef.current) return;
         if (requestGeneration !== assignmentAccessRefreshGenerationRef.current) return;
         if (activeLibraryIdRef.current !== requestLibraryId) return;
         const assignmentBySetlistId = new Map(
@@ -6938,13 +6948,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     };
 
     const reconcileActiveMembership = async () => {
-      if (membershipRefreshInFlight || libraryTransitionOwnerRef.current) return;
+      if (membershipRefreshInFlight || libraryTransitionOwnerRef.current || isPerformanceModeRef.current) return;
       membershipRefreshInFlight = true;
       let membershipTransitionStarted = false;
       let membershipTransitionOwner: symbol | null = null;
       try {
         const libraries = await repository.listLibraries();
-        if (cancelled || libraryTransitionOwnerRef.current) return;
+        if (cancelled || libraryTransitionOwnerRef.current || isPerformanceModeRef.current) return;
 
         const currentLibrary = libraries.find((item) => item.id === activeLibraryId) ?? null;
         const roleChanged = currentLibrary?.role !== activeLibraryRoleRef.current;
@@ -7843,15 +7853,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       `scale(${scale}) translateY(-${offset}px)`;
   };
 
-  const focusPerformanceKeyboardCapture = () => {
-    // Native modal dialogs are above the performance overlay. Let their controls
-    // keep focus instead of periodically pulling it back to the page turner.
-    if (document.querySelector('dialog[open]')) return;
-    const focusTarget = performanceKeyboardCaptureRef.current ?? performanceOverlayRef.current;
-    if (!focusTarget || document.activeElement === focusTarget) return;
-
-    focusTarget.focus({ preventScroll: true });
-  };
+  const focusPerformanceKeyboardCapture = usePerformanceKeyboardFocus(
+    isPerformanceMode, performanceKeyboardCaptureRef, performanceOverlayRef
+  );
 
   // Show the performance-mode chrome and (re)arm the 2s idle timer that hides it.
   // Purely visual — it never blocks taps, so page turning is unaffected.
@@ -7938,6 +7942,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     revealPerformanceChrome();
     const t = e.touches[0];
     if (!t) return;
+    performanceSuppressClickRef.current = false;
     performanceTouchRef.current = { x: t.clientX, y: t.clientY };
   };
 
@@ -7950,6 +7955,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
     if (Math.abs(dx) < 44 || Math.abs(dy) >= Math.abs(dx)) return;
+    performanceSuppressClickRef.current = true;
     if (dx < 0) handlePerformanceNextPage();
     else handlePerformancePrevPage();
   };
@@ -8047,51 +8053,33 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const handler = (e: KeyboardEvent) => {
       if (e.defaultPrevented || document.querySelector('dialog[open]')) return;
       const direction = getPerformancePageDirection(e);
-      const signature = getPerformanceKeyboardSignature(e);
-      const now = window.performance.now();
-      const lastHandled = lastPerformanceKeyboardEventRef.current;
-
-      if (
-        e.type === 'keyup' &&
-        lastHandled?.signature === signature &&
-        now - lastHandled.handledAt < 350
-      ) {
+      if (e.repeat || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) {
+        if (direction) e.preventDefault();
         return;
       }
+      if (direction && !performanceKeyGateRef.current.accept(e)) { e.preventDefault(); return; }
 
       if (direction === 'next') {
         e.preventDefault();
-        lastPerformanceKeyboardEventRef.current = { signature, handledAt: now };
         handlePerformanceNextPageRef.current();
       } else if (direction === 'prev') {
         e.preventDefault();
-        lastPerformanceKeyboardEventRef.current = { signature, handledAt: now };
         handlePerformancePrevPageRef.current();
       } else if (e.key === 'Escape' && e.type === 'keydown') {
         e.preventDefault();
-        lastPerformanceKeyboardEventRef.current = { signature, handledAt: now };
         handleExitPerformanceMode();
       }
     };
+    const resetKeys = () => performanceKeyGateRef.current.reset();
+    resetKeys();
+    window.addEventListener('blur', resetKeys);
     window.addEventListener('keydown', handler);
     window.addEventListener('keyup', handler);
     return () => {
+      resetKeys();
+      window.removeEventListener('blur', resetKeys);
       window.removeEventListener('keydown', handler);
       window.removeEventListener('keyup', handler);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPerformanceMode]);
-
-  useEffect(() => {
-    if (!isPerformanceMode) return;
-    const rafId = window.requestAnimationFrame(focusPerformanceKeyboardCapture);
-    // iOS can silently blur the hidden input after a period of inactivity, which
-    // stops Bluetooth page-turner / hardware keyboard events from reaching the
-    // webview. Re-assert focus periodically so the page turner keeps working.
-    const intervalId = window.setInterval(focusPerformanceKeyboardCapture, 1500);
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      window.clearInterval(intervalId);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPerformanceMode]);
@@ -8326,13 +8314,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const pendingSyncWorkspaceRef = useRef({ songs, setlists, projects });
   pendingSyncWorkspaceRef.current = { songs, setlists, projects };
   useEffect(() => {
-    if (!authenticatedUser || !cloudRepositoryRef.current || !activeLibraryId || isTeamWorkspace || isLoadingCloudWorkspace) {
+    if (!authenticatedUser || !cloudRepositoryRef.current || !activeLibraryId || isTeamWorkspace || isLoadingCloudWorkspace || isPerformanceMode) {
       return;
     }
 
     const performPendingFlush = async () => {
       const pending = loadPendingSync({ userId: authenticatedUser.id, libraryId: activeLibraryId! });
-      if (!pending || !navigator.onLine || workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
+      if (!pending || !navigator.onLine || isPerformanceModeRef.current || workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
         || (pending.userId && pending.userId !== authenticatedUser.id)
         || (pending.libraryId && pending.libraryId !== activeLibraryId)) {
         return;
@@ -8344,7 +8332,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       try {
         setSyncStatus('syncing');
         const remoteWorkspace = await repository.loadLibraryWorkspace(activeLibraryId);
-        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId) return;
+        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId || isPerformanceModeRef.current) return;
         const mergedWorkspace = mergeWorkspaceByUpdatedAt(pending, remoteWorkspace);
         const savedAt = Math.max(
           pending.savedAt,
@@ -8366,7 +8354,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
         // Do not replace edits or clear a newer queued snapshot created while
         // the request was in flight (including pagehide/offline saves).
-        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId
+        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId || isPerformanceModeRef.current
           || pendingSyncWorkspaceRef.current.songs !== initialWorkspace.songs
           || pendingSyncWorkspaceRef.current.setlists !== initialWorkspace.setlists
           || pendingSyncWorkspaceRef.current.projects !== initialWorkspace.projects
@@ -8418,10 +8406,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     void flushPending();
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, [authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, language, toast]);
+  }, [authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, isPerformanceMode, language, toast]);
 
   useEffect(() => {
-    if (!isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
+    if (isPerformanceMode || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
       return;
     }
 
@@ -8442,7 +8430,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         autoSaveTimeoutRef.current = null;
       }
     };
-  }, [isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
+  }, [isPerformanceMode, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
@@ -16932,11 +16920,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             height: '100dvh',
             padding: 'env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px)',
           }}
-          onPointerDownCapture={focusPerformanceKeyboardCapture}
+          onPointerDownCapture={(event) => {
+            if (event.pointerType === 'mouse') performanceSuppressClickRef.current = false;
+            focusPerformanceKeyboardCapture();
+          }}
           onMouseDownCapture={focusPerformanceKeyboardCapture}
           onTouchStartCapture={focusPerformanceKeyboardCapture}
           onTouchStart={handlePerformanceTouchStart}
           onTouchEnd={handlePerformanceTouchEnd}
+          onTouchCancel={() => { performanceTouchRef.current = null; performanceSuppressClickRef.current = false; }}
           onMouseMove={revealPerformanceChrome}
         >
           <input
@@ -16958,7 +16950,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           />
 
           {/* One full A4 page, or a pair on wide screens. */}
-          <div data-performance-spread={performanceColumns} style={{
+          <div data-performance-spread={performanceColumns} data-performance-page={performanceSpreadStart + 1} data-performance-pages={performanceTotalPages} style={{
             width: performanceLayout.width,
             height: performanceLayout.height,
             flexShrink: 0,
@@ -17060,7 +17052,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               is never blocked; only the arrow hint fades with the rest of the chrome. */}
           <button
             type="button"
-            onClick={handlePerformancePrevPage}
+            onClick={() => {
+              if (performanceSuppressClickRef.current) { performanceSuppressClickRef.current = false; return; }
+              handlePerformancePrevPage();
+            }}
             className="absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3"
             aria-label="Previous page"
             aria-keyshortcuts="ArrowLeft ArrowUp PageUp Shift+Space"
@@ -17073,7 +17068,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           {/* Right tap area */}
           <button
             type="button"
-            onClick={handlePerformanceNextPage}
+            onClick={() => {
+              if (performanceSuppressClickRef.current) { performanceSuppressClickRef.current = false; return; }
+              handlePerformanceNextPage();
+            }}
             className="absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3"
             aria-label="Next page"
             aria-keyshortcuts="ArrowRight ArrowDown PageDown Space Enter"

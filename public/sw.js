@@ -60,7 +60,10 @@ const cacheAppShell = async () => {
 };
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(cacheAppShell().then(() => self.skipWaiting()));
+  // Keep the current worker and its complete asset cache while any page is
+  // open. A waiting update activates naturally after the last page closes;
+  // it must never replace an on-stage session or remove its offline chunks.
+  event.waitUntil(cacheAppShell());
 });
 
 self.addEventListener('activate', (event) => {

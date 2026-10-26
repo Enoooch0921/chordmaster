@@ -41,6 +41,8 @@ export default defineConfig(({mode}) => {
     },
     test: {
       environment: 'jsdom',
+      // App integration tests render full multi-page scores; bound worker memory.
+      maxWorkers: 2,
       include: ['src/**/*.test.{ts,tsx}'],
       setupFiles: ['./src/test/setup.ts'],
       restoreMocks: true,
