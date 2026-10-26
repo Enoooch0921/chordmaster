@@ -9,7 +9,7 @@ const setup = () => {
   const self = { registration: { scope: 'https://example.test/chordmaster/' }, location: { href: 'https://example.test/chordmaster/sw.js', origin: 'https://example.test' }, skipWaiting: vi.fn(), clients: { claim: vi.fn() }, addEventListener: (type: string, callback: any) => { listeners[type] = callback; } };
   const response = { ok: true, clone() { return this; }, text: async () => '<script src="./assets/main.js"></script>' };
   const fetch = vi.fn(async () => response);
-  runInNewContext(source, { self, caches, fetch, URL, Set, Promise });
+  runInNewContext(source.replace('const BUILD_ASSETS = [];', "const BUILD_ASSETS = ['./assets/main.js'];"), { self, caches, fetch, URL, Set, Promise });
   return { listeners, cache, caches, self, fetch, response };
 };
 describe('safe offline app updates', () => {
@@ -19,6 +19,17 @@ describe('safe offline app updates', () => {
     listeners.install({ waitUntil: (promise: Promise<void>) => { pending = promise; } }); await pending;
     expect(cache.put).toHaveBeenCalledWith('https://example.test/chordmaster/assets/main.js', expect.anything());
     expect(cache.put).toHaveBeenCalledWith('https://example.test/chordmaster/fonts/JianpuASCII.ttf', expect.anything());
+    expect(self.skipWaiting).not.toHaveBeenCalled(); expect(caches.delete).not.toHaveBeenCalled();
+  });
+  it('rejects an incomplete release instead of replacing the working offline cache', async () => {
+    const { listeners, self, caches, fetch, response } = setup();
+    fetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/assets/main.js')) throw new Error('Connection dropped during update');
+      return response;
+    });
+    let pending!: Promise<void>;
+    listeners.install({ waitUntil: (promise: Promise<void>) => { pending = promise; } });
+    await expect(pending).rejects.toThrow('Connection dropped during update');
     expect(self.skipWaiting).not.toHaveBeenCalled(); expect(caches.delete).not.toHaveBeenCalled();
   });
   it('serves an already cached navigation and lazy chunk when the network fails', async () => {
