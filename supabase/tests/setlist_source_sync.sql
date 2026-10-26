@@ -48,6 +48,7 @@ insert into public.team_invites(library_id,email,role,token,invited_by) values
 
 
 update public.songs set content_json='{"title":"Song","originalKey":"C","currentKey":"C","capo":2,"showNashvilleNumbers":true,"sections":[{"id":"verse","title":"Verse","bars":[{"id":"bar","chords":["C"],"riff":"1"}]}]}' where id='admin-test-song';
+update public.setlist_songs set override_json=jsonb_build_object('songData',(select content_json from public.songs where id='admin-test-song')) where id='admin-test-original';
 update public.setlist_songs set override_json='{"overrideKey":"D","sectionOrder":["verse","verse"],"songData":{"title":"Song","originalKey":"C","currentKey":"D","capo":7,"showNashvilleNumbers":false,"sections":[{"id":"verse","title":"Verse","bars":[{"id":"bar","chords":["G"],"riff":"2"}]}]}}' where id='admin-test-original';
 set local role authenticated;
 select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000003',true);

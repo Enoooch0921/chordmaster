@@ -6,7 +6,7 @@ import { PICKUP_EDITOR_SECTION_ID, PICKUP_EDITOR_BAR_ID, normalizePickupTimeSign
 import { currentKeyMode, normalizeKeyMode, formatKeyName } from './utils/keyMode';
 import { compareNaturalNames } from './utils/naturalNameCompare';
 import SetlistSourceSyncControl from './components/SetlistSourceSyncControl';
-import { hasSetlistSourceScoreChange } from './lib/setlistSourceSync';
+import { classifySetlistSource, hasSetlistSourceScoreChange } from './lib/setlistSourceSync';
 import type { TonalMode } from './types';
 import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { normalizeJianpuVoices } from './utils/jianpuVoices';
@@ -2837,9 +2837,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     ? getPreviewEditorBottomInset(previewEditorDeviceLayout, previewEditorPanelHeight)
     : 0;
   const activeDraftEditorSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
-  const hasSelectedSetlistSourceChanges = React.useMemo(() => (
-    hasSetlistSourceScoreChange(selectedSetlistSourceSong ?? undefined, activeDraftEditorSong ?? undefined)
-  ), [selectedSetlistSourceSong, activeDraftEditorSong]);
+  const selectedSetlistSourceStatus = React.useMemo(() => (
+    isSetlistMode && selectedSetlistSourceSong && activeDraftEditorSong
+      ? !selectedSetlistSong?.songData
+        ? (hasSetlistSourceScoreChange(selectedSetlistSourceSong, activeDraftEditorSong) ? 'setlist-changed' : 'aligned')
+        : classifySetlistSource(selectedSetlistSourceSong, activeDraftEditorSong, selectedSetlistSong.sourceBaseline)
+      : 'aligned'
+  ), [isSetlistMode, selectedSetlistSourceSong, activeDraftEditorSong, selectedSetlistSong?.sourceBaseline, selectedSetlistSong?.songData]);
   const activeDraftNavigationPreviewSong = React.useMemo(() => (
     isSetlistMode
     ? (activeDraftEditorSong && selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
@@ -15365,17 +15369,28 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         </header>
 
         {isSheetView && isSetlistMode && isTeamWorkspace && !isJoinedSetlist && activeLibraryId
-          && selectedSetlistSong && hasSelectedSetlistSourceChanges
+          && selectedSetlistSong && selectedSetlistSourceStatus !== 'aligned'
           && canEditSelectedSetlistContent && isTeamAdministrator(activeLibraryRole) && (
           <SetlistSourceSyncControl key={`${activeLibraryId}|${selectedSetlistSong.id}`}
-            libraryId={activeLibraryId} entryId={selectedSetlistSong.id} language={language}
+            libraryId={activeLibraryId} entryId={selectedSetlistSong.id} language={language} status={selectedSetlistSourceStatus}
             prepare={flushTeamSongDraftsBeforeMutation}
-            onSynced={updated => {
+            onReconciled={result => {
               if (activeLibraryIdRef.current !== activeLibraryId) return;
+              const updated = result.source;
               setSongs(current => current.map(item => item.id === updated.id ? updated : item));
               setSavedSongs(current => current.map(item => item.id === updated.id ? updated : item));
+              const applyEntry = (lists: Setlist[]) => lists.map(list => list.id !== result.entry.setlistId ? list : {
+                ...list, updatedAt: result.setlistUpdatedAt,
+                songs: list.songs.map(item => item.id === result.entry.id && item.songId === result.entry.songId
+                  ? { ...item, ...result.entry, capo: item.capo, personalCapoOverride: item.personalCapoOverride } : item)
+              });
+              setSetlists(applyEntry);
+              setSavedSetlists(applyEntry);
+              setActiveBar(null);
               setSongHistories(current => { const next = { ...current }; delete next[updated.id]; return next; });
-              toast.success(language === 'zh' ? '已同步回歌曲庫，原曲備份已保存。' : 'Updated the song library. The previous source was backed up.');
+              toast.success(result.direction === 'to-library'
+                ? (language === 'zh' ? '已同步回歌曲庫，原曲備份已保存。' : 'Updated the song library. The previous source was backed up.')
+                : (language === 'zh' ? '已更新這份歌單副本，原編排已備份。' : 'Updated this setlist copy. Its previous arrangement was backed up.'));
             }} />
         )}
 

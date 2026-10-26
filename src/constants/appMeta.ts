@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-26',
+        title: 'Safe source tracking across multiple setlists',
+        bullets: [
+          'Each setlist copy tracks its own source baseline: distinguish setlist edits, a newer library source, conflicts, and unknown legacy versions.',
+          'Unchanged old copies can refresh from the library but cannot overwrite its newer score. Conflicts require explicitly choosing which version to keep.',
+          'Both update directions preserve performance Key, personal Capo and valid section order, save full backups, and leave other setlists unchanged.'
+        ]
+      },
+      {
+        version: '0.9.15',
+        date: '2026-10-26',
         title: 'Reliable on-stage page turning, preview pickups and live libraries',
         bullets: [
           'Performance mode holds background score updates and reconnect sync until you exit, preserving the current song and page while offline.',
@@ -542,6 +552,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-26',
+        title: '同曲跨歌單的來源版本與衝突判斷',
+        bullets: [
+          '每份歌單記住自己的來源基準，分辨歌單修改、曲庫新版、雙方衝突與舊版來源未知；Key／Capo 不計入。',
+          '未修改的舊副本只能更新歌單，不能覆蓋新版曲庫；雙方衝突須先比對並明確選擇保留版本。',
+          '雙向更新保存完整備份，保留演出 Key、個人 Capo 與可用的段落演出順序；其他歌單不自動改寫。'
+        ]
+      },
+      {
+        version: '0.9.15',
         date: '2026-10-26',
         title: '演出翻譜穩定性、預覽弱起拍與曲庫即時同步',
         bullets: [

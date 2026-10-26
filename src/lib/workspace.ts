@@ -379,7 +379,11 @@ const normalizeSetlistSong = (
     sectionOrder: sectionOrderSourceSong
       ? sanitizeSetlistSectionOrder(rawSectionOrder, sectionOrderSourceSong)
       : rawSectionOrder,
-    songData: normalizedSongData
+    songData: normalizedSongData,
+    sourceBaseline: setlistSong.sourceBaseline?.songId === songId
+      && setlistSong.sourceBaseline.sourceContent && setlistSong.sourceBaseline.entryContent
+      && typeof setlistSong.sourceBaseline.sourceRevision === 'string'
+      ? cloneValue(setlistSong.sourceBaseline) : undefined
   };
 };
 
@@ -444,7 +448,7 @@ export const serializeSetlists = (setlists: Setlist[]) =>
   JSON.stringify(
     setlists.map(({ assignedToCurrentUser: _assignment, ...setlist }) => ({
       ...setlist,
-      songs: reindexSetlistSongs(setlist.songs).map(({ personalCapoOverride, sourceArchivedAt, ...song }) => song)
+      songs: reindexSetlistSongs(setlist.songs).map(({ personalCapoOverride, sourceArchivedAt, sourceBaseline, ...song }) => song)
     }))
   );
 

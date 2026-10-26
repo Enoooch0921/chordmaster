@@ -35,7 +35,7 @@ const signature = (value: unknown) => JSON.stringify(value, (_key, item) => {
 });
 
 const revisionFields = ['updatedAt', 'updatedBy'] as const;
-const localEntryFields = ['capo', 'personalCapoOverride', 'sourceArchivedAt', 'copySourceId'] as const;
+const localEntryFields = ['capo', 'personalCapoOverride', 'sourceArchivedAt', 'copySourceId', 'sourceBaseline'] as const;
 const sharedSong = (song: StoredSong) => without(song, revisionFields);
 const sharedProject = (project: Project) => without(project, revisionFields);
 const sharedSetlist = (setlist: Setlist) => ({

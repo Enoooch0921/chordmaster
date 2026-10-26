@@ -210,6 +210,14 @@ export interface StoredSong extends Song {
   };
 }
 
+export interface SetlistSourceBaseline {
+  songId: string;
+  sourceContent: Song;
+  entryContent: Song;
+  sourceRevision: string;
+  capturedAt: string;
+}
+
 export interface SetlistSong {
   id: string;
   setlistId: string;
@@ -223,6 +231,8 @@ export interface SetlistSong {
   sourceArchivedAt?: number | null;
   sectionOrder: string[];
   songData?: Song;
+  // Server-maintained provenance; never accepted from a browser write.
+  sourceBaseline?: SetlistSourceBaseline | null;
 }
 
 export interface Setlist {

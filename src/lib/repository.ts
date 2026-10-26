@@ -108,6 +108,7 @@ interface SetlistSongRow {
   setlist_id: string;
   song_id: string;
   order_index: number;
+  source_baseline?: SetlistSong['sourceBaseline'];
   override_json: {
     overrideKey?: SetlistSong['overrideKey'];
     sectionOrder?: string[];
@@ -268,6 +269,9 @@ const upsertProfile = async (userId: string, email: string, name: string, pictur
 export interface SetlistSaveOptions {
   // Captured at the caller's permission preflight, not re-read mid-save.
   teamRole?: LibraryRole;
+  // Origin of a live reference's first private edit. The server validates it
+  // against the actual source, then removes this transient request field.
+  sourceEditBases?: Record<string, Song>;
 }
 
 export interface WorkspaceRepository {
@@ -431,7 +435,8 @@ const mapSetlistRows = (
           personalCapoOverride: personalCapoBySetlistSongId.get(item.id),
           sourceArchivedAt: songsById.get(item.song_id)?.archivedAt ?? null,
           sectionOrder: Array.isArray(item.override_json?.sectionOrder) ? item.override_json.sectionOrder : [],
-          songData: item.override_json?.songData ? normalizeSongBars(item.override_json.songData) : undefined
+          songData: item.override_json?.songData ? normalizeSongBars(item.override_json.songData) : undefined,
+          sourceBaseline: item.source_baseline
         }))
         .filter((item) => songsById.has(item.songId) || Boolean(item.songData))
     );
@@ -1123,7 +1128,7 @@ const getLibraryWorkspace = async (
   const { data: setlistSongRows, error: setlistSongError } = setlistIds.length > 0
     ? await supabase
       .from('setlist_songs')
-      .select('id, setlist_id, song_id, order_index, override_json')
+      .select('id, setlist_id, song_id, order_index, override_json, source_baseline')
       .in('setlist_id', setlistIds)
       .limit(1000)
       .abortSignal(requestSignal)
@@ -1294,7 +1299,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
       .returns<SetlistRow[]>(),
     supabase
       .from('setlist_songs')
-      .select('id, setlist_id, song_id, order_index, override_json')
+      .select('id, setlist_id, song_id, order_index, override_json, source_baseline')
       .in('setlist_id', joinedSetlistIds)
       .returns<SetlistSongRow[]>()
   ]);
@@ -1337,7 +1342,8 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
           personalCapoOverride: userCapo,
           sourceArchivedAt: songRow?.archived_at ? new Date(songRow.archived_at).getTime() : null,
           sectionOrder: Array.isArray(s.override_json?.sectionOrder) ? s.override_json.sectionOrder : [],
-          songData: overrideSongData ?? (songRow ? normalizeSongBars(cloneValue(songRow.content_json)) : undefined)
+          songData: overrideSongData ?? (songRow ? normalizeSongBars(cloneValue(songRow.content_json)) : undefined),
+          sourceBaseline: s.source_baseline
         };
       });
 
@@ -1358,7 +1364,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
 // Stable signature used to decide whether to re-upload setlist_songs. Capo is
 // per-user, so both local personal overrides and legacy shared capos are ignored.
 const setlistSongsSignature = (songs: SetlistSong[]) => JSON.stringify(
-  reindexSetlistSongs(songs).map(({ capo: _sharedCapo, personalCapoOverride: _personalCapo, ...rest }) => rest)
+  reindexSetlistSongs(songs).map(({ capo: _sharedCapo, personalCapoOverride: _personalCapo, sourceBaseline: _baseline, ...rest }) => rest)
 );
 
 const persistSetlistSongs = async (setlist: Setlist, previousSetlist?: Setlist, options?: SetlistSaveOptions) => {
@@ -1384,6 +1390,7 @@ const persistSetlistSongs = async (setlist: Setlist, previousSetlist?: Setlist, 
     override_json: {
       ...(song.copySourceId ? { sourceSetlistSongId: song.copySourceId } : {}),
       ...(options?.teamRole ? { expectedTeamRole: options.teamRole } : {}),
+      ...(options?.sourceEditBases?.[song.id] ? { sourceEditBase: options.sourceEditBases[song.id] } : {}),
       overrideKey: song.overrideKey,
       sectionOrder: song.sectionOrder,
       songData: song.songData

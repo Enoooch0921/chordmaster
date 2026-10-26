@@ -139,11 +139,17 @@ export const syncWorkspaceDiff = async (params: {
   // Phase 4: setlist upserts (parallel). Pass the saved previous setlist so
   // saveSetlist can skip rewriting setlist_songs when only metadata changed.
   if (setlistDiff.changed.length > 0) {
-    await Promise.all(setlistDiff.changed.map((setlist) =>
-      params.teamRole
-        ? params.repository.saveSetlist(setlist, savedSetlistById.get(setlist.id), { teamRole: params.teamRole })
-        : params.repository.saveSetlist(setlist, savedSetlistById.get(setlist.id))
-    ));
+    await Promise.all(setlistDiff.changed.map((setlist) => {
+      const previous = savedSetlistById.get(setlist.id);
+      if (!params.teamRole) return params.repository.saveSetlist(setlist, previous);
+      const sourceEditBases = Object.fromEntries(setlist.songs.flatMap(entry => {
+        const before = previous?.songs.find(item => item.id === entry.id);
+        const source = cloudSongs.find(song => song.id === entry.songId);
+        return entry.songData && !before?.songData && !entry.copySourceId && source ? [[entry.id, source]] : [];
+      }));
+      return params.repository.saveSetlist(setlist, previous, { teamRole: params.teamRole,
+        ...(Object.keys(sourceEditBases).length ? { sourceEditBases } : {}) });
+    }));
   }
 
   // Phase 5: project deletes (after any setlists that used to reference them

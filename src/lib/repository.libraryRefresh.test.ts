@@ -28,6 +28,7 @@ describe('team collection refresh', () => {
         display_mode: 'chord-fixed-key', created_at: '2026-10-01', updated_at: '2026-10-26' }],
       projects: [{ id: 'project', library_id: 'team', name: 'Worship', created_at: '2026-10-01', updated_at: '2026-10-26' }],
       setlist_songs: [{ id: 'entry', setlist_id: 'setlist', song_id: 'song', order_index: 0,
+        source_baseline: { songId: 'song', sourceContent: song, entryContent: song, sourceRevision: '2026-10-26', capturedAt: '2026-10-26' },
         override_json: { overrideKey: 'D', songData: { ...song, title: 'Sunday version' } } }],
       setlist_editor_assignments: [],
       user_setlist_capo_overrides: [{ setlist_song_id: 'entry', capo: 2 }]
@@ -44,7 +45,7 @@ describe('team collection refresh', () => {
     expect(remote.songs).toBe(knownSongs);
     expect(remote.projects[0].name).toBe('Worship');
     expect(remote.setlists[0].songs[0]).toMatchObject({ overrideKey: 'D', personalCapoOverride: 2,
-      songData: { title: 'Sunday version' } });
+      songData: { title: 'Sunday version' }, sourceBaseline: { songId: 'song', sourceContent: song } });
     expect(mocks.from).not.toHaveBeenCalledWith('songs');
     expect(queries.get('setlists')?.eq).toHaveBeenCalledWith('library_id', 'team');
     expect(queries.get('projects')?.eq).toHaveBeenCalledWith('library_id', 'team');

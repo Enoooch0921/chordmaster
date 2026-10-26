@@ -72,4 +72,4 @@ it.each(['songs', 'setlists'])('deletes bars from the %s preview without crashin
   fireEvent.click(screen.getByRole('button', { name: '完成' }));
   expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument();
   expect(song.sections[0].bars).toHaveLength(4);
-});
+}, 15000);

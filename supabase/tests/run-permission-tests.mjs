@@ -37,6 +37,15 @@ try {
     create function auth.jwt() returns jsonb language sql stable as $$
       select coalesce(nullif(current_setting('request.jwt.claims',true),'')::jsonb,'{}'::jsonb)
     $$;
+    -- Realtime owns these objects in Supabase; provide the policy surface only.
+    create schema realtime;
+    create table realtime.messages (extension text);
+    alter table realtime.messages enable row level security;
+    create function realtime.topic() returns text language sql stable as $$
+      select nullif(current_setting('realtime.topic',true),'')
+    $$;
+    grant usage on schema realtime to anon,authenticated,service_role;
+    grant select,insert on realtime.messages to authenticated,service_role;
     grant usage on schema public,auth to anon,authenticated,service_role;
     alter default privileges in schema public grant all on tables to authenticated,service_role;
     alter default privileges in schema public grant usage,select on sequences to authenticated,service_role;

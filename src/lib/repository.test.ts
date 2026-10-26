@@ -261,7 +261,8 @@ describe('cloud repository shared setlist updates', () => {
       setlists: [current], savedSetlists: [previous], projects: [], savedProjects: [],
       ...(teamRole ? { teamRole } : {}) });
     expect(saveSetlist.mock.calls[0]).toHaveLength(teamRole ? 3 : 2);
-    if (teamRole) expect(saveSetlist.mock.calls[0][2]).toEqual({ teamRole });
+    if (teamRole) expect(saveSetlist.mock.calls[0][2]).toMatchObject({ teamRole,
+      sourceEditBases: { added: librarySong } });
     for (const row of entries.upsert.mock.calls[0][0]) {
       if (teamRole) expect(row.override_json.expectedTeamRole).toBe(teamRole);
       else expect(row.override_json).not.toHaveProperty('expectedTeamRole');
