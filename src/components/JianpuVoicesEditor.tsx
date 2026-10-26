@@ -5,11 +5,12 @@ import Jianpu from './Jianpu';
 interface Props {
   voices?: JianpuVoice[];
   timeSignature: string;
+  literalDurations?: boolean;
   language: AppLanguage;
   onChange: (voices: JianpuVoice[] | undefined) => void;
 }
 
-export default function JianpuVoicesEditor({ voices = [], timeSignature, language, onChange }: Props) {
+export default function JianpuVoicesEditor({ voices = [], timeSignature, literalDurations, language, onChange }: Props) {
   const zh = language === 'zh';
   const update = (index: number, voice: JianpuVoice) => onChange(voices.map((item, i) => i === index ? voice : item));
   return <details className="my-2 text-xs" data-additional-jianpu-editor>
@@ -31,7 +32,7 @@ export default function JianpuVoicesEditor({ voices = [], timeSignature, languag
         <input aria-label={zh ? '簡譜聲部記法' : 'Jianpu voice notation'} lang="en" spellCheck={false}
           className="w-full rounded border px-2 py-1 font-mono text-xs"
           value={voice.riff} onChange={event => update(index, { ...voice, riff: event.target.value })} />
-        {voice.riff.trim() && <Jianpu notation={voice.riff} timeSignature={timeSignature} compact className="w-full" />}
+        {voice.riff.trim() && <Jianpu notation={voice.riff} timeSignature={timeSignature} literalDurations={literalDurations} compact className="w-full" />}
       </div>)}
       <button type="button" className="rounded border px-2 py-1"
         onClick={() => onChange([...voices, { id: crypto.randomUUID(), label: zh ? '下聲部' : 'Lower voice', riff: '' }])}>

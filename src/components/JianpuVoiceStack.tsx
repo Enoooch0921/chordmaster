@@ -29,6 +29,7 @@ export default function JianpuVoiceStack({ voices, primaryLabel, showPrimary, ..
     {voices.map(voice => lane(voice.label, <Jianpu
       notation={voice.notation}
       timeSignature={primary.timeSignature}
+      literalDurations={primary.literalDurations}
       gridSlotCount={primary.gridSlotCount}
       compact={primary.compact}
       scale={primary.scale}

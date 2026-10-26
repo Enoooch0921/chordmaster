@@ -1,3 +1,5 @@
+import { applyPickupEditorSong, toPickupEditorSong } from '../../lib/pickupEditing';
+import { PICKUP_EDITOR_SECTION_ID, pickupTimeSignatureForUnits, resizePickup } from '../../utils/pickupUtils';
 import BarlineGlyph from '../BarlineGlyph';
 import TempoChangeControl from '../TempoChangeControl';
 import UnmeteredChordsEditor from '../UnmeteredChordsEditor';
@@ -237,33 +239,61 @@ const getCleanChordMarks = (marks: Bar['chordMarks']) => (
 );
 
 const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
-  session,
+  session: sourceSession,
   language,
   deviceLayout,
   storedKey,
   displayedKey,
   storageMode,
-  onApplyDraft,
+  onApplyDraft: onSourceApplyDraft,
   onInputModeChange,
   onNotationModeChange,
   onNotationCursorChange,
   onJianpuInputAbsoluteChange,
   jianpuPitchContext,
   onNavigate,
-  onStructure,
+  onStructure: onSourceStructure,
   hasCopiedBar = false,
-  hasCopiedJianpu = false,
-  onCopyJianpu,
-  onPasteJianpu,
-  hasCopiedRhythm = false,
-  onCopyRhythm,
-  onPasteRhythm,
+  hasCopiedJianpu: sourceHasCopiedJianpu = false,
+  onCopyJianpu: onSourceCopyJianpu,
+  onPasteJianpu: onSourcePasteJianpu,
+  hasCopiedRhythm: sourceHasCopiedRhythm = false,
+  onCopyRhythm: onSourceCopyRhythm,
+  onPasteRhythm: onSourcePasteRhythm,
   onUndo,
   onRedo,
   onDone,
   onCancel,
   onPanelHeightChange
 }) => {
+  const isPickup = sourceSession.target.sectionId === PICKUP_EDITOR_SECTION_ID;
+  const editorSong = React.useMemo(() => isPickup ? toPickupEditorSong(sourceSession.draftSong) : sourceSession.draftSong,
+    [isPickup, sourceSession.draftSong]);
+  const session = isPickup ? { ...sourceSession, draftSong: editorSong } : sourceSession;
+  const onApplyDraft: PreviewBarEditorProps['onApplyDraft'] = (draft, options) =>
+    onSourceApplyDraft(isPickup ? applyPickupEditorSong(sourceSession.draftSong, draft) : draft, options);
+  const onStructure: PreviewBarEditorProps['onStructure'] = action => {
+    if (!isPickup) return onSourceStructure(action);
+    if (action === 'delete') onSourceApplyDraft({ ...sourceSession.draftSong, pickup: undefined });
+  };
+  const [pickupCopiedJianpu, setPickupCopiedJianpu] = React.useState<{ riff: string; meter: string } | null>(null);
+  const [pickupCopiedRhythm, setPickupCopiedRhythm] = React.useState<string | null>(null);
+  const hasCopiedJianpu = isPickup ? pickupCopiedJianpu !== null : sourceHasCopiedJianpu;
+  const hasCopiedRhythm = isPickup ? pickupCopiedRhythm !== null : sourceHasCopiedRhythm;
+  const onCopyJianpu = isPickup ? () => setPickupCopiedJianpu({ riff: bar?.riff ?? '', meter: effectiveBarTimeSignature }) : onSourceCopyJianpu;
+  const onPasteJianpu = isPickup ? () => {
+    if (!pickupCopiedJianpu) return;
+    const resized = resizePickup({ timeSignature: pickupCopiedJianpu.meter, riff: pickupCopiedJianpu.riff }, session.draftSong.timeSignature, effectiveBarTimeSignature);
+    if (!resized) { setNotationActionError(language === 'zh' ? '內容超出弱起長度。' : 'This passage exceeds the pickup length.'); return; }
+    onApplyDraft(updateBarById(session.draftSong, session.target, bar => ({ ...bar, riff: resized.riff })));
+  } : onSourcePasteJianpu;
+  const onCopyRhythm = isPickup ? () => setPickupCopiedRhythm(bar?.rhythm ?? '') : onSourceCopyRhythm;
+  const onPasteRhythm = isPickup ? () => {
+    if (pickupCopiedRhythm === null) return;
+    const resized = resizePickup({ timeSignature: effectiveBarTimeSignature, rhythm: pickupCopiedRhythm }, session.draftSong.timeSignature, effectiveBarTimeSignature);
+    if (!resized) { setNotationActionError(language === 'zh' ? '內容超出弱起長度。' : 'This passage exceeds the pickup length.'); return; }
+    onApplyDraft(updateBarById(session.draftSong, session.target, bar => ({ ...bar, rhythm: resized.rhythm })));
+  } : onSourcePasteRhythm;
   const [mode, setMode] = React.useState<KeyboardMode>(() => modeForField(session.target.field));
   const [activePicker, setActivePicker] = React.useState<KeyboardPicker>(null);
   const [pickerAnchor, setPickerAnchor] = React.useState<PickerAnchor | null>(null);
@@ -1020,7 +1050,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           width: '100vw'
         }
       : { position: 'fixed', left: '50%', top: '50%', width: 'min(520px, calc(100vw - 24px))', transform: 'translate(-50%, -50%)' };
-    const isDeleted = session.targetStatus === 'deleted';
+    const isDeleted = session.targetStatus === 'deleted' || (isPickup && !sourceSession.draftSong.pickup);
     return (
       <section
         ref={panelRef}
@@ -1408,8 +1438,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </div>
       )}
 
-      {notationMode === 'rhythm' && !rhythmVoicesExpanded && (
-        <div className={`grid min-h-0 flex-1 ${deviceLayout === 'phone' ? (notationActionError ? 'grid-rows-[1fr_1fr_1.56fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_1.56fr_0.54fr_0.52fr]') : (notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr]')} gap-1.5`} data-keyboard-view="rhythm">
+      {notationMode === 'rhythm' && (isPickup || !rhythmVoicesExpanded) && (
+        <div className={`grid min-h-0 flex-1 ${deviceLayout === 'phone' ? (notationActionError ? 'grid-rows-[1fr_1fr_1.56fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_1.56fr_0.54fr_0.52fr]') : (notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr]')} gap-1.5`} data-keyboard-view="rhythm" style={isPickup ? { gridTemplateRows: `1fr 1fr 0.78fr 0.54fr${notationActionError ? ' auto' : ''}` } : undefined}>
           <div className="grid min-h-0 grid-cols-5 gap-1.5" data-rhythm-key-row="notes" data-key-surface="character">
             {([['w', '全音符', 'Whole'], ['h', '二分音符', 'Half'], ['q', '四分音符', 'Quarter'], ['e', '八分音符', 'Eighth'], ['s', '十六分音符', 'Sixteenth']] as const).map(([token, zhLabel, enLabel]) => (
               <button key={token} type="button" className={`${characterKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === token && !selectedRhythmEvent.isRest && !selectedRhythmEvent.isSlash && !selectedRhythmEvent.triplet ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token })} aria-label={language === 'zh' ? zhLabel : `${enLabel} note`}>
@@ -1442,14 +1472,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyRhythm} aria-label={language === 'zh' ? '複製節奏' : 'Copy rhythm'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製節奏' : 'Copy rhythm'}</button>
             <button type="button" disabled={!hasCopiedRhythm} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteRhythm} aria-label={language === 'zh' ? '貼上節奏' : 'Paste rhythm'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上節奏' : 'Paste rhythm'}</button>
           </div>
-          {renderPreviewColorControls('rhythm-color-controls')}
+          {!isPickup && renderPreviewColorControls('rhythm-color-controls')}
           {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
         </div>
       )}
 
 
       {notationMode === 'jianpu' && !graceDraft && (
-        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr]'} gap-1.5`} data-keyboard-view="jianpu">
+        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr]'} gap-1.5`} data-keyboard-view="jianpu" style={isPickup ? { gridTemplateRows: `1.08fr 0.92fr 0.78fr 0.55fr${notationActionError ? ' auto' : ''}` } : undefined}>
           <div className="grid min-h-0 grid-cols-7 gap-1.5" data-jianpu-key-row="pitches" data-key-surface="character">
             {(['1', '2', '3', '4', '5', '6', '7'] as const).map((pitch) => (
               <button key={pitch} type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-pitch', pitch })} aria-label={language === 'zh' ? `輸入簡譜 ${pitch}` : `Insert jianpu ${pitch}`}>
@@ -1491,7 +1521,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               setGraceDraft(existing.length ? existing.map(grace => ({ ...grace })) : [{ pitch: '2', accidental: '', octave: 0 }]);
             }} aria-label={language === 'zh' ? '編輯簡譜裝飾音' : 'Edit jianpu grace note'}>{language === 'zh' ? '裝飾音' : 'Grace note'}</button>
           </div>
-          {renderPreviewColorControls('jianpu-color-controls')}
+          {!isPickup && renderPreviewColorControls('jianpu-color-controls')}
           {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
         </div>
       )}
@@ -1525,13 +1555,13 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
       {notationMode === 'jianpu' && !graceDraft && (
         <div className="shrink-0 px-2">
-          <JianpuVoicesEditor voices={bar.riffVoices}
+          <JianpuVoicesEditor voices={bar.riffVoices} literalDurations={isPickup}
             timeSignature={getEffectiveTimeSignatureForBar(session.draftSong, bar)}
             language={language} onChange={riffVoices => updateFields({ riffVoices })} />
         </div>
       )}
 
-      {notationMode === 'rhythm' && (
+      {notationMode === 'rhythm' && !isPickup && (
         <div className={rhythmVoicesExpanded ? "min-h-0 flex-1 overflow-y-auto" : "shrink-0"}>
           <RhythmVoicesEditor expanded={rhythmVoicesExpanded} onExpandedChange={setRhythmVoicesExpanded} voices={bar.rhythmVoices} timeSignature={getEffectiveTimeSignatureForBar(session.draftSong, bar)} language={language} onChange={rhythmVoices => updateFields({ rhythmVoices })} />
         </div>
@@ -1615,11 +1645,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={16} /></button>}
         <div
           data-notation-mode-segments
+          style={isPickup ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' } : undefined}
           className="grid h-9 w-[5.5rem] shrink-0 grid-cols-3 rounded-[13px] border border-white/80 bg-slate-300/70 p-0.5 shadow-inner min-[360px]:w-[6.75rem] sm:w-[9rem]"
           role="group"
           aria-label={language === 'zh' ? '輸入法' : 'Input mode'}
         >
-          {PREVIEW_NOTATION_MODES.map((candidateMode) => {
+          {PREVIEW_NOTATION_MODES.filter(candidate => !isPickup || candidate !== 'chords').map((candidateMode) => {
             const selected = candidateMode === notationMode;
             return (
               <button
@@ -1643,7 +1674,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           })}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-indigo-500">{section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}</div>
+          <div className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-indigo-500">{isPickup ? (language === 'zh' ? '弱起拍 · 第 0 小節' : 'Pickup · Bar 0') : section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}</div>
           <div className="truncate text-xs font-black text-slate-900">{headerValue}</div>
         </div>
         {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('next')} aria-label="Next beat"><ChevronRight size={16} /></button>}
@@ -1665,6 +1696,23 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-600 !text-white hover:!bg-indigo-500`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={15} /><span className={deviceLayout === 'phone' ? 'sr-only' : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
       </header>
 
+      {isPickup && sourceSession.draftSong.pickup && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/70 bg-emerald-50/80 px-3 py-2">
+        <label className="flex items-center gap-2 text-xs font-semibold text-emerald-900">
+          {language === 'zh' ? '弱起長度（♩ = 1 拍）' : 'Pickup length (♩ = 1 beat)'}
+          <select aria-label={language === 'zh' ? '弱起長度' : 'Pickup length'} className="min-h-8 rounded border border-emerald-200 bg-white px-2"
+            value={sourceSession.draftSong.pickup.timeSignature ?? 'legacy'} onChange={event => {
+              const pickup = resizePickup(sourceSession.draftSong.pickup!, sourceSession.draftSong.timeSignature, event.target.value);
+              if (!pickup) return;
+              onSourceApplyDraft({ ...sourceSession.draftSong, pickup });
+              onNotationCursorChange(notationMode === 'rhythm' ? { kind: 'rhythm', cursorUnit: 0 } : { kind: 'jianpu', beatIndex: 0, unitIndex: 0, noteIndex: null });
+            }}>
+            <option value={sourceSession.draftSong.pickup.timeSignature ?? 'legacy'}>{sourceSession.draftSong.pickup.timeSignature ? `${parseTimeSignature(effectiveBarTimeSignature).barUnits / 4} ${language === 'zh' ? '拍' : 'beats'}` : (language === 'zh' ? '原有拍格' : 'Original grid')}</option>
+            {[1, 2, 3, 4, 6, 8, 10, 12, 14].filter(units => units < parseTimeSignature(sourceSession.draftSong.timeSignature).barUnits).map(units => ({ units, meter: pickupTimeSignatureForUnits(units) })).filter(option => option.meter !== sourceSession.draftSong.pickup?.timeSignature).map(option => <option key={option.meter} value={option.meter}
+              disabled={!resizePickup(sourceSession.draftSong.pickup!, sourceSession.draftSong.timeSignature, option.meter)}>{option.units / 4} {language === 'zh' ? '拍' : 'beats'}</option>)}
+          </select>
+        </label>
+        <button type="button" className="ml-auto min-h-8 rounded px-2 text-xs text-rose-700 hover:bg-rose-50" onClick={() => onSourceApplyDraft({ ...sourceSession.draftSong, pickup: undefined })}>{language === 'zh' ? '移除弱起拍' : 'Remove pickup'}</button>
+      </div>}
       {bar.chordKeyUnspecified && <p className="px-2 text-xs text-amber-800">{language==='zh'?'目的調未標，保留原譜級數；選擇已確認的調性後可顯示字母和弦。':'Destination key unspecified. Keep source degrees until a confirmed key is selected.'}</p>}
       {deviceLayout === 'desktop' && notationMode === 'chords' && session.target.field === 'chords' && (
         <input
@@ -1737,7 +1785,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       {!collapsed && deviceLayout === 'desktop' && keyboardContent}
       {!collapsed && deviceLayout !== 'desktop' && keyboardContent}
 
-      {!collapsed && (
+      {!collapsed && !isPickup && (
           <details className="shrink-0 rounded-lg border border-slate-200 bg-white/80 px-2 text-xs">
             <summary className="cursor-pointer py-1 font-semibold text-slate-600">{language === 'zh' ? '速度變化' : 'Tempo changes'}</summary>
             <div className="flex max-h-28 flex-wrap gap-3 overflow-y-auto py-2">

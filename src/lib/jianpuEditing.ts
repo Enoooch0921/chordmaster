@@ -1,3 +1,4 @@
+import { PICKUP_EDITOR_SECTION_ID } from '../utils/pickupUtils';
 /**
  * Pure immutable jianpu commands shared by editor surfaces.
  *
@@ -186,6 +187,7 @@ interface InternalBeatLayout extends JianpuBeatLayout {
 }
 
 interface JianpuBarContext {
+  isPickup: boolean;
   sectionIndex: number;
   barIndex: number;
   bar: Bar;
@@ -252,7 +254,7 @@ const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | n
   const beats: InternalBeatLayout[] = tokens.map((token, tokenIndex) => {
     const rawNotes = findJianpuNoteRanges(token);
     const rawPlaceholders = findJianpuPlaceholderRanges(token);
-    const parsedNotes = applyJianpuAutoDurationShorthand(
+    const parsedNotes = target.sectionId === PICKUP_EDITOR_SECTION_ID ? rawNotes : applyJianpuAutoDurationShorthand(
       rawNotes,
       rawNotes.length + rawPlaceholders.length,
       rawPlaceholders.length > 0,
@@ -348,6 +350,7 @@ const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | n
   });
 
   return {
+    isPickup: target.sectionId === PICKUP_EDITOR_SECTION_ID,
     sectionIndex: located.sectionIndex,
     barIndex: located.barIndex,
     bar: located.bar,
@@ -397,7 +400,7 @@ const clampCursor = (context: JianpuBarContext, cursor: JianpuCursor): JianpuCur
   }
 	  return {
 	    beatIndex,
-	    unitIndex: Math.max(0, Math.min(context.beatUnits - EPSILON, Number.isFinite(cursor.unitIndex) ? cursor.unitIndex : 0)),
+	    unitIndex: Math.max(0, Math.min(context.isPickup && beatIndex === context.beats.length - 1 ? context.beatUnits : context.beatUnits - EPSILON, Number.isFinite(cursor.unitIndex) ? cursor.unitIndex : 0)),
 	    noteIndex: null
 	  };
 };
@@ -410,6 +413,9 @@ const cursorForNote = (item: InternalNoteItem): JianpuCursor => ({
 
 const cursorForAbsoluteUnit = (context: JianpuBarContext, absoluteUnit: number): JianpuCursor => {
   const totalUnits = context.beats.length * context.beatUnits;
+  if (context.isPickup && absoluteUnit >= totalUnits - EPSILON) {
+    return { beatIndex: context.beats.length - 1, unitIndex: context.beatUnits, noteIndex: null };
+  }
   const safeAbsoluteUnit = Math.max(0, Math.min(totalUnits - EPSILON, Number.isFinite(absoluteUnit) ? absoluteUnit : 0));
   return {
     beatIndex: Math.floor(safeAbsoluteUnit / context.beatUnits),
@@ -929,6 +935,11 @@ const getNavigationCursors = (context: JianpuBarContext): JianpuCursor[] => {
       });
     }
   });
+  // A pickup has no following bar in the keyboard adapter. Keep a distinct
+  // insertion position at its end instead of selecting the last written note.
+  if (context.isPickup) {
+    pushCursor({ beatIndex: context.beats.length - 1, unitIndex: context.beatUnits, noteIndex: null });
+  }
   return cursors.sort((left, right) => (
     left.beatIndex - right.beatIndex ||
     left.unitIndex - right.unitIndex ||
@@ -1040,7 +1051,10 @@ const insertPitch = (
 
   const availableUnits = getAvailableUnitsAtCursor(context, safeCursor);
   if (availableUnits < (normalizedMode.triplet ? 2 / 3 : 1) - EPSILON) {
-    return baseResult(song, target, safeCursor, normalizedMode, '這個位置沒有可用的簡譜空位。');
+    return baseResult(song, target, safeCursor, normalizedMode, context.isPickup
+      && safeCursor.beatIndex === context.beats.length - 1 && safeCursor.unitIndex >= context.beatUnits - EPSILON
+      ? '弱起拍已填滿，請增加弱起長度，或選取音符後修改。'
+      : '這個位置沒有可用的簡譜空位。');
   }
   const fittedMode = fitJianpuInputModeToUnits(normalizedMode, availableUnits);
   const resolved = resolveInputParts(song, target, pitch, fittedMode.accidental, fittedMode.octave, pitchContext);

@@ -110,3 +110,13 @@ describe('team collection refresh', () => {
     for (const result of mocks.channel.mock.results) expect(mocks.removeChannel).toHaveBeenCalledWith(result.value);
   });
 });
+
+it('checks song versions without downloading scores and scopes the read to the current library', async () => {
+  const query = makeQuery([{ id: 'song', updated_at: '2026-10-26T08:00:00.000Z' }]);
+  mocks.from.mockReturnValue(query);
+  const signal = new AbortController().signal;
+  expect(await makeRepository().loadLibrarySongVersions('team', signal)).toEqual([{ id: 'song', updatedAt: Date.parse('2026-10-26T08:00:00.000Z') }]);
+  expect(query.select).toHaveBeenCalledWith('id, updated_at');
+  expect(query.eq).toHaveBeenCalledWith('library_id', 'team');
+  expect(query.abortSignal).toHaveBeenCalledWith(signal);
+});

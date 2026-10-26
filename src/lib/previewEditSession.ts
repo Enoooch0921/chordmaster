@@ -1,3 +1,4 @@
+import { PICKUP_EDITOR_SECTION_ID } from '../utils/pickupUtils';
 import type { Song } from '../types';
 import { getDefaultJianpuCursor } from './jianpuEditing';
 import { getDefaultRhythmCursor } from './rhythmEditing';
@@ -205,7 +206,7 @@ export const getPreviewNotationModeForTarget = (
 };
 
 const songHasTarget = (song: Song, target: PreviewEditTarget) => (
-  song.sections.some((section) => (
+  target.sectionId === PICKUP_EDITOR_SECTION_ID ? Boolean(song.pickup) : song.sections.some((section) => (
     section.id === target.sectionId
     && (target.kind === 'section' || section.bars.some((bar) => bar.id === target.barId))
   ))

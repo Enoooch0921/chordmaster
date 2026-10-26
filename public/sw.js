@@ -31,14 +31,17 @@ const extractSameOriginAssets = async (response) => {
     .filter(isCacheableSameOriginUrl);
 };
 
-const putIfOk = async (cache, url) => {
+const putIfOk = async (cache, url, required = false) => {
   try {
     const response = await fetch(url, { cache: 'reload' });
     if (response.ok) {
       await cache.put(url, response);
+    } else if (required) {
+      throw new Error(`Required offline asset unavailable: ${url}`);
     }
-  } catch (_) {
-    // Best-effort warm cache. Runtime fetches will fill any missed asset later.
+  } catch (error) {
+    // A partial release must never replace the working offline version.
+    if (required) throw error;
   }
 };
 
@@ -47,20 +50,28 @@ const cacheAppShell = async () => {
   const appShellUrl = toScopedUrl('./');
   const appShellResponse = await fetch(appShellUrl, { cache: 'reload' });
 
-  if (appShellResponse.ok) {
-    await cache.put(appShellUrl, appShellResponse.clone());
-  }
+  if (!appShellResponse.ok) throw new Error('Offline app shell unavailable');
+  await cache.put(appShellUrl, appShellResponse.clone());
+  const required = new Set([
+    ...BUILD_ASSETS,
+    './fonts/JianpuASCII.ttf',
+    './fonts/BachRhythm.ttf',
+    './fonts/BachSlurs.ttf',
+  ].map(toScopedUrl));
 
   const urls = new Set([
     ...APP_SHELL_PATHS.map(toScopedUrl),
     ...await extractSameOriginAssets(appShellResponse),
   ]);
 
-  await Promise.all(Array.from(urls, (url) => putIfOk(cache, url)));
+  await Promise.all(Array.from(urls, (url) => putIfOk(cache, url, required.has(url))));
 };
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(cacheAppShell().then(() => self.skipWaiting()));
+  // Keep the current worker and its complete asset cache while any page is
+  // open. A waiting update activates naturally after the last page closes;
+  // it must never replace an on-stage session or remove its offline chunks.
+  event.waitUntil(cacheAppShell());
 });
 
 self.addEventListener('activate', (event) => {

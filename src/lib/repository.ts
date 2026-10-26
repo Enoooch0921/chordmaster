@@ -276,6 +276,7 @@ export interface WorkspaceRepository {
   loadLibraryContent(libraryId: string, signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>>;
   loadLibraryCollections(libraryId: string, knownSongs: StoredSong[], signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>>;
   loadLibrarySongs(libraryId: string): Promise<StoredSong[]>;
+  loadLibrarySongVersions(libraryId: string, signal?: AbortSignal): Promise<{ id: string; updatedAt: number }[]>;
   loadPersonalWorkspace(): Promise<WorkspaceSnapshot>;
   loadJoinedWorkspace(): Promise<Pick<WorkspaceSnapshot, 'joinedSetlists' | 'joinedProjects'>>;
   listLibraries(): Promise<CloudLibrarySummary[]>;
@@ -847,6 +848,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async loadLibrarySongs() {
     return (await loadPersistentWorkspaceSnapshot()).songs;
+  },
+  async loadLibrarySongVersions() {
+    return (await loadPersistentWorkspaceSnapshot()).songs.map(({ id, updatedAt }) => ({ id, updatedAt: updatedAt ?? 0 }));
   },
   async loadPersonalWorkspace() {
     return loadPersistentWorkspaceSnapshot();
@@ -1609,6 +1613,15 @@ export const createCloudRepository = (params: {
 
     async loadLibrarySongs(libraryId) {
       return getLibrarySongs(libraryId);
+    },
+
+    async loadLibrarySongVersions(libraryId, signal) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const query = supabase.from('songs').select('id, updated_at').eq('library_id', libraryId).limit(1000);
+      const { data, error } = await (signal ? query.abortSignal(signal) : query)
+        .returns<{ id: string; updated_at: string }[]>();
+      if (error) throw error;
+      return (data ?? []).map((row) => ({ id: row.id, updatedAt: new Date(row.updated_at).getTime() }));
     },
 
     async loadPersonalWorkspace() {

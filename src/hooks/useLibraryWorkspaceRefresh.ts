@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceRepository } from '../lib/repository';
 import type { WorkspaceSnapshot } from '../types';
+import { retainUnchangedRows } from '../lib/remoteReconciliation';
 
 const SUCCESS_REFRESH_MS = 5 * 60 * 1000;
 const COLLECTION_REFRESH_MS = 15000;
@@ -18,6 +19,7 @@ interface Options {
   // unavailable, without repeatedly downloading the entire song catalogue.
   refreshCollections?: boolean;
   refreshVersion?: number;
+  songRefreshVersion?: number;
   workspace: Pick<LibraryContent, 'songs' | 'setlists' | 'projects'>;
   // Check synchronous mutation/storage guards too, before React has rerendered.
   canApply: () => boolean;
@@ -29,8 +31,8 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
   const latest = useRef(options);
   latest.current = options;
   const [refreshFailed, setRefreshFailed] = useState(false);
-  const requestRefreshRef = useRef<(() => void) | null>(null);
-  const triggerRef = useRef({ paused: options.paused, version: options.refreshVersion });
+  const requestRefreshRef = useRef<((full?: boolean) => void) | null>(null);
+  const triggerRef = useRef({ paused: options.paused, version: options.refreshVersion, songs: options.songRefreshVersion });
   const { repository, scope, libraryId, enabled, refreshCollections = false } = options;
 
   useEffect(() => {
@@ -60,9 +62,16 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
         controller = new AbortController();
         const requestController = controller;
         timeout = setTimeout(() => requestController.abort(), 15000);
-        const fullRead = fullRefreshRequested || !refreshCollections || lastFullRefreshAt === null
+        let fullRead = fullRefreshRequested || !refreshCollections || lastFullRefreshAt === null
           || Date.now() - lastFullRefreshAt >= SUCCESS_REFRESH_MS;
         fullRefreshRequested = false;
+        // Realtime can be interrupted on mobile or self-hosted installations.
+        // Compare only ids/timestamps every 15s; download scores only on change.
+        if (!fullRead) {
+          const versions = await repository.loadLibrarySongVersions(libraryId, controller.signal);
+          const known = new Map(snapshot.workspace.songs.map((song) => [song.id, song.updatedAt ?? 0]));
+          fullRead = versions.length !== known.size || versions.some((song) => known.get(song.id) !== song.updatedAt);
+        }
         const remote = fullRead
           ? await repository.loadLibraryContent(libraryId, controller.signal)
           : await repository.loadLibraryCollections(libraryId, snapshot.workspace.songs, controller.signal);
@@ -74,9 +83,16 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
         if (current.paused || !current.canApply()
             || current.workspace.songs !== snapshot.workspace.songs
             || current.workspace.setlists !== snapshot.workspace.setlists
-            || current.workspace.projects !== snapshot.workspace.projects) return;
+            || current.workspace.projects !== snapshot.workspace.projects) {
+          fullRefreshRequested ||= fullRead;
+          return;
+        }
         if (fullRead) lastFullRefreshAt = Date.now();
-        current.onUpdate(remote);
+        current.onUpdate({ ...remote,
+          songs: retainUnchangedRows(current.workspace.songs, remote.songs),
+          setlists: retainUnchangedRows(current.workspace.setlists, remote.setlists),
+          projects: retainUnchangedRows(current.workspace.projects, remote.projects)
+        });
       } catch {
         if (!cancelled) { failures += 1; setRefreshFailed(true); }
       } finally {
@@ -92,7 +108,8 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
         }
       }
     };
-    const requestRefresh = () => {
+    const requestRefresh = (full = false) => {
+      fullRefreshRequested ||= full;
       if (cancelled || !canRefresh()) return;
       if (inFlight) { queued = true; return; }
       clearTimer();
@@ -122,11 +139,12 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
 
   useEffect(() => {
     const previous = triggerRef.current;
-    triggerRef.current = { paused: options.paused, version: options.refreshVersion };
-    if ((previous.paused && !options.paused) || previous.version !== options.refreshVersion) {
-      requestRefreshRef.current?.();
+    triggerRef.current = { paused: options.paused, version: options.refreshVersion, songs: options.songRefreshVersion };
+    const songsChanged = previous.songs !== options.songRefreshVersion;
+    if ((previous.paused && !options.paused) || previous.version !== options.refreshVersion || songsChanged) {
+      requestRefreshRef.current?.(songsChanged);
     }
-  }, [options.paused, options.refreshVersion]);
+  }, [options.paused, options.refreshVersion, options.songRefreshVersion]);
 
   return refreshFailed;
 };

@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Song } from '../../types';
-import { createPreviewEditSession } from '../../lib/previewEditSession';
+import { applyPreviewDraft, createPreviewEditSession, setPreviewNotationCursor } from '../../lib/previewEditSession';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
 import PreviewBarEditor from './PreviewBarEditor';
+import { PICKUP_EDITOR_BAR_ID, PICKUP_EDITOR_SECTION_ID } from '../../utils/pickupUtils';
 
 const song: Song = {
   title: 'Test song',
@@ -1431,5 +1433,66 @@ describe('PreviewBarEditor', () => {
     rerenderSession(base);
     expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '預覽快捷編輯' })).toHaveAttribute('data-notation-mode', 'chords');
+  });
+});
+
+describe('preview pickup keyboard', () => {
+  const pickupTarget = { ...target, sectionId: PICKUP_EDITOR_SECTION_ID, barId: PICKUP_EDITOR_BAR_ID,
+    field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null } };
+  it.each(['desktop', 'phone'] as const)('edits a half-beat pickup on %s without exposing chords or changing regular bars', deviceLayout => {
+    const source = { ...song, pickup: { id: 'pickup', timeSignature: '1/8' } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: pickupTarget }), deviceLayout });
+    expect(screen.getByRole('combobox', { name: '弱起長度' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '切換到和弦' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '輸入簡譜 5' }));
+    const changed = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
+    expect(changed.pickup).toMatchObject({ id: 'pickup', timeSignature: '1/8', riff: '5_' });
+    expect(changed.sections).toEqual(source.sections);
+    expect(changed.timeSignature).toBe('4/4');
+  });
+
+  it('resizes and removes the pickup using preview controls', () => {
+    const source = { ...song, pickup: { id: 'pickup', timeSignature: '1/4', riff: '5_6_' } };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: pickupTarget }) });
+    expect(screen.getByRole('option', { name: '0.5 拍' })).toBeDisabled();
+    fireEvent.change(screen.getByRole('combobox', { name: '弱起長度' }), { target: { value: '3/8' } });
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].pickup).toMatchObject({ timeSignature: '3/8', riff: '5_ | 6_' });
+    fireEvent.click(screen.getByRole('button', { name: '移除弱起拍' }));
+    expect(onApplyDraft.mock.calls.at(-1)?.[0]).toMatchObject({ sections: source.sections, pickup: undefined });
+  });
+
+  it('continues typing, navigates, changes a selected note and deletes without looping or overwriting', () => {
+    const source = { ...song, pickup: { id: 'pickup', timeSignature: '1/4' } };
+    let latest = createPreviewEditSession({ song: source, target: pickupTarget });
+    let renderCount = 0;
+    function Harness() {
+      const [session, setSession] = useState(latest);
+      latest = session;
+      renderCount++;
+      return <PreviewBarEditor session={session} language="zh" deviceLayout="desktop" storedKey="C" displayedKey="C" storageMode="letters"
+        onApplyDraft={draft => setSession(current => applyPreviewDraft(current, draft))}
+        onNotationCursorChange={cursor => setSession(current => setPreviewNotationCursor(current, cursor))}
+        onNotationModeChange={vi.fn()} onInputModeChange={vi.fn()} onJianpuInputAbsoluteChange={vi.fn()}
+        onNavigate={vi.fn()} onStructure={vi.fn()} onUndo={vi.fn()} onRedo={vi.fn()} onDone={vi.fn()} onCancel={vi.fn()} />;
+    }
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: '切換簡譜八分音符' }));
+    fireEvent.click(screen.getByRole('button', { name: '輸入簡譜 5' }));
+    expect(latest.cursorByMode.jianpu).toMatchObject({ unitIndex: 2, noteIndex: null });
+    fireEvent.click(screen.getByRole('button', { name: '輸入簡譜 6' }));
+    expect(latest.draftSong.pickup?.riff).toBe('5_6_');
+    expect(latest.cursorByMode.jianpu).toMatchObject({ unitIndex: 4, noteIndex: null });
+    fireEvent.click(screen.getByRole('button', { name: '輸入簡譜 7' }));
+    expect(latest.draftSong.pickup?.riff).toBe('5_6_');
+    expect(screen.getByRole('status')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous beat' }));
+    fireEvent.click(screen.getByRole('button', { name: '輸入簡譜 2' }));
+    expect(latest.draftSong.pickup?.riff).toBe('5_2_');
+    fireEvent.click(screen.getByRole('button', { name: '刪除簡譜音符' }));
+    expect(latest.draftSong.pickup?.riff).not.toContain('2');
+    fireEvent.click(screen.getByRole('button', { name: '刪除簡譜音符' }));
+    expect(latest.draftSong.pickup?.riff ?? '').not.toMatch(/[1-7]/);
+    expect(latest.draftSong.sections).toEqual(source.sections);
+    expect(renderCount).toBeLessThan(30);
   });
 });
