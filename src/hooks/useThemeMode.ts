@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -33,34 +33,34 @@ const resolveDark = (mode: ThemeMode): boolean => {
 const applyDarkClass = (isDark: boolean) => {
   if (typeof document === 'undefined') return;
   document.documentElement.classList.toggle('dark', isDark);
+  document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
 };
 
 export const useThemeMode = () => {
   const [mode, setModeState] = useState<ThemeMode>(() => readStoredMode());
   const [isDark, setIsDark] = useState<boolean>(() => resolveDark(readStoredMode()));
 
-  useEffect(() => {
-    const dark = resolveDark(mode);
-    setIsDark(dark);
-    applyDarkClass(dark);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, mode);
-    } catch {
-      // ignore quota / privacy errors — runtime state still applies for the session.
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    if (mode !== 'auto' || typeof window === 'undefined' || !window.matchMedia) {
-      return;
-    }
-    const media = window.matchMedia(DARK_MEDIA_QUERY);
-    const handler = (event: MediaQueryListEvent) => {
-      setIsDark(event.matches);
-      applyDarkClass(event.matches);
+  useLayoutEffect(() => {
+    const media = typeof window.matchMedia === 'function' ? window.matchMedia(DARK_MEDIA_QUERY) : null;
+    const sync = () => {
+      const dark = mode === 'dark' || (mode === 'auto' && Boolean(media?.matches));
+      setIsDark(dark);
+      applyDarkClass(dark);
     };
-    media.addEventListener('change', handler);
-    return () => media.removeEventListener('change', handler);
+    sync();
+    try { window.localStorage.setItem(STORAGE_KEY, mode); } catch { /* Private browsing may block storage. */ }
+    if (mode !== 'auto') return;
+    const onVisible = () => { if (document.visibilityState === 'visible') sync(); };
+    media?.addEventListener('change', sync);
+    window.addEventListener('pageshow', sync);
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      media?.removeEventListener('change', sync);
+      window.removeEventListener('pageshow', sync);
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [mode]);
 
   const setMode = useCallback((next: ThemeMode) => {

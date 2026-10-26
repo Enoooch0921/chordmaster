@@ -59,7 +59,7 @@ describe('pickup workflow', () => {
       pickup: { id: 'p', timeSignature: '1/8', riff: '5_', rhythm: 'e' } }} language="zh" currentKey="C" onElementClick={onElementClick} />);
     const pickup = screen.getByRole('group', { name: '第 0 小節・弱起拍' });
     expect(pickup).toHaveAttribute('data-pickup-duration-units', '2');
-    expect(pickup.className).not.toContain('absolute');
+    expect(pickup).toHaveStyle({ top: '36px' });
     const firstBar = container.querySelector('[data-preview-clipboard-bar="b"]')!;
     const barGrid = firstBar.parentElement!;
     // The pickup belongs in the existing title gutter, leaving four equal bar columns.

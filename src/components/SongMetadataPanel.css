@@ -1,0 +1,59 @@
+.song-info-mobile {
+  color: var(--color-text);
+  caret-color: var(--color-indigo-600);
+  accent-color: var(--color-indigo-600);
+}
+.song-info-mobile ::selection { background: var(--color-indigo-100); color: var(--color-indigo-900); }
+.song-info-tabs { position: sticky; top: 0; z-index: 1; background: var(--color-surface); display: flex; gap: 20px; border-bottom: 1px solid var(--color-border); margin-bottom: 24px; }
+.song-info-tabs > button {
+  min-height: 48px; flex: 1; padding: 0 0 12px; border-bottom: 2px solid transparent;
+  font-size: 13px; font-weight: 600; color: var(--color-text-muted); white-space: nowrap;
+}
+.song-info-tabs > button[aria-selected="true"] { color: var(--color-indigo-700); border-bottom-color: var(--color-indigo-600); }
+.song-info-tabs > button:hover { color: var(--color-indigo-600); }
+.song-info-mobile button:focus-visible, .song-info-mobile input:focus-visible {
+  outline: 2px solid var(--color-indigo-500); outline-offset: 3px;
+}
+.song-info-mobile [data-song-metadata-field] > label:first-child,
+.song-info-layout > div > label {
+  color: var(--color-text-muted); font-size: 12px; font-weight: 500; letter-spacing: 0; margin-bottom: 8px;
+}
+.song-info-mobile input:not([type="checkbox"]) {
+  height: 48px; background: var(--color-surface-muted); border-color: var(--color-border);
+  color: var(--color-text); border-radius: 10px; font-size: 16px; padding-inline: 12px;
+}
+.song-info-mobile input::placeholder { color: var(--color-text-muted); opacity: 1; }
+.song-info-mobile input[type="checkbox"] { accent-color: var(--color-indigo-600); }
+.song-info-name input { font-size: 20px !important; font-weight: 600; }
+.song-info-credits, .song-info-musical { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 16px; }
+.song-info-credits { margin-top: 20px; }
+.song-info-musical { border-top: 1px solid var(--color-border); margin-top: 24px; padding-top: 24px; }
+.song-info-mobile [data-song-metadata-field="timeSignature"] > div { height: 48px; border-radius: 10px; border-color: var(--color-border); background: var(--color-surface-muted); }
+.song-info-mobile [data-song-metadata-field="timeSignature"] input { height: 100%; padding-inline: 0; border-radius: 0; background: transparent; }
+.song-info-mobile [data-song-metadata-field="groove"] > label:last-child { height: 48px; border-radius: 10px; border-color: var(--color-border); background: var(--color-surface-muted); }
+.song-info-mobile [data-song-metadata-field="groove"] > label:last-child > span:first-child { color: var(--color-text); }
+.song-info-mobile [data-song-metadata-field="key"] > label:last-child,
+.song-info-mobile [data-song-metadata-field="timeSignature"] > label:last-child { color: var(--color-text-muted); }
+.song-info-layout { display: grid; gap: 28px; padding-block: 4px 12px; }
+.song-info-references { display: grid; gap: 24px; }
+.song-info-references > div + div { border-top: 1px solid var(--color-border); padding-top: 24px; }
+.song-info-references button { min-height: 48px; }
+.song-info-references [class*="text-gray-"] { color: var(--color-text-muted); }
+@media (prefers-reduced-motion: reduce) {
+  .song-info-mobile *, .song-info-mobile *::before, .song-info-mobile *::after { transition-duration: 0s !important; }
+}
+
+.song-info-mobile [data-song-metadata-field="key"] button,
+.song-info-mobile [data-song-metadata-field="capo"] button { min-height: 48px; border-radius: 10px !important; background: var(--color-surface-muted) !important; border-color: var(--color-border) !important; color: var(--color-text); }
+[data-song-info-dialog="phone"], [data-song-info-dialog="phone"] [data-song-info-heading] { background: var(--color-surface); border-color: var(--color-border); }
+[data-song-info-dialog="phone"] [data-song-info-heading] .text-gray-900 { color: var(--color-text); }
+
+.song-info-references button { background: var(--color-surface-muted) !important; color: var(--color-text-muted) !important; border-color: var(--color-border) !important; border-radius: 10px; }
+.song-info-layout > div > div { background: var(--color-surface-muted); border-color: var(--color-border); }
+.song-info-layout button { color: var(--color-text-muted); }
+.song-info-layout button[class*="bg-white"] { background: var(--color-surface-raised); color: var(--color-indigo-700); }
+.dark .song-info-tabs > button[aria-selected="true"], .dark .song-info-layout button[class*="bg-white"] { color: var(--color-indigo-400); }
+
+.song-info-switch-track { background: var(--color-border-strong); }
+.song-info-switch-track[data-checked="true"] { background: var(--color-indigo-700); }
+.song-info-switch-thumb { background: var(--color-white, #fff); }

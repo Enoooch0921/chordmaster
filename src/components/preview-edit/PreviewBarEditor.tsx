@@ -8,8 +8,8 @@ import ChordPassVariantsEditor from '../ChordPassVariantsEditor';
 import ChordSubdivisionsEditor from '../ChordSubdivisionsEditor';
 import ChordBeatOffsetPicker from '../ChordBeatOffsetPicker';
 import { canOffsetChord, getChordBeatOffset } from '../../utils/chordBeatOffsets';
-import RhythmVoicesEditor from '../RhythmVoicesEditor';
-import JianpuVoicesEditor from '../JianpuVoicesEditor';
+import NotationVoiceSelector from './NotationVoiceSelector';
+import { projectNotationVoice, applyNotationVoiceDraft, isolateNotationVoiceCommand, type NotationVoice } from '../../lib/notationVoiceEditing';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -43,6 +43,7 @@ import KeyPicker from '../KeyPicker';
 import ChordTimingArrow from '../ChordTimingArrow';
 import {
   applyJianpuCommand,
+  buildJianpuPitchContext,
   DEFAULT_JIANPU_INPUT_MODE,
   getJianpuInputModeAtCursor,
   getJianpuSelectedNoteAtCursor,
@@ -267,28 +268,40 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   onPanelHeightChange
 }) => {
   const isPickup = sourceSession.target.sectionId === PICKUP_EDITOR_SECTION_ID;
-  const editorSong = React.useMemo(() => isPickup ? toPickupEditorSong(sourceSession.draftSong) : sourceSession.draftSong,
+  const baseEditorSong = React.useMemo(() => isPickup ? toPickupEditorSong(sourceSession.draftSong) : sourceSession.draftSong,
     [isPickup, sourceSession.draftSong]);
-  const session = isPickup ? { ...sourceSession, draftSong: editorSong } : sourceSession;
-  const onApplyDraft: PreviewBarEditorProps['onApplyDraft'] = (draft, options) =>
+  const sourceBar = findSongBar(baseEditorSong, sourceSession.target)?.bar;
+  const modeCursor = sourceSession.cursorByMode[sourceSession.notationMode];
+  const requestedVoiceId = modeCursor.kind === 'chord' ? undefined : modeCursor.voiceId;
+  const sourceVoices = sourceSession.notationMode === 'jianpu' ? sourceBar?.riffVoices : sourceBar?.rhythmVoices;
+  const selectedVoice = requestedVoiceId ? sourceVoices?.find(voice => voice.id === requestedVoiceId) : undefined;
+  const voiceTarget: NotationVoice | null = selectedVoice && sourceSession.notationMode !== 'chords'
+    ? { mode: sourceSession.notationMode, id: selectedVoice.id } : null;
+  const editorSong = React.useMemo(() => selectedVoice && sourceSession.notationMode !== 'chords'
+    ? projectNotationVoice(baseEditorSong, sourceSession.target, { mode: sourceSession.notationMode, id: selectedVoice.id })
+    : baseEditorSong, [baseEditorSong, selectedVoice, sourceSession.notationMode, sourceSession.target]);
+  const session = editorSong === sourceSession.draftSong ? sourceSession : { ...sourceSession, draftSong: editorSong };
+  const applyBaseDraft: PreviewBarEditorProps['onApplyDraft'] = (draft, options) =>
     onSourceApplyDraft(isPickup ? applyPickupEditorSong(sourceSession.draftSong, draft) : draft, options);
+  const onApplyDraft: PreviewBarEditorProps['onApplyDraft'] = (draft, options) => applyBaseDraft(
+    voiceTarget ? applyNotationVoiceDraft(baseEditorSong, draft, session.target, voiceTarget) : draft, options);
   const onStructure: PreviewBarEditorProps['onStructure'] = action => {
     if (!isPickup) return onSourceStructure(action);
     if (action === 'delete') onSourceApplyDraft({ ...sourceSession.draftSong, pickup: undefined });
   };
   const [pickupCopiedJianpu, setPickupCopiedJianpu] = React.useState<{ riff: string; meter: string } | null>(null);
   const [pickupCopiedRhythm, setPickupCopiedRhythm] = React.useState<string | null>(null);
-  const hasCopiedJianpu = isPickup ? pickupCopiedJianpu !== null : sourceHasCopiedJianpu;
-  const hasCopiedRhythm = isPickup ? pickupCopiedRhythm !== null : sourceHasCopiedRhythm;
-  const onCopyJianpu = isPickup ? () => setPickupCopiedJianpu({ riff: bar?.riff ?? '', meter: effectiveBarTimeSignature }) : onSourceCopyJianpu;
-  const onPasteJianpu = isPickup ? () => {
+  const hasCopiedJianpu = isPickup || voiceTarget ? pickupCopiedJianpu !== null : sourceHasCopiedJianpu;
+  const hasCopiedRhythm = isPickup || voiceTarget ? pickupCopiedRhythm !== null : sourceHasCopiedRhythm;
+  const onCopyJianpu = () => { setPickupCopiedJianpu({ riff: bar?.riff ?? '', meter: effectiveBarTimeSignature }); if (!isPickup && !voiceTarget) onSourceCopyJianpu(); };
+  const onPasteJianpu = isPickup || voiceTarget ? () => {
     if (!pickupCopiedJianpu) return;
     const resized = resizePickup({ timeSignature: pickupCopiedJianpu.meter, riff: pickupCopiedJianpu.riff }, session.draftSong.timeSignature, effectiveBarTimeSignature);
     if (!resized) { setNotationActionError(language === 'zh' ? '內容超出弱起長度。' : 'This passage exceeds the pickup length.'); return; }
     onApplyDraft(updateBarById(session.draftSong, session.target, bar => ({ ...bar, riff: resized.riff })));
   } : onSourcePasteJianpu;
-  const onCopyRhythm = isPickup ? () => setPickupCopiedRhythm(bar?.rhythm ?? '') : onSourceCopyRhythm;
-  const onPasteRhythm = isPickup ? () => {
+  const onCopyRhythm = () => { setPickupCopiedRhythm(bar?.rhythm ?? ''); if (!isPickup && !voiceTarget) onSourceCopyRhythm(); };
+  const onPasteRhythm = isPickup || voiceTarget ? () => {
     if (pickupCopiedRhythm === null) return;
     const resized = resizePickup({ timeSignature: effectiveBarTimeSignature, rhythm: pickupCopiedRhythm }, session.draftSong.timeSignature, effectiveBarTimeSignature);
     if (!resized) { setNotationActionError(language === 'zh' ? '內容超出弱起長度。' : 'This passage exceeds the pickup length.'); return; }
@@ -300,7 +313,6 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [bassMode, setBassMode] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
   const [subdivisionsExpanded, setSubdivisionsExpanded] = React.useState(() => Boolean(findSongBar(session.draftSong, session.target)?.bar.chordSubdivisions?.length || findSongBar(session.draftSong, session.target)?.bar.chordPassVariants?.length));
-  const [rhythmVoicesExpanded, setRhythmVoicesExpanded] = React.useState(false);
   const [graceDraft, setGraceDraft] = React.useState<JianpuGraceNote[] | null>(null);
   const [desktopKeysVisible, setDesktopKeysVisible] = React.useState(() => (
     deviceLayout !== 'desktop' || session.target.field !== 'chords'
@@ -466,9 +478,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }
 
   function applyRhythmAction(action: RhythmEditAction) {
-    const result = applyRhythmEdit(session.draftSong, session.target, rhythmCursor, action);
+    const result = applyRhythmEdit(voiceTarget ? isolateNotationVoiceCommand(session.draftSong, session.target) : session.draftSong, session.target, rhythmCursor, action);
     setNotationActionError(result.error);
-    onNotationCursorChange({ kind: 'rhythm', cursorUnit: result.cursor.cursorUnit });
+    onNotationCursorChange({ kind: 'rhythm', cursorUnit: result.cursor.cursorUnit, ...(voiceTarget ? { voiceId: voiceTarget.id } : {}) });
     if (result.changed) onApplyDraft(result.song);
     if (
       action.type === 'insert'
@@ -484,11 +496,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }
 
   function applyJianpuAction(action: JianpuAction) {
-    const result = applyJianpuCommand(session.draftSong, session.target, {
+    const commandSong = voiceTarget ? isolateNotationVoiceCommand(session.draftSong, session.target) : session.draftSong;
+    const result = applyJianpuCommand(commandSong, session.target, {
       beatIndex: jianpuCursor.beatIndex,
       unitIndex: jianpuCursor.unitIndex,
       noteIndex: jianpuCursor.noteIndex ?? null
-    }, action, jianpuInputMode, jianpuPitchContext);
+    }, action, jianpuInputMode, jianpuPitchContext ?? (voiceTarget ? buildJianpuPitchContext(session.draftSong) : undefined));
     setNotationActionError(result.error);
     setJianpuInputMode(result.inputMode);
     const movedToAnotherBar = result.target.sectionId !== session.target.sectionId
@@ -501,6 +514,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           : 'next';
       onNavigate(direction, {
         kind: 'jianpu',
+        ...(voiceTarget ? { voiceId: voiceTarget.id } : {}),
         beatIndex: result.cursor.beatIndex,
         unitIndex: result.cursor.unitIndex,
         noteIndex: result.cursor.noteIndex
@@ -508,12 +522,13 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     } else {
       onNotationCursorChange({
         kind: 'jianpu',
+        ...(voiceTarget ? { voiceId: voiceTarget.id } : {}),
         beatIndex: result.cursor.beatIndex,
         unitIndex: result.cursor.unitIndex,
         noteIndex: result.cursor.noteIndex
       });
     }
-    if (result.song !== session.draftSong) onApplyDraft(result.song);
+    if (result.song !== commandSong) onApplyDraft(result.song);
     return result;
   }
 
@@ -560,7 +575,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }
 
   function changeNotationMode(nextMode: PreviewNotationMode) {
-    if (nextMode === notationMode) return;
+    if (nextMode === notationMode) { setMode('common'); setGraceDraft(null); return; }
     setMode('common');
     setActivePicker(null);
     setPickerAnchor(null);
@@ -849,14 +864,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   };
 
   const deleteEmptyBarIfPossible = () => {
-    if (!isBarCompletelyEmpty(bar)) return false;
+    if (voiceTarget || !isBarCompletelyEmpty(sourceBar)) return false;
     onStructure('delete');
     return true;
   };
 
   const updateFields = (patch: Parameters<typeof updateEditableBarFields>[2], mergeKey?: string) => {
-    onApplyDraft(
-      updateEditableBarFields(session.draftSong, session.target, patch),
+    applyBaseDraft(
+      updateEditableBarFields(baseEditorSong, session.target, patch),
       mergeKey ? { mergeKey } : undefined
     );
   };
@@ -884,9 +899,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         left: viewportLeft,
         bottom: keyboardOffset,
         width: viewportWidth,
-        // Five rows need their full key height after the header, tempo controls,
-        // footer and safe area. A 40dvh-only dock makes short phones overlap.
-        height: collapsed ? 'auto' : 'min(calc(max(40dvh, 360px) + env(safe-area-inset-bottom)), calc(100dvh - 64px))',
+        // Notation follows its actual rows; a short viewport scrolls the center.
+        // Chord keys retain their established flexible dock sizing.
+        height: collapsed || notationMode !== 'chords' || mode === 'text' ? 'auto' : 'min(calc(max(40dvh, 360px) + env(safe-area-inset-bottom)), calc(100dvh - 64px))',
         maxHeight: Math.max(0, viewportHeight - 64)
       }
     : deviceLayout === 'tablet'
@@ -895,12 +910,15 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           left: viewportLeft,
           bottom: keyboardOffset,
           width: viewportWidth,
-          height: collapsed ? 'auto' : 'min(40dvh, 420px)'
+          height: collapsed || notationMode !== 'chords' || mode === 'text' ? 'auto' : 'min(40dvh, 420px)',
+          maxHeight: Math.max(0, viewportHeight - 64)
         }
       : (() => {
           const width = Math.min(520, viewportWidth - 24);
           const estimatedHeight = hasUnmeteredChords(bar) || (bar?.chordTimingUnspecified && notationMode === 'chords') || (notationMode === 'chords' && subdivisionsExpanded)
             ? Math.min(420, viewportHeight - 24)
+            : notationMode !== 'chords'
+            ? Math.min(440, viewportHeight - 24)
             : mode === 'text'
             ? Math.min(300, viewportHeight - 24)
             : desktopKeysVisible
@@ -917,19 +935,19 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             top,
             left,
             width,
-            height: estimatedHeight,
-            maxHeight: viewportHeight - 24
+            height: notationMode !== 'chords' || mode === 'text' ? 'auto' : estimatedHeight,
+            maxHeight: viewportTop + viewportHeight - top - 12
           };
         })();
 
   const buttonClass = 'inline-flex min-h-8 min-w-0 items-center justify-center rounded-[11px] border border-white/80 bg-white/95 px-2 text-[11px] font-semibold text-slate-700 shadow-[0_1px_0_rgba(15,23,42,0.18),0_2px_5px_rgba(15,23,42,0.10)] transition-[transform,background-color,box-shadow,border-color,color] duration-75 hover:bg-white active:translate-y-px active:scale-[0.98] active:bg-slate-50 active:shadow-none disabled:shadow-none disabled:opacity-40';
   const characterKeyClass = `${buttonClass} rounded-[12px] border-white/90 bg-white/95 font-semibold text-slate-900`;
   const utilityKeyClass = `${buttonClass} border-white/40 bg-slate-300/75 text-slate-700`;
-  const copyKeyClass = `${utilityKeyClass} !border-sky-300/80 !bg-sky-100/90 !text-sky-800 hover:!bg-sky-100`;
-  const pasteKeyClass = `${utilityKeyClass} !border-emerald-300/80 !bg-emerald-100/90 !text-emerald-800 hover:!bg-emerald-100`;
-  const destructiveKeyClass = `${utilityKeyClass} !border-rose-300/80 !bg-rose-100/90 !text-rose-700 !shadow-[0_1px_0_rgba(159,18,57,0.18),0_3px_8px_rgba(190,24,93,0.12)] hover:!bg-rose-100`;
+  const copyKeyClass = `${utilityKeyClass} dark:!border-sky-800 dark:!bg-sky-950 dark:!text-sky-200 !border-sky-300/80 !bg-sky-100/90 !text-sky-800 hover:!bg-sky-100`;
+  const pasteKeyClass = `${utilityKeyClass} dark:!border-emerald-800 dark:!bg-emerald-950 dark:!text-emerald-200 !border-emerald-300/80 !bg-emerald-100/90 !text-emerald-800 hover:!bg-emerald-100`;
+  const destructiveKeyClass = `${utilityKeyClass} dark:!border-rose-800 dark:!bg-rose-950 dark:!text-rose-200 !border-rose-300/80 !bg-rose-100/90 !text-rose-700 !shadow-[0_1px_0_rgba(159,18,57,0.18),0_3px_8px_rgba(190,24,93,0.12)] hover:!bg-rose-100`;
   const toolbarButtonClass = 'inline-flex min-h-8 min-w-8 items-center justify-center rounded-[11px] border border-white/80 bg-white/85 px-2 text-[11px] font-semibold text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.09)] transition-[transform,background-color,box-shadow] duration-75 hover:bg-white active:translate-y-px active:scale-[0.97] active:bg-slate-100 disabled:shadow-none disabled:opacity-35';
-  const activeButtonClass = '!border-indigo-500/70 !bg-indigo-600 !text-white !shadow-[0_1px_0_rgba(49,46,129,0.8),0_3px_8px_rgba(79,70,229,0.28)] hover:!bg-indigo-600';
+  const activeButtonClass = '!border-indigo-500/70 !bg-indigo-700 !text-white !shadow-[0_1px_0_rgba(49,46,129,0.8),0_3px_8px_rgba(79,70,229,0.28)] hover:!bg-indigo-700';
   const fieldClass = 'h-9 w-full rounded-xl border border-white/90 bg-white/95 px-3 text-sm font-semibold text-slate-800 shadow-inner outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200/70';
 
   const activeChordMarkIndex = bar
@@ -1072,7 +1090,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           </div>
           <button type="button" className={toolbarButtonClass} disabled={session.past.length === 0} onClick={onUndo} aria-label="Undo"><Undo2 size={15} /></button>
           <button type="button" className={`${toolbarButtonClass} !text-rose-700`} onClick={onCancel} aria-label="Cancel"><X size={16} /></button>
-          <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-600 !text-white`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={16} /><span className="ml-1">{language === 'zh' ? '完成' : 'Done'}</span></button>
+          <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-700 !text-white`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={16} /><span className="ml-1">{language === 'zh' ? '完成' : 'Done'}</span></button>
         </div>
       </section>
     );
@@ -1148,7 +1166,45 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const keyboardContent = notationMode === 'chords' && subdivisionsExpanded ? (
     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2"><ChordSubdivisionsEditor bar={bar} beats={beatCount} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})}/><ChordPassVariantsEditor bar={bar} beats={beatCount} language={language} onChange={chordPassVariants => updateFields({chordPassVariants})}/></div>
   ) : (
-    <div data-keyboard-mode={keyboardSurfaceMode} data-notation-mode={notationMode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-x-hidden ${deviceLayout === 'phone' ? 'overflow-y-auto' : 'overflow-y-hidden'} bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
+    <div data-keyboard-mode={keyboardSurfaceMode} data-notation-mode={notationMode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
+      {notationMode !== 'chords' && <NotationVoiceSelector
+        key={`${session.previewIdentity}|${session.target.barId}|${notationMode}`}
+        language={language}
+        primaryName={(notationMode === 'jianpu' ? sourceBar?.riffLabel : sourceBar?.rhythmLabel) || sourceBar?.label || (language === 'zh' ? '主聲部' : 'Main')}
+        voices={sourceVoices ?? []} selectedId={selectedVoice?.id} canRenamePrimary={!isPickup} canAdd={!isPickup || notationMode === 'jianpu'}
+        context={`${section.title} · ${language === 'zh' ? `第 ${isPickup ? 0 : barIndex + 1} 小節` : `Bar ${isPickup ? 0 : barIndex + 1}`}`}
+        onSelect={id => {
+          setGraceDraft(null); setNotationActionError(null);
+          onNotationCursorChange(notationMode === 'jianpu'
+            ? { ...jianpuCursor, noteIndex: null, voiceId: id }
+            : { ...rhythmCursor, voiceId: id });
+        }}
+        onRename={name => {
+          if (selectedVoice) updateFields(notationMode === 'jianpu'
+            ? { riffVoices: sourceBar?.riffVoices?.map(voice => voice.id === selectedVoice.id ? { ...voice, label: name } : voice) }
+            : { rhythmVoices: sourceBar?.rhythmVoices?.map(voice => voice.id === selectedVoice.id ? { ...voice, label: name } : voice) });
+          else applyBaseDraft(updateBarById(baseEditorSong, session.target, original => ({ ...original, [notationMode === 'jianpu' ? 'riffLabel' : 'rhythmLabel']: name || undefined })), { mergeKey: `voice-name:${sourceBar?.id}:${notationMode}` });
+        }}
+        onAdd={() => {
+          const id = crypto.randomUUID();
+          const label = language === 'zh' ? `聲部 ${(sourceVoices?.length ?? 0) + 2}` : `Voice ${(sourceVoices?.length ?? 0) + 2}`;
+          updateFields(notationMode === 'jianpu'
+            ? { riffVoices: [...(sourceBar?.riffVoices ?? []), { id, label, riff: '' }] }
+            : { rhythmVoices: [...(sourceBar?.rhythmVoices ?? []), { id, label, rhythm: '' }] });
+          onNotationCursorChange(notationMode === 'jianpu'
+            ? { kind: 'jianpu', beatIndex: 0, unitIndex: 0, noteIndex: null, voiceId: id }
+            : { kind: 'rhythm', cursorUnit: 0, voiceId: id });
+        }}
+        onRemove={() => {
+          updateFields(notationMode === 'jianpu'
+            ? { riffVoices: sourceBar?.riffVoices?.filter(voice => voice.id !== selectedVoice?.id) }
+            : { rhythmVoices: sourceBar?.rhythmVoices?.filter(voice => voice.id !== selectedVoice?.id) });
+          onNotationCursorChange(notationMode === 'jianpu'
+            ? { ...jianpuCursor, noteIndex: null, voiceId: undefined }
+            : { ...rhythmCursor, voiceId: undefined });
+        }}
+      />}
+
       {notationMode === 'chords' && mode === 'common' && (
         <div className={`grid flex-1 ${deviceLayout === 'phone' ? 'min-h-[192px] grid-rows-[repeat(5,minmax(32px,1fr))] [&>div]:gap-1' : compactHardwareMode ? 'min-h-0 grid-rows-3' : 'min-h-0 grid-rows-5'} gap-2`} data-keyboard-view="main" data-desktop-compact={compactHardwareMode ? 'true' : undefined}>
           {!compactHardwareMode && (
@@ -1203,8 +1259,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 px-0`} onClick={deleteLastChordCharacter} disabled={!displayedChord} aria-label={language === 'zh' ? '刪除最後一個字元' : 'Delete last character'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
           </div>
 
-          <div className="grid min-h-0 grid-cols-10 gap-1.5" data-key-surface="utility">
-            <button type="button" className={`${utilityKeyClass} min-h-0 px-0 text-[11px]`} onClick={() => { setMode('text'); setActivePicker(null); }} aria-label={language === 'zh' ? '文字欄位' : 'Text fields'}>{language === 'zh' ? '文字' : 'Text'}</button>
+          <div className="grid min-h-0 grid-cols-9 gap-1.5" data-key-surface="utility">
             <button type="button" data-picker-trigger="special" className={`${utilityKeyClass} min-h-0 px-0`} onClick={(event) => openPicker('special', event.currentTarget)} aria-label={language === 'zh' ? '休止符與整小節符號' : 'Rests and whole-bar symbols'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">{getRestGlyph('q')}</span></button>
             <button type="button" data-picker-trigger="articulation" className={`${utilityKeyClass} min-h-0 px-0 ${trailingModifiers(displayedChord) ? activeButtonClass : ''}`} onClick={(event) => openPicker('articulation', event.currentTarget)} aria-label={language === 'zh' ? '選擇演奏記號' : 'Choose articulation'}><ChordTimingArrow marker="<" className="h-6 w-8" strokeWidth={1.8} /></button>
             <button type="button" data-picker-trigger="ending" className={`${utilityKeyClass} min-h-0 overflow-hidden px-1 ${bar.ending ? activeButtonClass : ''}`} onClick={(event) => openPicker('ending', event.currentTarget)} aria-label={language === 'zh' ? '選擇房子記號' : 'Choose ending'} aria-keyshortcuts="Alt+1 Alt+2 Alt+3 Alt+4 Alt+5 Alt+6 Alt+7 Alt+8 Alt+9"><EndingGlyph value={bar.ending || '1'} compact={deviceLayout === 'phone'} /></button>
@@ -1335,7 +1390,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               {activePicker === 'bar' && (
                 <div className="flex min-h-0 flex-1 flex-col justify-center gap-2 px-2">
                   <input value={barText} onChange={(event) => setBarText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyBarText(); } }} className={fieldClass} placeholder={language === 'zh' ? `最多 ${beatCount} 個和弦` : `Up to ${beatCount} chords`} aria-label={language === 'zh' ? '整小節和弦' : 'Whole bar chords'} />
-                  <button type="button" className={`${buttonClass} !border-indigo-500 !bg-indigo-600 !text-white`} onClick={applyBarText}>{language === 'zh' ? '套用整小節' : 'Apply whole bar'}</button>
+                  <button type="button" className={`${buttonClass} !border-indigo-500 !bg-indigo-700 !text-white`} onClick={applyBarText}>{language === 'zh' ? '套用整小節' : 'Apply whole bar'}</button>
                   {barTextError && <p role="alert" className="text-[10px] font-bold text-rose-600">{barTextError}</p>}
                 </div>
               )}
@@ -1438,8 +1493,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </div>
       )}
 
-      {notationMode === 'rhythm' && (isPickup || !rhythmVoicesExpanded) && (
-        <div className={`grid min-h-0 flex-1 ${deviceLayout === 'phone' ? (notationActionError ? 'grid-rows-[1fr_1fr_1.56fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_1.56fr_0.54fr_0.52fr]') : (notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr]')} gap-1.5`} data-keyboard-view="rhythm" style={isPickup ? { gridTemplateRows: `1fr 1fr 0.78fr 0.54fr${notationActionError ? ' auto' : ''}` } : undefined}>
+      {notationMode === 'rhythm' && mode !== 'text' && (
+        <div className={`grid min-h-0 flex-1 ${deviceLayout === 'phone' ? (notationActionError ? 'grid-rows-[1fr_1fr_1.56fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_1.56fr_0.54fr_0.52fr]') : (notationActionError ? 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr_auto]' : 'grid-rows-[1fr_1fr_0.78fr_0.54fr_0.52fr]')} gap-1.5`} data-keyboard-view="rhythm" style={{ flex: '0 0 auto', gridTemplateRows: `48px 48px ${deviceLayout === 'phone' ? 94 : 44}px 44px${isPickup || voiceTarget ? '' : ' 40px'}${notationActionError ? ' auto' : ''}` }}>
           <div className="grid min-h-0 grid-cols-5 gap-1.5" data-rhythm-key-row="notes" data-key-surface="character">
             {([['w', '全音符', 'Whole'], ['h', '二分音符', 'Half'], ['q', '四分音符', 'Quarter'], ['e', '八分音符', 'Eighth'], ['s', '十六分音符', 'Sixteenth']] as const).map(([token, zhLabel, enLabel]) => (
               <button key={token} type="button" className={`${characterKeyClass} min-h-0 px-0 ${selectedRhythmEvent?.base === token && !selectedRhythmEvent.isRest && !selectedRhythmEvent.isSlash && !selectedRhythmEvent.triplet ? activeButtonClass : ''}`} onClick={() => applyRhythmAction({ type: 'insert', token })} aria-label={language === 'zh' ? zhLabel : `${enLabel} note`}>
@@ -1469,17 +1524,17 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 px-0`} onClick={() => applyRhythmAction({ type: 'delete', mode: 'backspace' })} aria-label={language === 'zh' ? '刪除節奏事件' : 'Delete rhythm event'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
           </div>
           <div className="grid min-h-0 grid-cols-2 gap-1.5" data-rhythm-key-row="copy-paste" data-key-surface="utility">
-            <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyRhythm} aria-label={language === 'zh' ? '複製節奏' : 'Copy rhythm'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製節奏' : 'Copy rhythm'}</button>
-            <button type="button" disabled={!hasCopiedRhythm} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteRhythm} aria-label={language === 'zh' ? '貼上節奏' : 'Paste rhythm'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上節奏' : 'Paste rhythm'}</button>
+            <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyRhythm} aria-label={language === 'zh' ? '複製節奏' : 'Copy rhythm'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製' : 'Copy'}</button>
+            <button type="button" disabled={!hasCopiedRhythm} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteRhythm} aria-label={language === 'zh' ? '貼上節奏' : 'Paste rhythm'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上' : 'Paste'}</button>
           </div>
-          {!isPickup && renderPreviewColorControls('rhythm-color-controls')}
+          {!isPickup && !voiceTarget && renderPreviewColorControls('rhythm-color-controls')}
           {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
         </div>
       )}
 
 
-      {notationMode === 'jianpu' && !graceDraft && (
-        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr]'} gap-1.5`} data-keyboard-view="jianpu" style={isPickup ? { gridTemplateRows: `1.08fr 0.92fr 0.78fr 0.55fr${notationActionError ? ' auto' : ''}` } : undefined}>
+      {notationMode === 'jianpu' && mode !== 'text' && !graceDraft && (
+        <div className={`grid min-h-0 flex-1 ${notationActionError ? 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr_auto]' : 'grid-rows-[1.08fr_0.92fr_0.78fr_0.55fr_0.52fr]'} gap-1.5`} data-keyboard-view="jianpu" style={{ flex: '0 0 auto', gridTemplateRows: `48px 48px ${deviceLayout === 'phone' ? 94 : 44}px 44px${isPickup || voiceTarget ? '' : ' 40px'}${notationActionError ? ' auto' : ''}` }}>
           <div className="grid min-h-0 grid-cols-7 gap-1.5" data-jianpu-key-row="pitches" data-key-surface="character">
             {(['1', '2', '3', '4', '5', '6', '7'] as const).map((pitch) => (
               <button key={pitch} type="button" className={`${characterKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'insert-pitch', pitch })} aria-label={language === 'zh' ? `輸入簡譜 ${pitch}` : `Insert jianpu ${pitch}`}>
@@ -1499,7 +1554,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 	            ))}
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-1 ${session.draftSong.jianpuInputAbsolute ? activeButtonClass : ''}`} onClick={() => onJianpuInputAbsoluteChange(!Boolean(session.draftSong.jianpuInputAbsolute))} aria-label={session.draftSong.jianpuInputAbsolute ? (language === 'zh' ? '切換為首調簡譜輸入' : 'Switch to movable-do jianpu input') : (language === 'zh' ? '切換為固定調簡譜輸入' : 'Switch to fixed-do jianpu input')}><span className="text-xs font-bold leading-none">{session.draftSong.jianpuInputAbsolute ? (language === 'zh' ? '固定調' : 'Fixed') : (language === 'zh' ? '首調' : 'Movable')}</span></button>
           </div>
-	          <div className="grid min-h-0 grid-cols-9 gap-1.5" data-jianpu-key-row="modifiers" data-key-surface="utility">
+	          <div className={`grid min-h-0 ${deviceLayout === 'phone' ? 'grid-cols-5 grid-rows-2' : 'grid-cols-9'} gap-1.5`} data-jianpu-key-row="modifiers" data-key-surface="utility">
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.octave < 0 ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-octave', octave: jianpuInputMode.octave < 0 ? 0 : -1 })} aria-label={language === 'zh' ? '切換低八度簡譜' : 'Toggle low-octave jianpu'} aria-keyshortcuts="ArrowDown L" title={language === 'zh' ? '低八度（↓ / L）' : 'Low octave (Down / L)'}><JianpuInputGlyph pitch="5" octave={-1} className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[21px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.octave > 0 ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-octave', octave: jianpuInputMode.octave > 0 ? 0 : 1 })} aria-label={language === 'zh' ? '切換高八度簡譜' : 'Toggle high-octave jianpu'} aria-keyshortcuts="ArrowUp H" title={language === 'zh' ? '高八度（↑ / H）' : 'High octave (Up / H)'}><JianpuInputGlyph pitch="5" octave={1} className="!h-full !min-w-0 [&_[data-jianpu-pitch-symbol]]:!text-[21px] [&_[data-jianpu-pitch-symbol]]:!font-semibold" /></button>
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-0 ${jianpuInputMode.accidental === '#' ? activeButtonClass : ''}`} onClick={() => applyJianpuAction({ type: 'set-accidental', accidental: jianpuInputMode.accidental === '#' ? '' : '#' })} aria-label={language === 'zh' ? '切換簡譜升記號' : 'Toggle jianpu sharp'}><span className="text-[22px] font-medium leading-none" aria-hidden="true">♯</span></button>
@@ -1511,8 +1566,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 min-w-0 px-0`} onClick={() => applyJianpuAction({ type: 'delete', direction: 'backward' })} aria-label={language === 'zh' ? '刪除簡譜音符' : 'Delete jianpu note'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
           </div>
           <div className="grid min-h-0 grid-cols-3 gap-1.5" data-jianpu-key-row="bar-actions" data-key-surface="utility">
-            <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyJianpu} aria-label={language === 'zh' ? '複製簡譜' : 'Copy jianpu'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製簡譜' : 'Copy jianpu'}</button>
-            <button type="button" disabled={!hasCopiedJianpu} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteJianpu} aria-label={language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}</button>
+            <button type="button" className={`${copyKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px]`} onClick={onCopyJianpu} aria-label={language === 'zh' ? '複製簡譜' : 'Copy jianpu'}><Copy size={15} aria-hidden="true" />{language === 'zh' ? '複製' : 'Copy'}</button>
+            <button type="button" disabled={!hasCopiedJianpu} className={`${pasteKeyClass} min-h-0 min-w-0 gap-1 px-2 text-[11px] disabled:cursor-not-allowed disabled:opacity-40`} onClick={onPasteJianpu} aria-label={language === 'zh' ? '貼上簡譜' : 'Paste jianpu'}><ClipboardPaste size={15} aria-hidden="true" />{language === 'zh' ? '貼上' : 'Paste'}</button>
             <button type="button" className={`${utilityKeyClass} min-h-0 min-w-0 px-1 text-[11px]`} onClick={() => {
               const selected = getJianpuSelectedNoteAtCursor(session.draftSong, session.target, { ...jianpuCursor, noteIndex: jianpuCursor.noteIndex ?? null }, jianpuPitchContext);
               if (!selected || !/^[1-7]$/.test(selected.pitch)) { setNotationActionError(language === 'zh' ? '請先選取裝飾音要連接的主音。' : 'Select the principal note first.'); return; }
@@ -1521,12 +1576,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               setGraceDraft(existing.length ? existing.map(grace => ({ ...grace })) : [{ pitch: '2', accidental: '', octave: 0 }]);
             }} aria-label={language === 'zh' ? '編輯簡譜裝飾音' : 'Edit jianpu grace note'}>{language === 'zh' ? '裝飾音' : 'Grace note'}</button>
           </div>
-          {!isPickup && renderPreviewColorControls('jianpu-color-controls')}
+          {!isPickup && !voiceTarget && renderPreviewColorControls('jianpu-color-controls')}
           {notationActionError && <p role="status" className="shrink-0 truncate text-[10px] font-bold text-amber-700">{notationActionError}</p>}
         </div>
       )}
 
-      {notationMode === 'jianpu' && graceDraft && (
+      {notationMode === 'jianpu' && mode !== 'text' && graceDraft && (
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2" data-jianpu-grace-editor>
           <p className="text-sm font-semibold">{language === 'zh' ? '主音前的裝飾音，不另占拍數' : 'Grace note before the principal note, without adding beats'}</p>
           {graceDraft.map((grace, index) => {
@@ -1553,27 +1608,13 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         </div>
       )}
 
-      {notationMode === 'jianpu' && !graceDraft && (
-        <div className="shrink-0 px-2">
-          <JianpuVoicesEditor voices={bar.riffVoices} literalDurations={isPickup}
-            timeSignature={getEffectiveTimeSignatureForBar(session.draftSong, bar)}
-            language={language} onChange={riffVoices => updateFields({ riffVoices })} />
-        </div>
-      )}
-
-      {notationMode === 'rhythm' && !isPickup && (
-        <div className={rhythmVoicesExpanded ? "min-h-0 flex-1 overflow-y-auto" : "shrink-0"}>
-          <RhythmVoicesEditor expanded={rhythmVoicesExpanded} onExpandedChange={setRhythmVoicesExpanded} voices={bar.rhythmVoices} timeSignature={getEffectiveTimeSignatureForBar(session.draftSong, bar)} language={language} onChange={rhythmVoices => updateFields({ rhythmVoices })} />
-        </div>
-      )}
-
-      {notationMode === 'chords' && mode === 'text' && (
-        <div className="flex min-h-0 flex-1 flex-col gap-2" data-text-fields-view="all">
+      {mode === 'text' && (
+        <div className="flex flex-1 flex-col gap-2" data-text-fields-view="all">
           <div className="flex shrink-0 items-center gap-2">
-            <button type="button" className={utilityKeyClass} onClick={() => { setMode('common'); setActivePicker(null); }} aria-label={language === 'zh' ? '返回和弦鍵盤' : 'Back to chord keyboard'}>ABC</button>
+            <button type="button" className={utilityKeyClass} onClick={() => { setMode('common'); setActivePicker(null); }} aria-label={language === 'zh' ? `返回${notationMode === 'chords' ? '和弦' : notationMode === 'rhythm' ? '節奏' : '簡譜'}鍵盤` : 'Back to notation keyboard'}>{language === 'zh' ? '返回鍵盤' : 'Back'}</button>
             <span className="text-xs font-black text-slate-600">{language === 'zh' ? '小節文字位置' : 'Bar text positions'}</span>
           </div>
-          <div className="grid min-h-0 flex-1 grid-cols-2 gap-2">
+          <div className="grid flex-1 grid-cols-2 gap-2">
             {([
               ['label', language === 'zh' ? '小節標籤' : 'Label'],
               ['annotation', language === 'zh' ? '上方註記' : 'Annotation'],
@@ -1582,10 +1623,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             ] as const).map(([field, label]) => (
               <label key={field} className="flex min-h-0 flex-col gap-1 text-[10px] font-bold text-slate-600" htmlFor={`preview-text-${field}`}>
                 <span>{label}</span>
-                <input id={`preview-text-${field}`} className={`${fieldClass} min-h-0 flex-1`} value={bar[field] || ''} onChange={(event) => updateFields({ [field]: event.target.value || undefined }, `${field}:${bar.id}`)} />
+                <input id={`preview-text-${field}`} className={`${fieldClass} min-h-11 text-base`} value={sourceBar?.[field] || ''} onChange={(event) => updateFields({ [field]: event.target.value || undefined }, `${field}:${bar.id}`)} />
               </label>
             ))}
           </div>
+          <p className="text-[11px] text-[color:var(--color-text-muted)]">{language === 'zh' ? '文字套用到目前小節，由所有聲部共用。' : 'Text applies to the current bar and is shared by all voices.'}</p>
         </div>
       )}
     </div>
@@ -1633,7 +1675,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       data-preview-edit-ui
       data-device-layout={deviceLayout}
       data-notation-mode={notationMode}
-      data-fixed-keyboard-height={deviceLayout === 'phone' ? 'adaptive' : isDocked ? '40dvh' : undefined}
+      data-fixed-keyboard-height={isDocked ? 'adaptive' : undefined}
       role="dialog"
       aria-label={language === 'zh' ? '預覽快捷編輯' : 'Preview quick editor'}
       className="z-[5000] flex flex-col overflow-hidden rounded-t-[28px] border-x border-t border-white/80 bg-slate-200/95 shadow-[0_20px_60px_rgba(15,23,42,0.24)] backdrop-blur-xl"
@@ -1646,12 +1688,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <div
           data-notation-mode-segments
           style={isPickup ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' } : undefined}
-          className="grid h-9 w-[5.5rem] shrink-0 grid-cols-3 rounded-[13px] border border-white/80 bg-slate-300/70 p-0.5 shadow-inner min-[360px]:w-[6.75rem] sm:w-[9rem]"
+          className="grid h-11 w-28 shrink-0 grid-cols-4 rounded-[13px] border border-white/80 bg-slate-300/70 p-0.5 shadow-inner min-[360px]:w-36 sm:w-44"
           role="group"
           aria-label={language === 'zh' ? '輸入法' : 'Input mode'}
         >
           {PREVIEW_NOTATION_MODES.filter(candidate => !isPickup || candidate !== 'chords').map((candidateMode) => {
-            const selected = candidateMode === notationMode;
+            const selected = candidateMode === notationMode && mode !== 'text';
             return (
               <button
                 key={candidateMode}
@@ -1672,6 +1714,13 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               </button>
             );
           })}
+          {!isPickup && <button type="button" aria-label={language === 'zh' ? '文字欄位' : 'Text fields'} aria-pressed={mode === 'text'}
+            onClick={() => { setMode('text'); setActivePicker(null); setGraceDraft(null); setCollapsed(false); setSubdivisionsExpanded(false); }}
+            className={`min-w-0 rounded-[10px] px-0.5 text-[10px] font-black leading-none transition-colors ${mode === 'text'
+              ? 'bg-white text-indigo-700 shadow-[0_1px_4px_rgba(15,23,42,0.14)]'
+              : 'text-slate-600 hover:bg-white/60 hover:text-slate-900'}`}>
+            {language === 'zh' ? '文字' : 'Text'}
+          </button>}
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-indigo-500">{isPickup ? (language === 'zh' ? '弱起拍 · 第 0 小節' : 'Pickup · Bar 0') : section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}</div>
@@ -1693,8 +1742,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <button type="button" className={toolbarButtonClass} disabled={session.past.length === 0} onClick={onUndo} aria-label="Undo"><Undo2 size={14} /></button>
         <button type="button" className={toolbarButtonClass} disabled={session.future.length === 0} onClick={onRedo} aria-label="Redo"><Redo2 size={14} /></button>
         <button type="button" className={`${toolbarButtonClass} !text-rose-700`} onClick={onCancel} aria-label="Cancel"><X size={15} /></button>
-        <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-600 !text-white hover:!bg-indigo-500`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={15} /><span className={deviceLayout === 'phone' ? 'sr-only' : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
+        <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-700 !text-white hover:!bg-indigo-800`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={15} /><span className={deviceLayout === 'phone' ? 'sr-only' : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
       </header>
+
+
 
       {isPickup && sourceSession.draftSong.pickup && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/70 bg-emerald-50/80 px-3 py-2">
         <label className="flex items-center gap-2 text-xs font-semibold text-emerald-900">
@@ -1790,19 +1841,19 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <summary className="cursor-pointer py-1 font-semibold text-slate-600">{language === 'zh' ? '速度變化' : 'Tempo changes'}</summary>
             <div className="flex max-h-28 flex-wrap gap-3 overflow-y-auto py-2">
             <TempoChangeControl value={bar} language={language} label={language === 'zh' ? '小節速度' : 'Bar tempo'} onChange={patch => updateFields(patch)} />
-            {section && <TempoChangeControl value={section} language={language} label={language === 'zh' ? '段落速度' : 'Section tempo'} onChange={patch => onApplyDraft({ ...session.draftSong, sections: session.draftSong.sections.map(candidate => candidate.id === section.id ? { ...candidate, ...patch } : candidate) })} />}
+            {section && <TempoChangeControl value={section} language={language} label={language === 'zh' ? '段落速度' : 'Section tempo'} onChange={patch => applyBaseDraft({ ...baseEditorSong, sections: baseEditorSong.sections.map(candidate => candidate.id === section.id ? { ...candidate, ...patch } : candidate) })} />}
             </div>
           </details>
       )}
 
       {deviceLayout !== 'desktop' && (
         <footer className="relative flex shrink-0 items-stretch gap-2 border-t border-white/70 bg-slate-200/90 px-2.5 py-2">
-          <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-white/80 bg-white/80 text-sm font-semibold text-indigo-700 shadow-[0_1px_0_rgba(15,23,42,0.16),0_3px_7px_rgba(15,23,42,0.10)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-white active:shadow-none" onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={20} className="mr-1" />{previousLabel}</button>
+          <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-white/80 bg-white/80 whitespace-nowrap text-xs font-semibold text-indigo-700 sm:text-sm shadow-[0_1px_0_rgba(15,23,42,0.16),0_3px_7px_rgba(15,23,42,0.10)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-white active:shadow-none" onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={20} className="mr-1 shrink-0" />{previousLabel}</button>
           <div className="flex min-w-14 flex-col items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 px-1 text-center shadow-inner">
             <span className="text-[9px] font-black uppercase text-slate-400">{footerPositionLabel}</span>
             <span className="text-xs font-black text-slate-800">{footerPositionValue}</span>
           </div>
-          <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-indigo-500/60 bg-indigo-600 text-sm font-semibold text-white shadow-[0_1px_0_rgba(49,46,129,0.9),0_4px_10px_rgba(79,70,229,0.28)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-indigo-700 active:shadow-none" onClick={() => navigateNotation('next')} aria-label="Next beat">{nextLabel}<ChevronRight size={20} className="ml-1" /></button>
+          <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-indigo-500/60 bg-indigo-700 whitespace-nowrap text-xs font-semibold text-white sm:text-sm shadow-[0_1px_0_rgba(49,46,129,0.9),0_4px_10px_rgba(79,70,229,0.28)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-indigo-700 active:shadow-none" onClick={() => navigateNotation('next')} aria-label="Next beat">{nextLabel}<ChevronRight size={20} className="ml-1 shrink-0" /></button>
           <button type="button" className="inline-flex min-w-10 items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 text-slate-600 shadow-[0_1px_3px_rgba(15,23,42,0.10)] transition-[transform,background-color] duration-75 active:translate-y-px active:bg-slate-300" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? (language === 'zh' ? '展開鍵盤' : 'Expand keyboard') : (language === 'zh' ? '收合鍵盤' : 'Collapse keyboard')}>
             {collapsed ? <Plus size={17} /> : <ChevronDown size={17} />}
           </button>

@@ -82,20 +82,42 @@ describe('PreviewWysiwygEditor song information panel', () => {
     expect(dialog).toBeInTheDocument();
   });
 
-  it('uses a compact phone grid and focuses the tapped field', async () => {
+  it('uses readable phone fields and focuses the tapped field', async () => {
     const { container } = render(<StatefulEditor deviceLayout="phone" field="title" />);
     const panel = container.querySelector<HTMLElement>('[data-song-metadata-panel]');
     const titleInput = container.querySelector<HTMLInputElement>('[data-song-metadata-field="title"] input');
-    const keyField = container.querySelector<HTMLElement>('[data-song-metadata-field="key"]');
-    const shuffleField = container.querySelector<HTMLElement>('[data-song-metadata-field="groove"]');
 
     expect(panel?.dataset.deviceLayout).toBe('phone');
-    expect(panel).toHaveClass('grid', 'grid-cols-6', 'gap-y-2');
-    expect(titleInput?.closest('[data-song-metadata-field]')?.parentElement).toHaveClass('col-span-6');
-    expect(keyField?.parentElement).toHaveClass('col-span-3');
-    expect(shuffleField?.parentElement).toHaveClass('col-span-2');
+    expect(screen.getByRole('textbox', { name: '歌名' })).toBe(titleInput);
     await waitFor(() => expect(document.activeElement).toBe(titleInput));
-    expect(titleInput).toHaveClass('h-11');
+  });
+
+  it('exposes complete phone editing through song, chart and audio tabs', () => {
+    render(<StatefulEditor deviceLayout="phone" />);
+    expect(screen.getByRole('tab', { name: '歌曲資料' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: '參考音源' }));
+    expect(screen.getByRole('group', { name: '樂團版本' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '歌手版本' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '譜面設定' }));
+    expect(screen.getByText('簡譜輸入設定')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '樂團版本' })).toBeNull();
+  });
+
+  it('supports keyboard navigation between phone editing tabs', () => {
+    render(<StatefulEditor deviceLayout="phone" />);
+    fireEvent.keyDown(screen.getByRole('tab', { name: '歌曲資料' }), { key: 'ArrowRight' });
+    const layout = screen.getByRole('tab', { name: '譜面設定' });
+    expect(layout).toHaveAttribute('aria-selected', 'true');
+    expect(layout).toHaveFocus();
+  });
+
+  it('closes the phone panel from a keyboard-activated Done button', () => {
+    const onClose = vi.fn();
+    render(<PreviewWysiwygEditor song={song} language="zh" target={makeTarget('metadata')}
+      deviceLayout="phone" currentKey="C" currentCapo={0} originalKey="C"
+      onChange={() => undefined} onKeyChange={() => undefined} onCapoChange={() => undefined} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: '完成' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('opens the complete song information panel from the metadata target', () => {

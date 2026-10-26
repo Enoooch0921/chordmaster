@@ -1,4 +1,5 @@
 import React from 'react';
+import './SongMetadataPanel.css';
 import { AppLanguage, BarNumberMode, Key, SetlistDisplayMode, Song, SongReference, SongReferenceKind } from '../types';
 import { getUiCopy } from '../constants/i18n';
 import KeyPicker from './KeyPicker';
@@ -287,6 +288,12 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   // Keep only the core fields visible by default; everything else lives in a
   // collapsible "advanced" block so the panel stays compact on small laptops.
   const [isAdvancedOpen, setIsAdvancedOpen] = React.useState(initialAdvancedOpen);
+  const [phoneSection, setPhoneSection] = React.useState<'details' | 'layout' | 'references'>('details');
+  const selectPhoneSection = (section: 'details' | 'layout' | 'references') => {
+    const scroller = panelRef.current?.closest<HTMLElement>('[data-preview-metadata-scroll], [data-mobile-metadata-scroll]');
+    if (scroller) scroller.scrollTop = 0;
+    setPhoneSection(section);
+  };
   const bandTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
   const vocalTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
   const referenceBpmCommitTimeoutsRef = React.useRef<Record<SongReferenceKind, number | null>>({
@@ -296,19 +303,20 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const timeSignatureParts = splitTimeSignatureInput(song.timeSignature);
   const resolvedKey = keyValue ?? song.originalKey;
   const resolvedCapo = capoValue ?? (song.capo ?? 0);
+  const shuffleEnabled = song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle';
   const isPreviewHeader = variant === 'preview-header';
-  const isTouchOptimized = isPreviewHeader && deviceLayout !== 'desktop';
-  const isPhonePreviewHeader = isPreviewHeader && deviceLayout === 'phone';
+  const isPhoneLayout = deviceLayout === 'phone';
+  const isTouchOptimized = isPhoneLayout || (isPreviewHeader && deviceLayout !== 'desktop');
   const isWideLayout = layoutMode === 'wide';
   const isStackedLayout = layoutMode === 'stacked';
   const segmentedSize = isStackedLayout ? 'sm' : 'xs';
   const toggleSize = isStackedLayout ? 'sm' : 'xs';
-  const labelClassName = isPhonePreviewHeader
-    ? 'mb-0.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400'
+  const labelClassName = isPhoneLayout
+    ? 'mb-2 block text-[11px] font-semibold tracking-wide text-gray-500'
     : `${isTouchOptimized ? 'text-[11px]' : 'text-[9px]'} mb-1 block font-semibold uppercase tracking-[0.16em] text-gray-400`;
-  const controlLabelClassName = 'mb-1 block text-[8px] font-semibold uppercase tracking-[0.16em] text-gray-400';
+  const controlLabelClassName = isPhoneLayout ? labelClassName : 'mb-1 block text-[8px] font-semibold uppercase tracking-[0.16em] text-gray-400';
   const fieldHeightClassName = isTouchOptimized ? 'h-11' : isPreviewHeader ? 'h-10' : 'h-7';
-  const fieldClassName = `${fieldHeightClassName} w-full rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500`;
+  const fieldClassName = `${fieldHeightClassName} w-full ${isPhoneLayout ? 'rounded-xl border border-gray-200 bg-gray-50/70 px-3 text-base' : 'rounded-lg border border-gray-300 bg-white px-2.5 text-[13px]'} font-medium text-gray-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500`;
   const controlFieldClassName = 'h-7 w-full rounded-lg border border-gray-300 bg-white px-2 text-[12px] font-medium text-gray-700 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500';
 
   React.useEffect(() => {
@@ -504,7 +512,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       : kind === 'band' ? 'Band Version' : 'Vocal Version';
 
     return (
-      <div className="grid grid-cols-12 items-center gap-1.5">
+      <div role="group" aria-label={label} className="grid grid-cols-12 items-center gap-1.5">
         <div className="col-span-12 flex min-w-0 items-center gap-1.5 sm:col-span-12 lg:col-span-2">
           <div className="min-w-0 truncate text-[11px] font-bold text-gray-600">{label}</div>
           {hasInvalidUrl ? (
@@ -620,8 +628,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
   const titleField = (
     <div data-song-metadata-field="title">
-      <label className={labelClassName}>{copy.editor.title}</label>
-      <input
+      <label htmlFor={`${metadataInputId}-title`} className={labelClassName}>{isPhoneLayout && language === 'zh' ? '歌名' : copy.editor.title}</label>
+      <input id={`${metadataInputId}-title`}
         type="text"
         value={song.title}
         onChange={(event) => updateField('title', event.target.value)}
@@ -636,7 +644,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
             event.currentTarget.blur();
           }
         }}
-        className={`${fieldClassName} font-semibold`}
+        className={`${fieldClassName} font-semibold ${isPhoneLayout ? '!h-12 !text-lg' : ''}`}
       />
     </div>
   );
@@ -666,13 +674,13 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         triggerDensity="compact"
         autoOpen={isPreviewHeader && initialFocusField === 'key'}
         touchOptimized={isTouchOptimized}
-        buttonClassName={`${isTouchOptimized ? '!h-11' : isPreviewHeader ? '!h-10' : 'h-7'} w-full min-w-0 rounded-lg px-2.5`}
-        valueTextClassName="text-[13px]"
+        buttonClassName={`${isTouchOptimized ? '!h-11' : isPreviewHeader ? '!h-10' : 'h-7'} w-full min-w-0 rounded-lg px-2.5 ${isPhoneLayout ? '!rounded-xl !border-[color:var(--color-border)] !bg-[color:var(--color-surface-muted)]' : ''}`}
+        valueTextClassName={isPhoneLayout ? 'text-base' : 'text-[13px]'}
         metaTextClassName={isWideLayout ? '' : 'hidden'}
         triggerIconSize={14}
       />
-      <label className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
-        <input type="checkbox" disabled={!canEditKey} checked={song.originalKeyUnspecified === true} onChange={event => updateField('originalKeyUnspecified', event.target.checked || undefined)} />
+      <label className={`${isPhoneLayout ? 'mt-1.5 min-h-8 text-xs' : 'mt-1 text-[10px]'} flex items-center gap-1.5 text-gray-500`}>
+        <input className="accent-indigo-600" type="checkbox" disabled={!canEditKey} checked={song.originalKeyUnspecified === true} onChange={event => updateField('originalKeyUnspecified', event.target.checked || undefined)} />
         {language === 'zh' ? '原調未定' : 'Original key unconfirmed'}
       </label>
     </div>
@@ -697,8 +705,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         triggerDensity="compact"
         autoOpen={isPreviewHeader && initialFocusField === 'capo'}
         touchOptimized={isTouchOptimized}
-        buttonClassName={`${isTouchOptimized ? '!h-11' : isPreviewHeader ? '!h-10' : 'h-7'} w-full min-w-0 rounded-lg px-2.5`}
-        valueTextClassName="text-[13px]"
+        buttonClassName={`${isTouchOptimized ? '!h-11' : isPreviewHeader ? '!h-10' : 'h-7'} w-full min-w-0 rounded-lg px-2.5 ${isPhoneLayout ? '!rounded-xl !border-[color:var(--color-border)] !bg-[color:var(--color-surface-muted)]' : ''}`}
+        valueTextClassName={isPhoneLayout ? 'text-base' : 'text-[13px]'}
         showPlayKey={isWideLayout}
         triggerIconSize={14}
       />
@@ -707,8 +715,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
   const tempoField = (
     <div data-song-metadata-field="tempo">
-      <label className={labelClassName}>{copy.editor.tempo}</label>
-      <input
+      <label htmlFor={`${metadataInputId}-tempo`} className={labelClassName}>{copy.editor.tempo}</label>
+      <input id={`${metadataInputId}-tempo`}
         type="text"
         inputMode="decimal"
         pattern="[0-9]*[.]?[0-9]{0,2}"
@@ -732,15 +740,16 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const timeField = (
     <div data-song-metadata-field="timeSignature">
       <label className={labelClassName}>{copy.editor.timeSignature}</label>
-      <div className={`flex min-w-0 items-center rounded-lg border border-gray-300 bg-white px-2 ${fieldHeightClassName}`}>
+      <div className={`flex min-w-0 items-center ${isPhoneLayout ? 'rounded-xl border border-gray-200 bg-gray-50/70' : 'rounded-lg border border-gray-300 bg-white'} px-2 ${fieldHeightClassName}`}>
         <input
           type="text"
           inputMode="numeric"
           value={song.timeSignatureUnspecified ? '' : timeSignatureParts.numerator}
           disabled={song.timeSignatureUnspecified}
           onChange={(event) => updateField('timeSignature', buildTimeSignatureInput(event.target.value, timeSignatureParts.denominator))}
+          aria-label={language === 'zh' ? '每小節拍數' : 'Beats per bar'}
           placeholder={song.timeSignatureUnspecified ? '?' : '4'}
-          className="h-full w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
+          className={`h-full min-w-0 w-full border-0 bg-transparent px-1 text-center ${isPhoneLayout ? 'text-base' : 'text-[13px]'} font-semibold text-gray-800 outline-none focus:ring-0`}
         />
         <span className="px-0.5 text-sm font-semibold text-gray-400">/</span>
         <input
@@ -749,12 +758,13 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           value={song.timeSignatureUnspecified ? '' : timeSignatureParts.denominator}
           disabled={song.timeSignatureUnspecified}
           onChange={(event) => updateField('timeSignature', buildTimeSignatureInput(timeSignatureParts.numerator, event.target.value))}
+          aria-label={language === 'zh' ? '拍號分母' : 'Beat unit'}
           placeholder={song.timeSignatureUnspecified ? '?' : '4'}
-          className="h-full w-full border-0 bg-transparent px-1 text-center text-[13px] font-semibold text-gray-800 outline-none focus:ring-0"
+          className={`h-full min-w-0 w-full border-0 bg-transparent px-1 text-center ${isPhoneLayout ? 'text-base' : 'text-[13px]'} font-semibold text-gray-800 outline-none focus:ring-0`}
         />
       </div>
-      <label className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
-        <input type="checkbox" checked={song.timeSignatureUnspecified === true} onChange={event => updateField('timeSignatureUnspecified', event.target.checked || undefined)} />
+      <label className={`${isPhoneLayout ? 'mt-1.5 min-h-8 text-xs' : 'mt-1 text-[11px]'} flex items-center gap-1.5 text-slate-500`}>
+        <input className="accent-indigo-600" type="checkbox" checked={song.timeSignatureUnspecified === true} onChange={event => updateField('timeSignatureUnspecified', event.target.checked || undefined)} />
         {language === 'zh' ? '拍號未定' : 'Time signature unspecified'}
       </label>
     </div>
@@ -762,23 +772,26 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
   const shuffleField = (
     <div data-song-metadata-field="groove">
-      <label className={labelClassName}>{copy.editor.shuffle}</label>
-      <label className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-gray-300 bg-white px-2.5 ${fieldHeightClassName}`}>
+      <label className={labelClassName}>{isPhoneLayout ? (language === 'zh' ? '律動' : 'Feel') : copy.editor.shuffle}</label>
+      <label className={`relative flex cursor-pointer items-center justify-between gap-2 ${isPhoneLayout ? 'rounded-xl border border-gray-200 bg-gray-50/70' : 'rounded-lg border border-gray-300 bg-white'} px-2.5 ${fieldHeightClassName}`}>
         <span className="truncate text-[12px] font-medium text-gray-600">{copy.editor.shuffle}</span>
         <input
           type="checkbox"
-          checked={song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle'}
+          checked={shuffleEnabled}
           onChange={(event) => onChange({ ...song, shuffle: event.target.checked, groove: undefined })}
-          className={`${isTouchOptimized ? 'h-5 w-5' : 'h-3.5 w-3.5'} shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500`}
+          className={isPhoneLayout ? 'peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0' : `${isTouchOptimized ? 'h-5 w-5' : 'h-3.5 w-3.5'} shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500`}
         />
+        {isPhoneLayout ? <span aria-hidden="true" data-checked={shuffleEnabled} className="song-info-switch-track relative h-6 w-10 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-300 peer-focus-visible:ring-offset-2">
+          <span className={`song-info-switch-thumb absolute left-0.5 top-0.5 size-5 rounded-full shadow-sm transition-transform ${shuffleEnabled ? 'translate-x-4' : ''}`} />
+        </span> : null}
       </label>
     </div>
   );
 
   const versionField = (
     <div data-song-metadata-field="credits">
-      <label className={labelClassName}>{copy.version}</label>
-      <input
+      <label htmlFor={`${metadataInputId}-credits`} className={labelClassName}>{copy.version}</label>
+      <input id={`${metadataInputId}-credits`}
         type="text"
         list={metadataSuggestions?.versions.length ? `${metadataInputId}-versions` : undefined}
         value={getVersionValue(song)}
@@ -809,8 +822,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
   const translatorField = (
     <div data-song-metadata-field="translator">
-      <label className={labelClassName}>{copy.editor.translator}</label>
-      <input
+      <label htmlFor={`${metadataInputId}-translator`} className={labelClassName}>{copy.editor.translator}</label>
+      <input id={`${metadataInputId}-translator`}
         type="text"
         list={metadataSuggestions?.translators.length ? `${metadataInputId}-translators` : undefined}
         value={song.translator || ''}
@@ -848,8 +861,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         onChange={(mode) => onDisplayModeChange?.(mode)}
         size={segmentedSize}
         stretch
-        className="rounded-lg"
-        buttonClassName="min-w-0"
+        className={isPhoneLayout ? '!h-auto rounded-lg p-1' : 'rounded-lg'}
+        buttonClassName={isPhoneLayout ? 'min-h-10 min-w-0 !text-xs' : 'min-w-0'}
       />
     </div>
   );
@@ -871,8 +884,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         onChange={(value) => onJianpuInputAbsoluteChange?.(value === 'fixed')}
         size={segmentedSize}
         stretch
-        className="rounded-lg"
-        buttonClassName="min-w-0"
+        className={isPhoneLayout ? '!h-auto rounded-lg p-1' : 'rounded-lg'}
+        buttonClassName={isPhoneLayout ? 'min-h-10 min-w-0 !text-xs' : 'min-w-0'}
       />
     </div>
   );
@@ -889,8 +902,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         onChange={(mode) => updateField('barNumberMode', mode)}
         size={segmentedSize}
         stretch
-        className="rounded-lg"
-        buttonClassName="min-w-0"
+        className={isPhoneLayout ? '!h-auto rounded-lg p-1' : 'rounded-lg'}
+        buttonClassName={isPhoneLayout ? 'min-h-10 min-w-0 !text-xs' : 'min-w-0'}
       />
     </div>
   );
@@ -908,19 +921,19 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         onChange={(value) => updateField('barRowCount', value === '1' ? 1 : value === '3' ? 3 : 2)}
         size={segmentedSize}
         stretch
-        className="rounded-lg"
-        buttonClassName="min-w-0"
+        className={isPhoneLayout ? '!h-auto rounded-lg p-1' : 'rounded-lg'}
+        buttonClassName={isPhoneLayout ? 'min-h-10 min-w-0 !text-xs' : 'min-w-0'}
       />
     </div>
   );
 
   const referencesField = (
-    <div className="rounded-xl border border-gray-200 bg-gray-50/70 px-2.5 py-2">
+    <div className={isPhoneLayout ? 'space-y-4 rounded-xl border border-gray-200 bg-gray-50 p-3 [&_input:not([type=checkbox])]:h-11 [&_input:not([type=checkbox])]:text-base [&_button]:min-h-11' : 'rounded-xl border border-gray-200 bg-gray-50/70 px-2.5 py-2'}>
       <div className="flex items-center gap-2 px-0.5">
         <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-500">{language === 'zh' ? '參考音源' : 'Reference'}</div>
         <div className="h-px flex-1 bg-gray-200" />
       </div>
-      <div className="mt-1.5 space-y-1.5">
+      <div className={isPhoneLayout ? 'mt-3 space-y-5' : 'mt-1.5 space-y-1.5'}>
         {renderReferenceEditor('band')}
         {renderReferenceEditor('vocal')}
       </div>
@@ -942,7 +955,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       type="button"
       onClick={() => setIsAdvancedOpen((current) => !current)}
       aria-expanded={isAdvancedOpen}
-      className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-gray-500 transition-colors hover:bg-gray-100"
+      className={`flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 ${isPhoneLayout ? 'min-h-11 text-sm' : 'py-1.5 text-[10px] uppercase tracking-[0.14em]'} font-bold text-gray-500 transition-colors hover:bg-gray-100`}
     >
       <span className="flex items-center gap-1.5">
         {language === 'zh' ? '進階設定' : 'Advanced'}
@@ -967,43 +980,65 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     </button>
   );
 
-  if (isPreviewHeader) {
-    if (isPhonePreviewHeader) {
-      return (
-        <section
-          ref={panelRef}
-          data-song-metadata-panel
-          data-device-layout={deviceLayout}
-          className="grid grid-cols-6 gap-x-2 gap-y-2"
-        >
-          <div className="col-span-6">{titleField}</div>
-          <div className="col-span-3">{versionField}</div>
-          <div className="col-span-3">{translatorField}</div>
-          <div className="col-span-3">{keyField}</div>
-          <div className="col-span-3">{capoField}</div>
-          <div className="col-span-2">{tempoField}</div>
-          <div className="col-span-2">{timeField}</div>
-          <div className="col-span-2">{shuffleField}</div>
-        </section>
-      );
-    }
+  if (isPhoneLayout) {
+    const tabs = [
+      { id: 'details' as const, label: language === 'zh' ? '歌曲資料' : 'Song' },
+      ...(!isPreviewHeader ? [{ id: 'layout' as const, label: language === 'zh' ? '譜面設定' : 'Chart' }] : []),
+      ...(!isPreviewHeader && showReferenceFields ? [{ id: 'references' as const, label: language === 'zh' ? '參考音源' : 'Audio' }] : [])
+    ];
+    return (
+      <section ref={panelRef} data-song-metadata-panel data-device-layout={deviceLayout} className="song-info-mobile">
+        {tabs.length > 1 ? <div role="tablist" aria-label={language === 'zh' ? '歌曲資訊分類' : 'Song information sections'} className="song-info-tabs">
+          {tabs.map((tab, index) => <button key={tab.id} type="button" role="tab" id={`${metadataInputId}-${tab.id}-tab`}
+            aria-selected={phoneSection === tab.id} aria-controls={`${metadataInputId}-${tab.id}-panel`}
+            tabIndex={phoneSection === tab.id ? 0 : -1}
+            onClick={() => selectPhoneSection(tab.id)}
+            onKeyDown={event => {
+              const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
+                : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+                : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+              if (next < 0) return;
+              event.preventDefault();
+              selectPhoneSection(tabs[next].id);
+              document.getElementById(`${metadataInputId}-${tabs[next].id}-tab`)?.focus();
+            }}>{tab.label}</button>)}
+        </div> : null}
+        <div role={tabs.length > 1 ? 'tabpanel' : undefined} id={`${metadataInputId}-${phoneSection}-panel`}
+          aria-labelledby={tabs.length > 1 ? `${metadataInputId}-${phoneSection}-tab` : undefined}
+          className="song-info-tab-content">
+          {phoneSection === 'details' ? <>
+            <div className="song-info-name">{titleField}</div>
+            <div className="song-info-credits">{versionField}{translatorField}</div>
+            <div className="song-info-musical">
+              {keyField}{tempoField}{timeField}{shuffleField}
+              {!isLibraryInputMode && capoField}
+            </div>
+          </> : phoneSection === 'layout' ? <div className="song-info-layout">
+            {displayOrInputField}{barNumbersField}{barHeightField}
+          </div> : <div className="song-info-references">
+            {renderReferenceEditor('band')}{renderReferenceEditor('vocal')}
+          </div>}
+        </div>
+      </section>
+    );
+  }
 
-    const twoColumn = deviceLayout !== 'phone';
+  if (isPreviewHeader) {
     return (
       <section
         ref={panelRef}
         data-song-metadata-panel
         data-device-layout={deviceLayout}
-        className={twoColumn ? 'grid grid-cols-2 gap-x-3 gap-y-3' : 'space-y-3'}
+        className="grid grid-cols-2 gap-x-3 gap-y-3"
       >
-        <div className={twoColumn ? 'col-span-2' : undefined}>{titleField}</div>
+        <div className="col-span-2">{titleField}</div>
         {versionField}
         {translatorField}
         {keyField}
         {capoField}
         {tempoField}
         {timeField}
-        <div className={twoColumn ? 'col-span-2' : undefined}>{shuffleField}</div>
+        <div className="col-span-2">{shuffleField}</div>
       </section>
     );
   }
@@ -1025,7 +1060,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       </div>
 
       {isWideLayout ? (
-        <div className="mt-1.5 space-y-1.5">
+        <div className={isPhoneLayout ? 'mt-3 space-y-5' : 'mt-1.5 space-y-1.5'}>
           <div className="grid items-start gap-2 [grid-template-columns:minmax(0,2.6fr)_minmax(5rem,0.9fr)_minmax(4.5rem,0.8fr)_minmax(5.5rem,1fr)_minmax(6rem,1.05fr)]">
             {titleField}
             {keyField}

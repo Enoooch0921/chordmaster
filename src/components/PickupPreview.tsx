@@ -20,11 +20,13 @@ interface Props {
   nextRiff?: string;
   nextRhythm?: string;
   nextTimeSignature?: string;
+  notationTop?: number;
+  rhythmLaneHeight?: number;
   onSelect?: (event: React.MouseEvent<HTMLElement>, field: 'riff' | 'rhythm', cursor?: PreviewNotationCursor) => void;
 }
 
 export default function PickupPreview({ pickup, meter, language, playKey, absolute, active,
-  nextRiff, nextRhythm, nextTimeSignature, onSelect, previewIdentity = 'preview', cursor }: Props) {
+  nextRiff, nextRhythm, nextTimeSignature, notationTop, rhythmLaneHeight, onSelect, previewIdentity = 'preview', cursor }: Props) {
   const zh = language === 'zh';
   const anchor = (mode: string) => `${previewIdentity}|${PICKUP_EDITOR_SECTION_ID}|${PICKUP_EDITOR_BAR_ID}|${mode}|all`;
   if (!pickup) return onSelect ? <button type="button" data-preview-only-control="true"
@@ -42,7 +44,7 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
   const { beatUnits, barUnits, beats } = parseTimeSignature(display.timeSignature);
   const jianpuCursor = active && cursor?.kind === 'jianpu' ? cursor : null;
   const cursorUnit = jianpuCursor ? Math.min(barUnits, jianpuCursor.beatIndex * beatUnits + jianpuCursor.unitIndex) : null;
-  const laneClass = `block w-full rounded px-1 text-left ${active ? 'bg-emerald-50 ring-1 ring-emerald-200' : ''}`;
+  const laneClass = `relative block w-full rounded-sm bg-gray-300/70 px-1 text-left mix-blend-multiply ${active ? 'ring-1 ring-emerald-300' : ''}`;
   const selectLane = (event: React.MouseEvent<HTMLElement>, field: 'riff' | 'rhythm', nextCursor?: PreviewNotationCursor) => {
     event.stopPropagation();
     onSelect?.(event, field, nextCursor);
@@ -50,8 +52,8 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
   return <div data-preview-pickup role="group" aria-label={zh ? '第 0 小節・弱起拍' : 'Bar 0 · Pickup'}
     data-preview-edit-anchor={anchor('lower')}
     data-pickup-duration-units={display.durationUnits}
-    className="relative mt-auto flex w-full min-w-0 flex-col gap-0.5 py-1">
-    {(pickup.rhythm?.trim() || active && cursor?.kind === 'rhythm') && <div role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined} className={laneClass}
+    className={`${notationTop === undefined ? 'relative mt-auto gap-0.5' : 'absolute inset-x-0 gap-1.5'} flex w-full min-w-0 flex-col py-1`} style={notationTop === undefined ? undefined : { top: notationTop - 4 }}>
+    {(pickup.rhythm?.trim() || active && cursor?.kind === 'rhythm') && <div role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined} className={laneClass} style={rhythmLaneHeight ? { minHeight: rhythmLaneHeight } : undefined}
       data-preview-edit-anchor={anchor('rhythm')}
       aria-label={zh ? '編輯弱起節奏' : 'Edit pickup rhythm'} onClick={event => selectLane(event, 'rhythm')}
       onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); } }}>

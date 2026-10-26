@@ -1,0 +1,939 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-26T13:04:12.233042+00:00",
+  "title": "Design System: ChordMaster",
+  "extensions": {
+    "colorMeta": {
+      "green-50": {
+        "role": "primary",
+        "displayName": "Green 50",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-100": {
+        "role": "primary",
+        "displayName": "Green 100",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-200": {
+        "role": "primary",
+        "displayName": "Green 200",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-300": {
+        "role": "primary",
+        "displayName": "Green 300",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-400": {
+        "role": "primary",
+        "displayName": "Green 400",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-500": {
+        "role": "primary",
+        "displayName": "Green 500",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-600": {
+        "role": "primary",
+        "displayName": "Green 600",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-700": {
+        "role": "primary",
+        "displayName": "Green 700",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-800": {
+        "role": "primary",
+        "displayName": "Green 800",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-900": {
+        "role": "primary",
+        "displayName": "Green 900",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "green-950": {
+        "role": "primary",
+        "displayName": "Green 950",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "surface-muted": {
+        "role": "neutral",
+        "displayName": "Surface Muted",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "surface-sunken": {
+        "role": "neutral",
+        "displayName": "Surface Sunken",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Surface Raised",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Border Strong",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Text Muted",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "text-faint": {
+        "role": "neutral",
+        "displayName": "Text Faint",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "text-inverse": {
+        "role": "neutral",
+        "displayName": "Text Inverse",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Surface Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "surface-muted-dark": {
+        "role": "neutral",
+        "displayName": "Surface Muted Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "surface-sunken-dark": {
+        "role": "neutral",
+        "displayName": "Surface Sunken Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "surface-raised-dark": {
+        "role": "neutral",
+        "displayName": "Surface Raised Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "border-dark": {
+        "role": "neutral",
+        "displayName": "Border Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "border-strong-dark": {
+        "role": "neutral",
+        "displayName": "Border Strong Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "text-dark": {
+        "role": "neutral",
+        "displayName": "Text Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "text-muted-dark": {
+        "role": "neutral",
+        "displayName": "Text Muted Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "text-faint-dark": {
+        "role": "neutral",
+        "displayName": "Text Faint Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "text-inverse-dark": {
+        "role": "neutral",
+        "displayName": "Text Inverse Dark",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      },
+      "success": {
+        "role": "feedback",
+        "displayName": "Success",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "success-soft": {
+        "role": "feedback",
+        "displayName": "Success Soft",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "success-soft-dark": {
+        "role": "feedback",
+        "displayName": "Success Soft Dark",
+        "tonalRamp": [
+          "#0D1F17",
+          "#1A3A2A",
+          "#1A5234",
+          "#236E48",
+          "#3DAA78",
+          "#8AD0AC",
+          "#DAF1E5",
+          "#F0FAF5"
+        ]
+      },
+      "danger": {
+        "role": "feedback",
+        "displayName": "Danger",
+        "tonalRamp": [
+          "oklch(15% 0.025 15)",
+          "oklch(25% 0.065 15)",
+          "oklch(35% 0.12 15)",
+          "oklch(45% 0.18 15)",
+          "oklch(60% 0.22 15)",
+          "oklch(75% 0.15 15)",
+          "oklch(87% 0.07 15)",
+          "oklch(95% 0.02 15)"
+        ]
+      },
+      "danger-dark": {
+        "role": "feedback",
+        "displayName": "Danger Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 15)",
+          "oklch(25% 0.065 15)",
+          "oklch(35% 0.12 15)",
+          "oklch(45% 0.18 15)",
+          "oklch(60% 0.22 15)",
+          "oklch(75% 0.15 15)",
+          "oklch(87% 0.07 15)",
+          "oklch(95% 0.02 15)"
+        ]
+      },
+      "danger-soft": {
+        "role": "feedback",
+        "displayName": "Danger Soft",
+        "tonalRamp": [
+          "oklch(15% 0.025 15)",
+          "oklch(25% 0.065 15)",
+          "oklch(35% 0.12 15)",
+          "oklch(45% 0.18 15)",
+          "oklch(60% 0.22 15)",
+          "oklch(75% 0.15 15)",
+          "oklch(87% 0.07 15)",
+          "oklch(95% 0.02 15)"
+        ]
+      },
+      "danger-soft-dark": {
+        "role": "feedback",
+        "displayName": "Danger Soft Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 15)",
+          "oklch(25% 0.065 15)",
+          "oklch(35% 0.12 15)",
+          "oklch(45% 0.18 15)",
+          "oklch(60% 0.22 15)",
+          "oklch(75% 0.15 15)",
+          "oklch(87% 0.07 15)",
+          "oklch(95% 0.02 15)"
+        ]
+      },
+      "feedback-emerald-surface-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Emerald Surface Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 155)",
+          "oklch(25% 0.06 155)",
+          "oklch(35% 0.1 155)",
+          "oklch(45% 0.13 155)",
+          "oklch(60% 0.15 155)",
+          "oklch(75% 0.11 155)",
+          "oklch(87% 0.06 155)",
+          "oklch(95% 0.02 155)"
+        ]
+      },
+      "feedback-emerald-text-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Emerald Text Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 155)",
+          "oklch(25% 0.06 155)",
+          "oklch(35% 0.1 155)",
+          "oklch(45% 0.13 155)",
+          "oklch(60% 0.15 155)",
+          "oklch(75% 0.11 155)",
+          "oklch(87% 0.06 155)",
+          "oklch(95% 0.02 155)"
+        ]
+      },
+      "feedback-emerald-border-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Emerald Border Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 155)",
+          "oklch(25% 0.06 155)",
+          "oklch(35% 0.1 155)",
+          "oklch(45% 0.13 155)",
+          "oklch(60% 0.15 155)",
+          "oklch(75% 0.11 155)",
+          "oklch(87% 0.06 155)",
+          "oklch(95% 0.02 155)"
+        ]
+      },
+      "feedback-sky-surface-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Sky Surface Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 235)",
+          "oklch(25% 0.06 235)",
+          "oklch(35% 0.1 235)",
+          "oklch(45% 0.13 235)",
+          "oklch(60% 0.15 235)",
+          "oklch(75% 0.11 235)",
+          "oklch(87% 0.06 235)",
+          "oklch(95% 0.02 235)"
+        ]
+      },
+      "feedback-sky-text-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Sky Text Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 235)",
+          "oklch(25% 0.06 235)",
+          "oklch(35% 0.1 235)",
+          "oklch(45% 0.13 235)",
+          "oklch(60% 0.15 235)",
+          "oklch(75% 0.11 235)",
+          "oklch(87% 0.06 235)",
+          "oklch(95% 0.02 235)"
+        ]
+      },
+      "feedback-sky-border-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Sky Border Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 235)",
+          "oklch(25% 0.06 235)",
+          "oklch(35% 0.1 235)",
+          "oklch(45% 0.13 235)",
+          "oklch(60% 0.15 235)",
+          "oklch(75% 0.11 235)",
+          "oklch(87% 0.06 235)",
+          "oklch(95% 0.02 235)"
+        ]
+      },
+      "feedback-amber-surface-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Amber Surface Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 85)",
+          "oklch(25% 0.06 85)",
+          "oklch(35% 0.1 85)",
+          "oklch(45% 0.13 85)",
+          "oklch(60% 0.15 85)",
+          "oklch(75% 0.11 85)",
+          "oklch(87% 0.06 85)",
+          "oklch(95% 0.02 85)"
+        ]
+      },
+      "feedback-amber-text-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Amber Text Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 85)",
+          "oklch(25% 0.06 85)",
+          "oklch(35% 0.1 85)",
+          "oklch(45% 0.13 85)",
+          "oklch(60% 0.15 85)",
+          "oklch(75% 0.11 85)",
+          "oklch(87% 0.06 85)",
+          "oklch(95% 0.02 85)"
+        ]
+      },
+      "feedback-amber-border-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Amber Border Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 85)",
+          "oklch(25% 0.06 85)",
+          "oklch(35% 0.1 85)",
+          "oklch(45% 0.13 85)",
+          "oklch(60% 0.15 85)",
+          "oklch(75% 0.11 85)",
+          "oklch(87% 0.06 85)",
+          "oklch(95% 0.02 85)"
+        ]
+      },
+      "feedback-rose-surface-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Rose Surface Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 15)",
+          "oklch(25% 0.06 15)",
+          "oklch(35% 0.1 15)",
+          "oklch(45% 0.13 15)",
+          "oklch(60% 0.15 15)",
+          "oklch(75% 0.11 15)",
+          "oklch(87% 0.06 15)",
+          "oklch(95% 0.02 15)"
+        ]
+      },
+      "feedback-rose-text-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Rose Text Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 15)",
+          "oklch(25% 0.06 15)",
+          "oklch(35% 0.1 15)",
+          "oklch(45% 0.13 15)",
+          "oklch(60% 0.15 15)",
+          "oklch(75% 0.11 15)",
+          "oklch(87% 0.06 15)",
+          "oklch(95% 0.02 15)"
+        ]
+      },
+      "feedback-rose-border-dark": {
+        "role": "feedback",
+        "displayName": "Feedback Rose Border Dark",
+        "tonalRamp": [
+          "oklch(15% 0.025 15)",
+          "oklch(25% 0.06 15)",
+          "oklch(35% 0.1 15)",
+          "oklch(45% 0.13 15)",
+          "oklch(60% 0.15 15)",
+          "oklch(75% 0.11 15)",
+          "oklch(87% 0.06 15)",
+          "oklch(95% 0.02 15)"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "White",
+        "tonalRamp": [
+          "#0a0d12",
+          "#161b22",
+          "#30363d",
+          "#484f58",
+          "#6e7681",
+          "#9ba1a8",
+          "#e6edf3",
+          "#f9fafb"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "song-title": {
+        "displayName": "Song Title",
+        "purpose": "Prominent mobile song-name field."
+      },
+      "panel-title": {
+        "displayName": "Panel Title",
+        "purpose": "Mobile modal heading."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Primary mobile actions."
+      },
+      "field": {
+        "displayName": "Field",
+        "purpose": "Mobile editable values."
+      },
+      "tab": {
+        "displayName": "Tab",
+        "purpose": "Song-information destinations."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Explicit mobile field labels."
+      }
+    },
+    "shadows": [
+      {
+        "name": "action-low",
+        "value": "0 1px 2px rgb(0 0 0 / 0.05)",
+        "purpose": "Tailwind shadow-sm on compact actions."
+      },
+      {
+        "name": "metadata-overlay",
+        "value": "0 25px 50px -12px rgb(0 0 0 / 0.25)",
+        "purpose": "Tailwind shadow-2xl on the metadata dialog."
+      },
+      {
+        "name": "actions-sheet",
+        "value": "0 -24px 60px rgba(15,23,42,0.18)",
+        "purpose": "Outer mobile actions-sheet boundary."
+      }
+    ],
+    "motion": [
+      {
+        "name": "actions-sheet-spring",
+        "value": "spring; bounce: 0; duration: 0.35s",
+        "purpose": "Observed mobile actions sheet entry and exit."
+      },
+      {
+        "name": "tap-tempo-pulse",
+        "value": "150ms ease-out",
+        "purpose": "Observed local tap-tempo confirmation."
+      },
+      {
+        "name": "metadata-reduced-motion",
+        "value": "transition-duration: 0s",
+        "purpose": "Mobile metadata CSS under prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "640px"
+      },
+      {
+        "name": "metadata-stacked",
+        "value": "480px"
+      },
+      {
+        "name": "metadata-wide",
+        "value": "820px"
+      },
+      {
+        "name": "touch-tablet-max",
+        "value": "1536px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Completion button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Persistent mobile editing completion action.",
+      "html": "<button class=\"ds-done\">完成</button>",
+      "css": ".ds-done{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;height:44px;min-width:64px;padding:0 16px;border:0;border-radius:9999px;background:var(--color-indigo-700, #236E48);color:#fff;font-size:14px;font-weight:700;box-shadow:0 1px 2px rgb(0 0 0 / .05);transition:background-color .15s;}.ds-done:hover{background:var(--color-indigo-800, #1A5234);}.ds-done:focus-visible{outline:auto;}"
+    },
+    {
+      "name": "Login button",
+      "kind": "button",
+      "refersTo": "button-login",
+      "description": "Visible mobile sign-in action with inline SVG icon.",
+      "html": "<button class=\"ds-login\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3\"/></svg>登入</button>",
+      "css": ".ds-login{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 12px;border:0;border-radius:12px;background:var(--color-indigo-700, #236E48);color:#fff;font-size:14px;font-weight:700;box-shadow:0 1px 2px rgb(0 0 0 / .05);transition:background-color .15s;}.ds-login:hover{background:var(--color-indigo-800, #1A5234);}.ds-login:focus-visible{outline:auto;}.ds-login:disabled{opacity:.5;cursor:not-allowed;}"
+    },
+    {
+      "name": "Reference action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Quiet bordered action within reference editors.",
+      "html": "<button class=\"ds-reference\">貼上連結</button>",
+      "css": ".ds-reference{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;min-height:48px;padding:0 12px;border:1px solid var(--color-border, #e5e7eb);border-radius:10px;background:var(--color-surface-muted, #f9fafb);color:var(--color-text-muted, #4b5563);font-size:12px;font-weight:600;transition:border-color .15s;}.ds-reference:hover{border-color:var(--color-indigo-200, #B6E3CA);}.ds-reference:focus-visible{outline:2px solid var(--color-indigo-500, #3DAA78);outline-offset:3px;}"
+    },
+    {
+      "name": "Mobile field",
+      "kind": "input",
+      "refersTo": "input-mobile",
+      "description": "Explicit label and readable text-entry value.",
+      "html": "<label class=\"ds-field-label\">歌名<input class=\"ds-field\" placeholder=\"輸入歌名\" /></label>",
+      "css": ".ds-field-label{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;display:grid;gap:8px;color:var(--color-text-muted, #4b5563);font-size:12px;font-weight:500;}.ds-field{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;height:48px;min-width:0;padding:0 12px;border:1px solid var(--color-border, #e5e7eb);border-radius:10px;background:var(--color-surface-muted, #f9fafb);color:var(--color-text, #111827);font-size:16px;font-weight:500;}.ds-field::placeholder{color:var(--color-text-muted, #4b5563);opacity:1;}.ds-field:focus{border-color:var(--color-indigo-500, #3DAA78);}.ds-field:focus-visible{outline:2px solid var(--color-indigo-500, #3DAA78);outline-offset:3px;}"
+    },
+    {
+      "name": "Song information tabs",
+      "kind": "nav",
+      "refersTo": "tab-selected",
+      "description": "Equal-width direct destinations with selected underline.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\" aria-label=\"歌曲資訊分類\"><button role=\"tab\" aria-selected=\"true\">歌曲資料</button><button role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">譜面設定</button><button role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">參考音源</button></div>",
+      "css": ".ds-tabs{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;display:flex;gap:20px;background:var(--color-surface, #ffffff);border-bottom:1px solid var(--color-border, #e5e7eb);}.ds-tabs button{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;flex:1;min-height:48px;padding:0 0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--color-text-muted, #4b5563);font-size:13px;font-weight:600;white-space:nowrap;}.ds-tabs button[aria-selected=\"true\"]{color:var(--color-indigo-700, #236E48);border-bottom-color:var(--color-indigo-600, #2E8C5E);}.ds-tabs button:hover{color:var(--color-indigo-600, #2E8C5E);}.ds-tabs button:focus-visible{outline:2px solid var(--color-indigo-500, #3DAA78);outline-offset:3px;}@media(prefers-reduced-motion:reduce){.ds-tabs button{transition:none;}}:host-context(.dark) .ds-tabs button[aria-selected=\"true\"]{color:var(--color-indigo-400, #5EBD8F);}"
+    },
+    {
+      "name": "Workspace badge",
+      "kind": "chip",
+      "refersTo": "chip-workspace",
+      "description": "Compact active workspace context.",
+      "html": "<span class=\"ds-badge\">歌曲庫</span>",
+      "css": ".ds-badge{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;display:inline-block;padding:2px 8px;border-radius:9999px;background:var(--color-indigo-50, #F0FAF5);color:var(--color-indigo-700, #236E48);font-size:10px;font-weight:700;letter-spacing:.08em;box-shadow:0 0 0 1px var(--color-indigo-200, #B6E3CA);}:host-context(.dark) .ds-badge{background:var(--color-indigo-950, #0D1F17);color:var(--color-indigo-200, #B6E3CA);box-shadow:0 0 0 1px var(--color-indigo-800, #1A5234);}"
+    },
+    {
+      "name": "Editing sheet",
+      "kind": "card",
+      "refersTo": "sheet",
+      "description": "Continuous surface with rounded modal boundary.",
+      "html": "<section class=\"ds-sheet\"><div class=\"ds-sheet-handle\" aria-hidden=\"true\"></div><h2 class=\"ds-sheet-title\">歌曲資訊</h2></section>",
+      "css": ".ds-sheet{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;background:var(--color-surface, #ffffff);color:var(--color-text, #111827);border:1px solid var(--color-border, #e5e7eb);border-radius:24px 24px 0 0;box-shadow:0 25px 50px -12px rgb(0 0 0 / .25);overflow:hidden;}.ds-sheet-handle{height:4px;width:36px;margin:10px auto 0;border-radius:9999px;background:var(--color-border, #e5e7eb);}.ds-sheet-title{margin:0;padding:12px 20px 16px;font-size:18px;line-height:28px;font-weight:700;letter-spacing:-.025em;border-bottom:1px solid var(--color-border, #e5e7eb);}"
+    },
+    {
+      "name": "Groove switch",
+      "kind": "input",
+      "refersTo": "switch-track",
+      "description": "Full-field checkbox with distinct track states and a white thumb in either theme.",
+      "html": "<label class=\"ds-switch-field\"><span>Shuffle</span><input type=\"checkbox\" class=\"ds-switch-input\" aria-label=\"Shuffle\" /><span class=\"ds-switch-track\" aria-hidden=\"true\"><span class=\"ds-switch-thumb\"></span></span></label>",
+      "css": ".ds-switch-field{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;height:48px;padding:0 10px;border:1px solid var(--color-border,#e5e7eb);border-radius:10px;background:var(--color-surface-muted,#f9fafb);color:var(--color-text,#111827);font-size:12px;font-weight:500;}.ds-switch-input{position:absolute;inset:0;width:100%;height:100%;margin:0;z-index:1;opacity:0;cursor:pointer;}.ds-switch-track{position:relative;flex-shrink:0;width:40px;height:24px;border-radius:9999px;background:var(--color-border-strong,#d1d5db);transition:background-color .15s;}.ds-switch-thumb{position:absolute;left:2px;top:2px;width:20px;height:20px;border-radius:9999px;background:var(--color-white,#fff);box-shadow:0 1px 2px rgb(0 0 0 / .05);transition:transform .15s;}.ds-switch-input:checked+.ds-switch-track{background:var(--color-indigo-700,#236E48);}.ds-switch-input:checked+.ds-switch-track .ds-switch-thumb{transform:translateX(16px);}.ds-switch-input:focus-visible+.ds-switch-track{outline:2px solid var(--color-indigo-300,#8AD0AC);outline-offset:2px;}@media(prefers-reduced-motion:reduce){.ds-switch-track,.ds-switch-thumb{transition:none;}}"
+    },
+    {
+      "name": "Active notation mode key",
+      "kind": "button",
+      "refersTo": "keyboard-key-active",
+      "description": "Active 48px notation mode option; musical glyph sizes remain local to their functions.",
+      "html": "<button class=\"ds-note-active\" aria-pressed=\"true\" aria-label=\"固定調簡譜輸入\">固定調</button>",
+      "css": ".ds-note-active{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;height:48px;min-width:0;padding:0 8px;border:1px solid var(--color-indigo-500,#3DAA78);border-radius:11px;background:var(--color-indigo-700,#236E48);color:var(--color-white,#fff);font-size:12px;font-weight:700;transition:transform 75ms,background-color 75ms;}.ds-note-active:hover{background:var(--color-indigo-700,#236E48);}.ds-note-active:active{transform:translateY(1px) scale(.98);}.ds-note-active:focus-visible{outline:auto;}.ds-note-active:disabled{opacity:.4;}"
+    },
+    {
+      "name": "Voice selector",
+      "kind": "custom",
+      "refersTo": "voice-choice-selected",
+      "description": "In-place horizontal voice choices with direct rename and add controls.",
+      "html": "<div class=\"ds-voice-selector\"><div class=\"ds-voice-choices\" role=\"group\" aria-label=\"選擇編輯聲部\"><button class=\"ds-voice-choice\" aria-pressed=\"false\">主聲部</button><button class=\"ds-voice-choice\" aria-pressed=\"true\">大鼓</button></div><button class=\"ds-voice-action\" aria-label=\"重新命名目前聲部\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.5zM15 5l4 4\"/></svg></button><button class=\"ds-voice-action\" aria-label=\"新增聲部\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"/></svg></button></div>",
+      "css": ".ds-voice-selector{font-family:Inter, PingFang TC, Hiragino Sans GB, Microsoft JhengHei, Noto Sans CJK TC, Noto Sans TC, ui-sans-serif, system-ui, sans-serif;display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--color-surface,#fff);color:var(--color-text,#111827);border-bottom:1px solid var(--color-border,#e5e7eb);}.ds-voice-choices{display:flex;flex:1;min-width:0;gap:4px;overflow-x:auto;}.ds-voice-choice{font-family:inherit;height:44px;max-width:160px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0;border-radius:8px;padding:0 10px;font-size:12px;font-weight:600;background:transparent;color:var(--color-text-muted,#4b5563);}.ds-voice-choice:hover,.ds-voice-action:hover{background:var(--color-surface-muted,#f9fafb);}.ds-voice-choice[aria-pressed=\"true\"]{background:var(--color-indigo-100,#DAF1E5);color:var(--color-indigo-800,#1A5234);}.ds-voice-action{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex-shrink:0;border:0;border-radius:8px;background:transparent;color:var(--color-text-muted,#4b5563);}.ds-voice-choice:focus-visible,.ds-voice-action:focus-visible{outline:auto;}.ds-voice-action:disabled{opacity:.4;}:host-context(.dark) .ds-voice-choice[aria-pressed=\"true\"]{background:var(--color-indigo-950,#0D1F17);color:var(--color-indigo-200,#B6E3CA);}"
+    }
+  ],
+  "narrative": {
+    "northStar": "ChordMaster green workspace",
+    "overview": "ChordMaster retains its existing green musical workspace: a quiet, practical interface around charts, musical settings and editing. Inter and Traditional Chinese sans-serif fallbacks carry the UI; musical notation and printable charts keep their own specialist typography. This document records the implemented system rather than establishing a new identity.\n\nMobile reading and full editing have equal importance. Controls remain legible and reachable while overlays preserve the underlying chart position. Semantic surfaces support light and dark themes; a restrained green accent identifies actions and selection. Theme choice can be light, dark or system-following, with interface and native form-control color schemes kept in sync. Charts keep chords and their corresponding lower notation together as one readable musical unit.",
+    "keyCharacteristics": [
+      "Existing green identity with semantic light/dark surfaces.",
+      "Compact desktop tools and larger mobile editing controls.",
+      "Clear labels, rounded fields and restrained borders.",
+      "Independent overlay scrolling with persistent chart position."
+    ],
+    "rules": [
+      {
+        "name": "The Semantic Surface Rule",
+        "body": "Use surface, border and text roles for theme-aware UI; the dark theme changes their values rather than the meaning of the roles.",
+        "section": "colors"
+      },
+      {
+        "name": "The Inherited Green Rule",
+        "body": "Existing indigo-named utilities resolve to the ChordMaster green scale. Preserve that mapping when extending the app.",
+        "section": "colors"
+      },
+      {
+        "name": "The Chart Position Rule",
+        "body": "Opening and scrolling a mobile editor preserves the background chart position; closing restores access to that same position.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Paper and UI Rule",
+        "body": "Theme changes affect interface chrome while printable chart paper and ink retain their established palette.",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Do use the semantic surface, border and text roles together in light and dark UI.",
+      "Do preserve the existing UI font and the green mapping behind indigo utilities.",
+      "Do use 44–48px primary mobile touch controls; padded segmented rails contain 40px options.",
+      "Do keep modal content independently scrollable, retain visible completion controls and respect safe-area insets.",
+      "Do retain visible focus, keyboard navigation and meaningful labels.",
+      "Do preserve native form-control color schemes alongside the root theme and respect explicit theme choices.",
+      "Do keep notation key height floors and allow the center of a short phone dock to scroll.",
+      "Do preserve dedicated switch thumb and track colors when changing theme compatibility rules.",
+      "Do keep voice selection and per-bar naming inside the same notation workflow, with chart selection feedback.",
+      "Do distinguish shared bar text from the name and notation of an individual voice.",
+      "Do keep timed lower notation close to its chord/pass stack and reserve real space for additional voices.",
+      "Do preserve untimed and unmetered rendering when applying compact chart geometry.",
+      "Do render the same saved setlist arrangement in selected previews, unselected previews and export."
+    ],
+    "donts": [
+      "Don't promote the mobile song editor's three-tab composition into a requirement for every screen.",
+      "Don't substitute raw white and gray styling for theme-aware roles in new mobile editing surfaces.",
+      "Don't use muted or faint text roles interchangeably: labels and placeholder text in the mobile editor use the muted role.",
+      "Don't change chart or notation typography to match UI controls; export keeps its printable light appearance.",
+      "Don't let generic dark compatibility override dedicated component variants or printable chart content.",
+      "Don't reserve empty filler below notation keys; use content-sized panels with bounded center scrolling.",
+      "Don't distribute spare A4 height inside timed notation-bearing rows or inflate ordinary single-melody pagination."
+    ]
+  }
+}

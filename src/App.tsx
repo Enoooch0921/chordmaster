@@ -1,3 +1,5 @@
+import { useModalFocus } from './hooks/useModalFocus';
+import { useModalScrollLock } from './hooks/useModalScrollLock';
 import { usePerformanceKeyboardFocus } from './hooks/usePerformanceKeyboardFocus';
 import { createPerformanceKeyGate } from './lib/performanceKeyGate';
 import { openPickupPreviewSession } from './lib/pickupEditing';
@@ -141,7 +143,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus, Keyboard } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus, Keyboard } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -2309,6 +2311,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     isLoading?: boolean;
   }>>({});
   const previewRef = React.useRef<HTMLDivElement>(null);
+  const mobileMetadataRef = React.useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const previewZoomLabelRef = useRef<HTMLButtonElement>(null);
@@ -2599,6 +2602,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       || (/Macintosh/i.test(previewEditorUserAgent) && previewEditorPlatform === 'MacIntel' && previewEditorTouchPoints > 1)
       || (Capacitor.getPlatform() === 'ios' && !previewEditorIsPhoneDevice && viewportWidth >= PHONE_VIEWPORT_BREAKPOINT)
   });
+  useModalFocus(isPhoneViewport && isMobileMetadataOpen, mobileMetadataRef);
+  useModalScrollLock(
+    (isPhoneViewport && (isMobileActionsSheetOpen || isMobileMetadataOpen))
+      || (previewEditorDeviceLayout !== 'desktop' && Boolean(previewMetaEditTarget)
+        && previewMetaEditTarget?.field !== 'performanceKey'),
+    previewRef
+  );
   const isSidebarExpanded = isPhoneViewport ? isMobileNavOpen : (isSidebarPinned || isSidebarHovered);
   const usesOverlaySidebar = viewportWidth < SIDEBAR_OVERLAY_BREAKPOINT;
   const collapsedSidebarWidth = isPhoneViewport ? 0 : COLLAPSED_SIDEBAR_WIDTH;
@@ -7739,7 +7749,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
               {isLyricsMode && isLyricsContinuous ? <LyricsBook title={selectedSetlist.name} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode /> : setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
                 const baseDerivedSong = applySetlistSongOverrides(
-                  sourceSong,
+                  item.songData ?? sourceSong,
                   selectedSetlist,
                   item,
                   guitaristMode,
@@ -10560,7 +10570,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         ? activeDraftNavigationPreviewSong
         : {
             ...applySetlistSongOverrides(
-              sourceSong,
+              item.songData ?? sourceSong,
               effectiveSelectedSetlist,
               item,
               guitaristMode,
@@ -11712,6 +11722,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             : activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong}
           language={language}
           metadataSuggestions={metadataSuggestions}
+          deviceLayout={isPhoneViewport ? 'phone' : 'desktop'}
           title={copy.setlistEditor.instanceSettings}
           onChange={(nextSong) => {
             if (isJoinedSetlist) {
@@ -11745,6 +11756,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           song={(activeDraftEditorSong ?? song) as StoredSong}
           language={language}
           metadataSuggestions={metadataSuggestions}
+          deviceLayout={isPhoneViewport ? 'phone' : 'desktop'}
           title={language === 'zh' ? '編輯歌曲' : 'Edit Song'}
           onChange={handleActiveEditorSongChange}
           jianpuInputAbsolute={(activeDraftEditorSong ?? song).jianpuInputAbsolute ?? false}
@@ -14347,7 +14359,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 <img src={logoSrc} alt="ChordMaster" className="h-9 w-9 rounded-xl shadow-sm ring-1 ring-gray-200" />
 
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-bold tracking-tight text-gray-900">{APP_NAME}</div>
+                  <div className="truncate text-sm font-bold tracking-tight text-[color:var(--color-text)]">{APP_NAME}</div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                     {isSheetView ? (
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
@@ -14361,6 +14373,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     <span className="truncate text-[11px] font-medium text-gray-500">{activeAppViewLabel}</span>
                   </div>
                 </div>
+
+                {!isAuthenticated ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleGoogleSignIn()}
+                    disabled={!isAuthConfigured}
+                    className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-indigo-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label={copy.continueWithGoogle}
+                  >
+                    <LogIn size={16} />
+                    <span>{language === 'zh' ? '登入' : 'Sign in'}</span>
+                  </button>
+                ) : null}
 
                 <button
                   type="button"
@@ -16305,21 +16330,28 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   animate={{ y: 0 }}
                   exit={{ y: '100%' }}
                   transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
-                  className="absolute inset-x-0 bottom-0 z-[80] max-h-[86dvh] overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-[#F5F5F4] shadow-[0_-24px_60px_rgba(15,23,42,0.18)] dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
+                  ref={mobileMetadataRef} role="dialog" aria-modal="true" aria-label={mobileMetadataTitle}
+                  onKeyDown={event => {
+                    event.stopPropagation();
+                    if (event.key === 'Escape' && !(event.target instanceof Element && event.target.closest('[data-placement]'))) {
+                      event.preventDefault(); setIsMobileMetadataOpen(false);
+                    }
+                  }}
+                  className="absolute inset-x-0 bottom-0 z-[80] flex max-h-[90dvh] flex-col overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-[#F5F5F4] shadow-[0_-24px_60px_rgba(15,23,42,0.18)] dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
                 >
-                  <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-gray-300" />
-                  <div className="flex items-center justify-between border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur-sm">
+                  <div className="mx-auto mt-2 h-1.5 w-12 shrink-0 rounded-full bg-gray-300" />
+                  <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur-sm">
                     <div className="text-sm font-bold text-gray-900">{mobileMetadataTitle}</div>
                     <button
                       type="button"
                       onClick={() => setIsMobileMetadataOpen(false)}
-                      className="rounded-lg px-2 py-1 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
+                      className="min-h-11 rounded-lg px-3 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50"
                     >
                       {copy.done}
                     </button>
                   </div>
 
-                  <div className="max-h-[calc(86dvh-4.5rem)] overflow-y-auto px-4 py-4">
+                  <div data-mobile-metadata-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                     {metadataPanelContent}
                   </div>
                 </motion.div>

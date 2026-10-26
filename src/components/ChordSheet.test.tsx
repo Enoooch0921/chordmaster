@@ -456,7 +456,7 @@ describe('ChordSheet preview input caret', () => {
     expect(lowerGutter).toHaveClass('absolute', 'bottom-[2px]', 'right-2', 'flex-col', 'gap-0');
     expect(lowerGutter?.querySelector('[data-preview-section-gutter-time-signature]')).toHaveTextContent('44');
     expect(lowerGutter?.querySelector('[data-preview-section-gutter-label]')).toHaveTextContent('Top Note');
-    expect(lowerGutter?.closest('[data-preview-section-start-lower-gutter]')).toHaveClass('min-h-[68px]', 'flex-[1.18]');
+    expect(lowerGutter?.closest('[data-preview-section-start-lower-gutter]')).toHaveClass('min-h-[68px]', 'flex-1');
     expect(container.querySelector('[data-preview-inline-time-signature]')).toHaveTextContent('24');
     expect(container.querySelector('.sheet-bar [data-preview-section-gutter-label]')).toBeNull();
   });
@@ -649,7 +649,7 @@ describe('ChordSheet preview input caret', () => {
 
     const bottomLane = container.querySelector('[data-preview-bottom-lane]');
     expect(bottomLane).not.toHaveClass('pr-[96px]');
-    expect(bottomLane).toHaveStyle({ bottom: '4px' });
+    expect(bottomLane).toHaveStyle({ top: '40px' });
     expect(screen.getByText('Fine').parentElement).toHaveClass('-bottom-[16px]', 'right-1');
     expect(screen.getByText('Fine').parentElement).not.toHaveClass('top-[2px]');
   });
@@ -717,6 +717,48 @@ describe('ChordSheet preview input caret', () => {
       />
     );
     expect(container.querySelector('[data-preview-slot-hit]')?.parentElement).toHaveClass('pt-[3px]');
+  });
+
+  it.each(['subdivided', 'unmetered', 'untimed'] as const)('aligns pickup and gutter with the %s first-measure anchor', kind => {
+    const baseBar = { id: 'first', chords: ['C'], rhythm: 'q q q q', riff: '1 | 2 | 3 | 4', label: 'Band', labelLane: 'rhythm' as const };
+    const bar = { ...baseBar, ...(kind === 'subdivided' ? { chordSubdivisions: [{ beat: 0, offset: 0.5 as const, chord: 'G' }] } : kind === 'unmetered' ? { unmeteredChordLines: [['C', 'G']] } : { chordTimingUnspecified: true }) };
+    const source: Song = { ...song, pickup: { timeSignature: '1/4', riff: '5', rhythm: 'q' }, sections: [{ id: 's', title: 'Verse', bars: [bar] }] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    const lane = container.querySelector<HTMLElement>('[data-preview-bottom-lane]');
+    const pickup = container.querySelector<HTMLElement>('[data-preview-pickup]');
+    const gutter = container.querySelector<HTMLElement>('[data-preview-section-lower-gutter]');
+    if (kind === 'subdivided') {
+      expect(lane).toHaveStyle({ top: '48px' }); expect(pickup).toHaveStyle({ top: '44px' });
+    } else if (kind === 'unmetered') {
+      expect(container.querySelector('[data-unmetered-chord-block]')).toBeInTheDocument();
+      expect(lane).toBeNull(); expect(pickup).toBeNull();
+    } else {
+      expect(lane).toHaveStyle({ bottom: '4px' }); expect(pickup?.style.top).toBe('');
+      expect(gutter?.style.top ?? '').toBe('');
+    }
+  });
+
+  it('keeps a chord with one melody at the normal two-line pagination weight', () => {
+    const bars = Array.from({ length: 40 }, (_, index) => ({ id: `melody-${index}`, chords: ['C'], riff: '1 | 2 | 3 | 4' }));
+    const { container } = render(<ChordSheet song={{ ...song, barRowCount: 2, sections: [{ id: 's', title: 'Verse', bars }] }} language="zh" currentKey="C" />);
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
+    const row = container.querySelector('[data-preview-compact-notation-row]');
+    expect(row).toHaveAttribute('data-preview-layout-weight', '1');
+    expect(row).toHaveClass('flex-1');
+    expect(row).toHaveStyle({ maxHeight: '68px' });
+    expect(container.querySelector('[data-preview-bottom-lane]')).toHaveStyle({ top: '40px' });
+  });
+
+  it('keeps sparse multi-voice notation near its chords while reserving every voice row', () => {
+    const source: Song = { ...song, barRowCount: 3, sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'], rhythm: 'q q q q', riff: '1 | 2 | 3 | 4',
+      rhythmVoices: [{ id: 'kick', label: 'Kick', rhythm: 'q' }], riffVoices: [{ id: 'bass', label: 'Bass', riff: '5' }, { id: 'flute', label: 'Flute', riff: '3' }]
+    }] }] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    const row = container.querySelector('[data-preview-compact-notation-row]');
+    expect(row).toHaveStyle({ minHeight: '164px', maxHeight: '164px' });
+    expect(container.querySelector('[data-rhythm-voice="kick"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-voice="bass"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-voice="flute"]')).toBeInTheDocument();
   });
 
   it('uses the three-line bar height for preview and printable page pagination', () => {
@@ -1428,6 +1470,51 @@ describe('ChordSheet preview input caret', () => {
     expect(pages[1].querySelectorAll('[data-preview-section-id="section-2"] [data-rhythm-measure-row]')).toHaveLength(2);
   });
 
+  it('keeps add controls from creating a third page after moving a section start', () => {
+    // The 71-bar chart has nine rows before Verse 2; keeping its opening
+    // together fills page one with a spacer and page two with ten music rows.
+    const source: Song = {
+      ...song,
+      barRowCount: 2,
+      sections: [4, 8, 4, 17, 8, 4, 16, 10].map((count, sectionIndex) => ({
+        id: `section-${sectionIndex}`,
+        title: ['Intro', 'Verse 1', 'Pre-Chorus 1', 'Chorus 1', 'Verse 2', 'Pre-Chorus 2', 'Chorus 2', 'Bridge'][sectionIndex],
+        bars: Array.from({ length: count }, (_, barIndex) => ({
+          id: `bar-${sectionIndex}-${barIndex}`, chords: ['C']
+        }))
+      }))
+    };
+    const before = JSON.stringify(source);
+    const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(2);
+
+    rerender(<ChordSheet song={source} language="zh" currentKey="C" onAddBarClick={vi.fn()} onAddSectionAfterClick={vi.fn()} />);
+    const pages = container.querySelectorAll('[data-print-page]');
+    expect(pages).toHaveLength(2);
+    expect(pages[0].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(9);
+    expect(pages[1].querySelectorAll('[data-rhythm-measure-row]')).toHaveLength(10);
+    expect(container.querySelectorAll('[data-preview-clipboard-bar]')).toHaveLength(71);
+    expect(container.querySelector('[data-preview-add-choice-row]')).toBeNull();
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it('keeps add controls within the remaining capacity of weighted notation rows', () => {
+    const source: Song = {
+      ...song,
+      barRowCount: 1,
+      sections: [{ ...song.sections[0], bars: Array.from({ length: 32 }, (_, index) => ({
+        id: `bar-${index}`, chords: ['C'], rhythm: 'q q q q', riff: '1 2 3 4'
+      })) }]
+    };
+    const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
+
+    rerender(<ChordSheet song={source} language="zh" currentKey="C" onAddBarClick={vi.fn()} onAddSectionAfterClick={vi.fn()} />);
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-preview-clipboard-bar]')).toHaveLength(32);
+    expect(container.querySelector('[data-preview-add-choice-row]')).toBeNull();
+  });
+
   it('uses one-line bar height for chord-only rows without reserving an empty lower lane', () => {
     const bars = Array.from({ length: 76 }, (_, index) => ({
       id: `bar-${index + 1}`,
@@ -1487,7 +1574,7 @@ describe('ChordSheet preview input caret', () => {
     const row = container.querySelector('[data-preview-row-lower-notation-rows="true"]');
 
     expect(rhythmAnchor).not.toBeNull();
-    expect(row).toHaveClass('min-h-[68px]', 'flex-[1.18]');
+    expect(row).toHaveClass('min-h-[68px]', 'flex-1');
     expect(rhythmAnchor?.className).toContain('before:-top-2');
     expect(rhythmAnchor?.className).toContain('z-[30]');
   });

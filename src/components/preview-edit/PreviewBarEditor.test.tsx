@@ -194,19 +194,78 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: /^十六分三連休止$/ })).toBeEnabled();
   });
 
-  it('edits an extra voice without overlapping the primary keyboard or changing its rhythm', async () => {
+  it.each(['rhythm', 'jianpu'] as const)('edits and names a %s voice in the shared keyboard without touching other parts', async mode => {
     const user = userEvent.setup();
-    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], rhythm: 'qr q qr q', rhythmVoices: [{ id: 'kick', label: 'Kick', rhythm: 'q' }] }] }] };
-    const rhythmTarget = { ...target, field: 'rhythm' as const, slotIndex: 0, cursor: { kind: 'rhythm' as const, cursorUnit: 0 } };
-    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: rhythmTarget, inputMode: 'letters' }), deviceLayout: 'phone' });
-    await user.click(screen.getByText('其他節奏聲部 (1)'));
-    expect(document.querySelector('[data-keyboard-view="rhythm"]')).toBeNull();
-    await user.click(screen.getByRole('button', { name: /^重音$/ }));
-    const bar = onApplyDraft.mock.calls.at(-1)![0].sections[0].bars[0];
-    expect(bar.rhythm).toBe('qr q qr q');
-    expect(bar.rhythmVoices).toEqual([{ id: 'kick', label: 'Kick', rhythm: 'q^' }]);
-    await user.click(screen.getByText('其他節奏聲部 (1)'));
-    expect(document.querySelector('[data-keyboard-view="rhythm"]')).toBeInTheDocument();
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0],
+      rhythm: 'qr q qr q', riff: '1 | 2 | 3 | 4',
+      rhythmVoices: [{ id: 'kick', label: 'Kick', rhythm: 'q' }],
+      riffVoices: [{ id: 'bass', label: 'Bass', riff: '5 | 6 | 7 | 1' }]
+    }, { id: 'neighbor', chords: ['G'], riff: '7', rhythm: 'q' }] }] };
+    const notationTarget = { ...target, field: mode, slotIndex: 0, cursor: mode === 'rhythm' ? { kind: 'rhythm' as const, cursorUnit: 0 } : { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null } };
+    let latest = createPreviewEditSession({ song: source, target: notationTarget, inputMode: 'letters' });
+    function Harness() {
+      const [session, setSession] = useState(latest); latest = session;
+      return <PreviewBarEditor session={session} language="zh" deviceLayout="phone" storedKey="C" displayedKey="C" storageMode="letters"
+        onApplyDraft={draft => setSession(current => applyPreviewDraft(current, draft))}
+        onNotationCursorChange={cursor => setSession(current => setPreviewNotationCursor(current, cursor))}
+        onNotationModeChange={vi.fn()} onInputModeChange={vi.fn()} onJianpuInputAbsoluteChange={vi.fn()}
+        onNavigate={vi.fn()} onStructure={vi.fn()} onUndo={vi.fn()} onRedo={vi.fn()} onDone={vi.fn()} onCancel={vi.fn()} />;
+    }
+    render(<Harness />);
+    const voiceId = mode === 'rhythm' ? 'kick' : 'bass';
+    await user.click(screen.getByRole('button', { name: mode === 'rhythm' ? 'Kick' : 'Bass' }));
+    expect(latest.past).toHaveLength(0);
+    expect(document.querySelector(`[data-keyboard-view="${mode}"]`)).toBeInTheDocument();
+    expect(latest.cursorByMode[mode]).toMatchObject({ voiceId });
+    await user.click(screen.getByRole('button', { name: mode === 'rhythm' ? '切換節奏重音' : '刪除簡譜音符' }));
+    let bar = latest.draftSong.sections[0].bars[0];
+    expect(bar.rhythm).toBe('qr q qr q'); expect(bar.riff).toBe('1 | 2 | 3 | 4');
+    if (mode === 'rhythm') expect(bar.rhythmVoices?.[0].rhythm).toBe('q^');
+    else expect(bar.riffVoices?.[0].riff).not.toBe(source.sections[0].bars[0].riffVoices?.[0].riff);
+    expect(latest.draftSong.sections[0].bars[1]).toEqual(source.sections[0].bars[1]);
+    await user.click(screen.getByRole('button', { name: '重新命名目前聲部' }));
+    await user.clear(screen.getByRole('textbox', { name: '聲部名稱' }));
+    await user.type(screen.getByRole('textbox', { name: '聲部名稱' }), '合唱');
+    await user.click(screen.getByRole('button', { name: '儲存' }));
+    bar = latest.draftSong.sections[0].bars[0];
+    expect((mode === 'rhythm' ? bar.rhythmVoices : bar.riffVoices)?.[0].label).toBe('合唱');
+    await user.click(screen.getByRole('button', { name: '主聲部' }));
+    await user.click(screen.getByRole('button', { name: '重新命名目前聲部' }));
+    await user.clear(screen.getByRole('textbox', { name: '聲部名稱' }));
+    await user.type(screen.getByRole('textbox', { name: '聲部名稱' }), '旋律');
+    await user.click(screen.getByRole('button', { name: '儲存' }));
+    expect(latest.draftSong.sections[0].bars[0][mode === 'rhythm' ? 'rhythmLabel' : 'riffLabel']).toBe('旋律');
+    expect(latest.draftSong.sections[0].bars[1]).toEqual(source.sections[0].bars[1]);
+    await user.click(screen.getByRole('button', { name: '新增聲部' }));
+    expect(screen.getByRole('button', { name: '聲部 3' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: '重新命名目前聲部' }));
+    await user.click(screen.getByRole('button', { name: '移除目前聲部' }));
+    expect(screen.queryByRole('button', { name: '聲部 3' })).toBeNull();
+    expect(screen.getByRole('button', { name: '旋律' })).toHaveAttribute('aria-pressed', 'true');
+    expect(latest.draftSong.sections[0].bars[0].rhythm).toBe('qr q qr q');
+    expect(latest.draftSong.sections[0].bars[0].riff).toBe('1 | 2 | 3 | 4');
+  });
+
+  it('does not delete a bar when backspacing an empty additional voice over a populated primary', () => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [], riff: '1 | 2 | 3 | 4', riffVoices: [{ id: 'empty', label: '空聲部', riff: '' }] }] }] };
+    const cursor = { kind: 'jianpu' as const, voiceId: 'empty', beatIndex: 0, unitIndex: 0, noteIndex: null };
+    const { onStructure, onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: { ...target, field: 'jianpu', cursor } }) });
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    expect(onStructure).not.toHaveBeenCalled();
+    expect(onApplyDraft).not.toHaveBeenCalled();
+  });
+
+  it.each(['chords', 'rhythm', 'jianpu'] as const)('opens shared text fields from %s and returns to its keyboard', async field => {
+    const user = userEvent.setup();
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], riff: '1', rhythm: 'q', riffVoices: [{ id: 'bass', label: 'Bass', riff: '5' }] }] }] };
+    const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: { ...target, field } }), deviceLayout: 'phone' });
+    await user.click(screen.getByRole('button', { name: '文字欄位' }));
+    expect(screen.getByText('文字套用到目前小節，由所有聲部共用。')).toBeVisible();
+    fireEvent.change(screen.getByRole('textbox', { name: '上方註記' }), { target: { value: '漸強' } });
+    expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0]).toEqual({ ...source.sections[0].bars[0], annotation: '漸強' });
+    await user.click(screen.getByRole('button', { name: `返回${field === 'chords' ? '和弦' : field === 'rhythm' ? '節奏' : '簡譜'}鍵盤` }));
+    expect(screen.queryByRole('textbox', { name: '上方註記' })).toBeNull();
+    expect(screen.getByRole('button', { name: '文字欄位' })).toBeVisible();
   });
 
   it('cycles a source crosshead without changing its duration or neighboring notes', async () => {
@@ -546,14 +605,14 @@ describe('PreviewBarEditor', () => {
       expect(glyph).toHaveAttribute('data-jianpu-duration', 'eighth');
       expect(glyph.querySelectorAll('[data-jianpu-duration-line]')).toHaveLength(1);
     });
-    expect(eighthButton).toHaveClass('!bg-indigo-600');
+    expect(eighthButton).toHaveClass('!bg-indigo-700');
 
     await user.click(eighthButton);
     Array.from(document.querySelectorAll('[data-jianpu-key-row="pitches"] [data-jianpu-input-glyph]')).forEach((glyph) => {
       expect(glyph).toHaveAttribute('data-jianpu-duration', 'quarter');
       expect(glyph.querySelectorAll('[data-jianpu-duration-line]')).toHaveLength(0);
     });
-    expect(eighthButton).not.toHaveClass('!bg-indigo-600');
+    expect(eighthButton).not.toHaveClass('!bg-indigo-700');
 
     await user.click(screen.getByRole('button', { name: '切換簡譜十六分音符' }));
     Array.from(document.querySelectorAll('[data-jianpu-key-row="pitches"] [data-jianpu-input-glyph]')).forEach((glyph) => {
@@ -565,10 +624,10 @@ describe('PreviewBarEditor', () => {
     await user.click(screen.getByRole('button', { name: '切換高八度簡譜' }));
     await user.click(screen.getByRole('button', { name: '切換簡譜附點' }));
 
-    expect(eighthButton).toHaveClass('!bg-indigo-600');
-    expect(screen.getByRole('button', { name: '切換簡譜升記號' })).toHaveClass('!bg-indigo-600');
-    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).toHaveClass('!bg-indigo-600');
-    expect(screen.getByRole('button', { name: '切換簡譜附點' })).toHaveClass('!bg-indigo-600');
+    expect(eighthButton).toHaveClass('!bg-indigo-700');
+    expect(screen.getByRole('button', { name: '切換簡譜升記號' })).toHaveClass('!bg-indigo-700');
+    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).toHaveClass('!bg-indigo-700');
+    expect(screen.getByRole('button', { name: '切換簡譜附點' })).toHaveClass('!bg-indigo-700');
     expect(pitchKey).toHaveTextContent('1');
     expect(document.querySelectorAll('[data-jianpu-input-glyph]')).toHaveLength(11);
   });
@@ -761,20 +820,20 @@ describe('PreviewBarEditor', () => {
     renderEditor({ session: jianpuSession, deviceLayout: 'desktop' });
 
     fireEvent.keyDown(document.body, { key: 'e' });
-    expect(screen.getByRole('button', { name: '切換簡譜八分音符' })).toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換簡譜八分音符' })).toHaveClass('!bg-indigo-700');
     expect(screen.getByRole('button', { name: '輸入簡譜 4' }).querySelector('[data-jianpu-input-glyph]')).toHaveAttribute('data-jianpu-duration', 'eighth');
     fireEvent.keyDown(document.body, { key: 'e' });
-    expect(screen.getByRole('button', { name: '切換簡譜八分音符' })).not.toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換簡譜八分音符' })).not.toHaveClass('!bg-indigo-700');
     expect(screen.getByRole('button', { name: '輸入簡譜 4' }).querySelector('[data-jianpu-input-glyph]')).toHaveAttribute('data-jianpu-duration', 'quarter');
 
     fireEvent.keyDown(document.body, { key: 's' });
-    expect(screen.getByRole('button', { name: '切換簡譜十六分音符' })).toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換簡譜十六分音符' })).toHaveClass('!bg-indigo-700');
     fireEvent.keyDown(document.body, { key: 'ArrowUp' });
-    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).toHaveClass('!bg-indigo-700');
     fireEvent.keyDown(document.body, { key: 'ArrowUp' });
-    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).not.toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換高八度簡譜' })).not.toHaveClass('!bg-indigo-700');
     fireEvent.keyDown(document.body, { key: 'ArrowDown' });
-    expect(screen.getByRole('button', { name: '切換低八度簡譜' })).toHaveClass('!bg-indigo-600');
+    expect(screen.getByRole('button', { name: '切換低八度簡譜' })).toHaveClass('!bg-indigo-700');
   });
 
   it('hands cross-bar jianpu navigation back to the App target navigator', async () => {

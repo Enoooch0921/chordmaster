@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-26',
+        title: 'Mobile editing, continuous voices and stable setlist pages',
+        bullets: [
+          'Mobile song info has clear tabs and its own scroll area; the sign-in button is easier to find.',
+          'Edit all voices with the same notation keyboard, rename the current bar’s voice, and open Text from the same header position in every notation mode.',
+          'Notation keyboards fit their content and short screens. Pickup markers and automatic light/dark changes match the rest of the interface.',
+          'Rhythm and melody stay close to their chords. Saved setlist arrangements are used consistently so page counts stay stable when switching songs.'
+        ]
+      },
+      {
+        version: '0.9.17',
+        date: '2026-10-26',
         title: 'Google account selection at sign-in',
         bullets: [
           'Google sign-in now asks which account to use each time, so signing out of a secondary account lets you choose your main account again.'
@@ -560,6 +571,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-26',
+        title: '手機編輯、連續聲部操作與穩定歌單頁數',
+        bullets: [
+          '手機歌曲資訊分頁與獨立捲動，登入按鈕更容易找到。',
+          '主聲部與其他聲部共用記譜鍵盤，可直接修改目前小節的聲部名稱；三種鍵盤的「文字」入口統一放在頂部。',
+          '鍵盤依內容收合並適應短螢幕，弱起標記及系統日夜模式切換完整套用介面顏色。',
+          '節奏與簡譜靠近和弦；歌單預覽與匯出統一使用保存的編排，修正來回切歌時頁數變動。'
+        ]
+      },
+      {
+        version: '0.9.17',
         date: '2026-10-26',
         title: '登入時選擇 Google 帳號',
         bullets: [

@@ -1,3 +1,4 @@
+import { useModalFocus } from '../hooks/useModalFocus';
 import { currentKeyMode } from '../utils/keyMode';
 import type { TonalMode } from '../types';
 import React from 'react';
@@ -414,6 +415,8 @@ export default function PreviewWysiwygEditor({
     };
   }, [isTouchLayout, usesMetadataPanel]);
 
+  useModalFocus(usesMetadataPanel && isTouchLayout, panelRef);
+
   const closeWithoutCommit = () => {
     if (finishedRef.current) {
       return;
@@ -535,6 +538,9 @@ export default function PreviewWysiwygEditor({
   };
 
   const handleEscape = (event: React.KeyboardEvent) => {
+    if (usesMetadataPanel && isTouchLayout) {
+      event.stopPropagation();
+    }
     if (event.key === 'Escape') {
       if (event.target instanceof Element && event.target.closest('[data-placement]')) {
         return;
@@ -563,19 +569,23 @@ export default function PreviewWysiwygEditor({
   const chrome = (children: React.ReactNode, title: string, fullMetadata = false) => (
     <div
       ref={(node) => { panelRef.current = node; }}
+      data-song-info-dialog={fullMetadata ? deviceLayout : undefined}
       role={fullMetadata ? 'dialog' : undefined}
+      aria-modal={fullMetadata && isTouchLayout ? true : undefined}
       aria-label={fullMetadata ? title : undefined}
-      className={`flex max-h-full flex-col border border-gray-200 bg-white shadow-2xl ${isTouchLayout ? 'rounded-t-[24px] sm:rounded-[24px]' : 'rounded-xl'}`}
+      style={fullMetadata ? { maxHeight: 'inherit' } : undefined}
+      className={`flex min-h-0 flex-col overflow-hidden border border-gray-200 bg-white shadow-2xl ${deviceLayout === 'phone' && fullMetadata ? 'h-full' : ''} ${isTouchLayout ? 'rounded-t-[24px] sm:rounded-[24px]' : 'rounded-xl'}`}
       onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
       onKeyDown={handleEscape}
     >
-      <div className={`sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 rounded-t-[inherit] border-b border-gray-100 bg-white ${deviceLayout === 'phone' && fullMetadata ? 'px-3 py-2' : 'px-4 py-3'}`}>
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="truncate text-sm font-bold text-gray-900">{title}</div>
-          {fullMetadata ? (
+      {fullMetadata && deviceLayout === 'phone' ? <div aria-hidden="true" className="mx-auto mt-2.5 h-1 w-9 shrink-0 rounded-full bg-gray-200" /> : null}
+      <div data-song-info-heading className={`sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 rounded-t-[inherit] border-b border-gray-100 bg-white ${fullMetadata && deviceLayout === 'phone' ? 'px-5 pb-4 pt-3' : 'px-4 py-3'}`}>
+        <div className={`flex min-w-0 ${fullMetadata && deviceLayout === 'phone' ? 'flex-col items-start gap-1' : 'items-center gap-2'}`}>
+          <div className={`truncate font-bold text-gray-900 ${fullMetadata && deviceLayout === 'phone' ? 'text-lg tracking-tight' : 'text-sm'}`}>{title}</div>
+          {fullMetadata && deviceLayout !== 'phone' ? (
             <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-500">
               {copy.editor.originalKey}: {song.originalKey}
             </span>
@@ -583,22 +593,18 @@ export default function PreviewWysiwygEditor({
         </div>
         <button
           type="button"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            closeWithoutCommit();
-          }}
-          onClick={(event) => event.preventDefault()}
-          className={`${isTouchLayout ? 'h-11 min-w-11 px-3' : 'h-8 w-8'} inline-flex shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700`}
+          onClick={closeWithoutCommit}
+          className={`${fullMetadata && deviceLayout === 'phone' ? 'h-11 min-w-16 rounded-full bg-indigo-700 px-4 text-white shadow-sm hover:bg-indigo-800' : isTouchLayout ? 'h-11 min-w-11 rounded-lg px-3 text-gray-500 hover:bg-gray-100' : 'h-8 w-8 rounded-lg text-gray-500 hover:bg-gray-100'} inline-flex shrink-0 items-center justify-center transition-colors`}
           title={zh ? '關閉' : 'Close'}
         >
           {fullMetadata && isTouchLayout ? (
-            <span className="text-sm font-bold text-indigo-600">{zh ? '完成' : 'Done'}</span>
+            <span className={`text-sm font-bold ${deviceLayout === 'phone' ? '' : 'text-indigo-600'}`}>{zh ? '完成' : 'Done'}</span>
           ) : (
             <X size={16} />
           )}
         </button>
       </div>
-      <div className={`${fullMetadata ? 'overflow-y-auto overscroll-contain' : ''} ${deviceLayout === 'phone' && fullMetadata ? 'p-3' : 'space-y-3 p-4'}`}>
+      <div data-preview-metadata-scroll={fullMetadata ? '' : undefined} className={`${fullMetadata ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain' : ''} ${fullMetadata && deviceLayout === 'phone' ? 'bg-[color:var(--color-surface)] px-5 pb-5' : 'space-y-3 p-4'}`}>
         {children}
       </div>
     </div>
@@ -915,7 +921,7 @@ export default function PreviewWysiwygEditor({
       variant={usesFullSongInfoPanel ? 'default' : 'preview-header'}
       deviceLayout={deviceLayout}
       initialFocusField={target.field === 'metadata' ? undefined : target.field === 'performanceKey' ? 'key' : target.field}
-      initialAdvancedOpen={usesFullSongInfoPanel}
+      initialAdvancedOpen={usesFullSongInfoPanel && deviceLayout !== 'phone'}
       canEditKey={canEditKey}
     />,
     zh ? '歌曲資訊' : 'Song information',
@@ -957,21 +963,23 @@ export default function PreviewWysiwygEditor({
 
   if (usesMetadataPanel && isTouchLayout) {
     const maxHeight = deviceLayout === 'phone'
-      ? Math.max(280, Math.min(680, visualViewportState.height * 0.82))
-      : Math.max(300, Math.min(480, visualViewportState.height * 0.5));
+      ? Math.min(760, visualViewportState.height * 0.9)
+      : Math.min(480, visualViewportState.height * 0.75);
     return (
       <div
         data-preview-metadata-backdrop
         data-device-layout={deviceLayout}
-        className={`fixed inset-x-0 top-0 z-[82] flex items-end justify-center bg-slate-950/10 ${deviceLayout === 'phone' ? 'px-0' : 'px-4'} pb-[max(0.75rem,env(safe-area-inset-bottom))]`}
+        className={`fixed inset-x-0 top-0 z-[82] flex items-end justify-center overscroll-none bg-slate-950/30 ${deviceLayout === 'phone' ? 'px-0' : 'px-4'} pb-[max(0.75rem,env(safe-area-inset-bottom))]`}
+        onTouchMove={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
         style={{ bottom: visualViewportState.keyboardOffset }}
         onPointerDown={(event) => {
           if (event.currentTarget === event.target) closeWithoutCommit();
         }}
       >
         <div
-          className={deviceLayout === 'phone' ? 'w-full' : 'w-full max-w-[720px]'}
-          style={{ maxHeight }}
+          className={`flex min-h-0 flex-col ${deviceLayout === 'phone' ? 'w-full' : 'w-full max-w-[720px]'}`}
+          style={{ maxHeight, height: deviceLayout === 'phone' ? maxHeight : undefined }}
         >
           {body}
         </div>
@@ -981,7 +989,7 @@ export default function PreviewWysiwygEditor({
 
   return (
     <div
-      className="fixed z-[82]"
+      className="fixed z-[82] flex min-h-0 flex-col"
       style={usesMetadataPanel ? { ...desktopStyle, maxHeight: 'min(70vh, 520px)' } : desktopStyle}
     >
       {body}

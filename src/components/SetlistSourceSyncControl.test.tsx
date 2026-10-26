@@ -22,6 +22,7 @@ it('requires an explicit preview and confirmation before uploading', async () =>
   const { prepare, onSynced } = mount();
   expect(mocks.sync).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '同步回歌曲庫' }));
+  await screen.findByRole('dialog');
   await screen.findByText('Verse · 第 1 小節：和弦 (C → G)');
   expect(prepare).toHaveBeenCalledOnce();
   expect(mocks.sync).not.toHaveBeenCalled();
@@ -53,6 +54,7 @@ it.each(['conflict','unknown'])('requires choosing a version explicitly for %s',
 it('blocks another upload after a conflict until a fresh preview is loaded', async () => {
   const { onSynced } = mount();
   fireEvent.click(screen.getByRole('button', { name: '同步回歌曲庫' }));
+  await screen.findByRole('dialog');
   await screen.findByText('Verse · 第 1 小節：和弦 (C → G)');
   mocks.sync.mockRejectedValueOnce({ message: '歌曲庫已被其他人修改' });
   fireEvent.click(screen.getByRole('button', { name: '確認更新歌曲庫' }));
@@ -64,6 +66,7 @@ it('blocks another upload after a conflict until a fresh preview is loaded', asy
 });
 it('cancels without changing the source', async () => {
   mount(); fireEvent.click(screen.getByRole('button', { name: '同步回歌曲庫' }));
+  await screen.findByRole('dialog');
   await screen.findByText('Verse · 第 1 小節：和弦 (C → G)');
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(mocks.sync).not.toHaveBeenCalled();

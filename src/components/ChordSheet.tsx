@@ -1,3 +1,4 @@
+import { projectNotationVoice } from '../lib/notationVoiceEditing';
 import PickupPreview from './PickupPreview';
 import { getPickupDisplay, PICKUP_EDITOR_SECTION_ID } from '../utils/pickupUtils';
 import { getSongTempoStates, hasTempoEvent } from '../utils/tempoEvents';
@@ -110,6 +111,9 @@ const MajorQualityGlyph: React.FC<{ qualityText: string; numeric?: boolean; abbr
 const getBarDisplayLabel = (bar?: Bar) => (
   bar?.label?.trim() || bar?.riffLabel?.trim() || (visibleRhythmVoices(bar?.rhythmVoices).length ? '' : bar?.rhythmLabel?.trim()) || ''
 );
+
+const usesCompactNotationAnchor = (bar?: Bar) => Boolean(bar && !bar.chordTimingUnspecified && !hasUnmeteredChords(bar));
+const compactNotationTop = (bar?: Bar) => 40 + (bar?.chordSubdivisions?.length ? 8 : 0) + (bar?.chordPassVariants?.length ?? 0) * 36;
 
 const isWholeRestChord = (chordString?: string) => {
   const trimmed = chordString?.trim();
@@ -1565,9 +1569,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       return clientY < candidate.startY ? 'rhythm' : 'riff';
     }
 
-    // In three-line preview, the lower two notation rows occupy the row bottom.
-    // Dropping above this split chooses row 2 (rhythm), below it chooses row 3 (riff).
-    const lowerLaneSplitY = rowRect.bottom - 24;
+    const measure = candidate.targetElement.closest('.sheet-bar')
+      ?? candidate.rowElement?.querySelector('.sheet-bar');
+    const rhythm = measure?.querySelector('[data-preview-edit-anchor$="|rhythm|all"]')?.getBoundingClientRect();
+    const riff = measure?.querySelector('[data-preview-edit-anchor$="|jianpu|all"]')?.getBoundingClientRect();
+    const lowerLaneSplitY = rhythm && riff && riff.height > 0
+      ? (rhythm.bottom + riff.top) / 2
+      : rowRect.bottom - 24;
     return clientY < lowerLaneSplitY ? 'rhythm' : 'riff';
   };
   const handleLabelLanePointerDown = (
@@ -1892,11 +1900,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const barRowCount = song.barRowCount === 1 ? 1 : song.barRowCount === 3 ? 3 : 2;
   const ROWS_PER_PAGE_FIRST = barRowCount === 3 ? 8 : barRowCount === 1 ? 18 : 10;
   const ROWS_PER_PAGE_OTHER = barRowCount === 3 ? 9 : barRowCount === 1 ? 21 : 10;
-  const pageIndexOfRow = (rowIndex: number) =>
-    rowIndex < ROWS_PER_PAGE_FIRST
-      ? 0
-      : 1 + Math.floor((rowIndex - ROWS_PER_PAGE_FIRST) / ROWS_PER_PAGE_OTHER);
-
   const allowAddBar = Boolean(onAddBarClick);
   const allowAddSectionAfter = Boolean(onAddSectionAfterClick);
   // Older drafts can contain orphaned sections left behind by a cancelled
@@ -2021,28 +2024,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
       }
   });
 
-  // Adding after the final section is represented by one neutral choice row.
-  // It does not become a bar or a section until the user explicitly chooses
-  // which structure to create.
   const finalSection = song.sections[lastSectionIndex];
   const finalVisibleBars = visibleSectionBars[lastSectionIndex] ?? finalSection?.bars ?? [];
-  if ((allowAddBar || allowAddSectionAfter) && finalSection && finalSection.bars.length > 0) {
-    const addSectionRowIndex = allRows.length;
-    if (addSectionRowIndex > 0 && pageIndexOfRow(addSectionRowIndex) === pageIndexOfRow(addSectionRowIndex - 1)) {
-      allRows.push({
-        kind: 'add-choice',
-        sectionTitle: null,
-        bars: [],
-        sIdx: lastSectionIndex,
-        startBIdx: finalVisibleBars.length,
-        addSectionAfter: true,
-        hasThreeNotationRows: false,
-        hasLowerNotationRows: false,
-        hasSectionStartLowerGutter: false,
-        layoutWeight: 1
-      });
-    }
-  }
   const sectionBarOffsets: number[] = [];
   let accumulatedBarCount = 0;
   song.sections.forEach((section, index) => {
@@ -2104,6 +2087,25 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   });
   if (activePageRows.length > 0) {
     pages.push(activePageRows);
+  }
+
+  // Add editor controls only after music pagination, using the actual room
+  // left after section-start moves and weighted notation rows. A choice row
+  // must never create an otherwise empty printable page.
+  if ((allowAddBar || allowAddSectionAfter) && finalSection && finalSection.bars.length > 0
+    && activePageRows.length > 0 && activePageWeight + 1 <= activePageCapacity) {
+    activePageRows.push({
+      kind: 'add-choice',
+      sectionTitle: null,
+      bars: [],
+      sIdx: lastSectionIndex,
+      startBIdx: finalVisibleBars.length,
+      addSectionAfter: true,
+      hasThreeNotationRows: false,
+      hasLowerNotationRows: false,
+      hasSectionStartLowerGutter: false,
+      layoutWeight: 1
+    });
   }
 
   // Ensure at least one page
@@ -2378,9 +2380,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
               const sectionStartBar = row.startBIdx === 0 ? row.bars[0] : undefined;
               const sectionStartBarLabel = getBarDisplayLabel(sectionStartBar);
               const sectionStartEffectiveTimeSignature = getBarEffectiveTimeSignatureByIndex(row.sIdx, row.startBIdx, sectionStartBar);
-              const sectionStartHasRhythm = Boolean(sectionStartBar?.rhythm?.trim());
+              const sectionStartHasRhythm = Boolean(sectionStartBar?.rhythm?.trim() || visibleRhythmVoices(sectionStartBar?.rhythmVoices).length);
               const sectionStartHasRiff = hasVisiblePreviewRiff(getPreviewRiffNotation(sectionStartBar?.riff, sectionStartEffectiveTimeSignature))
                 || visibleJianpuVoices(sectionStartBar?.riffVoices).length > 0;
+              const sectionStartHasChords = Boolean(sectionStartBar && (hasMeaningfulChordContent(sectionStartBar.chords) || sectionStartBar.chordSubdivisions?.length || sectionStartBar.chordPassVariants?.length));
+              const sectionStartLowerTop = compactNotationTop(sectionStartBar);
+              const sectionStartRhythmHeight = 18 + visibleRhythmVoices(sectionStartBar?.rhythmVoices).length * 22;
               const sectionStartDefaultLabelLane: BarLabelLane = sectionStartHasRhythm && sectionStartHasRiff && (!sectionStartBar?.timeSignature || sectionStartBar.partialMeasure) ? 'rhythm' : 'riff';
               const sectionStartLabelLane: BarLabelLane = sectionStartBar?.labelLane === 'rhythm'
                 ? 'rhythm'
@@ -2457,6 +2462,13 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 </div>
               );
 
+              // Keep notation attached to its chord row even when a sparse A4
+              // page has spare height. Voice count still reserves its full space.
+              const notationRowHeight = Math.max(
+                row.bars.some(bar => bar?.chordTimingUnspecified) ? row.hasThreeNotationRows ? 120 : row.hasLowerNotationRows ? 90 : 50 : 0,
+                row.hasThreeNotationRows ? 94 : barRowCount === 1 ? row.hasLowerNotationRows ? 58 : 34 : 68
+              ) + (row.extraRhythmRows ?? 0) * 22 + (row.extraJianpuRows ?? 0) * 24 + (row.extraChordPassRows ?? 0) * 36;
+
               return (
                 <motion.div
                   key={`${section?.id || row.sIdx}-${row.kind}-${row.startBIdx}`}
@@ -2465,13 +2477,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                   data-preview-only-control={row.kind === 'add-choice' ? 'true' : undefined}
                   data-preview-row-three-notation-rows={row.hasThreeNotationRows ? true : undefined}
                   data-preview-row-lower-notation-rows={row.hasLowerNotationRows ? true : undefined}
+                  data-preview-compact-notation-row={row.kind === 'music' && row.hasLowerNotationRows ? true : undefined}
                   data-preview-section-start-lower-gutter={row.hasSectionStartLowerGutter ? true : undefined}
                   data-preview-layout-weight={row.layoutWeight}
                   data-preview-section-drop-target={row.startBIdx === 0 ? section?.id || '' : undefined}
                   style={{
+                    ...(row.kind === 'music' && row.hasLowerNotationRows && !row.unmetered && !row.bars.some(bar => bar.chordTimingUnspecified) ? { maxHeight: notationRowHeight } : {}),
                     ...(row.extraRhythmRows || row.extraJianpuRows || row.extraChordPassRows || row.bars.some(bar=>bar?.chordTimingUnspecified) ? {
-                    minHeight: Math.max(row.bars.some(bar=>bar?.chordTimingUnspecified) ? row.hasThreeNotationRows ? 120 : row.hasLowerNotationRows ? 90 : 50 : 0, row.hasThreeNotationRows ? 94 : barRowCount === 1 ? row.hasLowerNotationRows ? 58 : 34 : 68)
-                      + (row.extraRhythmRows ?? 0) * 22 + (row.extraJianpuRows ?? 0) * 24 + (row.extraChordPassRows ?? 0) * 36,
+                    minHeight: notationRowHeight,
                     flexGrow: row.layoutWeight
                   } : {}) }}
                   layout={!suppressSectionTransitions}
@@ -2503,7 +2516,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         : row.hasThreeNotationRows
                           ? 'min-h-[94px] flex-[1.45]'
                           : row.hasLowerNotationRows
-                            ? 'min-h-[68px] flex-[1.18]'
+                            ? 'min-h-[68px] flex-1'
                             : 'min-h-0 flex-1'
                   }`}
                 >
@@ -2658,7 +2671,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               ? 'bottom-[2px] gap-0'
                               : 'bottom-[6px] gap-0.5'
                         } ${canDragSectionStartLabelLane ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
-                        style={canDragSectionStartLabelLane ? { WebkitUserSelect: 'none', userSelect: 'none' } : undefined}
+                        style={{ ...(canDragSectionStartLabelLane ? { WebkitUserSelect: 'none', userSelect: 'none' } : {}),
+                          ...(usesCompactNotationAnchor(sectionStartBar) && (sectionStartHasRhythm || sectionStartHasRiff) ? {
+                            top: sectionStartLowerTop + (sectionStartLabelLane === 'riff' && sectionStartHasChords && sectionStartHasRhythm && sectionStartHasRiff ? sectionStartRhythmHeight + 6 : 0)
+                              - (showSectionStartGutterTimeSignature && sectionStartLabelLane !== 'rhythm' ? 28 : 0), bottom: 'auto'
+                          } : {}) }}
                         title={canDragSectionStartLabelLane ? getLabelLaneDragTitle(language) : undefined}
                         onMouseDown={canDragSectionStartLabelLane ? (event) => event.stopPropagation() : undefined}
                         onPointerDown={canDragSectionStartLabelLane ? (event) => handleLabelLanePointerDown(event, row.sIdx, 0, sectionStartLabelLane) : undefined}
@@ -2698,6 +2715,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                 {row.sIdx === 0 && row.startBIdx === 0 && (hasPickupDisplay || onElementClick) && <PickupPreview pickup={pickup} meter={song.timeSignature}
                   language={language} playKey={getPlayKey(displayedCurrentKey, capo)} absolute={song.showAbsoluteJianpu} active={isPickupActive}
                   previewIdentity={previewIdentity ?? 'preview'} cursor={isPickupActive ? resolvedActiveNotationTarget?.cursor : undefined}
+                  notationTop={usesCompactNotationAnchor(sectionStartBar) ? sectionStartLowerTop + (!pickup?.rhythm?.trim() && sectionStartHasChords && sectionStartHasRhythm && sectionStartHasRiff ? sectionStartRhythmHeight + 6 : 0) : undefined}
+                  rhythmLaneHeight={sectionStartRhythmHeight}
                   nextRiff={sectionStartBar?.riff} nextRhythm={sectionStartBar?.rhythm}
                   nextTimeSignature={sectionStartEffectiveTimeSignature}
                   onSelect={onElementClick ? (event, field, cursor) => emitElementClick(event, 0, -1, field, undefined, undefined, cursor) : undefined} />}
@@ -2880,7 +2899,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     };
                     const emitRhythmSelection = (
                       cursorUnit: number,
-                      event?: React.MouseEvent<HTMLElement>
+                      event?: React.MouseEvent<HTMLElement>,
+                      voiceId?: string
                     ) => {
                       if (!event) return;
                       emitElementClick(
@@ -2890,17 +2910,18 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         'rhythm',
                         undefined,
                         undefined,
-                        { kind: 'rhythm', cursorUnit }
+                        { kind: 'rhythm', cursorUnit, ...(voiceId ? { voiceId } : {}) }
                       );
                     };
                     const emitJianpuNoteSelection = (
                       beatIndex: number,
                       noteIndex: number,
-                      event?: React.MouseEvent<HTMLElement>
+                      event?: React.MouseEvent<HTMLElement>,
+                      voiceId?: string
                     ) => {
                       if (!event) return;
                       const cursor = section?.id && bar?.id
-                        ? getJianpuCursorForNote(song, { sectionId: section.id, barId: bar.id }, beatIndex, noteIndex)
+                        ? getJianpuCursorForNote(voiceId ? projectNotationVoice(song, { sectionId: section.id, barId: bar.id }, { mode: 'jianpu', id: voiceId }) : song, { sectionId: section.id, barId: bar.id }, beatIndex, noteIndex)
                         : null;
                       emitElementClick(
                         event,
@@ -2909,13 +2930,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         'riff',
                         undefined,
                         undefined,
-                        { kind: 'jianpu', ...(cursor ?? { beatIndex, unitIndex: 0, noteIndex }) }
+                        { kind: 'jianpu', ...(cursor ?? { beatIndex, unitIndex: 0, noteIndex }), ...(voiceId ? { voiceId } : {}) }
                       );
                     };
                     const emitJianpuInsertSelection = (
                       beatIndex: number,
                       unitIndex: number,
-                      event?: React.MouseEvent<HTMLElement>
+                      event?: React.MouseEvent<HTMLElement>,
+                      voiceId?: string
                     ) => {
                       if (!event) return;
                       emitElementClick(
@@ -2925,7 +2947,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                         'riff',
                         undefined,
                         undefined,
-                        { kind: 'jianpu', beatIndex, unitIndex, noteIndex: null }
+                        { kind: 'jianpu', beatIndex, unitIndex, noteIndex: null, ...(voiceId ? { voiceId } : {}) }
                       );
                     };
                     const previousRhythmBar = bIdx > 0
@@ -3378,6 +3400,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               previousVoices={bIdx === 0 ? (previousRhythmBar as Bar | undefined)?.rhythmVoices : undefined}
                                               previousTimeSignature={previousRhythmTimeSignature}
                                               nextVoices={nextRhythmBar?.rhythmVoices}
+                                              activeVoiceId={activeRhythmCursor?.voiceId}
+                                              onVoiceInsertSelect={onElementClick ? (voiceId, unit, event) => emitRhythmSelection(unit, event, voiceId) : undefined}
                                               primaryLabel={bar.rhythmLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
                                               notation={bar.rhythm || ''}
                                               timeSignature={effectiveTimeSignature}
@@ -3654,7 +3678,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                               <div
                                 data-preview-bottom-lane
                                 className={`absolute left-1 right-1 ${contentLeftInsetClass}`}
-                                style={{ bottom: '4px' }}
+                                style={usesCompactNotationAnchor(bar) ? { top: compactNotationTop(bar) } : { bottom: '4px' }}
                               >
 	                                {showBottomRhythmLane && hasRiff ? (
 	                                  <div className={`flex gap-1 ${hasThreeNotationRows ? 'items-stretch' : ''}`}>
@@ -3699,6 +3723,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               previousVoices={bIdx === 0 ? (previousRhythmBar as Bar | undefined)?.rhythmVoices : undefined}
                                               previousTimeSignature={previousRhythmTimeSignature}
                                               nextVoices={nextRhythmBar?.rhythmVoices}
+                                              activeVoiceId={activeRhythmCursor?.voiceId}
+                                              onVoiceInsertSelect={onElementClick ? (voiceId, unit, event) => emitRhythmSelection(unit, event, voiceId) : undefined}
                                               primaryLabel={bar.rhythmLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
                                               notation={bar.rhythm || ''}
                                               timeSignature={effectiveTimeSignature}
@@ -3734,6 +3760,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             <JianpuVoiceStack
                                               voices={extraRiffVoices}
                                               showPrimary={hasVisiblePreviewRiff(previewRiffNotation)}
+                                              activeVoiceId={activeJianpuCursor?.voiceId}
+                                              onVoiceTokenClick={onElementClick ? (voiceId, beat, unit, event) => emitJianpuInsertSelection(beat, unit, event, voiceId) : undefined}
+                                              onVoiceNoteClick={onElementClick ? (voiceId, beat, note, event) => emitJianpuNoteSelection(beat, note, event, voiceId) : undefined}
                                               primaryLabel={bar.riffLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
                                               notation={previewRiffNotation}
                                               compact
@@ -3784,7 +3813,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               previousVoices={bIdx === 0 ? (previousRhythmBar as Bar | undefined)?.rhythmVoices : undefined}
                                               previousTimeSignature={previousRhythmTimeSignature}
                                               nextVoices={nextRhythmBar?.rhythmVoices}
-                                                primaryLabel={bar.rhythmLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
+                                                activeVoiceId={activeRhythmCursor?.voiceId}
+                                              onVoiceInsertSelect={onElementClick ? (voiceId, unit, event) => emitRhythmSelection(unit, event, voiceId) : undefined}
+                                              primaryLabel={bar.rhythmLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
                                                 notation={bar.rhythm || ''}
                                                 timeSignature={effectiveTimeSignature}
                                                 compact
@@ -3806,6 +3837,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                             <JianpuVoiceStack
                                               voices={extraRiffVoices}
                                               showPrimary={hasVisiblePreviewRiff(previewRiffNotation)}
+                                              activeVoiceId={activeJianpuCursor?.voiceId}
+                                              onVoiceTokenClick={onElementClick ? (voiceId, beat, unit, event) => emitJianpuInsertSelection(beat, unit, event, voiceId) : undefined}
+                                              onVoiceNoteClick={onElementClick ? (voiceId, beat, note, event) => emitJianpuNoteSelection(beat, note, event, voiceId) : undefined}
                                               primaryLabel={bar.riffLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
                                               notation={previewRiffNotation}
                                               compact

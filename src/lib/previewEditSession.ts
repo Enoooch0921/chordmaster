@@ -31,11 +31,13 @@ export interface PreviewChordCursor {
 
 export interface PreviewRhythmCursor {
   kind: 'rhythm';
+  voiceId?: string;
   cursorUnit: number;
 }
 
 export interface PreviewJianpuCursor {
   kind: 'jianpu';
+  voiceId?: string;
   beatIndex: number;
   unitIndex: number;
   noteIndex?: number | null;

@@ -12,6 +12,7 @@ const TeamInvitePage = lazy(() => import('./pages/TeamInvitePage.tsx'));
 import { ToastProvider } from './components/Toast.tsx';
 import { registerAppFontFaces, waitForAppFontsReady } from './lib/fontFaceAssets.ts';
 import './index.css';
+import './styles/dark-ui.css';
 
 const appBaseUrl = import.meta.env.BASE_URL;
 const routerBasename = appBaseUrl === './' ? '/' : appBaseUrl;
