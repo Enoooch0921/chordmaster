@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-27',
+        title: "Remember projects and smoother setlist navigation",
+        bullets: ["Reopen the same project, meeting and song on this account and browser. Archived or unavailable meetings return to their parent project; archived or unavailable projects return to All Setlists.", "Enter meetings with a directional slide and reverse the path when returning. Show named loading feedback over the score preview before rendering the next meeting.", "Meeting, project and member swipe actions update only the dragged row, with opaque foregrounds and hidden action layers. Preserve vertical scrolling, long-press selection, role controls and removal confirmations."]
+      },
+      {
+        version: '0.9.26',
+        date: '2026-10-27',
         title: 'Keep chords and barlines steady during startup',
         bullets: ['Chart rows update their geometry immediately instead of animating position and size after viewport or font measurements. This fixes chords and barlines sliding inside stationary paper while loading.', 'Section selection and highlight colors keep their existing feedback.']
       },
@@ -625,6 +631,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: "記住專案位置與流暢歌單導覽",
+        bullets: ["同一帳號與瀏覽器重新開啟時，回到上次的專案、聚會與歌曲；聚會歸檔或無法存取時回到上一層專案，整個專案歸檔或無法存取時回到全部歌單。", "進入聚會時向內滑入，返回時反向滑回；右側譜面區先顯示具名載入提示，再呈現下一個聚會。", "歌單、專案與成員列改為獨立滑動，避免拖曳時反覆重繪整頁，並以不透明前景及隱藏操作層修正紅色底層外露；保留上下捲動、長按多選、權限控制與移除確認。"]
+      },
+      {
+        version: '0.9.26',
         date: '2026-10-27',
         title: '修正和弦與小節線載入晃動',
         bullets: ['譜面列的位置與尺寸立即更新，移除載入量測引發的內部排版動畫，修正白紙固定、和弦與小節線左右晃動。', '保留段落選取與提示的顏色回饋。']

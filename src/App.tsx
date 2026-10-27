@@ -1,3 +1,4 @@
+import { SwipeActionGroup, SwipeActionRow } from './components/SwipeActionRow';
 import { AnimatedDisclosure, AnimatedPopover, PresenceSurface, PresenceBackdrop } from './components/ui/InteractionMotion';
 import { useUiMotion } from './hooks/useUiMotion';
 import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants } from './lib/uiMotion';
@@ -20,6 +21,9 @@ import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { normalizeJianpuVoices } from './utils/jianpuVoices';
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
 import { usePreviewPinchZoom } from './hooks/usePreviewPinchZoom';
+import { useSetlistNavigationMemory } from './hooks/useSetlistNavigationMemory';
+import { useSetlistOpening } from './hooks/useSetlistOpening';
+import { getNavigationStorageKey, getSetlistParentFilter, type SetlistNavigationLocation } from './lib/setlistNavigationMemory';
 import { usePerformanceFullscreen } from './hooks/usePerformanceFullscreen';
 import PerformanceFullscreenControl from './components/PerformanceFullscreenControl';
 import HomeScreenGuide from './components/HomeScreenGuide';
@@ -266,158 +270,6 @@ const DEFAULT_EXPANDED_SIDEBAR_WIDTH = 420;
 const MIN_EXPANDED_SIDEBAR_WIDTH = 360;
 const MAX_EXPANDED_SIDEBAR_WIDTH = 640;
 const PHONE_VIEWPORT_BREAKPOINT = 640;
-// Setlist swipe-to-reveal tuning. Reveal width matches the w-20 (5rem = 80px)
-// behind-buttons so the card lines up flush with them when fully snapped open.
-const SETLIST_SWIPE_AXIS_LOCK_PX = 6;
-const SETLIST_SWIPE_REVEAL_PX = 80;
-const SETLIST_SWIPE_OPEN_THRESHOLD_PX = 10;
-
-// Shared swipe-to-reveal engine used by both the setlist rows and the project
-// rows so the two lists behave identically (right swipe → archive, left swipe →
-// delete, iOS-style hysteresis, mouse drag on the web). A controller is built
-// per render from the caller's ref + state setters so its closures always see
-// the latest open/dragging state, mirroring inline handlers.
-type SwipeGestureState = {
-  id: string;
-  x: number;
-  y: number;
-  axis: 'h' | 'v' | null;
-  latestDx: number;
-  baseOffset: number;
-  latestOffset: number;
-};
-
-type SwipeControllerConfig = {
-  ref: React.MutableRefObject<SwipeGestureState | null>;
-  handledRef: React.MutableRefObject<boolean>;
-  openId: string | null;
-  openAction: 'delete' | 'archive' | null;
-  setDragging: React.Dispatch<React.SetStateAction<{ id: string; dx: number } | null>>;
-  setOpen: (next: { id: string; action: 'delete' | 'archive' } | null) => void;
-  canDelete: (id: string) => boolean;
-  canArchive: (id: string) => boolean;
-};
-
-const createSwipeController = (config: SwipeControllerConfig) => {
-  // Carry over the row's current open offset so dragging from an open row can
-  // pull it closed instead of jumping the transform back to 0. Delete lives on
-  // the right (row translated left → negative offset); archive on the left.
-  const begin = (id: string, clientX: number, clientY: number) => {
-    const baseOffset = config.openId === id
-      ? (config.openAction === 'delete' ? -SETLIST_SWIPE_REVEAL_PX : SETLIST_SWIPE_REVEAL_PX)
-      : 0;
-    config.ref.current = { id, x: clientX, y: clientY, axis: null, latestDx: 0, baseOffset, latestOffset: baseOffset };
-    config.handledRef.current = false;
-  };
-
-  // Returns the locked axis ('h' once it is a horizontal swipe) so the mouse
-  // pointer handler knows when to capture the pointer and suppress selection.
-  const update = (clientX: number, clientY: number): 'h' | 'v' | null => {
-    const start = config.ref.current;
-    if (!start) return null;
-    const dx = clientX - start.x;
-    const dy = clientY - start.y;
-    if (start.axis === null) {
-      if (Math.abs(dx) < SETLIST_SWIPE_AXIS_LOCK_PX && Math.abs(dy) < SETLIST_SWIPE_AXIS_LOCK_PX) return null;
-      start.axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
-      // Past the lock threshold, treat as a deliberate swipe so the follow-up
-      // tap doesn't fall through to selecting the row.
-      if (start.axis === 'h') config.handledRef.current = true;
-    }
-    if (start.axis !== 'h') return start.axis;
-    // Neutral rows can travel either direction; an already-open row only swings
-    // back toward 0 so a single gesture can't tear through one action into the other.
-    const candidate = start.baseOffset + dx;
-    const min = start.baseOffset === SETLIST_SWIPE_REVEAL_PX || !config.canDelete(start.id)
-      ? 0
-      : -SETLIST_SWIPE_REVEAL_PX;
-    const max = start.baseOffset === -SETLIST_SWIPE_REVEAL_PX ? 0 : SETLIST_SWIPE_REVEAL_PX;
-    const offset = Math.max(min, Math.min(max, candidate));
-    start.latestDx = dx;
-    start.latestOffset = offset;
-    config.setDragging((current) => (
-      current && current.id === start.id && current.dx === offset ? current : { id: start.id, dx: offset }
-    ));
-    return 'h';
-  };
-
-  // Commits the final action. Returns true when a horizontal swipe was handled
-  // (so the caller can preventDefault and suppress the trailing click).
-  const commit = (id: string): boolean => {
-    const start = config.ref.current;
-    config.ref.current = null;
-    config.setDragging(null);
-    if (!start || start.id !== id) return false;
-    if (start.axis !== 'h') { config.handledRef.current = false; return false; }
-    // iOS-style hysteresis. From neutral: left past threshold → reveal delete,
-    // right past threshold → reveal archive. From an open row: nudging back past
-    // the threshold toward 0 closes it; anything smaller stays open.
-    const offset = start.latestOffset;
-    const movedFromBase = offset - start.baseOffset;
-    const wasOpen = start.baseOffset !== 0;
-    if (wasOpen) {
-      const closingNudge = start.baseOffset < 0 ? movedFromBase : -movedFromBase;
-      if (closingNudge > SETLIST_SWIPE_OPEN_THRESHOLD_PX) config.setOpen(null);
-      else config.setOpen({ id, action: start.baseOffset < 0 ? 'delete' : 'archive' });
-    } else if (offset <= -SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
-      if (config.canDelete(id)) config.setOpen({ id, action: 'delete' });
-      else config.setOpen(null);
-    } else if (offset >= SETLIST_SWIPE_OPEN_THRESHOLD_PX) {
-      if (config.canArchive(id)) config.setOpen({ id, action: 'archive' });
-      else config.setOpen(null);
-    } else {
-      config.setOpen(null);
-    }
-    return true;
-  };
-
-  const reset = () => {
-    config.ref.current = null;
-    config.handledRef.current = false;
-    config.setDragging(null);
-  };
-
-  const touchStart = (id: string, event: React.TouchEvent<HTMLDivElement>) => {
-    const touch = event.touches[0];
-    if (!touch) return;
-    begin(id, touch.clientX, touch.clientY);
-  };
-  const touchMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    const touch = event.touches[0];
-    if (!touch) return;
-    update(touch.clientX, touch.clientY);
-  };
-  const touchEnd = (id: string, event: React.TouchEvent<HTMLDivElement>) => {
-    if (commit(id)) event.preventDefault();
-  };
-
-  // Mouse-only pointer handlers bring the same swipe to the web. Touch input
-  // keeps flowing through the touch handlers, so these bail for non-mouse
-  // pointers to avoid double-driving the gesture on touchscreens.
-  const pointerDown = (id: string, event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== 'mouse' || event.button !== 0) return;
-    begin(id, event.clientX, event.clientY);
-  };
-  const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== 'mouse' || !config.ref.current) return;
-    const axis = update(event.clientX, event.clientY);
-    if (axis === 'h') {
-      // Capture the pointer so the drag keeps tracking if the cursor leaves the
-      // row, and stop the browser from selecting the row's text.
-      if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
-        try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* noop */ }
-      }
-      event.preventDefault();
-    }
-  };
-  const pointerEnd = (id: string, event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== 'mouse' || !config.ref.current) return;
-    commit(id);
-  };
-
-  return { begin, update, commit, reset, touchStart, touchMove, touchEnd, pointerDown, pointerMove, pointerEnd };
-};
-
 const SIDEBAR_OVERLAY_BREAKPOINT = 1280;
 const SPLIT_EDITOR_BREAKPOINT = 1360;
 // User-draggable editor/preview split bounds (desktop split view only).
@@ -2145,6 +1997,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [joinedProjects, setJoinedProjects] = useState<JoinedProject[]>([]);
   const [joinedSetlistDisplayPreferences, setJoinedSetlistDisplayPreferences] = useState<Record<string, JoinedSetlistDisplayPreference>>(loadJoinedSetlistDisplayPreferences);
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlists.selectedSetlistId);
+  const [allowDefaultSetlistSelection, setAllowDefaultSetlistSelection] = useState(true);
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlists.selectedSetlistSongId);
   const [songHistories, setSongHistories] = useState<Record<string, SongHistoryState>>({});
   const [setlistSongHistories, setSetlistSongHistories] = useState<Record<string, SetlistSongHistoryState>>({});
@@ -2210,6 +2063,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [librarySortMode, setLibrarySortMode] = useState<LibrarySortMode>(loadLibrarySortPreference);
   const [showArchivedSongs, setShowArchivedSongs] = useState(false);
   const [setlistPanelView, setSetlistPanelView] = useState<SetlistPanelView>('list');
+  const [legacyNavigation] = useState<SetlistNavigationLocation>(() => {
+    let filter = setlistProjectFilter;
+    try {
+      const legacyProjectId = window.localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY);
+      filter = parseSetlistProjectFilter(window.localStorage.getItem(SETLIST_PROJECT_FILTER_STORAGE_KEY))
+        ?? (legacyProjectId ? { kind: 'owned-project', projectId: legacyProjectId } : filter);
+    } catch { /* Use the in-memory selection when storage is unavailable. */ }
+    return {
+      version: 1, workspaceMode, filter, view: 'list', parentFilter: filter,
+      setlistId: selectedSetlistId, songId: selectedSetlistSongId
+    };
+  });
+  const [navigationLinkSetlistId] = useState(() => (
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('setlist')
+  ));
   const [setlistContextMenu, setSetlistContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const setlistContextTriggerRef = useRef<HTMLElement | null>(null);
   const [isCreateSetlistOpen, setIsCreateSetlistOpen] = useState(false);
@@ -2231,12 +2099,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [mobileActionsSection, setMobileActionsSection] = useState<'sheet' | 'settings'>('sheet');
   const [isMobileMetadataOpen, setIsMobileMetadataOpen] = useState(false);
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
-  const [mobileSwipeSetlist, setMobileSwipeSetlist] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
-  const [draggingSetlist, setDraggingSetlist] = useState<{ id: string; dx: number } | null>(null);
-  const [mobileSwipeProject, setMobileSwipeProject] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
-  const [draggingProject, setDraggingProject] = useState<{ id: string; dx: number } | null>(null);
-  const [mobileSwipeMember, setMobileSwipeMember] = useState<{ id: string; action: 'delete' | 'archive' } | null>(null);
-  const [draggingMember, setDraggingMember] = useState<{ id: string; dx: number } | null>(null);
   const [draggingSetlistSongId, setDraggingSetlistSongId] = useState<string | null>(null);
   const [dragOverSetlistSongId, setDragOverSetlistSongId] = useState<string | null>(null);
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(loadGoogleSession);
@@ -2268,6 +2130,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [cloudLibraries, setCloudLibraries] = useState<CloudLibrarySummary[]>([]);
   const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
   const [workspaceOwnerId, setWorkspaceOwnerId] = useState<string | null>(null);
+  const setlistOpening = useSetlistOpening(`${authenticatedUser?.id ?? 'local'}:${activeLibraryId ?? 'local'}:${workspaceMode}`);
   const [isSwitchingLibrary, setIsSwitchingLibrary] = useState(false);
   const [activeCloudMutationCount, setActiveCloudMutationCount] = useState(0);
   const [teamManagement, setTeamManagement] = useState<TeamManagementSnapshot | null>(null);
@@ -2342,12 +2205,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const importLibraryInputRef = useRef<HTMLInputElement>(null);
   const googleSignInRef = useRef<HTMLDivElement>(null);
   const googleIdentityInitializedRef = useRef(false);
-  const mobileSetlistSwipeRef = useRef<SwipeGestureState | null>(null);
-  const mobileSetlistSwipeHandledRef = useRef(false);
-  const mobileProjectSwipeRef = useRef<SwipeGestureState | null>(null);
-  const mobileProjectSwipeHandledRef = useRef(false);
-  const mobileMemberSwipeRef = useRef<SwipeGestureState | null>(null);
-  const mobileMemberSwipeHandledRef = useRef(false);
+  const setlistLongPressHandledRef = useRef(false);
   const mobileLongPressRef = useRef<{ kind: 'song' | 'setlist'; id: string; x: number; y: number } | null>(null);
   const mobileLongPressTimerRef = useRef<number | null>(null);
   const mobileLongPressTriggeredRef = useRef(false);
@@ -2700,7 +2558,44 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     () => getJoinedProjectSetlists(joinedProjects),
     [joinedProjects]
   );
-  const firstAvailableSetlist = setlists[0] ?? joinedSetlists[0] ?? allJoinedProjectSetlists[0] ?? null;
+  const navigationWorkspace = React.useMemo(() => ({ projects, setlists, joinedProjects, joinedSetlists }),
+    [projects, setlists, joinedProjects, joinedSetlists]);
+  const navigationReady = !isLoadingCloudWorkspace && !isSwitchingLibrary && (
+    authenticatedUser
+      ? workspaceOwnerId === authenticatedUser.id
+      : !isAuthConfigured || authStatus === 'unauthenticated' || authStatus === 'unconfigured'
+  );
+  const navigationMemoryReady = useSetlistNavigationMemory({
+    storageKey: getNavigationStorageKey(authenticatedUser?.id ?? null, activeLibraryId),
+    ready: navigationReady,
+    workspace: navigationWorkspace,
+    legacy: legacyNavigation,
+    explicitSetlistId: navigationLinkSetlistId,
+    current: {
+      version: 1, workspaceMode, filter: setlistProjectFilter,
+      view: setlistPanelView === 'detail' || setlistPanelView === 'addSongs' ? 'detail' : 'list',
+      setlistId: selectedSetlistId, songId: selectedSetlistSongId,
+      parentFilter: getSetlistParentFilter(selectedSetlistId, navigationWorkspace)
+    },
+    onRestore: location => {
+      setWorkspaceMode(location.workspaceMode);
+      setSetlistProjectFilter(location.filter);
+      setSetlistPanelView(location.view);
+      setSelectedSetlistId(location.setlistId);
+      setSelectedSetlistSongId(location.songId);
+      setAllowDefaultSetlistSelection(location.setlistId !== null || location.workspaceMode !== 'setlists');
+      if (location.workspaceMode === 'setlists' && location.view === 'list') {
+        if (isPhoneViewport) setIsMobileNavOpen(true);
+        else {
+          setIsSidebarPinned(true);
+          setIsSidebarHovered(true);
+        }
+      }
+    }
+  });
+  const firstAvailableSetlist = allowDefaultSetlistSelection || selectedSetlistId
+    ? setlists[0] ?? joinedSetlists[0] ?? allJoinedProjectSetlists[0] ?? null
+    : null;
   const selectedSetlist = selectedSetlistId
     ? setlists.find((item) => item.id === selectedSetlistId)
       ?? joinedSetlists.find((item) => item.id === selectedSetlistId)
@@ -2901,13 +2796,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       ? buildJianpuPitchContext(activeDraftNavigationPreviewSong)
       : undefined
   ), [activeDraftNavigationPreviewSong]);
-  const activeAppViewLabel = activeAppView === 'about'
-    ? copy.about
-    : activeAppView === 'help'
-      ? copy.help
-      : isSetlistMode
-        ? selectedSetlist?.name || copy.untitledSetlist
-        : hasSongs ? song.title || copy.untitledSong : (activeCloudLibrary?.name ?? copy.songLibrary);
   const workspaceModeBadge = isSetlistMode ? copy.setlistModeBadge : copy.songModeBadge;
   const syncStatusLabel = syncStatus === 'saved'
     ? copy.cloudSyncSaved
@@ -3455,10 +3343,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           ? projects.find((project) => project.id === setlistProjectFilter.projectId)?.name ?? copy.untitledProject
           : joinedProjects.find((project) => project.id === setlistProjectFilter.projectId)?.name ?? copy.sharedWithMe;
 
+  const activeAppViewLabel = activeAppView === 'about'
+    ? copy.about
+    : activeAppView === 'help'
+      ? copy.help
+      : isSetlistMode
+        ? selectedSetlist ? selectedSetlist.name || copy.untitledSetlist : selectedProjectFilterLabel
+        : hasSongs ? song.title || copy.untitledSong : (activeCloudLibrary?.name ?? copy.songLibrary);
+
   const handleSetlistProjectFilterChange = (nextFilter: SetlistProjectFilter) => {
     setSetlistProjectFilter(nextFilter);
     setShowArchivedSetlists(false);
-    setMobileSwipeSetlist(null);
+
   };
   // Filter from the full library (not filteredSongs) so the song-library search
   // query never leaks into the setlist "add songs" list.
@@ -3478,7 +3374,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   });
 
   useEffect(() => {
-    if (!isPhoneSetlistDrawer) return;
+    if (!navigationMemoryReady || !isPhoneSetlistDrawer) return;
 
     if (!selectedSetlist) {
       // Keep an intentional 'manageProjects' (or 'list') view; only setlist-bound
@@ -3486,23 +3382,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setSetlistPanelView((view) => (view === 'detail' || view === 'addSongs') ? 'list' : view);
       return;
     }
-  }, [isPhoneSetlistDrawer, selectedSetlist?.id]);
-
-  useEffect(() => {
-    // The setlist list (with its swipe behind-buttons) is visible in two
-    // layouts: the phone drawer when in 'list' view, OR the desktop/tablet
-    // sidebar when in 'list' view. Close any open swipe only when neither
-    // list surface is on screen.
-    const listVisible = setlistPanelView === 'list';
-    if (!listVisible) {
-      setMobileSwipeSetlist(null);
-      return;
-    }
-
-    if (mobileSwipeSetlist && !setlists.some((item) => item.id === mobileSwipeSetlist.id)) {
-      setMobileSwipeSetlist(null);
-    }
-  }, [setlistPanelView, mobileSwipeSetlist, setlists]);
+  }, [navigationMemoryReady, isPhoneSetlistDrawer, selectedSetlist?.id]);
 
   useEffect(() => {
     setSetlistContextMenu(null);
@@ -3517,15 +3397,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   }, [setlists, isTeamWorkspace, activeLibraryRole, authenticatedUser?.id]);
 
   useEffect(() => {
-    // Auto-collapse an open swipe after a few seconds of inactivity so a
-    // forgotten "delete" button doesn't linger waiting to be tapped.
-    if (!mobileSwipeSetlist) return;
-    const timeout = window.setTimeout(() => setMobileSwipeSetlist(null), 4000);
-    return () => window.clearTimeout(timeout);
-  }, [mobileSwipeSetlist]);
-
-  useEffect(() => {
-    if (isPhoneViewport) {
+    if (!navigationMemoryReady || isPhoneViewport) {
       return;
     }
 
@@ -3540,7 +3412,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     if (setlistPanelView === 'addSongs' && !canEditSelectedSetlist) {
       setSetlistPanelView('detail');
     }
-  }, [canEditSelectedSetlist, setlistPanelView, isPhoneViewport, isSetlistMode, selectedSetlist?.id]);
+  }, [navigationMemoryReady, canEditSelectedSetlist, setlistPanelView, isPhoneViewport, isSetlistMode, selectedSetlist?.id]);
 
   useEffect(() => () => {
     clearMobileLongPressTimer();
@@ -4125,8 +3997,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setSelectedSetlistSongId(nextSetlist?.songs.find((item) => item.id === selectedSetlistSongId)?.id ?? nextSetlist?.songs[0]?.id ?? null);
   };
 
-  const runSelectionChange = async (applySelection: () => void) => {
+  const runSelectionChange = async (applySelection: () => void, onStart?: () => void) => {
     const performSelectionChange = async () => {
+      onStart?.();
       setActiveAppView('sheet');
 
       // Always persist silently in the background when switching songs so the user
@@ -4265,12 +4138,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       workspace.joinedProjects ?? []
     ));
     // Library changes keep the current workspace mode, including empty teams.
-    // A remembered selection is only for the preview; navigation starts at the overview.
+    // The scoped navigation memory restores the destination once this library
+    // snapshot is ready; use the overview while the transition is still busy.
     setSetlistPanelView('list');
     setSetlistContextMenu(null);
     setMultiSelectedSetlistIds([]);
     setProjectPicker(null);
-    setMobileSwipeSetlist(null);
+
     setSetlistSearchQuery('');
     setShowArchivedSetlists(false);
   };
@@ -5013,6 +4887,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setProjects(nextProjects);
     if (archived && setlistProjectFilter.kind === 'owned-project' && setlistProjectFilter.projectId === projectId) {
       handleSetlistProjectFilterChange({ kind: 'all' });
+      setSetlistPanelView('list');
+      setAllowDefaultSetlistSelection(false);
+      setSelectedSetlistId(null);
+      setSelectedSetlistSongId(null);
     }
     void persistWorkspace(songs, setlists, nextProjects).catch(() => {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -5327,40 +5205,26 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   };
 
   const handleSelectSetlist = (nextSetlistId: string) => {
-    setMobileSwipeSetlist(null);
-    setSetlistPanelView('detail');
+
     setSetlistSongSearchQuery('');
-
-    if (selectedSetlistId === nextSetlistId && workspaceMode === 'setlists') {
-      return;
-    }
-
+    const nextSetlist = setlists.find((item) => item.id === nextSetlistId)
+      ?? joinedSetlists.find((item) => item.id === nextSetlistId)
+      ?? allJoinedProjectSetlists.find((item) => item.id === nextSetlistId);
+    if (!nextSetlist) return;
+    let token = 0;
     void runSelectionChange(() => {
-      setIsSetlistActionsMenuOpen(false);
-      const nextSetlist = setlists.find((item) => item.id === nextSetlistId)
-        ?? joinedSetlists.find((item) => item.id === nextSetlistId)
-        ?? allJoinedProjectSetlists.find((item) => item.id === nextSetlistId)
-        ?? null;
-      setWorkspaceMode('setlists');
-      setSelectedSetlistId(nextSetlistId);
-      setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
-    });
+      setlistOpening.commit(token, () => {
+        setIsSetlistActionsMenuOpen(false);
+        setSetlistPanelView('detail');
+        setWorkspaceMode('setlists');
+        setSelectedSetlistId(nextSetlistId);
+        setSelectedSetlistSongId(current => selectedSetlistId === nextSetlistId ? current : nextSetlist.songs[0]?.id ?? null);
+      });
+    }, () => { token = setlistOpening.begin(nextSetlistId, nextSetlist.name || copy.untitledSetlist); });
   };
 
   const handleSelectJoinedSetlist = (nextSetlistId: string) => {
-    setMobileSwipeSetlist(null);
-    setSetlistPanelView('detail');
-    setSetlistSongSearchQuery('');
-    if (selectedSetlistId === nextSetlistId && workspaceMode === 'setlists') return;
-    void runSelectionChange(() => {
-      setIsSetlistActionsMenuOpen(false);
-      const nextSetlist = joinedSetlists.find((item) => item.id === nextSetlistId)
-        ?? allJoinedProjectSetlists.find((item) => item.id === nextSetlistId)
-        ?? null;
-      setWorkspaceMode('setlists');
-      setSelectedSetlistId(nextSetlistId);
-      setSelectedSetlistSongId(nextSetlist?.songs[0]?.id ?? null);
-    });
+    handleSelectSetlist(nextSetlistId);
   };
 
   const savePersonalCapoOverride = (setlistSongId: string, capo: number) => {
@@ -5959,7 +5823,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
 
     setIsSetlistActionsMenuOpen(false);
-    setMobileSwipeSetlist(null);
+
 
     const remainingSetlists = setlists.filter((item) => item.id !== setlistId);
     const nextSetlist = remainingSetlists[0] ?? null;
@@ -5988,7 +5852,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
 
     setIsSetlistActionsMenuOpen(false);
-    setMobileSwipeSetlist(null);
+
 
     const nextSetlists = setlists.map((item) =>
       item.id === setlistId ? { ...item, archived, updatedAt: Date.now() } : item
@@ -5998,11 +5862,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     // Archiving the open setlist hides it from the default list, so drop back to
     // the setlist list rather than leaving a hidden detail view on screen.
     if (archived && selectedSetlistId === setlistId) {
-      if (isPhoneViewport) {
-        setSetlistPanelView('list');
-      } else {
-        setSetlistPanelView('list');
-      }
+      handleSetlistProjectFilterChange(getSetlistParentFilter(setlistId, navigationWorkspace));
+      setSetlistPanelView('list');
+      setAllowDefaultSetlistSelection(false);
+      setSelectedSetlistId(null);
+      setSelectedSetlistSongId(null);
     }
 
     void persistWorkspace(songs, nextSetlists).catch(() => {
@@ -6029,7 +5893,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const target = setlists.find((item) => item.id === setlistId);
     if (!target || !canManageSetlist(target)) return;
     // Long-press enters multi-select mode with this item already selected.
-    setMobileSwipeSetlist(null);
+
     setMultiSelectedSetlistIds((current) => (
       current.includes(setlistId) ? current : [...current, setlistId]
     ));
@@ -6079,65 +5943,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     clearMobileLongPressTimer();
     mobileLongPressRef.current = null;
   };
-
-  // Setlist + project swipe-to-reveal share one engine (see createSwipeController)
-  // so both lists behave identically. Each controller is rebuilt per render so
-  // its closures read the latest open/dragging state.
-  const setlistSwipe = createSwipeController({
-    ref: mobileSetlistSwipeRef,
-    handledRef: mobileSetlistSwipeHandledRef,
-    openId: mobileSwipeSetlist?.id ?? null,
-    openAction: mobileSwipeSetlist?.action ?? null,
-    setDragging: setDraggingSetlist,
-    setOpen: setMobileSwipeSetlist,
-    canDelete: (id) => {
-      const target = setlists.find((item) => item.id === id);
-      return Boolean(target && canManageSetlist(target));
-    },
-    canArchive: (id) => {
-      const target = setlists.find((item) => item.id === id);
-      return Boolean(target && canManageSetlist(target));
-    }
-  });
-
-  // Preserve the handler names the setlist JSX already wires up.
-  const handleMobileSetlistTouchStart = setlistSwipe.touchStart;
-  const handleMobileSetlistTouchMove = setlistSwipe.touchMove;
-  const handleMobileSetlistTouchEnd = setlistSwipe.touchEnd;
-  const handleSetlistMousePointerDown = setlistSwipe.pointerDown;
-  const handleSetlistMousePointerMove = setlistSwipe.pointerMove;
-  const handleSetlistMousePointerEnd = setlistSwipe.pointerEnd;
-  const resetSetlistSwipe = setlistSwipe.reset;
-
-  const projectSwipe = createSwipeController({
-    ref: mobileProjectSwipeRef,
-    handledRef: mobileProjectSwipeHandledRef,
-    openId: mobileSwipeProject?.id ?? null,
-    openAction: mobileSwipeProject?.action ?? null,
-    setDragging: setDraggingProject,
-    setOpen: setMobileSwipeProject,
-    canDelete: (id) => {
-      const target = projects.find((item) => item.id === id);
-      return Boolean(target && canManageProject(target));
-    },
-    canArchive: (id) => {
-      const target = projects.find((item) => item.id === id);
-      return Boolean(target && canManageProject(target));
-    }
-  });
-
-  // Share-panel member rows reuse the same swipe engine, but only the left
-  // swipe (→ reveal "remove"); there's no archive side, so canArchive is false.
-  const memberSwipe = createSwipeController({
-    ref: mobileMemberSwipeRef,
-    handledRef: mobileMemberSwipeHandledRef,
-    openId: mobileSwipeMember?.id ?? null,
-    openAction: mobileSwipeMember?.action ?? null,
-    setDragging: setDraggingMember,
-    setOpen: setMobileSwipeMember,
-    canDelete: () => true,
-    canArchive: () => false
-  });
 
   // The selection is an ordered list of song ids that ALLOWS duplicates: the same
   // song can appear multiple times so it can be added to the setlist more than once
@@ -6967,7 +6772,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         if (revokedSetlistIds.size > 0) {
           setMultiSelectedSetlistIds((current) => current.filter((id) => !revokedSetlistIds.has(id)));
           setProjectPicker((current) => current && current.setlistIds.some((id) => revokedSetlistIds.has(id)) ? null : current);
-          setMobileSwipeSetlist((current) => current && revokedSetlistIds.has(current.id) ? null : current);
+
           if (setlistAssignmentTargetIdRef.current && revokedSetlistIds.has(setlistAssignmentTargetIdRef.current)) {
             closeSetlistEditorAssignments();
           }
@@ -7058,7 +6863,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           setIsLibraryEditing(false);
           setSelectedLibrarySongIds([]);
           setMultiSelectedSetlistIds([]);
-          setMobileSwipeSetlist(null);
+
           setProjectPicker(null);
           setIsCreateSetlistOpen(false);
           setNewSetlistProjectId('');
@@ -7172,7 +6977,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         setIsLibraryEditing(false);
         setSelectedLibrarySongIds([]);
         setMultiSelectedSetlistIds([]);
-        setMobileSwipeSetlist(null);
+
         setProjectPicker(null);
         setIsCreateSetlistOpen(false);
         setNewSetlistProjectId('');
@@ -8637,6 +8442,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   }, [songs]);
 
   useEffect(() => {
+    if (!navigationMemoryReady) return;
     setSelectedSetlistId((currentId) => {
       if (!currentId) {
         return firstAvailableSetlist?.id ?? null;
@@ -8649,9 +8455,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         ? currentId
         : firstAvailableSetlist?.id ?? null;
     });
-  }, [allJoinedProjectSetlists, firstAvailableSetlist?.id, joinedSetlists, setlists]);
+  }, [navigationMemoryReady, allJoinedProjectSetlists, firstAvailableSetlist?.id, joinedSetlists, setlists]);
 
   useEffect(() => {
+    if (!navigationMemoryReady) return;
     const activeSetlist = setlists.find((item) => item.id === selectedSetlistId)
       ?? joinedSetlists.find((item) => item.id === selectedSetlistId)
       ?? allJoinedProjectSetlists.find((item) => item.id === selectedSetlistId)
@@ -8666,7 +8473,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         ? currentId
         : activeSetlist.songs[0]?.id ?? null
     ));
-  }, [allJoinedProjectSetlists, joinedSetlists, selectedSetlistId, setlists]);
+  }, [navigationMemoryReady, allJoinedProjectSetlists, joinedSetlists, selectedSetlistId, setlists]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -10667,6 +10474,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   const setlistPreviewSheet = React.useMemo(() => {
     if (setlistPreviewSongs.length === 0) {
+      if (!allowDefaultSetlistSelection && !selectedSetlistId) {
+        return <p className="p-8 text-center text-sm text-gray-500">{language === 'zh' ? '請從列表選擇歌單' : 'Choose a setlist from the list.'}</p>;
+      }
       return null;
     }
 
@@ -10727,7 +10537,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         ))}
       </div>
     );
-  }, [activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
+  }, [allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -11773,11 +11583,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               {onToggleManager ? (
                 <button
                   type="button"
+                  data-swipe-ignore
                   onClick={() => {
-                    if (mobileMemberSwipeHandledRef.current) {
-                      mobileMemberSwipeHandledRef.current = false;
-                      return;
-                    }
                     onToggleManager(participant);
                   }}
                   className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition-colors ${
@@ -11804,44 +11611,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             );
           }
 
-          // Owner view: swipe the row left to reveal the "remove" action,
-          // reusing the shared swipe engine (left swipe only).
-          const swipeAction = mobileSwipeMember?.id === participant.userId ? mobileSwipeMember.action : null;
-          const dragOffset = draggingMember?.id === participant.userId ? draggingMember.dx : null;
-          const translateClass = dragOffset !== null
-            ? ''
-            : swipeAction === 'delete' ? '-translate-x-20' : 'translate-x-0';
           return (
-            <div key={participant.userId} className="relative overflow-hidden rounded-xl">
-              <div className="absolute inset-y-0 right-0 flex items-stretch">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileSwipeMember(null);
-                    onRemove(participant);
-                  }}
-                  className="flex w-20 items-center justify-center rounded-r-xl bg-rose-500 px-3 text-xs font-bold text-white"
-                  aria-label={`${copy.removeMember} ${participant.name || participant.email}`}
-                  title={copy.removeMember}
-                >
-                  {copy.removeMember}
-                </button>
-              </div>
-              <div
-                onTouchStart={(event) => memberSwipe.touchStart(participant.userId, event)}
-                onTouchMove={memberSwipe.touchMove}
-                onTouchEnd={(event) => memberSwipe.touchEnd(participant.userId, event)}
-                onTouchCancel={memberSwipe.reset}
-                onPointerDown={(event) => memberSwipe.pointerDown(participant.userId, event)}
-                onPointerMove={memberSwipe.pointerMove}
-                onPointerUp={(event) => memberSwipe.pointerEnd(participant.userId, event)}
-                onPointerCancel={memberSwipe.reset}
-                style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
-                className={`relative flex min-w-0 select-none items-center gap-2 bg-gray-50 px-2.5 py-2 transition-transform duration-200 ease-out [touch-action:pan-y] ${translateClass}`}
-              >
-                {rowContent}
-              </div>
-            </div>
+            <SwipeActionRow key={participant.userId} className="rounded-xl"
+              contentClassName="flex min-w-0 select-none items-center gap-2 bg-gray-50 px-2.5 py-2"
+              rightAction={{ label: copy.removeMember, accessibleLabel: `${copy.removeMember} ${participant.name || participant.email}`,
+                tone: 'delete', onAction: () => onRemove(participant) }}>
+              {rowContent}
+            </SwipeActionRow>
           );
         })}
       </div>
@@ -12227,65 +12003,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     // right swipe → archive (indigo, left), left swipe → delete (rose, right).
     // Rename stays as a pencil inside the foreground card (no swipe equivalent).
     if (project && !isUngrouped && canManage) {
-      const swipeAction = mobileSwipeProject?.id === project.id ? mobileSwipeProject.action : null;
-      const dragOffset = draggingProject?.id === project.id ? draggingProject.dx : null;
-      const translateClass = dragOffset !== null
-        ? ''
-        : swipeAction === 'delete' ? '-translate-x-20' : swipeAction === 'archive' ? 'translate-x-20' : 'translate-x-0';
       const baseStyle = archived ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white';
       return (
-        <div key={project.id} data-project-id={project.id} className={`relative overflow-hidden ${isPhoneViewport ? 'border-b border-gray-200' : 'rounded-2xl'}`}>
-          <div className="absolute inset-y-0 left-0 flex items-stretch">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                handleSetProjectArchived(project.id, !project.archived);
-              }}
-              className="flex w-20 items-center justify-center rounded-l-2xl bg-indigo-500 px-3 text-center text-sm font-bold leading-tight text-white"
-              aria-label={`${project.archived ? copy.unarchiveProject : copy.archiveProject} ${name}`}
-              title={project.archived ? copy.unarchiveProject : copy.archiveProject}
-            >
-              {project.archived ? copy.unarchiveSetlist : copy.archiveSetlist}
-            </button>
-          </div>
-          <div className="absolute inset-y-0 right-0 flex items-stretch">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleDeleteProject(project.id);
-              }}
-              className="flex w-20 items-center justify-center rounded-r-2xl bg-rose-500 px-3 text-sm font-bold text-white"
-              aria-label={`${copy.delete} ${name}`}
-              title={copy.delete}
-            >
-              {copy.delete}
-            </button>
-          </div>
-          <div
-            onTouchStart={(event) => projectSwipe.touchStart(project.id, event)}
-            onTouchMove={projectSwipe.touchMove}
-            onTouchEnd={(event) => projectSwipe.touchEnd(project.id, event)}
-            onTouchCancel={projectSwipe.reset}
-            onPointerDown={(event) => projectSwipe.pointerDown(project.id, event)}
-            onPointerMove={projectSwipe.pointerMove}
-            onPointerUp={(event) => projectSwipe.pointerEnd(project.id, event)}
-            onPointerCancel={projectSwipe.reset}
-            style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
-            className={`relative flex select-none items-center gap-2 ${isPhoneViewport ? 'px-0 py-3' : 'border p-3'} transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
-          >
+        <SwipeActionRow key={project.id} data-project-id={project.id}
+          className={isPhoneViewport ? 'border-b border-gray-200' : 'rounded-2xl'}
+          contentClassName={`flex select-none items-center gap-2 ${isPhoneViewport ? 'px-0 py-3' : 'border p-3'} ${baseStyle}`}
+          leftAction={{ label: project.archived ? copy.unarchiveSetlist : copy.archiveSetlist,
+            accessibleLabel: `${project.archived ? copy.unarchiveProject : copy.archiveProject} ${name}`, tone: 'archive',
+            onAction: () => handleSetProjectArchived(project.id, !project.archived) }}
+          rightAction={{ label: copy.delete, accessibleLabel: `${copy.delete} ${name}`, tone: 'delete',
+            onAction: () => { void handleDeleteProject(project.id); } }}>
             <button
               type="button"
               onClick={() => {
-                if (mobileProjectSwipeHandledRef.current) {
-                  mobileProjectSwipeHandledRef.current = false;
-                  return;
-                }
-                if (swipeAction) {
-                  setMobileSwipeProject(null);
-                  return;
-                }
                 handleSelectProject(project.id);
               }}
               className={`${isPhoneViewport ? 'min-h-11 items-center gap-3' : 'items-start gap-2'} flex min-w-0 flex-1 text-left`}
@@ -12304,6 +12034,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
+                data-swipe-ignore
                 onClick={(event) => {
                   event.stopPropagation();
                   const nextName = window.prompt(copy.renameProjectPrompt, project.name);
@@ -12330,8 +12061,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 </button>
               )}
             </div>
-          </div>
-        </div>
+        </SwipeActionRow>
       );
     }
 
@@ -12657,88 +12387,42 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             const projectName = item.projectId
               ? projects.find((project) => project.id === item.projectId)?.name ?? copy.untitledProject
               : copy.ungroupedProject;
-            const swipeAction = mobileSwipeSetlist?.id === item.id ? mobileSwipeSetlist.action : null;
-            const dragOffset = draggingSetlist?.id === item.id ? draggingSetlist.dx : null;
             const canManage = canManageSetlist(item);
             const baseStyle = isActive
               ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100'
               : item.archived ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white';
-            const translateClass = dragOffset !== null
-              ? ''
-              : swipeAction === 'delete' ? '-translate-x-20' : swipeAction === 'archive' ? 'translate-x-20' : 'translate-x-0';
             return (
-              <div key={item.id} className="relative overflow-hidden rounded-2xl"
+              <SwipeActionRow key={item.id} className="rounded-2xl"
                 onContextMenu={(event) => {
                   if (!canManage) return;
                   event.preventDefault();
-                  setMobileSwipeSetlist(null);
+
                   setlistContextTriggerRef.current = event.currentTarget.querySelector('input[type="checkbox"]');
                   setSetlistContextMenu({ id: item.id, x: event.clientX, y: event.clientY });
                 }}
-              >
-                {canManage && (
-                  <div className="absolute inset-y-0 left-0 flex items-stretch">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleSetSetlistArchived(item.id, !item.archived);
-                      }}
-                      className="flex w-20 items-center justify-center rounded-l-2xl bg-indigo-500 px-3 text-center text-sm font-bold leading-tight text-white"
-                      aria-label={`${item.archived ? copy.unarchiveSetlist : copy.archiveSetlist} ${item.name || copy.untitledSetlist}`}
-                      title={item.archived ? copy.unarchiveSetlist : copy.archiveSetlist}
-                    >
-                      {item.archived ? copy.unarchiveSetlist : copy.archiveSetlist}
-                    </button>
-                  </div>
-                )}
-                {canManage && (
-                  <div className="absolute inset-y-0 right-0 flex items-stretch">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleDeleteSetlist(item.id);
-                      }}
-                      className="flex w-20 items-center justify-center rounded-r-2xl bg-rose-500 px-3 text-sm font-bold text-white"
-                      aria-label={`${copy.delete} ${item.name || copy.untitledSetlist}`}
-                      title={copy.delete}
-                    >
-                      {copy.delete}
-                    </button>
-                  </div>
-                )}
-                <div
-                  onTouchStart={(event) => {
-                    handleMobileSetlistTouchStart(item.id, event);
+                leftAction={canManage ? { label: item.archived ? copy.unarchiveSetlist : copy.archiveSetlist,
+                  accessibleLabel: `${item.archived ? copy.unarchiveSetlist : copy.archiveSetlist} ${item.name || copy.untitledSetlist}`, tone: 'archive',
+                  onAction: () => handleSetSetlistArchived(item.id, !item.archived) } : undefined}
+                rightAction={canManage ? { label: copy.delete, accessibleLabel: `${copy.delete} ${item.name || copy.untitledSetlist}`, tone: 'delete',
+                  onAction: () => handleDeleteSetlist(item.id) } : undefined}
+                contentClassName={`flex select-none items-start gap-2 border p-3 ${baseStyle}`}
+                contentProps={{
+                  onTouchStart: event => {
+                    setlistLongPressHandledRef.current = false;
                     handleMobileLongPressStart('setlist', item.id, event);
-                  }}
-                  onTouchMove={(event) => {
-                    handleMobileLongPressMove(event);
-                    handleMobileSetlistTouchMove(event);
-                  }}
-                  onTouchEnd={(event) => {
+                  },
+                  onTouchMove: handleMobileLongPressMove,
+                  onTouchEnd: event => {
                     if (mobileLongPressTriggeredRef.current) {
                       mobileLongPressTriggeredRef.current = false;
-                      mobileSetlistSwipeHandledRef.current = true;
-                      handleMobileLongPressEnd();
+                      setlistLongPressHandledRef.current = true;
                       event.preventDefault();
-                      return;
                     }
                     handleMobileLongPressEnd();
-                    handleMobileSetlistTouchEnd(item.id, event);
-                  }}
-                  onTouchCancel={() => {
-                    handleMobileLongPressEnd();
-                    resetSetlistSwipe();
-                  }}
-                  onPointerDown={(event) => handleSetlistMousePointerDown(item.id, event)}
-                  onPointerMove={handleSetlistMousePointerMove}
-                  onPointerUp={(event) => handleSetlistMousePointerEnd(item.id, event)}
-                  onPointerCancel={resetSetlistSwipe}
-                  style={dragOffset !== null ? { transform: `translateX(${dragOffset}px)`, transition: 'none' } : undefined}
-                  className={`relative flex select-none items-start gap-2 border p-3 transition-transform duration-200 ease-out [touch-action:pan-y] ${baseStyle} ${translateClass}`}
-                >
+                  },
+                  onTouchCancel: handleMobileLongPressEnd
+                }}
+              >
                   {canManage && (
                     <input
                       type="checkbox"
@@ -12753,12 +12437,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   <button
                     type="button"
                     onClick={(event) => {
-                      if (mobileSetlistSwipeHandledRef.current) {
-                        mobileSetlistSwipeHandledRef.current = false;
-                        return;
-                      }
-                      if (swipeAction) {
-                        setMobileSwipeSetlist(null);
+                      if (setlistLongPressHandledRef.current) {
+                        setlistLongPressHandledRef.current = false;
                         return;
                       }
                       if (isMultiSelectMode || event.metaKey || event.ctrlKey) {
@@ -12800,6 +12480,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {item.archived && canManage && !isMultiSelectMode && (
                     <button
                       type="button"
+                      data-swipe-ignore
                       onClick={(event) => {
                         event.stopPropagation();
                         handleSetSetlistArchived(item.id, false);
@@ -12811,8 +12492,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       <ArchiveRestore size={15} />
                     </button>
                   )}
-                </div>
-              </div>
+              </SwipeActionRow>
             );
           })}
         </div>
@@ -13516,7 +13196,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   type="button"
                   onClick={() => {
                     setWorkspaceMode('setlists');
-                    setSetlistPanelView('list');
                     if (usesOverlaySidebar && !hasFinePointer) {
                       setIsSidebarPinned(true);
                       setIsSidebarHovered(true);
@@ -13655,7 +13334,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 onSongs={() => { setWorkspaceMode('songs'); setActiveAppView('sheet'); }}
                 onSetlists={() => {
                   setWorkspaceMode('setlists'); setActiveAppView('sheet');
-                  setSetlistPanelView('list');
                 }}
                 onAbout={() => { handleAppViewChange('about'); setIsMobileNavOpen(false); }}
                 onHelp={() => { handleAppViewChange('help'); setIsMobileNavOpen(false); }}
@@ -13666,13 +13344,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             {showSidebarWorkspacePanels ? librarySwitcherPanel : null}
 
             {isSetlistMode ? (
+              <SwipeActionGroup resetKey={`${activeLibraryId ?? 'local'}:${setlistPanelView}:${serializeSetlistProjectFilter(setlistProjectFilter)}`}>
               <SetlistNavigator
                 view={setlistPanelView}
+                busy={Boolean(setlistOpening.opening)}
+                ready={navigationMemoryReady}
+                motion={uiMotion}
                 list={desktopSetlistListPanel}
                 detail={desktopSetlistDetailPanel}
                 addSongs={desktopSetlistAddSongsPanel}
                 manageProjects={desktopSetlistProjectsPanel}
               />
+              </SwipeActionGroup>
             ) : (
               <>
                 <div className="shrink-0">
@@ -15529,9 +15212,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           </AnimatePresence>
 
           {/* Sheet Preview Pane */}
-          <div className="relative flex-1 min-w-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
+          <div data-setlist-preview-pane aria-busy={Boolean(setlistOpening.opening)} className="relative flex-1 min-w-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
+            {setlistOpening.opening && (
+              <div data-setlist-opening role="status" aria-live="polite" className="absolute inset-0 z-30 flex items-start justify-center bg-[#F5F5F4]/80 px-4 pt-12 dark:bg-[color:var(--color-surface-muted)]/80">
+                <div className="flex max-w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 text-sm font-semibold text-gray-700 shadow-sm dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)] dark:text-[color:var(--color-text)]">
+                  <LoaderCircle size={20} className={`shrink-0 ${uiMotion.instant ? '' : 'animate-spin motion-reduce:animate-none'}`} aria-hidden="true" />
+                  <span className="min-w-0 break-words">{language === 'zh' ? `正在開啟「${setlistOpening.opening.name}」…` : `Opening “${setlistOpening.opening.name}”…`}</span>
+                </div>
+              </div>
+            )}
             <div
               ref={previewRef}
+              inert={setlistOpening.opening ? true : undefined}
               data-print-preview-container
               onMouseDown={handlePreviewMouseDown}
               onClickCapture={handlePreviewClickCapture}
