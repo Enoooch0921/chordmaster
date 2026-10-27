@@ -2122,6 +2122,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   const creditLine = [versionNames.join(' ｜ '), translator].filter(Boolean).join(' ｜ ');
   const hasCredits = Boolean(creditLine);
 
+  // The preview scales and centers this paper. Layout projection or CSS
+  // geometry transitions on its rows animate those ancestor measurements,
+  // making chords and barlines drift inside otherwise stationary paper.
   return (
     <div className="flex flex-col gap-8 print:gap-0">
       {sectionDrag && typeof document !== 'undefined' && createPortal(
@@ -2359,9 +2362,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     key={row.closedFillerId || `closed-${pIdx}-${rIdx}`}
                     data-preview-closed-page-row
                     data-preview-layout-weight={row.layoutWeight}
-                    className="relative flex w-full min-h-0 flex-1 rounded-lg transition-all"
+                    className="relative flex w-full min-h-0 flex-1 rounded-lg"
                     style={{ flexGrow: row.layoutWeight || 1 }}
-                    layout={!suppressSectionTransitions}
                     initial={false}
                   >
                     <div className="relative w-16 sm:w-20 shrink-0" />
@@ -2489,7 +2491,6 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     minHeight: notationRowHeight,
                     flexGrow: row.layoutWeight
                   } : {}) }}
-                  layout={!suppressSectionTransitions}
                   initial={false}
                   animate={{
                     backgroundColor: isHighlighted
@@ -2500,13 +2501,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     boxShadow: isActiveSection ? `inset 0 0 0 2px ${activeTone.stroke}` : 'inset 0 0 0 0 rgba(0, 0, 0, 0)'
                   }}
                   transition={{
-                    layout: suppressSectionTransitions
-                      ? { duration: 0 }
-                      : { type: 'spring', stiffness: 300, damping: 30 },
                     backgroundColor: { duration: suppressSectionTransitions ? 0 : (isHighlighted ? 0.2 : 0.25) },
                     boxShadow: { duration: suppressSectionTransitions ? 0 : 0.2 }
                   }}
-                  className={`relative flex w-full rounded-lg transition-all ${
+                  className={`relative flex w-full rounded-lg ${
                     barRowCount === 3
                       ? 'min-h-0 flex-1'
                       : barRowCount === 1

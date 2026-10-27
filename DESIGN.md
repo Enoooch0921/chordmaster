@@ -444,3 +444,5 @@ Setlist display mode is a personal account/browser preference for every setlist 
 Preview startup measures the scroll viewport and sheet bounds before the first visible paint, so the chart starts at its fitted scale and centered position. Returning from About or Help reattaches both measurement observers to the remounted preview. Resize callbacks remain coalesced per animation frame and are cancelled when the pane detaches; pinch-zoom anchoring keeps its existing path.
 
 Native preview pinch listeners are enabled only while the sheet view is mounted. About and Help release the old pane listeners; returning binds the new pane even when the selected song or setlist identity is unchanged.
+
+Chart music and closed-filler rows have no Motion layout projection or CSS geometry transitions. Fitting, font measurement and pane changes must not animate chords or barlines inside stationary paper. Selection/highlight color feedback remains independent. Verify startup by tracking bar coordinates relative to the paper through font readiness, using the real bootstrap and multi-page songs; outer paper stability alone is insufficient.

@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-27',
+        title: 'Keep chords and barlines steady during startup',
+        bullets: ['Chart rows update their geometry immediately instead of animating position and size after viewport or font measurements. This fixes chords and barlines sliding inside stationary paper while loading.', 'Section selection and highlight colors keep their existing feedback.']
+      },
+      {
+        version: '0.9.25',
+        date: '2026-10-27',
         title: 'Stable chart startup and restored pinch zoom',
         bullets: ['Measure the viewport and chart before the first visible frame so opening or refreshing starts at the correct fitted scale and centered position.', 'Restore pinch zoom after returning from About or Help in both song and setlist views; reattach measurement observers and release the old pane listeners.']
       },
@@ -619,6 +625,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: '修正和弦與小節線載入晃動',
+        bullets: ['譜面列的位置與尺寸立即更新，移除載入量測引發的內部排版動畫，修正白紙固定、和弦與小節線左右晃動。', '保留段落選取與提示的顏色回饋。']
+      },
+      {
+        version: '0.9.25',
         date: '2026-10-27',
         title: '穩定載入位置與恢復雙指縮放',
         bullets: ['在首次顯示前完成尺寸量測，開啟或重新整理時直接以正確縮放與置中位置呈現。', '修正從關於／說明返回後雙指縮放失效，歌曲庫與歌單皆重新綁定手勢及尺寸觀察，並清理舊畫面的監聽。']
