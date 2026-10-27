@@ -200,12 +200,12 @@ import {
   findSongBar,
   getBarStoredKey,
   getBarDisplayKey,
+  getBarsByIdentities,
   getBeatCount,
   getChordBeatSlots,
   getChordStorageModeForTarget,
   insertBar,
   insertSectionAfter,
-  isBarCompletelyEmpty,
   mergeSectionToPrevious,
   pasteBarsAtBar,
   PasteBarsMode,
@@ -1157,6 +1157,7 @@ interface PreviewBarContextMenuState extends PreviewBarSelectionTarget {
 
 interface PreviewBarClipboard {
   bars: Bar[];
+  content: PreviewClipboard;
 }
 
 interface EditorFocusRequest {
@@ -2062,7 +2063,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
   const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
   const [previewEditSession, setPreviewEditSession] = useState<PreviewEditSession | null>(null);
-  const [previewCopiedBar, setPreviewCopiedBar] = useState<Bar | null>(null);
   const [previewSelectedBars, setPreviewSelectedBars] = useState<PreviewBarSelectionTarget[]>([]);
   const [previewBarClipboard, setPreviewBarClipboard] = useState<PreviewBarClipboard | null>(null);
   const previewClipboardRef = useRef<RememberedPreviewClipboard | null>(null);
@@ -9486,8 +9486,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       const content = copyPreviewContent(current.draftSong, [current.target], 'bars');
       if (!content) return;
       rememberPreviewClipboard(previewClipboardRef, content, true);
-      setPreviewCopiedBar(structuredClone(content.items[0].bar));
-      setPreviewBarClipboard({ bars: content.items.map(({ bar }) => structuredClone(bar)) });
+      setPreviewBarClipboard({ bars: content.items.map(({ bar }) => structuredClone(bar)), content });
       return;
     }
     if (action === 'split-section' || action === 'insert-section-after') {
@@ -9540,15 +9539,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         const nextLocated = findSongBar(draftSong, current.target);
         targetBarId = nextLocated?.section.bars[nextLocated.barIndex + 1]?.id ?? targetBarId;
       } else if (action === 'paste-bar-after') {
-        if (!previewCopiedBar) return current;
-        const bars = [...located.section.bars];
-        bars[located.barIndex] = {
-          ...structuredClone(previewCopiedBar),
-          id: located.bar.id
-        };
-        const sections = [...draftSong.sections];
-        sections[located.sectionIndex] = { ...located.section, bars };
-        draftSong = { ...draftSong, sections };
+        if (!previewBarClipboard) return current;
+        const result = pastePreviewContent(draftSong, [current.target], previewBarClipboard.content);
+        if (result.error) return current;
+        draftSong = result.song;
         targetBarId = located.bar.id ?? targetBarId;
       } else {
         draftSong = deleteBar(draftSong, current.target);
@@ -9600,7 +9594,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       };
     });
     window.requestAnimationFrame(refreshPreviewEditAnchorRect);
-  }, [commitPreviewEditSession, findPreviewAnchorRect, makePreviewTargetAnchorKey, previewCopiedBar, previewEditSession, refreshPreviewEditAnchorRect]);
+  }, [commitPreviewEditSession, findPreviewAnchorRect, makePreviewTargetAnchorKey, previewBarClipboard, previewEditSession, refreshPreviewEditAnchorRect]);
 
   const handlePreviewSectionReorder = React.useCallback((
     sourceSectionId: string,
@@ -9738,11 +9732,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const copiedBars = copyBarsForClipboard(sourceSong, getPreviewBatchTargets(previewBarContextMenu));
     if (copiedBars.length === 0) return;
     const content = copyPreviewContent(sourceSong, getPreviewBatchTargets(previewBarContextMenu), 'bars');
-    if (content) rememberPreviewClipboard(previewClipboardRef, content, true);
-    setPreviewBarClipboard({ bars: copiedBars });
-    if (copiedBars.length === 1) {
-      setPreviewCopiedBar(structuredClone(copiedBars[0]));
-    }
+    if (!content) return;
+    rememberPreviewClipboard(previewClipboardRef, content, true);
+    setPreviewBarClipboard({ bars: copiedBars, content });
     setPreviewBarContextMenu(null);
   }, [getPreviewBatchSong, getPreviewBatchTargets, previewBarContextMenu]);
 
@@ -9812,8 +9804,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const content = copyPreviewContent(sourceSong, selection.length ? selection : [target!], kind);
     if (!content) return null;
     if (kind === 'bars') {
-      setPreviewBarClipboard({ bars: content.items.map(({ bar }) => structuredClone(bar)) });
-      if (content.items.length === 1) setPreviewCopiedBar(structuredClone(content.items[0].bar));
+      setPreviewBarClipboard({ bars: content.items.map(({ bar }) => structuredClone(bar)), content });
     } else if (kind === 'rhythm') setPreviewCopiedRhythm(content.items[0].bar.rhythm ?? '');
     else if (kind === 'jianpu') setPreviewCopiedJianpu(content.items[0].bar.riff ?? '');
     toast.success(language === 'zh'
@@ -9830,7 +9821,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     ));
     // Moving to a destination outside the original selection must paste there,
     // not back into the bars that were just copied.
-    const targets = content.kind !== 'bars' && activePreviewSelectedBars.length && (!hovered || hoverIsSelected)
+    const targets = activePreviewSelectedBars.length && (!hovered || hoverIsSelected)
       ? activePreviewSelectedBars
       : hovered ? [hovered] : getPreviewBatchTargets(getActivePreviewBarTarget(sourceSong));
     const result = hovered?.appendToSection
@@ -9868,6 +9859,36 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     onPaste: pasteHoveredPreviewContent,
     onUnavailable: () => toast.info(language === 'zh' ? '請先在譜面複製小節或內容。' : 'Copy chart bars or notation first.', { id: 'preview-clipboard' })
   });
+
+  React.useEffect(() => {
+    if (!isSheetView || !canOpenEditor || isEditing || isLyricsMode || isPerformanceMode
+      || isKeyboardShortcutsOpen || isSwitchingLibrary || isLoadingCloudWorkspace
+      || !activePreviewSelectedBars.length) return;
+    const removeSelectedBars = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.repeat
+        || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey
+        || !['Backspace', 'Delete'].includes(event.key)
+        || isEditableKeyboardTarget(event.target)
+        || (event.target instanceof Element && event.target.closest('[role="dialog"], [aria-modal="true"], [contenteditable]'))
+        || window.getSelection()?.toString()) return;
+      const sourceSong = getPreviewBatchSong();
+      if (!sourceSong) return;
+      const targets = getBarsByIdentities(sourceSong, activePreviewSelectedBars).map(({ target }) => target);
+      if (!targets.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nextSong = targets.reduce((current, target) => deleteBar(current, target), sourceSong);
+      commitPreviewBarBatchSong(nextSong, sourceSong);
+      setPreviewSelectedBars([]);
+      setPreviewBarContextMenu(null);
+      setActiveBar(null);
+      toast.success(language === 'zh' ? `已刪除 ${targets.length} 小節` : `Deleted ${targets.length} bars`);
+    };
+    window.addEventListener('keydown', removeSelectedBars, true);
+    return () => window.removeEventListener('keydown', removeSelectedBars, true);
+  }, [activePreviewSelectedBars, canOpenEditor, commitPreviewBarBatchSong, getPreviewBatchSong,
+    isEditing, isKeyboardShortcutsOpen, isLoadingCloudWorkspace, isLyricsMode, isPerformanceMode,
+    isSheetView, isSwitchingLibrary, language, toast]);
 
   React.useEffect(() => {
     const handlePreviewEndingShortcut = (event: KeyboardEvent) => {
@@ -15569,7 +15590,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   jianpuPitchContext={activeJianpuPitchContext}
                   onNavigate={handlePreviewEditNavigate}
                   onStructure={handlePreviewEditStructure}
-                  hasCopiedBar={Boolean(previewCopiedBar)}
+                  hasCopiedBar={Boolean(previewBarClipboard)}
                   hasCopiedJianpu={previewCopiedJianpu !== null}
                   onCopyJianpu={handlePreviewCopyJianpu}
                   onPasteJianpu={handlePreviewPasteJianpu}
@@ -15613,17 +15634,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               />
             )}
             {previewBarContextMenu && canOpenEditor && !isLyricsMode && activeEditorSong && previewBarContextMenu.previewIdentity === activePreviewIdentity && (() => {
-              const menuSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
-              const locatedTarget = menuSong
-                ? findSongBar(menuSong, {
-                    sectionId: previewBarContextMenu.sectionId,
-                    barId: previewBarContextMenu.barId
-                  })
-                : null;
               const selectedCount = Math.max(1, activePreviewSelectedBars.length);
               const clipboardCount = previewBarClipboard?.bars.length ?? 0;
               const canPaste = clipboardCount > 0;
-              const canPasteIntoEmpty = Boolean(canPaste && locatedTarget && isBarCompletelyEmpty(locatedTarget.bar));
               const menuWidth = 230;
               const menuLeft = typeof window === 'undefined'
                 ? previewBarContextMenu.clientX
@@ -15658,13 +15671,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     <Copy size={14} />
                     <span>{language === 'zh' ? '複製選取小節' : 'Copy selected bars'}</span>
                   </button>
-                  {canPasteIntoEmpty ? (
-                    <button type="button" role="menuitem" className={menuButtonClass} onClick={() => pastePreviewBarsAtContextTarget('replace-empty')}>
+                    <button type="button" role="menuitem" disabled={!canPaste} className={menuButtonClass} onClick={() => {
+                      if (previewBarClipboard) pasteHoveredPreviewContent(previewBarClipboard.content, { ...previewBarContextMenu, field: 'bars' });
+                    }}>
                       <ClipboardPaste size={14} />
-                      <span>{language === 'zh' ? `貼上 ${clipboardCount} 小節` : `Paste ${clipboardCount} bar${clipboardCount === 1 ? '' : 's'}`}</span>
+                      <span>{language === 'zh' ? `覆蓋貼上 ${clipboardCount} 小節` : `Overwrite ${clipboardCount} bar${clipboardCount === 1 ? '' : 's'}`}</span>
                     </button>
-                  ) : (
-                    <>
                       <button type="button" role="menuitem" disabled={!canPaste} className={menuButtonClass} onClick={() => pastePreviewBarsAtContextTarget('before')}>
                         <ClipboardPaste size={14} />
                         <span>{language === 'zh' ? '貼到前方' : 'Paste before'}</span>
@@ -15673,8 +15685,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                         <ClipboardPaste size={14} />
                         <span>{language === 'zh' ? '貼到後方' : 'Paste after'}</span>
                       </button>
-                    </>
-                  )}
                   <div className="mt-2 border-t border-slate-100 pt-2">
                     <div className="mb-1 flex items-center gap-1 px-2 text-[11px] font-black text-slate-500">
                       <Hash size={12} />

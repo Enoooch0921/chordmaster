@@ -4,8 +4,8 @@ import { transposeChordSubdivisions, getChordEvents, chordEventLabel } from '../
 import type { Bar, Key, Song } from '../types';
 import { getTransposeOffset, transposeChord } from '../utils/musicUtils';
 import {
-  findSongBar, getBarsByIdentities, getBarStoredKey, getEffectiveTimeSignatureForBar, getStructuralTimeSignatureForBar,
-  isBarCompletelyEmpty, pasteBarsAtBar, type SongBarIdentity
+  getBarsByIdentities, getBarStoredKey, getEffectiveTimeSignatureForBar, getStructuralTimeSignatureForBar,
+  getSongKeyStates, getSongTimeSignatureStates, type SongBarIdentity
 } from './songEditing';
 
 export type PreviewClipboardKind = 'bars' | 'chords' | 'rhythm' | 'jianpu' | 'label' | 'annotation' | 'marker';
@@ -74,54 +74,53 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
 
   if (clipboard.kind === 'bars') {
     if (clipboard.items.some((item) => item.bar.riff?.trim() && item.absoluteJianpu !== Boolean(song.jianpuInputAbsolute))) return failure('jianpu-mode');
-    const destination = located[0];
-    const mode = isBarCompletelyEmpty(destination.bar) ? 'replace-empty' : 'after';
-    let meter = getStructuralTimeSignatureForBar(song, destination.bar);
-    let key = getBarStoredKey(song, destination.target);
-    const bars = clipboard.items.map((item) => {
-      const bar = structuredClone(item.bar);
-      if (bar.partialMeasure) {
-        if ((item.structuralTimeSignature ?? item.timeSignature) !== meter) return null;
-      } else if (item.timeSignature !== meter) {
-        bar.timeSignature = item.timeSignature;
-      }
-      if (!bar.chordKeyUnspecified && item.key !== key) bar.keyChangeTo = item.key;
-      if (!bar.partialMeasure) meter = item.timeSignature;
-      if (!bar.chordKeyUnspecified) key = item.key;
-      return bar;
+    if (located.length > 1 && clipboard.items.length !== 1 && clipboard.items.length !== located.length) return failure('count-mismatch');
+    const first = located[0];
+    // A single destination is the start of an overwrite range. Extend only
+    // its own section when the copied range runs past its final measure.
+    const missing = located.length === 1
+      ? Math.max(0, clipboard.items.length - (first.section.bars.length - first.barIndex)) : 0;
+    const blanks: Bar[] = Array.from({ length: missing }, () => ({ id: crypto.randomUUID(), chords: [] }));
+    const preparedSections = song.sections.map((section, index) => index === first.sectionIndex && missing
+      ? { ...section, bars: [...section.bars, ...blanks] } : section);
+    const destinations = located.length > 1 ? located.map(({ target }) => target)
+      : preparedSections[first.sectionIndex].bars.slice(first.barIndex, first.barIndex + clipboard.items.length)
+        .map((bar) => ({ sectionId: first.target.sectionId, barId: bar.id! }));
+    const identity = (target: SongBarIdentity) => `${target.sectionId}\0${target.barId}`;
+    const replacements = new Map(destinations.map((target, index) => [identity(target), clipboard.items[clipboard.items.length === 1 ? 0 : index]]));
+    const meters = getSongTimeSignatureStates(song);
+    const keys = getSongKeyStates(song);
+    let meter = meters.sectionBaseTimeSignatures[0] ?? song.timeSignature;
+    let key = song.originalKey;
+    let incompatibleMeter = false;
+    const sections = preparedSections.map((section, sectionIndex) => {
+      if (section.keyChangeTo) key = section.keyChangeTo;
+      const bars = section.bars.map((original, barIndex) => {
+        const source = replacements.get(identity({ sectionId: section.id!, barId: original.id! }));
+        let bar = source ? { ...structuredClone(source.bar), id: original.id } : original;
+        if (source) {
+          if (bar.partialMeasure) {
+            if ((source.structuralTimeSignature ?? source.timeSignature) !== meter) incompatibleMeter = true;
+          } else if (source.timeSignature !== meter) bar.timeSignature = source.timeSignature;
+          if (!bar.chordKeyUnspecified && source.key !== key) bar.keyChangeTo = source.key;
+        } else {
+          // Restore inherited context after every overwritten range, including
+          // non-contiguous selections and the next section's first measure.
+          const expectedMeter = meters.barActiveTimeSignatures[sectionIndex][barIndex];
+          if (bar.partialMeasure) {
+            if (meter !== meters.barBaseTimeSignatures[sectionIndex][barIndex]) incompatibleMeter = true;
+          } else if ((bar.timeSignature || meter) !== expectedMeter) bar = { ...bar, timeSignature: expectedMeter };
+          const expectedKey = keys.barActiveKeys[sectionIndex][barIndex];
+          if ((bar.keyChangeTo || key) !== expectedKey) bar = { ...bar, keyChangeTo: expectedKey };
+        }
+        if (!bar.partialMeasure && bar.timeSignature) meter = bar.timeSignature;
+        if (bar.keyChangeTo) key = bar.keyChangeTo;
+        return bar;
+      });
+      return { ...section, bars };
     });
-    if (bars.some((bar) => bar === null)) return failure('time-signature');
-    const result = pasteBarsAtBar(song, destination.target, bars as Bar[], mode);
-    // Preserve inherited meter/key at the copy boundary, including when a
-    // copied modulation would otherwise alter the untouched following bars.
-    const allTargets = song.sections.flatMap((section) => section.bars.flatMap((bar) => (
-      section.id && bar.id ? [{ sectionId: section.id, barId: bar.id }] : []
-    )));
-    const nextTarget = allTargets[allTargets.findIndex((target) => target.sectionId === destination.target.sectionId && target.barId === destination.target.barId) + 1];
-    const nextOriginal = nextTarget && findSongBar(song, nextTarget);
-    const nextPasted = nextTarget && findSongBar(result.song, nextTarget);
-    if (nextOriginal && nextPasted) {
-      const nextMeter = getStructuralTimeSignatureForBar(song, nextOriginal.bar);
-      const nextKey = getBarStoredKey(song, nextTarget);
-      const restoreMeter = getStructuralTimeSignatureForBar(result.song, nextPasted.bar) !== nextMeter;
-      const restoreKey = getBarStoredKey(result.song, nextTarget) !== nextKey;
-      if (restoreMeter || restoreKey) {
-        result.song = {
-          ...result.song,
-          sections: result.song.sections.map((section) => section.id !== nextTarget.sectionId ? section : {
-            ...section,
-            bars: section.bars.map((bar) => bar.id !== nextTarget.barId ? bar : {
-              ...bar, ...(restoreMeter ? { timeSignature: nextMeter } : {}), ...(restoreKey ? { keyChangeTo: nextKey } : {})
-            })
-          })
-        };
-      }
-    }
-    return {
-      song: result.song,
-      targets: result.pastedBarIds.map((barId) => ({ sectionId: destination.target.sectionId, barId })),
-      inserted: mode === 'after'
-    };
+    if (incompatibleMeter) return failure('time-signature');
+    return { song: { ...song, sections }, targets: destinations };
   }
 
   if (clipboard.items.length !== 1 && clipboard.items.length !== located.length) return failure('count-mismatch');

@@ -80,7 +80,12 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
       {
         keys: ['Ctrl/Cmd + V'],
         action: { en: 'Paste into the hovered bar, or the selected destination', zh: '貼到滑鼠所在小節，或選取的目的小節' },
-        context: { en: 'Notation replaces only its own lane; whole bars fill an empty bar or insert after an occupied bar', zh: '只替換複製的內容區；整小節填入空白處，或插在已有內容的小節後方' }
+        context: { en: 'Notation replaces only its own lane; whole bars overwrite from the destination and extend the section if needed', zh: '只替換複製的內容區；整小節從目的位置直接覆蓋，超出段落時才新增小節' }
+      },
+      {
+        keys: ['Backspace', 'Delete'],
+        action: { en: 'Delete selected whole bars', zh: '刪除選取的完整小節' },
+        context: { en: 'Select bars with Ctrl/Cmd + click; Undo restores the whole selection in one step', zh: '以 Ctrl/Cmd + 點選多選小節；可一次復原整批刪除' }
       },
       {
         keys: ['Space'],

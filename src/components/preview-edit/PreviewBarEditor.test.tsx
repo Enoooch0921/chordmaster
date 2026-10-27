@@ -76,6 +76,24 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it.each(['phone', 'tablet', 'desktop'] as const)('cycles the barline button through double, final and off on %s', async (deviceLayout) => {
+    const user = userEvent.setup();
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], repeatStart: true, repeatEnd: true }] }] };
+    let session = createPreviewEditSession({ song: source, target, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session, deviceLayout });
+    for (const state of ['double', 'final', 'off', 'double']) {
+      await user.click(screen.getByRole('button', { name: /切換小節線/ }));
+      const edited = onApplyDraft.mock.calls.at(-1)![0] as Song;
+      expect(edited.sections[0].bars[0]).toMatchObject({
+        doubleBar: state === 'double', finalBar: state === 'final', repeatStart: true, repeatEnd: false, chords: ['C']
+      });
+      session = applyPreviewDraft(session, edited);
+      rerenderSession(session);
+      expect(document.querySelector('[data-barline-cycle]')).toHaveAttribute('data-barline-cycle', state);
+      expect(document.querySelector('[data-keyboard-picker]')).not.toBeInTheDocument();
+    }
+  });
+
   it.each(['C', 'Ab', 'Db'] as const)('keeps b6 in the input after applying a numeric chord in %s', key => {
     const source: Song = { ...song, originalKey: key, currentKey: key };
     const base = createPreviewEditSession({ song: source, target, inputMode: 'nashville' });

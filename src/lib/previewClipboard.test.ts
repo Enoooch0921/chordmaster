@@ -104,13 +104,61 @@ describe('preview clipboard commands', () => {
     expect(result.targets.map(({ barId }) => barId)).toEqual(['c', bars[3].id]);
   });
 
-  it('inserts after occupied bars without overwriting their content', () => {
+  it('overwrites occupied bars while keeping their identities', () => {
     const song = makeSong();
     const result = pastePreviewContent(song, [target('b')], copyPreviewContent(song, [target('a')], 'bars')!);
-    expect(result.inserted).toBe(true);
-    expect(result.song.sections[0].bars[1]).toEqual(song.sections[0].bars[1]);
-    expect(result.song.sections[0].bars[2].chords).toEqual(song.sections[0].bars[0].chords);
-    expect(result.song.sections[0].bars[3].id).toBe('c');
+    expect(result.inserted).not.toBe(true);
+    expect(result.song.sections[0].bars).toHaveLength(3);
+    expect(result.song.sections[0].bars[1]).toEqual({ ...song.sections[0].bars[0], id: 'b' });
+    expect(result.song.sections[0].bars[2]).toEqual(song.sections[0].bars[2]);
+  });
+
+  it('overwrites a consecutive range and extends only the destination section', () => {
+    const song = makeSong();
+    song.sections.push({ id: 'chorus', title: 'Chorus', bars: [{ id: 'd', chords: ['Am'] }] });
+    const original = structuredClone(song);
+    const result = pastePreviewContent(song, [target('b')], copyPreviewContent(song, [target('a'), target('b'), target('c')], 'bars')!);
+    expect(result.song.sections[0].bars.map((bar) => bar.chords)).toEqual([original.sections[0].bars[0].chords, original.sections[0].bars[0].chords, ['F'], []]);
+    expect(result.targets.slice(0, 2)).toEqual([target('b'), target('c')]);
+    expect(result.song.sections[1]).toEqual(original.sections[1]);
+    expect(new Set(result.song.sections[0].bars.map((bar) => bar.id)).size).toBe(4);
+    expect(song).toEqual(original);
+  });
+
+  it('overwrites non-contiguous selections across sections and preserves surrounding key/meter', () => {
+    const source = makeSong();
+    source.timeSignature = '3/4';
+    source.originalKey = 'D';
+    const song = makeSong();
+    song.sections.push({ id: 'chorus', title: 'Chorus', bars: [{ id: 'd', chords: ['Am'] }, { id: 'e', chords: ['G'] }] });
+    const destinations = [target('b'), { sectionId: 'chorus', barId: 'd' }];
+    const result = pastePreviewContent(song, destinations, copyPreviewContent(source, [target('a'), target('b')], 'bars')!);
+    expect(result.targets).toEqual(destinations);
+    for (const destination of destinations) {
+      expect(getBarStoredKey(result.song, destination)).toBe('D');
+    }
+    expect(result.song.sections.map((section) => section.bars.length)).toEqual([3, 2]);
+    expect(getEffectiveTimeSignatureForBar(result.song, result.song.sections[0].bars[2])).toBe('4/4');
+    expect(getEffectiveTimeSignatureForBar(result.song, result.song.sections[1].bars[1])).toBe('4/4');
+    expect(getBarStoredKey(result.song, target('c'))).toBe('C');
+    expect(getBarStoredKey(result.song, { sectionId: 'chorus', barId: 'e' })).toBe('C');
+  });
+
+  it('rejects mismatched whole-bar destination counts atomically', () => {
+    const song = makeSong();
+    const result = pastePreviewContent(song, [target('a'), target('b'), target('c')], copyPreviewContent(song, [target('a'), target('b')], 'bars')!);
+    expect(result.error).toBe('count-mismatch');
+    expect(result.song).toBe(song);
+  });
+
+  it('rejects a meter change that would alter an untouched partial measure', () => {
+    const source = makeSong();
+    source.timeSignature = '3/4';
+    const song = makeSong();
+    song.sections[0].bars[2] = { id: 'c', chords: ['G'], partialMeasure: true, timeSignature: '1/4' };
+    const result = pastePreviewContent(song, [target('b')], copyPreviewContent(source, [target('a')], 'bars')!);
+    expect(result.error).toBe('time-signature');
+    expect(result.song).toBe(song);
   });
 
   it('rejects a whole batch atomically when a destination has a different meter', () => {
@@ -128,8 +176,8 @@ describe('preview clipboard commands', () => {
     source.sections[0].bars[0].chords = ['D', 'A', 'G'];
     const destination = makeSong();
     const result = pastePreviewContent(destination, [target('b')], copyPreviewContent(source, [target('a')], 'bars')!);
-    const pasted = result.song.sections[0].bars[2];
-    const following = result.song.sections[0].bars[3];
+    const pasted = result.song.sections[0].bars[1];
+    const following = result.song.sections[0].bars[2];
     expect(getEffectiveTimeSignatureForBar(result.song, pasted)).toBe('3/4');
     expect(getBarStoredKey(result.song, target(pasted.id!))).toBe('D');
     expect(getEffectiveTimeSignatureForBar(result.song, following)).toBe('4/4');
@@ -146,10 +194,10 @@ describe('preview clipboard commands', () => {
     const destination = makeSong();
     const result = pastePreviewContent(destination, [target('b')], clipboard);
     expect(result.error).toBeUndefined();
-    const pasted = result.song.sections[0].bars[2];
+    const pasted = result.song.sections[0].bars[1];
     expect(pasted.partialMeasure).toBe(true);
     expect(getEffectiveTimeSignatureForBar(result.song, pasted)).toBe('3/4');
-    expect(getEffectiveTimeSignatureForBar(result.song, result.song.sections[0].bars[3])).toBe('4/4');
+    expect(getEffectiveTimeSignatureForBar(result.song, result.song.sections[0].bars[2])).toBe('4/4');
     const otherMeter = { ...destination, timeSignature: '6/8' };
     expect(pastePreviewContent(otherMeter, [target('b')], clipboard).error).toBe('time-signature');
   });

@@ -73,3 +73,83 @@ it.each(['songs', 'setlists'])('deletes bars from the %s preview without crashin
   expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument();
   expect(song.sections[0].bars).toHaveLength(4);
 }, 15000);
+
+async function renderBatchPreview(mode: 'songs' | 'setlists') {
+  const song: StoredSong = {
+    id: 'batch-song', updatedAt: 1, title: '批次編輯測試',
+    originalKey: 'C', currentKey: 'C', timeSignature: '4/4',
+    sections: [{ id: 'batch-section', title: 'Verse', bars: ['C', 'Dm', 'F', 'G'].map((chord, i) => ({ id: `batch-${i}`, chords: [chord] })) }]
+  };
+  fixture = {
+    songs: [song], projects: [], joinedSetlists: [], joinedProjects: [], lastSavedAt: 1,
+    setlists: [{ id: 'batch-list', name: '批次歌單', displayMode: 'chord-movable-key', createdAt: 1, updatedAt: 1,
+      songs: [{ id: 'batch-entry', setlistId: 'batch-list', songId: song.id, order: 0, sectionOrder: ['batch-section'], songData: song }] }]
+  };
+  localStorage.setItem('chordmaster.workspace-mode.v1', mode);
+  localStorage.setItem('chordmaster.selected-setlist-id.v1', 'batch-list');
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  await screen.findAllByText('批次編輯測試');
+  return song;
+}
+
+const batchBar = (index: number) => document.querySelector<HTMLElement>(`[data-preview-clipboard-bar="batch-${index}"]`)!;
+const batchBars = () => document.querySelectorAll('[data-preview-clipboard-bar^="batch-"]');
+
+it.each(['songs', 'setlists'] as const)('deletes a multi-bar selection in %s with either delete key and restores it in one undo', async (mode) => {
+  const original = await renderBatchPreview(mode);
+  for (const key of ['Delete', 'Backspace']) {
+    fireEvent.click(batchBar(0), { metaKey: true });
+    fireEvent.click(batchBar(1), { metaKey: true });
+    expect(document.querySelectorAll('[data-preview-selected-bar]')).toHaveLength(2);
+    const input = document.createElement('input');
+    document.body.append(input);
+    expect(fireEvent.keyDown(input, { key })).toBe(true);
+    input.remove();
+    expect(batchBars()).toHaveLength(4);
+    fireEvent.keyDown(document.body, { key, repeat: true });
+    fireEvent.keyDown(document.body, { key, isComposing: true });
+    fireEvent.keyDown(document.body, { key, metaKey: true });
+    expect(batchBars()).toHaveLength(4);
+    expect(fireEvent.keyDown(document.body, { key })).toBe(false);
+    expect(batchBars()).toHaveLength(2);
+    expect(batchBar(0)).toBeNull();
+    expect(batchBar(1)).toBeNull();
+    expect(batchBar(2)).not.toBeNull();
+    fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
+    expect(batchBars()).toHaveLength(4);
+  }
+  expect(original.sections[0].bars).toHaveLength(4);
+}, 15000);
+
+it.each(['songs', 'setlists'] as const)('copies several bars and overwrites the destination in %s without inserting, with one-step undo', async (mode) => {
+  await renderBatchPreview(mode);
+  fireEvent.click(batchBar(0), { ctrlKey: true });
+  fireEvent.click(batchBar(1), { ctrlKey: true });
+  expect([...document.querySelectorAll<HTMLElement>('[data-preview-selected-bar]')].map((bar) => bar.dataset.previewClipboardBar)).toEqual(['batch-0', 'batch-1']);
+  const values = new Map<string, string>();
+  const clipboardData = { setData: (key: string, value: string) => values.set(key, value), getData: (key: string) => values.get(key) ?? '' };
+  const dispatchClipboard = (type: string) => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: clipboardData });
+    fireEvent(window, event);
+    expect(event.defaultPrevented).toBe(true);
+  };
+  dispatchClipboard('copy');
+  expect(values.get('text/plain')).toBe('| C |\n| Dm |');
+  fireEvent.click(batchBar(0), { ctrlKey: true });
+  fireEvent.click(batchBar(1), { ctrlKey: true });
+  fireEvent.contextMenu(batchBar(2));
+  expect([...document.querySelectorAll<HTMLElement>('[data-preview-selected-bar]')].map((bar) => bar.dataset.previewClipboardBar)).toEqual(['batch-2']);
+  // jsdom has no real pointer position; model the pointer over this destination.
+  const querySelector = document.querySelector.bind(document);
+  const hover = vi.spyOn(document, 'querySelector').mockImplementation((selector: string) => selector === '[data-preview-hoverable]:hover'
+    ? querySelector('[data-preview-clipboard-bar="batch-2"]') : querySelector(selector));
+  try { dispatchClipboard('paste'); } finally { hover.mockRestore(); }
+  expect(batchBars()).toHaveLength(4);
+  expect(batchBar(2)).toHaveTextContent('C');
+  expect(batchBar(3)).toHaveTextContent('Dm');
+  fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
+  expect(batchBars()).toHaveLength(4);
+  expect(batchBar(2)).toHaveTextContent('F');
+  expect(batchBar(3)).toHaveTextContent('G');
+}, 15000);

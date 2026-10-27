@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-27',
+        title: 'Batch bar editing and direct barline switching',
+        bullets: ['Delete selected bars with Delete or Backspace and undo the whole batch in one step.', 'Whole-bar paste overwrites from the destination while preserving the key and meter of untouched bars. Insert before and after remain available in the context menu.', 'The barline button cycles through double, final and off on phone, tablet and desktop; repeat signs keep their own picker.']
+      },
+      {
+        version: '0.9.23',
+        date: '2026-10-27',
         title: 'Personal setlist views and a tighter app header',
         bullets: ['Nashville, fixed-do and movable-do setlist views are personal to this account/browser, including preview, performance mode and PDF export. Owners and viewers can choose independently.', 'Remove the empty status row above the team-setlist toolbar while preserving system safe areas and update notices.']
       },
@@ -607,6 +613,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: '多選刪除、覆蓋貼上與小節線切換',
+        bullets: ['多選小節後按 Delete／Backspace 整批刪除，可一次復原。', '完整小節從目的位置直接覆蓋，保留其他小節的拍號與調性；右鍵仍可選擇貼到前方／後方。', '「|」按鈕循環切換雙小節線、終止線與關閉，手機、平板、桌面一致；反覆記號使用獨立選單。']
+      },
+      {
+        version: '0.9.23',
         date: '2026-10-27',
         title: '歌單個人顯示與頂部留白修正',
         bullets: ['級數、固定調、首調改為目前帳號與瀏覽器的個人選擇，預覽、演出與 PDF 都一致；管理者和唯讀團員互不影響。', '移除團隊歌單工具列上方空白狀態列，保留系統安全區與更新提醒。']
