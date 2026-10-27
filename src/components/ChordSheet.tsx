@@ -6,8 +6,10 @@ import { formatTempoBpm } from '../utils/tempoUtils';
 import { currentKeyMode } from '../utils/keyMode';
 import type { TonalMode } from '../types';
 import { hasUnmeteredChords } from '../utils/unmeteredChords';
+import { isClosedBar } from '../utils/closedBar';
 import { getChordPassEvents } from '../utils/chordPassVariants';
 import { getChordEvents, chordEventLabel } from '../utils/chordSubdivisions';
+import { chordBeatGroupLabels, chordBeatTrackWeights } from '../utils/chordBeatLayout';
 import { getChordBeatOffset, chordBeatPositionLabel } from '../utils/chordBeatOffsets';
 import RhythmVoiceStack from './RhythmVoiceStack';
 import { visibleRhythmVoices } from '../utils/rhythmVoices';
@@ -118,7 +120,8 @@ const getBarDisplayLabel = (bar?: Bar) => (
 );
 
 const usesCompactNotationAnchor = (bar?: Bar) => Boolean(bar && !bar.chordTimingUnspecified && !hasUnmeteredChords(bar));
-const compactNotationTop = (bar?: Bar) => 40 + (bar?.chordSubdivisions?.length ? 8 : 0) + (bar?.chordPassVariants?.length ?? 0) * 36;
+// Beat labels already fit inside the 32px chord group. They do not add a lane.
+const compactNotationTop = (bar?: Bar) => 40 + (bar?.chordPassVariants?.length ?? 0) * 36;
 
 const isWholeRestChord = (chordString?: string) => {
   const trimmed = chordString?.trim();
@@ -1220,9 +1223,10 @@ const AutoShrink: React.FC<{
   minScale?: number;
   maxScale?: number;
   overflowVisible?: boolean;
-  shrinkAxis?: 'uniform' | 'x-only';
+  shrinkAxis?: 'uniform' | 'x-only' | 'balanced';
   startOffsetFraction?: number;
   fitNarrow?: boolean;
+  baseline?: boolean;
 }> = ({
   children,
   className = "",
@@ -1232,7 +1236,8 @@ const AutoShrink: React.FC<{
   overflowVisible = false,
   shrinkAxis = 'uniform',
   startOffsetFraction = 0,
-  fitNarrow = false
+  fitNarrow = false,
+  baseline = false
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const contentRef = React.useRef<HTMLDivElement>(null);
@@ -1288,7 +1293,7 @@ const AutoShrink: React.FC<{
     : align === 'right'
       ? 'justify-end'
       : 'justify-center';
-  const transformOrigin = align === 'left'
+  const transformOrigin = baseline ? `${align} bottom` : align === 'left'
     ? 'left center'
     : align === 'right'
       ? 'right center'
@@ -1303,18 +1308,44 @@ const AutoShrink: React.FC<{
       <div
         ref={contentRef}
         style={{
-          transform: `${startOffsetFraction ? `translateX(${startInset}px) ` : ''}${shrinkAxis === 'x-only' ? `scaleX(${scale})` : `scale(${scale})`}`,
+          transform: `${startOffsetFraction ? `translateX(${startInset}px) ` : ''}${shrinkAxis === 'x-only' ? `scaleX(${scale})` : shrinkAxis === 'balanced' ? `scale(${scale}, ${Math.min(1, scale * 2)})` : `scale(${scale})`}`,
           transformOrigin,
           whiteSpace: 'nowrap',
           flexShrink: 0,
-          display: 'inline-block'
-        }}
+          display: 'inline-block',
+          '--auto-fit-inverse-x': 1 / Math.max(.0001, scale),
+          '--auto-fit-inverse-y': 1 / Math.max(.0001, shrinkAxis === 'x-only' ? 1 : shrinkAxis === 'balanced' ? Math.min(1, scale * 2) : scale)
+        } as React.CSSProperties}
       >
         {children}
       </div>
     </div>
   );
 };
+
+// Each beat owns a separate column and its attacks share one fit. Cap the
+// horizontal condensation at 2:1, then reduce height too for very dense beats.
+const ChordBeatGroup: React.FC<{
+  beat: number;
+  offset: number;
+  labels: string[];
+  compact?: boolean;
+  children: React.ReactNode;
+}> = ({beat, offset, labels, compact = false, children}) => (
+  <div data-chord-beat-group={beat + 1} className="relative grid min-w-0" style={{gridTemplateColumns:offset > 0 ? `${offset}fr ${1-offset}fr` : 'minmax(0, 1fr)'}}>
+    {offset > 0 && <div aria-hidden="true"/>}
+    <div className="relative min-w-0">
+      <AutoShrink align="left" minScale={0} fitNarrow overflowVisible baseline shrinkAxis="balanced" className={`${compact ? 'h-[24px]' : 'h-[32px]'} items-end`}>
+        <div className="flex w-max items-end gap-x-1">
+          {React.Children.map(children,(child,index)=><div className={`relative flex-shrink-0 ${compact ? '' : 'pt-[8px]'}`}>
+            <span data-chord-beat-labels aria-hidden="true" className={`absolute left-0 text-[8px] font-medium leading-none text-slate-600 ${compact ? '-top-[5px]' : 'top-0'}`} style={{transform:'scale(var(--auto-fit-inverse-x), var(--auto-fit-inverse-y))',transformOrigin:'left bottom'}}>{labels[index]}</span>
+            {child}
+          </div>)}
+        </div>
+      </AutoShrink>
+    </div>
+  </div>
+);
 
 const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
   const phraseCarries = React.useMemo(() => song.sections.map(section => {
@@ -1723,6 +1754,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   };
   const shouldIgnorePreviewBarMultiSelectEvent = (target: EventTarget | null) => (
     target instanceof Element
+    && !target.closest('[data-preview-closed-hit]')
     && Boolean(target.closest('[data-preview-only-control], button, a, input, textarea, select, [role="button"]'))
   );
   const getPreviewBarActionTarget = (
@@ -1899,7 +1931,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
     .filter(({ section }) => (
       section.id === activeSectionId
       || Boolean(section.title.trim())
-      || section.bars.some((bar) => !isBarCompletelyEmpty(bar))
+      || section.bars.some((bar) => isClosedBar(bar) || !isBarCompletelyEmpty(bar))
     ))
     .map(({ sIdx }) => sIdx);
   if (previewSectionIndexes.length === 0 && song.sections.length > 0) {
@@ -2016,7 +2048,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   song.sections.forEach((section, index) => {
     sectionBarOffsets.push(accumulatedBarCount);
     if (!previewSectionIndexSet.has(index)) return;
-    accumulatedBarCount += (visibleSectionBars[index] ?? section.bars).filter(bar => !hasUnmeteredChords(bar)).length;
+    accumulatedBarCount += (visibleSectionBars[index] ?? section.bars).filter(bar => !hasUnmeteredChords(bar) && !isClosedBar(bar)).length;
   });
   const barNumberMode = song.barNumberMode ?? 'none';
   const previewJianpuScale = 0.86;
@@ -2736,6 +2768,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                   const restPlan = Array.from({ length: 4 }, () => ({ span: 1, covered: false }));
                   const isAbsorbableRestBar = (candidate: Bar | undefined) => {
                     if (!candidate) return true;
+                    if (isClosedBar(candidate)) return false;
                     if (hasMeaningfulChordContent(candidate.chords)) return false;
                     if (candidate.rhythm?.trim()) return false;
                     if (visibleJianpuVoices(candidate.riffVoices).length) return false;
@@ -2762,6 +2795,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const restSpan = restPlan[bIdx].span;
                     const lastBIdx = bIdx + restSpan - 1;
                     const bar = row.bars[bIdx];
+                    const isClosedCell = isClosedBar(bar);
                     const previousBar = row.bars[bIdx - 1];
                     const globalBarIndex = row.startBIdx + bIdx;
                     const barWrittenKey = songKeyStates.barActiveKeys[row.sIdx]?.[globalBarIndex] ?? sectionWrittenKey;
@@ -2831,7 +2865,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const rightNavigationText = bar?.rightText?.trim() || getDefaultRightNavigationText(bar?.rightMarker);
                     const isRightTextOnlyMarker = Boolean(bar?.rightMarker && TEXT_ONLY_NAVIGATION_MARKERS.has(bar.rightMarker));
                     const hasBarLabel = Boolean(barLabel);
-                    const globalBarNumber = (sectionBarOffsets[row.sIdx] ?? 0) + (song.sections[row.sIdx]?.bars.slice(0,row.startBIdx+bIdx).filter(bar=>!hasUnmeteredChords(bar)).length ?? 0) + 1;
+                    const globalBarNumber = (sectionBarOffsets[row.sIdx] ?? 0) + (song.sections[row.sIdx]?.bars.slice(0,row.startBIdx+bIdx).filter(bar=>!hasUnmeteredChords(bar) && !isClosedBar(bar)).length ?? 0) + 1;
                     const beatsPerBar = parseInt(effectiveTimeSignature.split('/')[0]) || 4;
                     const displayChordEntries = bar ? getChordDisplaySlotEntries(bar.chords, beatsPerBar) : [];
                     const rhythmMarkColor = getRhythmMarkTextColor(bar);
@@ -3081,8 +3115,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                     const shouldReserveBarNumberForNavigationMarker = Boolean(bar?.leftMarker || previousBar?.rightMarker);
                     const showBarNumber = Boolean(
                       bar
+                      && !isClosedCell
                       && barNumberMode !== 'none'
-                      && (barNumberMode === 'all' || bIdx === 0)
+                      && (barNumberMode === 'all' || row.bars.slice(0, bIdx).every(isClosedBar))
                       && !shouldReserveBarNumberForNavigationMarker
                     );
                     const barNumberTopClass = bar?.ending
@@ -3162,6 +3197,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           data-preview-clipboard-identity={previewIdentity ?? undefined}
                           data-preview-clipboard-section={previewBarSectionId}
                           data-preview-clipboard-bar={previewBarId}
+                          data-preview-closed-cell={isClosedCell ? true : undefined}
                           data-preview-active-bar={isActiveBar || isActivePreviewEditBar ? true : undefined}
 	                        data-preview-lower-lanes={onElementClick ? lowerLaneCount : undefined}
 	                        data-preview-three-notation-rows={hasThreeNotationRows ? true : undefined}
@@ -3302,13 +3338,24 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                           />
                         )}
 
-                        {isUnusedBar && !row.addSectionAfter && (
-                          <div className="absolute inset-0 z-[1] flex items-center pointer-events-none">
+                        {(isClosedCell || (isUnusedBar && !row.addSectionAfter)) && (
+                          <div data-preview-unused-line className="absolute inset-0 z-[1] flex items-center pointer-events-none">
                             <div className="h-[2px] w-full bg-gray-400" />
                           </div>
                         )}
 
-                        {bar && (
+                        {isClosedCell && onElementClick && (
+                          <button
+                            type="button"
+                            data-preview-closed-hit
+                            data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || globalBarIndex}|chords|0`}
+                            className="absolute inset-0 z-[2] cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-indigo-500 print:hidden"
+                            aria-label={language === 'zh' ? '已關閉的小節，開啟編輯' : 'Closed bar, open editor'}
+                            onClick={event => emitElementClick(event, row.sIdx, globalBarIndex, 'chords', 0)}
+                          />
+                        )}
+
+                        {bar && !isClosedCell && (
                           <>
                             {bar.chordKeyUnspecified && <span data-chord-key-unspecified={bar.id} className="absolute -top-[10px] left-1 z-40 rounded bg-amber-50 px-1 text-[8px] font-medium text-amber-800">{language === 'zh' ? '調性未標 · 原譜級數' : 'Key unspecified · source degrees'}</span>}
                             {bar.chordKeyUnspecified && !bar.chordTimingUnspecified && bar.annotation && <details className="absolute right-1 top-0 z-40 print:hidden" onClick={event=>event.stopPropagation()}><summary aria-label={language==='zh'?'原譜註記':'Source annotation'} className="cursor-pointer list-none text-[8px] text-slate-500">{language==='zh'?'註':'Note'}</summary><div className="fixed bottom-12 left-3 right-3 rounded-lg border border-slate-300 bg-white p-3 text-xs leading-5 text-slate-700 shadow-lg sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:w-72">{bar.annotation}</div></details>}
@@ -3426,13 +3473,18 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
 
                                     if (bar.chordSubdivisions?.length) {
                                       const events = getChordEvents(bar, beatsPerBar);
-                                      return <div data-subbeat-chord-row className={`grid w-full min-w-0 items-end ${contentLeftInsetClass}`} style={{gridTemplateColumns:`repeat(${events.length}, minmax(0, 1fr))`}}>
-                                        {events.map((entry,index) => <div key={index} data-chord-event-position={chordEventLabel(entry.beat,entry.offset)} data-chord-event-kind={entry.subdivisionIndex === null ? 'primary' : 'additional'} className="relative min-w-0 px-[2px] pt-[8px]" onClick={event=>{event.stopPropagation();emitElementClick(event,row.sIdx,row.startBIdx+bIdx,'chords',entry.beat,entry.rawIndex ?? undefined);}}>
-                                          <span className="absolute left-[2px] top-0 text-[8px] font-medium leading-none text-slate-600">{chordEventLabel(entry.beat,entry.offset)}</span>
-                                          <AutoShrink align="left" minScale={0} fitNarrow overflowVisible shrinkAxis="x-only" className="h-[24px] items-end">
-                                            <FormattedChord chordString={displayBarChord(entry.chord)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} color={entry.rawIndex === null ? undefined : getChordMarkTextColor(bar,entry.rawIndex)} specialLabel={entry.rawIndex === null ? undefined : getChordSpecialLabel(bar,entry.rawIndex,language)}/>
-                                          </AutoShrink>
-                                        </div>)}
+                                      return <div data-subbeat-chord-row className={`grid w-full min-w-0 items-end ${contentLeftInsetClass}`} style={{gridTemplateColumns:chordBeatTrackWeights(events,beatsPerBar).map(weight=>`minmax(0, ${weight}fr)`).join(' '),columnGap:6}}>
+                                        {Array.from({length:beatsPerBar}, (_,beat) => {
+                                          const beatEvents = events.filter(entry => entry.beat === beat);
+                                          return <ChordBeatGroup key={beat} beat={beat} offset={beatEvents[0]?.offset ?? 0} labels={chordBeatGroupLabels(beatEvents)}>
+                                            {beatEvents.map((entry,index) => <div key={index} data-chord-event-position={chordEventLabel(entry.beat,entry.offset)} data-chord-event-kind={entry.subdivisionIndex === null ? 'primary' : 'additional'} className="relative min-w-max" onClick={event=>{event.stopPropagation();emitElementClick(event,row.sIdx,row.startBIdx+bIdx,'chords',entry.beat,entry.rawIndex ?? undefined);}}>
+                                              <span className="sr-only">{chordEventLabel(entry.beat,entry.offset)}</span>
+                                              <div className="flex h-[24px] items-end overflow-visible">
+                                                <FormattedChord chordString={displayBarChord(entry.chord)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} color={entry.rawIndex === null ? undefined : getChordMarkTextColor(bar,entry.rawIndex)} specialLabel={entry.rawIndex === null ? undefined : getChordSpecialLabel(bar,entry.rawIndex,language)}/>
+                                              </div>
+                                            </div>)}
+                                          </ChordBeatGroup>;
+                                        })}
                                       </div>;
                                     }
 
@@ -3654,16 +3706,15 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         const events = getChordPassEvents(bar, beatsPerBar, variant.pass);
                                         return <div key={variant.pass} data-chord-pass={variant.pass} data-preview-hover-field={onElementClick ? 'chords' : undefined} className={`relative h-[36px] min-w-0 flex-shrink-0 ${contentLeftInsetClass}`} onClick={event => { event.stopPropagation(); emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords'); }}>
                                           <span className="block px-[3px] text-[8px] font-bold leading-[10px] text-slate-600">{language === 'zh' ? `第${variant.pass}遍` : `Pass ${variant.pass}`}</span>
-                                          <div className="relative h-[24px] w-full">
-                                            {events.map((entry, index) => {
-                                              const position = entry.beat + entry.offset;
-                                              const end = events[index + 1] ? events[index + 1].beat + events[index + 1].offset : beatsPerBar;
-                                              return <div key={index} data-chord-pass-event-position={chordEventLabel(entry.beat, entry.offset)} className="absolute bottom-0 h-[24px] min-w-0 px-[3px]" style={{ left: `${position / beatsPerBar * 100}%`, width: `${Math.max(0.25, end - position) / beatsPerBar * 100}%` }}>
-                                                {entry.offset !== 0 && <span className="absolute -top-[5px] left-[3px] text-[8px] leading-none text-slate-600">{chordEventLabel(entry.beat, entry.offset)}</span>}
-                                                <AutoShrink align="left" minScale={0} fitNarrow shrinkAxis="x-only" className="h-[24px] items-end">
-                                                  <FormattedChord chordString={displayBarChord(entry.chord)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />
-                                                </AutoShrink>
-                                              </div>;
+                                          <div className="grid w-full min-w-0 items-end" style={{gridTemplateColumns:chordBeatTrackWeights(events,beatsPerBar).map(weight=>`minmax(0, ${weight}fr)`).join(' '),columnGap:6}}>
+                                            {Array.from({length:beatsPerBar}, (_,beat) => {
+                                              const beatEvents = events.filter(entry=>entry.beat===beat);
+                                              return <ChordBeatGroup key={beat} beat={beat} offset={beatEvents[0]?.offset ?? 0} labels={chordBeatGroupLabels(beatEvents,true)} compact>
+                                                {beatEvents.map((entry,index)=><div key={index} data-chord-pass-event-position={chordEventLabel(entry.beat,entry.offset)} className="flex h-[24px] min-w-max items-end">
+                                                  {entry.offset !== 0 && <span className="sr-only">{chordEventLabel(entry.beat,entry.offset)}</span>}
+                                                  <FormattedChord chordString={displayBarChord(entry.chord)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily}/>
+                                                </div>)}
+                                              </ChordBeatGroup>;
                                             })}
                                           </div>
                                         </div>;

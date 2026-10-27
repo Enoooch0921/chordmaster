@@ -153,3 +153,45 @@ it.each(['songs', 'setlists'] as const)('copies several bars and overwrites the 
   expect(batchBar(2)).toHaveTextContent('F');
   expect(batchBar(3)).toHaveTextContent('G');
 }, 15000);
+
+
+it.each(['songs', 'setlists'] as const)('clears, closes, reopens and undoes the first bar from the %s context menu without moving later bars', async mode => {
+  const original = await renderBatchPreview(mode);
+  fireEvent.contextMenu(batchBar(0));
+  expect(screen.getByRole('menuitem', { name: '關閉此小節' })).toBeDisabled();
+  expect(screen.getByText('請先清空小節，再關閉')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('menuitem', { name: '清空此小節' }));
+  expect(batchBar(0)).not.toHaveTextContent('C');
+  expect(batchBar(1)).toHaveTextContent('Dm');
+  fireEvent.contextMenu(batchBar(0));
+  fireEvent.click(screen.getByRole('menuitem', { name: '關閉此小節' }));
+  expect(batchBar(0)).toHaveAttribute('data-preview-closed-cell', 'true');
+  expect(batchBars()).toHaveLength(4);
+  expect(batchBar(1)).toHaveTextContent('Dm');
+  expect(batchBar(2)).toHaveTextContent('F');
+  expect(batchBar(3)).toHaveTextContent('G');
+  fireEvent.contextMenu(screen.getByRole('button', { name: '已關閉的小節，開啟編輯' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '重新開啟此小節' }));
+  expect(batchBar(0)).not.toHaveAttribute('data-preview-closed-cell');
+  fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
+  expect(batchBar(0)).toHaveAttribute('data-preview-closed-cell', 'true');
+  fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
+  expect(batchBar(0)).not.toHaveAttribute('data-preview-closed-cell');
+  fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
+  expect(batchBar(0)).toHaveTextContent('C');
+  expect(original.sections[0].bars[0].chords).toEqual(['C']);
+}, 15000);
+
+it('applies context clearing inside the active draft and undoes it without losing previous input', async () => {
+  await renderBatchPreview('songs');
+  fireEvent.click(batchBar(0).querySelector('[data-preview-slot-index="0"]')!);
+  fireEvent.change(await screen.findByRole('textbox', { name: '和弦直接輸入' }), { target: { value: 'Em7' } });
+  fireEvent.contextMenu(batchBar(0));
+  fireEvent.click(screen.getByRole('menuitem', { name: '清空此小節' }));
+  expect(batchBar(0)).not.toHaveTextContent('Em7');
+  expect(screen.getByRole('textbox', { name: '和弦直接輸入' })).toHaveFocus();
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  expect(batchBar(0)).toHaveTextContent('Em7');
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(batchBar(0)).toHaveTextContent('C');
+});

@@ -1,4 +1,5 @@
 import { hasUnmeteredChords, transposeUnmeteredChordLines } from '../utils/unmeteredChords';
+import { canCloseBar } from '../utils/closedBar';
 import { transposeChordPassVariants } from '../utils/chordPassVariants';
 import { reconcileChordSubdivisions, transposeChordSubdivisions } from '../utils/chordSubdivisions';
 import { canOffsetChord, setRawChordBeatOffset } from '../utils/chordBeatOffsets';
@@ -19,6 +20,7 @@ import {
   getTransposeOffset,
   isNashville,
   normalizeChordEnharmonic,
+  normalizeChordQualityAliases,
   parseNashvilleToChord,
   transposeChord,
   transposeKeyPreservingSpelling,
@@ -104,6 +106,7 @@ export const toggleEndingNumber = (ending: string | undefined, digit: string): s
 
 export type EditableBarFields = Pick<
   Bar,
+  | 'closed'
   | 'timeSignature'
   | 'tempo'
   | 'resetTempo'
@@ -146,7 +149,7 @@ const hasObjectEntries = (value?: object | null) => Boolean(value && Object.keys
 
 export const isBarCompletelyEmpty = (bar?: Bar | null) => {
   if (!bar) return false;
-  return !hasUnmeteredChords(bar) && !bar.chordTimingUnspecified && !bar.chordKeyUnspecified
+  return bar.closed !== true && !hasUnmeteredChords(bar) && !bar.chordTimingUnspecified && !bar.chordKeyUnspecified
     && !bar.chords.some((chord) => chord.trim())
     && !bar.riff?.trim()
     && !bar.riffVoices?.length
@@ -568,7 +571,8 @@ export const normalizeChordBeatTokens = (
   beatCount: number
 ): ChordTextParseResult => {
   const safeBeatCount = Math.max(1, beatCount);
-  const visibleTokens = tokens.map((token) => token.trim()).filter(Boolean);
+  const normalizedTokens = tokens.map(normalizeChordQualityAliases);
+  const visibleTokens = normalizedTokens.map((token) => token.trim()).filter(Boolean);
   const fullBarTokens = visibleTokens.filter((token) => isFullBarChordToken(token));
   if (fullBarTokens.length > 0 && visibleTokens.length > 1) {
     return {
@@ -592,7 +596,7 @@ export const normalizeChordBeatTokens = (
     });
     return { chords: positioned, error: null };
   }
-  return { chords: tokens, error: null };
+  return { chords: normalizedTokens, error: null };
 };
 
 export const parseChordBarText = (value: string, beatCount: number): ChordTextParseResult => {
@@ -608,7 +612,7 @@ export const setBarChordText = (song: Song, target: SongBarIdentity, value: stri
   const located = findSongBar(song, target);
   if (!located) return { song, chords: [], error: '找不到要編輯的小節。' };
   if (located.bar.chordTimingUnspecified) {
-    const chords=value.trim().split(/\s+/).filter(Boolean);
+    const chords=value.trim().split(/\s+/).filter(Boolean).map(normalizeChordQualityAliases);
     return {song:replaceLocatedBar(song,located,{...located.bar,chords}),chords,error:null};
   }
   const beatCount = getBeatCount(song, located.bar);
@@ -711,6 +715,27 @@ export const copyBarsForClipboard = (
   song: Song,
   targets: SongBarIdentity[]
 ): Bar[] => getBarsByIdentities(song, targets).map(({ bar }) => structuredClone(bar));
+
+export type BarCellAction = 'clear' | 'close' | 'reopen';
+
+/** Change cell contents without changing identities, order, or neighbouring bars. */
+export const applyBarCellAction = (song: Song, targets: SongBarIdentity[], action: BarCellAction): Song => {
+  const selected = getBarsByIdentities(song, targets);
+  if (!selected.length || (action === 'close' && selected.some(({ bar }) => !canCloseBar(bar)))) return song;
+  const keys = new Set(selected.map(({ target }) => getSongBarIdentityKey(target)));
+  let changed = false;
+  const sections = song.sections.map(section => {
+    let sectionChanged = false;
+    const bars = section.bars.map(bar => {
+      if (!section.id || !bar.id || !keys.has(getSongBarIdentityKey({ sectionId: section.id, barId: bar.id }))) return bar;
+      if (action === 'clear' ? canCloseBar(bar) : action === 'close' ? bar.closed === true : bar.closed !== true) return bar;
+      sectionChanged = changed = true;
+      return action === 'clear' ? { id: bar.id, chords: [] } : { ...bar, closed: action === 'close' ? true : undefined };
+    });
+    return sectionChanged ? { ...section, bars } : section;
+  });
+  return changed ? { ...song, sections } : song;
+};
 
 export const setEndingForBars = (
   song: Song,
@@ -1245,13 +1270,14 @@ export const getChordStorageModeForTarget = (
   return detectChordStorageMode(chord, fallback);
 };
 
-/** Normalize only chord roots while preserving user-defined quality text. */
+/** Normalize roots and supported aliases while preserving other quality text. */
 export const normalizeChordTextInput = (
   input: string,
   inputMode: ChordInputMode
 ): string => {
-  if (inputMode !== 'letters') return input;
-  return input
+  const normalized = normalizeChordQualityAliases(input);
+  if (inputMode !== 'letters') return normalized;
+  return normalized
     .replace(/^([a-g])/, (_, root: string) => root.toUpperCase())
     .replace(/\/([a-g])/g, (_, root: string) => `/${root.toUpperCase()}`);
 };

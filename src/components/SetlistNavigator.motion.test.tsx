@@ -40,3 +40,17 @@ it('disables outgoing controls during a slide and skips animation when restoring
   expect(container.querySelector('[data-setlist-panel-layer="list"]')).toHaveAttribute('inert');
   await waitFor(() => expect(container.querySelectorAll('[data-setlist-panel-layer]')).toHaveLength(1));
 });
+
+it('animates root folders even while both levels use the list view and restores the root scroll', async()=>{
+ const panel=(label:string)=><div data-setlist-scroll><button>{label}</button></div>;
+ const options={detail:'',addSongs:'',manageProjects:'',view:'list' as const,motion:{instant:true,reduced:false}};
+ const {container,rerender}=render(<SetlistNavigator {...options} path={[]} list={panel('Root folder')}/>);
+ const scroller=container.querySelector<HTMLElement>('[data-setlist-scroll]')!;scroller.scrollTop=260;
+ rerender(<SetlistNavigator {...options} path={['project:la']} list={panel('Meeting')}/>);
+ await waitFor(()=>expect(container.querySelectorAll('[data-setlist-panel-layer]')).toHaveLength(1));
+ expect(container.querySelector('[data-setlist-location]')).toHaveStyle({zIndex:'1'});
+ rerender(<SetlistNavigator {...options} path={[]} list={panel('Root folder')}/>);
+ await waitFor(()=>expect(container.querySelectorAll('[data-setlist-panel-layer]')).toHaveLength(1));
+ expect(container.querySelector('[data-setlist-location]')).toHaveStyle({zIndex:'0'});
+ expect(container.querySelector<HTMLElement>('[data-setlist-scroll]')!.scrollTop).toBe(260);
+});

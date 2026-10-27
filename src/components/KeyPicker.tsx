@@ -36,7 +36,7 @@ interface KeyPickerProps {
   label: string;
   originalKey?: Key | null;
   title?: string;
-  triggerLabel?: string;
+  triggerLabel?: React.ReactNode;
   triggerMetaText?: string;
   panelMetaText?: string;
   clearLabel?: string;

@@ -76,6 +76,50 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it.each(['phone', 'tablet', 'desktop'] as const)('closes and reopens only the empty selected cell without shifting later bars on %s', async deviceLayout => {
+    const user = userEvent.setup();
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [
+      { id: 'bar-1', chords: [] }, { id: 'bar-2', chords: ['C'] }, { id: 'bar-3', chords: ['F'] }, { id: 'bar-4', chords: ['G'] }
+    ] }] };
+    let session = createPreviewEditSession({ song: source, target, inputMode: 'letters' });
+    const { onApplyDraft, onStructure, rerenderSession } = renderEditor({ session, deviceLayout });
+    await user.click(screen.getByRole('button', { name: '小節操作' }));
+    await user.click(screen.getByRole('button', { name: '關閉此小節' }));
+    const closed = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    expect(closed.sections[0].bars[0]).toEqual({ id: 'bar-1', chords: [], closed: true });
+    expect(closed.sections[0].bars.slice(1)).toEqual(source.sections[0].bars.slice(1));
+    expect(onStructure).not.toHaveBeenCalled();
+    session = applyPreviewDraft(session, closed);
+    rerenderSession(session);
+    await user.click(screen.getByRole('button', { name: '小節操作' }));
+    await user.click(screen.getByRole('button', { name: '重新開啟小節' }));
+    const reopened = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    expect(reopened.sections[0].bars.map(bar => bar.id)).toEqual(['bar-1', 'bar-2', 'bar-3', 'bar-4']);
+    expect(reopened.sections[0].bars[0].closed).toBeUndefined();
+    expect(reopened.sections[0].bars.slice(1)).toEqual(source.sections[0].bars.slice(1));
+  });
+
+  it('disables closing for a nonempty measure and reopens a closed cell when notation is entered', async () => {
+    const user = userEvent.setup();
+    const { onApplyDraft, rerenderSession } = renderEditor();
+    await user.click(screen.getByRole('button', { name: '小節操作' }));
+    expect(screen.getByRole('button', { name: '關閉此小節' })).toBeDisabled();
+    expect(onApplyDraft).not.toHaveBeenCalled();
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [], closed: true }] }] };
+    rerenderSession(createPreviewEditSession({ song: source, target, inputMode: 'letters' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '和弦直接輸入' }), { target: { value: 'F' } });
+    const edited = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    expect(edited.sections[0].bars[0].closed).toBeUndefined();
+    expect(edited.sections[0].bars[0].chords).toContain('F');
+  });
+
+  it('accepts Em7-5 from direct typing as Em7b5 in the saved draft', () => {
+    const { onApplyDraft } = renderEditor();
+    fireEvent.change(screen.getByRole('textbox', { name: '和弦直接輸入' }), { target: { value: 'Em7-5' } });
+    const draft = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    expect(draft.sections[0].bars[0].chords).toEqual(['C', 'Em7b5', '', '']);
+  });
+
   it.each(['phone', 'tablet', 'desktop'] as const)('cycles the barline button through double, final and off on %s', async (deviceLayout) => {
     const user = userEvent.setup();
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], repeatStart: true, repeatEnd: true }] }] };
@@ -1155,7 +1199,7 @@ describe('PreviewBarEditor', () => {
     await user.click(screen.getByRole('button', { name: '小節操作' }));
     const actions = document.querySelector('[data-structure-actions]');
     expect(actions).toBeInTheDocument();
-    expect(actions?.querySelectorAll('button')).toHaveLength(7);
+    expect(actions?.querySelectorAll('button')).toHaveLength(8);
     expect(actions).not.toHaveClass('overflow-y-auto');
     await user.click(within(actions as HTMLElement).getByRole('button', { name: '複製小節' }));
     expect(onStructure).toHaveBeenCalledWith('copy-bar');

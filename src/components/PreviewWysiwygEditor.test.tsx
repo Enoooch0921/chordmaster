@@ -218,3 +218,58 @@ describe('PreviewWysiwygEditor song information panel', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
+
+describe('reverting an accidental credit edit', () => {
+  it.each(['desktop', 'tablet', 'phone'] as const)('keeps the original credit fields and source status on %s', async deviceLayout => {
+    const original: Song = { ...song, lyricist: 'Original Writer', composer: 'Original Composer', translator: 'original translator' };
+    let latest = original;
+    const onClose = vi.fn();
+    function CreditsEditor() {
+      const [value, setValue] = React.useState(original);
+      return <PreviewWysiwygEditor song={value} language="zh" target={makeTarget('credits')} deviceLayout={deviceLayout}
+        currentKey="C" currentCapo={0} originalKey="C" onChange={next => { latest = next; setValue(next); }}
+        onKeyChange={() => {}} onCapoChange={() => {}} onClose={onClose} />;
+    }
+    const { container } = render(<CreditsEditor />);
+    const input = deviceLayout === 'desktop' ? screen.getByRole('textbox', { name: '版本 / 詞曲' })
+      : container.querySelector<HTMLInputElement>('[data-song-metadata-field="credits"] input')!;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'Original Writer / Original Composer1' } });
+    fireEvent.change(input, { target: { value: 'Original Writer / Original Composer' } });
+    if (deviceLayout === 'desktop') fireEvent.keyDown(input, { key: 'Enter' });
+    else fireEvent.blur(input);
+    expect(latest).toEqual(original);
+    const { classifySetlistSource } = await import('../lib/setlistSourceSync');
+    expect(classifySetlistSource(original, latest, { songId: 'song', sourceContent: original, entryContent: original, sourceRevision: '2026-10-27', capturedAt: '2026-10-27' })).toBe('aligned');
+  });
+
+  it('does not rewrite authors when only the translator text is entered and removed', () => {
+    const original: Song = { ...song, composer: 'Original Composer', translator: 'original translator' };
+    const onChange = vi.fn();
+    render(<PreviewWysiwygEditor song={original} language="zh" target={makeTarget('credits')} deviceLayout="desktop"
+      currentKey="C" currentCapo={0} originalKey="C" onChange={onChange} onKeyChange={() => {}} onCapoChange={() => {}} onClose={() => {}} />);
+    const input = screen.getByRole('textbox', { name: '翻譯' });
+    fireEvent.change(input, { target: { value: 'original translator1' } });
+    fireEvent.change(input, { target: { value: 'original translator' } });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '版本 / 詞曲' }), { key: 'Enter' });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+it.each(['tablet', 'phone'] as const)('preserves unchanged translator capitalization on %s', deviceLayout => {
+  const original: Song = { ...song, composer: 'Original Composer', translator: 'original translator' };
+  let latest = original;
+  function CreditsEditor() {
+    const [value, setValue] = React.useState(original);
+    return <PreviewWysiwygEditor song={value} language="zh" target={makeTarget('credits')} deviceLayout={deviceLayout}
+      currentKey="C" currentCapo={0} originalKey="C" onChange={next => { latest = next; setValue(next); }}
+      onKeyChange={() => {}} onCapoChange={() => {}} onClose={() => {}} />;
+  }
+  const { container } = render(<CreditsEditor />);
+  const input = container.querySelector<HTMLInputElement>('[data-song-metadata-field="translator"] input')!;
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: 'original translator1' } });
+  fireEvent.change(input, { target: { value: 'original translator' } });
+  fireEvent.blur(input);
+  expect(latest).toEqual(original);
+});

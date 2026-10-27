@@ -231,6 +231,11 @@ export function getParenthesizedChordInner(chord: string): string | null {
   return depth === 0 ? inner : null;
 }
 
+/** Accept the manual half-diminished shorthand without rewriting other qualities. */
+export function normalizeChordQualityAliases(chord: string): string {
+  return chord.replace(/^(\(?)([A-Ga-g][#b]?|[#b]?[1-7][#b]?)m7-5(?=$|[\/)<>^~])/, '$1$2m7b5');
+}
+
 export function normalizeChordEnharmonic(chord: string): string {
   if (!chord || chord === '%' || chord === '/') {
     return chord;

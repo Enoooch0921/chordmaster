@@ -49,3 +49,8 @@ describe('remembered project and meeting navigation', () => {
     expect(loadNavigationLocation(key)).toBeNull();
   });
 });
+it('migrates legacy loose/shared category views to the folder/file root',()=>{
+ expect(resolveNavigationLocation({...location,view:'list',filter:{kind:'ungrouped'}},workspace).filter).toEqual({kind:'all'});
+ expect(resolveNavigationLocation({...location,view:'list',filter:{kind:'shared-setlists'}},workspace).filter).toEqual({kind:'all'});
+ expect(resolveNavigationLocation({...location,filter:{kind:'all'}},workspace).filter).toEqual(location.filter);
+});

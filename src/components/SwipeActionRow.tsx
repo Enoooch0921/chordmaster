@@ -20,10 +20,12 @@ export function SwipeActionGroup({ children, resetKey }: { children: React.React
       node.querySelector<HTMLElement>('[data-swipe-foreground] button')?.focus();
     };
     document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('touchstart', outside, { passive: true, capture: true });
     document.addEventListener('focusin', outside);
     document.addEventListener('keydown', escape);
     return () => {
       document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('touchstart', outside, true);
       document.removeEventListener('focusin', outside);
       document.removeEventListener('keydown', escape);
     };
@@ -41,6 +43,7 @@ interface SwipeActionRowProps extends React.HTMLAttributes<HTMLDivElement> {
 const REVEAL = 80;
 const LOCK = 8;
 const THRESHOLD = 14;
+type SwipeInput = Pick<React.PointerEvent<HTMLDivElement>, 'pointerId' | 'isPrimary' | 'button' | 'target' | 'clientX' | 'clientY' | 'preventDefault'> & { currentTarget: HTMLDivElement };
 type Gesture = { pointer: number; x: number; y: number; base: number; wasOpen: number; latest: number; axis: 'h' | 'v' | null };
 
 /** Dragging writes one transform per frame; it never sends pixels through App state. */
@@ -98,7 +101,7 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
     };
   }, []);
 
-  const begin = (event: React.PointerEvent<HTMLDivElement>) => {
+  const begin = (event: SwipeInput) => {
     if (event.isPrimary === false || event.button !== 0 || (!leftAction && !rightAction)) return;
     if ((event.target as HTMLElement).closest('input, select, textarea, [data-swipe-ignore]')) return;
     clearTimers();
@@ -112,7 +115,7 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
     element.style.transform = `translate3d(${base}px, 0, 0)`;
     gesture.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, base, wasOpen: target.current, latest: base, axis: null };
   };
-  const move = (event: React.PointerEvent<HTMLDivElement>) => {
+  const move = (event: SwipeInput, capture = true) => {
     const start = gesture.current;
     if (!start || start.pointer !== event.pointerId) return;
     const dx = event.clientX - start.x, dy = event.clientY - start.y;
@@ -126,7 +129,7 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
           group.current = { node: root.current!, close };
         }
         foreground.current!.style.willChange = 'transform';
-        try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* detached or synthetic pointer */ }
+        try { if (capture) event.currentTarget.setPointerCapture(event.pointerId); } catch { /* detached or synthetic pointer */ }
       }
     }
     if (start.axis !== 'h') return;
@@ -139,7 +142,7 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
     });
     event.preventDefault();
   };
-  const finish = (event: React.PointerEvent<HTMLDivElement>) => {
+  const finish = (event: SwipeInput) => {
     const start = gesture.current;
     if (!start || start.pointer !== event.pointerId) return;
     if (start.axis !== 'h') { settle(start.wasOpen); return; }
@@ -149,6 +152,43 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
     settle(offset);
     event.preventDefault();
   };
+  // Safari touch scrolling may cancel pointer streams. Track real touches separately
+  // and prevent native scrolling only after locking a horizontal gesture.
+  const touchHandlers = useRef({ begin, move, finish, close });
+  useLayoutEffect(() => { touchHandlers.current = { begin, move, finish, close }; });
+  useEffect(() => {
+    const element = foreground.current;
+    if (!element) return;
+    const input = (event: TouchEvent, touch: Touch): SwipeInput => ({
+      pointerId: touch.identifier, isPrimary: true, button: 0, target: event.target!, currentTarget: element,
+      clientX: touch.clientX, clientY: touch.clientY,
+      preventDefault: () => { if (event.cancelable) event.preventDefault(); }
+    });
+    const start = (event: TouchEvent) => {
+      if (event.touches.length !== 1) { touchHandlers.current.close(); return; }
+      touchHandlers.current.begin(input(event, event.touches[0]));
+    };
+    const moveTouch = (event: TouchEvent) => {
+      if (event.touches.length !== 1) { touchHandlers.current.close(); return; }
+      const touch = Array.from(event.touches).find(item => item.identifier === gesture.current?.pointer);
+      if (touch) touchHandlers.current.move(input(event, touch), false);
+    };
+    const end = (event: TouchEvent) => {
+      const touch = Array.from(event.changedTouches).find(item => item.identifier === gesture.current?.pointer);
+      if (touch) touchHandlers.current.finish(input(event, touch));
+    };
+    const cancel = () => touchHandlers.current.close();
+    element.addEventListener('touchstart', start, { passive: true });
+    element.addEventListener('touchmove', moveTouch, { passive: false });
+    element.addEventListener('touchend', end, { passive: false });
+    element.addEventListener('touchcancel', cancel);
+    return () => {
+      element.removeEventListener('touchstart', start);
+      element.removeEventListener('touchmove', moveTouch);
+      element.removeEventListener('touchend', end);
+      element.removeEventListener('touchcancel', cancel);
+    };
+  }, []);
   const action = (side: 'left' | 'right', item: Action | undefined) => item && (
     <div ref={side === 'left' ? left : right} data-swipe-action={side} aria-hidden={open !== side} inert={open !== side ? true : undefined}
       style={{ visibility: 'hidden' }} className={`absolute inset-y-0 ${side === 'left' ? 'left-0' : 'right-0'} flex w-20 items-stretch`}>
@@ -160,7 +200,11 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
   return <div {...props} ref={root} data-swipe-row className={`relative isolate overflow-hidden ${className}`}>
     {action('left', leftAction)}{action('right', rightAction)}
     <div ref={foreground} data-swipe-foreground className="relative rounded-[inherit] bg-white dark:bg-[color:var(--color-surface)] [touch-action:pan-y_pinch-zoom]"
-      onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={close} onLostPointerCapture={() => { if (gesture.current) close(); }}
+      onPointerDown={event => { if (event.pointerType !== 'touch') begin(event); }}
+      onPointerMove={event => { if (event.pointerType !== 'touch') move(event); }}
+      onPointerUp={event => { if (event.pointerType !== 'touch') finish(event); }}
+      onPointerCancel={event => { if (event.pointerType !== 'touch') close(); }}
+      onLostPointerCapture={event => { if (event.pointerType !== 'touch' && gesture.current) close(); }}
       onKeyDown={event => {
         suppressClick.current = false;
         if ((event.target as HTMLElement).closest('input, select, textarea, [data-swipe-ignore]')) return;

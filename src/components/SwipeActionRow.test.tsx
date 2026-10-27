@@ -8,7 +8,7 @@ afterEach(() => vi.useRealTimers());
 const leftAction = { label: 'Archive', accessibleLabel: 'Archive meeting', tone: 'archive' as const, onAction: vi.fn() };
 const rightAction = { label: 'Delete', accessibleLabel: 'Delete meeting', tone: 'delete' as const, onAction: vi.fn() };
 function pointer(element: Element, kind: 'Down' | 'Move' | 'Up' | 'Cancel', x: number, y = 20) {
-  fireEvent[`pointer${kind}`](element, { pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0, clientX: x, clientY: y });
+  fireEvent[`pointer${kind}`](element, { pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, clientX: x, clientY: y });
 }
 function fixture() {
   const commits = vi.fn(), select = vi.fn();
@@ -88,4 +88,36 @@ it('supports keyboard reveal, Escape, outside clicks and context resets', () => 
   pointer(row, 'Down', 200); pointer(row, 'Move', 140); pointer(row, 'Up', 140);
   rerender(<SwipeActionGroup resetKey="another-project"><SwipeActionRow rightAction={rightAction} contentClassName="content"><button>Meeting</button></SwipeActionRow></SwipeActionGroup>);
   expect(screen.queryByRole('button', { name: 'Delete meeting' })).toBeNull();
+});
+
+it('tracks native tablet touches even when Safari cancels its pointer stream', () => {
+  const { row, commits, select } = fixture();
+  const touch = (x: number) => ({ identifier: 42, clientX: x, clientY: 20 });
+  fireEvent.pointerDown(row, { pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0, clientX: 200, clientY: 20 });
+  fireEvent.touchStart(row, { touches: [touch(200)] });
+  fireEvent.pointerCancel(row, { pointerId: 7, pointerType: 'touch' });
+  const move = new TouchEvent('touchmove', { bubbles: true, cancelable: true, touches: [touch(140) as Touch] });
+  fireEvent(row, move);
+  expect(move.defaultPrevented).toBe(true);
+  act(() => vi.advanceTimersByTime(16));
+  expect(row).toHaveStyle({ transform: 'translate3d(-60px, 0, 0)' });
+  expect(commits).not.toHaveBeenCalled();
+  fireEvent.touchEnd(row, { touches: [], changedTouches: [touch(140)] });
+  expect(screen.getByRole('button', { name: 'Delete meeting' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Meeting' }));
+  expect(select).not.toHaveBeenCalled();
+});
+it('leaves vertical touch scrolling native, reveals archive to the right, and cancels multi-touch', () => {
+  const { row } = fixture();
+  const touch = (x: number, y = 20, identifier = 42) => ({ identifier, clientX: x, clientY: y });
+  fireEvent.touchStart(row, { touches: [touch(200)] });
+  const vertical = new TouchEvent('touchmove', { bubbles: true, cancelable: true, touches: [touch(205, 80) as Touch] });
+  fireEvent(row, vertical); expect(vertical.defaultPrevented).toBe(false);
+  fireEvent.touchEnd(row, { touches: [], changedTouches: [touch(205, 80)] });
+  fireEvent.touchStart(row, { touches: [touch(100)] });
+  fireEvent.touchMove(row, { touches: [touch(170)] });
+  fireEvent.touchEnd(row, { touches: [], changedTouches: [touch(170)] });
+  expect(screen.getByRole('button', { name: 'Archive meeting' })).toBeInTheDocument();
+  fireEvent.touchStart(row, { touches: [touch(170), touch(200, 20, 43)] });
+  expect(screen.queryByRole('button', { name: 'Archive meeting' })).toBeNull();
 });

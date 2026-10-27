@@ -24,8 +24,25 @@ describe('contained app viewport', () => {
   scroller.scrollTop = 400; touch(child, 'touchstart', [point(100, 100)]); expect(touch(child, 'touchmove', [point(100, 70)]).defaultPrevented).toBe(true);
   touch(child, 'touchstart', [point(100, 100), point(150, 100)]); expect(touch(child, 'touchmove', [point(80, 100), point(170, 100)]).defaultPrevented).toBe(false);
  });
+ it('keeps a vertical pan native through small horizontal drift, including the next gesture', () => {
+  const { root } = setup(); const scroller = document.createElement('div'); scroller.style.overflowY = 'auto';
+  Object.defineProperties(scroller, { clientHeight: { value: 200 }, scrollHeight: { value: 1000 } }); scroller.scrollTop=200; root.append(scroller);
+  for(let attempt=0;attempt<2;attempt++) {
+   touch(scroller,'touchstart',[point(100,300)]);
+   expect(touch(scroller,'touchmove',[point(102,299)]).defaultPrevented).toBe(false);
+   expect(touch(scroller,'touchmove',[point(103,260)]).defaultPrevented).toBe(false);
+   expect(touch(scroller,'touchmove',[point(110,259)]).defaultPrevented).toBe(false);
+   touch(scroller,'touchend',[]);
+  }
+ });
  it('removes global gesture and viewport work on unmount', () => {
   const { root, hook, frame } = setup(); hook.unmount(); viewport.height = 300; fireEvent(window, new Event('pageshow')); frame(); expect(root.style.height).toBe('700px');
   touch(root, 'touchstart', [point(100, 100)]); expect(touch(root, 'touchmove', [point(100, 130)]).defaultPrevented).toBe(false);
  });
+});
+it('uses native overscroll containment without a global blocking touch handler where supported', () => {
+ vi.stubGlobal('CSS',{supports:vi.fn(()=>true)});
+ const {root}=setup();
+ touch(root,'touchstart',[point(100,100)]);
+ expect(touch(root,'touchmove',[point(100,150)]).defaultPrevented).toBe(false);
 });

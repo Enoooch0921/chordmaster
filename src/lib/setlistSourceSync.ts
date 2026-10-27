@@ -150,7 +150,7 @@ export const describeSetlistSourceChanges = (source: Song, edited: Song, languag
     groove: '風格', shuffle: 'Shuffle', originalKey: '原調', originalKeyMode: '大小調', originalKeyUnspecified: '原調標記',
     tempo: '速度', timeSignature: '拍號', timeSignatureUnspecified: '拍號標記', jianpuInputAbsolute: '簡譜輸入模式',
     references: '參考影片', pickup: '弱起拍', lyricsDoc: '歌詞', chordTimingVersion: '和弦時點格式',
-    chords: '和弦', riff: '簡譜', rhythm: '節奏', annotation: '備註', label: '標籤', riffLabel: '簡譜標籤',
+    chords: '和弦', closed: '小節關閉', riff: '簡譜', rhythm: '節奏', annotation: '備註', label: '標籤', riffLabel: '簡譜標籤',
     rhythmLabel: '節奏標籤', keyChangeTo: '轉調', bars: '小節', titleSection: '段落名稱'
   }[field] ?? '演奏記號／聲部');
   for (const field of SCORE_FIELDS.filter(field => field !== 'sections')) {
@@ -170,7 +170,9 @@ export const describeSetlistSourceChanges = (source: Song, edited: Song, languag
     if (section.title !== previous.title) changes.push(`${previous.title} → ${section.title}`);
     const fields = new Set([...Object.keys(section), ...Object.keys(previous)]);
     if ([...fields].some(key => !['id','title','bars'].includes(key) && !equal(section[key], previous[key]))) changes.push(`${section.title}：${zh ? '段落演奏設定' : 'Section performance markings'}`);
-    if (!equal(previous.bars.map(b => b.id), section.bars.map(b => b.id))) changes.push(`${section.title}：${zh ? '小節新增、刪除或重排' : 'Bars added, removed or reordered'} (${previous.bars.length} → ${section.bars.length})`);
+    if (!equal(previous.bars.map(b => b.id), section.bars.map(b => b.id))) changes.push(previous.bars.length === section.bars.length
+      ? `${section.title}：${zh ? `小節編排記錄變更（共 ${section.bars.length} 小節）` : `Bar arrangement records changed (${section.bars.length} bars)`}`
+      : `${section.title}：${zh ? '小節數變更' : 'Bar count changed'} (${previous.bars.length} → ${section.bars.length})`);
     section.bars.forEach((bar, index) => {
       const old = previous.bars.find(b => b.id === bar.id);
       if (!old) return;

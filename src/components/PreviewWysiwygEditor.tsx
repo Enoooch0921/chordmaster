@@ -1,3 +1,4 @@
+import { applySongVersionText, getSongVersionText as getVersionValue } from '../lib/songCredits';
 import { motion } from 'motion/react';
 import { useBottomSheetMotion } from '../hooks/useBottomSheetMotion';
 import { useModalFocus } from '../hooks/useModalFocus';
@@ -201,10 +202,6 @@ const getInlinePosition = (
 
   return { left, top, width, height };
 };
-
-const getVersionValue = (song: Song) => (
-  Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ')
-);
 
 const normalizeOptional = (value: string) => {
   const trimmed = value.trim();
@@ -479,14 +476,12 @@ export default function PreviewWysiwygEditor({
     if (!markCommitted()) {
       return;
     }
-    const nextVersion = formatInitialCaps(versionDraft).trim();
-    const nextTranslator = formatInitialCaps(translatorDraft).trim();
-    onChange({
-      ...song,
-      lyricist: normalizeOptional(nextVersion),
-      composer: undefined,
-      translator: normalizeOptional(nextTranslator)
-    });
+    const versionUnchanged = versionDraft.trim() === getVersionValue(song);
+    let next = applySongVersionText(song, versionUnchanged ? versionDraft : formatInitialCaps(versionDraft).trim());
+    if (translatorDraft.trim() !== (song.translator?.trim() ?? '')) {
+      next = { ...next, translator: normalizeOptional(formatInitialCaps(translatorDraft).trim()) };
+    }
+    if (next !== song) onChange(next);
     onClose();
   };
 

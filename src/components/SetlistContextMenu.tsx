@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Archive, ArchiveRestore, FolderInput, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, FolderInput, Trash2, CheckSquare } from 'lucide-react';
 import type { AppLanguage } from '../types';
 
 interface SetlistContextMenuProps {
@@ -9,13 +9,14 @@ interface SetlistContextMenuProps {
   archived: boolean;
   x: number;
   y: number;
+  onSelect?: () => void;
   onArchive: () => void;
   onMove: () => void;
   onDelete: () => void;
   onClose: () => void;
 }
 
-export default function SetlistContextMenu({ language, title, archived, x, y, onArchive, onMove, onDelete, onClose }: SetlistContextMenuProps) {
+export default function SetlistContextMenu({ language, title, archived, x, y, onArchive, onMove, onDelete, onClose, onSelect }: SetlistContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x, top: y });
 
@@ -74,14 +75,15 @@ export default function SetlistContextMenu({ language, title, archived, x, y, on
       }}
     >
       <div className="truncate px-3 py-2 text-xs font-semibold text-gray-500">{title}</div>
-      <button type="button" role="menuitem" onClick={() => run(onArchive)} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none">
+      {onSelect && <button type="button" role="menuitem" onClick={() => run(onSelect)} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none"><CheckSquare size={16}/>{language==='zh'?'選取多份歌單':'Select multiple setlists'}</button>}
+      <button type="button" role="menuitem" onClick={() => run(onArchive)} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none">
         {archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
         {language === 'zh' ? (archived ? '取消歸檔' : '歸檔') : (archived ? 'Unarchive' : 'Archive')}
       </button>
-      <button type="button" role="menuitem" onClick={() => run(onMove)} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none">
+      <button type="button" role="menuitem" onClick={() => run(onMove)} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none">
         <FolderInput size={16} />{language === 'zh' ? '移至專案' : 'Move to project'}
       </button>
-      <button type="button" role="menuitem" onClick={() => run(onDelete)} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-rose-600 hover:bg-rose-50 focus:bg-rose-50 focus:outline-none">
+      <button type="button" role="menuitem" onClick={() => run(onDelete)} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-rose-600 hover:bg-rose-50 focus:bg-rose-50 focus:outline-none">
         <Trash2 size={16} />{language === 'zh' ? '刪除' : 'Delete'}
       </button>
     </div>,

@@ -60,13 +60,14 @@ export function getSetlistParentFilter(id: string | null, workspace: NavigationW
   if (sharedProject) return { kind: 'shared-project', projectId: sharedProject.id };
   const owned = workspace.setlists.find(setlist => setlist.id === id);
   if (owned?.projectId) return { kind: 'owned-project', projectId: owned.projectId };
-  if (workspace.joinedSetlists.some(setlist => setlist.id === id)) return { kind: 'shared-setlists' };
+  if (workspace.joinedSetlists.some(setlist => setlist.id === id)) return { kind: 'all' };
   return { kind: 'all' };
 }
 
 /** Resolve only against a fully loaded workspace, never a partial pre-auth cache. */
 export function resolveNavigationLocation(location: SetlistNavigationLocation, workspace: NavigationWorkspace): SetlistNavigationLocation {
   const validate = (filter: SetlistProjectFilter): SetlistProjectFilter => {
+    if (filter.kind === 'ungrouped' || filter.kind === 'shared-setlists') return { kind: 'all' };
     if (filter.kind === 'owned-project'
       && !workspace.projects.some(project => project.id === filter.projectId && !project.archived)) return { kind: 'all' };
     if (filter.kind === 'shared-project'
@@ -79,7 +80,7 @@ export function resolveNavigationLocation(location: SetlistNavigationLocation, w
     ?? workspace.joinedProjects.flatMap(project => project.setlists).find(setlist => setlist.id === location.setlistId);
   const parentFilter = selected ? getSetlistParentFilter(selected.id, workspace) : location.parentFilter;
   const activeParent = validate(parentFilter);
-  const projectUnavailable = serializeSetlistProjectFilter(filter) !== serializeSetlistProjectFilter(location.filter)
+  const projectUnavailable = (['owned-project','shared-project'].includes(location.filter.kind) && serializeSetlistProjectFilter(filter) !== serializeSetlistProjectFilter(location.filter))
     || (location.view === 'detail' && serializeSetlistProjectFilter(parentFilter) !== serializeSetlistProjectFilter(activeParent));
   if (projectUnavailable) {
     return { ...location, filter: { kind: 'all' }, view: 'list', setlistId: null, songId: null, parentFilter: { kind: 'all' } };
@@ -88,7 +89,7 @@ export function resolveNavigationLocation(location: SetlistNavigationLocation, w
     return { ...location, filter: activeParent, view: 'list', setlistId: null, songId: null, parentFilter: activeParent };
   }
   return {
-    ...location, filter, parentFilter,
+    ...location, filter: location.view === 'detail' && selected ? activeParent : filter, parentFilter,
     setlistId: selected && !selected.archived ? selected.id : null,
     songId: selected && !selected.archived
       ? selected.songs.find(song => song.id === location.songId)?.id ?? selected.songs[0]?.id ?? null

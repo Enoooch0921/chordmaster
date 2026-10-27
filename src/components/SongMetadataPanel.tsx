@@ -1,3 +1,4 @@
+import { applySongVersionText, getSongVersionText as getVersionValue } from '../lib/songCredits';
 import { AnimatedDisclosure } from './ui/InteractionMotion';
 import React from 'react';
 import './SongMetadataPanel.css';
@@ -49,9 +50,6 @@ const DISPLAY_MODE_OPTIONS: SetlistDisplayMode[] = [
 ];
 const BAR_NUMBER_OPTIONS: BarNumberMode[] = ['none', 'line-start', 'all'];
 type MetadataLayoutMode = 'stacked' | 'compact' | 'wide';
-
-const getVersionValue = (song: Song) =>
-  Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ');
 
 const formatMetadataText = formatInitialCaps;
 
@@ -282,6 +280,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   const copy = getUiCopy(language);
   const panelRef = React.useRef<HTMLElement>(null);
   const metadataInputId = React.useId();
+  const versionOrigin = React.useRef<Song | null>(null);
+  const translatorOrigin = React.useRef<string | null>(null);
   const [tempoDraft, setTempoDraft] = React.useState(formatTempoBpm(song.tempo));
   const [referenceBpmDrafts, setReferenceBpmDrafts] = React.useState<Record<SongReferenceKind, string>>(() => getReferenceBpmDrafts(song));
   const [activeReferenceTapKind, setActiveReferenceTapKind] = React.useState<SongReferenceKind>('band');
@@ -796,12 +796,18 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         type="text"
         list={metadataSuggestions?.versions.length ? `${metadataInputId}-versions` : undefined}
         value={getVersionValue(song)}
-        onChange={(event) => onChange({ ...song, lyricist: event.target.value, composer: '' })}
+        onFocus={() => { versionOrigin.current = song; }}
+        onChange={(event) => {
+          const original = versionOrigin.current ?? song;
+          const next = applySongVersionText(song, event.target.value, original);
+          if (next !== song) onChange(next);
+        }}
         onBlur={(event) => {
-          const formattedVersion = formatMetadataText(event.target.value);
-          if (formattedVersion !== getVersionValue(song)) {
-            onChange({ ...song, lyricist: formattedVersion, composer: '' });
-          }
+          const original = versionOrigin.current ?? song;
+          const value = event.target.value;
+          const next = applySongVersionText(song, value.trim() === getVersionValue(original) ? value : formatMetadataText(value), original);
+          if (next !== song) onChange(next);
+          versionOrigin.current = null;
         }}
         onKeyDown={(event) => {
           event.stopPropagation();
@@ -828,8 +834,14 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         type="text"
         list={metadataSuggestions?.translators.length ? `${metadataInputId}-translators` : undefined}
         value={song.translator || ''}
+        onFocus={() => { translatorOrigin.current = song.translator ?? ''; }}
         onChange={(event) => updateField('translator', event.target.value)}
         onBlur={(event) => {
+          if (event.target.value.trim() === translatorOrigin.current?.trim()) {
+            translatorOrigin.current = null;
+            return;
+          }
+          translatorOrigin.current = null;
           const formattedTranslator = formatMetadataText(event.target.value);
           if (formattedTranslator !== (song.translator || '')) {
             updateField('translator', formattedTranslator);

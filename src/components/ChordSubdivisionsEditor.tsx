@@ -1,6 +1,7 @@
 import React from 'react';
 import type { AppLanguage, Bar } from '../types';
 import { availableSubdivisionPositions, chordEventLabel, getChordEvents } from '../utils/chordSubdivisions';
+import { normalizeChordQualityAliases } from '../utils/musicUtils';
 
 export default function ChordSubdivisionsEditor({bar, beats, language, onChange}:{bar:Bar;beats:number;language:AppLanguage;onChange:(value:Bar['chordSubdivisions'])=>void}) {
  const zh=language==='zh', entries=bar.chordSubdivisions??[];
@@ -17,7 +18,7 @@ export default function ChordSubdivisionsEditor({bar, beats, language, onChange}
     if(!choices.some(e=>e.beat===entry.beat&&e.offset===entry.offset))choices.push(entry);
     return <div key={index} className="grid grid-cols-[64px_minmax(0,1fr)_44px] gap-2">
      <select className="min-h-9 rounded border bg-white px-1" aria-label={zh?`追加和弦 ${index+1} 拍位`:`Additional chord ${index+1} position`} value={entry.beat+entry.offset} onChange={event=>{const position=Number(event.target.value);onChange(entries.map((e,i)=>i===index?{...e,beat:Math.floor(position),offset:position%1 as .25|.5|.75}:e));}}>{choices.map(e=><option key={e.beat+e.offset} value={e.beat+e.offset}>{chordEventLabel(e.beat,e.offset)}</option>)}</select>
-     <input className="min-h-9 min-w-0 rounded border px-2 font-mono" aria-label={zh?`追加和弦 ${index+1}`:`Additional chord ${index+1}`} value={entry.chord} onChange={event=>onChange(entries.map((e,i)=>i===index?{...e,chord:event.target.value}:e))}/>
+     <input className="min-h-9 min-w-0 rounded border px-2 font-mono" aria-label={zh?`追加和弦 ${index+1}`:`Additional chord ${index+1}`} value={entry.chord} onChange={event=>onChange(entries.map((e,i)=>i===index?{...e,chord:normalizeChordQualityAliases(event.target.value)}:e))}/>
      <button type="button" className="min-h-9 rounded border text-rose-700" aria-label={zh?`移除追加和弦 ${index+1}`:`Remove additional chord ${index+1}`} onClick={()=>{const next=entries.filter((_,i)=>i!==index);onChange(next.length?next:undefined);}}>{zh?'移除':'×'}</button>
     </div>;
   })}

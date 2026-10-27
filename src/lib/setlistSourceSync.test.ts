@@ -44,6 +44,14 @@ describe('per-setlist source provenance', () => {
   });
 });
 describe('manual source sync', () => {
+  it('names closing an empty cell precisely in the source change summary', () => {
+    const source = structuredClone(song);
+    source.sections[0].bars[0] = { id: 'bar', chords: [] };
+    const edited = structuredClone(source);
+    edited.sections[0].bars[0].closed = true;
+    expect(hasSetlistSourceScoreChange(source, edited)).toBe(true);
+    expect(describeSetlistSourceChanges(source, edited, 'zh')).toEqual(['Verse · 第 1 小節：小節關閉']);
+  });
   it('compares source content without treating performance settings or metadata as score edits', () => {
     expect(hasSetlistSourceScoreChange(song, { ...song, currentKey: 'D', currentKeyMode: 'minor', capo: 4, showAbsoluteJianpu: true })).toBe(false);
     const changed = structuredClone(song); changed.sections[0].bars[0].chords = ['G'];

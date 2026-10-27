@@ -141,24 +141,39 @@ interface SetlistNavigatorProps {
   busy?: boolean;
   ready?: boolean;
   motion?: UiMotionPreference;
+  path?: string[];
 }
 
 const SetlistNavigator: React.FC<SetlistNavigatorProps> = ({
-  view, list, detail, addSongs, manageProjects, busy = false, ready = true,
+  view, list, detail, addSongs, manageProjects, busy = false, ready = true, path,
   motion: preference = { instant: false, reduced: false }
 }) => {
-  const previous = useRef({ view, direction: 1 });
-  const direction = previous.current.view === view ? previous.current.direction
-    : panelDepth[view] >= panelDepth[previous.current.view] ? 1 : -1;
-  useLayoutEffect(() => { previous.current = { view, direction }; }, [view, direction]);
+  const depth = path?.length ?? panelDepth[view];
+  const location = path ? view + ':' + path.join('/') : view;
+  const root = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(new Map<string, number>());
+  const previous = useRef({ location, depth, direction: 1 });
+  const changed = previous.current.location !== location;
+  const direction = !changed ? previous.current.direction
+    : depth >= previous.current.depth ? 1 : -1;
+  useLayoutEffect(() => { previous.current = { location, depth, direction }; }, [location, depth, direction]);
+  useLayoutEffect(() => {
+    if (!ready) scrollPositions.current.clear();
+    const panel = Array.from(root.current?.querySelectorAll<HTMLElement>('[data-setlist-location]') ?? [])
+      .find(node => node.dataset.setlistLocation === location);
+    const scroller = panel?.querySelector<HTMLElement>('[data-setlist-scroll], [data-project-scroll], [data-setlist-detail-scroll]');
+    if (scroller) scroller.scrollTop = scrollPositions.current.get(location) ?? 0;
+    if (ready && changed) (panel?.querySelector<HTMLElement>('h2[tabindex="-1"]') ?? panel?.querySelector<HTMLElement>('[data-setlist-detail-header] .pm-back'))?.focus({preventScroll:true});
+    return () => { if (scroller) scrollPositions.current.set(location, scroller.scrollTop); };
+  }, [location, ready]);
   const panelMotion = { ...preference, direction };
   const panel = view === 'detail' ? detail : view === 'addSongs' ? addSongs : view === 'manageProjects' ? manageProjects : list;
-  return <div data-setlist-navigator data-setlist-panel={view} className="relative flex min-h-0 flex-1 flex-col overflow-hidden" aria-busy={busy}>
+  return <div ref={root} data-setlist-navigator data-setlist-panel={view} className="relative flex min-h-0 flex-1 flex-col overflow-hidden" aria-busy={busy}>
     {/* Recreate presence at restoration so a remembered location appears immediately. */}
     <AnimatePresence key={ready ? 'ready' : 'restoring'} initial={false} custom={panelMotion}>
-      <PresenceSurface key={view} data-setlist-panel-layer={view} custom={panelMotion}
+      <PresenceSurface key={location} data-setlist-location={location} data-setlist-panel-layer={view} custom={panelMotion}
         variants={setlistPanelVariants} initial="enter" animate="visible" exit="exit"
-        inert={busy ? true : undefined} style={{ zIndex: panelDepth[view] }}
+        inert={busy ? true : undefined} style={{ zIndex: depth }}
         className="absolute inset-0 flex min-h-0 flex-col bg-white dark:bg-[color:var(--color-surface)]">
         {panel}
       </PresenceSurface>

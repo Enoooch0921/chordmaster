@@ -209,6 +209,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           tempo: normalizeTempoBpm(safeBar.tempo),
           resetTempo: safeBar.resetTempo === true || undefined,
           id: typeof safeBar.id === 'string' && safeBar.id.trim() ? safeBar.id : undefined,
+          closed: safeBar.closed === true || undefined,
           chords,
           chordTimingUnspecified: safeBar.chordTimingUnspecified === true ? true : undefined,
           chordKeyUnspecified: safeBar.chordKeyUnspecified === true ? true : undefined,

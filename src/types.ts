@@ -84,6 +84,7 @@ export interface JianpuVoice {
 
 export interface Bar {
   id?: string; // Unique ID for bar animations and drag operations
+  closed?: boolean; // Empty layout cell drawn as an unused horizontal line; preserves its slot, without a measure number.
   chords: string[]; // e.g., ["E", "C#m"]
   chordTimingUnspecified?: boolean; // Printed measure boundary is known; chords are ordered, with no confirmed beat positions.
   chordKeyUnspecified?: boolean; // Source harmony has no confirmed key; preserve literal degrees instead of deriving pitches from the working key.

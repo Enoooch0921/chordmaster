@@ -2,6 +2,7 @@ import React from 'react';
 import type { AppLanguage, Bar } from '../types';
 import { getChordDisplaySlotEntries } from '../utils/chordSlots';
 import { reconcileChordSubdivisions } from '../utils/chordSubdivisions';
+import { normalizeChordQualityAliases } from '../utils/musicUtils';
 import ChordSubdivisionsEditor from './ChordSubdivisionsEditor';
 
 export default function ChordPassVariantsEditor({ bar, beats, language, onChange }: {
@@ -34,7 +35,7 @@ export default function ChordPassVariantsEditor({ bar, beats, language, onChange
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${beats}, minmax(0, 1fr))` }}>
           {Array.from({ length: beats }, (_, beat) => <label key={beat} className="min-w-0 text-slate-500">{zh ? `${beat + 1}拍` : `Beat ${beat + 1}`}<input className="min-h-9 w-full min-w-0 rounded border px-1 font-mono text-slate-900" aria-label={zh ? `第${variant.pass}遍 第${beat + 1}拍和弦` : `Pass ${variant.pass} beat ${beat + 1} chord`} value={entries[beat]?.chord ?? ''} onChange={event => {
             const chords = Array.from({ length: beats }, (_, i) => entries[i]?.chord ?? '');
-            chords[beat] = event.target.value;
+            chords[beat] = normalizeChordQualityAliases(event.target.value);
             update(index, { chords, chordSubdivisions: reconcileChordSubdivisions({ chords, chordSubdivisions: variant.chordSubdivisions }, beats) });
           }} /></label>)}
         </div>

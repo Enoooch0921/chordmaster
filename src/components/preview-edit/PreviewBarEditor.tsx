@@ -4,6 +4,7 @@ import BarlineGlyph from '../BarlineGlyph';
 import TempoChangeControl from '../TempoChangeControl';
 import UnmeteredChordsEditor from '../UnmeteredChordsEditor';
 import { hasUnmeteredChords } from '../../utils/unmeteredChords';
+import { canCloseBar, isClosedBar } from '../../utils/closedBar';
 import ChordPassVariantsEditor from '../ChordPassVariantsEditor';
 import ChordSubdivisionsEditor from '../ChordSubdivisionsEditor';
 import ChordBeatOffsetPicker from '../ChordBeatOffsetPicker';
@@ -22,6 +23,7 @@ import {
   Delete,
   Eraser,
   Keyboard,
+  Minus,
   Plus,
   Redo2,
   Scissors,
@@ -282,7 +284,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     : baseEditorSong, [baseEditorSong, selectedVoice, sourceSession.notationMode, sourceSession.target]);
   const session = editorSong === sourceSession.draftSong ? sourceSession : { ...sourceSession, draftSong: editorSong };
   const applyBaseDraft: PreviewBarEditorProps['onApplyDraft'] = (draft, options) =>
-    onSourceApplyDraft(isPickup ? applyPickupEditorSong(sourceSession.draftSong, draft) : draft, options);
+    onSourceApplyDraft(isPickup ? applyPickupEditorSong(sourceSession.draftSong, draft) : updateBarById(draft, sourceSession.target, bar => (
+      bar.closed && !canCloseBar(bar) ? { ...bar, closed: undefined } : bar
+    )), options);
   const onApplyDraft: PreviewBarEditorProps['onApplyDraft'] = (draft, options) => applyBaseDraft(
     voiceTarget ? applyNotationVoiceDraft(baseEditorSong, draft, session.target, voiceTarget) : draft, options);
   const onStructure: PreviewBarEditorProps['onStructure'] = action => {
@@ -914,7 +918,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           maxHeight: Math.max(0, viewportHeight - 64)
         }
       : (() => {
-          const width = Math.min(520, viewportWidth - 24);
+          const width = Math.min(620, viewportWidth - 24);
           const estimatedHeight = hasUnmeteredChords(bar) || (bar?.chordTimingUnspecified && notationMode === 'chords') || (notationMode === 'chords' && subdivisionsExpanded)
             ? Math.min(420, viewportHeight - 24)
             : notationMode !== 'chords'
@@ -923,7 +927,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             ? Math.min(300, viewportHeight - 24)
             : desktopKeysVisible
               ? Math.min(340, viewportHeight - 24)
-              : Math.min(190, viewportHeight - 24);
+              : Math.min(260, viewportHeight - 24);
           const preferredBelow = session.target.anchorRect.bottom + 10;
           const preferredTop = preferredBelow + estimatedHeight <= viewportTop + viewportHeight - 12
             ? preferredBelow
@@ -946,7 +950,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const copyKeyClass = `${utilityKeyClass} dark:!border-sky-800 dark:!bg-sky-950 dark:!text-sky-200 !border-sky-300/80 !bg-sky-100/90 !text-sky-800 hover:!bg-sky-100`;
   const pasteKeyClass = `${utilityKeyClass} dark:!border-emerald-800 dark:!bg-emerald-950 dark:!text-emerald-200 !border-emerald-300/80 !bg-emerald-100/90 !text-emerald-800 hover:!bg-emerald-100`;
   const destructiveKeyClass = `${utilityKeyClass} dark:!border-rose-800 dark:!bg-rose-950 dark:!text-rose-200 !border-rose-300/80 !bg-rose-100/90 !text-rose-700 !shadow-[0_1px_0_rgba(159,18,57,0.18),0_3px_8px_rgba(190,24,93,0.12)] hover:!bg-rose-100`;
-  const toolbarButtonClass = 'inline-flex min-h-8 min-w-8 items-center justify-center rounded-[11px] border border-white/80 bg-white/85 px-2 text-[11px] font-semibold text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.09)] transition-[transform,background-color,box-shadow] duration-75 hover:bg-white active:translate-y-px active:scale-[0.97] active:bg-slate-100 disabled:shadow-none disabled:opacity-35';
+  const toolbarButtonClass = 'inline-flex shrink-0 min-h-8 min-w-8 items-center justify-center whitespace-nowrap rounded-[11px] border border-white/80 bg-white/85 px-2 text-[11px] font-semibold text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.09)] transition-[transform,background-color,box-shadow] duration-75 hover:bg-white active:translate-y-px active:scale-[0.97] active:bg-slate-100 disabled:shadow-none disabled:opacity-35';
   const activeButtonClass = '!border-indigo-500/70 !bg-indigo-700 !text-white !shadow-[0_1px_0_rgba(49,46,129,0.8),0_3px_8px_rgba(79,70,229,0.28)] hover:!bg-indigo-700';
   const fieldClass = 'h-9 w-full rounded-xl border border-white/90 bg-white/95 px-3 text-sm font-semibold text-slate-800 shadow-inner outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200/70';
 
@@ -1103,6 +1107,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   </section>;
 
   const barlineState = bar.finalBar ? 'final' : bar.doubleBar ? 'double' : 'off';
+  const closedCell = isClosedBar(sourceBar);
+  const canToggleClosedCell = !isPickup && !voiceTarget && (closedCell || canCloseBar(sourceBar));
+  const closedCellLabel = language === 'zh'
+    ? closedCell ? '重新開啟小節' : '關閉此小節'
+    : closedCell ? 'Reopen bar' : 'Close this bar';
   const barlineStateLabel = language === 'zh'
     ? { final: '終止線', double: '雙小節線', off: '關閉' }[barlineState]
     : { final: 'final barline', double: 'double barline', off: 'off' }[barlineState];
@@ -1209,7 +1218,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       />}
 
       {notationMode === 'chords' && mode === 'common' && (
-        <div className={`grid flex-1 ${deviceLayout === 'phone' ? 'min-h-[192px] grid-rows-[repeat(5,minmax(32px,1fr))] [&>div]:gap-1' : compactHardwareMode ? 'min-h-0 grid-rows-3' : 'min-h-0 grid-rows-5'} gap-2`} data-keyboard-view="main" data-desktop-compact={compactHardwareMode ? 'true' : undefined}>
+        <div className={`grid flex-1 ${deviceLayout === 'phone' ? 'min-h-[192px] grid-rows-[repeat(5,minmax(32px,1fr))] [&>div]:gap-1' : compactHardwareMode ? 'min-h-[148px] grid-rows-[repeat(3,minmax(44px,1fr))]' : 'min-h-[212px] grid-rows-[repeat(5,minmax(36px,1fr))]'} gap-2`} data-keyboard-view="main" data-desktop-compact={compactHardwareMode ? 'true' : undefined}>
           {!compactHardwareMode && (
             <>
               <div className="grid min-h-0 grid-cols-10 gap-1.5" data-chord-key-row="roots" data-key-surface="character">
@@ -1245,8 +1254,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               touchOptimized={deviceLayout !== 'desktop'}
               rootClassName="col-span-2"
               buttonStyle={{ height: '100%', minWidth: 0, padding: 0, width: '100%' }}
-              buttonClassName={`!h-full !min-h-0 !w-full !min-w-0 !rounded-[11px] !px-0 !shadow-[0_1px_0_rgba(15,23,42,0.18),0_2px_5px_rgba(15,23,42,0.10)] ${barTargetKey ? activeButtonClass : '!border-white/40 !bg-slate-300/75 !text-slate-700 hover:!bg-white'}`}
-              valueTextClassName="!text-[11px] !font-black"
+              buttonClassName={`!h-full !min-h-0 !w-full !min-w-0 !rounded-[11px] !px-0 [&>svg]:!text-inherit !shadow-[0_1px_0_rgba(15,23,42,0.18),0_2px_5px_rgba(15,23,42,0.10)] ${barTargetKey ? activeButtonClass : '!border-white/40 !bg-slate-300/75 !text-slate-700 hover:!bg-white dark:!bg-[var(--color-surface-raised)] dark:!text-[var(--color-text)] dark:!border-[var(--color-border)] dark:hover:!bg-[var(--color-surface-muted)]'}`}
+              valueTextClassName="!text-[11px] !font-black !text-inherit"
               metaTextClassName="hidden"
               hideTriggerIcon={deviceLayout === 'phone'}
               panelZIndex={5300}
@@ -1380,7 +1389,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               )}
 
               {activePicker === 'structure' && (
-                <div data-structure-actions className="grid min-h-0 flex-1 grid-cols-7 gap-1 overflow-hidden">
+                <div data-structure-actions className="grid min-h-0 flex-1 grid-cols-4 gap-1 overflow-hidden">
                   <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('insert-before'); setActivePicker(null); }}><Plus size={14} />{language === 'zh' ? '前方插入' : 'Before'}</button>
                   <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('insert-after'); setActivePicker(null); }}><Plus size={14} />{language === 'zh' ? '後方插入' : 'After'}</button>
                   <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('duplicate'); setActivePicker(null); }} aria-label={language === 'zh' ? '複製到後方' : 'Duplicate after'}><Copy size={14} />{language === 'zh' ? '複製到後' : 'Duplicate'}</button>
@@ -1388,6 +1397,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
                   <button type="button" disabled={!hasCopiedBar} className={`${pasteKeyClass} min-h-0 flex-col px-1 text-[9px] leading-tight disabled:cursor-not-allowed disabled:opacity-40`} onClick={() => { onStructure('paste-bar-after'); setActivePicker(null); }} aria-label={language === 'zh' ? '貼上小節' : 'Paste bar'}><ClipboardPaste size={14} />{language === 'zh' ? '貼上小節' : 'Paste bar'}</button>
                   <button type="button" className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight`} onClick={() => { onStructure('split-section'); setActivePicker(null); }}><Scissors size={14} />{language === 'zh' ? '拆分段落' : 'Split'}</button>
                   <button type="button" className={`${buttonClass} min-h-0 flex-col border-rose-200 px-1 text-[9px] leading-tight text-rose-700`} onClick={() => { onStructure('delete'); setActivePicker(null); }}><Trash2 size={14} />{language === 'zh' ? '刪除' : 'Delete'}</button>
+                  <button type="button" disabled={!canToggleClosedCell} className={`${buttonClass} min-h-0 flex-col px-1 text-[9px] leading-tight disabled:cursor-not-allowed disabled:opacity-40`} onClick={() => {
+                    if (!canToggleClosedCell) return;
+                    updateFields({ closed: closedCell ? undefined : true });
+                    setActivePicker(null);
+                  }} aria-label={closedCellLabel}><Minus size={14} aria-hidden="true" />{closedCellLabel}</button>
+                  <p className="col-span-4 self-center text-center text-[10px] leading-tight text-slate-600">{language === 'zh' ? '只關閉空白格，後面小節不移動' : 'Empty cells only; later bars stay in place.'}</p>
                 </div>
               )}
 

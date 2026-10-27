@@ -1,8 +1,11 @@
 import { SwipeActionGroup, SwipeActionRow } from './components/SwipeActionRow';
+import { canCloseBar, isClosedBar } from './utils/closedBar';
 import { AnimatedDisclosure, AnimatedPopover, PresenceSurface, PresenceBackdrop } from './components/ui/InteractionMotion';
 import { useUiMotion } from './hooks/useUiMotion';
 import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants } from './lib/uiMotion';
 import SetlistSongActions from './components/SetlistSongActions';
+import './components/SongLibraryPanel.css';
+import ProjectManagementPanel, { ManagementActions } from './components/ProjectManagementPanel';
 import { useAppViewport } from './hooks/useAppViewport';
 import { useBottomSheetMotion } from './hooks/useBottomSheetMotion';
 import { useModalFocus } from './hooks/useModalFocus';
@@ -55,7 +58,7 @@ import { Capacitor } from '@capacitor/core';
 import { Clipboard } from '@capacitor/clipboard';
 import { Share } from '@capacitor/share';
 import { createRoot } from 'react-dom/client';
-import * as OpenCC from 'opencc-js/t2cn';
+import { createSearchQuery, getSearchDictionaryState, loadSearchDictionary, needsSearchDictionary, normalizeSearchText, searchItems, subscribeSearchDictionary } from './lib/songSearch';
 import {
   CloudLibrarySummary,
   LibraryRole,
@@ -120,6 +123,7 @@ import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
 const SongEditor = React.lazy(() => import('./components/SongEditor'));
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
+import TempoPicker from './components/TempoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
 import ReferencePlayer from './components/ReferencePlayer';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
@@ -156,7 +160,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Guitar, Check, Minus, Keyboard } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Guitar, Check, Minus, Keyboard, Eraser } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -194,6 +198,8 @@ import {
 } from './lib/previewEditSession';
 import {
   copyBarsForClipboard,
+  applyBarCellAction,
+  type BarCellAction,
   createEmptyBar,
   deleteSection,
   deleteBar,
@@ -267,7 +273,8 @@ const SIDEBAR_WIDTH_STORAGE_KEY = 'chordmaster.sidebar-width.v1';
 const GOOGLE_IDENTITY_SCRIPT_ID = 'google-identity-services-script';
 const COLLAPSED_SIDEBAR_WIDTH = 80;
 const DEFAULT_EXPANDED_SIDEBAR_WIDTH = 420;
-const MIN_EXPANDED_SIDEBAR_WIDTH = 360;
+// Keep at least 340px of list space after the 80px desktop navigation rail.
+const MIN_EXPANDED_SIDEBAR_WIDTH = 420;
 const MAX_EXPANDED_SIDEBAR_WIDTH = 640;
 const PHONE_VIEWPORT_BREAKPOINT = 640;
 const SIDEBAR_OVERLAY_BREAKPOINT = 1280;
@@ -627,14 +634,12 @@ const normalizeText = (value: unknown, fallback = ''): string => (
   typeof value === 'string' ? value : fallback
 );
 
-const traditionalToSimplifiedForSearch = OpenCC.Converter({ from: 'tw', to: 'cn' });
-
-const normalizeSearchText = (value: string): string => (
-  traditionalToSimplifiedForSearch(value)
-    .trim()
-    .toLowerCase()
-    .replace(/祢/g, '你')
-);
+const getSongSearchFields = (item: Song): (string | undefined)[] => [
+  item.title, item.originalKey, item.currentKey, item.timeSignature,
+  typeof item.tempo === 'number' ? String(item.tempo) : undefined,
+  item.lyricist, item.composer, item.translator,
+  ...item.sections.map(section => section.title)
+];
 
 const cloneSong = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -1919,6 +1924,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [previewBarClipboard, setPreviewBarClipboard] = useState<PreviewBarClipboard | null>(null);
   const previewClipboardRef = useRef<RememberedPreviewClipboard | null>(null);
   const [previewBarContextMenu, setPreviewBarContextMenu] = useState<PreviewBarContextMenuState | null>(null);
+  const previewBarMenuRef = useRef<HTMLDivElement>(null);
   const [previewCopiedJianpu, setPreviewCopiedJianpu] = useState<string | null>(null);
   const [previewCopiedRhythm, setPreviewCopiedRhythm] = useState<string | null>(null);
   const [lastPreviewNonChordMode, setLastPreviewNonChordMode] = useState<PreviewNonChordMode>(loadPreviewLastNonChordMode);
@@ -2063,6 +2069,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [librarySortMode, setLibrarySortMode] = useState<LibrarySortMode>(loadLibrarySortPreference);
   const [showArchivedSongs, setShowArchivedSongs] = useState(false);
   const [setlistPanelView, setSetlistPanelView] = useState<SetlistPanelView>('list');
+  const [isSetlistSongSortMode, setIsSetlistSongSortMode] = useState(false);
+  useEffect(() => { setIsSetlistSongSortMode(false); }, [selectedSetlistId, setlistPanelView]);
   const [legacyNavigation] = useState<SetlistNavigationLocation>(() => {
     let filter = setlistProjectFilter;
     try {
@@ -2117,6 +2125,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [selectedSetlistShareStatus, setSelectedSetlistShareStatus] = useState<ScopedSetlistShareStatus | null>(null);
   const [isLoadingSetlistShareStatus, setIsLoadingSetlistShareStatus] = useState(false);
   const [selectedProjectShareStatus, setSelectedProjectShareStatus] = useState<ScopedProjectShareStatus | null>(null);
+  const [projectMembersTargetId, setProjectMembersTargetId] = useState<string | null>(null);
+  const [projectShareStatusError, setProjectShareStatusError] = useState(false);
   const [isLoadingProjectShareStatus, setIsLoadingProjectShareStatus] = useState(false);
   const [pendingRevokeShareSetlistId, setPendingRevokeShareSetlistId] = useState<string | null>(null);
   const [isRevokingSetlistShare, setIsRevokingSetlistShare] = useState(false);
@@ -2498,9 +2508,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   );
   const responsiveSidebarMinWidth = isPhoneViewport
     ? phoneSidebarPreferredWidth
-    : usesOverlaySidebar
-      ? Math.max(collapsedSidebarWidth + 216, 288)
-      : MIN_EXPANDED_SIDEBAR_WIDTH;
+    : MIN_EXPANDED_SIDEBAR_WIDTH;
   const responsiveSidebarMaxWidth = isPhoneViewport
     ? phoneSidebarPreferredWidth
     : usesOverlaySidebar
@@ -2804,6 +2812,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       : syncStatus === 'offline'
         ? copy.cloudSyncOffline
         : copy.cloudSyncFailed;
+  const syncStatusFeedback = isTeamWorkspace && syncStatus === 'saved' && !libraryWorkspaceRefreshFailed
+    ? `${syncStatusLabel} · ${language === 'zh' ? '歌曲庫自動同步' : 'Song library sync is automatic'}`
+    : syncStatusLabel;
   // Colour tone for the compact sync-status indicator in the collapsed sidebar.
   const syncStatusTone = syncStatus === 'failed'
     ? 'bg-rose-50 text-rose-600 ring-rose-200/70 hover:bg-rose-100'
@@ -3096,9 +3107,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       </div>
     </AnimatedPopover>
   );
+  const searchDictionaryState = React.useSyncExternalStore(subscribeSearchDictionary, getSearchDictionaryState, getSearchDictionaryState);
+  useEffect(() => {
+    if ([librarySearchQuery, setlistSearchQuery, setlistSongSearchQuery].some(needsSearchDictionary)) {
+      void loadSearchDictionary().catch(() => { /* Exact text search remains available; the next query retries. */ });
+    }
+  }, [librarySearchQuery, setlistSearchQuery, setlistSongSearchQuery]);
+  const searchEmptyMessage = (query: string, fallback: string = copy.noSongsMatch) => {
+    if (!needsSearchDictionary(query)) return fallback;
+    if (searchDictionaryState === 'idle' || searchDictionaryState === 'loading') return language === 'zh' ? '正在準備拼音／注音搜尋…' : 'Preparing phonetic search…';
+    if (searchDictionaryState === 'error') return language === 'zh' ? '拼音搜尋暫時無法載入，請稍後重試或輸入歌名。' : 'Phonetic search could not load. Try again or search by title.';
+    return fallback;
+  };
+  const librarySearch = React.useMemo(() => createSearchQuery(librarySearchQuery), [librarySearchQuery]);
+  const setlistSearch = React.useMemo(() => createSearchQuery(setlistSearchQuery), [setlistSearchQuery]);
+  const setlistSongSearch = React.useMemo(() => createSearchQuery(setlistSongSearchQuery), [setlistSongSearchQuery]);
   const normalizedLibrarySearchQuery = normalizeSearchText(librarySearchQuery);
   const normalizedSetlistSearchQuery = normalizeSearchText(setlistSearchQuery);
-  const normalizedSetlistSongSearchQuery = normalizeSearchText(setlistSongSearchQuery);
   const currentCapo = song.capo || 0;
   const currentPlayKey = getPlayKey(song.currentKey, currentCapo);
   const currentSetlistKey = activeSetlistPreviewSong?.currentKey ?? selectedSetlistSourceSong?.currentKey ?? 'C';
@@ -3205,28 +3230,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const activeLibrarySongs = songs.filter((item) => !item.archivedAt);
   const archivedSongCount = songs.length - activeLibrarySongs.length;
   const visibleLibrarySongs = isShowingArchivedSongs ? songs : activeLibrarySongs;
-  const filteredSongs = sortSongsForDisplay(visibleLibrarySongs.filter((item) => {
-    if (!normalizedLibrarySearchQuery) {
-      return true;
-    }
-
-    const librarySearchText = [
-      item.title,
-      item.originalKey,
-      item.currentKey,
-      item.timeSignature,
-      typeof item.tempo === 'number' ? String(item.tempo) : '',
-      item.lyricist,
-      item.composer,
-      item.translator,
-      ...item.sections.map((section) => section.title)
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .trim();
-
-    return normalizeSearchText(librarySearchText).includes(normalizedLibrarySearchQuery);
-  }), librarySortMode);
+  const filteredSongs = searchItems<StoredSong>(
+    sortSongsForDisplay(visibleLibrarySongs, librarySortMode), librarySearch, getSongSearchFields
+  );
   const getSetlistSongSource = (item: SetlistSong): StoredSong | null => {
     const libSong = songs.find((songItem) => songItem.id === item.songId);
     return libSong ?? (item.songData ? {
@@ -3273,29 +3279,25 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const sourceSong = getSetlistSongSource(item);
     return { item, sourceSong };
   }).filter((entry): entry is { item: SetlistSong; sourceSong: StoredSong } => entry.sourceSong !== null);
-  const setlistMatchesSearch = (item: Setlist | JoinedSetlist) => {
-    if (!normalizedSetlistSearchQuery) {
-      return true;
-    }
-
-    const searchText = [
-      item.name,
-      ...item.songs.map((setlistSong) => {
-        const sourceSong = getSetlistSongSource(setlistSong);
-        const displaySong = setlistSong.songData ?? sourceSong;
-        return displaySong?.title ?? '';
-      })
-    ].join(' ');
-
-    return normalizeSearchText(searchText).includes(normalizedSetlistSearchQuery);
-  };
+  const getSetlistSearchFields = (item: Setlist | JoinedSetlist): string[] => [
+    item.name,
+    projects.find(project => project.id === item.projectId)?.name
+      ?? joinedProjects.find(project => project.setlists.some(setlist => setlist.id === item.id))?.name ?? '',
+    ...item.songs.map(setlistSong => {
+      const displaySong = setlistSong.songData ?? getSetlistSongSource(setlistSong);
+      return displaySong?.title ?? '';
+    })
+  ];
   const selectedJoinedProject = setlistProjectFilter.kind === 'shared-project'
     ? joinedProjects.find((item) => item.id === setlistProjectFilter.projectId) ?? null
     : null;
 
-  const setlistsInScope = filterOwnedSetlistsByProject(setlists, setlistProjectFilter);
-  const joinedSetlistsInScope: JoinedSetlist[] = setlistProjectFilter.kind === 'all'
-    ? [
+  const isSetlistRoot = setlistProjectFilter.kind === 'all';
+  const setlistsInScope = isSetlistRoot && !normalizedSetlistSearchQuery
+    ? setlists.filter(item => !item.projectId)
+    : filterOwnedSetlistsByProject(setlists, setlistProjectFilter);
+  const joinedSetlistsInScope: JoinedSetlist[] = isSetlistRoot
+    ? !normalizedSetlistSearchQuery ? joinedSetlists : [
         ...joinedSetlists,
         ...joinedProjects.flatMap((project) => project.setlists.map((setlist) => ({ ...setlist, isJoined: true } as JoinedSetlist)))
       ]
@@ -3307,10 +3309,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         : [];
   const archivedSetlistCount = setlistsInScope.filter((item) => item.archived).length;
   const visibleSetlists = showArchivedSetlists ? setlistsInScope : setlistsInScope.filter((item) => !item.archived);
-  const filteredSetlists: Setlist[] = sortSetlistsForDisplay<Setlist>(visibleSetlists.filter(setlistMatchesSearch), setlistSortMode);
-  const filteredJoinedSetlists: JoinedSetlist[] = sortSetlistsForDisplay<JoinedSetlist>(
-    joinedSetlistsInScope.filter(setlistMatchesSearch),
-    setlistSortMode
+  const filteredSetlists = searchItems(
+    sortSetlistsForDisplay(visibleSetlists, setlistSortMode), setlistSearch, getSetlistSearchFields
+  );
+  const filteredJoinedSetlists = searchItems(
+    sortSetlistsForDisplay(joinedSetlistsInScope, setlistSortMode), setlistSearch, getSetlistSearchFields
   );
 
   const activeProjects = projects.filter((item) => !item.archived);
@@ -3319,12 +3322,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const selectedProject = setlistProjectFilter.kind === 'owned-project'
     ? projects.find((item) => item.id === setlistProjectFilter.projectId) ?? null
     : null;
+  const managedProject = setlistPanelView === 'manageProjects'
+    ? projects.find(project => project.id === projectMembersTargetId) ?? null
+    : null;
+  const projectShareContext = managedProject ?? selectedProject ?? null;
+  const canViewProjectMembers = Boolean(projectShareContext && !isLoadingCloudWorkspace && !isSwitchingLibrary
+    && workspaceOwnerId === authenticatedUser?.id && canShareProject(projectShareContext));
   selectedSetlistForShareRef.current = selectedSetlist?.id ?? null;
-  selectedProjectForShareRef.current = selectedProject?.id ?? null;
+  selectedProjectForShareRef.current = projectShareContext?.id ?? null;
   const activeSetlistShareStatus = selectedSetlistShareStatus?.resourceId === selectedSetlist?.id
     ? selectedSetlistShareStatus
     : null;
-  const activeProjectShareStatus = selectedProjectShareStatus?.resourceId === selectedProject?.id
+  const activeProjectShareStatus = selectedProjectShareStatus?.resourceId === projectShareContext?.id
     ? selectedProjectShareStatus
     : null;
   const selectedProjectShareTarget = selectedProject ?? selectedJoinedProject;
@@ -3334,7 +3343,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const ungroupedSetlistCount = setlists.filter((item) => (item.projectId ?? null) === null && !item.archived).length;
   const projectSetlistCount = (projectId: string) => setlists.filter((item) => item.projectId === projectId && !item.archived).length;
   const selectedProjectFilterLabel = setlistProjectFilter.kind === 'all'
-    ? (language === 'zh' ? '全部歌單' : 'All setlists')
+    ? (language === 'zh' ? '歌單' : 'Setlists')
     : setlistProjectFilter.kind === 'ungrouped'
       ? copy.ungroupedProject
       : setlistProjectFilter.kind === 'shared-setlists'
@@ -3352,26 +3361,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         : hasSongs ? song.title || copy.untitledSong : (activeCloudLibrary?.name ?? copy.songLibrary);
 
   const handleSetlistProjectFilterChange = (nextFilter: SetlistProjectFilter) => {
+    setProjectMembersTargetId(null);
     setSetlistProjectFilter(nextFilter);
     setShowArchivedSetlists(false);
 
   };
   // Filter from the full library (not filteredSongs) so the song-library search
   // query never leaks into the setlist "add songs" list.
-  const filteredSongsForSetlist = activeLibrarySongs.filter((item) => {
-    if (!normalizedSetlistSongSearchQuery) {
-      return true;
-    }
-
-    const searchText = [
-      item.title,
-      item.currentKey,
-      item.originalKey,
-      ...item.sections.map((section) => section.title)
-    ].join(' ');
-
-    return normalizeSearchText(searchText).includes(normalizedSetlistSongSearchQuery);
-  });
+  const filteredSongsForSetlist = searchItems<StoredSong>(activeLibrarySongs, setlistSongSearch, getSongSearchFields);
 
   useEffect(() => {
     if (!navigationMemoryReady || !isPhoneSetlistDrawer) return;
@@ -3969,6 +3966,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       ...(!isCloudMode ? { capo: nextSong.capo ?? 0 } : {}),
       sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong, nextSong),
       songData: cloneSong(normalizeSongBars(nextSong))
+    }));
+  };
+
+  const handleSetlistSongTempoChange = (itemId: string, tempo: number | undefined) => {
+    if (!canEditSelectedSetlistContent) return;
+    const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
+    if (!entry) return;
+    if (activePreviewEditSession?.previewIdentity === itemId) {
+      applyPreviewEditDraft({ ...activePreviewEditSession.draftSong, tempo }, { mergeKey: 'tempo' });
+      return;
+    }
+    const previous = entry.item.songData ?? entry.sourceSong;
+    if (previous.tempo === tempo) return;
+    pushSetlistSongHistory(itemId, previous, entry.item.sectionOrder);
+    handleUpdateSetlistSong(itemId, current => ({
+      ...current,
+      songData: { ...cloneSong(current.songData ?? entry.sourceSong), tempo }
     }));
   };
 
@@ -4821,7 +4835,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setSetlists((current) => [newSetlist, ...current]);
     handleSetlistProjectFilterChange(newSetlist.projectId
       ? { kind: 'owned-project', projectId: newSetlist.projectId }
-      : { kind: 'ungrouped' });
+      : { kind: 'all' });
     setSetlistSearchQuery('');
     exitMultiSelect();
     setSelectedSetlistId(newSetlist.id);
@@ -4970,7 +4984,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
     if (setlistProjectFilter.kind === 'owned-project' && setlistProjectFilter.projectId === projectId) {
       handleSetlistProjectFilterChange({ kind: 'all' });
+      setSetlistPanelView('list');
     }
+    if (projectMembersTargetId === projectId) setProjectMembersTargetId(null);
     if (!isTeamWorkspace || !authenticatedUser || !cloudRepositoryRef.current) {
       void persistWorkspace(songs, nextSetlists, nextProjects).catch(() => {
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -4978,11 +4994,24 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
   };
 
+  const handleOpenProjectMembers = (projectId: string) => {
+    setProjectMembersTargetId(projectId);
+    if (projectShareContext?.id === projectId) void loadProjectShareStatus(projectId);
+    if (isPhoneViewport && setlistPanelView !== 'manageProjects') setIsMobileSetlistToolsOpen(true);
+  };
+
+  const handleOpenProjectManagement = (projectId?: string) => {
+    setProjectMembersTargetId(projectId ?? null);
+    setIsMobileSetlistToolsOpen(false);
+    setSetlistPanelView('manageProjects');
+  };
+
   const handleSelectProject = (nextProjectId: string | null) => {
     exitMultiSelect();
+    setSetlistSearchQuery('');
     handleSetlistProjectFilterChange(nextProjectId
       ? { kind: 'owned-project', projectId: nextProjectId }
-      : { kind: 'ungrouped' });
+      : { kind: 'all' });
     setSetlistPanelView('list');
   };
 
@@ -5005,7 +5034,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     });
     const projectName = nextProjectId
       ? projects.find((item) => item.id === nextProjectId)?.name ?? ''
-      : language === 'zh' ? '未分類' : 'Ungrouped';
+      : language === 'zh' ? '歌單根目錄' : 'Setlist root';
     toast.success(language === 'zh' ? `已移到「${projectName}」` : `Moved to "${projectName}"`);
   };
 
@@ -5039,7 +5068,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const now = Date.now();
     const projectName = nextProjectId
       ? projects.find((item) => item.id === nextProjectId)?.name ?? ''
-      : language === 'zh' ? '未分類' : 'Ungrouped';
+      : language === 'zh' ? '歌單根目錄' : 'Setlist root';
 
     let nextSetlists: Setlist[];
     if (mode === 'move') {
@@ -5082,6 +5111,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
 
     setSetlists(nextSetlists);
+    if (mode === 'move' && setlistPanelView !== 'list' && selectedSetlistId && setlistIds.includes(selectedSetlistId)) {
+      handleSetlistProjectFilterChange(nextProjectId ? {kind:'owned-project',projectId:nextProjectId} : {kind:'all'});
+    }
     void persistWorkspace(songs, nextSetlists).catch(() => {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
     });
@@ -5200,7 +5232,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     });
     const projectName = nextProjectId
       ? projects.find((item) => item.id === nextProjectId)?.name ?? ''
-      : language === 'zh' ? '未分類' : 'Ungrouped';
+      : language === 'zh' ? '歌單根目錄' : 'Setlist root';
     toast.success(language === 'zh' ? `已複製到「${projectName}」` : `Copied to "${projectName}"`);
   };
 
@@ -5215,7 +5247,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     void runSelectionChange(() => {
       setlistOpening.commit(token, () => {
         setIsSetlistActionsMenuOpen(false);
-        setSetlistPanelView('detail');
+        setProjectMembersTargetId(null);
+            setSetlistPanelView('detail');
+        setSetlistProjectFilter(getSetlistParentFilter(nextSetlistId, navigationWorkspace));
+        setSetlistSearchQuery('');
         setWorkspaceMode('setlists');
         setSelectedSetlistId(nextSetlistId);
         setSelectedSetlistSongId(current => selectedSetlistId === nextSetlistId ? current : nextSetlist.songs[0]?.id ?? null);
@@ -5465,7 +5500,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     if (selectedProjectForShareRef.current !== projectId) return;
     const repository = cloudRepositoryRef.current;
     const requestGeneration = ++projectShareStatusGenerationRef.current;
-    setSelectedProjectShareStatus(null);
+    setSelectedProjectShareStatus(current => current?.resourceId === projectId ? current : null);
+    setProjectShareStatusError(false);
     if (!repository) {
       setIsLoadingProjectShareStatus(false);
       return;
@@ -5479,8 +5515,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     } catch {
       if (requestGeneration !== projectShareStatusGenerationRef.current) return;
       if (selectedProjectForShareRef.current !== projectId) return;
-      // Non-fatal: the panel just shows an empty/zero state and can be refreshed.
       setSelectedProjectShareStatus(null);
+      setProjectShareStatusError(true);
     } finally {
       if (requestGeneration === projectShareStatusGenerationRef.current
           && selectedProjectForShareRef.current === projectId) {
@@ -5508,19 +5544,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       !authenticatedUser
       || !cloudRepositoryRef.current
       || !isSetlistMode
-      || !selectedProject
-      || selectedJoinedProject
-      || !canShareSelectedProject
+      || !projectShareContext
+      || !canViewProjectMembers
     ) {
       projectShareStatusGenerationRef.current += 1;
       setSelectedProjectShareStatus(null);
+      setProjectShareStatusError(false);
       setIsLoadingProjectShareStatus(false);
       return;
     }
 
-    void loadProjectShareStatus(selectedProject.id);
+    void loadProjectShareStatus(projectShareContext.id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticatedUser, canShareSelectedProject, isSetlistMode, selectedProject?.id, selectedJoinedProject?.id]);
+  }, [authenticatedUser, canViewProjectMembers, isSetlistMode, projectShareContext?.id]);
 
   // In-app notification inbox + "people I shared with before" contact list.
   const refreshNotifications = async () => {
@@ -5684,7 +5720,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       handleSetlistProjectFilterChange({ kind: 'shared-project', projectId: notification.resourceId });
       setSetlistPanelView('list');
     } else {
-      handleSetlistProjectFilterChange({ kind: 'shared-setlists' });
+      handleSetlistProjectFilterChange({ kind: 'all' });
       setSelectedSetlistId(notification.resourceId);
       setSetlistPanelView('detail');
     }
@@ -9560,6 +9596,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setPreviewBarContextMenu(null);
   }, [getPreviewBatchSong, getPreviewBatchTargets, previewBarContextMenu]);
 
+  const changePreviewBarCells = (action: BarCellAction) => {
+    if (!canOpenEditor || !previewBarContextMenu || previewBarContextMenu.previewIdentity !== activePreviewIdentity) return;
+    const sourceSong = getPreviewBatchSong();
+    if (!sourceSong) return;
+    const nextSong = applyBarCellAction(sourceSong, getPreviewBatchTargets(previewBarContextMenu), action);
+    if (nextSong !== sourceSong) {
+      if (activePreviewEditSession) applyPreviewEditDraft(nextSong);
+      else commitPreviewBarBatchSong(nextSong, sourceSong);
+    }
+    setPreviewBarContextMenu(null);
+  };
+
   const applyPreviewEndingToTargets = React.useCallback((
     ending: string | undefined,
     mode: 'set' | 'toggle-digit' = 'set',
@@ -9760,6 +9808,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   React.useEffect(() => {
     if (!previewBarContextMenu) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const menuElement = previewBarMenuRef.current;
+    const focusFrame = window.requestAnimationFrame(() => previewBarMenuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true }));
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (event.target instanceof Element && event.target.closest('[data-preview-bar-batch-menu]')) {
         return;
@@ -9772,8 +9823,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     document.addEventListener('pointerdown', closeOnOutsidePointer, true);
     window.addEventListener('keydown', closeOnEscape);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
       window.removeEventListener('keydown', closeOnEscape);
+      if (document.activeElement === document.body || menuElement?.contains(document.activeElement)) {
+        const target = previousFocus?.isConnected ? previousFocus : document.querySelector<HTMLElement>('[data-preview-chord-capture]');
+        target?.focus({ preventScroll: true });
+      }
     };
   }, [previewBarContextMenu]);
 
@@ -11636,10 +11692,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const hasSetlistShareActivity = Boolean(activeSetlistShareStatus?.activeToken)
     || (activeSetlistShareStatus?.participantCount ?? 0) > 0;
   const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist && hasSetlistShareActivity ? (
-    <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
+    <details className="group setlist-sharing-summary">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400 sm:text-xs">{copy.setlistSharingTitle}</div>
+          <div className="text-sm font-semibold text-gray-900">{copy.setlistSharingTitle}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
               activeSetlistShareStatus?.activeToken
@@ -11662,7 +11718,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); void loadSetlistShareStatus(selectedSetlist.id); }}
             disabled={isLoadingSetlistShareStatus}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
             title={copy.setlistSharingRefresh}
             aria-label={copy.setlistSharingRefresh}
           >
@@ -11699,63 +11755,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             {copy.setlistSharingCancel}
           </button>
         </div>
-      </div>
-    </details>
-  ) : null;
-
-  // Project mode "who joined" — same idea as the setlist panel, scoped to the
-  // whole project. Read-only list + refresh (the project header already hosts
-  // the share button). Collapsible and closed by default. Only surfaces once the
-  // project is actually shared (active link) or someone has joined — otherwise
-  // it's just empty chrome taking up space.
-  const hasProjectShareActivity = Boolean(activeProjectShareStatus?.activeToken)
-    || (activeProjectShareStatus?.participantCount ?? 0) > 0;
-  const projectSharingPanel = isSetlistMode && selectedProject && !selectedJoinedProject && canShareProject(selectedProject) && hasProjectShareActivity ? (
-    <details className="group rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
-        <div className="min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400 sm:text-xs">
-            {language === 'zh' ? '專案共享' : 'Project sharing'}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-              activeProjectShareStatus?.activeToken
-                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-                : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
-            }`}>
-              {isLoadingProjectShareStatus
-                ? copy.cloudSyncSyncing
-                : activeProjectShareStatus?.activeToken
-                  ? copy.setlistSharingActive
-                  : copy.setlistSharingInactive}
-            </span>
-            <span className="text-xs font-semibold text-gray-500">
-              {copy.setlistSharingParticipants}: {activeProjectShareStatus?.participantCount ?? 0}
-            </span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void loadProjectShareStatus(selectedProject.id); }}
-            disabled={isLoadingProjectShareStatus}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
-            title={copy.setlistSharingRefresh}
-            aria-label={copy.setlistSharingRefresh}
-          >
-            <RefreshCw size={13} className={isLoadingProjectShareStatus ? 'animate-spin' : ''} />
-          </button>
-          <ChevronRight size={16} className="text-gray-400 transition-transform group-open:rotate-90" />
-        </div>
-      </summary>
-
-      <div className="mt-3 border-t border-gray-100 pt-3">
-        {renderShareParticipantList(
-          activeProjectShareStatus?.participants,
-          'max-h-48',
-          selectedProject ? (participant) => { void handleToggleProjectMemberRole(selectedProject.id, participant); } : undefined,
-          selectedProject ? (participant) => { void handleRemoveSharedMember('project', selectedProject.id, participant); } : undefined
-        )}
       </div>
     </details>
   ) : null;
@@ -11991,229 +11990,30 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     </div>
   );
 
-  const renderProjectCard = (project: Project | null, options: { isUngrouped?: boolean }) => {
-    const isUngrouped = options.isUngrouped ?? false;
-    const projectId = project?.id ?? null;
-    const name = isUngrouped ? copy.ungroupedProject : (project?.name || copy.untitledProject);
-    const count = isUngrouped ? ungroupedSetlistCount : (project ? projectSetlistCount(project.id) : 0);
-    const archived = !isUngrouped && Boolean(project?.archived);
-    const canManage = project ? canManageProject(project) : false;
-
-    // Manageable projects get the same swipe-to-archive/delete row as setlists:
-    // right swipe → archive (indigo, left), left swipe → delete (rose, right).
-    // Rename stays as a pencil inside the foreground card (no swipe equivalent).
-    if (project && !isUngrouped && canManage) {
-      const baseStyle = archived ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white';
-      return (
-        <SwipeActionRow key={project.id} data-project-id={project.id}
-          className={isPhoneViewport ? 'border-b border-gray-200' : 'rounded-2xl'}
-          contentClassName={`flex select-none items-center gap-2 ${isPhoneViewport ? 'px-0 py-3' : 'border p-3'} ${baseStyle}`}
-          leftAction={{ label: project.archived ? copy.unarchiveSetlist : copy.archiveSetlist,
-            accessibleLabel: `${project.archived ? copy.unarchiveProject : copy.archiveProject} ${name}`, tone: 'archive',
-            onAction: () => handleSetProjectArchived(project.id, !project.archived) }}
-          rightAction={{ label: copy.delete, accessibleLabel: `${copy.delete} ${name}`, tone: 'delete',
-            onAction: () => { void handleDeleteProject(project.id); } }}>
-            <button
-              type="button"
-              onClick={() => {
-                handleSelectProject(project.id);
-              }}
-              className={`${isPhoneViewport ? 'min-h-11 items-center gap-3' : 'items-start gap-2'} flex min-w-0 flex-1 text-left`}
-            >
-              {isPhoneViewport && <FolderTree size={20} className="ml-2 shrink-0 text-indigo-600" aria-hidden="true" />}
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-2">
-                  <div className={`${isPhoneViewport ? 'text-base font-semibold' : 'text-sm font-bold'} min-w-0 truncate text-gray-900`}>{name}</div>
-                  {archived && (
-                    <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">{copy.archivedProjectBadge}</span>
-                  )}
-                </div>
-                <div className="mt-1 text-xs text-gray-500">{count} {copy.setlists}</div>
-              </div>
-            </button>
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                data-swipe-ignore
-                onClick={(event) => {
-                  event.stopPropagation();
-                  const nextName = window.prompt(copy.renameProjectPrompt, project.name);
-                  if (nextName !== null) handleRenameProject(project.id, nextName);
-                }}
-                className={`${isPhoneViewport ? 'flex h-11 w-11 items-center justify-center' : 'p-1.5'} rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700`}
-                title={copy.renameProject}
-                aria-label={copy.renameProject}
-              >
-                <Edit3 size={15} />
-              </button>
-              {project.archived && (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleSetProjectArchived(project.id, false);
-                  }}
-                  className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
-                  title={copy.unarchiveProject}
-                  aria-label={copy.unarchiveProject}
-                >
-                  <ArchiveRestore size={15} />
-                </button>
-              )}
-            </div>
-        </SwipeActionRow>
-      );
-    }
-
-    // Ungrouped pseudo-project and non-manageable projects: plain, non-swipe card.
-    return (
-      <div
-        key={projectId ?? '__ungrouped__'}
-        className={`${isPhoneViewport ? 'border-b border-gray-200 py-3' : 'rounded-2xl border border-gray-200 p-3'} transition-colors ${archived ? 'bg-gray-50' : 'bg-white'}`}
-      >
-        <div className="flex items-start gap-2">
-          <button
-            type="button"
-            onClick={() => handleSelectProject(projectId)}
-            className={`${isPhoneViewport ? 'flex min-h-11 items-center gap-3 px-2' : ''} min-w-0 flex-1 text-left`}
-          >
-            {isPhoneViewport && <FolderTree size={20} className="shrink-0 text-gray-500" aria-hidden="true" />}
-            <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className={`${isPhoneViewport ? 'text-base font-semibold' : 'text-sm font-bold'} min-w-0 truncate text-gray-900`}>{name}</div>
-              {archived && (
-                <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-600">{copy.archivedProjectBadge}</span>
-              )}
-            </div>
-            <div className="mt-1 text-xs text-gray-500">{count} {copy.setlists}</div>
-            </div>
-            {isPhoneViewport && <ChevronRight size={16} className="text-gray-400" aria-hidden="true" />}
-          </button>
-        </div>
-      </div>
-    );
-  };
-
   const desktopSetlistProjectsPanel = (
-    <>
-      <div className="px-5 py-4 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setSetlistPanelView('list')}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-            title={language === 'zh' ? '返回歌單總覽' : 'Back to setlists'}
-            aria-label={language === 'zh' ? '返回歌單總覽' : 'Back to setlists'}
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className={`${isPhoneViewport ? 'text-lg font-semibold' : 'text-base font-bold'} text-gray-900`}>{language === 'zh' ? '專案管理' : 'Manage projects'}</div>
-            <div className="mt-0.5 text-xs text-gray-500">{isPhoneViewport ? `${visibleProjects.length} ${language === 'zh' ? '個專案' : 'projects'}` : language === 'zh' ? '整理歌單，不影響目前譜面' : 'Organize setlists without changing the current sheet'}</div>
-          </div>
-        </div>
-        {canCreateProject && (
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={handleCreateProject}
-              className={`${isPhoneViewport ? 'min-h-11' : ''} flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500`}
-            >
-              <Plus size={16} />
-              <span>{copy.newProject}</span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className={`${isPhoneViewport ? archivedProjectsCount > 0 ? 'px-4 py-2' : 'hidden' : 'px-3 py-3'} border-b border-gray-100`}>
-        {!isPhoneViewport && <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400"><span>{copy.projects}</span><span>{visibleProjects.length}</span></div>}
-        {archivedProjectsCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowArchivedProjects((current) => !current)}
-            className={`mt-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold transition-colors ${
-              showArchivedProjects ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:bg-gray-100'
-            }`}
-          >
-            <Archive size={13} />
-            {showArchivedProjects ? copy.hideArchivedProjects : `${copy.showArchivedProjects} (${archivedProjectsCount})`}
-          </button>
-        )}
-      </div>
-
-      <div data-project-scroll className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${isPhoneViewport ? 'px-4' : 'p-3'}`}>
-        <div className={isPhoneViewport ? '' : 'space-y-2'}>
-          {renderProjectCard(null, { isUngrouped: true })}
-          {visibleProjects.map((project) => renderProjectCard(project, { isUngrouped: false }))}
-        </div>
-
-        {joinedProjects.length > 0 && (
-          <div className="mt-5 space-y-2">
-            <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
-              {language === 'zh' ? '別人分享的專案' : 'Shared with me'}
-            </div>
-            {joinedProjects.map((jp) => (
-              <button
-                key={jp.id}
-                type="button"
-                onClick={() => {
-                  handleSetlistProjectFilterChange({ kind: 'shared-project', projectId: jp.id });
-                  setSetlistPanelView('list');
-                }}
-                className={`${isPhoneViewport ? 'min-h-[72px] border-b border-gray-200 py-3' : 'rounded-2xl border border-indigo-100 p-3'} block w-full bg-white text-left transition-colors hover:bg-indigo-50/40`}
-              >
-                <div className="flex items-center gap-2">
-                  <div className={`${isPhoneViewport ? 'text-base font-semibold' : 'text-sm font-bold'} min-w-0 flex-1 truncate text-gray-900`}>{jp.name}</div>
-                  <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                    {language === 'zh' ? '已加入' : 'Joined'}
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-gray-500">
-                  {jp.setlists.length} {copy.setlistItems}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
+    <ProjectManagementPanel language={language} projects={showArchivedProjects && !selectedProject ? projects.filter(project => project.archived) : visibleProjects} archivedOnly={showArchivedProjects && !selectedProject} joinedProjects={joinedProjects}
+      setlists={setlists} project={managedProject} showArchived={showArchivedProjects} archivedCount={archivedProjectsCount}
+      canCreate={canCreateProject} canManage={canManageProject} canShare={canShareProject}
+      canViewMembers={canViewProjectMembers} memberStatus={activeProjectShareStatus}
+      membersLoading={isLoadingProjectShareStatus} membersError={projectShareStatusError}
+      sharing={creatingProjectShareLinkId === managedProject?.id}
+      onBack={() => setSetlistPanelView('list')}
+      projectBackLabel={managedProject && selectedProject?.id === managedProject.id ? (language === 'zh' ? '專案歌單' : 'Project setlists') : undefined}
+      onInspect={id => { if (id) handleOpenProjectMembers(id); else { setProjectMembersTargetId(null); if (selectedProject?.id === managedProject?.id) { setSetlistPanelView('list'); window.requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('.setlist-project-members')?.focus({preventScroll:true})); } } }}
+      onCreate={handleCreateProject} onToggleArchived={() => setShowArchivedProjects(current => !current)}
+      onOpenProject={handleSelectProject}
+      onOpenJoinedProject={id => { handleSetlistProjectFilterChange({ kind: 'shared-project', projectId: id }); setSetlistPanelView('list'); }}
+      onOpenSetlist={handleSelectSetlist}
+      onRename={project => { const name = window.prompt(copy.renameProjectPrompt, project.name); if (name !== null) handleRenameProject(project.id, name); }}
+      onArchive={project => handleSetProjectArchived(project.id, !project.archived)}
+      onDelete={project => { void handleDeleteProject(project.id); }}
+      onShare={project => { void handleCreateProjectShareLink(project.id); }}
+      onRefreshMembers={id => { void loadProjectShareStatus(id); }}
+      onRoleChange={async (project, member, role) => { if (role !== (member.role ?? 'viewer')) await handleToggleProjectMemberRole(project.id, member); }}
+      onRemoveMember={(project, member) => { void handleRemoveSharedMember('project', project.id, member); }}
+    />
   );
 
-  const setlistProjectPicker = (
-    <label className="min-w-0 flex-1">
-      <span className="sr-only">{language === 'zh' ? '專案篩選' : 'Project filter'}</span>
-      <select
-        value={serializeSetlistProjectFilter(setlistProjectFilter)}
-        onChange={(event) => {
-          const nextFilter = parseSetlistProjectFilter(event.target.value);
-          if (nextFilter) handleSetlistProjectFilterChange(nextFilter);
-        }}
-        className={`${isPhoneViewport ? 'h-11' : 'h-10'} w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300`}
-        aria-label={language === 'zh' ? '專案篩選' : 'Project filter'}
-      >
-        <option value="all">{language === 'zh' ? '全部歌單' : 'All setlists'}</option>
-        <option value="ungrouped">{copy.ungroupedProject}</option>
-        {activeProjects.length > 0 && (
-          <optgroup label={language === 'zh' ? '我的專案' : 'My projects'}>
-            {activeProjects.map((project) => (
-              <option key={project.id} value={`owned-project:${project.id}`}>{project.name}</option>
-            ))}
-          </optgroup>
-        )}
-        {joinedProjects.length > 0 && (
-          <optgroup label={language === 'zh' ? '共享專案' : 'Shared projects'}>
-            {joinedProjects.map((project) => (
-              <option key={project.id} value={`shared-project:${project.id}`}>{project.name}</option>
-            ))}
-          </optgroup>
-        )}
-        {joinedSetlists.length > 0 && (
-          <option value="shared-setlists">{copy.sharedWithMe}</option>
-        )}
-      </select>
-    </label>
-  );
   const setlistSearchField = (
     <label className={`${isPhoneViewport ? 'h-11' : ''} flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white`}>
       <Search size={15} className="shrink-0 text-gray-400" />
@@ -12242,142 +12042,33 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   const desktopSetlistListPanel = (
     <>
-      {isPhoneViewport ? (
-        <div data-mobile-setlist-toolbar className="shrink-0 border-b border-gray-200 px-3 py-2 dark:border-[color:var(--color-border)]">
-          <div className="flex min-w-0 items-center gap-2">
-            {setlistSearchField}
-            {canCreateTeamSetlists && (
-              <button type="button" onClick={handleCreateSetlist} aria-label={copy.newSetlist} title={copy.newSetlist}
-                className="ui-press flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm hover:bg-indigo-500">
-                <Plus size={20} />
-              </button>
-            )}
-          </div>
-          <div className="mt-2 flex min-w-0 items-center gap-2">
-            {setlistProjectPicker}
-            <span className="shrink-0 text-xs font-semibold tabular-nums text-gray-500" aria-label={language === 'zh' ? '歌單數量' : 'Setlist count'}>
-              {normalizedSetlistSearchQuery
-                ? `${filteredSetlists.length + filteredJoinedSetlists.length}/${visibleSetlists.length + joinedSetlistsInScope.length}`
-                : visibleSetlists.length + joinedSetlistsInScope.length}
-            </span>
-            <button type="button" onClick={() => setIsMobileSetlistToolsOpen((current) => !current)}
-              aria-expanded={isMobileSetlistToolsOpen} aria-controls="mobile-setlist-tools"
-              aria-label={language === 'zh' ? '歌單篩選與管理' : 'Setlist filters and management'}
-              title={language === 'zh' ? '歌單篩選與管理' : 'Setlist filters and management'}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors ${isMobileSetlistToolsOpen || showArchivedSetlists
-                ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-500'}`}>
-              {isMobileSetlistToolsOpen ? <ChevronUp size={18} /> : <SlidersHorizontal size={18} />}
-            </button>
-          </div>
-          <AnimatedDisclosure open={isMobileSetlistToolsOpen} id="mobile-setlist-tools" className="mt-2 max-h-[28dvh] space-y-2 overflow-y-auto overscroll-contain border-t border-gray-200 pt-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-gray-500">{copy.setlistSort}</span>
-                {setlistSortPicker}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => { setIsMobileSetlistToolsOpen(false); setSetlistPanelView('manageProjects'); }}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700">
-                  <FolderTree size={15} />{language === 'zh' ? '管理專案' : 'Manage projects'}
-                </button>
-                {archivedSetlistCount > 0 && (
-                  <button type="button" onClick={() => setShowArchivedSetlists((current) => !current)} aria-pressed={showArchivedSetlists}
-                    className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold ${showArchivedSetlists ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
-                    <Archive size={14} />{showArchivedSetlists ? copy.hideArchivedSetlists : `${copy.showArchivedSetlists} (${archivedSetlistCount})`}
-                  </button>
-                )}
-                {selectedProjectShareTarget && canShareSelectedProject && (
-                  <button type="button" onClick={() => void handleCreateProjectShareLink(selectedProjectShareTarget.id)} disabled={creatingProjectShareLinkId === selectedProjectShareTarget.id}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 disabled:opacity-60">
-                    <Share2 size={15} />{language === 'zh' ? '分享專案' : 'Share project'}
-                  </button>
-                )}
-              </div>
-              {projectSharingPanel}
-          </AnimatedDisclosure>
+      <div className="setlist-browser-header" data-setlist-browser-header>
+        {!isSetlistRoot && <button type="button" className="pm-back" onClick={() => { handleSelectProject(null); }}><ChevronLeft size={17} />{language === 'zh' ? '歌單' : 'Setlists'}</button>}
+        <div className="setlist-browser-title">
+          <h2 tabIndex={-1}>{isSetlistRoot ? (language === 'zh' ? '歌單' : 'Setlists') : selectedProjectFilterLabel}</h2>
+          {canCreateTeamSetlists && <ManagementActions label={language === 'zh' ? '新增' : 'New'} triggerContent={<><Plus size={16}/>{language === 'zh' ? '新增' : 'New'}</>} actions={[
+            {label:copy.newSetlist,icon:<ListMusic size={16}/>,run:handleCreateSetlist},
+            ...(isSetlistRoot && canCreateProject ? [{label:copy.newProject,icon:<FolderTree size={16}/>,run:handleCreateProject}] : [])
+          ]}/>}
         </div>
-      ) : (
-      <div className="shrink-0 px-4 py-3 border-b border-gray-200">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex min-h-9 min-w-0 flex-1 items-center">
-            <div className="flex min-w-0 items-center gap-2">
-              <ListMusic size={16} className="shrink-0 text-indigo-500" />
-              <span className="text-base font-bold text-gray-900 dark:text-[color:var(--color-text)]">
-                {language === 'zh' ? '歌單總覽' : 'Setlists'}
-              </span>
-            </div>
-          </div>
-          {selectedProjectShareTarget && canShareSelectedProject && (
-            <button
-              type="button"
-              onClick={() => void handleCreateProjectShareLink(selectedProjectShareTarget.id)}
-              disabled={creatingProjectShareLinkId === selectedProjectShareTarget.id}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
-              title={language === 'zh' ? '分享專案' : 'Share project'}
-              aria-label={language === 'zh' ? '分享專案' : 'Share project'}
-            >
-              {creatingProjectShareLinkId === selectedProjectShareTarget.id ? (
-                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-500" aria-hidden />
-              ) : (
-                <Share2 size={15} />
-              )}
-            </button>
-          )}
-        </div>
-        {projectSharingPanel ? <div className="mt-3">{projectSharingPanel}</div> : null}
-        <div className="mt-3 flex min-w-0 items-center gap-2">
-          {setlistProjectPicker}
-          <button
-            type="button"
-            onClick={() => setSetlistPanelView('manageProjects')}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-600 transition-colors hover:border-indigo-200 hover:text-indigo-700"
-            title={language === 'zh' ? '管理專案' : 'Manage projects'}
-          >
-            <FolderTree size={15} />
-            <span>{language === 'zh' ? '管理' : 'Manage'}</span>
-          </button>
-        </div>
-        <div className="mt-3 flex min-w-0 items-center gap-2">
-          {setlistSearchField}
-        </div>
-        {canCreateTeamSetlists && (
-            <button
-              type="button"
-              onClick={handleCreateSetlist}
-              className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-            >
-              <Plus size={18} />
-              <span>{copy.newSetlist}</span>
-            </button>
-        )}
-        <div className="mt-3 flex min-w-0 items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-1.5 text-xs font-bold uppercase tracking-[0.18em] text-gray-400">
-            <span>{selectedProjectFilterLabel}</span>
-            <span>{normalizedSetlistSearchQuery
-              ? `${filteredSetlists.length + filteredJoinedSetlists.length}/${visibleSetlists.length + joinedSetlistsInScope.length}`
-              : visibleSetlists.length + joinedSetlistsInScope.length}</span>
-          </div>
-          {setlistSortPicker}
-        </div>
-        {archivedSetlistCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowArchivedSetlists((current) => !current)}
-            className={`mt-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold transition-colors ${
-              showArchivedSetlists ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:bg-gray-100'
-            }`}
-          >
-            <Archive size={13} />
-            {showArchivedSetlists ? copy.hideArchivedSetlists : `${copy.showArchivedSetlists} (${archivedSetlistCount})`}
-          </button>
-        )}
+        {setlistSearchField}
+        {selectedProject && (canViewProjectMembers || canManageProject(selectedProject)) && <button type="button" className="setlist-project-members" onClick={() => handleOpenProjectManagement(selectedProject.id)}>
+          {canViewProjectMembers ? <Users size={17}/> : <MoreHorizontal size={17}/>}<span><strong>{canViewProjectMembers ? (language === 'zh' ? '成員與權限' : 'Members and permissions') : (language === 'zh' ? '管理專案' : 'Project settings')}</strong><small>{!canViewProjectMembers ? (language === 'zh' ? '重新命名、歸檔與其他操作' : 'Rename, archive and other actions') : isLoadingProjectShareStatus ? (language === 'zh' ? '正在載入…' : 'Loading…') : projectShareStatusError ? (language === 'zh' ? '查看成員與管理權限' : 'View members and roles') : activeProjectShareStatus?.participants.length ? activeProjectShareStatus.participants.map(member => member.name || member.email).join('、') : (language === 'zh' ? '邀請團員加入此專案' : 'Invite your team')}</small></span><ChevronRight size={16}/>
+        </button>}
+        {selectedJoinedProject && canShareSelectedProject && <button type="button" className="pm-text-button" onClick={()=>void handleCreateProjectShareLink(selectedJoinedProject.id)} disabled={creatingProjectShareLinkId===selectedJoinedProject.id}><Share2 size={16}/>{language==='zh'?'分享專案':'Share project'}</button>}
+        {(!isSetlistRoot || normalizedSetlistSearchQuery) && <div className="setlist-browser-options"><span>{normalizedSetlistSearchQuery ? (language === 'zh' ? '搜尋結果' : 'Search results') : language === 'zh' ? '歌單' : 'Setlists'} · {filteredSetlists.length + filteredJoinedSetlists.length}</span>{setlistSortPicker}</div>}
+        {archivedSetlistCount>0 && <button type="button" className="pm-archive-toggle" aria-pressed={showArchivedSetlists} onClick={()=>setShowArchivedSetlists(current=>!current)}><Archive size={14}/>{showArchivedSetlists?copy.hideArchivedSetlists:copy.showArchivedSetlists}{' ('+archivedSetlistCount+')'}</button>}
       </div>
-      )}
 
       <div data-setlist-scroll className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 ${isMultiSelectMode ? 'pb-40' : ''}`}>
-        <div className="space-y-2">
-          {filteredSetlists.length === 0 && filteredJoinedSetlists.length === 0 && (
+        <div>
+          {isSetlistRoot && !normalizedSetlistSearchQuery && <div className="setlist-folder-list" data-setlist-folders>
+            {activeProjects.map(project=><button key={project.id} type="button" className="setlist-folder-row" data-project-folder={project.id} onClick={()=>handleSelectProject(project.id)}><Folder size={22}/><span><strong>{project.name}</strong><small>{projectSetlistCount(project.id)}{language==='zh'?' 份歌單':' setlists'}</small></span><ChevronRight size={17}/></button>)}
+            {joinedProjects.filter(project=>!project.archived).map(project=><button key={project.id} type="button" className="setlist-folder-row" data-project-folder={project.id} onClick={()=>{setSetlistSearchQuery('');handleSetlistProjectFilterChange({kind:'shared-project',projectId:project.id});}}><Folder size={22}/><span><strong>{project.name}</strong><small>{project.setlists.filter(item=>!item.archived).length}{language==='zh'?' 份歌單 · 與我共享':' setlists · Shared'}</small></span><ChevronRight size={17}/></button>)}
+          </div>}
+          {filteredSetlists.length === 0 && filteredJoinedSetlists.length === 0 && (!isSetlistRoot || normalizedSetlistSearchQuery || activeProjects.length + joinedProjects.length === 0) && (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-              {showArchivedSetlists && archivedSetlistCount === 0 ? copy.noArchivedSetlists : copy.noSetlists}
+              {normalizedSetlistSearchQuery ? searchEmptyMessage(setlistSearchQuery, language === 'zh' ? '找不到符合條件的歌單。' : 'No matching setlists.') : showArchivedSetlists && archivedSetlistCount === 0 ? copy.noArchivedSetlists : copy.noSetlists}
             </div>
           )}
           {filteredSetlists.map((item) => {
@@ -12389,15 +12080,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               : copy.ungroupedProject;
             const canManage = canManageSetlist(item);
             const baseStyle = isActive
-              ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100'
-              : item.archived ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white';
+              ? 'bg-indigo-50'
+              : item.archived ? 'bg-gray-50' : 'bg-white';
             return (
-              <SwipeActionRow key={item.id} className="rounded-2xl"
+              <SwipeActionRow key={item.id} className="border-b border-gray-200"
                 onContextMenu={(event) => {
                   if (!canManage) return;
                   event.preventDefault();
 
-                  setlistContextTriggerRef.current = event.currentTarget.querySelector('input[type="checkbox"]');
+                  setlistContextTriggerRef.current = event.currentTarget.querySelector<HTMLElement>('[data-swipe-ignore]') ?? event.currentTarget.querySelector('button');
                   setSetlistContextMenu({ id: item.id, x: event.clientX, y: event.clientY });
                 }}
                 leftAction={canManage ? { label: item.archived ? copy.unarchiveSetlist : copy.archiveSetlist,
@@ -12405,7 +12096,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   onAction: () => handleSetSetlistArchived(item.id, !item.archived) } : undefined}
                 rightAction={canManage ? { label: copy.delete, accessibleLabel: `${copy.delete} ${item.name || copy.untitledSetlist}`, tone: 'delete',
                   onAction: () => handleDeleteSetlist(item.id) } : undefined}
-                contentClassName={`flex select-none items-start gap-2 border p-3 ${baseStyle}`}
+                contentClassName={`flex select-none items-start gap-2 px-2 py-3 ${baseStyle}`}
                 contentProps={{
                   onTouchStart: event => {
                     setlistLongPressHandledRef.current = false;
@@ -12423,7 +12114,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   onTouchCancel: handleMobileLongPressEnd
                 }}
               >
-                  {canManage && (
+                  {canManage && isMultiSelectMode && (
                     <input
                       type="checkbox"
                       checked={multiSelectedSetlistIds.includes(item.id)}
@@ -12449,9 +12140,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     }}
                     className="flex min-w-0 flex-1 items-start gap-2 text-left"
                   >
+                    {isSetlistRoot && <ListMusic size={22} className="mt-1 shrink-0 text-gray-500" aria-hidden="true"/>}
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
-                        <div className={`${isPhoneViewport ? 'text-base font-semibold' : 'text-sm font-bold'} min-w-0 truncate text-gray-900`}>{item.name || copy.untitledSetlist}</div>
+                        <div className={`${isPhoneViewport ? 'text-base' : 'text-sm'} min-w-0 truncate font-semibold text-gray-900`}>{item.name || copy.untitledSetlist}</div>
                         {isActive && (
                           <span className="shrink-0 rounded-full bg-indigo-600 px-2 py-0.5 text-[9px] font-bold text-white">
                             {language === 'zh' ? '目前顯示' : 'Current'}
@@ -12462,11 +12154,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                         )}
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
-                        <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-600">{projectName}</span>
-                        <span>{item.songs.length} {copy.setlistItems}</span>
+                        {normalizedSetlistSearchQuery && <span className="rounded-full bg-gray-100 px-2 py-0.5 font-semibold text-gray-600">{projectName}</span>}
+                        <span>{item.songs.length} {isSetlistRoot ? (language === 'zh' ? '首歌曲' : 'songs') : copy.setlistItems}</span>
                       </div>
-                      {previewTitles.length > 0 && (
-                        <div className={`${isPhoneViewport ? 'mt-2 space-y-1 text-xs leading-5' : 'mt-2 space-y-0.5 rounded-xl bg-white/70 px-2.5 py-2 text-[11px]'} text-gray-600`}>
+                      {!isSetlistRoot && previewTitles.length > 0 && (
+                        <div className="mt-2 space-y-0.5 text-xs leading-5 text-gray-600">
                           {previewTitles.map((title, index) => (
                             <div key={`${item.id}-${index}`} className="truncate">{index + 1}. {title}</div>
                           ))}
@@ -12477,6 +12169,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       )}
                     </div>
                   </button>
+                  {canManage && !isMultiSelectMode && <button type="button" data-swipe-ignore aria-label={language==='zh'?item.name+'的歌單操作':'Actions for '+item.name} className="pm-icon-button" onClick={event=>{const rect=event.currentTarget.getBoundingClientRect();setlistContextTriggerRef.current=event.currentTarget;setSetlistContextMenu({id:item.id,x:rect.right,y:rect.bottom});}}><MoreHorizontal size={18}/></button>}
                   {item.archived && canManage && !isMultiSelectMode && (
                     <button
                       type="button"
@@ -12498,7 +12191,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         </div>
 
         {joinedSetlistsInScope.length > 0 && (
-          <div className="mt-4 space-y-2">
+          <div className="mt-4">
             <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
               <span>{copy.sharedWithMe}</span>
               <span>{normalizedSetlistSearchQuery ? `${filteredJoinedSetlists.length}/${joinedSetlistsInScope.length}` : joinedSetlistsInScope.length}</span>
@@ -12516,13 +12209,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               return (
                 <div
                   key={item.id}
-                  className={`rounded-2xl border p-3 transition-all ${
-                    isActive ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100' : 'border-gray-200 bg-white'
+                  className={`border-b border-gray-200 px-2 py-3 ${
+                    isActive ? 'bg-indigo-50' : 'bg-white'
                   }`}
                 >
                   <button type="button" onClick={() => handleSelectJoinedSetlist(item.id)} className="w-full text-left">
                     <div className="flex items-center gap-2">
-                      <div className="min-w-0 flex-1 truncate text-sm font-bold text-gray-900">{item.name || copy.untitledSetlist}</div>
+                      <div className={`${isPhoneViewport ? 'text-base' : 'text-sm'} min-w-0 flex-1 truncate font-semibold text-gray-900`}>{item.name || copy.untitledSetlist}</div>
                       {isActive && (
                         <span className="shrink-0 rounded-full bg-indigo-600 px-2 py-0.5 text-[9px] font-bold text-white">
                           {language === 'zh' ? '目前顯示' : 'Current'}
@@ -12537,11 +12230,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       <span>{item.songs.length} {copy.setlistItems}</span>
                     </div>
                     {joinedSongSummaries.length > 0 ? (
-                      <div className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-xl border border-indigo-100 bg-white/70 p-2">
+                      <div className="mt-2 space-y-1 text-xs leading-5 text-gray-600">
                         {joinedSongSummaries.map((summary, index) => (
                           <div key={summary.id} className="min-w-0">
-                            <div className="truncate text-[11px] font-bold text-gray-800">{index + 1}. {summary.title}</div>
-                            <div className="break-words text-[10px] font-medium leading-4 text-gray-500">{summary.summary}</div>
+                            <div className="truncate">{index + 1}. {summary.title}</div>
+                            <div className="break-words text-[11px] leading-4 text-gray-500">{summary.summary}</div>
                           </div>
                         ))}
                         {hiddenSongCount > 0 && (
@@ -12569,178 +12262,56 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         )}
       </div>
 
+      {isSetlistRoot && archivedProjectsCount > 0 && <div className="px-4"><button type="button" className="pm-archive-toggle" onClick={()=>{setShowArchivedProjects(true);setSetlistSearchQuery('');handleOpenProjectManagement();}}><Archive size={15}/>{language==='zh'?'已歸檔專案':'Archived projects'}{' ('+archivedProjectsCount+')'}</button></div>}
       {desktopSetlistSavedFooter}
     </>
   );
 
   const desktopSetlistDetailPanel = selectedSetlist ? (
     <>
-      <div className="border-b border-gray-200 px-4 py-4">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              setIsSetlistActionsMenuOpen(false);
-              setSetlistSongSearchQuery('');
-              setSetlistPanelView('list');
-            }}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-            title={copy.backToSetlists}
-            aria-label={copy.backToSetlists}
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <div className="min-w-0 flex-1">
-            {!isPhoneViewport && <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{copy.setlistDetails}</div>}
-            {isJoinedSetlist || !canEditSelectedSetlist ? (
-              <div className="mt-1 truncate text-base font-bold text-gray-900 dark:text-[color:var(--color-text)]">{selectedSetlist.name || copy.untitledSetlist}</div>
-            ) : (
-              <input
-                value={selectedSetlist.name}
-                onChange={(event) => handleSetlistNameChange(selectedSetlist.id, event.target.value)}
-                className={`${isPhoneViewport ? 'text-lg font-semibold' : 'mt-1 text-base font-bold'} w-full rounded-lg bg-transparent text-gray-900 outline-none placeholder:text-gray-400 focus:bg-indigo-50/50 dark:text-[color:var(--color-text)] dark:focus:bg-[color:var(--color-surface-raised)]`}
-                placeholder={copy.untitledSetlist}
-              />
-            )}
-            <div className="mt-0.5 text-xs font-medium text-gray-500">{setlistSongsWithSource.length} {copy.setlistItems}</div>
-            {isCloudMode && <p className="mt-1 text-xs leading-5 text-gray-500">{language === 'zh'
-              ? '歌序與 Key 共用；Capo 只套用到自己。'
-              : 'Song order and keys are shared; Capo is personal.'}</p>}
-            {isTeamWorkspace && activeLibraryRole === 'setlist_manager' && <p className="mt-1 text-xs leading-5 text-indigo-600">{language === 'zh'
-              ? '可管理自己的或被指派的歌單；和弦與段落由歌曲管理員或總管理員維護。'
-              : 'Manage your own or assigned setlists; song managers and administrators maintain chords and sections.'}</p>}
-          </div>
-          {isJoinedSetlist ? (
-            <div ref={setlistActionsMenuRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-                title={language === 'zh' ? '歌單操作' : 'Setlist Actions'}
-              >
-                <MoreHorizontal size={16} />
-              </button>
-              <AnimatedPopover open={isSetlistActionsMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-20 mt-2" className="w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
-                  {selectedSetlistJoinedProject ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsSetlistActionsMenuOpen(false);
-                        requestLeaveSharedProject(selectedSetlistJoinedProject.id);
-                      }}
-                      disabled={leavingSharedProjectId === selectedSetlistJoinedProject.id}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
-                    >
-                      <LogOut size={15} />
-                      {copy.leaveProject}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsSetlistActionsMenuOpen(false);
-                        requestLeaveSharedSetlist(selectedSetlist.id);
-                      }}
-                      disabled={leavingSharedSetlistId === selectedSetlist.id}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
-                    >
-                      <LogOut size={15} />
-                      {copy.leaveSetlist}
-                    </button>
-                  )}
-                </AnimatedPopover>
-            </div>
-          ) : canEditSelectedSetlist ? (
-            <div ref={setlistActionsMenuRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setIsSetlistActionsMenuOpen((current) => !current)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-                title={language === 'zh' ? '歌單操作' : 'Setlist Actions'}
-              >
-                <MoreHorizontal size={16} />
-              </button>
-              <AnimatedPopover open={isSetlistActionsMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-20 mt-2" className="w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSetlistActionsMenuOpen(false);
-                      setProjectPicker({ mode: 'move', setlistIds: [selectedSetlist.id] });
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-                  >
-                    <FileText size={15} />
-                    {copy.moveSetlistToProject}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSetlistActionsMenuOpen(false);
-                      setProjectPicker({ mode: 'copy', setlistIds: [selectedSetlist.id] });
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-                  >
-                    <Copy size={15} />
-                    {copy.copySetlistToProject}
-                  </button>
-                  {canManageSelectedSetlistAssignments ? (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSetlistAssignments(selectedSetlist.id)}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-                    >
-                      <Users size={15} />
-                      {language === 'zh' ? '指派歌單協作者' : 'Assign collaborators'}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => handleSetSetlistArchived(selectedSetlist.id, !selectedSetlist.archived)}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
-                  >
-                    {selectedSetlist.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
-                    {selectedSetlist.archived ? copy.unarchiveSetlist : copy.archiveSetlist}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteSetlist(selectedSetlist.id)}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
-                  >
-                    <Trash2 size={15} />
-                    {copy.delete}
-                  </button>
-                </AnimatedPopover>
-            </div>
-          ) : (
-            <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600">
-              {getTeamRoleLabel(activeLibraryRole, language)}
-            </span>
-          )}
+      <div className="setlist-browser-header" data-setlist-detail-header>
+        <button type="button" className="pm-back" aria-label={copy.backToSetlists} onClick={()=>{setIsSetlistActionsMenuOpen(false);setSetlistSongSearchQuery('');setSetlistPanelView('list');}}><ChevronLeft size={17}/>{selectedProject?.name ?? selectedJoinedProject?.name ?? (language==='zh'?'歌單':'Setlists')}</button>
+        <div className="setlist-browser-title">
+          {isJoinedSetlist || !canEditSelectedSetlist ? <h2 tabIndex={-1}>{selectedSetlist.name || copy.untitledSetlist}</h2> : <input aria-label={language==='zh'?'歌單名稱':'Setlist name'} className="setlist-title-input" value={selectedSetlist.name} onChange={event=>handleSetlistNameChange(selectedSetlist.id,event.target.value)} placeholder={copy.untitledSetlist}/>}
+          {isSetlistSongSortMode ? <button type="button" className="pm-text-button" onClick={()=>{finishSetlistSongPointerDrag();setIsSetlistSongSortMode(false);}}><Check size={15}/>{language==='zh'?'完成排序':'Done'}</button> : (isJoinedSetlist || canEditSelectedSetlist || canShareSelectedSetlist || canReorderSelectedSetlist) && <ManagementActions label={language==='zh'?'歌單操作':'Setlist actions'} actions={[
+            ...(canReorderSelectedSetlist ? [{label:language==='zh'?'調整歌曲順序':'Reorder songs',icon:<ListMusic size={16}/>,run:()=>setIsSetlistSongSortMode(true)}] : []),
+            ...(canShareSelectedSetlist ? [{label:copy.shareCurrentSetlist,icon:<Share2 size={16}/>,run:()=>{void handleCreateShareLink('setlist');},disabled:isExportingPdf||isRevokingSetlistShare}] : []),
+            ...(!isJoinedSetlist && canEditSelectedSetlist ? [
+              {label:copy.moveSetlistToProject,icon:<Folder size={16}/>,run:()=>setProjectPicker({mode:'move',setlistIds:[selectedSetlist.id]})},
+              {label:copy.copySetlistToProject,icon:<Copy size={16}/>,run:()=>setProjectPicker({mode:'copy',setlistIds:[selectedSetlist.id]})},
+              ...(canManageSelectedSetlistAssignments ? [{label:language==='zh'?'指派歌單協作者':'Assign collaborators',icon:<Users size={16}/>,run:()=>handleOpenSetlistAssignments(selectedSetlist.id)}] : []),
+              {label:selectedSetlist.archived?copy.unarchiveSetlist:copy.archiveSetlist,icon:<Archive size={16}/>,run:()=>handleSetSetlistArchived(selectedSetlist.id,!selectedSetlist.archived)},
+              {label:copy.delete,icon:<Trash2 size={16}/>,run:()=>handleDeleteSetlist(selectedSetlist.id),danger:true}
+            ] : []),
+            ...(isJoinedSetlist ? [{label:selectedSetlistJoinedProject?copy.leaveProject:copy.leaveSetlist,icon:<LogOut size={16}/>,run:()=>selectedSetlistJoinedProject?requestLeaveSharedProject(selectedSetlistJoinedProject.id):requestLeaveSharedSetlist(selectedSetlist.id),danger:true,disabled:selectedSetlistJoinedProject?leavingSharedProjectId===selectedSetlistJoinedProject.id:leavingSharedSetlistId===selectedSetlist.id}] : [])
+          ]}/>}
         </div>
+        <div className="setlist-detail-toolbar"><span>{setlistSongsWithSource.length}{language==='zh'?' 首歌曲':' songs'}</span>{canEditSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="pm-new-button" aria-label={copy.addToSetlist} onClick={()=>{setSetlistAddSongSelection([]);setSetlistPanelView('addSongs');}}><Plus size={16}/>{language==='zh'?'加入歌曲':'Add songs'}</button>}</div>
+        {isTeamWorkspace && activeLibraryRole==='setlist_manager' && <p className="pm-header-note">{language==='zh'?'譜面由歌曲管理員或總管理員維護。':'Song managers and administrators maintain scores.'}</p>}
       </div>
 
-      <div data-setlist-detail-scroll className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${isPhoneViewport ? 'px-4 py-1' : 'p-3'}`}>
+      <div data-setlist-detail-scroll className="setlist-detail-scroll">
         {canShareSelectedSetlist && setlistSharingPanel ? <div className="mb-3">{setlistSharingPanel}</div> : null}
         {joinedSetlistDisplayPreferencePanel ? <div className="mb-3">{joinedSetlistDisplayPreferencePanel}</div> : null}
 
-        {!isPhoneViewport && <div className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400">{copy.setlistItems}</div>}
+
         {setlistSongsWithSource.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
             {copy.noSetlistSongs}
           </div>
         ) : (
-          <div className={isPhoneViewport ? 'divide-y divide-[color:var(--color-border)]' : 'mt-3 space-y-2'}>
+          <div className="setlist-song-list">
             {setlistSongsWithSource.map(({ item, sourceSong }, index) => {
               const isActive = item.id === selectedSetlistSong?.id;
               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
               const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode, setlistCapoResolutionOptions);
               const displaySong = item.songData ?? sourceSong;
-              const songInfoSummary = isPhoneViewport ? [
+              const effectiveTempo = activePreviewEditSession?.previewIdentity === item.id ? activePreviewEditSession.draftSong.tempo : displaySong.tempo;
+              const songInfoSummary = [
                 `${language === 'zh' ? '原調' : 'Original'} ${formatKeyName(displaySong.originalKey, displaySong.originalKeyMode)}`,
-                typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
                 displaySong.timeSignature,
                 getSongVersionSummary(displaySong), displaySong.translator?.trim()
-              ].filter(Boolean).join(' · ') : getSetlistSongInfoSummary(item, sourceSong);
+              ].filter(Boolean).join(' · ');
               const isDropTarget = dragOverSetlistSongId === item.id;
               const isDragging = draggingSetlistSongId === item.id;
 
@@ -12748,81 +12319,56 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 <div
                   key={item.id}
                   data-setlist-song-id={item.id}
-                  className={`group select-none transition-colors ${isPhoneViewport ? 'py-3' : 'rounded-xl border px-2.5 py-2'} ${
-                    isActive
-                      ? isPhoneViewport ? 'bg-indigo-50/60' : 'border-indigo-200 bg-indigo-50/80 shadow-sm shadow-indigo-100/60'
-                      : isDropTarget
-                        ? 'border-indigo-200 bg-indigo-50/70'
-                        : 'border-gray-200 bg-white hover:bg-gray-50/70'
-                  } ${isDragging ? 'scale-[0.99] ring-2 ring-indigo-200' : ''}`}
+                  className={`group setlist-song-row ${isSetlistSongSortMode ? 'is-sort-mode' : ''} ${isActive ? 'is-current' : ''} ${isDropTarget ? 'is-drop-target' : ''} ${isDragging ? 'is-dragging' : ''}`}
                 >
-                  <div className="flex items-start gap-2">
-                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                      <div className="flex min-w-0 items-center gap-2">
-                        {(!isPhoneViewport || !canReorderSelectedSetlist) && <span className={`${isPhoneViewport ? 'h-11 w-11 text-sm font-semibold' : 'h-7 w-7 rounded-full text-[11px] font-black'} inline-flex shrink-0 items-center justify-center tabular-nums ${
-                          isActive ? isPhoneViewport ? 'text-indigo-700' : 'bg-indigo-600 text-white' : 'text-gray-500'
-                        }`}>
-                          {index + 1}
-                        </span>}
-                        {canReorderSelectedSetlist && (
-                          <button
-                            type="button"
-                            onPointerDown={(event) => handleSetlistSongDragHandlePointerDown(event, item.id)}
-                            onPointerMove={handleSetlistSongDragHandlePointerMove}
-                            onPointerUp={finishSetlistSongPointerDrag}
-                            onPointerCancel={finishSetlistSongPointerDrag}
-                            onLostPointerCapture={finishSetlistSongPointerDrag}
-                            onContextMenu={(event) => event.preventDefault()}
-                            className={`${isPhoneViewport ? 'flex h-11 w-11 shrink-0 items-center justify-center gap-0.5 rounded-lg text-sm font-semibold tabular-nums' : 'rounded-lg border border-gray-200 bg-white p-2'} touch-none cursor-grab ${isActive ? 'text-indigo-700' : 'text-gray-500'} transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:cursor-grabbing`}
-                            style={{ WebkitUserSelect: 'none' }}
-                            title={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
-                            aria-label={language === 'zh' ? '拖動排序' : 'Drag to reorder'}
-                          >
-                            {isPhoneViewport && <span>{index + 1}</span>}<GripVertical size={isPhoneViewport ? 12 : 14} />
-                          </button>
-                        )}
-                        <button type="button" onClick={() => handleSelectSetlistSong(item.id)} aria-current={isActive ? 'true' : undefined} className={`${isPhoneViewport ? 'min-h-11' : ''} min-w-0 flex-1 text-left`}>
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <div className={`${isPhoneViewport ? 'line-clamp-2 break-words text-base font-semibold leading-6' : 'truncate text-sm font-bold'} min-w-0 text-gray-900`}>{displaySong.title || sourceSong.title || copy.untitledSong}</div>
-                            {isActive && isPhoneViewport && <Check size={16} aria-label={language === 'zh' ? '目前顯示' : 'Current song'} className="shrink-0 text-indigo-700" />}
-                            {sourceSong.archivedAt || item.sourceArchivedAt ? (
-                              <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700">
-                                {language === 'zh' ? '已封存' : 'Archived'}
-                              </span>
-                            ) : null}
-                            {isActive && !isPhoneViewport && (
-                              <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-bold text-indigo-700">
-                                {language === 'zh' ? '目前顯示' : 'Current'}
-                              </span>
-                            )}
-                          </div>
-                          {songInfoSummary ? (
-                            <div className={`${isPhoneViewport ? 'text-xs leading-5 text-gray-500' : 'text-[11px] font-medium leading-4 text-gray-400'} mt-0.5 break-words`}>
-                              {songInfoSummary}
-                            </div>
-                          ) : null}
-                        </button>
-                        {canEditSelectedSetlist && isPhoneViewport && (
-                          <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={() => handleRemoveSetlistSong(item.id)} />
-                        )}
-                        {canEditSelectedSetlist && !isPhoneViewport && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveSetlistSong(item.id)}
-                            className="rounded-full p-1.5 text-gray-300 opacity-70 transition-all group-hover:opacity-100 hover:bg-rose-50 hover:text-rose-600"
-                            title={copy.removeFromSetlist}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                      </div>
-                      <div className={isPhoneViewport ? 'grid min-w-0 grid-cols-2 gap-3 pl-[52px]' : 'flex min-w-0 items-end gap-2 pl-9'}>
-                        <div className={isPhoneViewport ? 'min-w-0' : 'w-[92px] shrink-0'}>
-                          <div className={`${isPhoneViewport ? 'text-xs font-medium text-gray-500' : 'text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400'} mb-1`}>
-                            {language === 'zh' ? '歌單 Key' : 'Setlist Key'}
-                          </div>
+                  <div className="setlist-song-reading">
+                  <div className="setlist-song-heading">
+                  {canReorderSelectedSetlist && !isSetlistSongSortMode ? (
+                      <button
+                        type="button"
+                        className="setlist-song-number-handle touch-none cursor-grab active:cursor-grabbing"
+                        aria-label={(language === 'zh' ? '拖動排序：' : 'Drag to reorder: ') + displaySong.title}
+                        aria-description={language === 'zh' ? `第 ${index + 1} 首。按住後拖動，或使用上下方向鍵調整順序。` : `Song ${index + 1}. Hold and drag, or use the up and down arrow keys to reorder.`}
+                        title={language === 'zh' ? '按住編號拖動排序' : 'Hold the number and drag to reorder'}
+                        onPointerDown={event => handleSetlistSongDragHandlePointerDown(event, item.id)}
+                        onPointerMove={handleSetlistSongDragHandlePointerMove}
+                        onPointerUp={finishSetlistSongPointerDrag}
+                        onPointerCancel={finishSetlistSongPointerDrag}
+                        onLostPointerCapture={finishSetlistSongPointerDrag}
+                        onContextMenu={event => event.preventDefault()}
+                        onKeyDown={event => {
+                          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                          event.preventDefault();
+                          const target = setlistSongsWithSource[index + (event.key === 'ArrowUp' ? -1 : 1)];
+                          if (target) moveSetlistSong(item.id, target.item.id);
+                        }}
+                      >
+                        <span className="setlist-song-number">{index + 1}</span>
+                        <GripVertical size={12} className="setlist-song-number-grip" aria-hidden="true" />
+                      </button>
+                    ) : <span className="setlist-song-static-number"><span className="setlist-song-number">{index + 1}</span></span>}
+                    {canEditSelectedSetlist && !isSetlistSongSortMode && <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={() => handleRemoveSetlistSong(item.id)} />}
+                  </div>
+                    <button type="button" onClick={() => handleSelectSetlistSong(item.id)} aria-current={isActive ? 'true' : undefined} className="setlist-song-select">
+                      <span className="setlist-song-title-line">
+                        <span className="setlist-song-title">{displaySong.title || sourceSong.title || copy.untitledSong}</span>
+                        {isActive && <Check size={16} aria-label={language === 'zh' ? '目前顯示' : 'Current song'} className="setlist-song-current" />}
+                        {sourceSong.archivedAt || item.sourceArchivedAt ? <span className="setlist-song-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
+                      </span>
+                      {songInfoSummary ? <span className="setlist-song-summary">{songInfoSummary}</span> : null}
+                    </button>
+                  </div>
+                  {isSetlistSongSortMode && canReorderSelectedSetlist ? (
+                    <div className="setlist-song-sort-actions">
+                      <button type="button" onPointerDown={event=>handleSetlistSongDragHandlePointerDown(event,item.id)} onPointerMove={handleSetlistSongDragHandlePointerMove} onPointerUp={finishSetlistSongPointerDrag} onPointerCancel={finishSetlistSongPointerDrag} onLostPointerCapture={finishSetlistSongPointerDrag} onContextMenu={event=>event.preventDefault()} className="setlist-song-drag touch-none cursor-grab active:cursor-grabbing" style={{WebkitUserSelect:'none'}} aria-label={(language==='zh'?'拖動排序：':'Drag to reorder: ')+displaySong.title}><GripVertical size={16}/></button>
+                      <button type="button" className="pm-icon-button" aria-label={(language==='zh'?'上移：':'Move up: ')+displaySong.title} disabled={index===0} onClick={()=>{const previous=setlistSongsWithSource[index-1];if(previous)moveSetlistSong(item.id,previous.item.id);}}><ChevronUp size={18}/></button>
+                      <button type="button" className="pm-icon-button" aria-label={(language==='zh'?'下移：':'Move down: ')+displaySong.title} disabled={index===setlistSongsWithSource.length-1} onClick={()=>{const next=setlistSongsWithSource[index+1];if(next)moveSetlistSong(item.id,next.item.id);}}><ChevronDown size={18}/></button>
+                    </div>
+                  ) : <div className="setlist-song-fields">
+                        <div className="min-w-0">
                           <KeyPicker
                             value={effectiveKey}
+                            triggerLabel={<span className="setlist-rail-value"><span className="setlist-rail-label">Key</span>{' '}<span>{formatKeyName(effectiveKey, currentKeyMode(sourceSong))}</span></span>}
                             mode={currentKeyMode(sourceSong)}
                             originalMode={currentKeyMode(sourceSong)}
                             language={language}
@@ -12830,38 +12376,29 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                               if (!key) return;
                               handleSetlistSongKeyChange(item.id, effectiveKey, effectiveCapo, key);
                             }}
-                            label={copy.key}
+                            label={language==='zh'?'歌單 Key':'Setlist Key'}
+                            panelMetaText={isCloudMode ? (language==='zh'?'此歌單共用的演奏調性':'Shared performance key for this setlist') : undefined}
                             originalKey={sourceSong.currentKey}
                             align="left"
                             disabled={!canEditSelectedSetlistKey}
-                            buttonClassName={`${isPhoneViewport ? '!h-11 !w-full !px-3' : '!h-8 !w-[92px] !px-2'} !min-w-0 !gap-1 !rounded-lg !border-gray-200 !bg-gray-50 dark:!border-[color:var(--color-border)] dark:!bg-[color:var(--color-surface-raised)] ${!canEditSelectedSetlistKey ? '!cursor-default !opacity-100' : ''}`}
-                            valueTextClassName={`${isPhoneViewport ? '!text-sm' : '!text-xs'} !leading-none dark:!text-[color:var(--color-text)]`}
+                            buttonClassName="setlist-rail-picker"
+                            valueTextClassName="setlist-rail-copy"
                             triggerIconSize={12}
                             touchOptimized={!hasFinePointer}
                           />
                         </div>
-                        <div className={isPhoneViewport ? 'min-w-0' : 'w-[92px] shrink-0'}>
-                          <div className={`${isPhoneViewport ? 'text-xs font-medium text-gray-500' : 'text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400'} mb-1`}>{isCloudMode ? (language === 'zh' ? '我的 Capo' : 'My Capo') : 'Capo'}</div>
-                          <CapoPicker
-                            value={effectiveCapo}
-                            currentKey={effectiveKey}
-                            onChange={isJoinedSetlist
-                              ? (capo) => handleJoinedSetlistCapoChange(item.id, capo)
-                              : isCloudMode
-                                ? (capo) => handlePersonalSetlistCapoChange(item.id, capo)
-                              : (capo) => handleUpdateSetlistSong(item.id, (currentSetlistSong) => ({ ...currentSetlistSong, capo }))}
-                            label="Capo"
-                            align="right"
-                            buttonClassName={`${isPhoneViewport ? '!h-11 !w-full !px-3' : '!h-8 !w-[92px] !px-2'} !min-w-0 !gap-1 !rounded-lg !border-gray-200 !bg-gray-50 dark:!border-[color:var(--color-border)] dark:!bg-[color:var(--color-surface-raised)]`}
-                            valueTextClassName={`${isPhoneViewport ? '!text-sm' : '!text-xs'} !leading-none dark:!text-[color:var(--color-text)]`}
-                            showPlayKey={false}
-                            triggerIconSize={12}
-                            touchOptimized={!hasFinePointer}
+                        <div className="min-w-0">
+                          <TempoPicker
+                            value={effectiveTempo}
+                            language={language}
+                            disabled={!canEditSelectedSetlistContent}
+                            triggerLabel={<span className="setlist-rail-value"><span className="setlist-rail-label">BPM</span><span className={String(effectiveTempo ?? '').length > 4 ? 'is-precise' : undefined}>{effectiveTempo ?? '—'}</span></span>}
+                            scopeText={language === 'zh' ? '只套用到這份歌單，歌曲庫不變。' : 'Applies to this setlist only. The library stays unchanged.'}
+                            onChange={tempo => handleSetlistSongTempoChange(item.id, tempo)}
+                            buttonClassName="setlist-rail-picker"
                           />
                         </div>
-                      </div>
-                    </div>
-                  </div>
+                  </div>}
                 </div>
               );
             })}
@@ -12869,54 +12406,37 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         )}
       </div>
 
-      {selectedSetlist && canEditSelectedSetlist && (
-        <div className="border-t border-gray-200 bg-white px-4 py-3">
-          <button
-            type="button"
-            onClick={() => {
-              setIsSetlistActionsMenuOpen(false);
-              setSetlistAddSongSelection([]);
-              setSetlistPanelView('addSongs');
-            }}
-            className="ui-press flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-          >
-            <Plus size={16} />
-            <span>{copy.addToSetlist}</span>
-          </button>
-        </div>
-      )}
-
       {desktopSetlistSavedFooter}
     </>
   ) : desktopSetlistListPanel;
 
+  const renderTempoControl = (buttonClassName = '') => <TempoPicker
+    key={activePreviewIdentity}
+    value={activeDraftEditorSong?.tempo}
+    language={language}
+    disabled={!canOpenEditor}
+    scopeText={isSetlistMode
+      ? (language === 'zh' ? '只套用到這份歌單，歌曲庫不變。' : 'Applies to this setlist only. The library stays unchanged.')
+      : (language === 'zh' ? '調整這首歌曲的原曲速度。' : 'Change the tempo of this library song.')}
+    buttonClassName={buttonClassName}
+    onChange={tempo => {
+      if (!canOpenEditor || !activeDraftEditorSong) return;
+      if (isSetlistMode && selectedSetlistSong) {
+        handleSetlistSongTempoChange(selectedSetlistSong.id, tempo);
+      } else if (activePreviewEditSession) {
+        applyPreviewEditDraft({ ...activePreviewEditSession.draftSong, tempo }, { mergeKey: 'tempo' });
+      } else {
+        handleSongChange({ ...song, tempo });
+      }
+    }}
+  />;
+
   const desktopSetlistAddSongsPanel = selectedSetlist ? (
     <>
-      <div className="border-b border-gray-200 px-4 py-4">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              setIsSetlistActionsMenuOpen(false);
-              setSetlistSongSearchQuery('');
-              setSetlistAddSongSelection([]);
-              setSetlistPanelView('detail');
-            }}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-            title={copy.backToPreview}
-            aria-label={copy.backToPreview}
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-base font-bold text-gray-900">{copy.addToSetlist}</div>
-            <div className="mt-0.5 truncate text-xs font-medium text-gray-500">
-              {setlistAddSongSelection.length > 0
-                ? (language === 'zh' ? `已選 ${setlistAddSongSelection.length} 首` : `${setlistAddSongSelection.length} selected`)
-                : (language === 'zh' ? '可勾選多首，同一首可加多份' : 'Tap to select; +/- adds repeats')}
-            </div>
-          </div>
-        </div>
+      <div className="setlist-browser-header">
+        <button type="button" className="pm-back" aria-label={copy.backToPreview} onClick={()=>{setIsSetlistActionsMenuOpen(false);setSetlistSongSearchQuery('');setSetlistAddSongSelection([]);setSetlistPanelView('detail');}}><ChevronLeft size={17}/>{selectedSetlist.name || copy.untitledSetlist}</button>
+        <div className="setlist-browser-title"><h2 tabIndex={-1}>{copy.addToSetlist}</h2></div>
+        <p className="pm-header-note">{setlistAddSongSelection.length>0 ? (language==='zh'?`已選 ${setlistAddSongSelection.length} 首`:`${setlistAddSongSelection.length} selected`) : (language==='zh'?'可選多首，同一首可重複加入。':'Select songs; the same song can be added more than once.')}</p>
 
         <label className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
           <Search size={14} className="text-gray-400" />
@@ -12930,11 +12450,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         </label>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        <div className="space-y-2">
+      <div className="setlist-detail-scroll">
+        <div className="divide-y divide-gray-200">
           {filteredSongsForSetlist.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
-              {copy.noSongsMatch}
+              {searchEmptyMessage(setlistSongSearchQuery)}
             </div>
           ) : (
             filteredSongsForSetlist.map((librarySong) => {
@@ -12945,7 +12465,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               return (
                 <div
                   key={`setlist-add-${librarySong.id}`}
-                  className={`flex items-center gap-2 rounded-xl border transition-colors ${
+                  className={`flex items-center gap-2 py-2 transition-colors ${
                     isSelected
                       ? 'border-indigo-300 bg-indigo-50'
                       : 'border-gray-200 bg-white'
@@ -12968,7 +12488,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <div className="truncate text-sm font-bold text-gray-900">
+                        <div className="truncate text-sm font-semibold text-gray-900">
                           {librarySong.title || copy.untitledSong}
                         </div>
                         {addedCount > 0 && (
@@ -12977,11 +12497,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                           </span>
                         )}
                       </div>
-                      <div className="mt-0.5 truncate text-[11px] text-gray-500" title={libraryMeta.tooltip}>
+                      <div className="mt-0.5 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
                         {libraryMeta.primary}
                       </div>
                       {libraryMeta.secondary && (
-                        <div className="truncate text-[11px] text-gray-400" title={libraryMeta.tooltip}>
+                        <div className="truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
                           {libraryMeta.secondary}
                         </div>
                       )}
@@ -12992,7 +12512,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       <button
                         type="button"
                         onClick={() => decrementSetlistAddSongSelection(librarySong.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-indigo-600 transition-colors hover:bg-indigo-50"
+                        className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-600 transition-colors hover:bg-indigo-50"
                         aria-label={language === 'zh' ? `減少一份 ${librarySong.title || copy.untitledSong}` : `Remove one ${librarySong.title || copy.untitledSong}`}
                       >
                         <Minus size={14} strokeWidth={3} />
@@ -13001,7 +12521,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       <button
                         type="button"
                         onClick={() => incrementSetlistAddSongSelection(librarySong.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-indigo-600 transition-colors hover:bg-indigo-50"
+                        className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-600 transition-colors hover:bg-indigo-50"
                         aria-label={language === 'zh' ? `多加一份 ${librarySong.title || copy.untitledSong}` : `Add one more ${librarySong.title || copy.untitledSong}`}
                       >
                         <Plus size={14} strokeWidth={3} />
@@ -13289,10 +12809,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {isAuthenticated ? (
                     <button
                       type="button"
-                      onClick={() => (syncStatus === 'failed' || syncStatus === 'offline' ? toast.error(syncStatusLabel) : toast.success(syncStatusLabel))}
+                      onClick={() => (syncStatus === 'failed' || syncStatus === 'offline' ? toast.error(syncStatusFeedback) : toast.success(syncStatusFeedback))}
                       className={`flex h-10 w-10 items-center justify-center rounded-2xl ring-1 ring-inset transition-colors ${syncStatusTone}`}
-                      title={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusLabel}`}
-                      aria-label={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusLabel}`}
+                      title={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusFeedback}`}
+                      aria-label={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusFeedback}`}
                     >
                       {syncStatus === 'syncing'
                         ? <LoaderCircle size={18} className="animate-spin" />
@@ -13347,6 +12867,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               <SwipeActionGroup resetKey={`${activeLibraryId ?? 'local'}:${setlistPanelView}:${serializeSetlistProjectFilter(setlistProjectFilter)}`}>
               <SetlistNavigator
                 view={setlistPanelView}
+                path={[
+                  ...((setlistProjectFilter.kind === 'owned-project' || setlistProjectFilter.kind === 'shared-project') ? [serializeSetlistProjectFilter(setlistProjectFilter)] : []),
+                  ...((setlistPanelView === 'detail' || setlistPanelView === 'addSongs') ? ['setlist:' + selectedSetlistId] : []),
+                  ...(setlistPanelView === 'manageProjects' ? selectedProject ? ['members'] : ['archived-projects', ...(managedProject ? [managedProject.id] : [])] : []),
+                  ...(setlistPanelView === 'addSongs' ? ['add-songs'] : [])
+                ]}
                 busy={Boolean(setlistOpening.opening)}
                 ready={navigationMemoryReady}
                 motion={uiMotion}
@@ -13357,252 +12883,128 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               />
               </SwipeActionGroup>
             ) : (
-              <>
-                <div className="shrink-0">
-                <div className="px-5 py-4 border-b border-gray-200">
-                  {isPhoneViewport ? (
-                    <div className="flex items-center gap-2">
-                      <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                        <Search size={15} className="shrink-0 text-gray-400" />
-                        <input
-                          type="text"
-                          value={librarySearchQuery}
-                          onChange={(event) => setLibrarySearchQuery(event.target.value)}
-                          placeholder={copy.searchSongs}
-                          className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                        />
-                      </label>
-                      {canEditTeamSongs && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={handleCreateSong}
-                            aria-label={copy.newSong}
-                            title={copy.newSong}
-                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                          >
-                            <Plus size={18} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleToggleLibraryEditing}
-                            aria-label={isLibraryEditing ? copy.done : copy.manage}
-                            title={isLibraryEditing ? copy.done : copy.manage}
-                            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                              isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            }`}
-                          >
-                            <Edit3 size={18} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {canEditTeamSongs && <div className="mt-4 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={handleCreateSong}
-                          className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-200 transition-colors hover:bg-indigo-500"
-                        >
-                          <Plus size={16} />
-                          <span>{copy.newSong}</span>
+              <div className="song-library-panel" data-song-library>
+                <header className="song-library-header">
+                  <div className="song-library-heading">
+                    <h2>{language === 'zh' ? '歌曲庫' : 'Song library'}</h2>
+                    {canEditTeamSongs && (
+                      <div className="song-library-header-actions">
+                        <button type="button" className="song-library-button" onClick={handleCreateSong} aria-label={copy.newSong}>
+                          <Plus size={16} />{copy.newSong}
                         </button>
-                        <button
-                          type="button"
-                          onClick={handleToggleLibraryEditing}
-                          className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
-                            isLibraryEditing ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                        >
-                          <Edit3 size={16} />
-                          <span>{isLibraryEditing ? copy.done : copy.manage}</span>
-                        </button>
-                      </div>}
-                      <div className="mt-3 flex items-center gap-1.5">
-                        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-                          <Search size={15} className="shrink-0 text-gray-400" />
-                          <input
-                            type="text"
-                            value={librarySearchQuery}
-                            onChange={(event) => setLibrarySearchQuery(event.target.value)}
-                            placeholder={copy.searchSongs}
-                            className="w-full min-w-0 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-                          />
-                        </label>
-                        {(!isTeamWorkspace || canEditTeamSongs) ? (
-                          <button
-                            type="button"
-                            onClick={handleExportSongLibraryJson}
-                            aria-label={copy.exportJson}
-                            title={copy.exportJson}
-                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-                          >
-                            <Download size={15} />
-                          </button>
-                        ) : null}
-                        {canEditTeamSongs && !isTeamWorkspace && (
-                          <button
-                            type="button"
-                            onClick={handleImportSongLibraryClick}
-                            aria-label={copy.importJson}
-                            title={copy.importJson}
-                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-200 hover:text-indigo-600"
-                          >
-                            <Upload size={15} />
-                          </button>
-                        )}
-                        {isTeamWorkspace && canEditTeamSongs && personalCloudLibrary && personalCloudLibrary.id !== activeLibraryId ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleOpenTeamSongImport()}
-                            disabled={isImportingPersonalSongs}
-                            aria-label={language === 'zh' ? '從個人區批量匯入' : 'Import personal songs'}
-                            title={language === 'zh' ? '從個人區批量匯入' : 'Import personal songs'}
-                            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60"
-                          >
-                            <Copy size={15} />
-                          </button>
-                        ) : null}
+                        <ManagementActions label={language === 'zh' ? '歌曲庫操作' : 'Song library actions'} actions={[
+                          { label: isLibraryEditing ? (language === 'zh' ? '完成管理' : 'Finish managing') : (language === 'zh' ? '管理歌曲' : 'Manage songs'), icon: <Edit3 size={16} />, run: handleToggleLibraryEditing },
+                          ...(archivedSongCount > 0 ? [{ label: showArchivedSongs ? (language === 'zh' ? '隱藏已封存歌曲' : 'Hide archived songs') : (language === 'zh' ? `包含封存歌曲 (${archivedSongCount})` : `Include archived songs (${archivedSongCount})`), icon: <Archive size={16} />, run: () => setShowArchivedSongs(current => !current) }] : []),
+                          { label: copy.exportJson, icon: <Download size={16} />, run: handleExportSongLibraryJson },
+                          ...(!isTeamWorkspace ? [{ label: copy.importJson, icon: <Upload size={16} />, run: handleImportSongLibraryClick }] : []),
+                          ...(isTeamWorkspace && personalCloudLibrary && personalCloudLibrary.id !== activeLibraryId ? [{ label: language === 'zh' ? '從個人區批量匯入' : 'Import personal songs', icon: <Copy size={16} />, run: () => void handleOpenTeamSongImport(), disabled: isImportingPersonalSongs }] : [])
+                        ]} />
                       </div>
-                    </>
-                  )}
-                  <input
-                    ref={importLibraryInputRef}
-                    type="file"
-                    accept="application/json,.json"
-                    onChange={handleImportSongLibrary}
-                    className="hidden"
-                  />
-                  {isLibraryEditing && (
-                    <>
-                      <div className="mt-2 flex items-center justify-between gap-2 text-xs font-bold text-gray-500">
-                        <span>{language === 'zh' ? `已選 ${selectedLibrarySongIds.length} 首` : `${selectedLibrarySongIds.length} selected`}</span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={handleToggleSelectAllFilteredSongs}
-                            className="rounded-lg px-2 py-1 text-indigo-600 transition-colors hover:bg-indigo-50"
-                          >
-                            {filteredSongs.length > 0 && filteredSongs.every((item) => selectedLibrarySongIds.includes(item.id))
-                              ? (language === 'zh' ? '取消全選' : 'Deselect all')
-                              : (language === 'zh' ? '全選目前結果' : 'Select results')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setIsLibraryEditing(false)}
-                            className="rounded-lg px-2 py-1 text-gray-500 transition-colors hover:bg-gray-100"
-                          >
-                            {copy.cancel}
-                          </button>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleShareSelectedSongs()}
-                        disabled={selectedLibrarySongIds.length === 0 || isCreatingSongShare}
-                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-100 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {isCreatingSongShare ? <LoaderCircle size={16} className="animate-spin" /> : <Share2 size={16} />}
-                        <span>{language === 'zh' ? `分享所選 (${selectedLibrarySongIds.length})` : `Share selected (${selectedLibrarySongIds.length})`}</span>
-                      </button>
-                      {isTeamWorkspace ? (() => {
-                        const selectedSongs = songs.filter((item) => selectedLibrarySongIds.includes(item.id));
-                        const allArchived = selectedSongs.length > 0 && selectedSongs.every((item) => Boolean(item.archivedAt));
-                        return (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => void handleArchiveSelectedSongs(!allArchived)}
-                              disabled={selectedLibrarySongIds.length === 0}
-                              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              {allArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
-                              <span>{language === 'zh'
-                                ? `${allArchived ? '取消封存' : '封存所選'} (${selectedLibrarySongIds.length})`
-                                : `${allArchived ? 'Restore' : 'Archive selected'} (${selectedLibrarySongIds.length})`}</span>
-                            </button>
-                            {allArchived ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleDeleteSelectedSongs()}
-                                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100"
-                              >
-                                <Trash2 size={16} />
-                                <span>{language === 'zh' ? '永久刪除所選' : 'Permanently delete selected'}</span>
-                              </button>
-                            ) : null}
-                          </>
-                        );
-                      })() : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteSelectedSongs()}
-                            disabled={selectedLibrarySongIds.length === 0}
-                            className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <Trash2 size={16} />
-                            <span>{`${copy.deleteSelected} (${selectedLibrarySongIds.length})`}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleRemoveLibrarySongDuplicates}
-                            className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 transition-colors hover:bg-gray-50"
-                          >
-                            <Copy size={16} />
-                            <span>{language === 'zh' ? '移除重複歌曲' : 'Remove duplicate songs'}</span>
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-                </div>
-
-                <div className="px-3 py-3 border-b border-gray-100">
-                  <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-gray-400">
-                    <span>{copy.songs}</span>
-                    <span>{normalizedLibrarySearchQuery ? `${filteredSongs.length}/${visibleLibrarySongs.length}` : visibleLibrarySongs.length}</span>
+                    )}
                   </div>
-                  <div className="mt-2 flex gap-2">
+                  <label className="song-library-search">
+                    <Search size={16} />
+                    <input
+                      type="text"
+                      value={librarySearchQuery}
+                      onChange={(event) => setLibrarySearchQuery(event.target.value)}
+                      placeholder={copy.searchSongs}
+                      aria-label={copy.searchSongs}
+                    />
+                  </label>
+                  <input ref={importLibraryInputRef} type="file" accept="application/json,.json" onChange={handleImportSongLibrary} className="hidden" />
+                  <div className="song-library-options">
+                    <span className="song-library-count">
+                      {normalizedLibrarySearchQuery
+                        ? (language === 'zh' ? `${filteredSongs.length} / ${visibleLibrarySongs.length} 首` : `${filteredSongs.length} / ${visibleLibrarySongs.length} songs`)
+                        : (language === 'zh' ? `${visibleLibrarySongs.length} 首歌曲` : `${visibleLibrarySongs.length} songs`)}
+                      {showArchivedSongs && <span className="song-library-archive-state">{language === 'zh' ? '含封存' : 'incl. archived'}</span>}
+                    </span>
                     <select
                       value={librarySortMode}
                       onChange={(event) => setLibrarySortMode(event.target.value as LibrarySortMode)}
-                      className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-600 outline-none transition-colors focus:border-indigo-300"
                       aria-label={language === 'zh' ? '歌曲排序' : 'Sort songs'}
                     >
                       <option value="updated-desc">{language === 'zh' ? '最近更新' : 'Recently updated'}</option>
                       <option value="created-desc">{language === 'zh' ? '最近添加' : 'Recently added'}</option>
                       <option value="name-asc">{language === 'zh' ? '名稱 A→Z' : 'Name A→Z'}</option>
                     </select>
-                    {canEditTeamSongs && archivedSongCount > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setShowArchivedSongs((current) => !current)}
-                        className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-[10px] font-bold transition-colors ${
-                          showArchivedSongs
-                            ? 'border-amber-200 bg-amber-50 text-amber-700'
-                            : 'border-gray-200 bg-white text-gray-500 hover:border-amber-200 hover:text-amber-700'
-                        }`}
-                        aria-pressed={showArchivedSongs}
-                      >
-                        <Archive size={12} />
-                        <span>{language === 'zh' ? `封存 ${archivedSongCount}` : `Archived ${archivedSongCount}`}</span>
-                      </button>
-                    ) : null}
                   </div>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
+                  {isLibraryEditing && (() => {
+                    const selectedSongs = songs.filter((item) => selectedLibrarySongIds.includes(item.id));
+                    const allArchived = selectedSongs.length > 0 && selectedSongs.every((item) => Boolean(item.archivedAt));
+                    const visibleSelectedCount = filteredSongs.filter((item) => selectedLibrarySongIds.includes(item.id)).length;
+                    const hiddenSelectedCount = selectedLibrarySongIds.length - visibleSelectedCount;
+                    return (
+                      <div className="song-library-bulk" data-library-bulk>
+                        <div className="song-library-bulk-heading">
+                          <span>{language === 'zh' ? `已選 ${selectedLibrarySongIds.length} 首` : `${selectedLibrarySongIds.length} selected`}</span>
+                          <div>
+                            <button type="button" onClick={handleToggleSelectAllFilteredSongs} className="song-library-button">
+                              {filteredSongs.length > 0 && filteredSongs.every((item) => selectedLibrarySongIds.includes(item.id))
+                                ? (language === 'zh' ? '取消全選' : 'Deselect all')
+                                : (language === 'zh' ? '全選目前結果' : 'Select results')}
+                            </button>
+                            <button type="button" onClick={() => setIsLibraryEditing(false)} className="song-library-button is-muted" aria-label={language === 'zh' ? '完成管理' : 'Finish managing'}>
+                              {copy.done}
+                            </button>
+                          </div>
+                        </div>
+                        {hiddenSelectedCount > 0 && <p className="song-library-bulk-note">{language === 'zh' ? `另有 ${hiddenSelectedCount} 首在其他搜尋結果中` : `${hiddenSelectedCount} selected songs are outside these results`}</p>}
+                        <div className="song-library-bulk-actions">
+                          <button
+                            type="button"
+                            onClick={() => void handleShareSelectedSongs()}
+                            disabled={visibleSelectedCount === 0 || isCreatingSongShare}
+                            className="song-library-button"
+                            title={language === 'zh' ? '僅分享目前結果中的所選歌曲' : 'Share only selected songs in the current results'}
+                          >
+                            {isCreatingSongShare ? <LoaderCircle size={15} className="animate-spin" /> : <Share2 size={15} />}
+                            <span>{language === 'zh' ? `分享 (${visibleSelectedCount})` : `Share (${visibleSelectedCount})`}</span>
+                          </button>
+                          {isTeamWorkspace ? (
+                            <>
+                              <button type="button" onClick={() => void handleArchiveSelectedSongs(!allArchived)} disabled={selectedLibrarySongIds.length === 0} className="song-library-button is-warning">
+                                {allArchived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+                                <span>{language === 'zh' ? `${allArchived ? '還原所選' : '封存所選'} (${selectedLibrarySongIds.length})` : `${allArchived ? 'Restore selected' : 'Archive selected'} (${selectedLibrarySongIds.length})`}</span>
+                              </button>
+                              {allArchived && (
+                                <button type="button" onClick={() => void handleDeleteSelectedSongs()} className="song-library-button is-danger">
+                                  <Trash2 size={15} /><span>{language === 'zh' ? `永久刪除所選 (${selectedLibrarySongIds.length})` : `Permanently delete selected (${selectedLibrarySongIds.length})`}</span>
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <button type="button" onClick={() => void handleDeleteSelectedSongs()} disabled={selectedLibrarySongIds.length === 0} className="song-library-button is-danger">
+                                <Trash2 size={15} /><span>{`${copy.deleteSelected} (${selectedLibrarySongIds.length})`}</span>
+                              </button>
+                              <button type="button" onClick={handleRemoveLibrarySongDuplicates} className="song-library-button is-muted">
+                                <Copy size={15} /><span>{language === 'zh' ? '移除重複歌曲' : 'Remove duplicates'}</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </header>
+                <div className="song-library-scroll" data-library-scroll>
                   {filteredSongs.length === 0 && (
-                    <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-                      {copy.noSongsMatch}
+                    <div className="song-library-empty">
+                      <p>{normalizedLibrarySearchQuery ? searchEmptyMessage(librarySearchQuery) : (language === 'zh' ? '歌曲庫還沒有歌曲。' : 'Your song library is empty.')}</p>
+                      {normalizedLibrarySearchQuery ? (
+                        <button type="button" className="song-library-button" onClick={() => setLibrarySearchQuery('')}>{language === 'zh' ? '清除搜尋' : 'Clear search'}</button>
+                      ) : canEditTeamSongs ? (
+                        <button type="button" className="song-library-button" onClick={handleCreateSong}><Plus size={16} />{copy.newSong}</button>
+                      ) : null}
                     </div>
                   )}
                   {filteredSongs.map((item) => {
                     const isActive = item.id === song.id;
+                    const title = item.title || copy.untitledSong;
                     const libraryMeta = getSongLibraryMeta(item, copy.editor.shuffle);
+                    const editors = isTeamWorkspace ? songEditorsById.get(item.id) ?? [] : [];
                     const teamSourceStatus = teamSourceStatuses[item.id];
                     const hasLinkedTeamUpdate = !isTeamWorkspace
                       && Boolean(item.teamSource)
@@ -13617,256 +13019,101 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                             ? (language === 'zh' ? '無法檢查團隊來源' : 'Unable to check team source')
                             : `${language === 'zh' ? '連結' : 'Linked'}: ${item.teamSource.libraryName ?? (language === 'zh' ? '團隊歌曲' : 'Team song')}`
                       : null;
-
+                    const metadata = (
+                      <div className="song-library-meta" title={libraryMeta.tooltip}>
+                        <div className="song-library-credit-slot" data-song-editing-status={isTeamWorkspace ? item.id : undefined}>
+                          {editors.length > 0 ? <SongEditingNotice editors={editors} language={language} compact /> : libraryMeta.secondary}
+                        </div>
+                        <div className="song-library-facts">
+                          <span className="song-library-key" aria-label={`Key ${formatKeyName(item.currentKey, currentKeyMode(item))}`}>{formatKeyName(item.currentKey, currentKeyMode(item))}</span>
+                          {typeof item.tempo === 'number' && <span className="song-library-tempo">{item.tempo}<span className="song-library-unit">BPM</span></span>}
+                          {item.timeSignature && <span className="song-library-meter">{item.timeSignature}</span>}
+                        </div>
+                      </div>
+                    );
                     return (
-                      <div
-                        key={item.id}
-                        className={`relative rounded-xl border transition-all ${
-                          isActive
-                            ? 'border-indigo-200 bg-indigo-50 shadow-sm shadow-indigo-100'
-                            : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
-                        }`}
-                      >
-                        {isLibraryEditing ? (
-                          <div className="px-3 py-3 pr-14">
-                            <div className="flex items-start gap-3">
-                              <input
-                                type="checkbox"
-                                checked={selectedLibrarySongIds.includes(item.id)}
-                                onChange={() => handleToggleSongBulkSelection(item.id)}
-                                className="mt-2 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                              />
-                              <div className={`mt-0.5 rounded-lg p-2 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                                <FileText size={14} />
-                              </div>
-                              <div className="min-w-0 flex-1">
+                      <div key={item.id} data-library-song-id={item.id} className={`song-library-row${isActive ? ' is-current' : ''}${canEditTeamSongs && !isLibraryEditing ? ' has-actions' : ''}`}>
+                        <div className="song-library-main">
+                          {isLibraryEditing ? (
+                            <div className="song-library-edit-row">
+                              <label className="song-library-checkbox">
                                 <input
-                                  value={item.title}
-                                  onChange={(event) => handleSongListTitleChange(item.id, event.target.value)}
-                                  onFocus={() => setLibraryTitleEditingSongId(item.id)}
-                                  onBlur={(event) => {
-                                    setLibraryTitleEditingSongId(null);
-                                    handleSongListTitleCommit(item.id, event.target.value);
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                                      event.currentTarget.blur();
-                                    }
-                                  }}
-                                  className={`w-full rounded-md border px-2 py-1 text-sm font-bold outline-none transition-colors ${
-                                    isActive
-                                      ? 'border-indigo-200 bg-white text-indigo-900 focus:border-indigo-400'
-                                      : 'border-gray-200 bg-white text-gray-800 focus:border-gray-400'
-                                  }`}
-                                  placeholder={copy.untitledSong}
+                                  type="checkbox"
+                                  checked={selectedLibrarySongIds.includes(item.id)}
+                                  onChange={() => handleToggleSongBulkSelection(item.id)}
+                                  aria-label={language === 'zh' ? `選取：${title}` : `Select: ${title}`}
                                 />
-                                {isTeamWorkspace && item.archivedAt ? (
-                                  <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                                    {language === 'zh' ? '已封存' : 'Archived'}
-                                  </span>
-                                ) : null}
-                                <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
-                                  {libraryMeta.primary}
-                                </div>
-                                {libraryMeta.secondary && (
-                                  <div className="mt-0.5 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
-                                    {libraryMeta.secondary}
-                                  </div>
-                                )}
-                                {teamSourceLabel ? (
-                                  <div className={`mt-1 inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                    hasLinkedTeamUpdate
-                                      ? 'bg-amber-100 text-amber-700'
-                                      : teamSourceStatus?.missing || teamSourceStatus?.error
-                                        ? 'bg-rose-50 text-rose-600'
-                                        : 'bg-emerald-50 text-emerald-700'
-                                  }`}>
-                                    <span className="truncate">{teamSourceLabel}</span>
-                                  </div>
-                                ) : null}
-                              </div>
+                              </label>
+                              <input
+                                value={item.title}
+                                onChange={(event) => handleSongListTitleChange(item.id, event.target.value)}
+                                onFocus={() => setLibraryTitleEditingSongId(item.id)}
+                                onBlur={(event) => {
+                                  setLibraryTitleEditingSongId(null);
+                                  handleSongListTitleCommit(item.id, event.target.value);
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
+                                }}
+                                className="song-library-title-input"
+                                placeholder={copy.untitledSong}
+                                aria-label={language === 'zh' ? `歌曲名稱：${title}` : `Song title: ${title}`}
+                              />
+                              {isTeamWorkspace && item.archivedAt ? <span className="song-library-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
+                              {metadata}
                             </div>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (mobileLongPressTriggeredRef.current) {
-                                mobileLongPressTriggeredRef.current = false;
-                                return;
-                              }
-
-                              handleSelectSong(item.id);
-                            }}
-                            onTouchStart={(event) => handleMobileLongPressStart('song', item.id, event)}
-                            onTouchMove={(event) => handleMobileLongPressMove(event)}
-                            onTouchEnd={(event) => {
-                              if (mobileLongPressTriggeredRef.current) {
-                                event.preventDefault();
-                              }
-                              handleMobileLongPressEnd();
-                            }}
-                            onTouchCancel={() => handleMobileLongPressEnd()}
-                            className="w-full px-3 py-3 pr-14 text-left [touch-action:pan-y]"
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className={`mt-0.5 rounded-lg p-2 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                                <FileText size={14} />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <div className={`text-sm font-bold leading-snug whitespace-normal break-words ${isActive ? 'text-indigo-900' : 'text-gray-800'}`}>
-                                    {item.title || copy.untitledSong}
-                                  </div>
-                                  {item.archivedAt ? (
-                                    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700">
-                                      {language === 'zh' ? '已封存' : 'Archived'}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-1 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
-                                  {libraryMeta.primary}
-                                </div>
-                                {libraryMeta.secondary && (
-                                  <div className="mt-0.5 truncate text-xs text-gray-500" title={libraryMeta.tooltip}>
-                                    {libraryMeta.secondary}
-                                  </div>
-                                )}
-                                {teamSourceLabel ? (
-                                  <div className={`mt-1 inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                    hasLinkedTeamUpdate
-                                      ? 'bg-amber-100 text-amber-700'
-                                      : teamSourceStatus?.missing || teamSourceStatus?.error
-                                        ? 'bg-rose-50 text-rose-600'
-                                        : 'bg-emerald-50 text-emerald-700'
-                                  }`}>
-                                    <span className="truncate">{teamSourceLabel}</span>
-                                  </div>
-                                ) : null}
-                              </div>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label={language === 'zh' ? `開啟歌曲：${title}` : `Open song: ${title}`}
+                              aria-current={isActive ? 'true' : undefined}
+                              onClick={() => {
+                                if (mobileLongPressTriggeredRef.current) {
+                                  mobileLongPressTriggeredRef.current = false;
+                                  return;
+                                }
+                                handleSelectSong(item.id);
+                              }}
+                              onTouchStart={(event) => handleMobileLongPressStart('song', item.id, event)}
+                              onTouchMove={(event) => handleMobileLongPressMove(event)}
+                              onTouchEnd={(event) => {
+                                if (mobileLongPressTriggeredRef.current) event.preventDefault();
+                                handleMobileLongPressEnd();
+                              }}
+                              onTouchCancel={() => handleMobileLongPressEnd()}
+                              className="song-library-select"
+                            >
+                              <span className="song-library-title">
+                                {title}
+                                {item.archivedAt ? <span className="song-library-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
+                              </span>
+                              {metadata}
+                            </button>
+                          )}
+                          {!isLibraryEditing && canEditTeamSongs && (
+                            <div className="song-library-row-actions">
+                              <ManagementActions label={language === 'zh' ? `歌曲操作：${title}` : `Song actions: ${title}`} actions={[
+                                ...(hasLinkedTeamUpdate ? [{ label: language === 'zh' ? '同步團隊最新版' : 'Sync latest team version', icon: <Download size={16} />, run: () => void handleSyncPersonalSongFromTeam(item.id) }] : []),
+                                ...(isTeamWorkspace ? [{ label: language === 'zh' ? '轉存到個人區' : 'Copy to personal', icon: <Download size={16} />, run: () => void handleCopyTeamSongToPersonal(item.id) }] : []),
+                                ...(isTeamWorkspace && item.archivedAt ? [
+                                  { label: language === 'zh' ? '取消封存' : 'Restore', icon: <ArchiveRestore size={16} />, run: () => void updateTeamSongArchiveState([item.id], false).catch((error) => { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }) },
+                                  { label: language === 'zh' ? '永久刪除歌曲' : 'Permanently delete song', icon: <Trash2 size={16} />, run: () => void handleDeleteSong(item.id), danger: true }
+                                ] : [
+                                  { label: language === 'zh' ? '複製歌曲' : 'Duplicate song', icon: <Copy size={16} />, run: () => handleDuplicateSong(item.id) },
+                                  { label: language === 'zh' ? '編輯歌曲' : 'Edit song', icon: <Edit3 size={16} />, run: () => { handleSelectSong(item.id); setIsEditing(true); } },
+                                  ...(isTeamWorkspace ? [{ label: language === 'zh' ? '封存歌曲' : 'Archive song', icon: <Archive size={16} />, run: () => void handleDeleteSong(item.id) }] : [])
+                                ])
+                              ]} />
                             </div>
-                          </button>
-                        )}
-                        {isTeamWorkspace ? (
-                          <div className="h-6 px-3" data-song-editing-status={item.id}>
-                            <SongEditingNotice editors={songEditorsById.get(item.id) ?? []} language={language} compact />
-                          </div>
-                        ) : null}
-                        {!isLibraryEditing && (
-                          <div className="absolute right-2 top-1/2 flex w-6 -translate-y-1/2 flex-col items-center justify-center gap-0">
-                            {canEditTeamSongs ? (
-                              <>
-                                {hasLinkedTeamUpdate ? (
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void handleSyncPersonalSongFromTeam(item.id);
-                                    }}
-                                    className="rounded-md p-0.5 text-amber-600 transition-colors hover:bg-white hover:text-amber-700"
-                                    aria-label={language === 'zh' ? `同步 ${item.title || copy.untitledSong} 到團隊最新版` : `Sync ${item.title || copy.untitledSong} to latest team version`}
-                                    title={language === 'zh' ? '同步團隊最新版' : 'Sync latest team version'}
-                                  >
-                                    <Download size={13} />
-                                  </button>
-                                ) : null}
-                                {isTeamWorkspace ? (
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void handleCopyTeamSongToPersonal(item.id);
-                                    }}
-                                    className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                                    aria-label={language === 'zh' ? `轉存 ${item.title || copy.untitledSong}` : `Copy ${item.title || copy.untitledSong} to personal library`}
-                                    title={language === 'zh' ? '轉存到個人區' : 'Copy to personal'}
-                                  >
-                                    <Download size={13} />
-                                  </button>
-                                ) : null}
-                                {isTeamWorkspace && item.archivedAt ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        void updateTeamSongArchiveState([item.id], false).catch((error) => {
-                                          toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
-                                        });
-                                      }}
-                                      className="rounded-md p-0.5 text-amber-600 transition-colors hover:bg-white hover:text-amber-700"
-                                      aria-label={language === 'zh' ? `取消封存 ${item.title || copy.untitledSong}` : `Restore ${item.title || copy.untitledSong}`}
-                                      title={language === 'zh' ? '取消封存' : 'Restore'}
-                                    >
-                                      <ArchiveRestore size={13} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        void handleDeleteSong(item.id);
-                                      }}
-                                      className="rounded-md p-0.5 text-rose-500 transition-colors hover:bg-white hover:text-rose-700"
-                                      aria-label={language === 'zh' ? `永久刪除 ${item.title || copy.untitledSong}` : `Permanently delete ${item.title || copy.untitledSong}`}
-                                      title={language === 'zh' ? '永久刪除' : 'Permanently delete'}
-                                    >
-                                      <Trash2 size={13} />
-                                    </button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleDuplicateSong(item.id);
-                                      }}
-                                      className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                                      aria-label={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                                      title={`${copy.duplicate} ${item.title || copy.untitledSong}`}
-                                    >
-                                      <Copy size={13} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleSelectSong(item.id);
-                                        setIsEditing(true);
-                                      }}
-                                      className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-indigo-600"
-                                      aria-label={`${copy.edit} ${item.title || copy.untitledSong}`}
-                                      title={`${copy.edit} ${item.title || copy.untitledSong}`}
-                                    >
-                                      <Edit3 size={13} />
-                                    </button>
-                                    {isTeamWorkspace ? (
-                                      <button
-                                        type="button"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          void handleDeleteSong(item.id);
-                                        }}
-                                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-white hover:text-amber-700"
-                                        aria-label={language === 'zh' ? `封存 ${item.title || copy.untitledSong}` : `Archive ${item.title || copy.untitledSong}`}
-                                        title={language === 'zh' ? '封存' : 'Archive'}
-                                      >
-                                        <Archive size={13} />
-                                      </button>
-                                    ) : null}
-                                  </>
-                                )}
-                              </>
-                            ) : null}
-                          </div>
-                        )}
+                          )}
+                        </div>
+                        {teamSourceLabel ? <div className={`song-library-source${hasLinkedTeamUpdate ? ' is-warning' : teamSourceStatus?.missing || teamSourceStatus?.error ? ' is-error' : ''}`} title={teamSourceLabel}>{teamSourceLabel}</div> : null}
                       </div>
                     );
                   })}
                 </div>
-
                 {desktopSetlistSavedFooter}
-              </>
+              </div>
             )}
           </motion.div>
         </motion.div>
@@ -13908,10 +13155,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           </p>
         ) : null}
 
-        {isTeamWorkspace && (teamLibraryUpdatePending || workspaceMode === 'songs') ? (
-          <div className="relative h-12 shrink-0 border-b border-gray-200" data-library-live-status>
+        {isTeamWorkspace && (teamLibraryUpdatePending || (workspaceMode === 'songs' && (libraryWorkspaceRefreshFailed || songPresence.failed || songEditorsById.has(song.id)))) ? (
+          <div className="shrink-0 border-b border-gray-200" data-library-live-status>
             {teamLibraryUpdatePending ? (
-              <div className="absolute inset-0 flex items-center gap-3 bg-amber-50 px-3 py-2 text-amber-800 sm:px-6">
+              <div className="flex flex-wrap items-center gap-3 bg-amber-50 px-3 py-2 text-amber-800 sm:px-6">
                 <RefreshCw size={15} className="shrink-0" />
                 <p className="min-w-0 flex-1 text-xs font-semibold sm:text-sm">
                   {language === 'zh'
@@ -13931,14 +13178,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             ) : null}
 
             {!teamLibraryUpdatePending && workspaceMode === 'songs' ? (
-              <div className="absolute inset-0 flex items-center px-3 text-xs text-gray-500 sm:px-6">
+              <div className="flex items-center px-3 py-2 text-xs text-gray-500 sm:px-6">
                 {libraryWorkspaceRefreshFailed
                   ? (language === 'zh' ? '雲端更新暫時中斷，保留目前內容並自動重試' : 'Cloud updates interrupted. Keeping the current score and retrying.')
                   : songPresence.failed
                   ? (language === 'zh' ? '編輯狀態暫時中斷，正在重新連線' : 'Editor status unavailable. Reconnecting.')
                   : songEditorsById.has(song.id)
                     ? <SongEditingNotice editors={songEditorsById.get(song.id)!} language={language} compact />
-                    : (language === 'zh' ? '歌曲庫自動同步' : 'Song library sync is automatic')}
+                    : null}
               </div>
             ) : null}
           </div>
@@ -14091,6 +13338,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     triggerIconSize={14}
                   />
 
+                  {renderTempoControl('h-10 rounded-xl')}
                   {renderSetlistDisplayModeControl()}
 
                   {!isSetlistMode && (
@@ -14238,6 +13486,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     triggerIconSize={14}
                   />
 
+                  {renderTempoControl()}
                   {renderSetlistDisplayModeControl()}
 
                   {!isSetlistMode && (
@@ -14403,7 +13652,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
-                <div className="min-w-0">
+                <div className={mainViewportWidth < 960 ? 'hidden' : 'min-w-0'}>
                   <div className="truncate font-display text-lg font-bold tracking-tight text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-2">
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
@@ -14421,7 +13670,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               </div>
 
               <div className="flex min-w-0 items-center justify-end">
-                <div className="flex min-w-0 items-center justify-end gap-2 overflow-x-auto pb-1 no-scrollbar">
+                <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                   <button
                     type="button"
                     onClick={handleToggleEditor}
@@ -14502,6 +13751,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     triggerIconSize={14}
                   />
 
+                  {renderTempoControl()}
                   {renderSetlistDisplayModeControl()}
 
                   {!isSetlistMode && (
@@ -14853,6 +14103,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       buttonClassName="h-11 w-full min-w-0"
                     />
 
+                    {renderTempoControl('h-11 w-full')}
                     {renderSetlistDisplayModeControl('w-full', 'sm')}
 
                     <button
@@ -15007,47 +14258,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           )}
         </header>
 
-        {isSheetView && isSetlistMode && isTeamWorkspace && !isJoinedSetlist && activeLibraryId
-          && selectedSetlistSong && selectedSetlistSourceStatus !== 'aligned'
-          && canEditSelectedSetlistContent && isTeamAdministrator(activeLibraryRole) && (
-          <SetlistSourceSyncControl key={`${activeLibraryId}|${selectedSetlistSong.id}`}
-            libraryId={activeLibraryId} entryId={selectedSetlistSong.id} language={language} status={selectedSetlistSourceStatus}
-            prepare={flushTeamSongDraftsBeforeMutation}
-            onSaveAs={async (preview, title, id) => {
-              const repository = cloudRepositoryRef.current;
-              if (!repository || !canEditTeamSongs || preview.libraryId !== activeLibraryIdRef.current
-                || preview.entryId !== selectedSetlistSong.id) {
-                throw new Error(language === 'zh' ? '曲庫或權限已變更，請重新開啟另存新檔。' : 'The library or permissions changed. Open Save As again.');
-              }
-              const release = beginCloudMutation();
-              try {
-                const newSong = { ...createSetlistSourceCopy(preview, title, id), createdBy: authenticatedUser?.id, updatedBy: authenticatedUser?.id };
-                await repository.saveSong(newSong, { createOnly: true });
-                if (activeLibraryIdRef.current !== preview.libraryId || cloudRepositoryRef.current !== repository) return;
-                setSongs(current => [newSong, ...current.filter(item => item.id !== newSong.id)]);
-                setSavedSongs(current => [newSong, ...current.filter(item => item.id !== newSong.id)]);
-                toast.success(language === 'zh' ? `已另存「${newSong.title}」到歌曲庫。` : `Saved “${newSong.title}” to the song library.`);
-              } finally { release(); }
-            }}
-            onReconciled={result => {
-              if (activeLibraryIdRef.current !== activeLibraryId) return;
-              const updated = result.source;
-              setSongs(current => current.map(item => item.id === updated.id ? updated : item));
-              setSavedSongs(current => current.map(item => item.id === updated.id ? updated : item));
-              const applyEntry = (lists: Setlist[]) => lists.map(list => list.id !== result.entry.setlistId ? list : {
-                ...list, updatedAt: result.setlistUpdatedAt,
-                songs: list.songs.map(item => item.id === result.entry.id && item.songId === result.entry.songId
-                  ? { ...item, ...result.entry, capo: item.capo, personalCapoOverride: item.personalCapoOverride } : item)
-              });
-              setSetlists(applyEntry);
-              setSavedSetlists(applyEntry);
-              setActiveBar(null);
-              setSongHistories(current => { const next = { ...current }; delete next[updated.id]; return next; });
-              toast.success(result.direction === 'to-library'
-                ? (language === 'zh' ? '已同步回歌曲庫，原曲備份已保存。' : 'Updated the song library. The previous source was backed up.')
-                : (language === 'zh' ? '已更新這份歌單副本，原編排已備份。' : 'Updated this setlist copy. Its previous arrangement was backed up.'));
-            }} />
-        )}
+
 
         {/* Content Area - Split View */}
         {isSheetView ? (
@@ -15213,6 +14424,49 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
           {/* Sheet Preview Pane */}
           <div data-setlist-preview-pane aria-busy={Boolean(setlistOpening.opening)} className="relative flex-1 min-w-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
+            {isSheetView && isSetlistMode && isTeamWorkspace && !isJoinedSetlist && activeLibraryId
+              && selectedSetlistSong && selectedSetlistSourceStatus !== 'aligned'
+              && canEditSelectedSetlistContent && isTeamAdministrator(activeLibraryRole) && (
+              <div data-source-sync-overlay className="pointer-events-none absolute bottom-16 left-3 z-30 max-w-[calc(100%-1.5rem)] sm:bottom-20 sm:left-4 lg:left-6"><div className="pointer-events-auto">
+              <SetlistSourceSyncControl compact key={`${activeLibraryId}|${selectedSetlistSong.id}`}
+                libraryId={activeLibraryId} entryId={selectedSetlistSong.id} language={language} status={selectedSetlistSourceStatus}
+                prepare={flushTeamSongDraftsBeforeMutation}
+                onSaveAs={async (preview, title, id) => {
+                  const repository = cloudRepositoryRef.current;
+                  if (!repository || !canEditTeamSongs || preview.libraryId !== activeLibraryIdRef.current
+                    || preview.entryId !== selectedSetlistSong.id) {
+                    throw new Error(language === 'zh' ? '曲庫或權限已變更，請重新開啟另存新檔。' : 'The library or permissions changed. Open Save As again.');
+                  }
+                  const release = beginCloudMutation();
+                  try {
+                    const newSong = { ...createSetlistSourceCopy(preview, title, id), createdBy: authenticatedUser?.id, updatedBy: authenticatedUser?.id };
+                    await repository.saveSong(newSong, { createOnly: true });
+                    if (activeLibraryIdRef.current !== preview.libraryId || cloudRepositoryRef.current !== repository) return;
+                    setSongs(current => [newSong, ...current.filter(item => item.id !== newSong.id)]);
+                    setSavedSongs(current => [newSong, ...current.filter(item => item.id !== newSong.id)]);
+                    toast.success(language === 'zh' ? `已另存「${newSong.title}」到歌曲庫。` : `Saved “${newSong.title}” to the song library.`);
+                  } finally { release(); }
+                }}
+                onReconciled={result => {
+                  if (activeLibraryIdRef.current !== activeLibraryId) return;
+                  const updated = result.source;
+                  setSongs(current => current.map(item => item.id === updated.id ? updated : item));
+                  setSavedSongs(current => current.map(item => item.id === updated.id ? updated : item));
+                  const applyEntry = (lists: Setlist[]) => lists.map(list => list.id !== result.entry.setlistId ? list : {
+                    ...list, updatedAt: result.setlistUpdatedAt,
+                    songs: list.songs.map(item => item.id === result.entry.id && item.songId === result.entry.songId
+                      ? { ...item, ...result.entry, capo: item.capo, personalCapoOverride: item.personalCapoOverride } : item)
+                  });
+                  setSetlists(applyEntry);
+                  setSavedSetlists(applyEntry);
+                  setActiveBar(null);
+                  setSongHistories(current => { const next = { ...current }; delete next[updated.id]; return next; });
+                  toast.success(result.direction === 'to-library'
+                    ? (language === 'zh' ? '已用這份歌單的版本更新歌曲庫，原曲備份已保存；其他歌單保持不變。' : 'Updated the song library. The previous source was backed up.')
+                    : (language === 'zh' ? '已從歌曲庫更新這份歌單，原編排已備份；歌曲庫與其他歌單保持不變。' : 'Updated this setlist copy. Its previous arrangement was backed up.'));
+                }} />
+              </div></div>
+            )}
             {setlistOpening.opening && (
               <div data-setlist-opening role="status" aria-live="polite" className="absolute inset-0 z-30 flex items-start justify-center bg-[#F5F5F4]/80 px-4 pt-12 dark:bg-[color:var(--color-surface-muted)]/80">
                 <div className="flex max-w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 text-sm font-semibold text-gray-700 shadow-sm dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)] dark:text-[color:var(--color-text)]">
@@ -15343,25 +14597,42 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               />
             )}
             {previewBarContextMenu && canOpenEditor && !isLyricsMode && activeEditorSong && previewBarContextMenu.previewIdentity === activePreviewIdentity && (() => {
-              const selectedCount = Math.max(1, activePreviewSelectedBars.length);
+              const sourceSong = getPreviewBatchSong()!;
+              const selectedBars = getBarsByIdentities(sourceSong, getPreviewBatchTargets(previewBarContextMenu));
+              const selectedCount = selectedBars.length;
+              const allClosed = selectedCount > 0 && selectedBars.every(({ bar }) => isClosedBar(bar));
+              const canClose = selectedCount > 0 && selectedBars.every(({ bar }) => canCloseBar(bar));
+              const canClear = selectedBars.some(({ bar }) => !canCloseBar(bar));
+              const cellLabel = selectedCount > 1 ? (language === 'zh' ? '選取小節' : 'selected bars') : (language === 'zh' ? '此小節' : 'this bar');
               const clipboardCount = previewBarClipboard?.bars.length ?? 0;
               const canPaste = clipboardCount > 0;
-              const menuWidth = 230;
+              const menuWidth = 280;
               const menuLeft = typeof window === 'undefined'
                 ? previewBarContextMenu.clientX
                 : Math.min(Math.max(8, previewBarContextMenu.clientX), Math.max(8, window.innerWidth - menuWidth - 8));
               const menuTop = typeof window === 'undefined'
                 ? previewBarContextMenu.clientY
-                : Math.min(Math.max(8, previewBarContextMenu.clientY), Math.max(8, window.innerHeight - 360));
-              const menuButtonClass = 'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs font-bold text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-700';
+                : Math.min(Math.max(8, previewBarContextMenu.clientY), Math.max(8, window.innerHeight - 550));
+              const menuButtonClass = 'flex min-h-10 w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-700';
               const endingButtonClass = 'flex h-8 min-w-0 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700';
               return (
                 <div
+                  ref={previewBarMenuRef}
                   data-preview-bar-batch-menu
                   role="menu"
                   aria-label={language === 'zh' ? '小節批量操作' : 'Batch bar actions'}
-                  className="fixed z-[2400] w-[230px] rounded-lg border border-slate-200 bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
-                  style={{ left: menuLeft, top: menuTop }}
+                  data-preview-edit-ui
+                  className="fixed z-[5300] w-[280px] overflow-y-auto overscroll-contain rounded-xl bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
+                  style={{ left: menuLeft, top: menuTop, maxHeight: `calc(100dvh - ${menuTop + 8}px)` }}
+                  onKeyDown={event => {
+                    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setPreviewBarContextMenu(null); }
+                    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+                    event.preventDefault(); event.stopPropagation();
+                    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+                    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+                    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+                    items[next]?.focus();
+                  }}
                   onContextMenu={(event) => event.preventDefault()}
                 >
                   {previewBarContextMenu.appendToSection ? (
@@ -15376,6 +14647,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   <div className="mb-1 border-b border-slate-100 px-2 pb-2 text-[11px] font-black text-slate-500">
                     {language === 'zh' ? `已選 ${selectedCount} 小節` : `${selectedCount} bar${selectedCount === 1 ? '' : 's'} selected`}
                   </div>
+                  <button type="button" role="menuitem" className={menuButtonClass} aria-label={language === 'zh' ? `清空${cellLabel}` : `Clear ${cellLabel}`} disabled={!canClear} onClick={() => changePreviewBarCells('clear')}>
+                    <Eraser size={16} className="shrink-0" aria-hidden="true" />
+                    <span><span className="block">{language === 'zh' ? `清空${cellLabel}` : `Clear ${cellLabel}`}</span><span className="mt-0.5 block text-xs font-normal text-slate-500">{language === 'zh' ? '移除內容與記號，保留小節位置' : 'Remove content and marks; keep the cell'}</span></span>
+                  </button>
+                  <button type="button" role="menuitem" className={`${menuButtonClass} disabled:!opacity-100 disabled:!text-slate-400`} aria-label={language === 'zh' ? `${allClosed ? '重新開啟' : '關閉'}${cellLabel}` : `${allClosed ? 'Reopen' : 'Close'} ${cellLabel}`} disabled={!allClosed && !canClose} onClick={() => changePreviewBarCells(allClosed ? 'reopen' : 'close')}>
+                    {allClosed ? <Plus size={16} className="shrink-0" aria-hidden="true" /> : <Minus size={16} className="shrink-0" aria-hidden="true" />}
+                    <span><span className="block">{language === 'zh' ? `${allClosed ? '重新開啟' : '關閉'}${cellLabel}` : `${allClosed ? 'Reopen' : 'Close'} ${cellLabel}`}</span><span className="mt-0.5 block text-xs font-normal text-slate-500">{language === 'zh' ? allClosed ? '恢復空白格，可繼續輸入' : canClose ? '顯示橫線，後方小節不移動' : '請先清空小節，再關閉' : allClosed ? 'Restore an empty cell for entry' : canClose ? 'Show a line; keep later bars in place' : 'Clear the bar before closing it'}</span></span>
+                  </button>
+                  <div role="separator" className="my-2 border-t border-slate-100" />
                   <button type="button" role="menuitem" className={menuButtonClass} onClick={copyPreviewSelectedBars}>
                     <Copy size={14} />
                     <span>{language === 'zh' ? '複製選取小節' : 'Copy selected bars'}</span>
@@ -16018,7 +15298,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   onChange={(event) => setNewSetlistProjectId(event.target.value)}
                   className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"
                 >
-                  <option value="">{copy.ungroupedProject}</option>
+                  <option value="">{language === 'zh' ? '不放入專案（根目錄）' : 'No project (root)'}</option>
                   {activeProjects.map((project) => (
                     <option
                       key={project.id}
@@ -16259,6 +15539,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             y={setlistContextMenu.y}
             onClose={closeSetlistContextMenu}
             onArchive={() => usesSelection ? handleBatchArchiveSelectedSetlists(!allArchived) : handleSetSetlistArchived(target.id, !allArchived)}
+            onSelect={() => setMultiSelectedSetlistIds(ids)}
             onMove={() => setProjectPicker({ mode: 'move', setlistIds: ids })}
             onDelete={() => usesSelection ? handleBatchDeleteSelectedSetlists() : handleDeleteSetlist(target.id)}
           />
@@ -16339,7 +15620,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   disabled={!canUseProjectPickerTarget(null)}
                   className="flex w-full items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-50"
                 >
-                  <div className="text-sm font-bold text-gray-900">{copy.ungroupedProject}</div>
+                  <div className="text-sm font-bold text-gray-900">{language === 'zh' ? '歌單根目錄' : 'Setlist root'}</div>
                   <div className="text-xs text-gray-500">{ungroupedSetlistCount} {copy.setlists}</div>
                 </button>
                 {activeProjects.map((project) => (

@@ -86,6 +86,19 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-27',
+        title: "Project folders, smarter search and faster chart editing",
+        bullets: [
+          "Browse project folders, setlists and songs in a clear hierarchy. Unassigned setlists stay beside projects; member and permission management is focused and compact.",
+          "Drag songs directly to reorder. Adjust Key and BPM in each song row, with Key, personal Capo and numeric tempo controls in the toolbar. Type a decimal BPM or use ±1; setlist tempo stays in that copy.",
+          "Search with pinyin, initials, Zhuyin and standard Zhuyin keyboard input typed in English mode. Literal matches remain first, and the pronunciation dictionary loads on demand.",
+          "See explicit library-to-setlist and setlist-to-library update directions with side-by-side differences. Reverting an author edit no longer creates a false change; sync notices no longer move the score.",
+          "Close an empty cell into a horizontal line without moving later measures. Right-click to clear, close or reopen, with undo; normalize Em7-5 to Em7b5.",
+          "Fix utility-keyboard overlap and dark Key contrast. Improve tablet swipe gestures, visible-song focus and interruption of automatic scrolling."
+        ]
+      },
+      {
+        version: '0.9.27',
+        date: '2026-10-27',
         title: "Remember projects and smoother setlist navigation",
         bullets: ["Reopen the same project, meeting and song on this account and browser. Archived or unavailable meetings return to their parent project; archived or unavailable projects return to All Setlists.", "Enter meetings with a directional slide and reverse the path when returning. Show named loading feedback over the score preview before rendering the next meeting.", "Meeting, project and member swipe actions update only the dragged row, with opaque foregrounds and hidden action layers. Preserve vertical scrolling, long-press selection, role controls and removal confirmations."]
       },
@@ -631,6 +644,19 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: "專案資料夾、智慧搜尋與更順手的譜面操作",
+        bullets: [
+          "依「專案 → 歌單 → 歌曲」導覽，沒有專案的歌單與專案同層顯示；集中查看成員與權限，保留進入／返回動畫和位置記憶。",
+          "歌曲可直接拖曳排序，每列直接調整 Key 與 BPM；頂部保留 Key、個人 Capo 和速度。速度可輸入小數或按加減調整 1 BPM，不使用 Tap，歌單修改只保存在目前副本。",
+          "搜尋支援拼音、首字母、注音與忘記切換輸入法的標準注音鍵位；原文字命中優先，字典按需載入。",
+          "清楚標示歌曲庫與歌單的更新方向，以並排內容比對差異；修正作者改回原值仍提示變更，移除歌曲庫頂部多餘狀態列，提示不再擠動譜面。",
+          "空白小節可關閉為橫線而不移動後方小節，右鍵可清空、關閉及重新開啟，支援復原；Em7-5 自動辨識為 Em7b5。",
+          "修正功能鍵模式按鈕重疊與深色 Key 對比，改善平板滑動、目前歌曲焦點，以及手動中斷自動捲動。"
+        ]
+      },
+      {
+        version: '0.9.27',
         date: '2026-10-27',
         title: "記住專案位置與流暢歌單導覽",
         bullets: ["同一帳號與瀏覽器重新開啟時，回到上次的專案、聚會與歌曲；聚會歸檔或無法存取時回到上一層專案，整個專案歸檔或無法存取時回到全部歌單。", "進入聚會時向內滑入，返回時反向滑回；右側譜面區先顯示具名載入提示，再呈現下一個聚會。", "歌單、專案與成員列改為獨立滑動，避免拖曳時反覆重繪整頁，並以不透明前景及隱藏操作層修正紅色底層外露；保留上下捲動、長按多選、權限控制與移除確認。"]

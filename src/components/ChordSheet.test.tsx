@@ -744,7 +744,7 @@ describe('ChordSheet preview input caret', () => {
     const pickup = container.querySelector<HTMLElement>('[data-preview-pickup]');
     const gutter = container.querySelector<HTMLElement>('[data-preview-section-lower-gutter]');
     if (kind === 'subdivided') {
-      expect(lane).toHaveStyle({ top: '48px' }); expect(pickup).toHaveStyle({ top: '44px' });
+      expect(lane).toHaveStyle({ top: '40px' }); expect(pickup).toHaveStyle({ top: '36px' });
     } else if (kind === 'unmetered') {
       expect(container.querySelector('[data-unmetered-chord-block]')).toBeInTheDocument();
       expect(lane).toBeNull(); expect(pickup).toBeNull();
@@ -752,6 +752,24 @@ describe('ChordSheet preview input caret', () => {
       expect(lane).toHaveStyle({ bottom: '4px' }); expect(pickup?.style.top).toBe('');
       expect(gutter?.style.top ?? '').toBe('');
     }
+  });
+
+  it.each([1, 2, 3] as const)('aligns subdivided and ordinary rhythm lanes in the same row with %i chart lines', barRowCount => {
+    const source: Song = { ...song, barRowCount, sections: [{ id: 'intro', title: 'Intro', bars: [
+      { id: 'plain-1', chords: ['C'], rhythm: 'q q q q' },
+      { id: 'plain-2', chords: ['G'], rhythm: 'q q q q' },
+      { id: 'plain-3', chords: ['F'], rhythm: 'q q q q' },
+      { id: 'subdivided-4', chords: ['Amaj7', '/', 'A', 'A/C#'], chordSubdivisions: [{beat:2,offset:.5,chord:'Bm'}], rhythm: 'er e q e e q' }
+    ] }] };
+    const before = JSON.stringify(source);
+    const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    for (const numbers of [false, true]) {
+      rerender(<ChordSheet song={{...source,showNashvilleNumbers:numbers}} language="zh" currentKey="C" />);
+      const lanes = container.querySelectorAll('[data-preview-bottom-lane]');
+      expect(lanes).toHaveLength(4);
+      lanes.forEach(lane => expect(lane).toHaveStyle({top:'40px'}));
+    }
+    expect(JSON.stringify(source)).toBe(before);
   });
 
   it('keeps a chord with one melody at the normal two-line pagination weight', () => {

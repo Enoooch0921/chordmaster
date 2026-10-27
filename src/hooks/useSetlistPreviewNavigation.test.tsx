@@ -145,6 +145,34 @@ describe('setlist preview navigation', () => {
     expect(options.onSelectSong).toHaveBeenCalledExactlyOnceWith('two');
   });
 
+  it('selects the song occupying most of the viewport even when the previous song crosses the old activation line', () => {
+    const { root, options, advance, move } = setup();
+    // A tall iPad viewport: the old 180px line is still on song two,
+    // while song three occupies over 80% of the screen.
+    root.getBoundingClientRect = () => ({ top: 0, bottom: 1100, height: 1100 }) as DOMRect;
+    move(1820);
+    advance();
+    expect(options.onSelectSong).toHaveBeenCalledExactlyOnceWith('three');
+  });
+
+  it('lets a fresh touch interrupt a programmatic jump without waiting for scrollend', () => {
+    const { root, options, hook, advance, move } = setup();
+    hook.rerender({ ...options, selectedSongId: 'three' });
+    advance(); move(1000); advance();
+    const touch = new Event('touchstart'); Object.defineProperty(touch, 'touches', { value: [{}] });
+    fireEvent(root, touch);
+    expect(root.scrollTo).toHaveBeenLastCalledWith({ top: 1000, left: 0, behavior: 'instant' });
+    move(1100); advance();
+    expect(options.onSelectSong).toHaveBeenCalledExactlyOnceWith('two');
+  });
+
+  it('releases a jump even when the browser emits no scroll events', () => {
+    const { options, hook, advance, move } = setup();
+    hook.rerender({ ...options, selectedSongId: 'three' }); advance(500);
+    move(1000); advance();
+    expect(options.onSelectSong).toHaveBeenCalledExactlyOnceWith('two');
+  });
+
   it('removes pending navigation work on unmount', () => {
     const { root, options, hook, advance } = setup();
     hook.rerender({ ...options, selectedSongId: 'three' });

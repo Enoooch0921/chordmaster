@@ -4,6 +4,7 @@ import { getChordDisplaySlotOwnership, getChordDisplaySlots, getChordTokenBeatSp
 import { ALL_KEYS, getNashvilleNumber, getTransposeOffset, isNashville, parseNashvilleToChord, transposeChord, transposeChordForDisplay } from '../utils/musicUtils';
 import {
   clearChordAtBeatSlot,
+  applyBarCellAction,
   convertDisplayedChordToStoredChord,
   convertStoredChordToDisplayedChord,
   copyBarsForClipboard,
@@ -29,6 +30,8 @@ import {
   insertChordBeatBeforeSlot,
   insertSectionAfter,
   normalizeChordTextInput,
+  normalizeChordBeatTokens,
+  setBarChordText,
   parseChordBarText,
   pasteBarsAtBar,
   repairSongStructure,
@@ -882,6 +885,39 @@ describe('edit what you see conversion', () => {
   });
 });
 
+describe('half-diminished manual input aliases', () => {
+  it.each([
+    ['Em7-5', 'Em7b5'],
+    ['em7-5', 'Em7b5'],
+    ['Ebm7-5/Gb', 'Ebm7b5/Gb'],
+    ['(Em7-5/Bb)', '(Em7b5/Bb)'],
+    ['Em7-5<^~', 'Em7b5<^~'],
+    ['E-7', 'E-7'], ['E-5', 'E-5'], ['EM7-5', 'EM7-5'],
+    ['Em7-50', 'Em7-50'], ['Cmystery-5', 'Cmystery-5'],
+    ['%', '%'], ['/', '/'], ['|4|', '|4|'], ['0_', '0_']
+  ])('accepts %s without broad minus-sign replacement', (input, expected) => {
+    expect(normalizeChordTextInput(input, 'letters')).toBe(expected);
+  });
+
+  it('keeps numeric roots and empty beats while normalizing the quality', () => {
+    expect(normalizeChordTextInput('b3m7-5/5', 'nashville')).toBe('b3m7b5/5');
+    expect(normalizeChordBeatTokens(['Em7-5', '', '2m7-5', ''], 4)).toEqual({ chords: ['Em7b5', '', '2m7b5', ''], error: null });
+  });
+
+  it('normalizes whole-bar text in timed and untimed measures', () => {
+    const target = { sectionId: 'section-1', barId: 'bar-1' };
+    const timed = makeSong({ chords: ['C'] });
+    expect(setBarChordText(timed, target, 'Em7-5 Bm7-5').chords).toEqual(['Em7b5', 'Bm7b5']);
+    const untimed = makeSong({ chords: ['C'], chordTimingUnspecified: true });
+    expect(setBarChordText(untimed, target, 'Em7-5 Bm7-5').chords).toEqual(['Em7b5', 'Bm7b5']);
+  });
+
+  it('normalizes before converting a transposed display back to stored chords', () => {
+    expect(convertDisplayedChordToStoredChord({ input: 'Em7-5/B', inputMode: 'letters', storageMode: 'letters', displayedKey: 'D', storedKey: 'C' })).toBe('Dm7b5/A');
+    expect(convertDisplayedChordToStoredChord({ input: 'Em7-5', inputMode: 'letters', storageMode: 'nashville', displayedKey: 'D', storedKey: 'C' })).toBe('2m7b5');
+  });
+});
+
 describe('preview chord input mode', () => {
   it.each([
     ['bb', 'Bb'],
@@ -961,5 +997,33 @@ describe('display key inheritance', () => {
     expect(changed.sections[1].bars[0].chords).toEqual(song.sections[1].bars[0].chords);
     const restored = applyBarKeyChange(changed, { sectionId: 'a', barId: 'a2' });
     expect(getSongDisplayKeyStates(restored).barActiveKeys).toEqual([['F', 'F'], ['F']]);
+  });
+});
+
+
+describe('bar cell actions', () => {
+  it('clears all selected content while preserving bar identities and unselected content', () => {
+    const original = makeSong({ id: 'bar-1', chords: ['C'], annotation: 'cue', tempo: 96, ending: '1', rhythm: 'q q q q', riffVoices: [{ id: 'voice', label: 'Lead', riff: '1' }] });
+    original.sections[0].bars.push({ id: 'bar-2', chords: ['F'] });
+    const target = [{ sectionId: 'section-1', barId: 'bar-1' }];
+    const cleared = applyBarCellAction(original, target, 'clear');
+    expect(cleared.sections[0].bars[0]).toEqual({ id: 'bar-1', chords: [] });
+    expect(cleared.sections[0].bars[1]).toBe(original.sections[0].bars[1]);
+    expect(original.sections[0].bars[0].chords).toEqual(['C']);
+    const closed = applyBarCellAction(cleared, target, 'close');
+    expect(closed.sections[0].bars[0].closed).toBe(true);
+    expect(applyBarCellAction(closed, target, 'close')).toBe(closed);
+    const reopened = applyBarCellAction(closed, target, 'reopen');
+    expect(reopened.sections[0].bars[0].closed).toBeUndefined();
+    expect(reopened.sections[0].bars.map(bar => bar.id)).toEqual(['bar-1', 'bar-2']);
+  });
+
+  it('does not partially close a mixed selection or hide annotation-only bars', () => {
+    const original = makeSong({ id: 'bar-1', chords: [] });
+    original.sections[0].bars.push({ id: 'bar-2', chords: [], annotation: 'cue' });
+    const targets = original.sections[0].bars.map(bar => ({ sectionId: 'section-1', barId: bar.id! }));
+    expect(applyBarCellAction(original, targets, 'close')).toBe(original);
+    expect(applyBarCellAction(original, [], 'clear')).toBe(original);
+    expect(applyBarCellAction(original, [{ sectionId: 'section-1', barId: 'missing' }], 'clear')).toBe(original);
   });
 });

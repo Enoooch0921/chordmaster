@@ -12,6 +12,7 @@ interface CapoPickerProps {
   onChange: (value: number) => void;
   disabled?: boolean;
   label?: string;
+  triggerLabel?: React.ReactNode;
   align?: PanelAlign;
   buttonClassName?: string;
   valueTextClassName?: string;
@@ -28,6 +29,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   onChange,
   disabled = false,
   label = 'Capo',
+  triggerLabel,
   align = 'right',
   buttonClassName = '',
   valueTextClassName = '',
@@ -158,7 +160,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         aria-expanded={isOpen}
       >
         <span className={`min-w-0 truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold text-gray-800 ${valueTextClassName}`}>
-          {value}{showPlayKey ? <> <span className="text-gray-400">({playKey})</span></> : null}
+          {triggerLabel ?? value}{showPlayKey ? <> <span className="text-gray-400">({playKey})</span></> : null}
         </span>
         <ChevronDown size={triggerIconSize} className={`shrink-0 text-gray-500 ui-motion-chevron ${isOpen ? 'rotate-180' : ''}`} />
       </button>

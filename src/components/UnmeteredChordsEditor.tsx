@@ -1,6 +1,7 @@
 import React from 'react';
 import type { AppLanguage } from '../types';
 import { parseUnmeteredChordText, unmeteredChordText } from '../utils/unmeteredChords';
+import { normalizeChordQualityAliases } from '../utils/musicUtils';
 
 export default function UnmeteredChordsEditor({lines,language,onChange,withinMeasure=false,keyUnspecified=false}:{lines:string[][];language:AppLanguage;onChange:(lines:string[][])=>void;withinMeasure?:boolean;keyUnspecified?:boolean}) {
  const value=unmeteredChordText(lines),[draft,setDraft]=React.useState(value);
@@ -15,6 +16,6 @@ export default function UnmeteredChordsEditor({lines,language,onChange,withinMea
    : withinMeasure
    ? (language==='zh'?'保留這一小節的和弦順序；以空白分隔，使用譜面原調。切換拍位仍待核。':'Keep the chord order within this measure, separated by spaces in the written key. Beat positions remain unspecified.')
    : (language==='zh'?'依原譜分行，和弦以空白分隔；使用譜面原調。未標明的拍位仍待核。':'Keep source lines; separate chords with spaces in the written key. Timing remains unspecified.')}</span>
-  <textarea aria-label={language==='zh'?'未定拍位和弦序列':'Chords without specified timing'} value={draft} rows={Math.max(3,Math.min(8,lines.length+1))} spellCheck={false} className="min-h-24 w-full resize-y rounded-lg border border-slate-300 bg-white p-2 font-mono text-sm leading-6 text-slate-900" onChange={event=>{setDraft(event.target.value);onChange(parseUnmeteredChordText(event.target.value))}}/>
+  <textarea aria-label={language==='zh'?'未定拍位和弦序列':'Chords without specified timing'} value={draft} rows={Math.max(3,Math.min(8,lines.length+1))} spellCheck={false} className="min-h-24 w-full resize-y rounded-lg border border-slate-300 bg-white p-2 font-mono text-sm leading-6 text-slate-900" onChange={event=>{const text=event.target.value.replace(/\S+/g,normalizeChordQualityAliases);setDraft(text);onChange(parseUnmeteredChordText(text))}}/>
  </label>;
 }

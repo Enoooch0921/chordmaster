@@ -29,13 +29,16 @@ export function useSetlistPreviewNavigation({
     // A fixed deadline can expire before a long smooth scroll has finished.
     navigatingRef.current = true;
     let idleTimer: number | undefined;
-    let scrollRoot: HTMLDivElement | null = null;
+    const scrollRoot = previewRef.current;
     let frameId: number;
     const finish = () => {
       navigatingRef.current = false;
       window.clearTimeout(idleTimer);
       scrollRoot?.removeEventListener('scroll', onScroll);
       scrollRoot?.removeEventListener('scrollend', finish);
+      scrollRoot?.removeEventListener('touchstart', interrupt);
+      scrollRoot?.removeEventListener('wheel', interrupt);
+      scrollRoot?.removeEventListener('pointerdown', interrupt);
     };
     const onScroll = () => {
       // Fallback for browsers without scrollend. Count from the last movement,
@@ -44,10 +47,22 @@ export function useSetlistPreviewNavigation({
       idleTimer = window.setTimeout(finish, 180);
     };
 
+    const interrupt = (event: Event) => {
+      if (event.type === 'touchstart' && (event as TouchEvent).touches.length !== 1) return;
+      window.cancelAnimationFrame(frameId);
+      if (navigatingRef.current && scrollRoot) {
+        scrollRoot.scrollTo({ top: scrollRoot.scrollTop, left: scrollRoot.scrollLeft, behavior: 'instant' });
+      }
+      preserveSelectionUntilRef.current = 0;
+      finish();
+    };
+    scrollRoot?.addEventListener('touchstart', interrupt, { passive: true });
+    scrollRoot?.addEventListener('wheel', interrupt, { passive: true });
+    scrollRoot?.addEventListener('pointerdown', interrupt, { passive: true });
+
     frameId = window.requestAnimationFrame(() => {
       frameId = window.requestAnimationFrame(() => {
         if (gestureActiveRef?.current) { finish(); return; }
-        scrollRoot = previewRef.current;
         const target = scrollRoot?.querySelector<HTMLElement>(`[data-setlist-preview-song-id="${selectedSongId}"]`);
         if (!scrollRoot || !target) {
           finish();
@@ -65,6 +80,8 @@ export function useSetlistPreviewNavigation({
         }
         scrollRoot.addEventListener('scroll', onScroll, { passive: true });
         scrollRoot.addEventListener('scrollend', finish);
+        // Some WebKit scroll requests do not emit a movement or scrollend.
+        onScroll();
         scrollRoot.scrollTo({ top: desiredTop, behavior: 'smooth' });
       });
     });
@@ -73,7 +90,7 @@ export function useSetlistPreviewNavigation({
       window.cancelAnimationFrame(frameId);
       finish();
     };
-  }, [enabled, selectedSongId, songCount, previewRef, skipNextAutoScrollRef, gestureActiveRef]);
+  }, [enabled, selectedSongId, songCount, previewRef, skipNextAutoScrollRef, preserveSelectionUntilRef, gestureActiveRef]);
 
   useEffect(() => {
     // Editor reflows must not change the song being edited.
@@ -85,18 +102,21 @@ export function useSetlistPreviewNavigation({
       frameId = null;
       if (gestureActiveRef?.current || navigatingRef.current || preserveSelectionUntilRef.current > performance.now()) return;
       const rootRect = scrollRoot.getBoundingClientRect();
-      const activationY = rootRect.top + Math.min(180, Math.max(72, rootRect.height * 0.28));
       const cards = scrollRoot.querySelectorAll<HTMLElement>('[data-setlist-preview-song-id]');
       let nextId: string | null = null;
+      let largestVisibleHeight = 0;
       let smallestDistance = Number.POSITIVE_INFINITY;
+      const centerY = (rootRect.top + rootRect.bottom) / 2;
       for (const card of cards) {
         const rect = card.getBoundingClientRect();
-        const distance = rect.top <= activationY && rect.bottom >= activationY
-          ? 0
-          : Math.min(Math.abs(rect.top - activationY), Math.abs(rect.bottom - activationY));
-        if (distance < smallestDistance) {
+        const visibleHeight = Math.max(0, Math.min(rect.bottom, rootRect.bottom) - Math.max(rect.top, rootRect.top));
+        const distance = Math.min(Math.abs(rect.top - centerY), Math.abs(rect.bottom - centerY));
+        const id = card.dataset.setlistPreviewSongId ?? null;
+        if (visibleHeight > largestVisibleHeight || (visibleHeight === largestVisibleHeight &&
+          (visibleHeight > 0 ? id === selectedSongId : distance < smallestDistance))) {
+          largestVisibleHeight = visibleHeight;
           smallestDistance = distance;
-          nextId = card.dataset.setlistPreviewSongId ?? null;
+          nextId = id;
         }
       }
       if (nextId && nextId !== selectedSongId) {
@@ -110,11 +130,19 @@ export function useSetlistPreviewNavigation({
       if (gestureActiveRef?.current || navigatingRef.current || frameId !== null) return;
       frameId = window.requestAnimationFrame(updateFromScroll);
     };
+    const resumeManualTracking = (event: Event) => {
+      if (event.type === 'touchstart' && (event as TouchEvent).touches.length !== 1) return;
+      if (!gestureActiveRef?.current) preserveSelectionUntilRef.current = 0;
+    };
     requestUpdate();
+    scrollRoot.addEventListener('touchstart', resumeManualTracking, { passive: true });
+    scrollRoot.addEventListener('wheel', resumeManualTracking, { passive: true });
     scrollRoot.addEventListener('scroll', requestUpdate, { passive: true });
     window.addEventListener('resize', requestUpdate);
     return () => {
       scrollRoot.removeEventListener('scroll', requestUpdate);
+      scrollRoot.removeEventListener('touchstart', resumeManualTracking);
+      scrollRoot.removeEventListener('wheel', resumeManualTracking);
       window.removeEventListener('resize', requestUpdate);
       if (frameId !== null) window.cancelAnimationFrame(frameId);
     };
