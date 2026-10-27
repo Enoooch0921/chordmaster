@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-27',
+        title: 'Stable chart startup and restored pinch zoom',
+        bullets: ['Measure the viewport and chart before the first visible frame so opening or refreshing starts at the correct fitted scale and centered position.', 'Restore pinch zoom after returning from About or Help in both song and setlist views; reattach measurement observers and release the old pane listeners.']
+      },
+      {
+        version: '0.9.24',
+        date: '2026-10-27',
         title: 'Batch bar editing and direct barline switching',
         bullets: ['Delete selected bars with Delete or Backspace and undo the whole batch in one step.', 'Whole-bar paste overwrites from the destination while preserving the key and meter of untouched bars. Insert before and after remain available in the context menu.', 'The barline button cycles through double, final and off on phone, tablet and desktop; repeat signs keep their own picker.']
       },
@@ -613,6 +619,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-27',
+        title: '穩定載入位置與恢復雙指縮放',
+        bullets: ['在首次顯示前完成尺寸量測，開啟或重新整理時直接以正確縮放與置中位置呈現。', '修正從關於／說明返回後雙指縮放失效，歌曲庫與歌單皆重新綁定手勢及尺寸觀察，並清理舊畫面的監聽。']
+      },
+      {
+        version: '0.9.24',
         date: '2026-10-27',
         title: '多選刪除、覆蓋貼上與小節線切換',
         bullets: ['多選小節後按 Delete／Backspace 整批刪除，可一次復原。', '完整小節從目的位置直接覆蓋，保留其他小節的拍號與調性；右鍵仍可選擇貼到前方／後方。', '「|」按鈕循環切換雙小節線、終止線與關閉，手機、平板、桌面一致；反覆記號使用獨立選單。']

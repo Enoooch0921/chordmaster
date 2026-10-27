@@ -4655,7 +4655,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setIsLyricsMode((current) => !current);
   };
 
-  React.useEffect(() => {
+  // Fit and center the first visible frame, rather than painting the default
+  // 794px canvas and correcting it after paint. Reattach when this pane remounts.
+  React.useLayoutEffect(() => {
+    if (!isSheetView) return;
+    let frame: number | null = null;
     const updateScale = () => {
       if (!previewRef.current || previewPinchActiveRef.current) {
         return;
@@ -4684,7 +4688,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     };
 
     const observer = new ResizeObserver(() => {
-      window.requestAnimationFrame(updateScale);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => { frame = null; updateScale(); });
     });
 
     if (previewRef.current) {
@@ -4693,10 +4698,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
     previewMeasureViewportRef.current = updateScale;
     updateScale();
-    return () => { previewMeasureViewportRef.current = null; observer.disconnect(); };
-  }, [isEditing]);
+    return () => {
+      previewMeasureViewportRef.current = null;
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [isEditing, isSheetView]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
+    if (!isSheetView) return;
+    let frame: number | null = null;
     const updateSheetMetrics = () => {
       if (!sheetRef.current) {
         return;
@@ -4717,7 +4728,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     };
 
     const observer = new ResizeObserver(() => {
-      window.requestAnimationFrame(updateSheetMetrics);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => { frame = null; updateSheetMetrics(); });
     });
 
     if (sheetRef.current) {
@@ -4725,8 +4737,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
 
     updateSheetMetrics();
-    return () => observer.disconnect();
-  }, []);
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [isSheetView]);
 
   React.useEffect(() => () => {
     if (previewSuppressClickTimeoutRef.current !== null) {
@@ -11027,7 +11042,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   usePreviewPinchZoom({
     rootRef: previewRef, sheetRef, activeRef: previewPinchActiveRef, labelRef: previewZoomLabelRef,
-    enabled: !(isLyricsMode && isLyricsReading),
+    // Info pages unmount the preview; release its native listeners and bind
+    // the newly mounted pane when returning to the chart.
+    enabled: isSheetView && !(isLyricsMode && isLyricsReading),
     identity: isSetlistMode ? selectedSetlist?.id ?? null : song?.id ?? null,
     minScale: PREVIEW_MIN_SCALE, maxScale: PREVIEW_MAX_SCALE, fitHeightScale: previewFitHeightScale,
     onStart: () => {
