@@ -2,7 +2,7 @@
 version: 1
 slug: "src-components-projectmanagementpanel-tsx"
 primary_target: "src/components/ProjectManagementPanel.tsx"
-related_targets: ["src/App.tsx","src/components/ProjectManagementPanel.css","src/components/SetlistNavigator.tsx","src/components/SetlistContextMenu.tsx","src/components/TempoPicker.tsx","src/components/TempoPicker.css"]
+related_targets: ["src/App.tsx","src/components/ProjectManagementPanel.css","src/components/SetlistNavigator.tsx","src/components/SetlistContextMenu.tsx","src/components/TempoPicker.tsx","src/components/TempoPicker.css","src/hooks/useSetlistSongDrag.ts"]
 ---
 
 # Folder-based setlist navigation and project members
@@ -26,6 +26,8 @@ Key/BPM clicks edit only their own entry without selecting another song or chang
 The tempo popover accepts direct numeric input including decimals. Enter or Apply commits a valid value from 20–400 BPM; blank clears the specified tempo. Minus/plus commit 1 BPM changes immediately without closing. Close, outside interaction and Escape discard uncommitted text. Invalid text disables Apply. There is no Tap action in this picker. Scope text distinguishes the current setlist snapshot from a library song. The toolbar picker is keyed by current entry so an open draft cannot apply to another song after selection changes. The compact panel is at most 276px wide with 12px viewport margins, 48px input/step targets and 44px footer actions. Apply follows the existing green-700/white primary action with green-800 hover.
 
 Dragging is available in the normal queue: mouse drag starts immediately and touch/pen uses the existing 180ms hold. Dragging preserves the selected song; scrolling over title/content stays native. Up/down keyboard arrows on the handle reorder directly. Read-only roles retain a passive number. The optional Reorder songs mode remains available with a drag handle and explicit up/down controls in place of the rail; Done and parent navigation leave that mode. No new animation or chart transforms.
+
+Continuous drag ownership belongs to the stationary `[data-setlist-detail-scroll]` pane, with native window pointer listeners as a fallback. Moving a keyed song row, leaving its handle or losing the handle's pointer capture must not end a held gesture. Read the latest callbacks after each reorder and restrict hit targets to that same pane. Touch/pen retain the 180ms hold; only the numbered handle starts a gesture. A 48px top/bottom edge zone auto-scrolls the list while the pointer stays held, rechecking targets each animation frame, up to 600px/s at the edge. Pointer release/cancel, Escape, another pointer, blur/hidden page, permission loss, scope change and unmount clean up capture, timers, listeners and selection suppression. Suppress the release click while allowing a fresh press and keyboard activation. Shared persistence continues through the existing role-checked handlers. This correction changes interaction only; retain the user's original contiguous song-row styling.
 
 ## Implemented evidence
 

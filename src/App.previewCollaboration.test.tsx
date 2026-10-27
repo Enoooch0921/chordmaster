@@ -61,7 +61,7 @@ describe('preview-first collaboration activity', () => {
     const draft = field === 'title' ? '本機未送出的歌名' : '96';
     input.focus(); fireEvent.change(input, { target: { value: draft } }); input.setSelectionRange(1, 1);
     expect(latestRefresh().workspace.songs.find(song => song.id === 'preview-song')!.title).toBe('預覽同步測試');
-    await act(async () => { window.dispatchEvent(new Event('focus')); rerender(view()); });
+    await act(async () => { window.dispatchEvent(new Event('focus')); rerender(view()); await new Promise(resolve=>setTimeout(resolve,100)); });
     expect(document.querySelector('[data-wysiwyg-autofocus]')).toBe(input);
     expect(input).toHaveFocus(); expect(input).toHaveValue(draft); expect(input.selectionStart).toBe(1);
     expectProtected();

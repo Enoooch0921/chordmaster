@@ -52,6 +52,7 @@ import {
   resolveShareLink as resolveEdgeShareLink
 } from './sharing';
 import { supabase } from './supabase';
+import { compactHistoryChange, historyFieldPatch, historySignature, type WorkspaceHistoryEntry, type HistoryRpcPatch, type HistoryTrashResource } from './workspaceHistory';
 import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
 import { normalizeTeamManagementScope } from './teamScope';
 
@@ -313,6 +314,9 @@ export interface WorkspaceRepository {
   deleteSong(id: string): Promise<void>;
   deleteSetlist(id: string): Promise<void>;
   deleteProject(id: string): Promise<void>;
+  trashWorkspaceResource(type: 'project' | 'setlist' | 'entry', id: string, expected: Record<string, unknown>): Promise<string>;
+  trashWorkspaceResources(resources: Array<{ type: HistoryTrashResource['type']; id: string; expected: Record<string, unknown> }>): Promise<HistoryTrashResource[]>;
+  applyWorkspaceHistory(entry: WorkspaceHistoryEntry, direction: 'undo' | 'redo', libraryId?: string): Promise<WorkspaceHistoryEntry>;
   importLocalWorkspace(localWorkspace: WorkspaceSnapshot): Promise<WorkspaceSnapshot>;
   createShareLink(resourceType: ShareResourceType, resourceId: string): Promise<string>;
   createSongBundleShare(songIds: string[]): Promise<string>;
@@ -944,6 +948,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   async deleteProject() {
     throw new Error('Local repository deleteProject is not used directly.');
   },
+  async trashWorkspaceResource() { throw new Error('Local history uses the local workspace.'); },
+  async trashWorkspaceResources() { throw new Error('Local history uses the local workspace.'); },
+  async applyWorkspaceHistory() { throw new Error('Local history uses the local workspace.'); },
   async saveSetlist() {
     throw new Error('Local repository saveSetlist is not used directly.');
   },
@@ -1971,6 +1978,89 @@ export const createCloudRepository = (params: {
     async saveProject(project) {
       const libraryId = await ensureLibraryId();
       await saveProjectToLibrary(project, libraryId);
+    },
+
+    async trashWorkspaceResource(type, id, expected) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('trash_workspace_resource', {
+        p_library_id: await ensureLibraryId(), p_type: type, p_id: id, p_expected: type === 'entry' ? { ...expected, overrideKey: expected.overrideKey ?? null, sectionOrder: expected.sectionOrder ?? null, songData: expected.songData ?? null } : expected
+      });
+      if (error) throw error;
+      if (typeof data !== 'string') throw new Error('Reversible deletion was not confirmed.');
+      return data;
+    },
+
+    async applyWorkspaceHistory(entry, direction, capturedLibraryId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const libraryId = capturedLibraryId ?? await ensureLibraryId();
+      const deletionResources = entry.trashResources ?? (entry.trashResource ? [{ ...entry.trashResource,trashId:entry.trashId }] : []);
+      if (deletionResources.length) {
+        const deleting = entry.inverseTrash ? direction === 'undo' : direction === 'redo';
+        if (!deleting) {
+          if (deletionResources.some(resource => !resource.trashId)) throw new Error('Deletion backup is unavailable.');
+          const { error } = await supabase.rpc('restore_workspace_resources', { p_trash_ids: deletionResources.map(resource => resource.trashId) });
+          if (error) throw error;
+          return entry;
+        }
+        const side = entry.inverseTrash ? 'after' : 'before';
+        const resources = deletionResources.map(resource => {
+          const expected=resource.type==='entry'
+            ? entry.changes.filter(change=>change.resource==='setlist').flatMap(change=>(change[side] as Setlist|null)?.songs??[]).find(song=>song.id===resource.id)
+              ?? entry.changes.flatMap(change=>change.entries??[]).find(item=>item.id===resource.id)?.[side]
+            : entry.changes.find(change=>change.id===resource.id)?.[side];
+          const guarded = resource.type === 'entry' && expected ? { ...expected, overrideKey: (expected as SetlistSong).overrideKey ?? null, sectionOrder: (expected as SetlistSong).sectionOrder ?? null, songData: (expected as SetlistSong).songData ?? null } : expected;
+          return {...resource,expected:resource.type==='project'&&expected?{...expected,setlistIds:entry.changes.filter(change=>change.resource==='setlist'&&(change[side] as Setlist|null)?.projectId===resource.id).map(change=>change.id)}:guarded};
+        });
+        if (resources.some(resource => !resource.expected)) throw new Error('Deletion backup is unavailable.');
+        const { data, error } = await supabase.rpc('trash_workspace_resources', { p_library_id: libraryId, p_resources: resources });
+        if (error) throw error;
+        if (!Array.isArray(data) || data.length !== resources.length) throw new Error('Reversible deletion was not confirmed.');
+        return { ...entry, trashResources: data as HistoryTrashResource[] };
+      }
+      const patches: HistoryRpcPatch[] = [];
+      for (const rawChange of entry.changes) {
+        const change=compactHistoryChange(rawChange);
+        const expected = direction === 'undo' ? change.after : change.before;
+        const desired = direction === 'undo' ? change.before : change.after;
+        if (!expected || !desired) throw new Error('This action requires a server deletion backup.');
+        if (change.resource === 'setlist') {
+          const from = expected as Setlist, to = desired as Setlist;
+          const scalar = (row: Setlist) => ({ name: row.name, archived: row.archived ?? false, projectId: row.projectId ?? null, displayMode: row.displayMode });
+          const patch = historyFieldPatch('setlist', change.id, scalar(from), scalar(to));
+          if (patch) patches.push(patch);
+          const beforeIds=direction==='undo'?change.order?.after:change.order?.before;
+          const afterIds=direction==='undo'?change.order?.before:change.order?.after;
+          if (beforeIds && afterIds) {
+            if(historySignature([...beforeIds].sort())!==historySignature([...afterIds].sort()))throw new Error('This action requires a server deletion backup.');
+            patches.push({ resource: 'order', id: change.id, before: { ids: beforeIds }, after: { ids: afterIds } });
+          }
+          for (const edit of change.entries??[]) {
+            const original=direction==='undo'?edit.after:edit.before, item=direction==='undo'?edit.before:edit.after;
+            if(!original||!item)throw new Error('This action requires a server deletion backup.');
+            const patch=historyFieldPatch('entry',edit.id,original as unknown as Record<string,unknown>,item as unknown as Record<string,unknown>);
+            if (patch) patches.push(patch);
+          }
+        } else {
+          const fields = (value: typeof expected) => change.resource === 'project'
+            ? { name: (value as Project).name, archived: (value as Project).archived ?? false }
+            : { ...value, ...('archivedAt' in value ? {archivedAt:value.archivedAt?new Date(value.archivedAt as number).toISOString():null}: {}) } as unknown as Record<string, unknown>;
+          const patch = historyFieldPatch(change.resource, change.id, fields(expected), fields(desired));
+          if (patch) patches.push(patch);
+        }
+      }
+      if (patches.length) {
+        const { error } = await supabase.rpc('patch_workspace_history', { p_library_id: libraryId, p_patches: patches });
+        if (error) throw error;
+      }
+      return entry;
+    },
+
+    async trashWorkspaceResources(resources) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data, error } = await supabase.rpc('trash_workspace_resources', { p_library_id: await ensureLibraryId(), p_resources: resources });
+      if (error) throw error;
+      if (!Array.isArray(data) || data.length !== resources.length) throw new Error('Reversible deletion was not confirmed.');
+      return data as HistoryTrashResource[];
     },
 
     async deleteProject(id) {

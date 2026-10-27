@@ -671,3 +671,36 @@ describe('cloud repository project deletion', () => {
     );
   });
 });
+
+describe('guarded global workspace history',()=>{
+ beforeEach(()=>{vi.clearAllMocks();mocks.rpc.mockResolvedValue({data:null,error:null});});
+ it('submits sparse metadata and order together against the captured library',async()=>{
+  const {createWorkspaceHistoryEntry}=await import('./workspaceHistory');
+  const list: Setlist={id:'list',name:'Before',createdAt:1,updatedAt:1,displayMode:'chord-movable-key',songs:[{id:'a',setlistId:'list',songId:'song-1',order:0,sectionOrder:[]},{id:'b',setlistId:'list',songId:'song-1',order:1,sectionOrder:[]}]};
+  const entry=createWorkspaceHistoryEntry({zh:'調整',en:'edit'},[{resource:'setlist',id:'list',before:list,after:{...list,name:'After',songs:[{...list.songs[1],order:0},{...list.songs[0],order:1}]}}])!;
+  const repository=createRepository();repository.setActiveLibrary('new-library');
+  await repository.applyWorkspaceHistory(entry,'undo','captured-library');
+  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('patch_workspace_history',{p_library_id:'captured-library',p_patches:[
+   {resource:'setlist',id:'list',before:{name:'After'},after:{name:'Before'}},
+   {resource:'order',id:'list',before:{ids:['b','a']},after:{ids:['a','b']}}
+  ]});expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('restores by private receipt, then replaces receipts when redoing deletion',async()=>{
+  const {createWorkspaceHistoryEntry}=await import('./workspaceHistory');
+  const project:Project={id:'project',name:'Project',createdAt:1,updatedAt:1};
+  const entry={...createWorkspaceHistoryEntry({zh:'刪除',en:'delete'},[{resource:'project',id:'project',before:project,after:null}])!,trashResources:[{type:'project' as const,id:'project',trashId:'receipt-one'}]};
+  const repository=createRepository();repository.setActiveLibrary('library');
+  await repository.applyWorkspaceHistory(entry,'undo');
+  expect(mocks.rpc).toHaveBeenLastCalledWith('restore_workspace_resources',{p_trash_ids:['receipt-one']});
+  mocks.rpc.mockResolvedValueOnce({data:[{type:'project',id:'project',trashId:'receipt-two'}],error:null});
+  const redone=await repository.applyWorkspaceHistory(entry,'redo');
+  expect(redone.trashResources?.[0].trashId).toBe('receipt-two');
+  expect(mocks.rpc).toHaveBeenLastCalledWith('trash_workspace_resources',expect.objectContaining({p_library_id:'library'}));
+ });
+ it('never falls back to an irreversible delete when the server migration is missing',async()=>{
+  const repository=createRepository();repository.setActiveLibrary('library');
+  mocks.rpc.mockResolvedValueOnce({data:null,error:{message:'function does not exist',code:'PGRST202'}});
+  await expect(repository.trashWorkspaceResource('project','project',{name:'Project'})).rejects.toMatchObject({code:'PGRST202'});
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+});

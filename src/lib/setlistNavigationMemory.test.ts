@@ -39,6 +39,14 @@ describe('remembered project and meeting navigation', () => {
     data.joinedProjects[0].archived = true;
     expect(resolveNavigationLocation(shared, data).filter).toEqual({ kind: 'all' });
   });
+  it('keeps the owned parent authoritative when the same ID also arrives through sharing', () => {
+    const data: NavigationWorkspace = { ...workspace,
+      joinedSetlists: [{ ...meeting, isJoined: true }],
+      joinedProjects: [{ ...workspace.projects[0], id: 'shared-copy', isJoined: true, role: 'viewer', setlists: [meeting] }]
+    };
+    expect(getSetlistParentFilter(meeting.id, data)).toEqual({ kind: 'owned-project', projectId: 'la' });
+    expect(getSetlistParentFilter(meeting.id, { ...data, setlists: [{ ...meeting, projectId: null }] })).toEqual({ kind: 'all' });
+  });
   it('isolates accounts and libraries and tolerates corrupt preferences', () => {
     const key = getNavigationStorageKey('user', 'team');
     saveNavigationLocation(key, location);

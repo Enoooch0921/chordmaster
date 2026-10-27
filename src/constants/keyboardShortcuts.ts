@@ -33,12 +33,12 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
       {
         keys: ['Ctrl/Cmd + Z'],
         action: { en: 'Undo', zh: '復原' },
-        context: { en: 'Song and setlist sheets, including after closing the editor', zh: '歌曲與歌單譜面，關閉編輯器後仍可使用' }
+        context: { en: 'Workspace actions and score edits; swipe left with three fingers on iPhone/iPad. Text fields keep native undo.', zh: '工作區操作與譜面編輯；iPhone／iPad 可三指左滑。文字欄位保留原生撤銷。' }
       },
       {
         keys: ['Ctrl/Cmd + Shift + Z', 'Ctrl/Cmd + Y'],
         action: { en: 'Redo', zh: '重做' },
-        context: { en: 'Song and setlist sheets, including after closing the editor', zh: '歌曲與歌單譜面，關閉編輯器後仍可使用' }
+        context: { en: 'Swipe right with three fingers on iPhone/iPad. History keeps the latest 50 actions for this account and library on this device.', zh: 'iPhone／iPad 可三指右滑；此裝置按帳號與曲庫分開保留最近 50 步。' }
       },
       {
         keys: ['Esc'],

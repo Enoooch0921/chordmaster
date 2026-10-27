@@ -30,7 +30,7 @@ const row = (id: string) => document.querySelector<HTMLElement>(`[data-setlist-s
 const currentSong = () => loadNavigationLocation(navigationKey())?.songId;
 const rowOrder = () => Array.from(document.querySelectorAll('[data-setlist-song-id]'), element => element.getAttribute('data-setlist-song-id'));
 const elementFromPoint = vi.fn();
-const pointer = { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 40, clientY: 100 };
+const pointer = { pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1, clientX: 40, clientY: 100 };
 const targetRow = (id: string) => elementFromPoint.mockReturnValue(row(id));
 const mount = async () => {
   saveNavigationLocation(navigationKey(), remembered);
@@ -120,6 +120,34 @@ it('waits for a touch hold before allowing a direct drag', async () => {
   expect(row('entry-second')).not.toHaveClass('is-dragging');
   expect(document.body.style.userSelect).toBe('');
   expect(currentSong()).toBe('entry-first');
+});
+
+it('keeps one held drag alive across several reordered rows and lost handle capture until release', async () => {
+  for (const [id, title] of [['third', '第三首歌曲'], ['fourth', '第四首歌曲']]) {
+    const song = { ...fixture.songs[0], id, title };
+    fixture.songs.push(song);
+    fixture.setlists[0].songs.push({ ...fixture.setlists[0].songs[0], id: `entry-${id}`, songId: id, songData: song, order: fixture.setlists[0].songs.length });
+  }
+  await mount();
+  const handle = within(row('entry-first')).getByRole('button', { name: '拖動排序：第一首歌曲' });
+  fireEvent.pointerDown(handle, pointer);
+  targetRow('entry-second'); fireEvent.pointerMove(handle, pointer);
+  expect(rowOrder()).toEqual(['entry-second', 'entry-first', 'entry-third', 'entry-fourth']);
+
+  // Moving a keyed row in the DOM can release capture on its original handle.
+  fireEvent.lostPointerCapture(handle, pointer);
+  expect(row('entry-first')).toHaveClass('is-dragging');
+  targetRow('entry-third'); fireEvent.pointerMove(document, pointer);
+  targetRow('entry-fourth'); fireEvent.pointerMove(document, pointer);
+  expect(rowOrder()).toEqual(['entry-second', 'entry-third', 'entry-fourth', 'entry-first']);
+  expect(currentSong()).toBe('entry-first');
+  targetRow('entry-second'); fireEvent.pointerMove(document, pointer);
+  expect(rowOrder()).toEqual(['entry-first', 'entry-second', 'entry-third', 'entry-fourth']);
+  fireEvent.pointerUp(document, { ...pointer, buttons: 0 });
+  expect(row('entry-first')).not.toHaveClass('is-dragging');
+  expect(document.body.style.userSelect).toBe('');
+  targetRow('entry-fourth'); fireEvent.pointerMove(document, pointer);
+  expect(rowOrder()).toEqual(['entry-first', 'entry-second', 'entry-third', 'entry-fourth']);
 });
 
 it('cancels a pending touch hold without later starting a drag', async () => {

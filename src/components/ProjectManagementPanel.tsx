@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, Edit3, ExternalLink, MoreHorizontal, Plus, RefreshCw, Share2, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, Edit3, ExternalLink, MoreHorizontal, Pin, PinOff, Plus, RefreshCw, Share2, Trash2 } from 'lucide-react';
 import type { AppLanguage, JoinedProject, Project, ProjectMemberRole, ProjectShareStatus, Setlist, ShareParticipant } from '../types';
 import { AnimatedPopover } from './ui/InteractionMotion';
 import { useAnchoredPortalPanel } from './useAnchoredPortalPanel';
@@ -71,6 +71,8 @@ interface Props {
   onRefreshMembers: (id: string) => void;
   onRoleChange: (project: Project, member: ShareParticipant, role: ProjectMemberRole) => Promise<void>;
   onRemoveMember: (project: Project, member: ShareParticipant) => void;
+  pinnedProjectIds?: ReadonlySet<string>;
+  onTogglePin?: (projectId: string) => void;
 }
 
 export default function ProjectManagementPanel(props: Props) {
@@ -101,6 +103,7 @@ export default function ProjectManagementPanel(props: Props) {
   };
   const projectActions: Action[] = project ? [
     { label: zh ? '開啟專案歌單' : 'Open project setlists', icon: <ExternalLink size={16} />, run: () => props.onOpenProject(project.id) },
+    ...(props.onTogglePin && !project.archived ? [{ label: props.pinnedProjectIds?.has(project.id) ? (zh ? '取消置頂' : 'Unpin project') : (zh ? '置頂專案' : 'Pin project'), icon: props.pinnedProjectIds?.has(project.id) ? <PinOff size={16}/> : <Pin size={16}/>, run: () => props.onTogglePin?.(project.id) }] : []),
     ...(props.canManage(project) ? [
       { label: zh ? '重新命名' : 'Rename', icon: <Edit3 size={16} />, run: () => props.onRename(project) },
       { label: project.archived ? (zh ? '取消歸檔' : 'Unarchive') : (zh ? '歸檔專案' : 'Archive project'), icon: project.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />, run: () => props.onArchive(project) },

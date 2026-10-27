@@ -370,11 +370,13 @@ export default function PreviewWysiwygEditor({
     if (usesMetadataPanel) {
       return;
     }
+    let focused = false;
     const focusInput = () => {
+      if (focused) return;
       const input = panelRef.current?.querySelector<HTMLInputElement>('input[data-wysiwyg-autofocus]');
       if (!input) return;
       input.focus({ preventScroll: true });
-      input.select();
+      if(document.activeElement===input){input.select();focused=true;}
     };
     focusInput();
     const frameId = window.requestAnimationFrame(focusInput);

@@ -6,6 +6,10 @@ import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVar
 import SetlistSongActions from './components/SetlistSongActions';
 import './components/SongLibraryPanel.css';
 import ProjectManagementPanel, { ManagementActions } from './components/ProjectManagementPanel';
+import SetlistBrowserHeader from './components/SetlistBrowserHeader';
+import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
+import { useThreeFingerHistory } from './hooks/useThreeFingerHistory';
+import { applyWorkspaceHistory as applyHistoryToWorkspace, createWorkspaceHistoryEntry, historySignature, type WorkspaceHistoryEntry, type WorkspaceHistoryChange, type HistoryWorkspace } from './lib/workspaceHistory';
 import { useAppViewport } from './hooks/useAppViewport';
 import { useBottomSheetMotion } from './hooks/useBottomSheetMotion';
 import { useModalFocus } from './hooks/useModalFocus';
@@ -25,7 +29,9 @@ import { normalizeJianpuVoices } from './utils/jianpuVoices';
 import { useSetlistPreviewNavigation } from './hooks/useSetlistPreviewNavigation';
 import { usePreviewPinchZoom } from './hooks/usePreviewPinchZoom';
 import { useSetlistNavigationMemory } from './hooks/useSetlistNavigationMemory';
+import { sortProjectsByPin, useProjectPins } from './hooks/useProjectPins';
 import { useSetlistOpening } from './hooks/useSetlistOpening';
+import { useSetlistSongDrag } from './hooks/useSetlistSongDrag';
 import { getNavigationStorageKey, getSetlistParentFilter, type SetlistNavigationLocation } from './lib/setlistNavigationMemory';
 import { usePerformanceFullscreen } from './hooks/usePerformanceFullscreen';
 import PerformanceFullscreenControl from './components/PerformanceFullscreenControl';
@@ -149,6 +155,7 @@ import SetlistNavigator, {
 } from './components/SetlistNavigator';
 import {
   applySetlistSongOverrides,
+  dedupeJoinedSetlists,
   getDefaultSectionOrder,
   getEffectiveSetlistSongCapo,
   getJoinedProjectSetlists,
@@ -160,7 +167,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Guitar, Check, Minus, Keyboard, Eraser } from 'lucide-react';
+import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Guitar, Check, Minus, Keyboard, Eraser, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -979,20 +986,11 @@ const EMPTY_LIBRARY_PREVIEW_SONG: StoredSong = {
   updatedAt: 0
 };
 
-interface SongHistoryState {
-  past: Song[];
-  future: Song[];
-}
 
-interface SetlistSongHistorySnapshot {
-  song: Song;
-  sectionOrder: string[];
-}
 
-interface SetlistSongHistoryState {
-  past: SetlistSongHistorySnapshot[];
-  future: SetlistSongHistorySnapshot[];
-}
+
+
+
 
 type AppView = 'sheet' | 'about' | 'help';
 type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics' | 'sectionName' | 'marker';
@@ -2005,8 +2003,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlists.selectedSetlistId);
   const [allowDefaultSetlistSelection, setAllowDefaultSetlistSelection] = useState(true);
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlists.selectedSetlistSongId);
-  const [songHistories, setSongHistories] = useState<Record<string, SongHistoryState>>({});
-  const [setlistSongHistories, setSetlistSongHistories] = useState<Record<string, SetlistSongHistoryState>>({});
+
+
   const [selectedLibrarySongIds, setSelectedLibrarySongIds] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [isLyricsMode, setIsLyricsMode] = useState(false);
@@ -2243,15 +2241,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   // Whether the setlist preview pane is scrolled down far enough to show the
   // "back to top" button (the preview can be a tall stack of songs).
   const [showPreviewBackToTop, setShowPreviewBackToTop] = useState(false);
-  const setlistSongPointerDragRef = useRef<{
-    sourceId: string;
-    pointerId: number;
-    lastTargetId: string | null;
-    previousUserSelect: string;
-    element: HTMLElement;
-    activated: boolean;
-    holdTimeoutId: number | null;
-  } | null>(null);
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
   const performanceOverlayRef = useRef<HTMLDivElement>(null);
@@ -2416,14 +2405,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       if (JSON.stringify(nextSongs) !== JSON.stringify(songs)) {
         setSongs(nextSongs);
         setSavedSongs(nextSongs);
-        const unchangedIds = new Set(nextSongs.filter((item) => songs.includes(item)).map((item) => item.id));
-        setSongHistories((current) => Object.fromEntries(Object.entries(current).filter(([id]) => unchangedIds.has(id))));
+
+
         setTeamLibraryUpdatePending(false);
       }
       if (JSON.stringify(remote.setlists) !== JSON.stringify(setlists)) {
         setSetlists(remote.setlists);
         setSavedSetlists(remote.setlists);
-        setSetlistSongHistories({});
+
       }
       if (JSON.stringify(remote.projects) !== JSON.stringify(projects)) {
         setProjects(remote.projects);
@@ -2561,7 +2550,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     : mainViewportWidth < 1380
       ? 'grid-cols-4'
       : 'grid-cols-7';
-  const currentSongHistory = songHistories[song?.id || ''] ?? { past: [], future: [] };
+
   const allJoinedProjectSetlists: JoinedSetlist[] = React.useMemo(
     () => getJoinedProjectSetlists(joinedProjects),
     [joinedProjects]
@@ -2714,7 +2703,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       ?? (selectedSetlistSong.songData ? { ...selectedSetlistSong.songData, id: selectedSetlistSong.songId, updatedAt: 0 } as StoredSong : null)
     : null
   ), [selectedSetlistSong, songs]);
-  const currentSetlistSongHistory = setlistSongHistories[selectedSetlistSong?.id || ''] ?? { past: [], future: [] };
+
   const activeSetlistEditableSong = React.useMemo(() => (
     selectedSetlistSong
       ? ensureSongEditingIds(normalizeSongBars(cloneSong(selectedSetlistSong.songData ?? selectedSetlistSourceSong ?? INITIAL_SONG)))
@@ -3296,7 +3285,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const setlistsInScope = isSetlistRoot && !normalizedSetlistSearchQuery
     ? setlists.filter(item => !item.projectId)
     : filterOwnedSetlistsByProject(setlists, setlistProjectFilter);
-  const joinedSetlistsInScope: JoinedSetlist[] = isSetlistRoot
+  const joinedSetlistCandidates: JoinedSetlist[] = isSetlistRoot
     ? !normalizedSetlistSearchQuery ? joinedSetlists : [
         ...joinedSetlists,
         ...joinedProjects.flatMap((project) => project.setlists.map((setlist) => ({ ...setlist, isJoined: true } as JoinedSetlist)))
@@ -3307,6 +3296,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         ? (joinedProjects.find((project) => project.id === setlistProjectFilter.projectId)?.setlists ?? [])
           .map((setlist) => ({ ...setlist, isJoined: true } as JoinedSetlist))
         : [];
+  const joinedSetlistsInScope = dedupeJoinedSetlists(joinedSetlistCandidates,
+    isSetlistRoot && !normalizedSetlistSearchQuery ? [...setlists, ...allJoinedProjectSetlists] : setlists);
   const archivedSetlistCount = setlistsInScope.filter((item) => item.archived).length;
   const visibleSetlists = showArchivedSetlists ? setlistsInScope : setlistsInScope.filter((item) => !item.archived);
   const filteredSetlists = searchItems(
@@ -3316,9 +3307,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     sortSetlistsForDisplay(joinedSetlistsInScope, setlistSortMode), setlistSearch, getSetlistSearchFields
   );
 
-  const activeProjects = projects.filter((item) => !item.archived);
+  const { pinnedIds: pinnedProjectIds, togglePin: toggleProjectPin } = useProjectPins(authenticatedUser?.id, activeLibraryId);
+  const activeProjects = sortProjectsByPin(projects.filter((item) => !item.archived), pinnedProjectIds);
   const archivedProjectsCount = projects.length - activeProjects.length;
-  const visibleProjects = showArchivedProjects ? projects : activeProjects;
+  const visibleProjects = showArchivedProjects ? sortProjectsByPin(projects, pinnedProjectIds) : activeProjects;
+  const rootProjectFolders = sortProjectsByPin([
+    ...activeProjects.map(project => ({ id: project.id, name: project.name, count: setlists.filter(item => item.projectId === project.id && !item.archived).length, owned: project, shared: false })),
+    ...joinedProjects.filter(project => !project.archived).map(project => ({ id: project.id, name: project.name, count: project.setlists.filter(item => !item.archived).length, owned: null, shared: true }))
+  ], pinnedProjectIds);
   const selectedProject = setlistProjectFilter.kind === 'owned-project'
     ? projects.find((item) => item.id === setlistProjectFilter.projectId) ?? null
     : null;
@@ -3867,20 +3863,100 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     return operation;
   };
 
-  const pushSongHistory = (songId: string, previousSong: Song) => {
-    setSongHistories((currentHistory) => {
-      const entry = currentHistory[songId] ?? { past: [], future: [] };
-      return {
-        ...currentHistory,
-        [songId]: {
-          past: [...entry.past.slice(-29), cloneSong(previousSong)],
-          future: []
+  const historyScope = JSON.stringify([authenticatedUser?.id ?? 'local', activeLibraryId ?? 'local']);
+  const historyLive = useRef({ scope: historyScope, songs, setlists, projects, joinedProjects });
+  historyLive.current = { scope: historyScope, songs, setlists, projects, joinedProjects };
+  const persistHistoryBaseline = useRef(persistWorkspace); persistHistoryBaseline.current = persistWorkspace;
+  const historyDragGroup = useRef<string | undefined>(undefined);
+  const historyRenameGroup = useRef<string | undefined>(undefined);
+  const historyReplay = useRef(false);
+  const [historyForwardBusy, setHistoryForwardBusy] = useState(false);
+  const joinedHistoryWork = useRef({ scope: historyScope, pending: 0, queue: Promise.resolve() });
+  useEffect(() => {
+    joinedHistoryWork.current = { scope: historyScope, pending: 0, queue: Promise.resolve() };
+    setHistoryForwardBusy(false);
+  }, [historyScope]);
+  const globalHistory = useWorkspaceHistory({
+    scope: historyScope,
+    enabled: navigationMemoryReady && !isSwitchingLibrary && !isLoadingCloudWorkspace,
+    apply: async (entry, direction) => {
+      const repository = cloudRepositoryRef.current;
+      const scope = historyScope;
+      const release = beginCloudMutation();
+      const toastId = toast.loading(language === 'zh' ? '正在復原操作…' : 'Restoring action…');
+      try {
+        if (workspacePersistenceInFlightRef.current) await workspacePersistenceInFlightRef.current;
+        if (historyLive.current.scope !== scope) throw new Error('Workspace changed.');
+        const current = historyLive.current;
+        // Shared project order entries use their role-checked endpoint, outside owned autosave.
+        const joinedChange = entry.changes.length === 1 && entry.changes[0].resource === 'setlist'
+          && !current.setlists.some(list => list.id === entry.changes[0].id);
+        const joinedList = joinedChange ? current.joinedProjects.flatMap(project => project.setlists).find(list => list.id === entry.changes[0].id) : null;
+        const before: HistoryWorkspace = { songs: current.songs, setlists: joinedList ? [joinedList] : current.setlists, projects: current.projects };
+        let next = applyHistoryToWorkspace(before, entry, direction);
+        if (repository) {
+          if (!navigator.onLine) throw new Error(language === 'zh' ? '請連線後再撤銷雲端操作。' : 'Go online to undo a cloud action.');
+          await persistHistoryBaseline.current(current.songs, current.setlists, current.projects);
+          entry = await repository.applyWorkspaceHistory(entry, direction, activeLibraryId ?? undefined);
+          // The server preserves unrelated collaborative edits. Re-read its result
+          // before advancing the saved baseline so a later save cannot hide them.
+          try {
+            if (joinedList) {
+              const fresh = await repository.loadJoinedWorkspace();
+              const restored = fresh.joinedProjects.flatMap(project => project.setlists).find(list => list.id === joinedList.id);
+              if (restored) next = { ...next, setlists: [restored] };
+            } else {
+              const fresh = await repository.loadLibraryContent(activeLibraryId ?? await repository.getPersonalLibraryId());
+              next = { songs: fresh.songs, setlists: fresh.setlists, projects: fresh.projects };
+            }
+          } catch {
+            // The write is already committed; keep Undo/Redo aligned with it.
+            // Normal workspace refresh will retry fetching the authoritative state.
+            toast.info(language === 'zh' ? '操作已復原，暫時無法重新載入最新協作內容。' : 'Action restored; the latest collaborative content could not be refreshed yet.');
+          }
+        } else {
+          await persistPersistentWorkspaceSnapshot(next.songs, next.setlists, next.projects);
         }
-      };
-    });
+        if (historyLive.current.scope !== scope || cloudRepositoryRef.current !== repository) return entry;
+        historyReplay.current = true;
+        if (joinedList) {
+          setJoinedProjects(current => current.map(project => ({ ...project, setlists: project.setlists.map(list => list.id === joinedList.id ? next.setlists[0] : list) })));
+        } else {
+          setSongs(next.songs); setSetlists(next.setlists); setProjects(next.projects);
+          setSavedSongs(cloneSong(next.songs)); setSavedSetlists(cloneSong(next.setlists)); setSavedProjects(cloneSong(next.projects));
+          historyLive.current = { ...current, ...next };
+        }
+        setLastSavedAt(Date.now()); setSyncStatus('saved');
+        return entry;
+      } finally { historyReplay.current = false; toast.dismiss(toastId); release(); }
+    },
+    onError: error => toast.error(error instanceof Error ? error.message : (language === 'zh' ? '無法安全復原，操作記錄已保留。' : 'Unable to restore safely. History has been kept.')),
+    onComplete: (entry, direction) => {
+      toast.dismiss('workspace-history-action');
+      toast.success(language === 'zh' ? `已${direction === 'undo' ? '撤銷' : '重做'}${entry.label.zh}`
+        : `${direction === 'undo' ? 'Undid' : 'Redid'} ${entry.label.en}`);
+    }
+  });
+  const recordHistory = (zh: string, en: string, changes: WorkspaceHistoryChange[], group?: string,
+    deletion?: Pick<WorkspaceHistoryEntry, 'trashId' | 'trashResource' | 'trashResources' | 'inverseTrash'>) => {
+    if (historyReplay.current) return null;
+    const entry = createWorkspaceHistoryEntry({ zh, en }, changes, group);
+    if (entry && deletion) Object.assign(entry, deletion);
+    globalHistory.record(entry);
+    if(entry)toast.dismiss('workspace-history-action');
+    if(entry && (deletion && !deletion.inverseTrash || zh==='歌曲排序' && !group)) {
+      toast.success(language==='zh'?(zh==='歌曲排序'?'已調整歌曲順序':`已${zh}`):`Completed: ${en}`,{id:'workspace-history-action',duration:6500,
+        action:{label:language==='zh'?'撤銷':'Undo',run:()=>{void globalHistory.undo(entry.id);}}});
+    }
+    return entry;
   };
 
+
+
   const replaceSongInLibrary = (songId: string, nextSong: Song) => {
+    nextSong = normalizeSongBars(nextSong);
+    const previous = songs.find(item => item.id === songId);
+    if (previous && !isReferenceOnlySongChange(previous, nextSong)) recordHistory('歌曲編輯', 'song edit', [{ resource: 'song', id: songId, before: previous, after: { ...nextSong, id: songId, updatedAt: Date.now() } }]);
     setSongs((currentSongs) =>
       currentSongs.map((item) =>
         item.id === songId
@@ -3912,21 +3988,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     );
   };
 
-  const pushSetlistSongHistory = (setlistSongId: string, previousSong: Song, sectionOrder: string[]) => {
-    setSetlistSongHistories((currentHistory) => {
-      const entry = currentHistory[setlistSongId] ?? { past: [], future: [] };
-      return {
-        ...currentHistory,
-        [setlistSongId]: {
-          past: [...entry.past.slice(-29), {
-            song: cloneSong(previousSong),
-            sectionOrder: [...sectionOrder]
-          }],
-          future: []
-        }
-      };
-    });
-  };
+
 
   const syncSetlistSectionOrder = (currentOrder: string[], previousSong: Song, nextSong: Song) => {
     const normalizedCurrentOrder = sanitizeSetlistSectionOrder(currentOrder, previousSong);
@@ -3957,7 +4019,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     // editing other content (chords, lyrics, etc.) does not reset the key.
     const keyChangedInEdit = nextSong.currentKey !== activeSetlistEditableSong.currentKey;
 
-    pushSetlistSongHistory(selectedSetlistSong.id, activeSetlistEditableSong, selectedSetlistSong.sectionOrder);
+
     handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
       ...currentSetlistSong,
       overrideKey: keyChangedInEdit
@@ -3979,7 +4041,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
     const previous = entry.item.songData ?? entry.sourceSong;
     if (previous.tempo === tempo) return;
-    pushSetlistSongHistory(itemId, previous, entry.item.sectionOrder);
+
     handleUpdateSetlistSong(itemId, current => ({
       ...current,
       songData: { ...cloneSong(current.songData ?? entry.sourceSong), tempo }
@@ -3991,7 +4053,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
     if (!entry) return;
     const previous = ensureSongEditingIds(normalizeSongBars(cloneSong(entry.item.songData ?? entry.sourceSong)));
-    pushSetlistSongHistory(itemId, previous, entry.item.sectionOrder);
+
     handleUpdateSetlistSong(itemId, current => ({ ...current, songData: { ...previous, lyricsDoc } }));
   };
 
@@ -4124,8 +4186,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     setJoinedSetlists(workspace.joinedSetlists);
     setJoinedProjects(workspace.joinedProjects ?? []);
     setLastSavedAt(workspace.lastSavedAt);
-    setSongHistories({});
-    setSetlistSongHistories({});
+
+
     setSelectedLibrarySongIds([]);
     setIsLibraryEditing(false);
     setSelectedSongId(pickAvailableSongId(workspaceSongs, [
@@ -4508,9 +4570,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       }
     }
 
-    if (!isReferenceOnlySongChange(song, nextSong)) {
-      pushSongHistory(song.id, song);
-    }
     replaceSongInLibrary(song.id, nextSong);
   };
 
@@ -4789,6 +4848,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
     const newSong = createDefaultSong(songs.length + 1);
+    recordHistory('新增歌曲','new song',[{resource:'song',id:newSong.id,before:{...newSong,archivedAt:Date.now()},after:newSong}]);
     const nextSongs = [newSong, ...songs];
     setSongs(nextSongs);
     setSelectedSongId(newSong.id);
@@ -4832,6 +4892,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       songs: []
     };
 
+    recordHistory('新增歌單', 'new setlist', [{resource:'setlist',id:newSetlist.id,before:null,after:newSetlist}],undefined,
+      {trashResources:[{type:'setlist',id:newSetlist.id}],inverseTrash:true});
+
     setSetlists((current) => [newSetlist, ...current]);
     handleSetlistProjectFilterChange(newSetlist.projectId
       ? { kind: 'owned-project', projectId: newSetlist.projectId }
@@ -4864,6 +4927,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       updatedAt: now
     };
     const nextProjects = [newProject, ...projects];
+    recordHistory('新增專案', 'new project', [{resource:'project',id:newProject.id,before:null,after:newProject}],undefined,
+      {trashResources:[{type:'project',id:newProject.id}],inverseTrash:true});
     setProjects(nextProjects);
     void persistWorkspace(songs, setlists, nextProjects).catch(() => {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -4882,6 +4947,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const nextProjects = projects.map((item) =>
       item.id === projectId ? { ...item, name: trimmed, updatedAt: Date.now(), updatedBy: authenticatedUser?.id } : item
     );
+    recordHistory('專案重新命名', 'project rename', [{ resource: 'project', id: projectId, before: target, after: nextProjects.find(item => item.id === projectId)! }]);
     setProjects(nextProjects);
     void persistWorkspace(songs, setlists, nextProjects).catch(() => {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -4898,6 +4964,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const nextProjects = projects.map((item) =>
       item.id === projectId ? { ...item, archived, updatedAt: Date.now(), updatedBy: authenticatedUser?.id } : item
     );
+    recordHistory(archived ? '專案歸檔' : '取消專案歸檔', archived ? 'project archive' : 'project unarchive', [{ resource: 'project', id: projectId, before: target, after: nextProjects.find(item => item.id === projectId)! }]);
     setProjects(nextProjects);
     if (archived && setlistProjectFilter.kind === 'owned-project' && setlistProjectFilter.projectId === projectId) {
       handleSetlistProjectFilterChange({ kind: 'all' });
@@ -4922,8 +4989,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
     const confirmed = window.confirm(language === 'zh'
-      ? '要刪除這個專案嗎？裡面的歌單會變成「未分類」。'
-      : 'Delete this project? Setlists inside will become Ungrouped.');
+      ? '要刪除這個專案嗎？裡面的歌單會移至最外層，可用「撤銷」恢復專案與原本分類。'
+      : 'Delete this project? Its setlists will move to the root. Undo restores the project and its original grouping.');
     if (!confirmed) return;
     // Detach any setlists pointing at this project so they fall back to "Ungrouped".
     const nextSetlists = setlists.map((item) =>
@@ -4931,8 +4998,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     );
     const nextProjects = projects.filter((item) => item.id !== projectId);
     let deletedFromTeamCloud = false;
+    let trashId: string | undefined;
 
-    if (isTeamWorkspace && authenticatedUser && cloudRepositoryRef.current) {
+    if (authenticatedUser && cloudRepositoryRef.current) {
       const requestRepository = cloudRepositoryRef.current;
       const requestLibraryId = activeLibraryIdRef.current;
       if (!navigator.onLine) {
@@ -4940,9 +5008,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         return;
       }
       const releaseCloudMutation = beginCloudMutation();
+      setHistoryForwardBusy(true);
       try {
         setSyncStatus('syncing');
-        await requestRepository.deleteProject(projectId);
+        await persistHistoryBaseline.current(songs, setlists, projects);
+        trashId = await requestRepository.trashWorkspaceResource('project', projectId, { ...target,setlistIds:setlists.filter(item=>item.projectId===projectId).map(item=>item.id) });
         // The delete is scoped to the library captured above. If navigation
         // completed while the request was in flight, the newly loaded
         // workspace must never receive this old library's snapshot.
@@ -4967,9 +5037,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           : (language === 'zh' ? '刪除專案失敗。' : 'Unable to delete the project.'));
         return;
       } finally {
+        setHistoryForwardBusy(false);
         releaseCloudMutation();
       }
     }
+
+    recordHistory('刪除專案', 'project deletion', [
+      { resource: 'project', id: target.id, before: target, after: null },
+      ...setlists.filter(item => item.projectId === projectId).map(item => ({ resource: 'setlist' as const, id: item.id, before: item, after: { ...item, projectId: null } }))
+    ], undefined, { trashId, trashResource: { type: 'project', id: projectId } });
 
     if (deletedFromTeamCloud) {
       // Merge only the confirmed database effect into the latest live state;
@@ -4987,7 +5063,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setSetlistPanelView('list');
     }
     if (projectMembersTargetId === projectId) setProjectMembersTargetId(null);
-    if (!isTeamWorkspace || !authenticatedUser || !cloudRepositoryRef.current) {
+    if (!authenticatedUser || !cloudRepositoryRef.current) {
       void persistWorkspace(songs, nextSetlists, nextProjects).catch(() => {
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
       });
@@ -5028,6 +5104,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const nextSetlists = setlists.map((item) =>
       item.id === setlistId ? { ...item, projectId: nextProjectId, updatedAt: Date.now() } : item
     );
+    recordHistory('歌單分類變更', 'setlist move', [{ resource: 'setlist', id: target.id, before: target, after: nextSetlists.find(item => item.id === target.id)! }]);
     setSetlists(nextSetlists);
     void persistWorkspace(songs, nextSetlists).catch(() => {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -5105,11 +5182,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         } satisfies Setlist;
       });
       nextSetlists = [...copies, ...setlists];
+      recordHistory('複製歌單', 'copy setlists', copies.map(item=>({resource:'setlist',id:item.id,before:null,after:item})),undefined,
+        {trashResources:copies.map(item=>({type:'setlist',id:item.id})),inverseTrash:true});
       toast.success(language === 'zh'
         ? `已將 ${targets.length} 份歌單複製到「${projectName}」`
         : `Copied ${targets.length} setlist${targets.length === 1 ? '' : 's'} to "${projectName}"`);
     }
 
+    if(mode==='move')recordHistory('歌單分類變更','setlist move',targets.map(item=>({resource:'setlist',id:item.id,before:item,after:nextSetlists.find(next=>next.id===item.id)!})));
     setSetlists(nextSetlists);
     if (mode === 'move' && setlistPanelView !== 'list' && selectedSetlistId && setlistIds.includes(selectedSetlistId)) {
       handleSetlistProjectFilterChange(nextProjectId ? {kind:'owned-project',projectId:nextProjectId} : {kind:'all'});
@@ -5152,6 +5232,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const nextSetlists = setlists.map((item) =>
       targetIds.has(item.id) ? { ...item, archived, updatedAt: now } : item
     );
+    recordHistory(archived ? '歌單歸檔' : '取消歌單歸檔', archived ? 'setlist archive' : 'setlist unarchive', targets.map(item => ({ resource: 'setlist', id: item.id, before: item, after: nextSetlists.find(next => next.id === item.id)! })));
     setSetlists(nextSetlists);
     exitMultiSelect();
     void persistWorkspace(songs, nextSetlists).catch(() => {
@@ -5162,7 +5243,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       : `${archived ? 'Archived' : 'Restored'} ${targets.length} setlist${targets.length === 1 ? '' : 's'}`);
   };
 
-  const handleBatchDeleteSelectedSetlists = () => {
+  const handleBatchDeleteSelectedSetlists = async () => {
     const ids = multiSelectedSetlistIds;
     if (ids.length === 0) return;
     const targets = setlists.filter((item) => ids.includes(item.id));
@@ -5171,10 +5252,25 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
     const confirmed = window.confirm(language === 'zh'
-      ? `要刪除選取的 ${targets.length} 份歌單嗎？此動作無法復原。`
-      : `Delete ${targets.length} selected setlist${targets.length === 1 ? '' : 's'}? This cannot be undone.`);
+      ? `要刪除選取的 ${targets.length} 份歌單嗎？可用「撤銷」整批恢復。`
+      : `Delete ${targets.length} selected setlist${targets.length === 1 ? '' : 's'}? Undo restores the entire batch.`);
     if (!confirmed) return;
     const targetIds = new Set(ids);
+    const repository = cloudRepositoryRef.current;
+    const scope = historyScope;
+    let trashResources: WorkspaceHistoryEntry['trashResources'];
+    if (repository) {
+      if (!navigator.onLine) { toast.error(language === 'zh' ? '請連線後再刪除雲端歌單。' : 'Go online to delete cloud setlists.'); return; }
+      const release = beginCloudMutation(); setHistoryForwardBusy(true);
+      try {
+        await persistHistoryBaseline.current(songs, setlists, projects);
+        trashResources = await repository.trashWorkspaceResources(targets.map(target => ({ type:'setlist',id:target.id,expected:{...target} })));
+        if (historyLive.current.scope !== scope || cloudRepositoryRef.current !== repository) return;
+        setSavedSetlists(current => current.filter(item => !targetIds.has(item.id)));
+      } catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); return; }
+      finally { release(); setHistoryForwardBusy(false); }
+    }
+    recordHistory('批次刪除歌單', 'batch setlist deletion', targets.map(target => ({ resource:'setlist',id:target.id,before:target,after:null })), undefined,{trashResources});
     const nextSetlists = setlists.filter((item) => !targetIds.has(item.id));
     if (selectedSetlistId && targetIds.has(selectedSetlistId)) {
       const fallback = nextSetlists[0] ?? null;
@@ -5183,7 +5279,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
     setSetlists(nextSetlists);
     exitMultiSelect();
-    void persistWorkspace(songs, nextSetlists).catch(() => {
+    if (!repository) void persistWorkspace(songs, nextSetlists).catch(() => {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
     });
     toast.success(language === 'zh' ? `已刪除 ${targets.length} 份歌單` : `Deleted ${targets.length} setlist${targets.length === 1 ? '' : 's'}`);
@@ -5226,6 +5322,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       }))
     };
     const nextSetlists = [newSetlist, ...setlists];
+    recordHistory('複製歌單', 'copy setlist', [{resource:'setlist',id:newSetlist.id,before:null,after:newSetlist}],undefined,
+      {trashResources:[{type:'setlist',id:newSetlist.id}],inverseTrash:true});
     setSetlists(nextSetlists);
     void persistWorkspace(songs, nextSetlists).catch(() => {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -5814,6 +5912,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   }, [activeLibraryId, canManageActiveTeam, isTeamManagementOpen]);
 
   const handleSetlistNameChange = (setlistId: string, name: string) => {
+    const target = setlists.find(item => item.id === setlistId);
+    if (!target || !canManageSetlist(target)) return;
+    recordHistory('歌單重新命名', 'setlist rename', [{ resource: 'setlist', id: setlistId, before: target, after: { ...target, name } }],historyRenameGroup.current);
     replaceSetlist(setlistId, (currentSetlist) => ({
       ...currentSetlist,
       name
@@ -5846,21 +5947,36 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     personalSetlistDisplay.setMode(selectedSetlist.id, mode);
   };
 
-  const handleDeleteSetlist = (setlistId: string) => {
+  const handleDeleteSetlist = async (setlistId: string) => {
     const targetSetlist = setlists.find((item) => item.id === setlistId);
+    if (!targetSetlist || historyForwardBusy) return;
     const canDeleteTarget = !isTeamWorkspace || canEditOwnedTeamSetlist(targetSetlist);
     if (!canDeleteTarget) {
       toast.error(language === 'zh' ? '你沒有刪除這份團隊歌單的權限。' : 'You do not have permission to delete this team setlist.');
       return;
     }
-    const confirmed = window.confirm(copy.confirmDeleteSetlist);
+    const confirmed = window.confirm(language === 'zh' ? '要刪除這份歌單嗎？可用「撤銷」恢復歌曲與共享設定。' : 'Delete this setlist? Undo restores its songs and sharing settings.');
     if (!confirmed) {
       return;
     }
 
     setIsSetlistActionsMenuOpen(false);
-
-
+    let trashId: string | undefined;
+    const repository = cloudRepositoryRef.current;
+    const requestScope = historyScope;
+    if (repository) {
+      if (!navigator.onLine) { toast.error(language === 'zh' ? '請連線後再刪除雲端歌單。' : 'Go online to delete a cloud setlist.'); return; }
+      const release = beginCloudMutation(); setHistoryForwardBusy(true);
+      try {
+        await persistHistoryBaseline.current(songs, setlists, projects);
+        trashId = await repository.trashWorkspaceResource('setlist', setlistId, { ...targetSetlist });
+        if (historyLive.current.scope !== requestScope || cloudRepositoryRef.current !== repository) return;
+        setSavedSetlists(current => current.filter(item => item.id !== setlistId));
+      } catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); return; }
+      finally { release(); setHistoryForwardBusy(false); }
+    }
+    recordHistory('刪除歌單', 'setlist deletion', [{ resource: 'setlist', id: setlistId, before: targetSetlist, after: null }], undefined,
+      { trashId, trashResource: { type: 'setlist', id: setlistId } });
     const remainingSetlists = setlists.filter((item) => item.id !== setlistId);
     const nextSetlist = remainingSetlists[0] ?? null;
     setSetlists(remainingSetlists);
@@ -5871,7 +5987,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setSetlistSongSearchQuery('');
     }
 
-    void persistWorkspace(songs, remainingSetlists).catch(() => {
+    if (!repository) void persistWorkspace(songs, remainingSetlists).catch(() => {
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
     });
   };
@@ -5893,6 +6009,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     const nextSetlists = setlists.map((item) =>
       item.id === setlistId ? { ...item, archived, updatedAt: Date.now() } : item
     );
+    recordHistory(archived ? '歌單歸檔' : '取消歌單歸檔', archived ? 'setlist archive' : 'setlist unarchive', [{ resource: 'setlist', id: setlistId, before: targetSetlist, after: nextSetlists.find(item => item.id === setlistId)! }]);
     setSetlists(nextSetlists);
 
     // Archiving the open setlist hides it from the default list, so drop back to
@@ -6029,6 +6146,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
 
+    recordHistory('加入歌曲', 'add songs', [{resource:'setlist',id:selectedSetlist.id,before:selectedSetlist,
+      after:{...selectedSetlist,songs:reindexSetlistSongs([...selectedSetlist.songs,...newSetlistSongs])}}],undefined,
+      {trashResources:newSetlistSongs.map(item=>({type:'entry',id:item.id})),inverseTrash:true});
+
     replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
       ...currentSetlist,
       songs: reindexSetlistSongs([...currentSetlist.songs, ...newSetlistSongs])
@@ -6081,65 +6202,28 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     });
   };
 
-  // Remove duplicate songs from the library — songs whose title and musical
-  // content are identical (ignoring id/timestamps). Keeps the first occurrence
-  // and re-points any setlist references from removed copies to the kept one.
-  const handleRemoveLibrarySongDuplicates = () => {
+  // Archive identical source copies without rewriting existing setlist references.
+  const handleRemoveLibrarySongDuplicates = async () => {
     if (isTeamWorkspace) {
-      toast.info(language === 'zh'
-        ? '團隊曲庫允許同名或同內容的不同版本，不會自動合併。'
-        : 'Team libraries allow separate same-title or same-content versions and are not auto-merged.');
+      toast.info(language === 'zh' ? '團隊曲庫保留各自的歌曲版本，不會自動合併。' : 'Team libraries preserve separate song versions.');
       return;
     }
-    if (!canEditTeamSongs) {
-      toast.error(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this song library.');
-      return;
+    const kept = new Set<string>();
+    const duplicateIds: string[] = [];
+    for (const item of songs.filter(item => !item.archivedAt)) {
+      const { id, updatedAt: _updated, createdAt: _created, createdBy: _creator, teamSource: _source, archivedAt: _archived, ...content } = item;
+      const key = historySignature(content);
+      if (kept.has(key)) duplicateIds.push(id); else kept.add(key);
     }
-
-    const contentKeyOf = (item: StoredSong) => {
-      const { id: _id, updatedAt: _u, createdAt: _c, teamSource: _t, ...rest } = item;
-      return JSON.stringify(rest);
-    };
-
-    const keptIdByContent = new Map<string, string>();
-    const remap = new Map<string, string>();
-    const deduped: StoredSong[] = [];
-    for (const item of songs) {
-      const key = contentKeyOf(item);
-      const keptId = keptIdByContent.get(key);
-      if (keptId) {
-        remap.set(item.id, keptId);
-        continue;
-      }
-      keptIdByContent.set(key, item.id);
-      deduped.push(item);
-    }
-
-    const removed = songs.length - deduped.length;
-    if (removed === 0) {
+    if (!duplicateIds.length) {
       toast.info(language === 'zh' ? '沒有發現重複歌曲' : 'No duplicate songs found');
       return;
     }
-
-    // Re-point setlist references from removed copies to the kept song.
-    const nextSetlists = setlists.map((setlist) => ({
-      ...setlist,
-      songs: setlist.songs.map((item) =>
-        remap.has(item.songId) ? { ...item, songId: remap.get(item.songId) as string } : item
-      )
-    }));
-
-    setSongs(deduped);
-    setSetlists(nextSetlists);
-    if (selectedSongId && remap.has(selectedSongId)) {
-      setSelectedSongId(remap.get(selectedSongId) as string);
-    }
-    setSelectedLibrarySongIds([]);
-    toast.success(
-      language === 'zh'
-        ? `已移除 ${removed} 首重複歌曲`
-        : `Removed ${removed} duplicate song${removed > 1 ? 's' : ''}`
-    );
+    if (!window.confirm(language === 'zh'
+      ? `要封存 ${duplicateIds.length} 首內容相同的歌曲副本嗎？既有歌單保留原本引用，可用撤銷恢復。`
+      : `Archive ${duplicateIds.length} identical song copies? Existing setlist references are preserved. You can undo this.`)) return;
+    try { await updateTeamSongArchiveState(duplicateIds, true); }
+    catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }
   };
 
   const handleUpdateSetlistSong = (setlistSongId: string, updater: (currentSong: SetlistSong) => SetlistSong) => {
@@ -6150,13 +6234,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
 
+    const original = selectedSetlist.songs.find(item => item.id === setlistSongId);
+    if (!original) return;
+    const next = updater(original);
+    recordHistory('歌單歌曲編輯', 'setlist song edit', [{ resource: 'setlist', id: selectedSetlist.id,
+      before: selectedSetlist, after: { ...selectedSetlist, songs: selectedSetlist.songs.map(item => item.id === setlistSongId ? next : item) } }]);
     replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
       ...currentSetlist,
-      songs: currentSetlist.songs.map((item) => item.id === setlistSongId ? updater(item) : item)
+      songs: currentSetlist.songs.map((item) => item.id === setlistSongId ? next : item)
     }));
   };
 
-  const handleRemoveSetlistSong = (setlistSongId: string) => {
+  const handleRemoveSetlistSong = async (setlistSongId: string) => {
     if (!selectedSetlist) {
       return;
     }
@@ -6176,12 +6265,30 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
 
+    if (!targetSetlistSong || historyForwardBusy) return;
+    const repository = cloudRepositoryRef.current;
+    const requestScope = historyScope;
+    let trashId: string | undefined;
+    if (repository) {
+      if (!navigator.onLine) { toast.error(language === 'zh' ? '請連線後再移出雲端歌曲。' : 'Go online to remove a cloud song entry.'); return; }
+      const release = beginCloudMutation(); setHistoryForwardBusy(true);
+      try {
+        await persistHistoryBaseline.current(songs, setlists, projects);
+        trashId = await repository.trashWorkspaceResource('entry', setlistSongId, { ...targetSetlistSong });
+        if (historyLive.current.scope !== requestScope || cloudRepositoryRef.current !== repository) return;
+        setSavedSetlists(current => current.map(list => list.id === selectedSetlist.id ? { ...list, songs: reindexSetlistSongs(list.songs.filter(item => item.id !== setlistSongId)) } : list));
+      } catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); return; }
+      finally { release(); setHistoryForwardBusy(false); }
+    }
+    const remainingSongs = reindexSetlistSongs(selectedSetlist.songs.filter((item) => item.id !== setlistSongId));
+    recordHistory('移出歌曲', 'song removal', [{ resource: 'setlist', id: selectedSetlist.id, before: selectedSetlist, after: { ...selectedSetlist, songs: remainingSongs } }], undefined,
+      { trashId, trashResource: { type: 'entry', id: setlistSongId } });
+
     replaceSetlist(selectedSetlist.id, (currentSetlist) => ({
       ...currentSetlist,
       songs: currentSetlist.songs.filter((item) => item.id !== setlistSongId)
     }));
 
-    const remainingSongs = selectedSetlist.songs.filter((item) => item.id !== setlistSongId);
     setSelectedSetlistSongId(remainingSongs[0]?.id ?? null);
   };
 
@@ -6191,7 +6298,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     if (!selectedSetlist || !cloudRepositoryRef.current) return;
     const nextSongs = reorderSetlistSongs(selectedSetlist.songs, sourceId, targetId);
     if (nextSongs === selectedSetlist.songs) return;
-    const orderedIds = nextSongs.map((item) => item.id);
+    const before = selectedSetlist;
+    const entry = createWorkspaceHistoryEntry({ zh:'歌曲排序',en:'song order' },[{resource:'setlist',id:before.id,before,after:{...before,songs:nextSongs}}],historyDragGroup.current);
+    if (!entry) return;
+    const repository = cloudRepositoryRef.current;
+    const work = joinedHistoryWork.current;
+    const requestLibraryId = activeLibraryId;
     setJoinedProjects((current) => current.map((jp) => {
       if (!jp.setlists.some((sl) => sl.id === selectedSetlistId)) return jp;
       return {
@@ -6204,12 +6316,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         })
       };
     }));
-    if (selectedSetlistId) {
-      const release = beginCloudMutation();
-      void cloudRepositoryRef.current.reorderProjectSetlist(selectedSetlistId, orderedIds)
-        .catch((error) => toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed))
-        .finally(release);
-    }
+    const release = beginCloudMutation();
+    work.pending += 1;
+    if (!historyDragGroup.current) setHistoryForwardBusy(true);
+    work.queue = work.queue.catch(() => undefined).then(async () => {
+      await repository.applyWorkspaceHistory(entry,'redo',requestLibraryId ?? undefined);
+      if (historyLive.current.scope === work.scope && cloudRepositoryRef.current === repository) globalHistory.record(entry);
+    }).catch(async error => {
+      if (historyLive.current.scope !== work.scope || cloudRepositoryRef.current !== repository) return;
+      toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+      try {
+        const fresh = await repository.loadJoinedWorkspace();
+        if (historyLive.current.scope === work.scope && cloudRepositoryRef.current === repository) setJoinedProjects(fresh.joinedProjects);
+      } catch { /* Keep the dirty order visible; a retry must pass the server guard. */ }
+    }).finally(() => {
+      work.pending -= 1; release();
+      if (!work.pending && historyLive.current.scope === work.scope) setHistoryForwardBusy(false);
+    });
   };
 
   const moveSetlistSong = (sourceId: string, targetId: string) => {
@@ -6221,6 +6344,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       moveJoinedProjectSetlistSong(sourceId, targetId);
       return;
     }
+
+    const nextSongs = reorderSetlistSongs(selectedSetlist.songs, sourceId, targetId);
+    if (nextSongs === selectedSetlist.songs) return;
+    recordHistory('歌曲排序', 'song order', [{ resource: 'setlist', id: selectedSetlist.id, before: selectedSetlist,
+      after: { ...selectedSetlist, songs: nextSongs } }], historyDragGroup.current);
 
     replaceSetlist(selectedSetlist.id, (currentSetlist) => {
       const nextSongs = reorderSetlistSongs(currentSetlist.songs, sourceId, targetId);
@@ -6235,123 +6363,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     });
   };
 
-  const finishSetlistSongPointerDrag = (event?: React.PointerEvent<HTMLElement>) => {
-    const dragState = setlistSongPointerDragRef.current;
-    if (!dragState || (event && event.pointerId !== dragState.pointerId)) {
-      return;
-    }
-
-    setlistSongPointerDragRef.current = null;
-
-    if (dragState.holdTimeoutId !== null) {
-      window.clearTimeout(dragState.holdTimeoutId);
-    }
-
-    try {
-      dragState.element.releasePointerCapture(dragState.pointerId);
-    } catch {
-      // Pointer capture may already be released by the browser.
-    }
-
-    if (dragState.activated) {
-      document.body.style.userSelect = dragState.previousUserSelect;
-    }
-
-    setDraggingSetlistSongId(null);
-    setDragOverSetlistSongId(null);
-  };
-
-  // Touch/pen input needs a short hold before the handle starts dragging, while
-  // mouse users expect the row to enter drag mode immediately on the handle.
-  const SETLIST_DRAG_HOLD_MS = 180;
-
-  const activateSetlistSongPointerDrag = () => {
-    const dragState = setlistSongPointerDragRef.current;
-    if (!dragState || dragState.activated) {
-      return;
-    }
-
-    dragState.activated = true;
-    dragState.holdTimeoutId = null;
-    dragState.previousUserSelect = document.body.style.userSelect;
-    document.body.style.userSelect = 'none';
-    try {
-      dragState.element.setPointerCapture(dragState.pointerId);
-    } catch {
-      // Pointer may have already been released before the hold elapsed.
-    }
-    setDraggingSetlistSongId(dragState.sourceId);
-    setDragOverSetlistSongId(dragState.sourceId);
-  };
-
-  const handleSetlistSongDragHandlePointerDown = (
-    event: React.PointerEvent<HTMLButtonElement>,
-    setlistSongId: string
-  ) => {
-    if (!canReorderSelectedSetlist || event.button !== 0) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    const element = event.currentTarget;
-    try {
-      element.setPointerCapture(event.pointerId);
-    } catch {
-      // Older WebKit builds can throw if capture is unavailable for the event.
-    }
-
-    const needsTouchHold = event.pointerType === 'touch' || event.pointerType === 'pen';
-    const holdTimeoutId = needsTouchHold
-      ? window.setTimeout(() => {
-        activateSetlistSongPointerDrag();
-      }, SETLIST_DRAG_HOLD_MS)
-      : null;
-
-    setlistSongPointerDragRef.current = {
-      sourceId: setlistSongId,
-      pointerId: event.pointerId,
-      lastTargetId: setlistSongId,
-      previousUserSelect: document.body.style.userSelect,
-      element,
-      activated: false,
-      holdTimeoutId
-    };
-
-    if (!needsTouchHold) {
-      activateSetlistSongPointerDrag();
-    }
-  };
-
-  const handleSetlistSongDragHandlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const dragState = setlistSongPointerDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    if (!dragState.activated) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    const targetElement = document.elementFromPoint(event.clientX, event.clientY);
-    const targetCard = targetElement?.closest('[data-setlist-song-id]') as HTMLElement | null;
-    const targetId = targetCard?.dataset.setlistSongId;
-    if (!targetId || targetId === dragState.lastTargetId) {
-      return;
-    }
-
-    dragState.lastTargetId = targetId;
-    setDragOverSetlistSongId(targetId);
-    if (targetId !== dragState.sourceId) {
-      moveSetlistSong(dragState.sourceId, targetId);
-    }
-  };
+  const { onPointerDown: handleSetlistSongDragHandlePointerDown, cancel: finishSetlistSongPointerDrag } = useSetlistSongDrag({
+    enabled: canReorderSelectedSetlist && isSetlistMode && isSheetView && setlistPanelView === 'detail'
+      && !isPerformanceMode && !isSwitchingLibrary && !isLoadingCloudWorkspace,
+    scopeKey: JSON.stringify([authenticatedUser?.id, activeLibraryId, selectedSetlist?.id, isSetlistSongSortMode]),
+    onMove: moveSetlistSong,
+    onDraggingChange: id => {
+      const previousGroup=historyDragGroup.current;
+      historyDragGroup.current = id ? crypto.randomUUID() : undefined; setDraggingSetlistSongId(id);
+      if (!id && joinedHistoryWork.current.pending && joinedHistoryWork.current.scope === historyScope) setHistoryForwardBusy(true);
+      if(!id && previousGroup) {
+        const entry=globalHistory.getUndoEntry();
+        if(entry?.group===previousGroup)toast.success(language==='zh'?'已調整歌曲順序':'Song order updated',{id:'workspace-history-action',duration:6500,
+          action:{label:language==='zh'?'撤銷':'Undo',run:()=>{void globalHistory.undo(entry.id);}}});
+      }
+    },
+    onTargetChange: setDragOverSetlistSongId
+  });
 
   const handleExportSongLibraryJson = () => {
     if (isTeamWorkspace && !canEditTeamSongs) {
@@ -6510,7 +6538,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         ? currentId
         : null);
       if (importMode === 'replace-library') {
-        setSongHistories({});
+
       }
       setSelectedLibrarySongIds([]);
       setIsLibraryEditing(false);
@@ -6575,7 +6603,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setSelectedSongId((currentId) => nextSongs.some((item) => item.id === currentId && (!item.archivedAt || isShowingArchivedSongs))
         ? currentId
         : nextSongs.find((item) => !item.archivedAt)?.id ?? (isShowingArchivedSongs ? nextSongs[0]?.id ?? null : null));
-      setSongHistories({});
+
       setSelectedLibrarySongIds([]);
       setIsLibraryEditing(false);
       setTeamLibraryUpdatePending(false);
@@ -7095,6 +7123,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       ...cloneSong(targetSong),
       title: buildDuplicateSongTitle(songs, targetSong.title, copy.untitledSong, duplicateLabel)
     });
+    recordHistory('複製歌曲','duplicate song',[{resource:'song',id:duplicatedSong.id,before:{...duplicatedSong,archivedAt:Date.now()},after:duplicatedSong}]);
 
     setSongs((currentSongs) => {
       const targetIndex = currentSongs.findIndex((item) => item.id === songId);
@@ -7106,10 +7135,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       nextSongs.splice(targetIndex + 1, 0, duplicatedSong);
       return nextSongs;
     });
-    setSongHistories((currentHistory) => ({
-      ...currentHistory,
-      [duplicatedSong.id]: { past: [], future: [] }
-    }));
+
     setSelectedSongId(duplicatedSong.id);
     setActiveAppView('sheet');
     setIsEditing(true);
@@ -7177,10 +7203,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setSongs(nextSongs);
       setSavedSongs(cloneSong(nextSongs));
       setLastSavedAt(savedAt);
-      setSongHistories((currentHistory) => ({
-        ...currentHistory,
-        [syncedSong.id]: { past: [], future: [] }
-      }));
+
       setTeamSourceStatuses((current) => ({
         ...current,
         [syncedSong.id]: {
@@ -7205,7 +7228,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
 
-    pushSongHistory(songId, targetSong);
+
     replaceSongInLibrary(songId, { ...targetSong, title });
   };
 
@@ -7218,19 +7241,32 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   const updateTeamSongArchiveState = async (songIds: string[], archived: boolean) => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || !activeLibraryId || !isTeamWorkspace || !canEditTeamSongs) {
+    if (!canEditTeamSongs || historyForwardBusy) {
       throw new Error(language === 'zh'
         ? '你沒有管理這個團隊曲庫的權限。'
         : 'You do not have permission to manage this team song library.');
     }
 
-    await flushTeamSongDraftsBeforeMutation();
-    const result = await repository.archiveTeamSongs(activeLibraryId, songIds, archived);
-    await refreshActiveTeamSongs(true);
-    setSelectedLibrarySongIds([]);
-    toast.success(language === 'zh'
-      ? `已${archived ? '封存' : '取消封存'} ${result.changedCount} 首歌曲。`
-      : `${archived ? 'Archived' : 'Restored'} ${result.changedCount} song${result.changedCount === 1 ? '' : 's'}.`);
+    const originals = songs.filter(item=>songIds.includes(item.id) && Boolean(item.archivedAt)!==archived);
+    const now=Date.now(),requestScope=historyScope;
+    const entry=createWorkspaceHistoryEntry({zh:archived?'歌曲封存':'取消歌曲封存',en:archived?'song archive':'song unarchive'},
+      originals.map(item=>({resource:'song',id:item.id,before:item,after:{...item,archivedAt:archived?now:null}})));
+    if(!entry)return;
+    if(repository&&!navigator.onLine)throw new Error(language==='zh'?'請連線後再封存雲端歌曲。':'Go online to archive cloud songs.');
+    const release=beginCloudMutation();setHistoryForwardBusy(true);
+    try {
+      if(repository){
+        await persistHistoryBaseline.current(songs,setlists,projects);
+        await repository.applyWorkspaceHistory(entry,'redo',activeLibraryId??undefined);
+      } else {
+        await persistHistoryBaseline.current(songs.map(item=>songIds.includes(item.id)?{...item,archivedAt:archived?now:null}:item),setlists,projects);
+      }
+      if(historyLive.current.scope!==requestScope||cloudRepositoryRef.current!==repository)return;
+      const update=(items:StoredSong[])=>items.map(item=>originals.some(original=>original.id===item.id)?{...item,archivedAt:archived?now:null,updatedAt:now}:item);
+      setSongs(update);setSavedSongs(update);globalHistory.record(entry);setSelectedLibrarySongIds([]);
+      toast.success(language==='zh'?`已${archived?'封存':'取消封存'} ${originals.length} 首歌曲。`:`${archived?'Archived':'Restored'} ${originals.length} songs.`,
+        {id:'workspace-history-action',duration:6500,action:{label:language==='zh'?'撤銷':'Undo',run:()=>{void globalHistory.undo(entry.id);}}});
+    } finally {release();setHistoryForwardBusy(false);}
   };
 
   const permanentlyDeleteTeamSongs = async (songIds: string[]) => {
@@ -7243,11 +7279,35 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
     await flushTeamSongDraftsBeforeMutation();
     const result = await repository.deleteTeamSongs(activeLibraryId, songIds);
+    await globalHistory.clear();
+    toast.dismiss('workspace-history-action');
     await refreshActiveTeamSongs(true);
     setSelectedLibrarySongIds([]);
     toast.success(language === 'zh'
       ? `已永久刪除 ${result.deletedCount} 首歌曲。`
       : `Permanently deleted ${result.deletedCount} song${result.deletedCount === 1 ? '' : 's'}.`);
+  };
+
+  const permanentlyDeletePersonalSongs = async (songIds: string[]) => {
+    const requestScope = historyScope;
+    const ids = new Set(songIds);
+    const remaining = songs.filter(item => !ids.has(item.id));
+    const nextSongs = remaining.length ? remaining : [createDefaultSong(1)];
+    const nextSetlists = setlists.map(list => ({ ...list,
+      songs: reindexSetlistSongs(list.songs.filter(item => !ids.has(item.songId))), updatedAt: Date.now() }));
+    const release = beginCloudMutation();
+    setHistoryForwardBusy(true);
+    try {
+      await persistHistoryBaseline.current(nextSongs, nextSetlists, projects);
+      if (historyLive.current.scope !== requestScope) return;
+      setSongs(nextSongs); setSetlists(nextSetlists);
+      setSavedSongs(cloneSong(nextSongs)); setSavedSetlists(cloneSong(nextSetlists));
+      setSelectedLibrarySongIds([]);
+      if (ids.has(selectedSongId)) setSelectedSongId(nextSongs[0].id);
+      await globalHistory.clear();
+      toast.dismiss('workspace-history-action');
+      toast.success(language === 'zh' ? `已永久刪除 ${songIds.length} 首歌曲。` : `Permanently deleted ${songIds.length} songs.`);
+    } finally { release(); setHistoryForwardBusy(false); }
   };
 
   const handleDeleteSong = async (songId: string) => {
@@ -7260,12 +7320,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
 
+    if(!isTeamWorkspace&&!targetSong.archivedAt){
+      if(!window.confirm(language==='zh'?`要封存「${targetSong.title||copy.untitledSong}」嗎？可用「撤銷」恢復，既有歌單會保留。`:`Archive "${targetSong.title||copy.untitledSong}"? Undo restores it and existing setlists stay intact.`))return;
+      try{await updateTeamSongArchiveState([songId],true);}catch(error){toast.error(error instanceof Error?error.message:copy.cloudSyncFailed);}
+      return;
+    }
+
     if (isTeamWorkspace) {
       const isArchived = Boolean(targetSong.archivedAt);
       const confirmed = window.confirm(isArchived
         ? (language === 'zh'
-          ? `要永久刪除「${targetSong.title || copy.untitledSong}」嗎？\n\n只有沒有任何歌單或有效分享引用時才能刪除。`
-          : `Permanently delete "${targetSong.title || copy.untitledSong}"?\n\nDeletion is allowed only when no setlist or active share still references it.`)
+          ? `要永久刪除「${targetSong.title || copy.untitledSong}」嗎？\n\n只有沒有任何歌單或有效分享引用時才能刪除。此操作無法撤銷，並會清除本工作區的撤銷記錄。`
+          : `Permanently delete "${targetSong.title || copy.untitledSong}"?\n\nDeletion is allowed only when no setlist or active share still references it. This cannot be undone and clears this workspace’s undo history.`)
         : (language === 'zh'
           ? `要封存「${targetSong.title || copy.untitledSong}」嗎？\n\n它會從曲庫與新增歌曲搜尋中隱藏，但既有歌單仍可顯示。`
           : `Archive "${targetSong.title || copy.untitledSong}"?\n\nIt will be hidden from library and add-song search, while existing setlists keep working.`));
@@ -7285,52 +7351,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
     const confirmed = window.confirm(
       language === 'zh'
-        ? `要刪除「${targetSong.title || copy.untitledSong}」嗎？`
-        : `Delete "${targetSong.title || copy.untitledSong}"?`
+        ? `要永久刪除「${targetSong.title || copy.untitledSong}」嗎？這會移除歌單引用，無法撤銷，並會清除本工作區的撤銷記錄。`
+        : `Permanently delete "${targetSong.title || copy.untitledSong}" and its setlist references? This cannot be undone and clears this workspace’s undo history.`
     );
     if (!confirmed) {
       return;
     }
 
-    const remainingSongs = songs.filter((item) => item.id !== songId);
-    const remainingSetlists = setlists.map((setlist) => ({
-      ...setlist,
-      songs: reindexSetlistSongs(setlist.songs.filter((item) => item.songId !== songId)),
-      updatedAt: Date.now()
-    }));
-
-    if (remainingSongs.length === 0) {
-      const replacementSong = createDefaultSong(1);
-      setSongs([replacementSong]);
-      setSetlists([]);
-      setSavedSongs([cloneSong(replacementSong)]);
-      setSavedSetlists([]);
-      setSelectedSetlistId(null);
-      setSelectedSetlistSongId(null);
-      setSelectedSongId(replacementSong.id);
-      setSongHistories({});
-      setSelectedLibrarySongIds([]);
-      setIsEditing(true);
-      void persistWorkspace([replacementSong], []).catch(() => {
-        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-      });
-      return;
-    }
-
-    setSongs(remainingSongs);
-    setSetlists(remainingSetlists);
-    setSongHistories((currentHistory) =>
-      Object.fromEntries(Object.entries(currentHistory).filter(([id]) => id !== songId))
-    );
-    setSelectedLibrarySongIds((currentIds) => currentIds.filter((id) => id !== songId));
-
-    if (selectedSongId === songId) {
-      setSelectedSongId(remainingSongs[0].id);
-    }
-
-    void persistWorkspace(remainingSongs, remainingSetlists).catch(() => {
-      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-    });
+    try { await permanentlyDeletePersonalSongs([songId]); }
+    catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }
   };
 
   const handleToggleSongBulkSelection = (songId: string) => {
@@ -7375,6 +7404,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       return;
     }
 
+    if(!isTeamWorkspace && songs.some(item=>selectedLibrarySongIds.includes(item.id)&&!item.archivedAt)){
+      await handleArchiveSelectedSongs(true);return;
+    }
+
     if (isTeamWorkspace) {
       const targets = songs.filter((item) => selectedLibrarySongIds.includes(item.id));
       if (targets.some((item) => !item.archivedAt)) {
@@ -7383,8 +7416,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       }
 
       const confirmedPermanentDelete = window.confirm(language === 'zh'
-        ? `要永久刪除選取的 ${targets.length} 首封存歌曲嗎？\n\n有任何歌單或有效分享引用時，資料庫會拒絕整批刪除。`
-        : `Permanently delete ${targets.length} selected archived song${targets.length === 1 ? '' : 's'}?\n\nThe database will reject the whole operation if a setlist or active share still references any song.`);
+        ? `要永久刪除選取的 ${targets.length} 首封存歌曲嗎？\n\n有任何歌單或有效分享引用時，資料庫會拒絕整批刪除。成功後會清除本工作區的撤銷記錄。`
+        : `Permanently delete ${targets.length} selected archived song${targets.length === 1 ? '' : 's'}?\n\nThe database will reject the whole operation if a setlist or active share still references any song. Successful deletion clears this workspace’s undo history.`);
       if (!confirmedPermanentDelete) return;
       try {
         await permanentlyDeleteTeamSongs(targets.map((item) => item.id));
@@ -7396,176 +7429,50 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
     const confirmed = window.confirm(
       language === 'zh'
-        ? `要刪除選取的 ${selectedLibrarySongIds.length} 首歌曲嗎？`
-        : `Delete ${selectedLibrarySongIds.length} selected songs?`
+        ? `要永久刪除選取的 ${selectedLibrarySongIds.length} 首封存歌曲嗎？這會移除歌單引用，無法撤銷，並會清除本工作區的撤銷記錄。`
+        : `Permanently delete ${selectedLibrarySongIds.length} archived songs and their setlist references? This cannot be undone and clears this workspace’s undo history.`
     );
     if (!confirmed) {
       return;
     }
 
-    const selectedIdSet = new Set(selectedLibrarySongIds);
-    const remainingSongs = songs.filter((item) => !selectedIdSet.has(item.id));
-    const remainingSetlists = setlists.map((setlist) => ({
-      ...setlist,
-      songs: reindexSetlistSongs(setlist.songs.filter((item) => !selectedIdSet.has(item.songId))),
-      updatedAt: Date.now()
-    }));
-
-    if (remainingSongs.length === 0) {
-      const replacementSong = createDefaultSong(1);
-      setSongs([replacementSong]);
-      setSetlists([]);
-      setSavedSongs([cloneSong(replacementSong)]);
-      setSavedSetlists([]);
-      setSelectedSetlistId(null);
-      setSelectedSetlistSongId(null);
-      setSelectedSongId(replacementSong.id);
-      setSongHistories({});
-      setSelectedLibrarySongIds([]);
-      setIsEditing(true);
-      void persistWorkspace([replacementSong], []).catch(() => {
-        setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-      });
-      return;
-    }
-
-    setSongs(remainingSongs);
-    setSetlists(remainingSetlists);
-    setSongHistories((currentHistory) =>
-      Object.fromEntries(Object.entries(currentHistory).filter(([id]) => !selectedIdSet.has(id)))
-    );
-    setSelectedLibrarySongIds([]);
-
-    if (selectedIdSet.has(selectedSongId)) {
-      setSelectedSongId(remainingSongs[0].id);
-    }
-
-    void persistWorkspace(remainingSongs, remainingSetlists).catch(() => {
-      setSyncStatus(navigator.onLine ? 'failed' : 'offline');
-    });
+    try { await permanentlyDeletePersonalSongs(selectedLibrarySongIds); }
+    catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }
   };
 
-  const handleUndo = () => {
-    if (!song || currentSongHistory.past.length === 0 || !canEditTeamSongs) {
-      return;
-    }
 
-    const previousSong = currentSongHistory.past[currentSongHistory.past.length - 1];
-    const newPast = currentSongHistory.past.slice(0, currentSongHistory.past.length - 1);
 
-    setSongHistories((currentHistory) => ({
-      ...currentHistory,
-      [song.id]: {
-        past: newPast,
-        future: [cloneSong(song), ...currentSongHistory.future]
-      }
-    }));
 
-    replaceSongInLibrary(song.id, previousSong);
-  };
 
-  const handleRedo = () => {
-    if (!song || currentSongHistory.future.length === 0 || !canEditTeamSongs) {
-      return;
-    }
 
-    const nextSong = currentSongHistory.future[0];
-    const newFuture = currentSongHistory.future.slice(1);
 
-    setSongHistories((currentHistory) => ({
-      ...currentHistory,
-      [song.id]: {
-        past: [...currentSongHistory.past, cloneSong(song)],
-        future: newFuture
-      }
-    }));
 
-    replaceSongInLibrary(song.id, nextSong);
-  };
-
-  const handleSetlistUndo = () => {
-    if (!selectedSetlistSong || currentSetlistSongHistory.past.length === 0 || !canEditSelectedSetlistContent) {
-      return;
-    }
-
-    const previousSnapshot = currentSetlistSongHistory.past[currentSetlistSongHistory.past.length - 1];
-    const previousSong = previousSnapshot.song;
-    const newPast = currentSetlistSongHistory.past.slice(0, currentSetlistSongHistory.past.length - 1);
-
-    setSetlistSongHistories((currentHistory) => ({
-      ...currentHistory,
-      [selectedSetlistSong.id]: {
-        past: newPast,
-        future: [{
-          song: cloneSong(activeSetlistEditableSong ?? previousSong),
-          sectionOrder: [...selectedSetlistSong.sectionOrder]
-        }, ...currentSetlistSongHistory.future]
-      }
-    }));
-
-    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-      ...currentSetlistSong,
-      overrideKey: previousSong.currentKey,
-      ...(!isCloudMode ? { capo: previousSong.capo ?? 0 } : {}),
-      sectionOrder: sanitizeSetlistSectionOrder(previousSnapshot.sectionOrder, previousSong),
-      songData: cloneSong(normalizeSongBars(previousSong))
-    }));
-  };
-
-  const handleSetlistRedo = () => {
-    if (!selectedSetlistSong || currentSetlistSongHistory.future.length === 0 || !canEditSelectedSetlistContent) {
-      return;
-    }
-
-    const nextSnapshot = currentSetlistSongHistory.future[0];
-    const nextSong = nextSnapshot.song;
-    const newFuture = currentSetlistSongHistory.future.slice(1);
-
-    setSetlistSongHistories((currentHistory) => ({
-      ...currentHistory,
-      [selectedSetlistSong.id]: {
-        past: [...currentSetlistSongHistory.past, {
-          song: cloneSong(activeSetlistEditableSong ?? nextSong),
-          sectionOrder: [...selectedSetlistSong.sectionOrder]
-        }],
-        future: newFuture
-      }
-    }));
-
-    handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
-      ...currentSetlistSong,
-      overrideKey: nextSong.currentKey,
-      ...(!isCloudMode ? { capo: nextSong.capo ?? 0 } : {}),
-      sectionOrder: sanitizeSetlistSectionOrder(nextSnapshot.sectionOrder, nextSong),
-      songData: cloneSong(normalizeSongBars(nextSong))
-    }));
-  };
 
   const handleActiveUndo = () => {
     if (activePreviewEditSession) {
       setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current);
-    } else if (isSetlistMode) {
-      handleSetlistUndo();
     } else {
-      handleUndo();
+      void globalHistory.undo();
     }
   };
 
   const handleActiveRedo = () => {
     if (activePreviewEditSession) {
       setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current);
-    } else if (isSetlistMode) {
-      handleSetlistRedo();
     } else {
-      handleRedo();
+      void globalHistory.redo();
     }
   };
 
+  const historyGestureSession=useThreeFingerHistory({ enabled: isSheetView && !isPerformanceMode && !globalHistory.busy && !historyForwardBusy && !draggingSetlistSongId && !isKeyboardShortcutsOpen
+    && !isSwitchingLibrary && !isLoadingCloudWorkspace && (canOpenEditor || globalHistory.canUndo || globalHistory.canRedo),
+    onUndo: handleActiveUndo, onRedo: handleActiveRedo });
   useSongHistoryShortcuts({
-    enabled: isSheetView && canOpenEditor && !isPerformanceMode && !isKeyboardShortcutsOpen
+    enabled: isSheetView && !historyForwardBusy && !draggingSetlistSongId && (canOpenEditor || globalHistory.canUndo || globalHistory.canRedo) && !isPerformanceMode && !isKeyboardShortcutsOpen
       && !isSwitchingLibrary && !isLoadingCloudWorkspace,
     onUndo: handleActiveUndo,
-    onRedo: handleActiveRedo
+    onRedo: handleActiveRedo,
+    gestureSession:historyGestureSession
   });
 
   const handleScrollEditorToTop = () => {
@@ -9469,7 +9376,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       const nextOrder = reorderSetlistSectionOrder(displayedOrder, sourceSectionId, targetSectionId, placement);
       if (nextOrder === displayedOrder || nextOrder.every((sectionId, index) => sectionId === displayedOrder[index])) return;
 
-      pushSetlistSongHistory(selectedSetlistSong.id, activeSetlistEditableSong, selectedSetlistSong.sectionOrder);
+
       handleUpdateSetlistSong(selectedSetlistSong.id, (currentSetlistSong) => ({
         ...currentSetlistSong,
         overrideKey: currentSetlistSong.overrideKey ?? editableSong.currentKey,
@@ -12011,60 +11918,91 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       onRefreshMembers={id => { void loadProjectShareStatus(id); }}
       onRoleChange={async (project, member, role) => { if (role !== (member.role ?? 'viewer')) await handleToggleProjectMemberRole(project.id, member); }}
       onRemoveMember={(project, member) => { void handleRemoveSharedMember('project', project.id, member); }}
+      pinnedProjectIds={pinnedProjectIds} onTogglePin={toggleProjectPin}
     />
   );
 
-  const setlistSearchField = (
-    <label className={`${isPhoneViewport ? 'h-11' : ''} flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white`}>
-      <Search size={15} className="shrink-0 text-gray-400" />
-      <input
-        type="search"
-        value={setlistSearchQuery}
-        onChange={(event) => setSetlistSearchQuery(event.target.value)}
-        placeholder={copy.searchSetlists}
-        className={`${isPhoneViewport ? 'text-base' : 'text-sm'} min-w-0 flex-1 bg-transparent text-gray-700 outline-none placeholder:text-gray-400`}
-        aria-label={copy.searchSetlists}
-      />
-    </label>
-  );
-  const setlistSortPicker = (
-    <select
-      value={setlistSortMode}
-      onChange={(event) => setSetlistSortMode(event.target.value as SetlistSortMode)}
-      className={`${isPhoneViewport ? 'h-11' : 'h-8'} min-w-0 max-w-[9rem] shrink-0 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-none transition-colors focus:border-indigo-300`}
-      aria-label={copy.setlistSort}
-    >
-      {setlistSortOptions.map((option) => (
-        <option key={option.value} value={option.value}>{option.label}</option>
-      ))}
-    </select>
-  );
+  const projectPinAction = (projectId: string) => ({
+    label: pinnedProjectIds.has(projectId) ? (language === 'zh' ? '取消置頂' : 'Unpin project') : (language === 'zh' ? '置頂專案' : 'Pin project'),
+    icon: pinnedProjectIds.has(projectId) ? <PinOff size={16}/> : <Pin size={16}/>,
+    run: () => toggleProjectPin(projectId)
+  });
+  const ownedProjectActions = (project: Project) => [
+    projectPinAction(project.id),
+    { label: language === 'zh' ? '專案管理' : 'Project management', icon: <Users size={16}/>, run: () => handleOpenProjectManagement(project.id) },
+    ...(canManageProject(project) ? [
+      { label: language === 'zh' ? '重新命名' : 'Rename', icon: <Edit3 size={16}/>, run: () => { const name = window.prompt(copy.renameProjectPrompt, project.name); if (name !== null) handleRenameProject(project.id, name); } },
+      { label: language === 'zh' ? '歸檔專案' : 'Archive project', icon: <Archive size={16}/>, run: () => handleSetProjectArchived(project.id, true) },
+      { label: language === 'zh' ? '刪除專案' : 'Delete project', icon: <Trash2 size={16}/>, danger: true, run: () => { void handleDeleteProject(project.id); } }
+    ] : [])
+  ];
+
+  const projectMembersLabel = canViewProjectMembers
+    ? (language === 'zh' ? '成員與權限' : 'Members and permissions')
+    : (language === 'zh' ? '管理專案' : 'Project settings');
+  const projectMembersDescription = !canViewProjectMembers
+    ? (language === 'zh' ? '重新命名、歸檔與其他操作' : 'Rename, archive and other actions')
+    : isLoadingProjectShareStatus
+      ? (language === 'zh' ? '正在載入…' : 'Loading…')
+      : projectShareStatusError
+        ? (language === 'zh' ? '成員載入失敗，點選查看並重試' : 'Members could not load. Open to retry.')
+        : activeProjectShareStatus?.participants.length
+          ? activeProjectShareStatus.participants.map(member => member.name || member.email).join('、')
+          : (language === 'zh' ? '邀請團員加入此專案' : 'Invite your team');
+  const projectMembersAction = selectedProject && (canViewProjectMembers || canManageProject(selectedProject))
+    ? <button type="button" className="setlist-project-members" aria-label={`${projectMembersLabel}：${projectMembersDescription}`}
+        title={`${projectMembersLabel} · ${projectMembersDescription}`} aria-busy={isLoadingProjectShareStatus || undefined}
+        onClick={() => handleOpenProjectManagement(selectedProject.id)}>
+        {canViewProjectMembers ? <Users size={16}/> : <MoreHorizontal size={16}/>}
+        <span>{canViewProjectMembers ? (language === 'zh' ? '成員' : 'Members') : (language === 'zh' ? '管理' : 'Manage')}</span>
+        {canViewProjectMembers && <span className="setlist-project-member-count">{isLoadingProjectShareStatus ? '…' : projectShareStatusError ? <CloudAlert size={15}/> : activeProjectShareStatus?.participants.length ?? 0}</span>}
+      </button>
+    : selectedJoinedProject && canShareSelectedProject
+      ? <button type="button" className="setlist-project-members" aria-label={language === 'zh' ? '分享專案' : 'Share project'}
+          onClick={() => void handleCreateProjectShareLink(selectedJoinedProject.id)} disabled={creatingProjectShareLinkId === selectedJoinedProject.id}>
+          <Share2 size={16}/><span>{language === 'zh' ? '分享' : 'Share'}</span>
+        </button>
+      : null;
 
   const desktopSetlistListPanel = (
     <>
-      <div className="setlist-browser-header" data-setlist-browser-header>
-        {!isSetlistRoot && <button type="button" className="pm-back" onClick={() => { handleSelectProject(null); }}><ChevronLeft size={17} />{language === 'zh' ? '歌單' : 'Setlists'}</button>}
-        <div className="setlist-browser-title">
-          <h2 tabIndex={-1}>{isSetlistRoot ? (language === 'zh' ? '歌單' : 'Setlists') : selectedProjectFilterLabel}</h2>
-          {canCreateTeamSetlists && <ManagementActions label={language === 'zh' ? '新增' : 'New'} triggerContent={<><Plus size={16}/>{language === 'zh' ? '新增' : 'New'}</>} actions={[
+      <SetlistBrowserHeader key={serializeSetlistProjectFilter(setlistProjectFilter)}
+        isRoot={isSetlistRoot} title={isSetlistRoot ? (language === 'zh' ? '歌單' : 'Setlists') : selectedProjectFilterLabel}
+        backLabel={language === 'zh' ? '歌單' : 'Setlists'} onBack={() => handleSelectProject(null)}
+        searchLabel={copy.searchSetlists} closeSearchLabel={language === 'zh' ? '關閉搜尋' : 'Close search'}
+        searchQuery={setlistSearchQuery} onSearchChange={setSetlistSearchQuery}
+        sortLabel={copy.setlistSort} sortMode={setlistSortMode} sortOptions={setlistSortOptions}
+        onSortChange={value => setSetlistSortMode(value as SetlistSortMode)}
+        countLabel={isSetlistRoot && !normalizedSetlistSearchQuery ? null : normalizedSetlistSearchQuery
+          ? `${language === 'zh' ? '搜尋結果' : 'Results'} · ${filteredSetlists.length + filteredJoinedSetlists.length}`
+          : `${filteredSetlists.length + filteredJoinedSetlists.length}${language === 'zh' ? ' 份歌單' : ' setlists'}`}
+        newAction={canCreateTeamSetlists && <ManagementActions label={language === 'zh' ? '新增' : 'New'} triggerContent={isSetlistRoot ? <><Plus size={16}/>{language === 'zh' ? '新增' : 'New'}</> : <Plus size={18}/>} actions={[
             {label:copy.newSetlist,icon:<ListMusic size={16}/>,run:handleCreateSetlist},
             ...(isSetlistRoot && canCreateProject ? [{label:copy.newProject,icon:<FolderTree size={16}/>,run:handleCreateProject}] : [])
           ]}/>}
-        </div>
-        {setlistSearchField}
-        {selectedProject && (canViewProjectMembers || canManageProject(selectedProject)) && <button type="button" className="setlist-project-members" onClick={() => handleOpenProjectManagement(selectedProject.id)}>
-          {canViewProjectMembers ? <Users size={17}/> : <MoreHorizontal size={17}/>}<span><strong>{canViewProjectMembers ? (language === 'zh' ? '成員與權限' : 'Members and permissions') : (language === 'zh' ? '管理專案' : 'Project settings')}</strong><small>{!canViewProjectMembers ? (language === 'zh' ? '重新命名、歸檔與其他操作' : 'Rename, archive and other actions') : isLoadingProjectShareStatus ? (language === 'zh' ? '正在載入…' : 'Loading…') : projectShareStatusError ? (language === 'zh' ? '查看成員與管理權限' : 'View members and roles') : activeProjectShareStatus?.participants.length ? activeProjectShareStatus.participants.map(member => member.name || member.email).join('、') : (language === 'zh' ? '邀請團員加入此專案' : 'Invite your team')}</small></span><ChevronRight size={16}/>
-        </button>}
-        {selectedJoinedProject && canShareSelectedProject && <button type="button" className="pm-text-button" onClick={()=>void handleCreateProjectShareLink(selectedJoinedProject.id)} disabled={creatingProjectShareLinkId===selectedJoinedProject.id}><Share2 size={16}/>{language==='zh'?'分享專案':'Share project'}</button>}
-        {(!isSetlistRoot || normalizedSetlistSearchQuery) && <div className="setlist-browser-options"><span>{normalizedSetlistSearchQuery ? (language === 'zh' ? '搜尋結果' : 'Search results') : language === 'zh' ? '歌單' : 'Setlists'} · {filteredSetlists.length + filteredJoinedSetlists.length}</span>{setlistSortPicker}</div>}
-        {archivedSetlistCount>0 && <button type="button" className="pm-archive-toggle" aria-pressed={showArchivedSetlists} onClick={()=>setShowArchivedSetlists(current=>!current)}><Archive size={14}/>{showArchivedSetlists?copy.hideArchivedSetlists:copy.showArchivedSetlists}{' ('+archivedSetlistCount+')'}</button>}
-      </div>
+        projectAction={isSetlistRoot
+          ? <ManagementActions label={language === 'zh' ? '歌單與專案操作' : 'Setlist and project actions'} actions={[
+              { label: language === 'zh' ? '專案管理' : 'Project management', icon: <FolderTree size={16}/>, run: () => { setShowArchivedProjects(false); handleOpenProjectManagement(); } }
+            ]}/>
+          : selectedProject
+            ? <ManagementActions label={language === 'zh' ? '專案操作' : 'Project actions'} actions={ownedProjectActions(selectedProject)}/>
+            : selectedJoinedProject
+              ? <ManagementActions label={language === 'zh' ? '專案操作' : 'Project actions'} actions={[projectPinAction(selectedJoinedProject.id)]}/>
+              : null}
+        contextAction={projectMembersAction}
+        archiveAction={archivedSetlistCount > 0 && <button type="button" className="pm-archive-toggle" aria-pressed={showArchivedSetlists} onClick={() => setShowArchivedSetlists(current => !current)}><Archive size={14}/>{showArchivedSetlists ? copy.hideArchivedSetlists : copy.showArchivedSetlists}{' (' + archivedSetlistCount + ')'}</button>}
+      />
 
       <div data-setlist-scroll className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 ${isMultiSelectMode ? 'pb-40' : ''}`}>
         <div>
           {isSetlistRoot && !normalizedSetlistSearchQuery && <div className="setlist-folder-list" data-setlist-folders>
-            {activeProjects.map(project=><button key={project.id} type="button" className="setlist-folder-row" data-project-folder={project.id} onClick={()=>handleSelectProject(project.id)}><Folder size={22}/><span><strong>{project.name}</strong><small>{projectSetlistCount(project.id)}{language==='zh'?' 份歌單':' setlists'}</small></span><ChevronRight size={17}/></button>)}
-            {joinedProjects.filter(project=>!project.archived).map(project=><button key={project.id} type="button" className="setlist-folder-row" data-project-folder={project.id} onClick={()=>{setSetlistSearchQuery('');handleSetlistProjectFilterChange({kind:'shared-project',projectId:project.id});}}><Folder size={22}/><span><strong>{project.name}</strong><small>{project.setlists.filter(item=>!item.archived).length}{language==='zh'?' 份歌單 · 與我共享':' setlists · Shared'}</small></span><ChevronRight size={17}/></button>)}
+            {rootProjectFolders.map(project => <div key={project.id} className="setlist-folder-item" data-project-folder-row={project.id} data-pinned={pinnedProjectIds.has(project.id) || undefined}>
+              <button type="button" className="setlist-folder-row" data-project-folder={project.id} onClick={() => {
+                if (project.shared) { setSetlistSearchQuery(''); handleSetlistProjectFilterChange({ kind: 'shared-project', projectId: project.id }); }
+                else handleSelectProject(project.id);
+              }}><Folder size={22}/><span><strong>{project.name}{pinnedProjectIds.has(project.id) && <Pin size={13} className="setlist-folder-pin" aria-label={language === 'zh' ? '已置頂' : 'Pinned'}/>}</strong><small>{project.count}{language === 'zh' ? ' 份歌單' : ' setlists'}{project.shared ? (language === 'zh' ? ' · 與我共享' : ' · Shared') : ''}</small></span><ChevronRight size={17}/></button>
+              <ManagementActions label={language === 'zh' ? `專案操作：${project.name}` : `Project actions: ${project.name}`} actions={project.owned ? ownedProjectActions(project.owned) : [projectPinAction(project.id)]}/>
+            </div>)}
           </div>}
           {filteredSetlists.length === 0 && filteredJoinedSetlists.length === 0 && (!isSetlistRoot || normalizedSetlistSearchQuery || activeProjects.length + joinedProjects.length === 0) && (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -12272,7 +12210,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       <div className="setlist-browser-header" data-setlist-detail-header>
         <button type="button" className="pm-back" aria-label={copy.backToSetlists} onClick={()=>{setIsSetlistActionsMenuOpen(false);setSetlistSongSearchQuery('');setSetlistPanelView('list');}}><ChevronLeft size={17}/>{selectedProject?.name ?? selectedJoinedProject?.name ?? (language==='zh'?'歌單':'Setlists')}</button>
         <div className="setlist-browser-title">
-          {isJoinedSetlist || !canEditSelectedSetlist ? <h2 tabIndex={-1}>{selectedSetlist.name || copy.untitledSetlist}</h2> : <input aria-label={language==='zh'?'歌單名稱':'Setlist name'} className="setlist-title-input" value={selectedSetlist.name} onChange={event=>handleSetlistNameChange(selectedSetlist.id,event.target.value)} placeholder={copy.untitledSetlist}/>}
+          {isJoinedSetlist || !canEditSelectedSetlist ? <h2 tabIndex={-1}>{selectedSetlist.name || copy.untitledSetlist}</h2> : <input aria-label={language==='zh'?'歌單名稱':'Setlist name'} className="setlist-title-input" value={selectedSetlist.name}
+            onFocus={()=>{historyRenameGroup.current=crypto.randomUUID();}} onBlur={()=>{historyRenameGroup.current=undefined;}}
+            onChange={event=>handleSetlistNameChange(selectedSetlist.id,event.target.value)} placeholder={copy.untitledSetlist}/>}
           {isSetlistSongSortMode ? <button type="button" className="pm-text-button" onClick={()=>{finishSetlistSongPointerDrag();setIsSetlistSongSortMode(false);}}><Check size={15}/>{language==='zh'?'完成排序':'Done'}</button> : (isJoinedSetlist || canEditSelectedSetlist || canShareSelectedSetlist || canReorderSelectedSetlist) && <ManagementActions label={language==='zh'?'歌單操作':'Setlist actions'} actions={[
             ...(canReorderSelectedSetlist ? [{label:language==='zh'?'調整歌曲順序':'Reorder songs',icon:<ListMusic size={16}/>,run:()=>setIsSetlistSongSortMode(true)}] : []),
             ...(canShareSelectedSetlist ? [{label:copy.shareCurrentSetlist,icon:<Share2 size={16}/>,run:()=>{void handleCreateShareLink('setlist');},disabled:isExportingPdf||isRevokingSetlistShare}] : []),
@@ -12331,10 +12271,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                         aria-description={language === 'zh' ? `第 ${index + 1} 首。按住後拖動，或使用上下方向鍵調整順序。` : `Song ${index + 1}. Hold and drag, or use the up and down arrow keys to reorder.`}
                         title={language === 'zh' ? '按住編號拖動排序' : 'Hold the number and drag to reorder'}
                         onPointerDown={event => handleSetlistSongDragHandlePointerDown(event, item.id)}
-                        onPointerMove={handleSetlistSongDragHandlePointerMove}
-                        onPointerUp={finishSetlistSongPointerDrag}
-                        onPointerCancel={finishSetlistSongPointerDrag}
-                        onLostPointerCapture={finishSetlistSongPointerDrag}
                         onContextMenu={event => event.preventDefault()}
                         onKeyDown={event => {
                           if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
@@ -12360,7 +12296,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   </div>
                   {isSetlistSongSortMode && canReorderSelectedSetlist ? (
                     <div className="setlist-song-sort-actions">
-                      <button type="button" onPointerDown={event=>handleSetlistSongDragHandlePointerDown(event,item.id)} onPointerMove={handleSetlistSongDragHandlePointerMove} onPointerUp={finishSetlistSongPointerDrag} onPointerCancel={finishSetlistSongPointerDrag} onLostPointerCapture={finishSetlistSongPointerDrag} onContextMenu={event=>event.preventDefault()} className="setlist-song-drag touch-none cursor-grab active:cursor-grabbing" style={{WebkitUserSelect:'none'}} aria-label={(language==='zh'?'拖動排序：':'Drag to reorder: ')+displaySong.title}><GripVertical size={16}/></button>
+                      <button type="button" onPointerDown={event=>handleSetlistSongDragHandlePointerDown(event,item.id)}     onContextMenu={event=>event.preventDefault()} className="setlist-song-drag touch-none cursor-grab active:cursor-grabbing" style={{WebkitUserSelect:'none'}} aria-label={(language==='zh'?'拖動排序：':'Drag to reorder: ')+displaySong.title}><GripVertical size={16}/></button>
                       <button type="button" className="pm-icon-button" aria-label={(language==='zh'?'上移：':'Move up: ')+displaySong.title} disabled={index===0} onClick={()=>{const previous=setlistSongsWithSource[index-1];if(previous)moveSetlistSong(item.id,previous.item.id);}}><ChevronUp size={18}/></button>
                       <button type="button" className="pm-icon-button" aria-label={(language==='zh'?'下移：':'Move down: ')+displaySong.title} disabled={index===setlistSongsWithSource.length-1} onClick={()=>{const next=setlistSongsWithSource[index+1];if(next)moveSetlistSong(item.id,next.item.id);}}><ChevronDown size={18}/></button>
                     </div>
@@ -12564,8 +12500,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     <div
       data-app-root
       ref={appViewportRef}
-      inert={isSwitchingLibrary ? true : undefined}
-      aria-busy={isSwitchingLibrary}
+      inert={isSwitchingLibrary || globalHistory.busy || historyForwardBusy ? true : undefined}
+      aria-busy={isSwitchingLibrary || globalHistory.busy || historyForwardBusy}
       className="fixed inset-x-0 top-0 flex h-[100dvh] min-h-0 min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900 dark:bg-[color:var(--color-surface-muted)] dark:text-[color:var(--color-text)] dark:selection:bg-[color:var(--color-indigo-800)] dark:selection:text-[color:var(--color-indigo-100)]"
       style={{
         // Keep the app clear of the iOS status bar / notch (Capacitor). These are
@@ -12885,12 +12821,22 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             ) : (
               <div className="song-library-panel" data-song-library>
                 <header className="song-library-header">
-                  <div className="song-library-heading">
-                    <h2>{language === 'zh' ? '歌曲庫' : 'Song library'}</h2>
+                  <h2 className="sr-only">{language === 'zh' ? '歌曲庫' : 'Song library'}</h2>
+                  <div className="song-library-toolbar">
+                    <label className="song-library-search">
+                      <Search size={16} aria-hidden="true" />
+                      <input
+                        type="text"
+                        value={librarySearchQuery}
+                        onChange={(event) => setLibrarySearchQuery(event.target.value)}
+                        placeholder={copy.searchSongs}
+                        aria-label={copy.searchSongs}
+                      />
+                    </label>
                     {canEditTeamSongs && (
                       <div className="song-library-header-actions">
-                        <button type="button" className="song-library-button" onClick={handleCreateSong} aria-label={copy.newSong}>
-                          <Plus size={16} />{copy.newSong}
+                        <button type="button" className="song-library-button song-library-create" onClick={handleCreateSong} aria-label={copy.newSong} title={copy.newSong}>
+                          <Plus size={16} aria-hidden="true" /><span>{copy.newSong}</span>
                         </button>
                         <ManagementActions label={language === 'zh' ? '歌曲庫操作' : 'Song library actions'} actions={[
                           { label: isLibraryEditing ? (language === 'zh' ? '完成管理' : 'Finish managing') : (language === 'zh' ? '管理歌曲' : 'Manage songs'), icon: <Edit3 size={16} />, run: handleToggleLibraryEditing },
@@ -12902,16 +12848,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       </div>
                     )}
                   </div>
-                  <label className="song-library-search">
-                    <Search size={16} />
-                    <input
-                      type="text"
-                      value={librarySearchQuery}
-                      onChange={(event) => setLibrarySearchQuery(event.target.value)}
-                      placeholder={copy.searchSongs}
-                      aria-label={copy.searchSongs}
-                    />
-                  </label>
                   <input ref={importLibraryInputRef} type="file" accept="application/json,.json" onChange={handleImportSongLibrary} className="hidden" />
                   <div className="song-library-options">
                     <span className="song-library-count">
@@ -12976,11 +12912,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                             </>
                           ) : (
                             <>
-                              <button type="button" onClick={() => void handleDeleteSelectedSongs()} disabled={selectedLibrarySongIds.length === 0} className="song-library-button is-danger">
-                                <Trash2 size={15} /><span>{`${copy.deleteSelected} (${selectedLibrarySongIds.length})`}</span>
+                              <button type="button" onClick={() => void handleArchiveSelectedSongs(!allArchived)} disabled={selectedLibrarySongIds.length === 0} className="song-library-button is-warning">
+                                {allArchived?<ArchiveRestore size={15}/>:<Archive size={15}/>}<span>{language==='zh'?`${allArchived?'取消封存':'封存所選'} (${selectedLibrarySongIds.length})`:`${allArchived?'Restore':'Archive selected'} (${selectedLibrarySongIds.length})`}</span>
                               </button>
-                              <button type="button" onClick={handleRemoveLibrarySongDuplicates} className="song-library-button is-muted">
-                                <Copy size={15} /><span>{language === 'zh' ? '移除重複歌曲' : 'Remove duplicates'}</span>
+                              {allArchived&&<button type="button" onClick={()=>void handleDeleteSelectedSongs()} className="song-library-button is-danger"><Trash2 size={15}/><span>{language==='zh'?`永久刪除所選 (${selectedLibrarySongIds.length})`:`Permanently delete selected (${selectedLibrarySongIds.length})`}</span></button>}
+                              <button type="button" onClick={() => void handleRemoveLibrarySongDuplicates()} className="song-library-button is-muted">
+                                <Copy size={15} /><span>{language === 'zh' ? '封存重複歌曲' : 'Archive duplicates'}</span>
                               </button>
                             </>
                           )}
@@ -13059,7 +12996,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                                 placeholder={copy.untitledSong}
                                 aria-label={language === 'zh' ? `歌曲名稱：${title}` : `Song title: ${title}`}
                               />
-                              {isTeamWorkspace && item.archivedAt ? <span className="song-library-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
+                              {item.archivedAt ? <span className="song-library-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
                               {metadata}
                             </div>
                           ) : (
@@ -13095,13 +13032,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                               <ManagementActions label={language === 'zh' ? `歌曲操作：${title}` : `Song actions: ${title}`} actions={[
                                 ...(hasLinkedTeamUpdate ? [{ label: language === 'zh' ? '同步團隊最新版' : 'Sync latest team version', icon: <Download size={16} />, run: () => void handleSyncPersonalSongFromTeam(item.id) }] : []),
                                 ...(isTeamWorkspace ? [{ label: language === 'zh' ? '轉存到個人區' : 'Copy to personal', icon: <Download size={16} />, run: () => void handleCopyTeamSongToPersonal(item.id) }] : []),
-                                ...(isTeamWorkspace && item.archivedAt ? [
+                                ...(item.archivedAt ? [
                                   { label: language === 'zh' ? '取消封存' : 'Restore', icon: <ArchiveRestore size={16} />, run: () => void updateTeamSongArchiveState([item.id], false).catch((error) => { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }) },
                                   { label: language === 'zh' ? '永久刪除歌曲' : 'Permanently delete song', icon: <Trash2 size={16} />, run: () => void handleDeleteSong(item.id), danger: true }
                                 ] : [
                                   { label: language === 'zh' ? '複製歌曲' : 'Duplicate song', icon: <Copy size={16} />, run: () => handleDuplicateSong(item.id) },
                                   { label: language === 'zh' ? '編輯歌曲' : 'Edit song', icon: <Edit3 size={16} />, run: () => { handleSelectSong(item.id); setIsEditing(true); } },
-                                  ...(isTeamWorkspace ? [{ label: language === 'zh' ? '封存歌曲' : 'Archive song', icon: <Archive size={16} />, run: () => void handleDeleteSong(item.id) }] : [])
+                                  { label: language === 'zh' ? '封存歌曲' : 'Archive song', icon: <Archive size={16} />, run: () => void handleDeleteSong(item.id) }
                                 ])
                               ]} />
                             </div>
@@ -14322,10 +14259,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                             isPhoneViewport={isPhoneViewport}
                             history={activePreviewEditSession
                               ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future }
-                              : {
-                                  past: currentSetlistSongHistory.past.map((snapshot) => snapshot.song),
-                                  future: currentSetlistSongHistory.future.map((snapshot) => snapshot.song)
-                                }}
+                              : { past: globalHistory.canUndo ? [song] : [], future: globalHistory.canRedo ? [song] : [] }}
                             onUndo={handleActiveUndo}
                             onRedo={handleActiveRedo}
                             onChange={handleActiveEditorSongChange}
@@ -14370,7 +14304,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                             song={(activeDraftEditorSong ?? song) as StoredSong}
                             language={language}
                             isPhoneViewport={isPhoneViewport}
-                            history={activePreviewEditSession ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future } : currentSongHistory}
+                            history={activePreviewEditSession ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future } : { past: globalHistory.canUndo ? [song] : [], future: globalHistory.canRedo ? [song] : [] }}
                             onUndo={handleActiveUndo}
                             onRedo={handleActiveRedo}
                             onChange={handleActiveEditorSongChange}
@@ -14402,7 +14336,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     </button>
                     <button
                       onClick={handleActiveUndo}
-                      disabled={activePreviewEditSession ? activePreviewEditSession.past.length === 0 : isSetlistMode ? currentSetlistSongHistory.past.length === 0 : currentSongHistory.past.length === 0}
+                      disabled={activePreviewEditSession ? activePreviewEditSession.past.length === 0 : !globalHistory.canUndo}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
                       title={copy.undo}
                     >
@@ -14410,7 +14344,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                     </button>
                     <button
                       onClick={handleActiveRedo}
-                      disabled={activePreviewEditSession ? activePreviewEditSession.future.length === 0 : isSetlistMode ? currentSetlistSongHistory.future.length === 0 : currentSongHistory.future.length === 0}
+                      disabled={activePreviewEditSession ? activePreviewEditSession.future.length === 0 : !globalHistory.canRedo}
                       className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
                       title={copy.redo}
                     >
@@ -14460,7 +14394,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   setSetlists(applyEntry);
                   setSavedSetlists(applyEntry);
                   setActiveBar(null);
-                  setSongHistories(current => { const next = { ...current }; delete next[updated.id]; return next; });
+
                   toast.success(result.direction === 'to-library'
                     ? (language === 'zh' ? '已用這份歌單的版本更新歌曲庫，原曲備份已保存；其他歌單保持不變。' : 'Updated the song library. The previous source was backed up.')
                     : (language === 'zh' ? '已從歌曲庫更新這份歌單，原編排已備份；歌曲庫與其他歌單保持不變。' : 'Updated this setlist copy. Its previous arrangement was backed up.'));
@@ -14763,15 +14697,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
                 <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
-                  {canOpenEditor && !activePreviewEditSession && (
+                  {(canOpenEditor || globalHistory.canUndo || globalHistory.canRedo) && !activePreviewEditSession && (
                     <>
                       <button
                         type="button"
                         data-preview-undo
-                        onClick={isSetlistMode ? handleSetlistUndo : handleUndo}
-                        disabled={isSetlistMode ? currentSetlistSongHistory.past.length === 0 : currentSongHistory.past.length === 0}
+                        onClick={handleActiveUndo}
+                        disabled={!globalHistory.canUndo}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35 sm:h-9 sm:w-9"
-                        title={copy.undo}
+                        title={globalHistory.undoEntry ? `${copy.undo} · ${globalHistory.undoEntry.label[language]}` : copy.undo}
                         aria-label={copy.undo}
                       >
                         <Undo2 size={16} />
@@ -14779,10 +14713,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       <button
                         type="button"
                         data-preview-redo
-                        onClick={isSetlistMode ? handleSetlistRedo : handleRedo}
-                        disabled={isSetlistMode ? currentSetlistSongHistory.future.length === 0 : currentSongHistory.future.length === 0}
+                        onClick={handleActiveRedo}
+                        disabled={!globalHistory.canRedo}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-35 sm:h-9 sm:w-9"
-                        title={copy.redo}
+                        title={globalHistory.redoEntry ? `${copy.redo} · ${globalHistory.redoEntry.label[language]}` : copy.redo}
                         aria-label={copy.redo}
                       >
                         <Redo2 size={16} />

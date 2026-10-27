@@ -34,6 +34,7 @@ export function usePreviewPinchZoom(options: Options) {
     const sheet = options.sheetRef.current;
     if (!root || !sheet || !options.enabled) return;
     let owned = false;
+    let multiFingerHistory = false;
     let frame: number | null = null;
     let gesture: {
       ids: [number, number]; distance: number; startScale: number; scale: number;
@@ -65,6 +66,12 @@ export function usePreviewPinchZoom(options: Options) {
       latest.current.onFinish();
     };
     const start = (event: TouchEvent) => {
+      if (event.touches.length >= 3) {
+        multiFingerHistory = true;
+        if (owned) { finish(false); owned = false; latest.current.onSuppressClick(); }
+        return;
+      }
+      if (multiFingerHistory) return;
       if (!owned && event.touches.length === 1) latest.current.onSingleTouchStart?.();
       if (event.touches.length !== 2 || gesture) { if (owned) own(event); return; }
       const a = event.touches[0], b = event.touches[1];
@@ -98,6 +105,7 @@ export function usePreviewPinchZoom(options: Options) {
       if (frame === null) frame = requestAnimationFrame(flush);
     };
     const end = (event: TouchEvent) => {
+      if (multiFingerHistory) { if (!event.touches.length) multiFingerHistory = false; return; }
       if (!owned) return;
       own(event);
       const ids = Array.from(event.touches, t => t.identifier);
@@ -106,22 +114,28 @@ export function usePreviewPinchZoom(options: Options) {
       if (!event.touches.length) { owned = false; latest.current.onSuppressClick(); }
     };
     const resize = () => {
+      multiFingerHistory = false;
       if (!owned) return;
       finish(false);
       owned = false;
       latest.current.onSuppressClick();
     };
+    const cancel = () => {
+      multiFingerHistory = false;
+      if (!owned) return;
+      finish(false); owned = false; latest.current.onSuppressClick();
+    };
     const listenerOptions = { passive: false, capture: true };
     root.addEventListener('touchstart', start, listenerOptions);
     root.addEventListener('touchmove', move, listenerOptions);
     root.addEventListener('touchend', end, listenerOptions);
-    root.addEventListener('touchcancel', end, listenerOptions);
+    root.addEventListener('touchcancel', cancel, listenerOptions);
     window.addEventListener('resize', resize);
     return () => {
       root.removeEventListener('touchstart', start, true);
       root.removeEventListener('touchmove', move, true);
       root.removeEventListener('touchend', end, true);
-      root.removeEventListener('touchcancel', end, true);
+      root.removeEventListener('touchcancel', cancel, true);
       window.removeEventListener('resize', resize);
       finish(false);
     };

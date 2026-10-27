@@ -31,6 +31,19 @@ export const getJoinedProjectSetlists = (
   )
 );
 
+/** Display one entry per identity, giving already represented owned/folder entries priority. */
+export const dedupeJoinedSetlists = (
+  candidates: readonly JoinedSetlist[],
+  representedSetlists: ReadonlyArray<Pick<Setlist, 'id'>>
+): JoinedSetlist[] => {
+  const seen = new Set(representedSetlists.map(setlist => setlist.id));
+  return candidates.filter(setlist => {
+    if (seen.has(setlist.id)) return false;
+    seen.add(setlist.id);
+    return true;
+  });
+};
+
 export const pickAvailableSetlist = (
   ownedSetlists: Setlist[],
   joinedSetlists: JoinedSetlist[],

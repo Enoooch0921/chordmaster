@@ -5,6 +5,16 @@ import { useSongHistoryShortcuts } from './useSongHistoryShortcuts';
 const shortcuts = () => ({ enabled: true, onUndo: vi.fn(), onRedo: vi.fn() });
 
 describe('sheet history shortcuts', () => {
+  it('routes native history intentions for chord controls while preserving native text undo', () => {
+    const options = shortcuts(); renderHook(() => useSongHistoryShortcuts(options));
+    render(<><input aria-label="Native search"/><input data-song-history-input aria-label="Chord"/></>);
+    for (const inputType of ['historyUndo','historyRedo']) {
+      expect(screen.getByLabelText('Native search').dispatchEvent(new InputEvent('beforeinput',{inputType,bubbles:true,cancelable:true}))).toBe(true);
+      const event=new InputEvent('beforeinput',{inputType,bubbles:true,cancelable:true});
+      expect(screen.getByLabelText('Chord').dispatchEvent(event)).toBe(false);
+    }
+    expect(options.onUndo).toHaveBeenCalledTimes(1);expect(options.onRedo).toHaveBeenCalledTimes(1);
+  });
   it('handles Cmd-Z and uppercase Cmd-Shift-Z without any editor mounted', () => {
     const options = shortcuts();
     renderHook(() => useSongHistoryShortcuts(options));

@@ -56,10 +56,10 @@ export function saveNavigationLocation(key: string, location: SetlistNavigationL
 }
 
 export function getSetlistParentFilter(id: string | null, workspace: NavigationWorkspace): SetlistProjectFilter {
+  const owned = workspace.setlists.find(setlist => setlist.id === id);
+  if (owned) return owned.projectId ? { kind: 'owned-project', projectId: owned.projectId } : { kind: 'all' };
   const sharedProject = workspace.joinedProjects.find(project => project.setlists.some(setlist => setlist.id === id));
   if (sharedProject) return { kind: 'shared-project', projectId: sharedProject.id };
-  const owned = workspace.setlists.find(setlist => setlist.id === id);
-  if (owned?.projectId) return { kind: 'owned-project', projectId: owned.projectId };
   if (workspace.joinedSetlists.some(setlist => setlist.id === id)) return { kind: 'all' };
   return { kind: 'all' };
 }

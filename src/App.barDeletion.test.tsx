@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
@@ -116,7 +116,7 @@ it.each(['songs', 'setlists'] as const)('deletes a multi-bar selection in %s wit
     expect(batchBar(1)).toBeNull();
     expect(batchBar(2)).not.toBeNull();
     fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
-    expect(batchBars()).toHaveLength(4);
+    await waitFor(()=>expect(batchBars()).toHaveLength(4));
   }
   expect(original.sections[0].bars).toHaveLength(4);
 }, 15000);
@@ -150,8 +150,7 @@ it.each(['songs', 'setlists'] as const)('copies several bars and overwrites the 
   expect(batchBar(3)).toHaveTextContent('Dm');
   fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
   expect(batchBars()).toHaveLength(4);
-  expect(batchBar(2)).toHaveTextContent('F');
-  expect(batchBar(3)).toHaveTextContent('G');
+  await waitFor(()=>{expect(batchBar(2)).toHaveTextContent('F');expect(batchBar(3)).toHaveTextContent('G');});
 }, 15000);
 
 
@@ -174,11 +173,11 @@ it.each(['songs', 'setlists'] as const)('clears, closes, reopens and undoes the 
   fireEvent.click(screen.getByRole('menuitem', { name: '重新開啟此小節' }));
   expect(batchBar(0)).not.toHaveAttribute('data-preview-closed-cell');
   fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
-  expect(batchBar(0)).toHaveAttribute('data-preview-closed-cell', 'true');
+  await waitFor(()=>expect(batchBar(0)).toHaveAttribute('data-preview-closed-cell', 'true'));
   fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
-  expect(batchBar(0)).not.toHaveAttribute('data-preview-closed-cell');
+  await waitFor(()=>expect(batchBar(0)).not.toHaveAttribute('data-preview-closed-cell'));
   fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', metaKey: true });
-  expect(batchBar(0)).toHaveTextContent('C');
+  await waitFor(()=>expect(batchBar(0)).toHaveTextContent('C'));
   expect(original.sections[0].bars[0].chords).toEqual(['C']);
 }, 15000);
 

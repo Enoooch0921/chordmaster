@@ -11,12 +11,14 @@ export type ToastItem = {
   message: string;
   variant: ToastVariant;
   description?: string;
+  action?: { label: string; run: () => void };
 };
 
 type ShowOptions = {
   id?: string;
   description?: string;
   duration?: number;
+  action?: ToastItem['action'];
 };
 
 type ToastApi = {
@@ -86,7 +88,7 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
     const duration = variant === 'loading'
       ? null
       : (options?.duration ?? DEFAULT_DURATION_MS);
-    upsert({ id, message, variant, description: options?.description }, duration);
+    upsert({ id, message, variant, description: options?.description, action: options?.action }, duration);
     return id;
   }, [upsert]);
 
@@ -177,6 +179,8 @@ function ToastCard({ item, onDismiss, preference }: { item: ToastItem; onDismiss
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold leading-snug text-[color:var(--color-text)]">{item.message}</p>
         {item.description ? <p className="mt-0.5 text-xs leading-relaxed text-[color:var(--color-text-muted)]">{item.description}</p> : null}
+        {item.action && <button type="button" className="ui-press mt-1 inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:text-indigo-300 dark:hover:bg-indigo-950"
+          onClick={() => { item.action?.run(); onDismiss(item.id); }}>{item.action.label}</button>}
       </div>
       {item.variant !== 'loading' ? <button type="button" onClick={() => onDismiss(item.id)}
         className="ui-press -m-1 shrink-0 rounded-full p-1 text-[color:var(--color-text-faint)] transition-colors hover:bg-[color:var(--color-surface-muted)] hover:text-[color:var(--color-text)]"

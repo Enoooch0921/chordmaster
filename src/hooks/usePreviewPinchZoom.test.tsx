@@ -27,6 +27,26 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => { vi.useRealTimers(); document.body.replaceChildren(); });
 
 describe('preview pinch ownership and compositor updates', () => {
+  it('yields a pending pinch to three fingers without committing zoom or restarting mid-gesture', () => {
+    const { sheet, options, touch, frame } = setup();
+    touch('touchstart',[point(1,100),point(2,200)]);
+    touch('touchmove',[point(1,50),point(2,250)]);frame();
+    expect(touch('touchstart',[point(1,50),point(2,250),point(3,300)]).defaultPrevented).toBe(false);
+    expect(sheet.style.transform).toBe('scale(0.5)');expect(options.onCommit).not.toHaveBeenCalled();
+    expect(touch('touchmove',[point(1,0),point(2,200),point(3,250)]).defaultPrevented).toBe(false);
+    touch('touchend',[point(1,0),point(2,200)]);touch('touchstart',[point(1,0),point(2,200)]);
+    expect(options.onStart).toHaveBeenCalledTimes(1);
+    touch('touchend',[]);touch('touchstart',[point(4,100),point(5,200)]);touch('touchend',[]);
+    expect(options.onStart).toHaveBeenCalledTimes(2);expect(options.onCommit).toHaveBeenCalledTimes(1);
+  });
+  it('cancels a system-interrupted pinch without saving its partial zoom', () => {
+    const { sheet, options, touch, frame } = setup();
+    touch('touchstart',[point(1,100),point(2,200)]);touch('touchmove',[point(1,50),point(2,250)]);frame();
+    touch('touchcancel',[]);
+    expect(sheet.style.transform).toBe('scale(0.5)');expect(options.onCommit).not.toHaveBeenCalled();
+    touch('touchstart',[point(3,100),point(4,200)]);touch('touchend',[]);
+    expect(options.onCommit).toHaveBeenCalledTimes(1);
+  });
   it('keeps single-finger scrolling native', () => {
     const { options, touch } = setup();
     expect(touch('touchstart', [point(1, 100)]).defaultPrevented).toBe(false);

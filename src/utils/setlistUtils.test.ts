@@ -3,6 +3,7 @@ import type { JoinedProject, JoinedSetlist, Setlist, SetlistSong, Song } from '.
 import { duplicateSection } from '../lib/songEditing';
 import {
   getJoinedProjectSetlists,
+  dedupeJoinedSetlists,
   insertNewSetlistSectionsAfterSources,
   resolveSetlistSongCapo,
   pickAvailableSetlist,
@@ -45,6 +46,32 @@ const makeSetlist = (id: string, songs: SetlistSong[] = setlistSongs): Setlist =
   createdAt: 1,
   updatedAt: 1,
   songs
+});
+
+describe('shared setlist display identity', () => {
+  it('excludes owned identities including grouped or archived lists without changing their sharing data', () => {
+    const owned = [{ ...makeSetlist('owned'), projectId: 'project', archived: true }];
+    const duplicate: JoinedSetlist = { ...owned[0], isJoined: true };
+    const external: JoinedSetlist = { ...makeSetlist('external'), isJoined: true };
+    const candidates = [duplicate, external];
+    expect(dedupeJoinedSetlists(candidates, owned)).toEqual([external]);
+    expect(candidates).toEqual([duplicate, external]);
+    expect(owned[0].archived).toBe(true);
+  });
+  it('keeps genuinely different shared lists with the same name', () => {
+    const owned = { ...makeSetlist('own'), name: '聚會一' };
+    const shared: JoinedSetlist = { ...makeSetlist('other'), name: '聚會一', isJoined: true };
+    expect(dedupeJoinedSetlists([shared], [owned])).toEqual([shared]);
+  });
+  it('deduplicates direct and project share search results by ID while retaining the first complete snapshot', () => {
+    const shared: JoinedSetlist = { ...makeSetlist('shared'), isJoined: true };
+    const result = dedupeJoinedSetlists([shared, { ...shared }, shared], []);
+    expect(result).toHaveLength(1); expect(result[0]).toBe(shared);
+  });
+  it('can defer a directly shared list to its existing project-folder entry', () => {
+    const shared: JoinedSetlist = { ...makeSetlist('shared'), projectId: 'project', isJoined: true };
+    expect(dedupeJoinedSetlists([shared], getJoinedProjectSetlists([{ setlists: [shared] }]))).toEqual([]);
+  });
 });
 
 describe('setlist song order editing', () => {

@@ -85,6 +85,19 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-28',
+        title: 'Global Undo and a calmer workspace',
+        bullets: [
+          'Undo and redo song order, song removal, setlist and project deletion, archive and content edits. Keep the last 50 actions on this device, separately for each account and library.',
+          'Restore deleted projects with their original setlist grouping and memberships. Recovery checks current permissions and preserves unrelated collaborative edits.',
+          'Use three fingers left to undo and right to redo on iPhone/iPad, or the existing buttons and keyboard shortcuts. Ordinary text fields retain native text undo.',
+          'Pin projects, use compact search that folds away when empty, and keep dragging songs continuously with edge scrolling. Remove duplicate shared setlist entries from the root.',
+          'Source-song deletion archives it first. Explicit permanent deletion remains irreversible and clears the workspace history.'
+        ]
+      },
+
+      {
+        version: '0.10.0',
         date: '2026-10-27',
         title: "Project folders, smarter search and faster chart editing",
         bullets: [
@@ -644,6 +657,19 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-28',
+        title: '全局撤銷與更清爽的工作區',
+        bullets: [
+          '歌曲排序、移出歌曲、歌單與專案刪除、歸檔及內容編輯可撤銷與重做；每個帳號與歌曲庫在此裝置保留最近 50 步。',
+          '刪除專案後可恢復原本歌單分類與共享成員；復原檢查目前權限，保留其他人的後續修改。',
+          'iPhone／iPad 可三指左滑撤銷、右滑重做，也可使用原有按鈕與鍵盤快捷鍵；一般文字輸入保留原生撤銷。',
+          '專案可置頂，搜尋列空白並離開焦點時自動收起；修正歌曲連續拖曳中斷，支援邊緣捲動，避免根目錄重複顯示共享歌單。',
+          '歌曲刪除先封存；明確選擇永久刪除仍不可恢復，並會清除該工作區的撤銷記錄。'
+        ]
+      },
+
+      {
+        version: '0.10.0',
         date: '2026-10-27',
         title: "專案資料夾、智慧搜尋與更順手的譜面操作",
         bullets: [
