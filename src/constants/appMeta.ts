@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-28',
+        title: 'Score modification times and sidebar update status',
+        bullets: [
+          'Show library and setlist score modification dates side by side in version comparisons, including seconds and the device time zone.',
+          'Identify library updates, setlist edits, conflicting edits and versions awaiting comparison directly beside each song in the setlist sidebar.',
+          'Record each setlist score edit on the server. Renames, ordering and performance settings preserve its date; older scores without a reliable record show that the time is unknown.'
+        ]
+      },
+
+      {
+        version: '0.11.2',
+        date: '2026-10-28',
         title: 'Clear Undo/Redo feedback and steady sharing status',
         bullets: [
           'Show Undo/Redo progress, completion and errors at the top center on phone, tablet and desktop. Update one notification in place, including chart drafts.',
@@ -679,6 +690,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-28',
+        title: '譜面修改時間與左側歌曲更新提示',
+        bullets: [
+          '版本比對直接並列歌曲庫與歌單中這首歌的最後修改時間，包含日期、秒數及裝置時區。',
+          '左側歌單逐首標示歌曲庫有新版、歌單有修改、兩邊都有修改或版本不同待比對；版本一致後標示自動消失。',
+          '由伺服器記錄歌單譜面修改時間；改名、排序及演出設定不會改動時間，舊資料缺乏可靠紀錄時明確顯示尚無修改時間。'
+        ]
+      },
+
+      {
+        version: '0.11.2',
         date: '2026-10-28',
         title: '清楚的撤銷提示與穩定的共享狀態',
         bullets: [

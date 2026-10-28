@@ -44,6 +44,16 @@ describe('per-setlist source provenance', () => {
   });
 });
 describe('manual source sync', () => {
+  it('reads the per-song score timestamp without substituting a baseline or collection timestamp', async () => {
+    const value = payload();
+    const timestamp = '2026-10-28T03:11:12.123456Z';
+    mocks.rpc.mockResolvedValueOnce({ data: { ...value, entry: { ...value.entry, score_updated_at: timestamp } }, error: null });
+    expect(await previewSetlistSourceSync('team', 'entry')).toMatchObject({
+      sourceRevision: row.updated_at, setlistScoreUpdatedAt: timestamp
+    });
+    mocks.rpc.mockResolvedValueOnce({ data: { ...value, setlistUpdatedAt: timestamp, entry: { ...value.entry, source_baseline: baseline } }, error: null });
+    expect((await previewSetlistSourceSync('team', 'entry')).setlistScoreUpdatedAt).toBeNull();
+  });
   it('names closing an empty cell precisely in the source change summary', () => {
     const source = structuredClone(song);
     source.sections[0].bars[0] = { id: 'bar', chords: [] };

@@ -36,6 +36,14 @@ export const hasSetlistSourceScoreChange = (before: Song | undefined, after: Son
 export type SetlistSourceStatus = 'aligned' | 'setlist-changed' | 'source-newer' | 'conflict' | 'unknown';
 export type SetlistSourceDirection = 'to-library' | 'to-setlist';
 
+export const getSetlistSourceStatusLabel = (status: SetlistSourceStatus, language: AppLanguage): string => ({
+  aligned: '',
+  'source-newer': language === 'zh' ? '歌曲庫有新版' : 'Library updated',
+  'setlist-changed': language === 'zh' ? '歌單有修改' : 'Setlist edited',
+  conflict: language === 'zh' ? '兩邊都有修改' : 'Both versions edited',
+  unknown: language === 'zh' ? '版本不同，待比對' : 'Versions differ — compare'
+}[status]);
+
 export const classifySetlistSource = (source: Song, edited: Song, baseline?: SetlistSourceBaseline | null): SetlistSourceStatus => {
   if (!hasSetlistSourceScoreChange(source, edited)) return 'aligned';
   if (!baseline?.sourceContent || !baseline.entryContent) return 'unknown';
@@ -56,6 +64,7 @@ export interface SetlistSourceSyncPreview {
   entryId: string;
   source: StoredSong;
   sourceRevision: string;
+  setlistScoreUpdatedAt?: string | null;
   sourceContent: Song;
   overrideJson: Record<string, unknown> & { songData: Song };
   setlistName: string;
@@ -83,13 +92,14 @@ export const previewSetlistSourceSync = async (libraryId: string, entryId: strin
   if (!supabase) throw new Error('Supabase is not configured.');
   const { data, error } = await supabase.rpc('preview_setlist_source_sync', { p_library_id: libraryId, p_entry_id: entryId });
   if (error) throw error;
-  const payload = data as { source: SourceRow; entry: { id: string; song_id: string; override_json: SetlistSourceSyncPreview['overrideJson']; source_baseline?: SetlistSourceBaseline | null }; setlistName: string; syncStatus?: SetlistSourceStatus };
+  const payload = data as { source: SourceRow; entry: { id: string; song_id: string; override_json: SetlistSourceSyncPreview['overrideJson']; source_baseline?: SetlistSourceBaseline | null; score_updated_at?: string | null }; setlistName: string; syncStatus?: SetlistSourceStatus };
   if (!payload?.source || payload.source.library_id !== libraryId || payload.source.archived_at
     || payload.entry?.id !== entryId || payload.entry.song_id !== payload.source.id || !payload.entry.override_json?.songData) {
     throw new Error('The setlist/source identity changed. Please preview again.');
   }
   return {
     libraryId, entryId, source: mapSource(payload.source), sourceRevision: payload.source.updated_at,
+    setlistScoreUpdatedAt: payload.entry.score_updated_at ?? null,
     sourceContent: structuredClone(payload.source.content_json),
     overrideJson: structuredClone(payload.entry.override_json), setlistName: payload.setlistName,
     baseline: structuredClone(payload.entry.source_baseline ?? null),

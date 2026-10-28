@@ -77,6 +77,15 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
     } finally { if (mounted.current) setBusy(false); }
   };
   const rows = preview ? compareSetlistSourceScores(preview.source, preview.overrideJson.songData, language) : [];
+  const renderModifiedTime = (value: string | null | undefined) => {
+    const date = value ? new Date(value) : null;
+    return date && Number.isFinite(date.getTime())
+      ? <time dateTime={date.toISOString()}>{date.toLocaleString(zh ? 'zh-TW' : 'en', {
+          year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hourCycle: 'h23', timeZoneName: 'short'
+        })}</time>
+      : <span>{zh ? '尚無修改時間紀錄' : 'Modification time not recorded'}</span>;
+  };
   const confirmLabel = direction === 'to-setlist' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library')
     : direction === 'to-library' ? (zh ? '用歌單版本更新歌曲庫' : 'Update library from this setlist')
     : direction === 'save-as' ? (zh ? '確認另存新歌曲' : 'Save as a new song')
@@ -111,9 +120,17 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
           <h3 className="source-sync-difference-title">{zh ? '兩份版本的差異' : 'Differences between versions'}<span>{rows.length} {zh ? '項' : 'changes'}</span></h3>
           <div className="source-comparison" role="table" aria-label={zh ? '歌曲庫與歌單目前的譜面差異' : 'Current library and setlist differences'}>
             <div className="source-comparison-header" role="row"><div role="columnheader">{zh ? '歌曲庫版本' : 'Library version'}{' '}{direction === 'to-setlist' ? <small>{zh ? '將採用此版本' : 'Version to use'}</small> : direction === 'to-library' ? <small>{zh ? '將被更新' : 'Will be updated'}</small> : null}</div><div role="columnheader">{zh ? `歌單 · ${preview.setlistName}` : `Setlist · ${preview.setlistName}`}{' '}{direction === 'to-library' || direction === 'save-as' ? <small>{zh ? '將採用此版本' : 'Version to use'}</small> : direction === 'to-setlist' ? <small>{zh ? '將被更新' : 'Will be updated'}</small> : null}</div></div>
+            <div className="source-comparison-row source-comparison-modified" role="rowgroup">
+              <div className="source-comparison-label" aria-hidden="true">{zh ? '最後修改時間' : 'Last modified'}</div>
+              <div className="source-comparison-values" role="row" aria-label={zh ? '最後修改時間' : 'Last modified'}>
+                <div role="cell">{renderModifiedTime(preview.sourceRevision)}</div>
+                <div role="cell">{renderModifiedTime(preview.setlistScoreUpdatedAt)}</div>
+              </div>
+            </div>
             {rows.map((row,index) => <div key={index} className="source-comparison-row" role="rowgroup"><div className="source-comparison-label" aria-hidden="true">{row.label}</div><div className="source-comparison-values" role="row" aria-label={row.label}><div role="cell" className={direction === 'to-setlist' ? 'adopted' : undefined}>{row.library}</div><div role="cell" className={direction === 'to-library' || direction === 'save-as' ? 'adopted' : undefined}>{row.setlist}</div></div></div>)}
             {!rows.length && <p className="p-4 text-sm text-gray-500">{changes.length ? (zh ? '目前顯示的譜面內容相同，但編排記錄不同。' : 'The displayed scores match, but their arrangement records differ.') : (zh ? '譜面內容相同，無須更新。' : 'The scores match. No update is needed.')}</p>}
           </div>
+          {!preview.setlistScoreUpdatedAt && <p className="source-sync-record-note">{zh ? '舊版歌單未記錄這首歌的修改時間；之後修改譜面時會自動記錄。' : 'Older setlists did not record this song’s modification time. Future score edits will record it automatically.'}</p>}
           {needsChoice && <fieldset className="source-sync-options"><legend>{zh ? '選擇更新方向' : 'Choose an update direction'}</legend>
             <label className="source-sync-option"><input type="radio" name={titleId} checked={direction === 'to-setlist'} disabled={busy} onChange={() => setDirection('to-setlist')} /><span><strong>{zh ? '歌曲庫' : 'Library'}<ArrowRight size={16} aria-hidden="true" />{preview.setlistName}</strong><small>{zh ? '取用歌曲庫版本，更新這份歌單' : 'Use the library version to update this setlist'}</small></span></label>
             <label className="source-sync-option"><input type="radio" name={titleId} checked={direction === 'to-library'} disabled={busy} onChange={() => setDirection('to-library')} /><span><strong>{preview.setlistName}<ArrowRight size={16} aria-hidden="true" />{zh ? '歌曲庫' : 'Library'}</strong><small>{zh ? '取用歌單版本，更新歌曲庫原曲' : 'Use this setlist version to update the library source'}</small></span></label>
@@ -124,7 +141,6 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
           </details>}
           <details className="source-sync-extra"><summary>{zh ? '更新範圍、備份與版本紀錄' : 'Update scope, backup and version history'}</summary>
             <p>{zh ? '保留 Key、個人 Capo 與顯示偏好。更新這份歌單時，保留仍有效的演出段落順序；已刪除的段落會移出順序。更新前完整備份，確認期間若有人修改，會停止更新並要求重新比對。' : 'Key, personal Capo and display preferences stay unchanged. Updating this setlist keeps valid performance section order and removes deleted sections. Previous versions are backed up; concurrent edits stop the update and require a fresh comparison.'}</p>
-            <p>{zh ? '歌曲庫最後更新：' : 'Library last updated: '}{new Date(preview.sourceRevision).toLocaleString(zh ? 'zh-TW' : 'en')}</p>
             {needsChoice && preview.baseline && <div className="source-sync-history"><div><h4>{zh ? '這份歌單曾修改' : 'Changes made in this setlist'}</h4><ul>{describeSetlistSourceChanges(preview.baseline.entryContent, preview.overrideJson.songData, language).map((change,index)=><li key={index}>{change}</li>)}</ul></div><div><h4>{zh ? '歌曲庫曾修改' : 'Changes made in the library'}</h4><ul>{describeSetlistSourceChanges(preview.baseline.sourceContent, preview.source, language).map((change,index)=><li key={index}>{change}</li>)}</ul></div></div>}
           </details>
           {error && <p role="alert" className="mt-4 text-sm text-rose-700">{error}</p>}

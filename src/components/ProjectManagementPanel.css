@@ -134,6 +134,11 @@
 .setlist-song-title{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;min-width:0;font-size:18px;font-weight:600;line-height:26px}
 .setlist-song-current{flex-shrink:0;margin-top:5px;color:var(--color-indigo-700)}
 .setlist-song-summary{display:block;margin-top:6px;font-size:12px;line-height:18px;color:var(--color-text-muted);overflow-wrap:anywhere}
+.setlist-song-source-status{display:inline-flex;align-items:center;gap:5px;margin-top:7px;padding:3px 7px;border-radius:6px;font-size:11px;font-weight:600;line-height:16px;max-width:100%;background:var(--color-amber-100);color:var(--color-amber-800);text-align:left}
+.setlist-song-source-status svg{flex-shrink:0}
+.setlist-song-source-status[data-source-status="setlist-changed"]{background:var(--color-indigo-50);color:var(--color-indigo-800)}
+.setlist-song-row.is-current .setlist-song-source-status{background:var(--color-surface);color:var(--color-amber-800)}
+.setlist-song-row.is-current .setlist-song-source-status[data-source-status="setlist-changed"]{color:var(--color-indigo-800)}
 .setlist-song-row.is-current :is(.setlist-song-number-handle,.setlist-song-static-number,.setlist-song-summary,.setlist-song-current,.setlist-song-heading>button){color:var(--color-indigo-50)}
 .setlist-song-row.is-current .setlist-song-heading>button:hover{background:var(--color-indigo-800)}
 .setlist-song-archived{grid-column:1/-1;justify-self:start;border-radius:8px;background:var(--color-amber-100);color:var(--color-amber-700);padding:2px 6px;font-size:11px;font-weight:600;line-height:16px}

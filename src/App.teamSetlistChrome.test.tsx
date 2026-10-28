@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 import { ToastProvider } from './components/Toast';
 import type { LibraryRole, WorkspaceSnapshot } from './types';
+import { getNavigationStorageKey, saveNavigationLocation } from './lib/setlistNavigationMemory';
 const state = vi.hoisted(() => ({ refresh: vi.fn(() => false), role: 'viewer' as LibraryRole, presenceFailed: false, editors: [] as import('./lib/songEditingPresence').SongEditorPresence[] }));
 let fixture: WorkspaceSnapshot;
 vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: { id: 'review-user', email: 'review@example.invalid', name: 'Review', picture: '' }, session: { access_token: 'test-session' }, status: 'signed-in', isConfigured: true, signInWithGoogle: vi.fn(), signOut: vi.fn() }) }));
@@ -81,3 +82,40 @@ it('keeps score-version notices inside the preview overlay instead of resizing t
   expect(within(notice as HTMLElement).getByRole('button',{name:'比對差異與方向'})).toBeVisible();
   expect(document.querySelector('[data-content-area]')?.previousElementSibling).toBe(document.querySelector('[data-topbar]'));
 });
+
+it('marks each differing song in the sidebar and clears the marker when the scores converge', async () => {
+  state.role = 'owner';
+  const original = structuredClone(fixture.songs[0]);
+  const baseline = { songId: original.id, sourceContent: original, entryContent: original,
+    sourceRevision: '2026-10-26T00:00:00Z', capturedAt: '2026-10-26T00:00:00Z' };
+  const cases = [
+    ['source', 'G', 'C', '歌曲庫有新版'], ['setlist', 'C', 'G', '歌單有修改'],
+    ['both', 'G', 'F', '兩邊都有修改'], ['unknown', 'C', 'F', '版本不同，待比對'],
+    ['same', 'C', 'C', ''], ['key-only', 'C', 'C', '']
+  ];
+  fixture.songs = cases.map(([id, chord]) => ({ ...structuredClone(original), id,
+    sections: [{ ...original.sections[0], bars: [{ ...original.sections[0].bars[0], chords: [chord] }] }] }));
+  fixture.setlists[0].songs = cases.map(([id, , chord], order) => ({ id, songId: id, setlistId: 'set', order, sectionOrder: [],
+    overrideKey: id === 'key-only' ? 'D' : undefined,
+    songData: { ...structuredClone(original), sections: [{ ...original.sections[0], bars: [{ ...original.sections[0].bars[0], chords: [chord] }] }] },
+    sourceBaseline: id === 'unknown' ? null : { ...baseline, songId: id }
+  }));
+  saveNavigationLocation(getNavigationStorageKey('review-user', 'team'), {
+    version: 1, workspaceMode: 'setlists', filter: { kind: 'all' }, parentFilter: { kind: 'all' },
+    view: 'detail', setlistId: 'set', songId: 'source'
+  });
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  await waitFor(() => expect(document.querySelector('[data-setlist-song-id="source"] [data-source-status]')).toHaveTextContent('歌曲庫有新版'));
+  for (const [id, , , label] of cases) {
+    const badge = document.querySelector(`[data-setlist-song-id="${id}"] [data-source-status]`);
+    if (label) expect(badge).toHaveTextContent(label);
+    else expect(badge).toBeNull();
+  }
+  const latest = () => (state.refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0];
+  const current = latest().workspace;
+  await act(async () => latest().onUpdate({ ...current, lastSavedAt: 2, setlists: current.setlists.map(list => ({ ...list,
+    songs: list.songs.map(entry => entry.id === 'source' ? { ...entry, songData: fixture.songs[0] } : entry)
+  })) }));
+  await waitFor(() => expect(document.querySelector('[data-setlist-song-id="source"] [data-source-status]')).toBeNull());
+  expect(document.querySelector('[data-setlist-song-id="both"] [data-source-status]')).toHaveTextContent('兩邊都有修改');
+}, 15000);

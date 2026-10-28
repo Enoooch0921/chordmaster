@@ -22,7 +22,7 @@ import { PICKUP_EDITOR_SECTION_ID, PICKUP_EDITOR_BAR_ID, normalizePickupTimeSign
 import { currentKeyMode, normalizeKeyMode, formatKeyName } from './utils/keyMode';
 import { compareNaturalNames } from './utils/naturalNameCompare';
 import SetlistSourceSyncControl from './components/SetlistSourceSyncControl';
-import { classifySetlistSource, createSetlistSourceCopy, hasSetlistSourceScoreChange } from './lib/setlistSourceSync';
+import { classifySetlistSource, createSetlistSourceCopy, getSetlistSourceStatusLabel, hasSetlistSourceScoreChange, type SetlistSourceStatus } from './lib/setlistSourceSync';
 import type { TonalMode } from './types';
 import { normalizeRhythmVoices } from './utils/rhythmVoices';
 import { normalizeJianpuVoices } from './utils/jianpuVoices';
@@ -167,7 +167,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Guitar, Check, Minus, Keyboard, Eraser, Pin, PinOff } from 'lucide-react';
+import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Guitar, Check, Minus, Keyboard, Eraser, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -2770,6 +2770,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         : classifySetlistSource(selectedSetlistSourceSong, activeDraftEditorSong, selectedSetlistSong.sourceBaseline)
       : 'aligned'
   ), [isSetlistMode, selectedSetlistSourceSong, activeDraftEditorSong, selectedSetlistSong?.sourceBaseline, selectedSetlistSong?.songData]);
+  const setlistSourceStatuses = React.useMemo(() => {
+    const statuses = new Map<string, SetlistSourceStatus>();
+    if (!isTeamWorkspace || isJoinedSetlist) return statuses;
+    const sources = new Map(songs.filter(source => !source.archivedAt).map(source => [source.id, source]));
+    for (const entry of selectedSetlist?.songs ?? []) {
+      const source = sources.get(entry.songId);
+      if (source && entry.songData && !entry.sourceArchivedAt) {
+        statuses.set(entry.id, classifySetlistSource(source, entry.songData, entry.sourceBaseline));
+      }
+    }
+    return statuses;
+  }, [isTeamWorkspace, isJoinedSetlist, songs, selectedSetlist?.songs]);
   const activeDraftNavigationPreviewSong = React.useMemo(() => (
     isSetlistMode
     ? (activeDraftEditorSong && selectedSetlistSong && selectedSetlistSourceSong && effectiveSelectedSetlist
@@ -12277,6 +12289,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
               const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode, setlistCapoResolutionOptions);
               const displaySong = item.songData ?? sourceSong;
+              const sourceStatus = isActive && setlistSourceStatuses.has(item.id)
+                ? selectedSetlistSourceStatus : setlistSourceStatuses.get(item.id) ?? 'aligned';
+              const sourceStatusLabel = getSetlistSourceStatusLabel(sourceStatus, language);
               const effectiveTempo = activePreviewEditSession?.previewIdentity === item.id ? activePreviewEditSession.draftSong.tempo : displaySong.tempo;
               const songInfoSummary = [
                 `${language === 'zh' ? '原調' : 'Original'} ${formatKeyName(displaySong.originalKey, displaySong.originalKeyMode)}`,
@@ -12323,6 +12338,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                         {sourceSong.archivedAt || item.sourceArchivedAt ? <span className="setlist-song-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
                       </span>
                       {songInfoSummary ? <span className="setlist-song-summary">{songInfoSummary}</span> : null}
+                      {sourceStatusLabel && <span className="setlist-song-source-status" data-source-status={sourceStatus}>
+                        <ArrowLeftRight size={13} aria-hidden="true" />{sourceStatusLabel}
+                      </span>}
                     </button>
                   </div>
                   {isSetlistSongSortMode && canReorderSelectedSetlist ? (

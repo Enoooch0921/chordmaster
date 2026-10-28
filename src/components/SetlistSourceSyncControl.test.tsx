@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
 const mocks = vi.hoisted(() => ({ preview: vi.fn(), sync: vi.fn() }));
@@ -29,6 +29,30 @@ it('requires an explicit preview and confirmation before uploading', async () =>
   fireEvent.click(screen.getByRole('button', { name: '用歌單版本更新歌曲庫' }));
   await waitFor(() => expect(onSynced).toHaveBeenCalledOnce());
   expect(screen.getByRole('status')).toHaveTextContent('已用「聚會一」的版本更新歌曲庫');
+});
+it('shows both modification dates before choosing a direction and reloads them on comparison refresh', async () => {
+  const value = await mocks.preview();
+  mocks.preview.mockResolvedValue({ ...value, status: 'conflict', setlistScoreUpdatedAt: '2026-10-28T03:11:12Z' });
+  mount();
+  fireEvent.click(screen.getByRole('button', { name: '預覽歌單 → 歌曲庫' }));
+  const dates = await screen.findByRole('row', { name: '最後修改時間' });
+  expect(dates.closest('details')).toBeNull();
+  expect(within(dates).getAllByRole('cell')[0].querySelector('time')).toHaveAttribute('datetime', '2026-10-26T00:00:00.000Z');
+  expect(within(dates).getAllByRole('cell')[1].querySelector('time')).toHaveAttribute('datetime', '2026-10-28T03:11:12.000Z');
+  expect(screen.getByRole('button', { name: '請先選擇更新方向' })).toBeDisabled();
+  mocks.preview.mockResolvedValue({ ...value, status: 'conflict', setlistScoreUpdatedAt: '2026-10-28T04:00:00Z' });
+  fireEvent.click(screen.getByRole('button', { name: '重新比對' }));
+  await waitFor(() => expect(within(dates).getAllByRole('cell')[1].querySelector('time')).toHaveAttribute('datetime', '2026-10-28T04:00:00.000Z'));
+  expect(mocks.sync).not.toHaveBeenCalled();
+});
+it.each([null, 'invalid-date'])('does not invent dates for missing or invalid timestamps (%s)', async timestamp => {
+  const value = await mocks.preview();
+  mocks.preview.mockResolvedValue({ ...value, setlistScoreUpdatedAt: timestamp });
+  mount();
+  fireEvent.click(screen.getByRole('button', { name: '預覽歌單 → 歌曲庫' }));
+  const dates = await screen.findByRole('row', { name: '最後修改時間' });
+  expect(within(dates).getAllByRole('cell')[1]).toHaveTextContent('尚無修改時間紀錄');
+  expect(dates).not.toHaveTextContent('Invalid Date');
 });
 it('offers only the refresh direction for an unchanged stale copy', async () => {
   const value = await mocks.preview();
