@@ -14,3 +14,10 @@ FORM: Current library and named setlist stay in fixed columns. Show actual chang
 QUALITY BAR: Direction changes never swap comparison columns. No writes occur on preview or selection. A failed or stale confirmation requires a fresh preview. Verify short and narrow screens, visible buttons, empty comparisons and save-as retries. Use local fixtures without production writes.
 
 The App uses a compact floating entry above its existing preview controls. It must not insert a band above the content area or participate in sheet sizing. Verify notice transitions by measuring viewport bounds, sheet transform, scroll position and the visible song’s coordinates before/after a real local score edit.
+
+
+## Theme correction — 2026-10-28
+
+Keep source selection, comparison labels, directional arrows, scope and primary confirmation on component-scoped theme roles. Dark mode uses green-300 accents and green-200 text on green-950 selected surfaces; its primary action uses green-300 with green-950 text. Light mode uses green-700 with white text for confirmation. Never inherit the global inverse-text token on a fixed green action. The compact/noncompact entry also retains readable amber feedback in dark mode.
+
+Verified actual production component with isolated synthetic data at 1280×800 and 390×844, including both conflict directions and the light theme. Dark body, scope, selected fields and confirmation exceed 4.5:1. No source or setlist data was written.

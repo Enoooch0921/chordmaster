@@ -1,3 +1,5 @@
+import { useLayoutEffect } from 'react';
+import { InvitationTransitionProvider, useInvitationTransition } from '../components/InvitationTransition';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -56,6 +58,12 @@ const song = (title: string) => ({
 
 const LocationDisplay = () => {
   const location = useLocation();
+  const { ready } = useInvitationTransition();
+  useLayoutEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const kind = params.has('project') ? 'project' : 'setlist';
+    ready(`${kind}:${params.get(kind)}`);
+  }, [location.search, ready]);
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
 };
 
@@ -80,10 +88,10 @@ const installLocalStorageMock = () => {
 
 const renderPage = () => render(
   <MemoryRouter initialEntries={['/share/test-token']}>
-    <Routes>
+    <InvitationTransitionProvider><Routes>
       <Route path="/share/:token" element={<SharedChartPage />} />
       <Route path="/" element={<LocationDisplay />} />
-    </Routes>
+    </Routes></InvitationTransitionProvider>
   </MemoryRouter>
 );
 
@@ -217,7 +225,7 @@ describe('SharedChartPage song imports', () => {
     mocks.rpc.mockResolvedValue({ data: 'shared-setlist-1', error: null });
 
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: '加入共享歌單' }));
+    fireEvent.click(await screen.findByRole('button', { name: '加入並開啟歌單' }));
 
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('join_shared_setlist', { p_token: 'test-token' }));
     expect(await screen.findByTestId('location')).toHaveTextContent('/?setlist=shared-setlist-1');
@@ -263,8 +271,8 @@ describe('SharedChartPage song imports', () => {
     await act(async () => authChanged('SIGNED_IN', { user: { id: 'user-2' } }));
     await waitFor(() => expect(maybeSingle).toHaveBeenCalledTimes(2));
     await act(async () => resolvePrevious({ data: { setlist_id: 'shared-1' } }));
-    expect(screen.getByRole('button', { name: '加入共享歌單' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '打開歌單' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '加入並開啟歌單' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '開啟歌單' })).not.toBeInTheDocument();
   });
 
   it('clears a joined project membership when signing into a different account', async () => {
@@ -276,10 +284,42 @@ describe('SharedChartPage song imports', () => {
       .mockReturnValue(new Promise(() => undefined));
     mocks.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle });
     renderPage();
-    expect(await screen.findByRole('button', { name: '打開專案' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '開啟專案' })).toBeInTheDocument();
     const authChanged = mocks.onAuthStateChange.mock.calls[0][0];
     await act(async () => authChanged('SIGNED_IN', { user: { id: 'user-2' } }));
-    expect(screen.getByRole('button', { name: '加入專案' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '打開專案' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '正在確認帳號…' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '開啟專案' })).not.toBeInTheDocument();
   });
+  it.each(['setlist', 'project'] as const)('covers joining and directly opening a %s invitation, without duplicate joins', async kind => {
+    const resource = kind === 'setlist' ? { resourceType: 'setlist', setlist: { id: 'target', name: 'Invitation', displayMode: 'chord-movable-key', songs: [] } }
+      : { resourceType: 'project', project: { id: 'target', name: 'Invitation', setlists: [] } };
+    mocks.resolveShareLink.mockResolvedValue(resource); mocks.rpc.mockResolvedValue({ data: 'target', error: null });
+    const page = renderPage();
+    const button = await screen.findByRole('button', { name: kind === 'setlist' ? '加入並開啟歌單' : '加入並開啟專案' });
+    fireEvent.click(button); fireEvent.click(button);
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId('location')).toHaveTextContent(`/?${kind}=target`);
+    await waitFor(() => expect(document.querySelector('.invitation-gate')).toBeNull());
+    page.unmount(); mocks.rpc.mockClear();
+    mocks.from.mockReturnValue({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({data:{id:'member'}}) });
+    renderPage(); fireEvent.click(await screen.findByRole('button', { name: kind === 'setlist' ? '開啟歌單' : '開啟專案' }));
+    expect(await screen.findByTestId('location')).toHaveTextContent(`/?${kind}=target`);
+    await waitFor(() => expect(document.querySelector('.invitation-gate')).toBeNull());
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it('returns to an actionable invitation when joining fails', async () => {
+    mocks.resolveShareLink.mockResolvedValue({resourceType:'project',project:{id:'target',name:'Invitation',setlists:[]}});
+    mocks.rpc.mockResolvedValue({data:null,error:new Error('Unavailable')});
+    renderPage(); fireEvent.click(await screen.findByRole('button',{name:'加入並開啟專案'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent('無法加入專案');
+    expect(document.querySelector('.invitation-gate')).toBeNull();
+    expect(screen.getByRole('button',{name:'加入並開啟專案'})).toBeEnabled();
+  });
+  it('passes invitation context to Google sign-in only for setlist/project invitations', async () => {
+    mocks.getSession.mockResolvedValue({data:{session:null},error:null});
+    mocks.resolveShareLink.mockResolvedValue({resourceType:'setlist',setlist:{id:'target',name:'Invitation',displayMode:'chord-movable-key',songs:[]}});
+    renderPage(); fireEvent.click(await screen.findByRole('button',{name:'使用 Google 登入'}));
+    await waitFor(()=>expect(mocks.signInWithGoogleRedirect).toHaveBeenCalledWith('/share/test-token',expect.objectContaining({kind:'setlist',id:'target',token:'test-token'})));
+  });
+
 });

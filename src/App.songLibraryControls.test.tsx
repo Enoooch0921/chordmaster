@@ -202,3 +202,27 @@ it('finds 點燃 in the library with both two-letter and two-symbol initials', a
     expect(row('third')).toBeNull();
   }
 });
+
+it.each([false, true])('finds saved lyrics in the song library without changing selection (team: %s)', async cloud => {
+  state.cloud = cloud; state.role = 'viewer';
+  fixture.songs[1].lyricsDoc = { chinese: '已刪除的歌詞', blocks: [
+    { id: 'v', marker: 'Verse', chinese: '星光照亮前路，\n我們一起前行', english: 'Hope will light\nour way' }
+  ] };
+  fixture.songs[2].sections[0].bars[0].annotation = '星光照亮前路';
+  await mount();
+  const search = screen.getByRole('textbox', { name: '搜尋歌曲' });
+  expect(search).toHaveAttribute('placeholder', '搜尋歌名、歌詞或作者');
+  for (const value of ['星光照亮前路我們一起前行', '我们一起前行', 'hope will light our way', '星光 D']) {
+    fireEvent.change(search, { target: { value } });
+    expect(await screen.findByRole('button', { name: '開啟歌曲：第二首歌曲' })).toBeInTheDocument();
+    expect(row('first')).toBeNull(); expect(row('third')).toBeNull();
+    expect(selectedSongId()).toBe('first');
+  }
+  fireEvent.change(search, { target: { value: '已刪除的歌詞' } });
+  expect(row('second')).toBeNull();
+  fireEvent.change(search, { target: { value: '' } });
+  expect(openSong('第一首歌曲')).toHaveAttribute('aria-current', 'true');
+  fireEvent.change(search, { target: { value: '星光照亮前路' } });
+  fireEvent.click(await screen.findByRole('button', { name: '開啟歌曲：第二首歌曲' }));
+  await waitFor(() => expect(selectedSongId()).toBe('second'));
+});

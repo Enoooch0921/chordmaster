@@ -11,6 +11,7 @@ import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
 import { useThreeFingerHistory } from './hooks/useThreeFingerHistory';
 import { applyWorkspaceHistory as applyHistoryToWorkspace, createWorkspaceHistoryEntry, historySignature, type WorkspaceHistoryEntry, type WorkspaceHistoryChange, type HistoryWorkspace } from './lib/workspaceHistory';
 import { useAppViewport } from './hooks/useAppViewport';
+import { useWorkspaceSwitcherDismiss } from './hooks/useWorkspaceSwitcherDismiss';
 import { useBottomSheetMotion } from './hooks/useBottomSheetMotion';
 import { useModalFocus } from './hooks/useModalFocus';
 import { useModalScrollLock } from './hooks/useModalScrollLock';
@@ -44,6 +45,8 @@ import MobileSidebarNavigation from './components/MobileSidebarNavigation';
 import SetlistContextMenu from './components/SetlistContextMenu';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import AppLoadingScreen from './components/AppLoadingScreen';
+import { useInvitationTransition } from './components/InvitationTransition';
+import { invitationTarget } from './lib/invitationJourney';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
 import { useJoinedWorkspaceRefresh } from './hooks/useJoinedWorkspaceRefresh';
@@ -245,12 +248,7 @@ import {
   togglePreviewBarSelection
 } from './lib/previewBarSelection';
 import { getPreviewZoomContentRatio, resolvePreviewZoomLayout } from './lib/previewZoom';
-import {
-  isLocalOnlySymbolTestSong,
-  SYMBOL_TEST_SONG_LEGACY_TITLE,
-  SYMBOL_TEST_SONG_THREE_ROW_TITLE,
-  SYMBOL_TEST_SONG_TWO_ROW_TITLE
-} from './lib/symbolTestSongs';
+import { isLocalOnlySymbolTestSong } from './lib/symbolTestSongs';
 import { getChordDisplaySlotOwnership } from './utils/chordSlots';
 import { getDefaultRhythmCursor, getRhythmCursorUnits } from './lib/rhythmEditing';
 import {
@@ -729,253 +727,6 @@ const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
   };
 };
 
-const SYMBOL_TEST_SONG_TEMPLATE: Song = {
-  chordTimingVersion: CURRENT_CHORD_TIMING_VERSION,
-  title: SYMBOL_TEST_SONG_LEGACY_TITLE,
-  shuffle: true,
-  originalKey: "Eb",
-  currentKey: "Eb",
-  showAbsoluteJianpu: false,
-  tempo: 72,
-  timeSignature: "4/4",
-  useSectionColors: true,
-  barNumberMode: 'all',
-  barRowCount: 2,
-  nashvilleFontPreset: DEFAULT_NASHVILLE_FONT_PRESET,
-  chordFontPreset: DEFAULT_CHORD_FONT_PRESET,
-  pickup: {
-    id: 'test-pickup',
-    rhythm: 'e~ e',
-    riff: "(#5_) 6_"
-  },
-  sections: [
-    {
-      id: "test-bars",
-      title: "Bars / Marks",
-      bars: [
-        {
-          id: "test-repeat-start",
-          chords: ["Eb"],
-          repeatStart: true,
-          leftMarker: 'segno',
-          leftText: 'Segno',
-          annotation: "Intro",
-          rhythm: "qr e~ q q e",
-          rhythmLabel: "Rh",
-          rhythmMark: { color: 'emerald' },
-          chordMarks: { 0: { special: true, color: 'amber' } }
-        },
-        {
-          id: "test-tie-target",
-          chords: ["Bb/D"],
-          rightMarker: 'coda',
-          rightText: 'To Coda',
-          rhythm: "q^ e e s s e q",
-          rhythmMark: { color: 'sky' },
-          unisonMark: { enabled: true, color: 'rose' }
-        },
-        {
-          id: "test-ending-one",
-          chords: ["C#m7b5", "", "F#dim7", ""],
-          ending: "1,2",
-          annotation: "Push",
-          rhythm: "e3 e3 e3 q. e",
-          riff: "1_t2_t3_t | 3= 4= | b5. | 6'",
-          riffLabel: "Riff"
-        },
-        {
-          id: "test-repeat-end",
-          chords: ["Gaug", "", "A7#11", ""],
-          ending: "1,2",
-          repeatEnd: true,
-          rightMarker: 'ds-al-coda',
-          rhythm: "s s s s e~ e q q",
-          riff: "5, 6, | 7 1' | 0 | -"
-        }
-      ]
-    },
-    {
-      id: "test-chords",
-      title: "Chords / Rests",
-      bars: [
-        {
-          id: "test-percent",
-          chords: ["%"],
-          label: "Perc",
-          annotation: "Repeat",
-          rhythm: "q q q q"
-        },
-        {
-          id: "test-whole-rest",
-          chords: ["0w"],
-          leftMarker: 'coda',
-          leftText: 'Coda',
-          rhythm: "wr"
-        },
-        {
-          id: "test-half-rest",
-          chords: ["0h", "", "Db/F", ""],
-          timeSignature: "3/4",
-          annotation: "3/4",
-          rhythm: "h qr",
-          riff: "1 2 | 3",
-          riffLabel: "3/4"
-        },
-        {
-          id: "test-final-bar",
-          chords: ["|4|"],
-          finalBar: true,
-          rightMarker: 'fine',
-          rhythm: "w"
-        }
-      ]
-    },
-    {
-      id: "test-meter",
-      title: "Meter / Jianpu",
-      keyChangeTo: "F",
-      bars: [
-        {
-          id: "test-six-eight",
-          chords: ["F", "", "C/E", ""],
-          timeSignature: "6/8",
-          repeatStart: true,
-          annotation: "Key F",
-          rhythm: "e e e e e e",
-          riff: "1_ 2_ 3_ | 4_ 5_ 6_",
-          riffLabel: "6/8"
-        },
-        {
-          id: "test-dotted",
-          chords: ["Dm9", "", "G13", ""],
-          timeSignature: "6/8",
-          rhythm: "q. q.",
-          riff: "(6_) 7_ 1' | 2' 3' 4'",
-          rhythmLabel: "Dot"
-        },
-        {
-          id: "test-minor-quality",
-          chords: ["Bbmaj9", "", "EbmMaj7", ""],
-          timeSignature: "5/4",
-          annotation: "5/4",
-          rhythm: "q q e e q q",
-          riff: "b7 6 | #5 4 | 3"
-        },
-        {
-          id: "test-dc",
-          chords: ["Csus4", "C", "F/A", "Bb"],
-          rightMarker: 'dc',
-          rhythm: "e~ e e e q q",
-          riff: "1= 2= 3= 4= | 5 | 6 | 7"
-        }
-      ]
-    },
-    {
-      id: "test-lanes",
-      title: "Lanes / Text",
-      bars: [
-        {
-          id: "test-shared-label",
-          chords: ["Ab"],
-          label: "EG",
-          annotation: "Label",
-          rhythm: "q^ q q q",
-          riff: "1 0 | 2 - | 3 | 4"
-        },
-        {
-          id: "test-rhythm-only",
-          chords: [],
-          rhythm: "q e e q~ q",
-          rhythmLabel: "Clap",
-          rhythmMark: { color: 'violet' }
-        },
-        {
-          id: "test-riff-only",
-          chords: [],
-          riff: "(1 2) | #3_ b4_ | 5= 6= 7= 1'= | 0",
-          riffLabel: "Lead"
-        },
-        {
-          id: "test-outro-end",
-          chords: ["Eb", "", "Bb/D", ""],
-          rightMarker: 'ds-al-fine',
-          annotation: "Outro",
-          rhythm: "q q q q",
-          unisonMark: { enabled: true, color: 'sky' }
-        }
-      ]
-    },
-    {
-      id: "test-overflow",
-      title: "Stress",
-      bars: [
-        {
-          id: "test-dense-chords",
-          chords: ["Ebsus4", "Eb", "Bb7/D", "Abadd9"],
-          leftText: 'Vamp',
-          rhythm: "s s s s s s s s q q"
-        },
-        {
-          id: "test-cross-bar-out",
-          chords: ["Fm11"],
-          rhythm: "q q q q~"
-        },
-        {
-          id: "test-cross-bar-in",
-          chords: ["Fm11"],
-          rhythm: "q q q q"
-        },
-        {
-          id: "test-terminal",
-          chords: ["Eb6/9"],
-          finalBar: true,
-          rightText: 'End',
-          rhythm: "w"
-        }
-      ]
-    }
-  ]
-};
-
-const stripSymbolTestBarToTwoLines = (bar: Bar, prefer: 'rhythm' | 'riff'): Bar => {
-  const hasRhythm = Boolean(bar.rhythm?.trim());
-  const hasRiff = Boolean(bar.riff?.trim());
-  if (!hasRhythm || !hasRiff) {
-    return bar;
-  }
-
-  if (prefer === 'riff') {
-    const { rhythm: _rhythm, rhythmLabel, rhythmMark: _rhythmMark, ...riffBar } = bar;
-    return {
-      ...riffBar,
-      label: riffBar.label ?? riffBar.riffLabel ?? rhythmLabel
-    };
-  }
-
-  const { riff: _riff, riffLabel: _riffLabel, ...rhythmBar } = bar;
-  return rhythmBar;
-};
-
-const createSymbolTestSongTemplate = (barRowCount: 2 | 3): Song => {
-  const song = cloneSong(SYMBOL_TEST_SONG_TEMPLATE);
-  return {
-    ...song,
-    title: barRowCount === 3 ? SYMBOL_TEST_SONG_THREE_ROW_TITLE : SYMBOL_TEST_SONG_TWO_ROW_TITLE,
-    barRowCount,
-    sections: barRowCount === 3
-      ? song.sections
-      : song.sections.map((section) => {
-        const prefer: 'rhythm' | 'riff' = section.id === 'test-meter' ? 'riff' : 'rhythm';
-        return {
-          ...section,
-          bars: section.bars.map((bar) => stripSymbolTestBarToTwoLines(bar, prefer))
-        };
-      })
-  };
-};
-
-const INITIAL_SONG = createSymbolTestSongTemplate(2);
-
 const EMPTY_LIBRARY_PREVIEW_SONG: StoredSong = {
   id: 'empty-library-preview',
   title: 'No songs yet',
@@ -1331,107 +1082,6 @@ const createEmptySong = (title: string): StoredSong =>
     ]
   });
 
-const getSymbolTestContentSignature = (song: Song) => JSON.stringify({
-  title: song.title,
-  shuffle: song.shuffle,
-  originalKey: song.originalKey,
-  currentKey: song.currentKey,
-  showAbsoluteJianpu: song.showAbsoluteJianpu,
-  tempo: song.tempo,
-  timeSignature: song.timeSignature,
-  useSectionColors: song.useSectionColors,
-  barNumberMode: song.barNumberMode,
-  barRowCount: song.barRowCount,
-  nashvilleFontPreset: song.nashvilleFontPreset,
-  chordFontPreset: song.chordFontPreset,
-  pickup: song.pickup,
-  sections: song.sections
-});
-
-const updateStoredSymbolTestSong = (song: StoredSong, barRowCount: 2 | 3, updatedAt: number) => {
-  const template = createSymbolTestSongTemplate(barRowCount);
-  if (getSymbolTestContentSignature(song) === getSymbolTestContentSignature(template)) {
-    return { song, changed: false };
-  }
-
-  return {
-    song: {
-      ...song,
-      ...template,
-      id: song.id,
-      createdBy: song.createdBy,
-      updatedBy: song.updatedBy,
-      archivedAt: song.archivedAt,
-      archivedBy: song.archivedBy,
-      teamSource: song.teamSource,
-      createdAt: song.createdAt,
-      updatedAt
-    },
-    changed: true
-  };
-};
-
-const ensureDefaultSymbolTestPages = (songs: StoredSong[]) => {
-  let changed = false;
-  const now = Date.now();
-  const normalizedSongs = songs.map((song) => {
-    if (!isLocalOnlySymbolTestSong(song)) {
-      return song;
-    }
-
-    if (song.title === SYMBOL_TEST_SONG_THREE_ROW_TITLE) {
-      const result = updateStoredSymbolTestSong(song, 3, now);
-      changed = changed || result.changed;
-      return result.song;
-    }
-
-    if (song.title === SYMBOL_TEST_SONG_TWO_ROW_TITLE || song.title === SYMBOL_TEST_SONG_LEGACY_TITLE) {
-      const result = updateStoredSymbolTestSong(song, 2, now);
-      changed = changed || result.changed;
-      return result.song;
-    }
-
-    return song;
-  });
-
-  const hasTwoRowPage = normalizedSongs.some((song) => (
-    isLocalOnlySymbolTestSong(song)
-    && song.title === SYMBOL_TEST_SONG_TWO_ROW_TITLE
-  ));
-  const hasThreeRowPage = normalizedSongs.some((song) => (
-    isLocalOnlySymbolTestSong(song)
-    && song.title === SYMBOL_TEST_SONG_THREE_ROW_TITLE
-  ));
-  const nextSongs = [...normalizedSongs];
-
-  if (!hasTwoRowPage) {
-    changed = true;
-    nextSongs.push(createStoredSong(createSymbolTestSongTemplate(2), createSongId()));
-  }
-  if (!hasThreeRowPage) {
-    changed = true;
-    nextSongs.push(createStoredSong(createSymbolTestSongTemplate(3), createSongId()));
-  }
-
-  return { songs: nextSongs, changed };
-};
-
-const addLocalSymbolTestPages = (cloudSongs: StoredSong[], localSongs: StoredSong[]) => (
-  ensureDefaultSymbolTestPages([
-    ...cloudSongs.filter((song) => !isLocalOnlySymbolTestSong(song)),
-    ...localSongs.filter(isLocalOnlySymbolTestSong)
-  ]).songs
-);
-
-const getDefaultLibrary = () => {
-  const defaultSong = createStoredSong(createSymbolTestSongTemplate(2), createSongId());
-  const threeRowSymbolTestSong = createStoredSong(createSymbolTestSongTemplate(3), createSongId());
-  return {
-    songs: [defaultSong, threeRowSymbolTestSong],
-    selectedSongId: defaultSong.id
-  };
-};
-
 const getSongSelectionLibraryKey = (libraryId: string | null | undefined) => (
   libraryId ? `cloud:${libraryId}` : 'personal'
 );
@@ -1502,24 +1152,17 @@ const persistSelectedSongId = (libraryId: string | null | undefined, songId: str
 };
 
 const loadSongLibrary = (workspace: WorkspaceSnapshot) => {
-  if (workspace.songs.length === 0) {
-    return {
-      ...getDefaultLibrary(),
-      lastSavedAt: null as number | null
-    };
-  }
-
   const storedSelectedId = getStoredSelectedSongId(null);
   const repairedSongs = workspace.songs.map((song, index) => normalizeSongBars({
     ...song,
     id: song.id || `song-restored-${index + 1}`,
     updatedAt: typeof song.updatedAt === 'number' ? song.updatedAt : Date.now()
   }));
-  const { songs, changed } = ensureDefaultSymbolTestPages(repairedSongs);
+  const songs = repairedSongs.filter(song => !isLocalOnlySymbolTestSong(song));
   let lastSavedAt = workspace.lastSavedAt;
-  if (changed || JSON.stringify(repairedSongs) !== JSON.stringify(workspace.songs)) {
+  if (JSON.stringify(repairedSongs) !== JSON.stringify(workspace.songs)) {
     try {
-      lastSavedAt = persistLocalWorkspaceSnapshot(songs, workspace.setlists, workspace.projects);
+      lastSavedAt = persistLocalWorkspaceSnapshot(repairedSongs, workspace.setlists, workspace.projects);
     } catch {
       // Keep the repaired in-memory copy; the recovery warning/save path will surface storage failures.
     }
@@ -1973,8 +1616,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   initialWorkspaceRef.current = initialWorkspace;
   const initialLibraryRef = useRef<ReturnType<typeof loadSongLibrary> | null>(null);
   const initialLibrary = initialLibraryRef.current ?? (cacheIdentityEligible ? {
-    songs: initialWorkspace.songs,
-    selectedSongId: pickAvailableSongId(initialWorkspace.songs, [getStoredSelectedSongId(startupCache!.library.id)]),
+    songs: initialWorkspace.songs.filter(song => !isLocalOnlySymbolTestSong(song)),
+    selectedSongId: pickAvailableSongId(initialWorkspace.songs.filter(song => !isLocalOnlySymbolTestSong(song)), [getStoredSelectedSongId(startupCache!.library.id)]),
     lastSavedAt: initialWorkspace.lastSavedAt
   } : loadSongLibrary(initialWorkspace));
   initialLibraryRef.current = initialLibrary;
@@ -2109,6 +1752,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       setlistId: selectedSetlistId, songId: selectedSetlistSongId
     };
   });
+  const invitationTransition = useInvitationTransition();
+  const [navigationLinkProjectId] = useState(() => new URLSearchParams(window.location.search).get('project'));
   const [navigationLinkSetlistId] = useState(() => (
     typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('setlist')
   ));
@@ -2184,6 +1829,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [isTeamManagementOpen, setIsTeamManagementOpen] = useState(false);
   const [isLoadingTeamManagement, setIsLoadingTeamManagement] = useState(false);
   const [isWorkspacePanelOpen, setIsWorkspacePanelOpen] = useState(false);
+  const workspaceSwitcherRef = useRef<HTMLDivElement>(null);
+  const workspaceSwitcherTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeWorkspaceSwitcher = React.useCallback(() => setIsWorkspacePanelOpen(false), []);
+  useWorkspaceSwitcherDismiss({ open: isWorkspacePanelOpen, rootRef: workspaceSwitcherRef,
+    triggerRef: workspaceSwitcherTriggerRef, onClose: closeWorkspaceSwitcher,
+    contextKey: JSON.stringify([activeLibraryId, workspaceMode, setlistPanelView, serializeSetlistProjectFilter(setlistProjectFilter),
+      selectedSetlistId, selectedSetlistSongId, selectedSongId]) });
   const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
@@ -2349,7 +2001,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   activeLibraryRoleRef.current = activeLibraryRole;
   const canEditTeamSongs = !usingStartupCache && (!isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole));
   const isShowingArchivedSongs = showArchivedSongs && canEditTeamSongs;
-  const hasSongs = songs.some((item) => !item.archivedAt) || (isShowingArchivedSongs && songs.length > 0);
+  const userLibrarySongs = React.useMemo(() => songs.filter(item => !isLocalOnlySymbolTestSong(item)), [songs]);
+  const hasSongs = userLibrarySongs.some(item => !item.archivedAt) || (isShowingArchivedSongs && userLibrarySongs.length > 0);
   const linkedTeamSourceSignature = React.useMemo(
     () => songs
       .filter((item) => item.teamSource)
@@ -2362,9 +2015,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // Keep the create-team form collapsed by default so it never permanently
   // compresses the sidebar; it only expands when the user opens it explicitly.
   const shouldShowCreateTeamForm = isCreateTeamOpen;
-  const song = songs.find((item) => item.id === selectedSongId && (!item.archivedAt || isShowingArchivedSongs))
-    ?? songs.find((item) => !item.archivedAt)
-    ?? (isShowingArchivedSongs ? songs[0] : null)
+  const song = userLibrarySongs.find((item) => item.id === selectedSongId && (!item.archivedAt || isShowingArchivedSongs))
+    ?? userLibrarySongs.find((item) => !item.archivedAt)
+    ?? (isShowingArchivedSongs ? userLibrarySongs[0] : null)
     ?? EMPTY_LIBRARY_PREVIEW_SONG;
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
   const setlistIsDirty = serializeSetlists(setlists) !== serializeSetlists(savedSetlists);
@@ -2434,7 +2087,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return isTeamWorkspace || !loadPendingSync({ userId: authenticatedUser!.id, libraryId: activeLibraryId! });
     },
     onUpdate: (remote) => {
-      const nextSongs = isTeamWorkspace ? remote.songs : addLocalSymbolTestPages(remote.songs, songs);
+      const nextSongs = remote.songs.filter(song => !isLocalOnlySymbolTestSong(song));
       // Advance the visible data and its saved baseline together. Otherwise
       // auto-save would interpret remote changes as local edits and write back.
       if (JSON.stringify(nextSongs) !== JSON.stringify(songs)) {
@@ -2592,7 +2245,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   );
   const navigationWorkspace = React.useMemo(() => ({ projects, setlists, joinedProjects, joinedSetlists }),
     [projects, setlists, joinedProjects, joinedSetlists]);
-  const navigationReady = !isLoadingCloudWorkspace && !isSwitchingLibrary && (
+  // A just-joined invitation may be missing from the startup cache. Resolve
+  // its explicit destination only after the server workspace has arrived.
+  const navigationReady = !isLoadingCloudWorkspace && !isSwitchingLibrary
+    && !(usingStartupCache && (navigationLinkSetlistId || navigationLinkProjectId)) && (
     authenticatedUser
       ? workspaceOwnerId === authenticatedUser.id
       : !isAuthConfigured || authStatus === 'unauthenticated' || authStatus === 'unconfigured'
@@ -2603,6 +2259,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     workspace: navigationWorkspace,
     legacy: legacyNavigation,
     explicitSetlistId: navigationLinkSetlistId,
+    explicitProjectId: navigationLinkProjectId,
     current: {
       version: 1, workspaceMode, filter: setlistProjectFilter,
       view: setlistPanelView === 'detail' || setlistPanelView === 'addSongs' ? 'detail' : 'list',
@@ -2741,7 +2398,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   const activeSetlistEditableSong = React.useMemo(() => (
     selectedSetlistSong
-      ? ensureSongEditingIds(normalizeSongBars(cloneSong(selectedSetlistSong.songData ?? selectedSetlistSourceSong ?? INITIAL_SONG)))
+      ? ensureSongEditingIds(normalizeSongBars(cloneSong(selectedSetlistSong.songData ?? selectedSetlistSourceSong ?? EMPTY_LIBRARY_PREVIEW_SONG)))
       : null
   ), [selectedSetlistSong, selectedSetlistSourceSong]);
   const activeLibraryEditableSong = React.useMemo(() => (
@@ -3274,11 +2931,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       setShowArchivedSongs(false);
     }
   }, [activeLibraryId, canEditTeamSongs, showArchivedSongs]);
-  const activeLibrarySongs = songs.filter((item) => !item.archivedAt);
-  const archivedSongCount = songs.length - activeLibrarySongs.length;
-  const visibleLibrarySongs = isShowingArchivedSongs ? songs : activeLibrarySongs;
+  const activeLibrarySongs = userLibrarySongs.filter((item) => !item.archivedAt);
+  const archivedSongCount = userLibrarySongs.length - activeLibrarySongs.length;
+  const visibleLibrarySongs = isShowingArchivedSongs ? userLibrarySongs : activeLibrarySongs;
   const filteredSongs = searchItems<StoredSong>(
-    sortSongsForDisplay(visibleLibrarySongs, librarySortMode), librarySearch, getSongSearchFields
+    sortSongsForDisplay(visibleLibrarySongs, librarySortMode), librarySearch, getSongSearchFields, item => item.lyricsDoc
   );
   const getSetlistSongSource = (item: SetlistSong): StoredSong | null => {
     const libSong = songs.find((songItem) => songItem.id === item.songId);
@@ -3422,7 +3079,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
   // Filter from the full library (not filteredSongs) so the song-library search
   // query never leaks into the setlist "add songs" list.
-  const filteredSongsForSetlist = searchItems<StoredSong>(activeLibrarySongs, setlistSongSearch, getSongSearchFields);
+  const filteredSongsForSetlist = searchItems<StoredSong>(activeLibrarySongs, setlistSongSearch, getSongSearchFields, item => item.lyricsDoc);
 
   useEffect(() => {
     if (!navigationMemoryReady || !isPhoneSetlistDrawer) return;
@@ -4279,9 +3936,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     workspace: { songs: StoredSong[]; setlists: Setlist[]; joinedSetlists: JoinedSetlist[]; projects: Project[]; joinedProjects?: JoinedProject[]; lastSavedAt: number | null },
     libraryId = activeLibraryId
   ) => {
-    const workspaceSongs = libraryId === personalCloudLibrary?.id
-      ? addLocalSymbolTestPages(workspace.songs, initialLibrary.songs)
-      : workspace.songs.filter((song) => !isLocalOnlySymbolTestSong(song));
+    const workspaceSongs = workspace.songs.filter(song => !isLocalOnlySymbolTestSong(song));
     setSongs(workspaceSongs);
     setSavedSongs(cloneSong(workspaceSongs));
     setSetlists(workspace.setlists);
@@ -8109,7 +7764,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           : null;
         const targetLibrary = resolveInitialLibrary(libraries, {
           requestedTeamId,
-          rememberedLibraryId
+          rememberedLibraryId: navigationLinkSetlistId || navigationLinkProjectId ? null : rememberedLibraryId
         });
         if (isCancelled) return;
         if (openedFromCache && targetLibrary?.id !== startupCache?.library.id) {
@@ -8155,9 +7810,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           const baseSongs = remoteUserSongs.length > 0 || loadingTeamWorkspace || openedFromCache
             ? remoteUserSongs
             : fallbackLocalSongs;
-          const nextSongs = loadingTeamWorkspace
-            ? baseSongs
-            : addLocalSymbolTestPages(baseSongs, initialLibrary.songs);
+          const nextSongs = baseSongs;
           const nextSetlists = cloudWorkspace.setlists;
           const nextJoinedSetlists = cloudWorkspace.joinedSetlists;
           const requestedSetlistId = typeof window !== 'undefined'
@@ -8233,7 +7886,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           }
         }
 
-        if (!openedFromCache && !loadingTeamWorkspace && hasLocalData && !migrationCompleted && !openedSharedSetlistFromLink) {
+        if (!openedFromCache && !loadingTeamWorkspace && hasLocalData && !migrationCompleted && !openedSharedSetlistFromLink && !navigationLinkProjectId) {
           setIsImportPromptOpen(true);
         } else {
           setIsImportPromptOpen(false);
@@ -11168,7 +10821,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
   };
 
-  const ensureShareResourceIsSynced = async (resourceType: 'song' | 'setlist' | 'project', projectIdForShare?: string) => {
+  const ensureShareResourceIsSynced = async (resourceType: 'song' | 'setlist' | 'project', resourceIdForShare?: string) => {
     const repository = cloudRepositoryRef.current;
     const requestLibraryId = activeLibraryIdRef.current;
     if (!repository) {
@@ -11217,7 +10870,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
 
     if (resourceType === 'project') {
-      const projectId = projectIdForShare;
+      const projectId = resourceIdForShare;
       const project = projectId ? projects.find((item) => item.id === projectId) : null;
       if (!project) {
         throw new Error(language === 'zh' ? '找不到要分享的專案。' : 'Project to share was not found.');
@@ -11275,19 +10928,20 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
 
-    if (!selectedSetlist) {
-      throw new Error(language === 'zh' ? '找不到目前歌單。' : 'Current setlist was not found.');
+    const targetSetlist = resourceIdForShare ? setlists.find(item => item.id === resourceIdForShare) : selectedSetlist;
+    if (!targetSetlist) {
+      throw new Error(language === 'zh' ? '找不到要分享的歌單。' : 'Setlist to share was not found.');
     }
 
-    if ((selectedSetlist as JoinedSetlist).isJoined) {
+    if ((targetSetlist as JoinedSetlist).isJoined) {
       throw new Error(language === 'zh' ? '目前不能重新分享別人分享給你的歌單。' : 'Setlists shared with you cannot be reshared yet.');
     }
 
-    if (!canShareSelectedSetlist) {
+    if (!(canManageSetlist(targetSetlist) && canCreateNewShareLink)) {
       throw new Error(language === 'zh' ? '你沒有分享這份團隊歌單的權限。' : 'You do not have permission to share this team setlist.');
     }
 
-    const requiredSongs = selectedSetlist.songs
+    const requiredSongs = targetSetlist.songs
       .map((setlistSong) => songs.find((item) => item.id === setlistSong.songId))
       .filter((item): item is StoredSong => Boolean(item));
     if (requiredSongs.some(isLocalOnlySymbolTestSong)) {
@@ -11306,7 +10960,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       assertRequestIsCurrent();
     }
 
-    await repository.saveSetlist(selectedSetlist);
+    await repository.saveSetlist(targetSetlist);
     assertRequestIsCurrent();
     setSavedSongs((current) => {
       const syncedById = new Map(requiredSongs.map((item) => [item.id, cloneSong(item)] as const));
@@ -11318,9 +10972,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       ];
     });
     setSavedSetlists((current) => {
-      const nextSetlist = cloneSong(selectedSetlist);
-      return current.some((item) => item.id === selectedSetlist.id)
-        ? current.map((item) => item.id === selectedSetlist.id ? nextSetlist : item)
+      const nextSetlist = cloneSong(targetSetlist);
+      return current.some((item) => item.id === targetSetlist.id)
+        ? current.map((item) => item.id === targetSetlist.id ? nextSetlist : item)
         : [...current, nextSetlist];
     });
     setSyncStatus('saved');
@@ -11376,7 +11030,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
   };
 
-  const handleCreateShareLink = async (resourceType: 'song' | 'setlist') => {
+  const handleCreateShareLink = async (resourceType: 'song' | 'setlist', setlistId?: string) => {
     const repository = cloudRepositoryRef.current;
     const requestLibraryId = activeLibraryIdRef.current;
     if (!repository) {
@@ -11384,7 +11038,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
 
-    const resourceId = resourceType === 'song' ? song?.id : selectedSetlist?.id;
+    const resourceId = resourceType === 'song' ? song?.id : setlistId ?? selectedSetlist?.id;
     if (!resourceId) {
       return;
     }
@@ -11396,14 +11050,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
     const releaseCloudMutation = beginCloudMutation();
     try {
-      await ensureShareResourceIsSynced(resourceType);
+      await ensureShareResourceIsSynced(resourceType, resourceId);
       if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
 
       if (resourceType === 'setlist') {
         // Reuse the existing active token when there is one so reopening the
         // dialog doesn't mint duplicate links.
-        const token = activeSetlistShareStatus?.activeToken
-          ?? await repository.createShareLink(resourceType, resourceId);
+        const existingToken = selectedSetlistShareStatus?.resourceId === resourceId
+          ? selectedSetlistShareStatus.activeToken : null;
+        const token = existingToken ?? await repository.createShareLink(resourceType, resourceId);
         if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== requestLibraryId) return;
         setPendingShareUrl(buildShareUrl(token));
         setShareDialogContext({ resourceType: 'setlist', resourceId });
@@ -11959,8 +11614,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     ? (language === 'zh' ? '個人區' : 'Personal')
     : activeCloudLibrary?.name ?? (language === 'zh' ? '個人區' : 'Personal');
   const librarySwitcherPanel = isAuthenticated ? (
-    <div className="border-b border-gray-200 bg-white px-3 py-1.5">
+    <div ref={workspaceSwitcherRef} className="border-b border-gray-200 bg-white px-3 py-1.5">
       <button
+        ref={workspaceSwitcherTriggerRef}
         type="button"
         onClick={() => setIsWorkspacePanelOpen((current) => !current)}
         className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50"
@@ -12137,6 +11793,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   });
   const ownedProjectActions = (project: Project) => [
     projectPinAction(project.id),
+    ...(canShareProject(project) ? [{ label: language === 'zh' ? '分享／邀請' : 'Share / invite', icon: <Share2 size={16}/>, run: () => { void handleCreateProjectShareLink(project.id); }, disabled: creatingProjectShareLinkId !== null }] : []),
     { label: language === 'zh' ? '專案管理' : 'Project management', icon: <Users size={16}/>, run: () => handleOpenProjectManagement(project.id) },
     ...(canManageProject(project) ? [
       { label: language === 'zh' ? '重新命名' : 'Rename', icon: <Edit3 size={16}/>, run: () => { const name = window.prompt(copy.renameProjectPrompt, project.name); if (name !== null) handleRenameProject(project.id, name); } },
@@ -12434,7 +12091,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             ...(isJoinedSetlist ? [{label:selectedSetlistJoinedProject?copy.leaveProject:copy.leaveSetlist,icon:<LogOut size={16}/>,run:()=>selectedSetlistJoinedProject?requestLeaveSharedProject(selectedSetlistJoinedProject.id):requestLeaveSharedSetlist(selectedSetlist.id),danger:true,disabled:selectedSetlistJoinedProject?leavingSharedProjectId===selectedSetlistJoinedProject.id:leavingSharedSetlistId===selectedSetlist.id}] : [])
           ]}/>}
         </div>
-        <div className="setlist-detail-toolbar"><span>{setlistSongsWithSource.length}{language==='zh'?' 首歌曲':' songs'}</span>{canEditSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="pm-new-button" aria-label={copy.addToSetlist} onClick={()=>{setSetlistAddSongSelection([]);setSetlistPanelView('addSongs');}}><Plus size={16}/>{language==='zh'?'加入歌曲':'Add songs'}</button>}</div>
+        <div className="setlist-detail-toolbar">
+          <span>{setlistSongsWithSource.length}{language === 'zh' ? ' 首歌曲' : ' songs'}</span>
+          <div className="flex items-center gap-2">
+            {canShareSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="pm-text-button"
+              aria-label={language === 'zh' ? '邀請加入歌單' : 'Invite to setlist'} disabled={isRevokingSetlistShare}
+              onClick={() => { void handleCreateShareLink('setlist'); }}><Share2 size={15}/>{language === 'zh' ? '邀請' : 'Invite'}</button>}
+            {canEditSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="pm-new-button" aria-label={copy.addToSetlist}
+              onClick={() => { setSetlistAddSongSelection([]); setSetlistPanelView('addSongs'); }}><Plus size={16}/>{language === 'zh' ? '加入歌曲' : 'Add songs'}</button>}
+          </div>
+        </div>
         {isTeamWorkspace && activeLibraryRole==='setlist_manager' && <p className="pm-header-note">{language==='zh'?'譜面由歌曲管理員或總管理員維護。':'Song managers and administrators maintain scores.'}</p>}
       </div>
 
@@ -12729,6 +12395,32 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     ? (startupLibraryName ? `正在載入 ${startupLibraryName}…` : '正在還原工作區…')
     : (startupLibraryName ? `Loading ${startupLibraryName}…` : 'Restoring workspace…');
 
+  useLayoutEffect(() => {
+    const pending = invitationTransition.pending;
+    if (!pending || pending.destination !== 'app') return;
+    if (startupError) { invitationTransition.fail(startupError); return; }
+    if (isRestoringWorkspace || isLoadingCloudWorkspace || isSwitchingLibrary || usingStartupCache || !navigationMemoryReady) return;
+    const arrived = workspaceMode === 'setlists' && (pending.kind === 'setlist'
+      ? selectedSetlistId === pending.id && setlistPanelView === 'detail'
+      : (setlistProjectFilter.kind === 'shared-project' || setlistProjectFilter.kind === 'owned-project')
+        && setlistProjectFilter.projectId === pending.id && setlistPanelView === 'list');
+    if (arrived) invitationTransition.ready(invitationTarget(pending), routeContent => {
+      const root = routeContent.querySelector<HTMLElement>('[data-app-root]');
+      if (pending.kind === 'project') return root?.querySelector<HTMLElement>('[data-setlist-panel-layer="list"][data-ui-presence="visible"] [data-project-header] h2') ?? null;
+      // Read the settled DOM: a hover-expanded sidebar may close during reveal.
+      if (root?.querySelector('[data-sidebar-expanded="true"]')) {
+        const title = root?.querySelector<HTMLElement>('[data-setlist-panel-layer="detail"][data-ui-presence="visible"] [data-setlist-detail-header] h2, [data-setlist-panel-layer="detail"][data-ui-presence="visible"] .setlist-title-input');
+        if (title) return title;
+      }
+      // On a phone/closed sidebar, focus the visible setlist reading surface,
+      // labelled with this setlist rather than an unrelated song's heading.
+      return root?.querySelector<HTMLElement>('[data-setlist-preview-pane]') ?? null;
+    });
+    else invitationTransition.fail(language === 'zh' ? '目前無法開啟這份邀請的內容。請返回邀請，確認權限後重試。' : 'This invitation’s content is unavailable. Return to the invitation and try again.');
+  }, [invitationTransition.pending?.ticket, invitationTransition.ready, invitationTransition.fail, startupError,
+    isRestoringWorkspace, isLoadingCloudWorkspace, isSwitchingLibrary, usingStartupCache, navigationMemoryReady,
+    workspaceMode, selectedSetlistId, setlistPanelView, setlistProjectFilter, language]);
+
   return (
     <>
     {isRestoringWorkspace && <AppLoadingScreen message={startupMessage}
@@ -12805,6 +12497,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       {/* Navigation Rail / Sidebar */}
       <aside
         data-sidebar
+        data-sidebar-expanded={isSidebarExpanded}
         inert={isPhoneViewport && !isMobileNavOpen ? true : undefined}
         aria-hidden={isPhoneViewport && !isMobileNavOpen ? true : undefined}
         className={isPhoneViewport
@@ -12936,7 +12629,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 <div className="flex flex-col items-center gap-1 text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">
                   <span>{isSetlistMode ? copy.setlists : copy.songs}</span>
                   <div className="min-w-10 rounded-full bg-gray-100 px-2 py-1 text-center text-xs text-gray-700">
-                    {isSetlistMode ? setlists.length : songs.length}
+                    {isSetlistMode ? setlists.length : userLibrarySongs.length}
                   </div>
                 </div>
                 <div className="flex w-full flex-col items-center gap-2">
@@ -13076,7 +12769,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         type="text"
                         value={librarySearchQuery}
                         onChange={(event) => setLibrarySearchQuery(event.target.value)}
-                        placeholder={copy.searchSongs}
+                        placeholder={language === 'zh' ? '搜尋歌名、歌詞或作者' : 'Search titles, lyrics or writers'}
                         aria-label={copy.searchSongs}
                       />
                     </label>
@@ -14533,7 +14226,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       </div>
                     ) : !hasSongs ? (
                       <div className="rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-6 py-8 text-sm leading-6 text-gray-500">
-                        {language === 'zh' ? '這個團隊還沒有歌曲。請先新增第一首歌。' : 'This team has no songs yet. Add the first song before editing.'}
+                        {language === 'zh' ? '歌曲庫還沒有歌曲。請先新增第一首歌。' : 'Your library has no songs yet. Add your first song.'}
                       </div>
                     ) : (
                       <div className="space-y-5">
@@ -14604,7 +14297,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           </AnimatePresence>
 
           {/* Sheet Preview Pane */}
-          <div data-setlist-preview-pane aria-busy={Boolean(setlistOpening.opening)} className="relative flex-1 min-w-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
+          <div data-setlist-preview-pane role={isSetlistMode && selectedSetlist ? 'region' : undefined}
+            aria-label={isSetlistMode && selectedSetlist ? selectedSetlist.name || copy.untitledSetlist : undefined}
+            aria-busy={Boolean(setlistOpening.opening)} className="relative flex-1 min-w-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
             {isSheetView && isSetlistMode && isTeamWorkspace && !isJoinedSetlist && activeLibraryId
               && selectedSetlistSong && selectedSetlistSourceStatus !== 'aligned'
               && canEditSelectedSetlistContent && isTeamAdministrator(activeLibraryRole) && (
@@ -15720,6 +15415,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             y={setlistContextMenu.y}
             onClose={closeSetlistContextMenu}
             onArchive={() => usesSelection ? handleBatchArchiveSelectedSetlists(!allArchived) : handleSetSetlistArchived(target.id, !allArchived)}
+            onShare={ids.length === 1 && canCreateNewShareLink ? () => { void handleCreateShareLink('setlist', target.id); } : undefined}
             onSelect={() => setMultiSelectedSetlistIds(ids)}
             onMove={() => setProjectPicker({ mode: 'move', setlistIds: ids })}
             onDelete={() => usesSelection ? handleBatchDeleteSelectedSetlists() : handleDeleteSetlist(target.id)}

@@ -1,4 +1,6 @@
 import * as OpenCC from 'opencc-js/t2cn';
+import type { LyricsDoc } from '../types';
+import { getLyricsBlocks } from '../utils/lyricsDocument';
 
 // Standard Zhuyin keyboard recovery follows Spotlight Han's SearchSupplement.swift.
 // Copyright (c) 2026 Enoooch0921, MIT; see docs/licenses/spotlight-han-MIT.txt.
@@ -152,10 +154,27 @@ export const needsSearchDictionary = (raw: string): boolean => {
     || text.split(/\s+/u).some(term => pinyinQuery(term) || keyboardQuery(term)));
 };
 
-export type SearchMatch = 'text' | 'phonetic' | 'keyboard';
+// Lyrics stay literal-only: transliterating full song bodies would swamp short
+// title initials and spend dictionary work on every verse. Weak keys release
+// old documents after edits or workspace changes.
+const lyricsCache = new WeakMap<LyricsDoc, readonly string[]>();
+const normalizeLyricsText = (value: string) => normalizeSearchText(value).replace(/[\s\p{P}\u200B-\u200D\uFEFF]+/gu, '');
+const getLyricsIndex = (doc?: LyricsDoc): readonly string[] => {
+  if (!doc) return [];
+  const cached = lyricsCache.get(doc);
+  if (cached) return cached;
+  const blocks = getLyricsBlocks(doc);
+  const fields = (['chinese', 'english'] as const).map(language => (
+    normalizeLyricsText(blocks.map(block => block[language]).join('\n'))
+  )).filter(Boolean);
+  lyricsCache.set(doc, fields);
+  return fields;
+};
+
+export type SearchMatch = 'text' | 'phonetic' | 'keyboard' | 'lyrics';
 export type SearchQuery = {
   isEmpty: boolean;
-  match: (fields: readonly (string | undefined | null)[]) => SearchMatch | null;
+  match: (fields: readonly (string | undefined | null)[], lyrics?: LyricsDoc) => SearchMatch | null;
   isExactTitleMatch: (title: string | undefined | null) => boolean;
 };
 
@@ -165,7 +184,7 @@ export const createSearchQuery = (raw: string): SearchQuery => {
   const latin = pinyinQuery(text);
   const symbols = ZHUYIN.test(text) && ZHUYIN_ONLY.test(text) ? text.replace(/[^ㄅ-ㄩ]/gu, '') : '';
   const keyboard = keyboardQuery(text);
-  const matchTerm = (fields: FieldIndex[], literal: string, phonetic: string, zhuyin: string, keys: KeyboardQuery | null): SearchMatch | null => {
+  const matchTerm = (fields: FieldIndex[], literal: string, phonetic: string, zhuyin: string, keys: KeyboardQuery | null, lyricText: string, lyrics?: LyricsDoc): SearchMatch | null => {
     if (fields.some(field => field.text.includes(literal))) return 'text';
     if (phonetic || zhuyin) {
       if (fields.some(field => {
@@ -178,9 +197,11 @@ export const createSearchQuery = (raw: string): SearchQuery => {
       const index = getPhonetics(field);
       return keys.initialsOnly ? index.zhuyinInitials.includes(keys.symbols) : index.zhuyin.includes(keys.symbols);
     })) return 'keyboard';
+    if (lyricText && getLyricsIndex(lyrics).some(field => field.includes(lyricText))) return 'lyrics';
     return null;
   };
-  const terms = text.split(/\s+/u).filter(Boolean).map(term => ({ text: term, latin: pinyinQuery(term), symbols: ZHUYIN_ONLY.test(term) ? term.replace(/[^ㄅ-ㄩ]/gu, '') : '', keyboard: keyboardQuery(term) }));
+  const lyricText = normalizeLyricsText(text);
+  const terms = text.split(/\s+/u).filter(Boolean).map(term => ({ text: term, lyricText: normalizeLyricsText(term), latin: pinyinQuery(term), symbols: ZHUYIN_ONLY.test(term) ? term.replace(/[^ㄅ-ㄩ]/gu, '') : '', keyboard: keyboardQuery(term) }));
   return {
     isEmpty: !text,
     isExactTitleMatch(title) {
@@ -194,17 +215,18 @@ export const createSearchQuery = (raw: string): SearchQuery => {
       return Boolean(latin && (index.pinyin === latin || index.initials === latin))
         || Boolean(symbols && (index.zhuyin === symbols || index.zhuyinInitials === symbols));
     },
-    match(values) {
+    match(values, lyrics) {
       if (!text) return 'text';
       const fields = values.filter((value): value is string => Boolean(value)).map(getField);
       if (fields.map(field => field.text).join(' ').includes(text)) return 'text';
-      const whole = matchTerm(fields, text, latin, symbols, keyboard);
+      const whole = matchTerm(fields, text, latin, symbols, keyboard, lyricText, lyrics);
       if (whole || terms.length < 2) return whole;
       let result: SearchMatch = 'text';
       for (const term of terms) {
-        const match = matchTerm(fields, term.text, term.latin, term.symbols, term.keyboard);
+        const match = matchTerm(fields, term.text, term.latin, term.symbols, term.keyboard, term.lyricText, lyrics);
         if (!match) return null;
-        if (match === 'keyboard' || result === 'keyboard') result = 'keyboard';
+        if (match === 'lyrics' || result === 'lyrics') result = 'lyrics';
+        else if (match === 'keyboard' || result === 'keyboard') result = 'keyboard';
         else if (match === 'phonetic') result = 'phonetic';
       }
       return result;
@@ -212,13 +234,13 @@ export const createSearchQuery = (raw: string): SearchQuery => {
   };
 };
 
-/** Literal results lead; exact song names lead partial matches within each tier. */
-export const searchItems = <T,>(items: readonly T[], query: SearchQuery, fields: (item: T) => readonly (string | undefined | null)[]): T[] => {
+/** Metadata results lead lyrics; exact song names lead partial matches within each tier. */
+export const searchItems = <T,>(items: readonly T[], query: SearchQuery, fields: (item: T) => readonly (string | undefined | null)[], lyrics?: (item: T) => LyricsDoc | undefined): T[] => {
   if (query.isEmpty) return [...items];
-  const ranks = { text: 0, phonetic: 1, keyboard: 2 };
+  const ranks = { text: 0, phonetic: 1, keyboard: 2, lyrics: 3 };
   return items.flatMap(item => {
     const values = fields(item);
-    const match = query.match(values);
+    const match = query.match(values, lyrics?.(item));
     return match ? [{ item, rank: ranks[match] * 2 + (query.isExactTitleMatch(values[0]) ? 0 : 1) }] : [];
   }).sort((left, right) => left.rank - right.rank).map(entry => entry.item);
 };

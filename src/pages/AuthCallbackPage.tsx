@@ -1,104 +1,79 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { NATIVE_AUTH_NEXT_PATH_STORAGE_KEY, resolveActiveSession } from '../lib/auth';
+import { safeAuthNextPath, takeInvitationAuthReturn } from '../lib/invitationJourney';
+import { useInvitationTransition } from '../components/InvitationTransition';
 import { supabase } from '../lib/supabase';
+import { useThemeMode } from '../hooks/useThemeMode';
 
 const getCallbackNextPath = (url: URL) => {
   const nextPath = url.searchParams.get('next');
-  if (nextPath) {
-    return nextPath;
-  }
-
   try {
     const storedNextPath = window.localStorage.getItem(NATIVE_AUTH_NEXT_PATH_STORAGE_KEY);
     window.localStorage.removeItem(NATIVE_AUTH_NEXT_PATH_STORAGE_KEY);
-    return storedNextPath || '/';
-  } catch {
-    return '/';
-  }
+    return safeAuthNextPath(nextPath || storedNextPath);
+  } catch { return safeAuthNextPath(nextPath); }
 };
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
+  useThemeMode();
+  const { resume, fail } = useInvitationTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const nextPath = useRef<string | null>(null);
+  const navigated = useRef(false);
+  const completion = useRef<ReturnType<typeof resolveActiveSession> | null>(null);
+
+  useLayoutEffect(() => {
+    // Capture and consume once, including React StrictMode's effect replay.
+    if (nextPath.current !== null) return;
+    nextPath.current = getCallbackNextPath(new URL(window.location.href));
+    const invitation = takeInvitationAuthReturn(nextPath.current);
+    if (invitation) resume(invitation);
+  }, [resume]);
 
   useEffect(() => {
-    let isCancelled = false;
-
-    const finalizeAuth = async () => {
-      if (!supabase) {
-        setErrorMessage('Supabase is not configured.');
-        return;
-      }
-
-      const url = new URL(window.location.href);
-      const authError = url.searchParams.get('error_description') || url.searchParams.get('error');
-      const nextPath = getCallbackNextPath(url);
-      if (authError) {
-        if (!isCancelled) {
-          setErrorMessage(authError);
-        }
-        return;
-      }
-
-      const authCode = url.searchParams.get('code');
-      if (authCode) {
-        const { error } = await supabase.auth.exchangeCodeForSession(authCode);
-        if (error) {
-          if (!isCancelled) {
-            setErrorMessage(error.message);
-          }
-          return;
-        }
-      }
-
-      let session = null;
-      try {
-        session = await resolveActiveSession();
-      } catch (error) {
-        if (!isCancelled) {
-          setErrorMessage(error instanceof Error ? error.message : 'Unable to verify your sign-in session.');
-        }
-        return;
-      }
-
-      if (!isCancelled && session) {
-        navigate(nextPath.startsWith('/') ? nextPath : '/', { replace: true });
-        return;
-      }
-
-      if (!isCancelled) {
-        setErrorMessage('Unable to finish sign-in. Please try again.');
-      }
+    let cancelled = false;
+    const finish = () => {
+      if (cancelled || navigated.current) return;
+      navigated.current = true;
+      navigate(nextPath.current || '/', { replace: true });
     };
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (isCancelled) {
-        return;
+    const showError = (error: unknown) => {
+      if (cancelled || navigated.current) return;
+      const message = error instanceof Error ? error.message : '無法完成登入，請返回邀請後重試。';
+      setErrorMessage(message); fail(message);
+    };
+    if (!supabase) { showError(new Error('登入服務尚未設定。')); return; }
+    const url = new URL(window.location.href);
+    const authError = url.searchParams.get('error_description') || url.searchParams.get('error');
+    if (authError) { showError(new Error(authError)); return; }
+    const client = supabase;
+    // Exchange a single-use code only once; both auth events and the promise
+    // use the same captured return path and navigation guard.
+    if (!completion.current) completion.current = (async () => {
+      const code = url.searchParams.get('code');
+      if (code) {
+        const { error } = await client.auth.exchangeCodeForSession(code);
+        if (error) throw error;
       }
-
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-        const nextPath = getCallbackNextPath(new URL(window.location.href));
-        navigate(nextPath.startsWith('/') ? nextPath : '/', { replace: true });
-      }
+      return resolveActiveSession();
+    })();
+    const { data: listener } = client.auth.onAuthStateChange((event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) finish();
     });
+    void completion.current.then(session => {
+      if (session) finish();
+      else showError(new Error('無法完成登入，請返回後重試。'));
+    }, showError);
+    return () => { cancelled = true; listener.subscription.unsubscribe(); };
+  }, [navigate, fail]);
 
-    void finalizeAuth();
-
-    return () => {
-      isCancelled = true;
-      authListener.subscription.unsubscribe();
-    };
-  }, [navigate]);
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-stone-50 px-6">
-      <div className="w-full max-w-md rounded-3xl border border-stone-200 bg-white p-8 shadow-xl shadow-stone-200/60">
-        <h1 className="text-2xl font-bold tracking-tight text-stone-900">Signing you in</h1>
-        <p className="mt-3 text-sm leading-6 text-stone-600">
-          {errorMessage ?? 'Please wait while ChordMaster finishes the authentication flow.'}
-        </p>
-      </div>
-    </div>
-  );
+  return <main className="invitation-page">
+    <div className="invitation-sheet"><div className="invitation-body">
+      <h1>{errorMessage ? '無法完成登入' : '正在登入 ChordMaster'}</h1>
+      <p className="invitation-description" role={errorMessage ? 'alert' : 'status'}>{errorMessage || '正在確認帳號，完成後會自動返回。'}</p>
+      {errorMessage && <button className="invitation-primary invitation-action" type="button" onClick={() => navigate(nextPath.current || '/', { replace: true })}>返回並重試</button>}
+    </div></div>
+  </main>;
 }

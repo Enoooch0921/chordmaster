@@ -95,9 +95,22 @@ const getDesktopPosition = (anchorRect: PreviewAnchorRect, field: ChordSheetMeta
   }
 
   const margin = 12;
-  const minimumWidth = field === 'metadata'
-    ? 900
-    : field === 'title'
+  if (field === 'metadata') {
+    const width = Math.min(480, window.innerWidth - margin * 2);
+    const maxHeight = Math.min(520, window.innerHeight * 0.7);
+    const below = window.innerHeight - anchorRect.bottom - margin - 8;
+    const above = anchorRect.top - margin - 8;
+    const preferredTop = below >= maxHeight || below >= above
+      ? anchorRect.bottom + 8
+      : anchorRect.top - maxHeight - 8;
+    return {
+      width,
+      maxHeight,
+      left: Math.max(margin, Math.min(anchorRect.right - width, window.innerWidth - width - margin)),
+      top: Math.max(margin, Math.min(preferredTop, window.innerHeight - maxHeight - margin))
+    };
+  }
+  const minimumWidth = field === 'title'
     ? 280
     : field === 'credits'
       ? 520
@@ -107,19 +120,14 @@ const getDesktopPosition = (anchorRect: PreviewAnchorRect, field: ChordSheetMeta
     Math.max(minimumWidth, window.innerWidth - margin * 2)
   );
   const left = Math.min(
-    Math.max(margin, field === 'metadata' ? anchorRect.right - width : anchorRect.left),
+    Math.max(margin, anchorRect.left),
     Math.max(margin, window.innerWidth - width - margin)
   );
-  const estimatedHeight = field === 'metadata' ? 560 : field === 'credits' ? 170 : 150;
-  const availableBelow = window.innerHeight - anchorRect.bottom - margin;
-  const top = field === 'metadata'
-    ? availableBelow >= estimatedHeight
-      ? anchorRect.bottom + 8
-      : Math.max(margin, Math.min(anchorRect.top - estimatedHeight - 8, window.innerHeight - estimatedHeight - margin))
-    : Math.min(
-        Math.max(margin, anchorRect.top - 8),
-        Math.max(margin, window.innerHeight - estimatedHeight - margin)
-      );
+  const estimatedHeight = field === 'credits' ? 170 : 150;
+  const top = Math.min(
+    Math.max(margin, anchorRect.top - 8),
+    Math.max(margin, window.innerHeight - estimatedHeight - margin)
+  );
 
   return { left, top, width };
 };
@@ -926,6 +934,7 @@ export default function PreviewWysiwygEditor({
       onJianpuInputAbsoluteChange={onJianpuInputAbsoluteChange}
       showReferenceFields={showReferenceFields}
       variant={usesFullSongInfoPanel ? 'default' : 'preview-header'}
+      presentation={deviceLayout === 'desktop' ? 'popover' : 'embedded'}
       deviceLayout={deviceLayout}
       initialFocusField={target.field === 'metadata' ? undefined : target.field === 'performanceKey' ? 'key' : target.field}
       initialAdvancedOpen={usesFullSongInfoPanel && deviceLayout !== 'phone'}
@@ -997,7 +1006,7 @@ export default function PreviewWysiwygEditor({
   return (
     <div
       className="fixed z-[82] flex min-h-0 flex-col"
-      style={usesMetadataPanel ? { ...desktopStyle, maxHeight: 'min(70vh, 520px)' } : desktopStyle}
+      style={desktopStyle}
     >
       {body}
     </div>

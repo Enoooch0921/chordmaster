@@ -13,6 +13,7 @@ vi.mock('./supabase', () => ({
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: auth.isNativePlatform } }));
 vi.mock('@capacitor/browser', () => ({ Browser: { open: auth.open } }));
 
+import { takeInvitationAuthReturn, rememberInvitationAuthReturn } from './invitationJourney';
 import { NATIVE_AUTH_NEXT_PATH_STORAGE_KEY, signInWithGoogleRedirect } from './auth';
 
 beforeEach(() => {
@@ -65,4 +66,16 @@ describe('Google account selection', () => {
     await expect(signInWithGoogleRedirect()).rejects.toThrow(error);
     expect(auth.open).not.toHaveBeenCalled();
   });
+});
+
+it('reserves the return animation for an explicit invitation and clears it on ordinary sign-in or failure', async () => {
+  const invitation = { kind: 'project' as const, id: 'p', name: 'Sunday', token: 'invite', language: 'zh' as const, motion: 'full' as const };
+  await signInWithGoogleRedirect('/share/invite', invitation);
+  expect(takeInvitationAuthReturn('/share/invite')).toEqual(invitation);
+  rememberInvitationAuthReturn(invitation);
+  await signInWithGoogleRedirect('/');
+  expect(takeInvitationAuthReturn('/share/invite')).toBeNull();
+  auth.signInWithOAuth.mockRejectedValue(new Error('Offline'));
+  await expect(signInWithGoogleRedirect('/share/invite', invitation)).rejects.toThrow('Offline');
+  expect(takeInvitationAuthReturn('/share/invite')).toBeNull();
 });

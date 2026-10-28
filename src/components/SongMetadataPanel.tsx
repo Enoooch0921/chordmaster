@@ -37,6 +37,7 @@ interface SongMetadataPanelProps {
   onJianpuInputAbsoluteChange?: (value: boolean) => void;
   showReferenceFields?: boolean;
   variant?: 'default' | 'preview-header';
+  presentation?: 'embedded' | 'popover';
   deviceLayout?: PreviewEditorDeviceLayout;
   initialFocusField?: PreviewMetadataFocusField;
   initialAdvancedOpen?: boolean;
@@ -272,6 +273,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   onJianpuInputAbsoluteChange,
   showReferenceFields = true,
   variant = 'default',
+  presentation = 'embedded',
   deviceLayout = 'desktop',
   initialFocusField,
   initialAdvancedOpen = false,
@@ -289,11 +291,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   // Keep only the core fields visible by default; everything else lives in a
   // collapsible "advanced" block so the panel stays compact on small laptops.
   const [isAdvancedOpen, setIsAdvancedOpen] = React.useState(initialAdvancedOpen);
-  const [phoneSection, setPhoneSection] = React.useState<'details' | 'layout' | 'references'>('details');
-  const selectPhoneSection = (section: 'details' | 'layout' | 'references') => {
+  const [activeSection, setActiveSection] = React.useState<'details' | 'layout' | 'references'>('details');
+  const selectSection = (section: 'details' | 'layout' | 'references') => {
     const scroller = panelRef.current?.closest<HTMLElement>('[data-preview-metadata-scroll], [data-mobile-metadata-scroll]');
     if (scroller) scroller.scrollTop = 0;
-    setPhoneSection(section);
+    setActiveSection(section);
   };
   const bandTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
   const vocalTapButtonRef = React.useRef<TapTempoButtonHandle>(null);
@@ -993,40 +995,42 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     </button>
   );
 
-  if (isPhoneLayout) {
+  if (isPhoneLayout || presentation === 'popover') {
     const tabs = [
       { id: 'details' as const, label: language === 'zh' ? '歌曲資料' : 'Song' },
       ...(!isPreviewHeader ? [{ id: 'layout' as const, label: language === 'zh' ? '譜面設定' : 'Chart' }] : []),
       ...(!isPreviewHeader && showReferenceFields ? [{ id: 'references' as const, label: language === 'zh' ? '參考音源' : 'Audio' }] : [])
     ];
     return (
-      <section ref={panelRef} data-song-metadata-panel data-device-layout={deviceLayout} className="song-info-mobile">
+      <section ref={panelRef} data-song-metadata-panel data-device-layout={deviceLayout} className={`song-info-form ${isPhoneLayout ? 'song-info-mobile' : 'song-info-popover'}`}>
         {tabs.length > 1 ? <div role="tablist" aria-label={language === 'zh' ? '歌曲資訊分類' : 'Song information sections'} className="song-info-tabs">
           {tabs.map((tab, index) => <button key={tab.id} type="button" role="tab" id={`${metadataInputId}-${tab.id}-tab`}
-            aria-selected={phoneSection === tab.id} aria-controls={`${metadataInputId}-${tab.id}-panel`}
-            tabIndex={phoneSection === tab.id ? 0 : -1}
-            onClick={() => selectPhoneSection(tab.id)}
+            aria-selected={activeSection === tab.id} aria-controls={`${metadataInputId}-${tab.id}-panel`}
+            tabIndex={activeSection === tab.id ? 0 : -1}
+            onClick={() => selectSection(tab.id)}
             onKeyDown={event => {
               const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
                 : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
                 : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
               if (next < 0) return;
               event.preventDefault();
-              selectPhoneSection(tabs[next].id);
+              selectSection(tabs[next].id);
               document.getElementById(`${metadataInputId}-${tabs[next].id}-tab`)?.focus();
             }}>{tab.label}</button>)}
         </div> : null}
-        <div role={tabs.length > 1 ? 'tabpanel' : undefined} id={`${metadataInputId}-${phoneSection}-panel`}
-          aria-labelledby={tabs.length > 1 ? `${metadataInputId}-${phoneSection}-tab` : undefined}
+        <div role={tabs.length > 1 ? 'tabpanel' : undefined} id={`${metadataInputId}-${activeSection}-panel`}
+          aria-labelledby={tabs.length > 1 ? `${metadataInputId}-${activeSection}-tab` : undefined}
           className="song-info-tab-content">
-          {phoneSection === 'details' ? <>
+          {activeSection === 'details' ? <>
             <div className="song-info-name">{titleField}</div>
             <div className="song-info-credits">{versionField}{translatorField}</div>
             <div className="song-info-musical">
-              {keyField}{tempoField}{timeField}{shuffleField}
-              {!isLibraryInputMode && capoField}
+              {keyField}
+              {!isPhoneLayout && (isPreviewHeader || !isLibraryInputMode) && capoField}
+              {tempoField}{timeField}{shuffleField}
+              {isPhoneLayout && !isLibraryInputMode && capoField}
             </div>
-          </> : phoneSection === 'layout' ? <div className="song-info-layout">
+          </> : activeSection === 'layout' ? <div className="song-info-layout">
             {displayOrInputField}{barNumbersField}{barHeightField}
           </div> : <div className="song-info-references">
             {renderReferenceEditor('band')}{renderReferenceEditor('vocal')}

@@ -1,3 +1,5 @@
+[data-setlist-source-sync]{--source-sync-accent:var(--color-indigo-700);--source-sync-selected:var(--color-indigo-50);--source-sync-selected-text:var(--color-indigo-900);--source-sync-primary:var(--color-indigo-700);--source-sync-primary-hover:var(--color-indigo-800);--source-sync-primary-text:var(--color-white)}
+.dark [data-setlist-source-sync]{color:#fde68a;--source-sync-accent:var(--color-indigo-300);--source-sync-selected:var(--color-indigo-950);--source-sync-selected-text:var(--color-indigo-200);--source-sync-primary:var(--color-indigo-300);--source-sync-primary-hover:var(--color-indigo-200);--source-sync-primary-text:var(--color-indigo-950)}
 .source-sync-dialog{margin:auto;padding:0;width:calc(100% - 32px);max-width:760px;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow:hidden;border:1px solid var(--color-border);border-radius:16px;background:var(--color-surface);color:var(--color-text);box-shadow:0 24px 70px #0f172a30}
 .source-sync-dialog::backdrop{background:#0f172a52}
 .source-sync-layout{display:flex;flex-direction:column;max-height:calc(100vh - 34px);max-height:calc(100dvh - 34px)}
@@ -15,26 +17,27 @@
 .source-comparison-header{background:var(--color-surface-muted);font-size:13px;font-weight:650;line-height:1.6}
 .source-comparison-header>div{padding:12px 16px;overflow-wrap:anywhere}
 .source-comparison-header>div+div,.source-comparison-values>div+div{border-left:1px solid var(--color-border)}
-.source-comparison-header small{font-size:11px;font-weight:500;display:block;color:var(--color-indigo-700);margin-top:2px}
+.source-comparison-header small{font-size:11px;font-weight:500;display:block;color:var(--source-sync-accent);margin-top:2px}
 .source-comparison-row{border-top:1px solid var(--color-border)}
 .source-comparison-label{font-size:12px;color:var(--color-text-muted);padding:10px 16px 0}
 .source-comparison-values{font-size:14px;line-height:1.7}
 .source-comparison-values>div{padding:8px 16px 14px;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
-.source-comparison-values>.adopted{background:var(--color-indigo-50);color:var(--color-indigo-900)}
+.source-comparison-values>.adopted{background:var(--source-sync-selected);color:var(--source-sync-selected-text)}
 .source-comparison-modified .source-comparison-values{font-size:12px;font-variant-numeric:tabular-nums;color:var(--color-text-muted)}
 .source-sync-record-note{font-size:12px;line-height:1.7;margin:12px 0 0;color:var(--color-text-muted)}
 .source-sync-options{border:0;padding:0;margin:24px 0 0;min-width:0}
 .source-sync-options legend{font-size:14px;font-weight:650;margin-bottom:12px}
 .source-sync-option{display:flex;align-items:center;gap:12px;min-height:66px;padding:12px 14px;border:1px solid var(--color-border);border-radius:10px;margin-top:8px;cursor:pointer}
-.source-sync-option:has(input:checked){border-color:var(--color-indigo-600);background:var(--color-indigo-50)}
-.source-sync-option input{width:16px;height:16px;accent-color:var(--color-indigo-600);flex-shrink:0}
+.source-sync-option:has(input:checked){border-color:var(--source-sync-accent);background:var(--source-sync-selected);color:var(--source-sync-selected-text)}
+.source-sync-option:has(input:checked) small{color:var(--source-sync-selected-text)}
+.source-sync-option input{width:16px;height:16px;accent-color:var(--source-sync-accent);flex-shrink:0}
 .source-sync-option>span{min-width:0;overflow-wrap:anywhere}
 .source-sync-option strong{flex-wrap:wrap;display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;line-height:1.6}
 .source-sync-option small{display:block;font-size:12px;line-height:1.7;color:var(--color-text-muted);margin-top:3px}
-.source-sync-scope{display:flex;gap:8px;align-items:flex-start;color:var(--color-indigo-800);font-size:13px;line-height:1.75;margin:15px 0 0}
+.source-sync-scope{display:flex;gap:8px;align-items:flex-start;color:var(--source-sync-accent);font-size:13px;line-height:1.75;margin:15px 0 0}
 .source-sync-scope svg{flex-shrink:0;margin-top:3px}
 .source-sync-route{display:flex;align-items:center;flex-wrap:wrap;gap:12px;background:var(--color-surface-muted);border:1px solid var(--color-border);border-radius:10px;padding:14px 16px;margin:0 0 18px;font-size:14px;font-weight:600}
-.source-sync-route svg{color:var(--color-indigo-600)}
+.source-sync-route svg{color:var(--source-sync-accent)}
 .source-sync-extra{border-top:1px solid var(--color-border);margin-top:20px;padding-top:14px;color:var(--color-text-muted);font-size:12px;line-height:1.8}
 .source-sync-extra summary{cursor:pointer;min-height:28px;font-weight:500}
 .source-sync-extra p{margin-top:8px}
@@ -44,10 +47,10 @@
 .source-sync-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 28px;border-top:1px solid var(--color-border);background:var(--color-surface-muted);flex-shrink:0}
 .source-sync-footer>div{display:flex;gap:8px;flex-wrap:nowrap}
 .source-sync-button{word-break:keep-all;min-height:44px;padding:10px 16px;border:1px solid var(--color-border);border-radius:9px;background:var(--color-surface);font-size:14px;font-weight:600;line-height:1.5}
-.source-sync-button.primary{background:var(--color-indigo-600);border-color:var(--color-indigo-600);color:var(--color-text-inverse)}
-.source-sync-button.primary:hover:not(:disabled){background:var(--color-indigo-700)}
+.source-sync-button.primary{background:var(--source-sync-primary);border-color:var(--source-sync-primary);color:var(--source-sync-primary-text)}
+.source-sync-button.primary:hover:not(:disabled){background:var(--source-sync-primary-hover);border-color:var(--source-sync-primary-hover)}
 .source-sync-button:disabled,.source-sync-close:disabled{opacity:.45;cursor:default}
-.source-sync-dialog button:focus-visible,.source-sync-dialog summary:focus-visible{outline:2px solid var(--color-indigo-600);outline-offset:3px}
+.source-sync-dialog button:focus-visible,.source-sync-dialog summary:focus-visible,.source-sync-dialog input:focus-visible{outline:2px solid var(--source-sync-accent);outline-offset:3px}
 .source-sync-copy-title{display:block;margin-top:12px;font-size:13px;font-weight:600;color:var(--color-text)}
 .source-sync-copy-title input{display:block;min-height:44px;width:100%;margin-top:6px;padding:8px 12px;border:1px solid var(--color-border);border-radius:8px;background:var(--color-surface);font-size:16px;font-weight:400;color:var(--color-text)}
 @media(max-width:600px){

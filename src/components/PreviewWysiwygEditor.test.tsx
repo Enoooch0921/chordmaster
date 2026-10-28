@@ -187,14 +187,42 @@ describe('PreviewWysiwygEditor song information panel', () => {
     expect(onMetadataKeyChange).not.toHaveBeenCalled();
   });
 
-  it('anchors the complete panel at desktop width', () => {
+  it('keeps desktop song information compact and exposes the other editing tabs', () => {
     const { container } = render(<StatefulEditor deviceLayout="desktop" />);
     const dialog = screen.getByRole('dialog', { name: '歌曲資訊' });
     const shell = dialog.parentElement;
 
     expect(container.querySelector('[data-preview-metadata-backdrop]')).toBeNull();
-    expect(shell).toHaveStyle({ width: '900px' });
+    expect(shell).toHaveStyle({ width: '480px' });
+    expect(screen.queryByText('編輯歌曲')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: '譜面設定' }));
+    expect(screen.getByText('簡譜輸入設定')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '參考音源' }));
+    expect(screen.getByRole('group', { name: '樂團版本' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '歌手版本' })).toBeInTheDocument();
   });
+
+  it.each([{ width: 440, height: 620 }, { width: 1280, height: 400 }])(
+    'keeps the desktop panel within a $width × $height viewport', ({ width, height }) => {
+      const originalWidth = window.innerWidth;
+      const originalHeight = window.innerHeight;
+      try {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+        render(<StatefulEditor deviceLayout="desktop" />);
+        const shell = screen.getByRole('dialog', { name: '歌曲資訊' }).parentElement!;
+        const left = parseFloat(shell.style.left);
+        const top = parseFloat(shell.style.top);
+        expect(left).toBeGreaterThanOrEqual(12);
+        expect(left + parseFloat(shell.style.width)).toBeLessThanOrEqual(width - 12);
+        expect(top).toBeGreaterThanOrEqual(12);
+        expect(top + parseFloat(shell.style.maxHeight)).toBeLessThanOrEqual(height - 12);
+      } finally {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight });
+      }
+    }
+  );
 
   it('closes the complete panel with Escape', async () => {
     const onClose = vi.fn();

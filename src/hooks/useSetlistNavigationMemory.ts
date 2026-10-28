@@ -11,6 +11,7 @@ interface Options {
   current: SetlistNavigationLocation;
   legacy: SetlistNavigationLocation;
   explicitSetlistId: string | null;
+  explicitProjectId?: string | null;
   onRestore: (location: SetlistNavigationLocation) => void;
 }
 
@@ -23,8 +24,16 @@ export function useSetlistNavigationMemory(options: Options) {
   useLayoutEffect(() => {
     if (!ready || !storageKey || restoredKey === storageKey) return;
     const value = latest.current;
+    const projectId = !explicitLinkHandled.current && !value.explicitSetlistId ? value.explicitProjectId : null;
+    const projectKind = projectId && workspace.projects.some(project => project.id === projectId && !project.archived)
+      ? 'owned-project' : projectId && workspace.joinedProjects.some(project => project.id === projectId && !project.archived) ? 'shared-project' : null;
+    // Project invitations land on their list, even when navigation memory points elsewhere.
+    if (projectId && projectKind) {
+      const filter = { kind: projectKind, projectId } as const;
+      value.onRestore({ version: 1, workspaceMode: 'setlists', filter, parentFilter: filter, view: 'list', setlistId: null, songId: null });
+      explicitLinkHandled.current = true;
     // An explicit accessible link takes precedence over a remembered location.
-    if (explicitLinkHandled.current || !value.explicitSetlistId || value.explicitSetlistId !== value.current.setlistId) {
+    } else if (explicitLinkHandled.current || !value.explicitSetlistId || value.explicitSetlistId !== value.current.setlistId) {
       const remembered = loadNavigationLocation(storageKey)
         ?? { ...value.legacy, workspaceMode: value.current.workspaceMode };
       value.onRestore(resolveNavigationLocation(remembered, workspace));

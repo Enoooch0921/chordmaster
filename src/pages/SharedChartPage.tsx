@@ -1,11 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
+import InvitationPage from '../components/InvitationPage';
+import { useInvitationTransition } from '../components/InvitationTransition';
+import { invitationPath, type InvitationResource } from '../lib/invitationJourney';
+import { useThemeMode } from '../hooks/useThemeMode';
 import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
 import LyricsSheet from '../components/LyricsSheet';
 import { APP_NAME } from '../constants/appMeta';
 import {
   AppLanguage,
-  SharedSetlistPayload,
   SharedSongImportInspection,
   SharedSongImportResult,
   SongImportResolution
@@ -18,42 +23,6 @@ import { useSharedResource } from '../hooks/useSharedResource';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
 const SELECTED_SETLIST_STORAGE_KEY = 'chordmaster.selected-setlist-id.v1';
 const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.v1';
-
-type SharedSetlistSong = SharedSetlistPayload['songs'][number];
-
-const getSharedSongMeta = (item: SharedSetlistSong) => {
-  const key = item.overrideKey ?? item.song.currentKey;
-  const tempo = typeof item.song.tempo === 'number' && Number.isFinite(item.song.tempo)
-    ? `${item.song.tempo} BPM`
-    : null;
-  return [key, tempo].filter(Boolean).join(' · ');
-};
-
-const SharedSetlistSongRow = ({
-  item,
-  index,
-  language
-}: {
-  key?: string;
-  item: SharedSetlistSong;
-  index: number;
-  language: AppLanguage;
-}) => (
-  <div className="flex items-center gap-3 px-4 py-2.5">
-    <span className="w-5 shrink-0 text-right text-xs font-bold text-stone-400">{index + 1}</span>
-    <span className="min-w-0 flex-1">
-      <span className="block text-sm font-semibold text-stone-800">{item.title}</span>
-      <span className="mt-0.5 block text-xs font-semibold text-stone-500">
-        {getSharedSongMeta(item)}
-      </span>
-    </span>
-    {item.archivedAt ? (
-      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-        {language === 'zh' ? '已封存' : 'Archived'}
-      </span>
-    ) : null}
-  </div>
-);
 
 const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string | null) => {
   try {
@@ -72,9 +41,23 @@ const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string |
 export default function SharedChartPage() {
   const { token = '' } = useParams();
   const navigate = useNavigate();
+  useThemeMode();
+  const transition = useInvitationTransition();
+  const { ready: invitationReady, fail: invitationFailed, cancel: cancelTransition } = transition;
+  const actionInFlight = useRef(false);
+  const actionGeneration = useRef(0);
+  const hadTransition = useRef(false);
+  const pageActive = useRef(true);
+  useEffect(() => { pageActive.current = true; return () => { pageActive.current = false; }; }, []);
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const { payload, errorMessage, isLoading, refreshFailed } = useSharedResource(token);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [account, setAccount] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [membershipReady, setMembershipReady] = useState(false);
+  const resource: InvitationResource | null = payload?.project
+    ? { kind: 'project', id: payload.project.id, name: payload.project.name, token, language }
+    : payload?.setlist ? { kind: 'setlist', id: payload.setlist.id, name: payload.setlist.name, token, language } : null;
   const [isMember, setIsMember] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -86,6 +69,15 @@ export default function SharedChartPage() {
   const [defaultImportResolution, setDefaultImportResolution] = useState<SongImportResolution>('duplicate');
   const [perSongResolutions, setPerSongResolutions] = useState<Record<string, SongImportResolution>>({});
   const [songImportResult, setSongImportResult] = useState<SharedSongImportResult | null>(null);
+
+  useEffect(() => {
+    if (hadTransition.current && !transition.pending) {
+      actionGeneration.current++;
+      actionInFlight.current = false;
+      setIsJoining(false); setIsSigningIn(false);
+    }
+    hadTransition.current = Boolean(transition.pending);
+  }, [transition.pending]);
 
   // In-app browsers (LINE, Facebook, Instagram) block Google OAuth as "unsafe".
   // Detect them so we can prompt the user to open the page in a real browser.
@@ -104,19 +96,31 @@ export default function SharedChartPage() {
   };
 
   useEffect(() => {
-    if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => {
-      setAuthUserId(data.session?.user.id ?? null);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUserId(session?.user.id ?? null);
-    });
-
-    return () => {
-      listener.subscription.unsubscribe();
+    if (!supabase) { setAuthReady(true); return; }
+    let cancelled = false;
+    const update = (user: { id: string; email?: string } | null | undefined) => {
+      if (cancelled) return;
+      setAuthUserId(user?.id ?? null);
+      setAccount(user?.email ?? null);
+      setAuthReady(true);
     };
+    supabase.auth.getSession().then(({ data }) => update(data.session?.user), () => update(null));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => update(session?.user));
+    return () => { cancelled = true; listener.subscription.unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    const restore = () => { actionInFlight.current = false; setIsSigningIn(false); cancelTransition(); };
+    const pageShow = (event: PageTransitionEvent) => { if (event.persisted) restore(); };
+    window.addEventListener('pageshow', pageShow);
+    const nativeListener = Capacitor.isNativePlatform() ? Browser.addListener('browserFinished', restore) : null;
+    return () => { window.removeEventListener('pageshow', pageShow); void nativeListener?.then(handle => handle.remove()); };
+  }, [cancelTransition]);
+
+  useLayoutEffect(() => {
+    if (errorMessage) invitationFailed(errorMessage);
+    else if (!isLoading && resource && authReady && (!authUserId || membershipReady)) invitationReady(`invite:${token}`);
+  }, [errorMessage, isLoading, resource?.id, authReady, authUserId, membershipReady, token, invitationReady, invitationFailed]);
 
   useEffect(() => {
     const firstBundleSongId = payload?.songBundle?.songs[0]?.id ?? null;
@@ -130,6 +134,7 @@ export default function SharedChartPage() {
 
   useEffect(() => {
     setIsMember(false);
+    setMembershipReady(false);
     const resourceId = payload?.project?.id ?? payload?.setlist?.id;
     if (!supabase || !authUserId || !resourceId) return;
     let cancelled = false;
@@ -143,16 +148,35 @@ export default function SharedChartPage() {
       .eq(idColumn, resourceId)
       .maybeSingle()
       .then(({ data, error }) => {
-        if (!cancelled) setIsMember(!error && Boolean(data));
-      });
+        if (!cancelled) { setIsMember(!error && Boolean(data)); setMembershipReady(true); }
+      }, () => { if (!cancelled) setMembershipReady(true); });
     return () => { cancelled = true; };
   }, [authUserId, payload?.setlist?.id, payload?.project?.id]);
 
-  const handleJoin = async () => {
-    if (!supabase || !token) return;
+  const openResource = (id: string) => {
+    if (!resource) return;
+    if (resource.kind === 'setlist') rememberSetlistLanding(id, payload?.setlist?.songs[0]?.id);
+    navigate(`/?${resource.kind}=${encodeURIComponent(id)}`);
+  };
+
+  const handleOpen = async (event: MouseEvent<HTMLButtonElement>) => {
+    if (!resource || actionInFlight.current) return;
+    actionInFlight.current = true;
+    const ticket = await transition.cover(resource, event, 'app');
+    if (ticket !== null && pageActive.current && transition.isCurrent(ticket)) openResource(resource.id);
+    actionInFlight.current = false;
+  };
+
+  const handleJoin = async (event: MouseEvent<HTMLButtonElement>) => {
+    if (!supabase || !token || !resource || actionInFlight.current) return;
+    actionInFlight.current = true;
+    const generation = ++actionGeneration.current;
+    let ticket: number | null = null;
     setIsJoining(true);
     setJoinError(null);
     try {
+      ticket = await transition.cover(resource, event, 'app');
+      if (ticket === null || !pageActive.current || !transition.isCurrent(ticket)) return;
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !sessionData.session) {
         throw new Error('Please sign in first.');
@@ -166,18 +190,14 @@ export default function SharedChartPage() {
       // Retry once after a short delay so a single tap is enough.
       let lastError: unknown = null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (!pageActive.current || !transition.isCurrent(ticket)) return;
         const { data, error } = await supabase.rpc(rpcName, { p_token: token });
+        if (!pageActive.current || !transition.isCurrent(ticket)) return;
         if (!error) {
-          if (isProjectShare) {
-            const projectId = typeof data === 'string' ? data : payload?.project?.id;
-            navigate(projectId ? `/?project=${encodeURIComponent(projectId)}` : '/');
-          } else {
-            const setlistId = typeof data === 'string' ? data : payload?.setlist?.id;
-            if (setlistId) {
-              rememberSetlistLanding(setlistId, payload?.setlist?.songs[0]?.id ?? null);
-            }
-            navigate(setlistId ? `/?setlist=${encodeURIComponent(setlistId)}` : '/');
-          }
+          // The invitation owns the target; a changed response cannot animate a different resource.
+          const id = typeof data === 'string' ? data : resource.id;
+          if (id !== resource.id) throw new Error(language === 'zh' ? '邀請內容已變更，請重新開啟連結。' : 'The invitation changed. Please reopen the link.');
+          openResource(id);
           return;
         }
         lastError = error;
@@ -188,7 +208,9 @@ export default function SharedChartPage() {
       }
       throw lastError;
     } catch (error) {
+      if (!pageActive.current || (ticket !== null && !transition.isCurrent(ticket))) return;
       const reason = error instanceof Error ? error.message.trim() : '';
+      cancelTransition();
       const resourceLabel = payload?.project
         ? (language === 'zh' ? '專案' : 'project')
         : (language === 'zh' ? '歌單' : 'setlist');
@@ -197,7 +219,11 @@ export default function SharedChartPage() {
           ? (language === 'zh' ? `無法加入${resourceLabel}：${reason}` : `Unable to join ${resourceLabel}: ${reason}`)
           : (language === 'zh' ? `無法加入${resourceLabel}，請稍後再試。` : `Unable to join ${resourceLabel}. Please try again.`)
       );
-      setIsJoining(false);
+    } finally {
+      if (generation === actionGeneration.current) {
+        actionInFlight.current = false;
+        if (pageActive.current) setIsJoining(false);
+      }
     }
   };
 
@@ -268,19 +294,33 @@ export default function SharedChartPage() {
     }
   };
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (event?: MouseEvent<HTMLButtonElement>) => {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
+    const generation = ++actionGeneration.current;
+    let ticket: number | null = null;
     setIsSigningIn(true);
     setJoinError(null);
     try {
-      await signInWithGoogleRedirect(`/share/${token}`);
+      if (resource && event) {
+        ticket = await transition.cover(resource, event, 'auth');
+        if (ticket === null || !pageActive.current || !transition.isCurrent(ticket)) return;
+        await signInWithGoogleRedirect(invitationPath(token), { ...resource, motion: transition.motion() });
+      } else await signInWithGoogleRedirect(invitationPath(token));
     } catch (error) {
       const reason = error instanceof Error ? error.message.trim() : '';
+      if (!pageActive.current || (ticket !== null && !transition.isCurrent(ticket))) return;
+      cancelTransition();
       setJoinError(
         reason
           ? (language === 'zh' ? `無法登入：${reason}` : `Unable to sign in: ${reason}`)
           : (language === 'zh' ? '無法登入，請稍後再試。' : 'Unable to sign in. Please try again.')
       );
-      setIsSigningIn(false);
+    } finally {
+      if (generation === actionGeneration.current) {
+        actionInFlight.current = false;
+        if (pageActive.current) setIsSigningIn(false);
+      }
     }
   };
 
@@ -412,6 +452,14 @@ export default function SharedChartPage() {
     );
   };
 
+  if (!isLoading && !errorMessage && resource) return <InvitationPage
+    setlist={payload?.setlist} project={payload?.project} language={language} onLanguage={setLanguage}
+    signedIn={Boolean(authUserId)} account={account} checking={!authReady || Boolean(authUserId && !membershipReady)}
+    member={isMember} busy={isJoining || isSigningIn} error={joinError} refreshFailed={refreshFailed}
+    inAppBrowser={isInAppBrowser} linkCopied={linkCopied} onCopy={() => void handleCopyShareLink()}
+    onSignIn={event => void handleSignIn(event)} onJoin={event => void handleJoin(event)} onOpen={event => void handleOpen(event)}
+  />;
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(191,219,254,0.45),_transparent_36%),linear-gradient(180deg,_#fafaf9_0%,_#f5f5f4_100%)] px-4 py-8 sm:px-6 lg:px-8">
       <div className={`mx-auto ${isSongShare ? 'max-w-6xl' : 'max-w-md'}`}>
@@ -480,174 +528,6 @@ export default function SharedChartPage() {
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-12 text-center text-sm font-medium text-rose-700">
               {errorMessage}
             </div>
-          ) : payload?.setlist ? (
-            <>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
-                {language === 'zh' ? '歌單' : 'Setlist'}
-              </div>
-              <h1 className="mb-2 text-2xl font-bold tracking-tight text-stone-900">
-                {payload.setlist.name}
-              </h1>
-              <p className="mb-5 text-sm text-stone-500">
-                {language === 'zh'
-                  ? '加入後可在帳號中開啟同一份歌單；歌序、調性與譜面會跟隨管理員儲存的更新。Capo 可自行設定。'
-                  : 'Join to open this shared setlist in your account. Song order, keys and charts follow saved updates; Capo is personal.'}
-              </p>
-
-              <div className="mb-6 overflow-hidden rounded-xl border border-stone-100 bg-stone-50 divide-y divide-stone-100">
-                {payload.setlist.songs.map((item, index) => (
-                  <SharedSetlistSongRow key={item.id} item={item} index={index} language={language} />
-                ))}
-              </div>
-
-              {authUserId ? (
-                isMember ? (
-                  <div className="rounded-xl border border-green-100 bg-green-50 px-4 py-4 text-center">
-                    <div className="text-sm font-semibold text-green-700">
-                      {language === 'zh' ? '✓ 已在你的帳號中' : '✓ Already in your account'}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        rememberSetlistLanding(payload.setlist!.id, payload.setlist!.songs[0]?.id ?? null);
-                        navigate(`/?setlist=${encodeURIComponent(payload.setlist!.id)}`);
-                      }}
-                      className="mt-3 inline-flex items-center justify-center rounded-xl bg-green-700 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-green-800"
-                    >
-                      {language === 'zh' ? '打開歌單' : 'Open Setlist'}
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void handleJoin()}
-                      disabled={isJoining}
-                      className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
-                    >
-                      {isJoining
-                        ? (language === 'zh' ? '加入中...' : 'Joining...')
-                        : (language === 'zh' ? '加入共享歌單' : 'Join Shared Setlist')}
-                    </button>
-                    {joinError && (
-                      <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
-                    )}
-                  </>
-                )
-              ) : (
-                <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-4 text-center">
-                  <p className="mb-3 text-sm text-stone-500">
-                    {language === 'zh' ? '登入後即可加入並開啟此歌單' : 'Sign in to join and open this setlist'}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void handleSignIn()}
-                    disabled={isSigningIn}
-                    className="inline-block rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-stone-700 disabled:opacity-60"
-                  >
-                    {isSigningIn
-                      ? (language === 'zh' ? '登入中...' : 'Signing in...')
-                      : (language === 'zh' ? '前往登入' : 'Sign In')}
-                  </button>
-                  {joinError && (
-                    <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
-                  )}
-                </div>
-              )}
-            </>
-          ) : payload?.project ? (
-            <>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
-                {language === 'zh' ? '專案' : 'Project'}
-              </div>
-              <h1 className="mb-2 text-2xl font-bold tracking-tight text-stone-900">
-                {payload.project.name}
-              </h1>
-              <p className="mb-5 text-sm text-stone-500">
-                {language === 'zh'
-                  ? '加入後可開啟專案中的共享歌單，並持續收到歌單與譜面的更新。Capo 可自行設定。'
-                  : 'Join to open the project’s shared setlists and receive saved setlist and chart updates. Capo is personal.'}
-              </p>
-
-              <div className="mb-6 space-y-3">
-                {payload.project.setlists.length === 0 ? (
-                  <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-3 text-center text-sm text-stone-500">
-                    {language === 'zh' ? '這個專案目前沒有歌單。' : 'This project has no setlists yet.'}
-                  </div>
-                ) : (
-                  payload.project.setlists.map((sl) => (
-                    <div key={sl.id} className="rounded-xl border border-stone-100 bg-stone-50">
-                      <div className="border-b border-stone-100 px-4 py-2 text-sm font-bold text-stone-800">
-                        {sl.name}
-                      </div>
-                      {sl.songs.length === 0 ? (
-                        <div className="px-4 py-2 text-xs text-stone-400">
-                          {language === 'zh' ? '無歌曲' : 'No songs'}
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-stone-100">
-                          {sl.songs.map((item, index) => (
-                            <SharedSetlistSongRow key={item.id} item={item} index={index} language={language} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {authUserId ? (
-                isMember ? (
-                  <div className="rounded-xl border border-green-100 bg-green-50 px-4 py-4 text-center">
-                    <div className="text-sm font-semibold text-green-700">
-                      {language === 'zh' ? '✓ 已在你的帳號中' : '✓ Already in your account'}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/?project=${encodeURIComponent(payload.project!.id)}`)}
-                      className="mt-3 inline-flex items-center justify-center rounded-xl bg-green-700 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-green-800"
-                    >
-                      {language === 'zh' ? '打開專案' : 'Open Project'}
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void handleJoin()}
-                      disabled={isJoining}
-                      className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
-                    >
-                      {isJoining
-                        ? (language === 'zh' ? '加入中...' : 'Joining...')
-                        : (language === 'zh' ? '加入專案' : 'Join Project')}
-                    </button>
-                    {joinError && (
-                      <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
-                    )}
-                  </>
-                )
-              ) : (
-                <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-4 text-center">
-                  <p className="mb-3 text-sm text-stone-500">
-                    {language === 'zh' ? '登入後即可加入此專案' : 'Sign in to join this project'}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void handleSignIn()}
-                    disabled={isSigningIn}
-                    className="inline-block rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-stone-700 disabled:opacity-60"
-                  >
-                    {isSigningIn
-                      ? (language === 'zh' ? '登入中...' : 'Signing in...')
-                      : (language === 'zh' ? '前往登入' : 'Sign In')}
-                  </button>
-                  {joinError && (
-                    <p className="mt-2 text-center text-xs text-rose-600">{joinError}</p>
-                  )}
-                </div>
-              )}
-            </>
           ) : payload?.songBundle && selectedBundleSong ? (
             <>
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">

@@ -1,6 +1,7 @@
 import { StrictMode, lazy, Suspense } from 'react';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import AppLoadingScreen from './components/AppLoadingScreen';
+import { InvitationTransitionProvider } from './components/InvitationTransition';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
@@ -129,6 +130,7 @@ const renderApp = () => {
     <StrictMode>
       <BrowserRouter basename={routerBasename}>
         <ToastProvider>
+          <InvitationTransitionProvider>
           <RecoveryBoundary>
           <Suspense fallback={<AppLoadingScreen />}>
           <Routes>
@@ -139,6 +141,7 @@ const renderApp = () => {
           </Routes>
           </Suspense>
           </RecoveryBoundary>
+          </InvitationTransitionProvider>
         </ToastProvider>
       </BrowserRouter>
     </StrictMode>,

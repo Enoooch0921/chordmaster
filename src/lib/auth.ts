@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { isAuthRetryableFetchError, type Session } from '@supabase/supabase-js';
 import { AuthenticatedUser } from '../types';
 import { hasSupabaseConfig, supabase } from './supabase';
+import { clearInvitationAuthReturn, invitationPath, rememberInvitationAuthReturn, type InvitationAuthReturn } from './invitationJourney';
 import { clearCloudStartupPointer } from './cloudWorkspaceCache';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unconfigured' | 'offline';
@@ -41,7 +42,7 @@ const buildNativeAppUrl = (path: string) => {
   return `chordmaster://${normalizedPath.replace(/^\//, '')}`;
 };
 
-export const signInWithGoogleRedirect = async (nextPath = '/') => {
+export const signInWithGoogleRedirect = async (nextPath = '/', invitation?: InvitationAuthReturn) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
@@ -56,21 +57,28 @@ export const signInWithGoogleRedirect = async (nextPath = '/') => {
     callbackUrl.searchParams.set('next', normalizedNextPath);
   }
 
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: callbackUrl.toString(),
-      queryParams: { prompt: 'select_account' },
-      skipBrowserRedirect: isNative
+  clearInvitationAuthReturn();
+  if (invitation && normalizedNextPath === invitationPath(invitation.token)) rememberInvitationAuthReturn(invitation);
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: callbackUrl.toString(),
+        queryParams: { prompt: 'select_account' },
+        skipBrowserRedirect: isNative
+      }
+    });
+
+    if (error) {
+      throw error;
     }
-  });
 
-  if (error) {
+    if (isNative && data.url) {
+      await Browser.open({ url: data.url });
+    }
+  } catch (error) {
+    clearInvitationAuthReturn();
     throw error;
-  }
-
-  if (isNative && data.url) {
-    await Browser.open({ url: data.url });
   }
 };
 

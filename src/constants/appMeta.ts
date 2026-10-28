@@ -86,6 +86,20 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-28',
+        title: "Invitation journeys, lyric search and clearer editing",
+        bullets: [
+          "Redesign setlist and project invitations, with a continuous Google sign-in return and App arrival transition triggered only by explicit invitation actions.",
+          "Share or invite directly from project and setlist lists, and dismiss the workspace switcher when interacting elsewhere.",
+          "Search saved Chinese and English lyrics from the song library and Add songs, preserving title, pinyin and Zhuyin matching.",
+          "Start new song libraries empty and hide built-in symbol test pages while preserving user-created songs.",
+          "Keep desktop song information in an anchored panel up to 480px wide, with tabs and a scrollable body on short screens.",
+          "Improve dark-mode contrast throughout library/setlist score comparisons, update directions and confirmation buttons."
+        ]
+      },
+
+      {
+        version: '0.11.5',
+        date: '2026-10-28',
         title: 'Restore or explicitly adopt a setlist tempo',
         bullets: [
           'Restore a setlist song to its existing library BPM directly from the tempo control.',
@@ -714,6 +728,20 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-28',
+        title: "邀請體驗、歌詞搜尋與介面修正",
+        bullets: [
+          "重新設計歌單與專案邀請頁，接上 Google 登入往返及開啟 App 的連續轉場；只有邀請操作會觸發動畫。",
+          "專案與歌單列表可直接分享／邀請，工作區選單在外部點選、滑動或切換內容時自動收合。",
+          "歌曲庫與加入歌曲支援已儲存的中英文歌詞搜尋，保留歌名、拼音及注音比對。",
+          "新用戶歌曲庫預設空白，隱藏內建符號測試頁，保留自己建立的歌曲。",
+          "桌面歌曲資訊面板最多 480px，靠近按鈕展開；欄位分頁呈現，矮視窗可捲動內容。",
+          "修正深色模式的譜面版本比對、更新方向、範圍說明與確認按鈕對比。"
+        ]
+      },
+
+      {
+        version: '0.11.5',
         date: '2026-10-28',
         title: '還原或主動設定歌曲原始速度',
         bullets: [

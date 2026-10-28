@@ -101,3 +101,46 @@ describe('song search, adapted from Spotlight Han', () => {
     expect(match('', '')).toBe('text');
   });
 });
+
+const lyricDoc = { chinese: '[Verse 1]\n星光照亮前路，\n我們一起前行！', english: '[Verse 1]\nHope will light\nour way.' };
+describe('literal lyric search', () => {
+  it('finds remembered phrases across line breaks, spaces and punctuation in either language', () => {
+    for (const query of ['星光照亮前路我們一起前行', '星光照亮前路， 我們一起前行', '星光照亮前路我们一起前行', 'HOPE WILL LIGHT OUR WAY', 'hope, will light our way']) {
+      expect(createSearchQuery(query).match(['另一首歌'], lyricDoc)).toBe('lyrics');
+    }
+    expect(createSearchQuery('你的同在').match(['另一首歌'], { chinese: '祢的同在' })).toBe('lyrics');
+  });
+  it('uses current bilingual blocks instead of stale legacy bodies or section headings', () => {
+    const doc = { chinese: '已刪除的歌詞', english: 'removed lyrics', blocks: [
+      { id: 'v', marker: '獨特標題', chinese: '星光照亮前路', english: 'Hope will light our way' },
+      { id: 'c', marker: 'Chorus', chinese: '我們一起前行', english: '' }
+    ] };
+    expect(createSearchQuery('前路我們').match(['新歌'], doc)).toBe('lyrics');
+    for (const query of ['已刪除的歌詞', 'removed lyrics', '獨特標題']) expect(createSearchQuery(query).match(['新歌'], doc)).toBeNull();
+    expect(createSearchQuery('Verse').match(['新歌'], lyricDoc)).toBeNull();
+  });
+  it('combines lyric fragments and metadata while requiring every term', () => {
+    expect(createSearchQuery('星光 C 136').match(['新歌', 'C', '136'], lyricDoc)).toBe('lyrics');
+    expect(createSearchQuery('星光 D 136').match(['新歌', 'C', '136'], lyricDoc)).toBeNull();
+    expect(createSearchQuery('xg').match(['另一首歌'], lyricDoc)).toBeNull();
+    expect(createSearchQuery('ㄒㄍ').match(['另一首歌'], lyricDoc)).toBeNull();
+    expect(createSearchQuery('星光 失落').match(['新歌'], lyricDoc)).toBeNull();
+  });
+  it('keeps song-name matches ahead of lyrics and preserves ordering among lyric hits', () => {
+    const songs = [
+      { title: '另一首歌', lyricsDoc: lyricDoc },
+      { title: '星光', lyricsDoc: undefined },
+      { title: '新歌', lyricsDoc: lyricDoc }
+    ];
+    expect(searchItems(songs, createSearchQuery('星光'), song => [song.title], song => song.lyricsDoc))
+      .toEqual([songs[1], songs[0], songs[2]]);
+    expect(searchItems(songs, createSearchQuery(''), song => [song.title], song => song.lyricsDoc)).toEqual(songs);
+  });
+  it('updates after lyric edits and removals without requiring a dictionary', () => {
+    const query = createSearchQuery('星光');
+    expect(query.match(['新歌'], lyricDoc)).toBe('lyrics');
+    expect(query.match(['新歌'], { ...lyricDoc, chinese: '全新歌詞' })).toBeNull();
+    expect(query.match(['新歌'], { chinese: '', blocks: [] })).toBeNull();
+    expect(query.match(['新歌'])).toBeNull();
+  });
+});

@@ -377,3 +377,14 @@ it('keeps the practice tempo when the original-tempo write is rejected', async (
   expect(liveWorkspace().songs.find(song => song.id === 'second')?.tempo).toBeUndefined();
   expect(liveWorkspace().setlists[0].songs[1].songData?.tempo).toBe(92);
 });
+
+it('finds a song by remembered lyrics in the add-songs view', async () => {
+  fixture.songs[1].lyricsDoc = { chinese: '[Chorus]\n星光照亮前路，\n我們一起前行' };
+  await mount();
+  fireEvent.click(screen.getByRole('button', { name: '加入歌曲' }));
+  const search = await screen.findByPlaceholderText('搜尋要加入的歌曲');
+  fireEvent.change(search, { target: { value: '星光照亮前路我們一起前行' } });
+  expect(await screen.findByRole('button', { name: /^第二首歌曲.*已加入/ })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.queryByRole('button', { name: /^第一首歌曲.*已加入/ })).toBeNull();
+  expect(currentSong()).toBe('entry-first');
+});
