@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-28',
+        title: 'Clear Undo/Redo feedback and steady sharing status',
+        bullets: [
+          'Show Undo/Redo progress, completion and errors at the top center on phone, tablet and desktop. Update one notification in place, including chart drafts.',
+          'Keep the current setlist sharing status and expanded participant panel through Undo/Redo. Ordinary content changes no longer clear and reload sharing information.',
+          'Retain the previous sharing information during explicit refreshes, and load the correct status when changing workspaces or setlists.'
+        ]
+      },
+
+      {
+        version: '0.11.1',
+        date: '2026-10-28',
         title: 'More precise search and reliable iPhone navigation',
         bullets: [
           'Exclude editorial review markers from pronunciation search and prioritize exact song names, so dr and ㄉㄖ find 點燃 first.',
@@ -668,6 +679,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-28',
+        title: '清楚的撤銷提示與穩定的共享狀態',
+        bullets: [
+          '手機、平板與電腦的撤銷／重做提示改到上方中央；進行中、完成與失敗都在同一則提示原地更新，譜面草稿操作也有回饋。',
+          '撤銷／重做保留共享狀態與已展開的參與者區塊；一般歌單內容修改不再清空並重新載入共享資訊，避免閃動。',
+          '手動重新整理時保留上一份共享資訊，切換工作區或歌單時則載入對應狀態。'
+        ]
+      },
+
+      {
+        version: '0.11.1',
         date: '2026-10-28',
         title: '精準搜尋、手機導覽與工作區啟動修正',
         bullets: [

@@ -3868,6 +3868,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   };
 
   const historyScope = JSON.stringify([authenticatedUser?.id ?? 'local', activeLibraryId ?? 'local']);
+  const historyFeedbackId = 'workspace-history-feedback';
+  useEffect(() => () => toast.dismiss(historyFeedbackId), [historyScope, toast]);
   const historyLive = useRef({ scope: historyScope, songs, setlists, projects, joinedProjects });
   historyLive.current = { scope: historyScope, songs, setlists, projects, joinedProjects };
   const persistHistoryBaseline = useRef(persistWorkspace); persistHistoryBaseline.current = persistWorkspace;
@@ -3887,7 +3889,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       const repository = cloudRepositoryRef.current;
       const scope = historyScope;
       const release = beginCloudMutation();
-      const toastId = toast.loading(language === 'zh' ? '正在復原操作…' : 'Restoring action…');
+      toast.loading(language === 'zh'
+        ? `正在${direction === 'undo' ? '撤銷' : '重做'}${entry.label.zh}…`
+        : `${direction === 'undo' ? 'Undoing' : 'Redoing'} ${entry.label.en}…`, { id: historyFeedbackId, placement: 'history' });
       try {
         if (workspacePersistenceInFlightRef.current) await workspacePersistenceInFlightRef.current;
         if (historyLive.current.scope !== scope) throw new Error('Workspace changed.');
@@ -3932,13 +3936,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         }
         setLastSavedAt(Date.now()); setSyncStatus('saved');
         return entry;
-      } finally { historyReplay.current = false; toast.dismiss(toastId); release(); }
+      } finally { historyReplay.current = false; release(); }
     },
-    onError: error => toast.error(error instanceof Error ? error.message : (language === 'zh' ? '無法安全復原，操作記錄已保留。' : 'Unable to restore safely. History has been kept.')),
+    onError: error => toast.error(error instanceof Error ? error.message : (language === 'zh' ? '無法安全復原，操作記錄已保留。' : 'Unable to restore safely. History has been kept.'),
+      { id: historyFeedbackId, placement: 'history' }),
     onComplete: (entry, direction) => {
       toast.dismiss('workspace-history-action');
       toast.success(language === 'zh' ? `已${direction === 'undo' ? '撤銷' : '重做'}${entry.label.zh}`
-        : `${direction === 'undo' ? 'Undid' : 'Redid'} ${entry.label.en}`);
+        : `${direction === 'undo' ? 'Undid' : 'Redid'} ${entry.label.en}`, { id: historyFeedbackId, placement: 'history' });
     }
   });
   const recordHistory = (zh: string, en: string, changes: WorkspaceHistoryChange[], group?: string,
@@ -5550,7 +5555,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     if (selectedSetlistForShareRef.current !== setlistId) return;
     const repository = cloudRepositoryRef.current;
     const requestGeneration = ++setlistShareStatusGenerationRef.current;
-    setSelectedSetlistShareStatus(null);
+    setSelectedSetlistShareStatus(current => current?.resourceId === setlistId ? current : null);
     if (!repository) {
       setIsLoadingSetlistShareStatus(false);
       return;
@@ -5574,7 +5579,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     } catch (error) {
       if (requestGeneration !== setlistShareStatusGenerationRef.current) return;
       if (selectedSetlistForShareRef.current !== setlistId) return;
-      setSelectedSetlistShareStatus(null);
+      setSelectedSetlistShareStatus(current => current?.resourceId === setlistId ? current : null);
       const reason = error instanceof Error ? error.message.trim() : '';
       setAuthUiError(reason ? `${copy.setlistSharingLoadError}\n\n${reason}` : copy.setlistSharingLoadError);
     } finally {
@@ -5585,6 +5590,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
   };
 
+  const selectedSetlistIsSaved = savedSetlists.some(item => item.id === selectedSetlist?.id);
   useEffect(() => {
     if (!authenticatedUser || !cloudRepositoryRef.current || !selectedSetlist || !canShareSelectedSetlist || !isSetlistMode) {
       setlistShareStatusGenerationRef.current += 1;
@@ -5594,7 +5600,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     }
 
     void loadSetlistShareStatus(selectedSetlist.id);
-  }, [authenticatedUser, canShareSelectedSetlist, isSetlistMode, savedSetlists, selectedSetlist?.id]);
+  }, [authenticatedUser, activeLibraryId, canShareSelectedSetlist, isSetlistMode, selectedSetlistIsSaved, selectedSetlist?.id]);
 
   // Project "who joined" — mirrors the setlist share status, but for the whole
   // project. Only loadable for owned/manageable projects (not joined ones).
@@ -7454,7 +7460,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   const handleActiveUndo = () => {
     if (activePreviewEditSession) {
+      if (activePreviewEditSession.past.length === 0) return;
       setPreviewEditSession((current) => current ? undoPreviewDraft(current) : current);
+      toast.success(language === 'zh' ? '已撤銷譜面修改' : 'Undid chart edit', { id: historyFeedbackId, placement: 'history' });
     } else {
       void globalHistory.undo();
     }
@@ -7462,7 +7470,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   const handleActiveRedo = () => {
     if (activePreviewEditSession) {
+      if (activePreviewEditSession.future.length === 0) return;
       setPreviewEditSession((current) => current ? redoPreviewDraft(current) : current);
+      toast.success(language === 'zh' ? '已重做譜面修改' : 'Redid chart edit', { id: historyFeedbackId, placement: 'history' });
     } else {
       void globalHistory.redo();
     }
@@ -11630,7 +11640,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
                 : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
             }`}>
-              {isLoadingSetlistShareStatus
+              {isLoadingSetlistShareStatus && !activeSetlistShareStatus
                 ? copy.cloudSyncSyncing
                 : activeSetlistShareStatus?.activeToken
                   ? copy.setlistSharingActive
