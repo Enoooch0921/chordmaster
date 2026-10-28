@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-28',
+        title: 'More precise search and reliable iPhone navigation',
+        bullets: [
+          'Exclude editorial review markers from pronunciation search and prioritize exact song names, so dr and ㄉㄖ find 點燃 first.',
+          'Fix About and Help taps in the mobile navigation menu.',
+          'Keep a named loading screen while restoring the last workspace and setlist location. Retry a failed load without flashing personal content.',
+          'Reserve three-finger Undo/Redo before Safari starts list scrolling, include final release movement and allow gestures on the list after using a text or sort field.'
+        ]
+      },
+      {
+        version: '0.11.0',
+        date: '2026-10-28',
         title: 'Global Undo and a calmer workspace',
         bullets: [
           'Undo and redo song order, song removal, setlist and project deletion, archive and content edits. Keep the last 50 actions on this device, separately for each account and library.',
@@ -657,6 +668,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-28',
+        title: '精準搜尋、手機導覽與工作區啟動修正',
+        bullets: [
+          '拼音／注音搜尋排除「待人工」處理標記，完整歌名優先；輸入 dr 或 ㄉㄖ 時，「點燃」排在最前面。',
+          '修正手機側欄的「關於／說明」選單在點擊完成前關閉，導致無法開啟的問題。',
+          '啟動時持續顯示上次工作區的載入畫面，曲庫與歌單位置還原後才呈現內容；失敗可重試，不先閃個人區。',
+          '修正 iPhone 歌單列表的三指撤銷／重做，提早保留手勢、補抓放手位移，並避免排序或名稱欄位焦點阻擋列表操作。'
+        ]
+      },
+      {
+        version: '0.11.0',
         date: '2026-10-28',
         title: '全局撤銷與更清爽的工作區',
         bullets: [

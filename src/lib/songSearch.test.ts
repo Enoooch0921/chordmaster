@@ -6,6 +6,27 @@ beforeAll(() => loadSearchDictionary());
 const match = (query: string, ...fields: string[]) => createSearchQuery(query).match(fields);
 
 describe('song search, adapted from Spotlight Han', () => {
+  it.each(['dr', 'DR', 'ㄉㄖ', 'dianran'])('finds 點燃 and its library versions using %s', query => {
+    for (const title of ['點燃', '點燃（官方版）', '點燃（手寫F調）（待人工）']) {
+      expect(match(query, title)).toBe('phonetic');
+    }
+  });
+
+  it.each(['dr', 'ㄉㄖ'])('does not let editorial 待人工 status flood results for %s', query => {
+    expect(match(query, '我跟隨主（待人工）')).toBeNull();
+    expect(match(query, 'Joy to the World（Remix）（待人工）')).toBeNull();
+    expect(match(query, '我跟隨主(待人工)')).toBeNull();
+    expect(match(query, '待人工')).toBe('phonetic');
+    expect(match('待人工', '我跟隨主（待人工）')).toBe('text');
+    expect(match('dairengong', '等待人工智慧')).toBe('phonetic');
+  });
+
+  it.each(['dr', 'ㄉㄖ'])('ranks exact song initials before partial title matches for %s', query => {
+    const titles = ['以利亞的日子（Father’s Day 編曲）（待人工）', '點燃（官方版）', '點燃（手寫F調）（待人工）', '在教會中得榮耀（待人工）', '我跟隨主（待人工）'];
+    expect(searchItems(titles, createSearchQuery(query), title => [title])).toEqual([
+      titles[1], titles[2], titles[0], titles[3]
+    ]);
+  });
   it.each(['我們歡迎君王降臨', '我们欢迎君王降临', '歡迎君王', 'wmhyjwjl', 'WMHYJWJL', 'womenhuanyingjunwangjianglin', 'huanying', 'hyjw', 'wo3 men5 huan1 ying2', 'ㄨㄛˇ ㄇㄣ˙', 'ㄨㄇㄏㄧㄐㄨㄐㄌ', 'ㄏㄧㄐㄨ'])('finds a Chinese song using %s', query => {
     expect(match(query, '我們歡迎君王降臨')).not.toBeNull();
   });

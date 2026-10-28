@@ -187,6 +187,40 @@ it('reorders from the normal handle with arrow keys while retaining keyboard foc
   expect(currentSong()).toBe('entry-first');
 });
 
+it('undoes and redoes global setlist order with three fingers on the iPhone song list', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)');
+  const width = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(390);
+  await mount();
+  fireEvent.click(screen.getByRole('button', { name: '固定歌曲列表' }));
+  fireEvent.keyDown(within(row('entry-second')).getByRole('button', { name: '拖動排序：第二首歌曲' }), { key: 'ArrowUp' });
+  expect(rowOrder()).toEqual(['entry-second', 'entry-first']);
+  const undo = screen.getByRole('button', { name: '復原 (Cmd/Ctrl+Z)' });
+  const redo = screen.getByRole('button', { name: '重做 (Shift+Cmd/Ctrl+Z)' });
+  await waitFor(() => expect(undo).toBeEnabled());
+  // Native fields may keep focus while the user returns to the song list.
+  act(() => screen.getByDisplayValue('聚會一').focus());
+  const points = (dx = 0, count = 3) => Array.from({ length: count }, (_, identifier) => ({
+    identifier, clientX: 220 + identifier * 40 + dx, clientY: 220 + identifier * 10
+  }));
+  const swipeOnList = (dx: number) => {
+    const list = document.querySelector<HTMLElement>('[data-setlist-detail-scroll]')!;
+    expect(fireEvent.touchStart(list, { touches: points(0, 1) })).toBe(true);
+    expect(fireEvent.touchStart(list, { touches: points(0, 2) })).toBe(true);
+    expect(fireEvent.touchStart(list, { touches: points() })).toBe(false);
+    expect(fireEvent.touchMove(list, { touches: points(dx / 7) })).toBe(false);
+    fireEvent.touchMove(list, { touches: points(dx / 2) });
+    fireEvent.touchEnd(list, { touches: points(dx, 2), changedTouches: [points(dx)[2]] });
+    fireEvent.touchEnd(list, { touches: [], changedTouches: points(dx, 2) });
+  };
+  swipeOnList(-70);
+  await waitFor(() => expect(rowOrder()).toEqual(['entry-first', 'entry-second']));
+  await waitFor(() => expect(redo).toBeEnabled());
+  swipeOnList(70);
+  await waitFor(() => expect(rowOrder()).toEqual(['entry-second', 'entry-first']));
+  expect(currentSong()).toBe('entry-first');
+  width.mockRestore();
+});
+
 it('selects a song from its title without starting a drag or changing the order', async () => {
   await mount();
   const title = within(row('entry-second')).getByRole('button', { name: /第二首歌曲.*4\/4/ });

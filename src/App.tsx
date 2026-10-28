@@ -2113,6 +2113,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [authUiMessage, setAuthUiMessage] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'saved' | 'syncing' | 'offline' | 'failed'>('saved');
   const [isLoadingCloudWorkspace, setIsLoadingCloudWorkspace] = useState(false);
+  const [workspaceBootstrap, setWorkspaceBootstrap] = useState<{
+    userId: string; libraryName: string | null; ready: boolean; error: string | null;
+  } | null>(null);
+  const [workspaceBootstrapAttempt, setWorkspaceBootstrapAttempt] = useState(0);
   const [isImportPromptOpen, setIsImportPromptOpen] = useState(false);
   const [isImportingLocalWorkspace, setIsImportingLocalWorkspace] = useState(false);
   const [leavingSharedSetlistId, setLeavingSharedSetlistId] = useState<string | null>(null);
@@ -7921,6 +7925,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       setNewTeamName('');
       setTeamFeatureError(null);
       setIsLoadingCloudWorkspace(false);
+      setWorkspaceBootstrap(null);
       setIsImportPromptOpen(false);
       setSyncStatus('saved');
       return;
@@ -7942,16 +7947,28 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     let isCancelled = false;
 
     const loadCloudWorkspace = async () => {
+      // Keep the local personal snapshot covered until this account's complete
+      // workspace and navigation are restored. Token refreshes do not restart it.
+      const isStartup = workspaceBootstrap?.userId !== authenticatedUser.id || !workspaceBootstrap.ready;
+      if (isStartup) setWorkspaceBootstrap(current => ({ userId: authenticatedUser.id,
+        libraryName: current?.userId === authenticatedUser.id ? current.libraryName : null, ready: false, error: null }));
       try {
         setIsLoadingCloudWorkspace(true);
         const repository = cloudRepositoryRef.current!;
         const storedSelectedSetlistId = getStoredSelectedSetlistId();
         const storedSelectedSetlistSongId = getStoredSelectedSetlistSongId();
+        const requestedTeamId = typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('team')
+          : null;
+        const rememberedLibraryId = loadActiveLibraryPreference(authenticatedUser.id);
         let libraries: CloudLibrarySummary[] = [];
         let libraryListError: string | null = null;
         try {
           libraries = await repository.listLibraries();
         } catch (error) {
+          // A temporary failure must not replace a remembered team's selection
+          // with personal content. Let startup offer a retry instead.
+          if (rememberedLibraryId || requestedTeamId) throw error;
           libraryListError = getTeamFeatureErrorMessage(error, language);
           const personalLibraryId = await repository.getPersonalLibraryId();
           libraries = [{
@@ -7964,16 +7981,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             updatedAt: new Date().toISOString()
           }];
         }
-        const requestedTeamId = typeof window !== 'undefined'
-          ? new URLSearchParams(window.location.search).get('team')
-          : null;
         const requestedTeam = requestedTeamId
           ? libraries.find((library) => library.id === requestedTeamId && library.kind === 'team') ?? null
           : null;
         const targetLibrary = resolveInitialLibrary(libraries, {
           requestedTeamId,
-          rememberedLibraryId: loadActiveLibraryPreference(authenticatedUser.id)
+          rememberedLibraryId
         });
+        if (isCancelled) return;
+        if (isStartup) setWorkspaceBootstrap({ userId: authenticatedUser.id, libraryName: targetLibrary?.name ?? null, ready: false, error: null });
         if (targetLibrary) {
           repository.setActiveLibrary(targetLibrary.id);
         }
@@ -8057,6 +8073,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
               });
             }
           }
+          if (isCancelled) return;
           setSelectedSetlistId(nextSelectedSetlist?.id ?? null);
           setSetlistProjectFilter((currentFilter) => validateSetlistProjectFilter(
             currentFilter,
@@ -8087,9 +8104,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         }
 
         setSyncStatus('saved');
+        if (isStartup) setWorkspaceBootstrap({ userId: authenticatedUser.id, libraryName: targetLibrary?.name ?? null, ready: true, error: null });
       } catch (error) {
         if (!isCancelled) {
           const message = getTeamFeatureErrorMessage(error, language);
+          if (isStartup) setWorkspaceBootstrap(current => ({
+            userId: authenticatedUser.id, libraryName: current?.libraryName ?? null, ready: false, error: message
+          }));
           setAuthUiError(message);
           setTeamFeatureError(message);
           setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -8106,7 +8127,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     return () => {
       isCancelled = true;
     };
-  }, [authenticatedUser, language]);
+  }, [authenticatedUser, language, workspaceBootstrapAttempt]);
 
   const pendingSyncWorkspaceRef = useRef({ songs, setlists, projects });
   pendingSyncWorkspaceRef.current = { songs, setlists, projects };
@@ -12496,14 +12517,32 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     || setlistPanelView === 'list'
     || setlistPanelView === 'manageProjects';
 
+  const isRestoringWorkspace = (isAuthConfigured && authStatus === 'loading')
+    || Boolean(authenticatedUser && (workspaceBootstrap?.userId !== authenticatedUser.id || !workspaceBootstrap.ready))
+    || (navigationReady && !navigationMemoryReady);
+  const startupLibraryName = workspaceBootstrap?.userId === authenticatedUser?.id ? workspaceBootstrap?.libraryName : null;
+  const startupError = workspaceBootstrap?.userId === authenticatedUser?.id ? workspaceBootstrap?.error : null;
+  const startupMessage = startupError
+    ? (language === 'zh' ? `無法載入${startupLibraryName ? ` ${startupLibraryName}` : '工作區'}` : `Could not load ${startupLibraryName || 'workspace'}`)
+    : language === 'zh'
+    ? (startupLibraryName ? `正在載入 ${startupLibraryName}…` : '正在還原工作區…')
+    : (startupLibraryName ? `Loading ${startupLibraryName}…` : 'Restoring workspace…');
+
   return (
+    <>
+    {isRestoringWorkspace && <AppLoadingScreen message={startupMessage}
+      error={startupError}
+      onRetry={() => setWorkspaceBootstrapAttempt(attempt => attempt + 1)} retryLabel={language === 'zh' ? '重試' : 'Retry'} />}
     <div
       data-app-root
       ref={appViewportRef}
-      inert={isSwitchingLibrary || globalHistory.busy || historyForwardBusy ? true : undefined}
-      aria-busy={isSwitchingLibrary || globalHistory.busy || historyForwardBusy}
+      inert={isRestoringWorkspace || isSwitchingLibrary || globalHistory.busy || historyForwardBusy ? true : undefined}
+      aria-hidden={isRestoringWorkspace || undefined}
+      aria-busy={isRestoringWorkspace || isSwitchingLibrary || globalHistory.busy || historyForwardBusy}
       className="fixed inset-x-0 top-0 flex h-[100dvh] min-h-0 min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900 dark:bg-[color:var(--color-surface-muted)] dark:text-[color:var(--color-text)] dark:selection:bg-[color:var(--color-indigo-800)] dark:selection:text-[color:var(--color-indigo-100)]"
       style={{
+        // Preserve preview measurement geometry behind the opaque startup screen.
+        visibility: isRestoringWorkspace ? 'hidden' : undefined,
         // Keep the app clear of the iOS status bar / notch (Capacitor). These are
         // 0 in a normal browser, so the web build is unaffected.
         paddingTop: 'env(safe-area-inset-top)',
@@ -15924,5 +15963,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         </div>
       )}
     </div>
+    </>
   );
 }

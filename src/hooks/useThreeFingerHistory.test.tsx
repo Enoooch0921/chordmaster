@@ -27,19 +27,35 @@ it('ignores one/two/four fingers, vertical pans, short movement, pinch and cance
  // A fresh gesture after cancellation works; real fingers arrive one at a time.
  fireEvent.touchStart(window,{touches:points(200,100,1)});swipe(window,-70);expect(options.onUndo).toHaveBeenCalledTimes(1);
 });
-it('leaves native text input and modal gestures to the system, including a focused input touched outside',()=>{
+it('leaves gestures inside native text inputs and modals to the system',()=>{
  const options=props();renderHook(()=>useThreeFingerHistory(options));
  render(<><input aria-label="Search"/><div role="dialog"><button>Invite</button></div></>);
  swipe(screen.getByLabelText('Search'),-80);swipe(screen.getByText('Invite'),-80);
- screen.getByLabelText('Search').focus();swipe(window,-80);
  expect(options.onUndo).not.toHaveBeenCalled();
 });
-it('does not claim scroll or zoom until a horizontal three-finger intent is clear',()=>{
+it('reserves three-finger input before Safari can turn the first small move into a list scroll',()=>{
  const options=props();renderHook(()=>useThreeFingerHistory(options));
- expect(fireEvent.touchStart(window,{touches:points()})).toBe(true);
- expect(fireEvent.touchMove(window,{touches:points(180)})).toBe(true);
+ expect(fireEvent.touchStart(window,{touches:points(200,100,1)})).toBe(true);
+ expect(fireEvent.touchStart(window,{touches:points(200,100,2)})).toBe(true);
+ expect(fireEvent.touchStart(window,{touches:points()})).toBe(false);
+ expect(fireEvent.touchMove(window,{touches:points(190)})).toBe(false);
+ expect(options.onUndo).not.toHaveBeenCalled();
  expect(fireEvent.touchMove(window,{touches:points(120)})).toBe(false);
  fireEvent.touchEnd(window,{touches:points(120,100,2)});fireEvent.touchEnd(window,{touches:[]});
+ expect(options.onUndo).toHaveBeenCalledTimes(1);
+});
+it('uses release coordinates when iPhone coalesces the last touchmove',()=>{
+ const options=props();renderHook(()=>useThreeFingerHistory(options));
+ fireEvent.touchStart(window,{touches:points()});
+ fireEvent.touchMove(window,{touches:points(180)});
+ fireEvent.touchEnd(window,{touches:points(130,100,2),changedTouches:[points(130)[2]]});
+ fireEvent.touchEnd(window,{touches:[],changedTouches:points(130,100,2)});
+ expect(options.onUndo).toHaveBeenCalledTimes(1);
+});
+it('undoes on the list even when its sort control still has keyboard focus',()=>{
+ const options=props();renderHook(()=>useThreeFingerHistory(options));
+ render(<><select aria-label="Sort"><option>Recent</option></select><div data-testid="list">歌單列表</div></>);
+ screen.getByLabelText('Sort').focus();swipe(screen.getByTestId('list'),-70);
  expect(options.onUndo).toHaveBeenCalledTimes(1);
 });
 it.each(['before','after'])('handles a custom chord input once when native undo arrives %s the touch fallback',order=>{

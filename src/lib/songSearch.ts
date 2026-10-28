@@ -93,7 +93,10 @@ const plainLatin = (value: string): string => value.normalize('NFKD').replace(/\
 const getPhonetics = (field: FieldIndex): Phonetics => {
   if (field.phonetics) return field.phonetics;
   // Only names/metadata supplied by a caller are indexed; score bodies are never transliterated.
-  const chinese = [...field.text].filter(character => HAN.test(character)).join('').slice(0, 240);
+  // Editorial status is still searchable as literal text, but must not make
+  // nearly every imported title match dr / ㄉㄖ (待人工 = dai ren gong).
+  const pronunciationText = field.text.replace(/\(\s*待人工\s*\)/gu, '');
+  const chinese = [...pronunciationText].filter(character => HAN.test(character)).join('').slice(0, 240);
   if (chinese && !pinyin) return EMPTY_PHONETICS;
   const syllables = chinese && pinyin ? pinyin(chinese, { type: 'array', toneType: 'none' }) : [];
   const symbols = syllables.map(toZhuyin);
@@ -153,6 +156,7 @@ export type SearchMatch = 'text' | 'phonetic' | 'keyboard';
 export type SearchQuery = {
   isEmpty: boolean;
   match: (fields: readonly (string | undefined | null)[]) => SearchMatch | null;
+  isExactTitleMatch: (title: string | undefined | null) => boolean;
 };
 
 /** Prepare once per query; field pronunciation keys are cached across keystrokes and renders. */
@@ -179,6 +183,17 @@ export const createSearchQuery = (raw: string): SearchQuery => {
   const terms = text.split(/\s+/u).filter(Boolean).map(term => ({ text: term, latin: pinyinQuery(term), symbols: ZHUYIN_ONLY.test(term) ? term.replace(/[^ㄅ-ㄩ]/gu, '') : '', keyboard: keyboardQuery(term) }));
   return {
     isEmpty: !text,
+    isExactTitleMatch(title) {
+      if (!title || !text) return false;
+      // A library version suffix does not change the underlying song name.
+      const field = getField(normalizeSearchText(title).replace(/(?:\s*\([^()]*\))+\s*$/u, '').trim());
+      if (!field.text) return false;
+      if (field.text === text) return true;
+      if (!latin && !symbols) return false;
+      const index = getPhonetics(field);
+      return Boolean(latin && (index.pinyin === latin || index.initials === latin))
+        || Boolean(symbols && (index.zhuyin === symbols || index.zhuyinInitials === symbols));
+    },
     match(values) {
       if (!text) return 'text';
       const fields = values.filter((value): value is string => Boolean(value)).map(getField);
@@ -197,12 +212,13 @@ export const createSearchQuery = (raw: string): SearchQuery => {
   };
 };
 
-/** Keep the user's chosen sort within each tier, with literal results before inferred input. */
+/** Literal results lead; exact song names lead partial matches within each tier. */
 export const searchItems = <T,>(items: readonly T[], query: SearchQuery, fields: (item: T) => readonly (string | undefined | null)[]): T[] => {
   if (query.isEmpty) return [...items];
   const ranks = { text: 0, phonetic: 1, keyboard: 2 };
   return items.flatMap(item => {
-    const match = query.match(fields(item));
-    return match ? [{ item, rank: ranks[match] }] : [];
+    const values = fields(item);
+    const match = query.match(values);
+    return match ? [{ item, rank: ranks[match] * 2 + (query.isExactTitleMatch(values[0]) ? 0 : 1) }] : [];
   }).sort((left, right) => left.rank - right.rank).map(entry => entry.item);
 };

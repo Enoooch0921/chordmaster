@@ -1,4 +1,5 @@
 import { BookOpen, Info, MoreHorizontal } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 
 interface Props {
   logoSrc: string;
@@ -17,6 +18,15 @@ interface Props {
 }
 
 export default function MobileSidebarNavigation(props: Props) {
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      const menu = menuRef.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    return () => document.removeEventListener('pointerdown', closeOutside);
+  }, []);
   const tabClass = (active: boolean) => `flex h-11 min-w-0 flex-1 items-center justify-center rounded-lg px-2 text-sm font-bold transition-colors ${active
     ? 'bg-indigo-600 text-white shadow-sm'
     : 'text-gray-600 hover:bg-gray-100 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface-raised)]'}`;
@@ -33,9 +43,13 @@ export default function MobileSidebarNavigation(props: Props) {
         </button>
       </nav>
       <details
+        ref={menuRef}
         className="relative shrink-0"
         onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false;
+          // Safari touch taps can blur the summary with a null relatedTarget
+          // before dispatching the menu item's click. Outside taps are handled
+          // by pointerdown; only a known keyboard focus destination closes here.
+          if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
         }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
@@ -49,10 +63,10 @@ export default function MobileSidebarNavigation(props: Props) {
           <MoreHorizontal size={20} />
         </summary>
         <div className="absolute right-0 top-full z-30 mt-1 w-36 rounded-xl border border-gray-200 bg-white p-1 shadow-lg dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
-          <button type="button" onClick={props.onAbout} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)]">
+          <button type="button" onClick={() => { props.onAbout(); if (menuRef.current) menuRef.current.open = false; }} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)]">
             <Info size={16} />{props.aboutLabel}
           </button>
-          <button type="button" onClick={props.onHelp} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)]">
+          <button type="button" onClick={() => { props.onHelp(); if (menuRef.current) menuRef.current.open = false; }} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:text-[color:var(--color-text)] dark:hover:bg-[color:var(--color-surface)]">
             <BookOpen size={16} />{props.helpLabel}
           </button>
         </div>

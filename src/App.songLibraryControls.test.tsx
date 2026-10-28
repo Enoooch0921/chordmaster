@@ -190,3 +190,15 @@ it('finds songs through pinyin, Zhuyin and missed input-method switching without
   expect(await screen.findByRole('button', { name: '開啟歌曲：我們歡迎君王降臨' })).toHaveAttribute('aria-current', 'true');
   expect(row('third')).not.toBeNull();
 });
+
+it('finds 點燃 in the library with both two-letter and two-symbol initials', async () => {
+  fixture.songs[0].title = '點燃（官方版）';
+  await mount();
+  const search = screen.getByRole('textbox', { name: '搜尋歌曲' });
+  for (const value of ['dr', 'ㄉㄖ', '點燃']) {
+    fireEvent.change(search, { target: { value } });
+    expect(await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toHaveAttribute('aria-current', 'true');
+    expect(row('second')).toBeNull();
+    expect(row('third')).toBeNull();
+  }
+});
