@@ -86,6 +86,18 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-28',
+        title: 'Restore or explicitly adopt a setlist tempo',
+        bullets: [
+          'Restore a setlist song to its existing library BPM directly from the tempo control.',
+          'When the library has no tempo, authorized song editors can explicitly choose Set as original tempo. Practice adjustments and Performance Mode never adopt a tempo automatically.',
+          'Save only the chosen BPM to the current source song, preserving other score content and existing setlist arrangements. Concurrent source edits stop the write instead of being overwritten.',
+          'Keep global Undo available for adopting an original tempo, and retain the setlist tempo if the library write fails.'
+        ]
+      },
+
+      {
+        version: '0.11.4',
+        date: '2026-10-28',
         title: 'Offline startup and compact connection status',
         bullets: [
           'Open previously loaded songs, setlists and projects from a cache scoped to the current account and workspace, without waiting for a slow connection or flashing the personal workspace.',
@@ -702,6 +714,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-28',
+        title: '還原或主動設定歌曲原始速度',
+        bullets: [
+          '歌曲庫已有速度時，可在歌單的速度選單直接還原歌曲庫 BPM。',
+          '歌曲庫尚未設定速度時，有歌曲編輯權限的人可明確按下「設為歌曲原始速度」；練習調速與進入演出模式都不會自動採用。',
+          '只將選定的 BPM 補到來源歌曲，保留其他譜面內容與現有歌單版本；有人同時修改來源時停止寫入，避免覆蓋。',
+          '設定原始速度支援全域撤銷；來源寫入失敗時，保留已調整的歌單速度並顯示錯誤。'
+        ]
+      },
+
+      {
+        version: '0.11.4',
         date: '2026-10-28',
         title: '離線啟動與精簡連線提示',
         bullets: [

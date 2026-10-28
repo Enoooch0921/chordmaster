@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -6,7 +7,7 @@ import { ToastProvider } from './components/Toast';
 import { getNavigationStorageKey, loadNavigationLocation, saveNavigationLocation, type SetlistNavigationLocation } from './lib/setlistNavigationMemory';
 import type { LibraryRole, WorkspaceSnapshot } from './types';
 
-const state = vi.hoisted(() => ({ cloud: false, role: 'viewer' as LibraryRole, saveCapo: vi.fn() }));
+const state = vi.hoisted(() => ({ cloud: false, role: 'viewer' as LibraryRole, saveCapo: vi.fn(), adoptTempo: vi.fn(), refresh: vi.fn(() => false) }));
 let fixture: WorkspaceSnapshot;
 vi.mock('./components/useAnchoredPortalPanel', () => ({ useAnchoredPortalPanel: () => ({ panelStyle: { position: 'fixed', top: 0, left: 0 }, placement: 'bottom', isPositioned: true, transformOrigin: 'top right' }) }));
 vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: state.cloud ? { id: 'controls-user', email: 'controls@example.invalid', name: 'Controls' } : null,
@@ -15,11 +16,12 @@ vi.mock('./lib/workspace', async original => ({ ...await original<typeof import(
 vi.mock('./lib/repository', () => ({ createCloudRepository: () => ({
   listLibraries: async () => [{ id: 'team', name: 'Controls team', kind: 'team', role: state.role, ownerUserId: 'owner', createdAt: '', updatedAt: '' }],
   setActiveLibrary: vi.fn(), loadLibraryWorkspace: async () => fixture, saveCapoOverride: state.saveCapo,
+  setOriginalTempoIfUnset: state.adoptTempo,
   getNotifications: async () => [], getShareContacts: async () => [], getPendingTeamInvites: async () => [],
   getSetlistShareStatus: async () => ({ activeToken: null, activeCreatedAt: null, participantCount: 0, participants: [] }),
   getSetlistEditorAssignments: async () => ({ members: [], assignments: [] }), subscribeToLibraryChanges: () => () => {}
 }) }));
-vi.mock('./hooks/useLibraryWorkspaceRefresh', () => ({ useLibraryWorkspaceRefresh: () => false }));
+vi.mock('./hooks/useLibraryWorkspaceRefresh', () => ({ useLibraryWorkspaceRefresh: state.refresh }));
 vi.mock('./hooks/useJoinedWorkspaceRefresh', () => ({ useJoinedWorkspaceRefresh: () => false }));
 vi.mock('./hooks/useSongEditingPresence', () => ({ useSongEditingPresence: () => ({ editors: [], failed: false }) }));
 vi.mock('./hooks/useTeamWorkspaceDraft', () => ({ useTeamWorkspaceDraft: () => ({ ready: true, pending: null, dismiss: vi.fn(), restored: vi.fn() }) }));
@@ -60,6 +62,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   localStorage.clear(); state.cloud = false; state.role = 'viewer'; state.saveCapo.mockReset().mockResolvedValue(undefined);
+  state.adoptTempo.mockReset(); state.refresh.mockClear();
   elementFromPoint.mockReset();
   const songs = [
     { id: 'first', title: '第一首歌曲', originalKey: 'C' as const, currentKey: 'C' as const, timeSignature: '4/4', updatedAt: 1, sections: [{ id: 'verse-first', title: 'Verse', bars: [{ id: 'bar-first', chords: ['C'] }] }] },
@@ -246,7 +249,7 @@ it('adjusts another song directly without changing the currently selected song',
 
   fireEvent.click(within(row('entry-second')).getByRole('button', { name: '速度 未設定 BPM' }));
   fireEvent.change(await screen.findByRole('textbox', { name: '速度 BPM' }), { target: { value: '92.5' } });
-  fireEvent.click(screen.getByRole('button', { name: '套用' }));
+  fireEvent.click(screen.getByRole('button', { name: '套用到歌單' }));
   await within(row('entry-second')).findByRole('button', { name: '速度 92.5 BPM' });
   expect(within(row('entry-first')).getByRole('button', { name: '速度 未設定 BPM' })).toBeInTheDocument();
   expect(currentSong()).toBe('entry-first');
@@ -311,4 +314,66 @@ it('uses the same phonetic search when choosing songs to add', async () => {
     expect(screen.queryByRole('button', { name: /^第一首歌曲.*已加入/ })).toBeNull();
     expect(currentSong()).toBe('entry-first');
   }
+});
+
+const liveWorkspace = () => (state.refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0].workspace;
+it('restores the source BPM only in the selected setlist copy', async () => {
+  fixture.songs[1].tempo = 92;
+  fixture.setlists[0].songs[1].songData = { ...fixture.songs[1], tempo: 110 };
+  await mount();
+  fireEvent.click(within(row('entry-second')).getByRole('button', { name: '速度 110 BPM' }));
+  fireEvent.click(await screen.findByRole('button', { name: '還原歌曲庫速度 · 92 BPM' }));
+  await waitFor(() => expect(liveWorkspace().setlists[0].songs[1].songData?.tempo).toBe(92));
+  expect(liveWorkspace().songs.find(song => song.id === 'second')?.tempo).toBe(92);
+  expect(liveWorkspace().setlists[0].songs[0].songData?.tempo).toBeUndefined();
+  expect(state.adoptTempo).not.toHaveBeenCalled();
+});
+it('requires the explicit action before promoting a practice tempo, and preserves other setlist versions', async () => {
+  fixture.setlists[0].songs[1].songData = { ...fixture.songs[1], tempo: 90 };
+  fixture.setlists.push({ ...structuredClone(fixture.setlists[0]), id: 'other-meeting', name: '另一份歌單',
+    songs: fixture.setlists[0].songs.map(entry => ({ ...structuredClone(entry), id: `other-${entry.id}`, setlistId: 'other-meeting' })) });
+  await mount();
+  fireEvent.click(within(row('entry-second')).getByRole('button', { name: '速度 90 BPM' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: '速度 BPM' }), { target: { value: '112.5' } });
+  fireEvent.click(screen.getByRole('button', { name: '套用到歌單' }));
+  expect(liveWorkspace().songs.find(song => song.id === 'second')?.tempo).toBeUndefined();
+  fireEvent.click((await screen.findAllByRole('button', { name: /^演出模式$/ }))[0]);
+  await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).not.toBeNull());
+  expect(liveWorkspace().songs.find(song => song.id === 'second')?.tempo).toBeUndefined();
+  fireEvent.click(screen.getByRole('button', { name: '退出' }));
+  fireEvent.click(within(row('entry-second')).getByRole('button', { name: '速度 112.5 BPM' }));
+  fireEvent.click(await screen.findByRole('button', { name: '設為歌曲原始速度 · 112.5 BPM' }));
+  await waitFor(() => expect(liveWorkspace().songs.find(song => song.id === 'second')?.tempo).toBe(112.5));
+  expect(liveWorkspace().setlists.find(list => list.id === 'other-meeting')?.songs[1].songData?.tempo).toBe(90);
+  expect(currentSong()).toBe('entry-first');
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '調整速度' })).toBeNull());
+  const undo = screen.getByRole('button', { name: '復原 (Cmd/Ctrl+Z)' });
+  await waitFor(() => expect(undo).toBeEnabled());
+  fireEvent.click(undo);
+  await waitFor(() => expect(liveWorkspace().songs.find(song => song.id === 'second')?.tempo).toBeUndefined());
+  expect(liveWorkspace().setlists[0].songs[1].songData?.tempo).toBe(112.5);
+});
+it('uses the guarded source write for an authorized cloud editor and leaves the score unchanged', async () => {
+  state.cloud = true; state.role = 'owner';
+  fixture.setlists[0].songs[1].songData = { ...fixture.songs[1], tempo: 92 };
+  state.adoptTempo.mockImplementation(async () => ({ before: structuredClone(fixture.songs[1]), after: { ...structuredClone(fixture.songs[1]), tempo: 92, updatedAt: 2 } }));
+  await mount();
+  fireEvent.click(within(row('entry-second')).getByRole('button', { name: '速度 92 BPM' }));
+  fireEvent.click(await screen.findByRole('button', { name: '設為歌曲原始速度 · 92 BPM' }));
+  await waitFor(() => expect(state.adoptTempo).toHaveBeenCalledWith('second', 92, 'team'));
+  await waitFor(() => expect(liveWorkspace().songs.find(song => song.id === 'second')?.tempo).toBe(92));
+  expect(liveWorkspace().songs.find(song => song.id === 'second')?.sections).toEqual(fixture.songs[1].sections);
+  expect(liveWorkspace().setlists[0].songs[0].songData?.tempo).toBeUndefined();
+});
+
+it('keeps the practice tempo when the original-tempo write is rejected', async () => {
+  state.cloud = true; state.role = 'owner';
+  fixture.setlists[0].songs[1].songData = { ...fixture.songs[1], tempo: 92 };
+  state.adoptTempo.mockRejectedValue(new Error('來源歌曲已被其他人修改，請重新確認。'));
+  await mount();
+  fireEvent.click(within(row('entry-second')).getByRole('button', { name: '速度 92 BPM' }));
+  fireEvent.click(await screen.findByRole('button', { name: '設為歌曲原始速度 · 92 BPM' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('來源歌曲已被其他人修改');
+  expect(liveWorkspace().songs.find(song => song.id === 'second')?.tempo).toBeUndefined();
+  expect(liveWorkspace().setlists[0].songs[1].songData?.tempo).toBe(92);
 });

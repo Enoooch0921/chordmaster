@@ -55,6 +55,7 @@ import { supabase } from './supabase';
 import { compactHistoryChange, historyFieldPatch, historySignature, type WorkspaceHistoryEntry, type HistoryRpcPatch, type HistoryTrashResource } from './workspaceHistory';
 import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
 import { normalizeTeamManagementScope } from './teamScope';
+import { MAX_TEMPO_BPM, MIN_TEMPO_BPM, normalizeTempoBpm } from '../utils/tempoUtils';
 
 interface SongRow {
   id: string;
@@ -309,6 +310,7 @@ export interface WorkspaceRepository {
   syncPersonalSongFromTeam(song: StoredSong): Promise<StoredSong>;
   savePersonalSong(song: StoredSong): Promise<void>;
   saveSong(song: StoredSong, options?: { createOnly?: boolean }): Promise<void>;
+  setOriginalTempoIfUnset(songId: string, tempo: number, libraryId: string): Promise<{ before: StoredSong; after: StoredSong }>;
   saveSetlist(setlist: Setlist, previousSetlist?: Setlist, options?: SetlistSaveOptions): Promise<void>;
   saveProject(project: Project): Promise<void>;
   deleteSong(id: string): Promise<void>;
@@ -941,6 +943,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   },
   async saveSong() {
     throw new Error('Local repository saveSong is not used directly.');
+  },
+  async setOriginalTempoIfUnset() {
+    throw new Error('Local original tempo changes use the workspace directly.');
   },
   async saveProject() {
     throw new Error('Local repository saveProject is not used directly.');
@@ -1968,6 +1973,29 @@ export const createCloudRepository = (params: {
     async saveSong(song, options) {
       const libraryId = await ensureLibraryId();
       await saveSongToLibrary(song, libraryId, undefined, options?.createOnly);
+    },
+
+    async setOriginalTempoIfUnset(songId, tempo, libraryId) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      if (!Number.isFinite(tempo) || tempo < MIN_TEMPO_BPM || tempo > MAX_TEMPO_BPM || normalizeTempoBpm(tempo) !== tempo) {
+        throw new Error('Enter a tempo between 20 and 400 BPM.');
+      }
+      // Read the complete current source, never a setlist snapshot. Preserve
+      // every unrelated field and guard the write by its exact server revision.
+      const { data: source, error: readError } = await supabase.from('songs').select('*')
+        .eq('id', songId).eq('library_id', libraryId).is('archived_at', null).maybeSingle<SongRow>();
+      if (readError) throw readError;
+      if (!source || source.id !== songId || source.library_id !== libraryId || source.archived_at) throw Object.assign(new Error('The active source song is unavailable.'), { code: 'original-tempo-source-unavailable' });
+      if (normalizeTempoBpm(source.content_json.tempo) !== undefined) throw Object.assign(new Error('The library already has a tempo. Reopen the tempo control to review it.'), { code: 'original-tempo-exists' });
+      const { data: saved, error: writeError } = await supabase.from('songs')
+        .update({ content_json: { ...cloneValue(source.content_json), tempo }, updated_by: params.userId })
+        .eq('id', songId).eq('library_id', libraryId).is('archived_at', null).eq('updated_at', source.updated_at)
+        .select('*').maybeSingle<SongRow>();
+      if (writeError) throw writeError;
+      if (!saved || saved.id !== songId || saved.library_id !== libraryId || saved.archived_at || saved.content_json.tempo !== tempo) {
+        throw Object.assign(new Error('The source song changed or access was denied. Reload before trying again.'), { code: 'original-tempo-conflict' });
+      }
+      return { before: mapSongRow(source), after: mapSongRow(saved) };
     },
 
     async saveSetlist(setlist, previousSetlist, options) {

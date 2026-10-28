@@ -6,7 +6,7 @@
 .tempo-trigger-unit{font-size:10px;font-weight:500;color:var(--color-text-muted)}
 .tempo-trigger>svg{flex-shrink:0;color:var(--color-text-muted)}
 .tempo-trigger:focus-visible,.tempo-trigger[aria-expanded=true]{outline:2px solid var(--color-indigo-600);outline-offset:-2px}
-.tempo-panel{width:min(276px,calc(100vw - 24px));padding:16px;border-radius:16px;background:var(--color-surface-raised);color:var(--color-text);box-shadow:0 10px 36px #0003}
+.tempo-panel{width:min(276px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior:contain;padding:16px;border-radius:16px;background:var(--color-surface-raised);color:var(--color-text);box-shadow:0 10px 36px #0003}
 .tempo-panel-heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;font-size:16px;font-weight:600}
 .tempo-panel-heading>span{font-size:12px;font-weight:500;color:var(--color-text-muted)}
 .tempo-scope{margin:0 0 16px;font-size:12px;line-height:18px;color:var(--color-text-muted)}
@@ -18,6 +18,9 @@
 .tempo-panel button:disabled{opacity:.45;cursor:default}
 .tempo-hint{margin:8px 0 16px;font-size:12px;line-height:18px;color:var(--color-text-muted)}
 .tempo-hint.is-error{color:var(--color-red-600)}
+.tempo-original{border-top:1px solid var(--color-border);padding-top:12px;margin-top:12px}
+.tempo-original p{font-size:12px;line-height:18px;color:var(--color-text-muted);margin:0 0 8px}
+.tempo-original button{width:100%;min-height:44px;padding:8px 10px;border:1px solid var(--color-border-strong);border-radius:8px;font-size:12px;font-weight:600;line-height:18px;text-align:left;background:var(--color-surface-muted);margin-bottom:8px}
 .tempo-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .tempo-footer button{min-height:44px;min-width:68px;padding:8px 16px;border-radius:8px;font-size:14px;font-weight:500}
 .tempo-footer button[type=button]:hover{background:var(--color-surface-sunken)}

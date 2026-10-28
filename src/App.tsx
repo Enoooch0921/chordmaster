@@ -4112,6 +4112,47 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }));
   };
 
+  const canAdoptOriginalTempo = canEditSelectedSetlistContent && canEditTeamSongs && !isJoinedSetlist
+    && !usingStartupCache && (!isCloudMode || networkOnline);
+  const handleAdoptOriginalTempo = async (itemId: string, tempo: number) => {
+    const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
+    const source = entry && songsRef.current.find(item => item.id === entry.item.songId && !item.archivedAt);
+    if (!canAdoptOriginalTempo || !entry || !source || normalizeTempoBpm(source.tempo) !== undefined) {
+      throw new Error(language === 'zh' ? '原始速度或編輯權限已變更，請重新開啟速度選單。' : 'The original tempo or permissions changed. Reopen the tempo control.');
+    }
+    const repository = cloudRepositoryRef.current, requestLibraryId = activeLibraryId, requestScope = historyScope;
+    if (isCloudMode && (!repository || !requestLibraryId || !navigator.onLine)) throw new Error(language === 'zh' ? '請連線後再設定歌曲原始速度。' : 'Reconnect before setting the original tempo.');
+    setHistoryForwardBusy(true);
+    const release = beginCloudMutation();
+    try {
+      // Clicking this explicit action also applies any number still in the
+      // input. Ordinary Apply/stepper changes never write the library tempo.
+      handleSetlistSongTempoChange(itemId, tempo);
+      await waitForWorkspaceStateCommit();
+      if (isCloudMode) await flushTeamSongDraftsBeforeMutation();
+      if (historyLive.current.scope !== requestScope) throw new Error(copy.cloudSyncFailed);
+      const result = isCloudMode
+        ? await repository!.setOriginalTempoIfUnset(source.id, tempo, requestLibraryId!)
+        : { before: source, after: { ...source, tempo, updatedAt: Date.now() } };
+      if (historyLive.current.scope !== requestScope) return;
+      const update = (items: StoredSong[]) => items.map(item => item.id === source.id ? result.after : item);
+      setSongs(update);
+      if (isCloudMode) setSavedSongs(update);
+      recordHistory('設定歌曲原始速度', 'set original song tempo', [{ resource: 'song', id: source.id, before: result.before, after: result.after }]);
+      toast.success(language === 'zh' ? `已將 ${tempo} BPM 設為「${source.title}」的原始速度。` : `Set ${tempo} BPM as the original tempo of “${source.title}”.`);
+    } catch (error) {
+      if (isCloudMode) setLibrarySongRefreshVersion(version => version + 1);
+      const code = (error as { code?: string })?.code;
+      const messages: Record<string, string> = {
+        'original-tempo-exists': '歌曲庫已有人設定速度，未覆蓋來源。請重新開啟速度選單。',
+        'original-tempo-source-unavailable': '找不到此工作區的未封存來源歌曲，請重新確認歌曲庫。',
+        'original-tempo-conflict': '來源歌曲已變更或存取權不足，未覆蓋來源。請重新確認。'
+      };
+      if (language === 'zh' && code && messages[code]) throw new Error(messages[code]);
+      throw error;
+    } finally { release(); setHistoryForwardBusy(false); }
+  };
+
   const handleBookLyricsChange = (itemId: string, lyricsDoc: Song['lyricsDoc']) => {
     if (!canEditSelectedSetlistContent) return;
     const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
@@ -8373,7 +8414,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [usingStartupCache, authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, isPerformanceMode, language, toast]);
 
   useEffect(() => {
-    if (usingStartupCache || isPerformanceMode || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
+    if (usingStartupCache || historyForwardBusy || isPerformanceMode || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
       return;
     }
 
@@ -8394,7 +8435,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         autoSaveTimeoutRef.current = null;
       }
     };
-  }, [usingStartupCache, isPerformanceMode, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
+  }, [usingStartupCache, historyForwardBusy, isPerformanceMode, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
@@ -12501,8 +12542,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                             value={effectiveTempo}
                             language={language}
                             disabled={!canEditSelectedSetlistContent}
+                            showOriginalTempo originalTempo={normalizeTempoBpm(sourceSong.tempo)}
+                            onAdoptOriginalTempo={canAdoptOriginalTempo && !sourceSong.archivedAt ? tempo => handleAdoptOriginalTempo(item.id, tempo) : undefined}
                             triggerLabel={<span className="setlist-rail-value"><span className="setlist-rail-label">BPM</span><span className={String(effectiveTempo ?? '').length > 4 ? 'is-precise' : undefined}>{effectiveTempo ?? '—'}</span></span>}
-                            scopeText={language === 'zh' ? '只套用到這份歌單，歌曲庫不變。' : 'Applies to this setlist only. The library stays unchanged.'}
+                            scopeText={language === 'zh' ? '一般調整只套用到這份歌單。' : 'Ordinary adjustments apply to this setlist only.'}
                             onChange={tempo => handleSetlistSongTempoChange(item.id, tempo)}
                             buttonClassName="setlist-rail-picker"
                           />
@@ -12524,8 +12567,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     value={activeDraftEditorSong?.tempo}
     language={language}
     disabled={!canOpenEditor}
+    showOriginalTempo={isSetlistMode}
+    originalTempo={isSetlistMode ? normalizeTempoBpm(selectedSetlistSourceSong?.tempo) : undefined}
+    onAdoptOriginalTempo={isSetlistMode && selectedSetlistSong && selectedSetlistSourceSong && !selectedSetlistSourceSong.archivedAt && canAdoptOriginalTempo
+      ? tempo => handleAdoptOriginalTempo(selectedSetlistSong.id, tempo) : undefined}
     scopeText={isSetlistMode
-      ? (language === 'zh' ? '只套用到這份歌單，歌曲庫不變。' : 'Applies to this setlist only. The library stays unchanged.')
+      ? (language === 'zh' ? '一般調整只套用到這份歌單。' : 'Ordinary adjustments apply to this setlist only.')
       : (language === 'zh' ? '調整這首歌曲的原曲速度。' : 'Change the tempo of this library song.')}
     buttonClassName={buttonClassName}
     onChange={tempo => {
