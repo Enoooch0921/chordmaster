@@ -71,3 +71,28 @@ export const writeWorkspaceDatabase = async (
     });
   } finally { db.close(); }
 };
+
+/** Server-backed caches have their own account/library keys, separate from drafts. */
+export const readWorkspaceCache = async (key: string): Promise<unknown> => {
+  const db = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE, 'readonly');
+      const request = transaction.objectStore(STORE).get(key);
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally { db.close(); }
+};
+
+export const writeWorkspaceCache = async (key: string, value: string) => {
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE, 'readwrite');
+      transaction.objectStore(STORE).put(value, key);
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally { db.close(); }
+};

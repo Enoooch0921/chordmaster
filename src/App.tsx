@@ -172,6 +172,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
 import { loadActiveLibraryPreference, resolveInitialLibrary, saveActiveLibraryPreference } from './lib/activeLibraryPreference';
+import { clearCloudStartupPointer, loadCloudStartupCache, saveCloudWorkspaceCache, type CloudWorkspaceCache } from './lib/cloudWorkspaceCache';
 import {
   consumeLocalWorkspaceRecoveryNotice,
   hasCompletedMigration,
@@ -1876,30 +1877,46 @@ const loadGoogleIdentityScript = async () => {
 
 export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
+  const [startupCache, setStartupCache] = useState<CloudWorkspaceCache | null>(null);
   const [error, setError] = useState<unknown>(null);
   useEffect(() => {
     let cancelled = false;
-    void loadPersistentWorkspaceSnapshot().then(
-      (snapshot) => { if (!cancelled) setWorkspace(snapshot); },
+    void Promise.all([loadPersistentWorkspaceSnapshot(), loadCloudStartupCache()]).then(
+      ([snapshot, cache]) => { if (!cancelled) { setStartupCache(cache); setWorkspace(snapshot); } },
       (cause) => { if (!cancelled) setError(cause); }
     );
     return () => { cancelled = true; };
   }, []);
   if (error) throw error;
   return workspace
-    ? <WorkspaceApp initialWorkspace={workspace} />
+    ? <WorkspaceApp initialWorkspace={workspace} startupCache={startupCache} />
     : <AppLoadingScreen />;
 }
 
-function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspace: WorkspaceSnapshot }) {
+function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { initialWorkspace: WorkspaceSnapshot; startupCache: CloudWorkspaceCache | null }) {
   const {
     user: rawAuthenticatedUser,
     session,
     status: authStatus,
     isConfigured: isAuthConfigured,
     signInWithGoogle,
-    signOut
+    signOut,
+    retry: retryAuthentication
   } = useSupabaseAuth();
+  const [cacheValidated, setCacheValidated] = useState(!startupCache);
+  const [cacheAllowed, setCacheAllowed] = useState(Boolean(startupCache));
+  const hasVerifiedAuth = Boolean(rawAuthenticatedUser && session);
+  const cacheIdentityEligible = Boolean(cacheAllowed && startupCache && (rawAuthenticatedUser?.id === startupCache.user.id
+    || (!rawAuthenticatedUser && (authStatus === 'loading' || authStatus === 'offline'))));
+  const usingStartupCache = cacheIdentityEligible && !cacheValidated;
+  const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine !== false);
+  useEffect(() => {
+    const update = () => setNetworkOnline(navigator.onLine !== false);
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
+  const effectiveUser = rawAuthenticatedUser ?? (cacheIdentityEligible ? startupCache!.user : null);
   // Supabase fires onAuthStateChange (TOKEN_REFRESHED, focus-driven re-auth, the
   // periodic auto-refresh, etc.) repeatedly, and each event hands back a brand-new
   // user object with identical fields. Effects keyed on `authenticatedUser` — most
@@ -1909,9 +1926,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   // the user has to re-pick the project). Stabilize the reference by user id so
   // those effects only re-run on a genuine sign-in / sign-out / account switch.
   const authenticatedUser = React.useMemo(
-    () => rawAuthenticatedUser,
+    () => effectiveUser,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rawAuthenticatedUser?.id]
+    [effectiveUser?.id]
   );
   const personalSetlistDisplay = useSetlistDisplayModePreference(authenticatedUser?.id);
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
@@ -1952,13 +1969,22 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const drawerMotion = { custom: uiMotion, variants: drawerVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
   const feedbackMotion = { custom: uiMotion, variants: notificationVariants, initial: 'hidden', animate: 'visible', exit: 'exit' };
   const initialWorkspaceRef = useRef<WorkspaceSnapshot | null>(null);
-  const initialWorkspace = initialWorkspaceRef.current ?? restoredWorkspace;
+  const initialWorkspace = initialWorkspaceRef.current ?? (cacheIdentityEligible ? startupCache!.workspace : restoredWorkspace);
   initialWorkspaceRef.current = initialWorkspace;
   const initialLibraryRef = useRef<ReturnType<typeof loadSongLibrary> | null>(null);
-  const initialLibrary = initialLibraryRef.current ?? loadSongLibrary(initialWorkspace);
+  const initialLibrary = initialLibraryRef.current ?? (cacheIdentityEligible ? {
+    songs: initialWorkspace.songs,
+    selectedSongId: pickAvailableSongId(initialWorkspace.songs, [getStoredSelectedSongId(startupCache!.library.id)]),
+    lastSavedAt: initialWorkspace.lastSavedAt
+  } : loadSongLibrary(initialWorkspace));
   initialLibraryRef.current = initialLibrary;
   const initialSetlistsRef = useRef<ReturnType<typeof loadSetlists> | null>(null);
-  const initialSetlists = initialSetlistsRef.current ?? loadSetlists(initialWorkspace, initialLibrary.songs);
+  const initialSetlists = initialSetlistsRef.current ?? (cacheIdentityEligible ? (() => {
+    const selected = pickAvailableSetlist(initialWorkspace.setlists, initialWorkspace.joinedSetlists,
+      initialWorkspace.joinedProjects ?? [], [getStoredSelectedSetlistId()]);
+    return { setlists: initialWorkspace.setlists, selectedSetlistId: selected?.id ?? null,
+      selectedSetlistSongId: pickAvailableSetlistSongId(selected, [getStoredSelectedSetlistSongId()]) };
+  })() : loadSetlists(initialWorkspace, initialLibrary.songs));
   initialSetlistsRef.current = initialSetlists;
   const initialProjectsRef = useRef<ReturnType<typeof loadProjects> | null>(null);
   const initialProjects = initialProjectsRef.current ?? loadProjects(initialWorkspace);
@@ -1997,12 +2023,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [projectPicker, setProjectPicker] = useState<{ mode: 'move' | 'copy'; setlistIds: string[] } | null>(null);
   const [creatingProjectShareLinkId, setCreatingProjectShareLinkId] = useState<string | null>(null);
   const [multiSelectedSetlistIds, setMultiSelectedSetlistIds] = useState<string[]>([]);
-  const [joinedSetlists, setJoinedSetlists] = useState<JoinedSetlist[]>([]);
-  const [joinedProjects, setJoinedProjects] = useState<JoinedProject[]>([]);
+  const [joinedSetlists, setJoinedSetlists] = useState<JoinedSetlist[]>(initialWorkspace.joinedSetlists);
+  const [joinedProjects, setJoinedProjects] = useState<JoinedProject[]>(initialWorkspace.joinedProjects ?? []);
   const [joinedSetlistDisplayPreferences, setJoinedSetlistDisplayPreferences] = useState<Record<string, JoinedSetlistDisplayPreference>>(loadJoinedSetlistDisplayPreferences);
   const [selectedSetlistId, setSelectedSetlistId] = useState<string | null>(initialSetlists.selectedSetlistId);
   const [allowDefaultSetlistSelection, setAllowDefaultSetlistSelection] = useState(true);
   const [selectedSetlistSongId, setSelectedSetlistSongId] = useState<string | null>(initialSetlists.selectedSetlistSongId);
+  const startupSelectionRef = useRef({ songId: selectedSongId, setlistId: selectedSetlistId, entryId: selectedSetlistSongId });
+  startupSelectionRef.current = { songId: selectedSongId, setlistId: selectedSetlistId, entryId: selectedSetlistSongId };
 
 
   const [selectedLibrarySongIds, setSelectedLibrarySongIds] = useState<string[]>([]);
@@ -2111,12 +2139,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
   const [authUiError, setAuthUiError] = useState<string | null>(null);
   const [authUiMessage, setAuthUiMessage] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<'saved' | 'syncing' | 'offline' | 'failed'>('saved');
+  const [syncStatus, setSyncStatus] = useState<'saved' | 'syncing' | 'offline' | 'failed'>(cacheIdentityEligible ? 'offline' : 'saved');
   const [isLoadingCloudWorkspace, setIsLoadingCloudWorkspace] = useState(false);
   const [workspaceBootstrap, setWorkspaceBootstrap] = useState<{
     userId: string; libraryName: string | null; ready: boolean; error: string | null;
-  } | null>(null);
+  } | null>(cacheIdentityEligible ? { userId: startupCache!.user.id, libraryName: startupCache!.library.name, ready: true, error: null } : null);
   const [workspaceBootstrapAttempt, setWorkspaceBootstrapAttempt] = useState(0);
+  const [cacheConnectionError, setCacheConnectionError] = useState<string | null>(null);
+  const [cacheConnecting, setCacheConnecting] = useState(false);
+  const [cacheRefreshDeferred, setCacheRefreshDeferred] = useState(false);
   const [isImportPromptOpen, setIsImportPromptOpen] = useState(false);
   const [isImportingLocalWorkspace, setIsImportingLocalWorkspace] = useState(false);
   const [leavingSharedSetlistId, setLeavingSharedSetlistId] = useState<string | null>(null);
@@ -2139,9 +2170,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const [shareContacts, setShareContacts] = useState<ShareContact[]>([]);
   const [isLoadingShareContacts, setIsLoadingShareContacts] = useState(false);
   const [isSharingToContacts, setIsSharingToContacts] = useState(false);
-  const [cloudLibraries, setCloudLibraries] = useState<CloudLibrarySummary[]>([]);
-  const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
-  const [workspaceOwnerId, setWorkspaceOwnerId] = useState<string | null>(null);
+  const [cloudLibraries, setCloudLibraries] = useState<CloudLibrarySummary[]>(cacheIdentityEligible ? startupCache!.libraries : []);
+  const [activeLibraryId, setActiveLibraryId] = useState<string | null>(cacheIdentityEligible ? startupCache!.library.id : null);
+  const [workspaceOwnerId, setWorkspaceOwnerId] = useState<string | null>(cacheIdentityEligible ? startupCache!.user.id : null);
   const setlistOpening = useSetlistOpening(`${authenticatedUser?.id ?? 'local'}:${activeLibraryId ?? 'local'}:${workspaceMode}`);
   const [isSwitchingLibrary, setIsSwitchingLibrary] = useState(false);
   const [activeCloudMutationCount, setActiveCloudMutationCount] = useState(0);
@@ -2275,7 +2306,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const { aboutSections, helpSections, changelogEntries } = getLocalizedAppMeta(language);
   const googleClientId = '';
   const showGoogleAuth = false;
-  const isAuthenticated = Boolean(session && authenticatedUser);
+  const isAuthenticated = Boolean(authenticatedUser && (session || usingStartupCache));
   const isCloudMode = isAuthenticated && Boolean(cloudRepositoryRef.current || authenticatedUser);
   const setlistCapoResolutionOptions = React.useMemo(
     () => ({ includeSharedCapo: !isCloudMode }),
@@ -2299,7 +2330,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         }]
       : [];
   const isTeamWorkspace = activeCloudLibrary?.kind === 'team';
-  const activeLibraryRole = activeCloudLibrary?.role ?? 'owner';
+  const activeLibraryRole = usingStartupCache ? 'viewer' : activeCloudLibrary?.role ?? 'owner';
   const activeLibraryIdRef = useRef(activeLibraryId);
   useEffect(() => {
     activeLibraryIdRef.current = activeLibraryId;
@@ -2316,7 +2347,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   }, [isSwitchingLibrary]);
   const activeLibraryRoleRef = useRef(activeLibraryRole);
   activeLibraryRoleRef.current = activeLibraryRole;
-  const canEditTeamSongs = !isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole);
+  const canEditTeamSongs = !usingStartupCache && (!isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole));
   const isShowingArchivedSongs = showArchivedSongs && canEditTeamSongs;
   const hasSongs = songs.some((item) => !item.archivedAt) || (isShowingArchivedSongs && songs.length > 0);
   const linkedTeamSourceSignature = React.useMemo(
@@ -2326,7 +2357,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       .join('|'),
     [songs]
   );
-  const canCreateTeamSetlists = !isTeamWorkspace || TEAM_SETLIST_CREATE_ROLES.has(activeLibraryRole);
+  const canCreateTeamSetlists = !usingStartupCache && (!isTeamWorkspace || TEAM_SETLIST_CREATE_ROLES.has(activeLibraryRole));
   const canManageActiveTeam = isTeamWorkspace && isTeamAdministrator(activeLibraryRole);
   // Keep the create-team form collapsed by default so it never permanently
   // compresses the sidebar; it only expands when the user opens it explicitly.
@@ -2341,7 +2372,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const workspaceIsDirty = libraryIsDirty || setlistIsDirty || projectIsDirty;
   const teamDraft = useTeamWorkspaceDraft({
     userId: authenticatedUser?.id, libraryId: activeLibraryId, enabled: isTeamWorkspace && workspaceOwnerId === authenticatedUser?.id,
-    loading: isLoadingCloudWorkspace || isSwitchingLibrary,
+    loading: isLoadingCloudWorkspace || isSwitchingLibrary || usingStartupCache,
     dirty: workspaceIsDirty,
     workspace: { songs, setlists, projects },
     baseline: { songs: savedSongs, setlists: savedSetlists, projects: savedProjects },
@@ -2369,7 +2400,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const songPresence = useSongEditingPresence({
     libraryId: activeLibraryId,
     user: authenticatedUser,
-    enabled: isCloudMode && isTeamWorkspace && workspaceOwnerId === authenticatedUser?.id
+    enabled: isCloudMode && !usingStartupCache && isTeamWorkspace && workspaceOwnerId === authenticatedUser?.id
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
     editingSongId: workspaceMode === 'songs' && canEditTeamSongs && activeAppView === 'sheet' && !isPerformanceMode
       ? isLibraryEditing ? libraryTitleEditingSongId : (isPreviewEditingActive || isEditing) ? song.id : null
@@ -2387,7 +2418,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     refreshCollections: isTeamWorkspace,
     refreshVersion: libraryRefreshVersion,
     songRefreshVersion: librarySongRefreshVersion,
-    enabled: isCloudMode && workspaceOwnerId === authenticatedUser?.id
+    enabled: isCloudMode && !usingStartupCache && workspaceOwnerId === authenticatedUser?.id
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
     paused: isPerformanceMode || isPreviewEditingActive || workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
       || (isTeamWorkspace && (isEditing || isLibraryEditing || isPerformanceMode))
@@ -2428,7 +2459,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const joinedWorkspaceRefreshFailed = useJoinedWorkspaceRefresh({
     repository: cloudRepositoryRef.current,
     scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
-    enabled: isCloudMode && !isTeamWorkspace && !isLoadingCloudWorkspace && !isSwitchingLibrary,
+    enabled: isCloudMode && !usingStartupCache && !isTeamWorkspace && !isLoadingCloudWorkspace && !isSwitchingLibrary,
     paused: isPerformanceMode || isPreviewEditingActive || activeCloudMutationCount > 0 || syncStatus === 'syncing'
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
       || Boolean(leavingSharedSetlistId) || Boolean(leavingSharedProjectId),
@@ -2607,7 +2638,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const canEditOwnedTeamSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'> | null | undefined) => (
     canArrangeTeamSetlist(activeLibraryRole, authenticatedUser?.id, setlist)
   );
-  const canEditSelectedSetlist = !isTeamWorkspace
+  const canEditSelectedSetlist = usingStartupCache ? false : !isTeamWorkspace
     ? !isJoinedSetlist
     : !isJoinedSetlist && canEditOwnedTeamSetlist(selectedSetlist);
   const canEditSelectedSetlistContent = canEditSelectedSetlist && (!isTeamWorkspace
@@ -2625,7 +2656,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   );
   const canManageSelectedSetlistAssignments = !isJoinedSetlist
     && canManageTeamSetlistAssignments(selectedSetlist);
-  const canCreateNewShareLink = !isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole);
+  const canCreateNewShareLink = !usingStartupCache && (!isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole));
   const canShareSelectedSetlist = canEditSelectedSetlist && canCreateNewShareLink;
   // The joined project (if any) that contains the currently-selected setlist, plus
   // whether I'm a *manager* of it. Managers may edit the shared key + song order of
@@ -2633,13 +2664,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const selectedSetlistJoinedProject = selectedSetlistId
     ? joinedProjects.find((jp) => jp.setlists.some((sl) => sl.id === selectedSetlistId)) ?? null
     : null;
-  const isJoinedProjectManager = selectedSetlistJoinedProject?.role === 'manager';
+  const isJoinedProjectManager = !usingStartupCache && selectedSetlistJoinedProject?.role === 'manager';
   // Key picker + drag-reorder unlock for owners/team-editors as before, *and* for
   // joined-project managers.
   const canEditSelectedSetlistKey = canEditSelectedSetlist || isJoinedProjectManager;
   const canReorderSelectedSetlist = canEditSelectedSetlist || isJoinedProjectManager;
-  const canManageSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'>) => !isTeamWorkspace
-    || canEditOwnedTeamSetlist(setlist);
+  const canManageSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'>) => !usingStartupCache && (!isTeamWorkspace
+    || canEditOwnedTeamSetlist(setlist));
   const isMultiSelectMode = multiSelectedSetlistIds.length > 0;
   const exitMultiSelect = () => setMultiSelectedSetlistIds([]);
   const toggleMultiSelect = (setlistId: string) => {
@@ -2656,8 +2687,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   // Owned project sharing follows team owner/editor rights. Joined project
   // managers get their own sharing path after selectedJoinedProject is known.
   const canCreateProject = canCreateTeamSetlists;
-  const canManageProject = (project: Pick<Project, 'createdBy'>) => !isTeamWorkspace
-    || canManageTeamProject(activeLibraryRole, authenticatedUser?.id, project);
+  const canManageProject = (project: Pick<Project, 'createdBy'>) => !usingStartupCache && (!isTeamWorkspace
+    || canManageTeamProject(activeLibraryRole, authenticatedUser?.id, project));
   const canManageProjectById = (projectId: string | null | undefined) => !projectId
     || Boolean(projects.find((project) => project.id === projectId && canManageProject(project)));
   const canChangeSetlistProject = (
@@ -2675,7 +2706,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   const canChangeCurrentKey = isSetlistMode ? canEditSelectedSetlistKey : canEditTeamSongs;
   // Cloud setlist capo is a per-account preference, so read-only setlist
   // viewers may still adjust it without mutating the shared setlist.
-  const canChangeCurrentCapo = isSetlistMode || canEditTeamSongs;
+  const canChangeCurrentCapo = !usingStartupCache && (isSetlistMode || canEditTeamSongs);
   const joinedSetlistDisplayPreference = isJoinedSetlist && selectedSetlist
     ? joinedSetlistDisplayPreferences[selectedSetlist.id] ?? {}
     : {};
@@ -2810,24 +2841,35 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       : undefined
   ), [activeDraftNavigationPreviewSong]);
   const workspaceModeBadge = isSetlistMode ? copy.setlistModeBadge : copy.songModeBadge;
-  const syncStatusLabel = syncStatus === 'saved'
+  const isOfflineMode = usingStartupCache || !networkOnline || syncStatus === 'offline'
+    || libraryWorkspaceRefreshFailed || (isJoinedSetlist && joinedWorkspaceRefreshFailed);
+  const offlineModeLabel = language === 'zh' ? '離線模式' : 'Offline Mode';
+  const connectionDetail = usingStartupCache
+    ? language === 'zh'
+      ? cacheRefreshDeferred ? '新版本已讀取，退出演出模式後更新。' : cacheConnectionError || authStatus === 'offline' ? '離線模式：可繼續看譜，連線後自動更新。' : '離線模式：背景連線中，確認版本後可編輯。'
+      : cacheRefreshDeferred ? 'Updates will appear after Performance Mode.' : 'Offline Mode: keep viewing scores. Updates resume when connected.'
+    : isOfflineMode ? (language === 'zh' ? '離線模式：保留目前內容，恢復連線後自動同步。' : 'Offline Mode: keeping your current content and reconnecting automatically.')
+      : (language === 'zh' ? 'Online：已連線。' : 'Online: connected.');
+  const connectionIndicator = isAuthenticated ? <span role="status" aria-label={`${language === 'zh' ? '連線狀態' : 'Connection status'}: ${isOfflineMode ? offlineModeLabel : 'Online'}`}
+    data-connection-mode={isOfflineMode ? 'offline' : 'online'} title={connectionDetail}
+    className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-4 ${isOfflineMode ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+    <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${isOfflineMode ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+    {isOfflineMode ? offlineModeLabel : 'Online'}
+  </span> : null;
+  const syncStatusLabel = isOfflineMode ? offlineModeLabel : syncStatus === 'saved'
     ? copy.cloudSyncSaved
     : syncStatus === 'syncing'
       ? copy.cloudSyncSyncing
-      : syncStatus === 'offline'
-        ? copy.cloudSyncOffline
-        : copy.cloudSyncFailed;
-  const syncStatusFeedback = isTeamWorkspace && syncStatus === 'saved' && !libraryWorkspaceRefreshFailed
+      : copy.cloudSyncFailed;
+  const syncStatusFeedback = isOfflineMode ? connectionDetail : isTeamWorkspace && syncStatus === 'saved' && !libraryWorkspaceRefreshFailed
     ? `${syncStatusLabel} · ${language === 'zh' ? '歌曲庫自動同步' : 'Song library sync is automatic'}`
     : syncStatusLabel;
   // Colour tone for the compact sync-status indicator in the collapsed sidebar.
-  const syncStatusTone = syncStatus === 'failed'
+  const syncStatusTone = isOfflineMode ? 'bg-amber-50 text-amber-700 ring-amber-200/70 hover:bg-amber-100' : syncStatus === 'failed'
     ? 'bg-rose-50 text-rose-600 ring-rose-200/70 hover:bg-rose-100'
-    : syncStatus === 'offline'
-      ? 'bg-amber-50 text-amber-600 ring-amber-200/70 hover:bg-amber-100'
-      : syncStatus === 'syncing'
-        ? 'bg-indigo-50 text-indigo-600 ring-indigo-200/70 hover:bg-indigo-100'
-        : 'bg-emerald-50 text-emerald-600 ring-emerald-200/70 hover:bg-emerald-100';
+    : syncStatus === 'syncing'
+      ? 'bg-indigo-50 text-indigo-600 ring-indigo-200/70 hover:bg-indigo-100'
+      : 'bg-emerald-50 text-emerald-600 ring-emerald-200/70 hover:bg-emerald-100';
   const importSummaryLabel = copy.importLocalStats
     .replace('{songs}', String(songs.length))
     .replace('{setlists}', String(setlists.length));
@@ -3002,11 +3044,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           <div className={`mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
             syncStatus === 'failed'
               ? 'bg-rose-50 text-rose-700'
-              : syncStatus === 'offline'
+              : isOfflineMode
                 ? 'bg-amber-50 text-amber-700'
                 : 'bg-emerald-50 text-emerald-700'
           }`}>
-            {syncStatus === 'offline' ? <CloudOff size={14} /> : <Cloud size={14} />}
+            {isOfflineMode ? <CloudOff size={14} /> : <Cloud size={14} />}
             <span>{syncStatusLabel}</span>
           </div>
 
@@ -3692,6 +3734,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     nextSetlists: Setlist[],
     nextProjects: Project[] = projects
   ) => {
+    if (usingStartupCache) throw new Error(language === 'zh' ? '目前為離線模式，連線確認後才能儲存修改。' : 'Offline Mode. Reconnect before saving edits.');
     let localSavedAt: number | null = null;
     let localStorageError: unknown = null;
     if (isTeamWorkspace && authenticatedUser && activeLibraryId) {
@@ -3896,7 +3939,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   }, [historyScope]);
   const globalHistory = useWorkspaceHistory({
     scope: historyScope,
-    enabled: navigationMemoryReady && !isSwitchingLibrary && !isLoadingCloudWorkspace,
+    enabled: navigationMemoryReady && !usingStartupCache && !isSwitchingLibrary && !isLoadingCloudWorkspace,
     apply: async (entry, direction) => {
       const repository = cloudRepositoryRef.current;
       const scope = historyScope;
@@ -4247,6 +4290,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   };
 
   const handleSwitchCloudLibrary = async (libraryId: string) => {
+    if (usingStartupCache) {
+      toast.info(language === 'zh' ? '目前為離線模式，連線確認後即可切換工作區。' : 'Offline Mode. Reconnect to switch workspaces.');
+      return;
+    }
     const repository = cloudRepositoryRef.current;
     if (!repository || libraryId === activeLibraryId || libraryTransitionOwnerRef.current) {
       return;
@@ -6805,7 +6852,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
 
   useEffect(() => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || !authenticatedUser || !isTeamWorkspace || !activeLibraryId) return;
+    if (usingStartupCache || !repository || !authenticatedUser || !isTeamWorkspace || !activeLibraryId) return;
 
     let cancelled = false;
     let membershipRefreshInFlight = false;
@@ -7129,7 +7176,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     };
   // The subscription is intentionally recreated only when the active team changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLibraryId, authenticatedUser?.id, isTeamWorkspace]);
+  }, [activeLibraryId, authenticatedUser?.id, isTeamWorkspace, usingStartupCache]);
 
   const handleDuplicateSong = (songId: string) => {
     if (!canEditTeamSongs) {
@@ -7936,6 +7983,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
   }, [isPerformanceMode, revealPerformanceChrome]);
 
   useEffect(() => {
+    if (usingStartupCache && !hasVerifiedAuth) return;
     if (!authenticatedUser) {
       cloudRepositoryRef.current = null;
       setCloudLibraries([]);
@@ -7959,14 +8007,24 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       name: authenticatedUser.name,
       picture: authenticatedUser.picture
     });
-  }, [authenticatedUser]);
+  }, [authenticatedUser, hasVerifiedAuth]);
 
   useEffect(() => {
-    if (!authenticatedUser || !cloudRepositoryRef.current) {
+    if (!hasVerifiedAuth || !authenticatedUser || !cloudRepositoryRef.current) {
       return;
     }
 
     let isCancelled = false;
+    const openedFromCache = usingStartupCache;
+    let cacheCanRemainVisible = openedFromCache;
+    const request = async <T,>(operation: Promise<T>): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([operation, new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(language === 'zh' ? '連線較慢，已保留本機快取。' : 'The connection is slow. Your local cache is still available.')), 12000);
+        })]);
+      } finally { clearTimeout(timer); }
+    };
 
     const loadCloudWorkspace = async () => {
       // Keep the local personal snapshot covered until this account's complete
@@ -7975,7 +8033,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       if (isStartup) setWorkspaceBootstrap(current => ({ userId: authenticatedUser.id,
         libraryName: current?.userId === authenticatedUser.id ? current.libraryName : null, ready: false, error: null }));
       try {
-        setIsLoadingCloudWorkspace(true);
+        if (!openedFromCache) setIsLoadingCloudWorkspace(true);
+        else { setCacheConnecting(true); setCacheConnectionError(null); }
+        if (navigator.onLine === false) throw new Error(language === 'zh' ? '目前離線' : 'Offline');
         const repository = cloudRepositoryRef.current!;
         const storedSelectedSetlistId = getStoredSelectedSetlistId();
         const storedSelectedSetlistSongId = getStoredSelectedSetlistSongId();
@@ -7986,13 +8046,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         let libraries: CloudLibrarySummary[] = [];
         let libraryListError: string | null = null;
         try {
-          libraries = await repository.listLibraries();
+          libraries = await request(repository.listLibraries());
         } catch (error) {
           // A temporary failure must not replace a remembered team's selection
           // with personal content. Let startup offer a retry instead.
           if (rememberedLibraryId || requestedTeamId) throw error;
           libraryListError = getTeamFeatureErrorMessage(error, language);
-          const personalLibraryId = await repository.getPersonalLibraryId();
+          const personalLibraryId = await request(repository.getPersonalLibraryId());
           libraries = [{
             id: personalLibraryId,
             name: language === 'zh' ? '個人區' : 'Personal',
@@ -8011,21 +8071,33 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           rememberedLibraryId
         });
         if (isCancelled) return;
+        if (openedFromCache && targetLibrary?.id !== startupCache?.library.id) {
+          // A server-confirmed membership/account change must not keep exposing
+          // a cached team while its authorized replacement is being loaded.
+          cacheCanRemainVisible = false;
+          clearCloudStartupPointer();
+          setIsLoadingCloudWorkspace(true);
+          setWorkspaceBootstrap({ userId: authenticatedUser.id, libraryName: targetLibrary?.name ?? null, ready: false, error: null });
+        }
         if (isStartup) setWorkspaceBootstrap({ userId: authenticatedUser.id, libraryName: targetLibrary?.name ?? null, ready: false, error: null });
         if (targetLibrary) {
           repository.setActiveLibrary(targetLibrary.id);
         }
         const cloudWorkspace = targetLibrary
-          ? await repository.loadLibraryWorkspace(targetLibrary.id)
-          : await repository.loadWorkspace();
+          ? await request(repository.loadLibraryWorkspace(targetLibrary.id))
+          : await request(repository.loadWorkspace());
         if (isCancelled) {
+          return;
+        }
+        if (cacheCanRemainVisible && isPerformanceModeRef.current) {
+          setCacheRefreshDeferred(true);
           return;
         }
 
         const hasLocalData = initialLibrary.songs.length > 0 || initialSetlists.setlists.length > 0;
         const migrationCompleted = hasCompletedMigration(authenticatedUser.id);
         const loadingTeamWorkspace = targetLibrary?.kind === 'team';
-        const shouldUseCloudWorkspace = loadingTeamWorkspace || cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || cloudWorkspace.joinedSetlists.length > 0 || (cloudWorkspace.joinedProjects ?? []).length > 0 || migrationCompleted || !hasLocalData;
+        const shouldUseCloudWorkspace = openedFromCache || loadingTeamWorkspace || cloudWorkspace.songs.length > 0 || cloudWorkspace.setlists.length > 0 || cloudWorkspace.joinedSetlists.length > 0 || (cloudWorkspace.joinedProjects ?? []).length > 0 || migrationCompleted || !hasLocalData;
         let openedSharedSetlistFromLink = false;
         setCloudLibraries(libraries);
         setTeamFeatureError(libraryListError);
@@ -8039,7 +8111,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         if (shouldUseCloudWorkspace) {
           const remoteUserSongs = cloudWorkspace.songs.filter((item) => !isLocalOnlySymbolTestSong(item));
           const fallbackLocalSongs = initialLibrary.songs.filter((item) => !isLocalOnlySymbolTestSong(item));
-          const baseSongs = remoteUserSongs.length > 0 || loadingTeamWorkspace
+          const baseSongs = remoteUserSongs.length > 0 || loadingTeamWorkspace || openedFromCache
             ? remoteUserSongs
             : fallbackLocalSongs;
           const nextSongs = loadingTeamWorkspace
@@ -8062,7 +8134,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             nextSetlists,
             nextJoinedSetlists,
             nextJoinedProjects,
-            [storedSelectedSetlistId]
+            [cacheCanRemainVisible ? startupSelectionRef.current.setlistId : storedSelectedSetlistId]
           );
           setSongs(nextSongs);
           setSavedSongs(cloneSong(nextSongs));
@@ -8083,6 +8155,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             : null;
           setSelectedSongId((currentId) => pickAvailableSongId(nextSongs, [
             requestedSongId,
+            ...(cacheCanRemainVisible ? [startupSelectionRef.current.songId] : []),
             storedSelectedSongId,
             currentId
           ]));
@@ -8109,7 +8182,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
             setSelectedSetlistSongId(requestedSetlist.songs[0]?.id ?? null);
             window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
           } else {
-            setSelectedSetlistSongId(pickAvailableSetlistSongId(nextSelectedSetlist, [storedSelectedSetlistSongId]));
+            setSelectedSetlistSongId(pickAvailableSetlistSongId(nextSelectedSetlist, [cacheCanRemainVisible ? startupSelectionRef.current.entryId : storedSelectedSetlistSongId]));
             if (requestedTeam) {
               setWorkspaceMode(nextSelectedSetlist ? 'setlists' : 'songs');
               window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
@@ -8119,18 +8192,24 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           }
         }
 
-        if (!loadingTeamWorkspace && hasLocalData && !migrationCompleted && !openedSharedSetlistFromLink) {
+        if (!openedFromCache && !loadingTeamWorkspace && hasLocalData && !migrationCompleted && !openedSharedSetlistFromLink) {
           setIsImportPromptOpen(true);
         } else {
           setIsImportPromptOpen(false);
         }
 
         setSyncStatus('saved');
-        if (isStartup) setWorkspaceBootstrap({ userId: authenticatedUser.id, libraryName: targetLibrary?.name ?? null, ready: true, error: null });
+        setCacheValidated(true);
+        setWorkspaceBootstrap({ userId: authenticatedUser.id, libraryName: targetLibrary?.name ?? null, ready: true, error: null });
       } catch (error) {
         if (!isCancelled) {
           const message = getTeamFeatureErrorMessage(error, language);
-          if (isStartup) setWorkspaceBootstrap(current => ({
+          if (cacheCanRemainVisible) {
+            setCacheConnectionError(message);
+            setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+            return;
+          }
+          if (isStartup || openedFromCache) setWorkspaceBootstrap(current => ({
             userId: authenticatedUser.id, libraryName: current?.libraryName ?? null, ready: false, error: message
           }));
           setAuthUiError(message);
@@ -8140,6 +8219,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
       } finally {
         if (!isCancelled) {
           setIsLoadingCloudWorkspace(false);
+          setCacheConnecting(false);
         }
       }
     };
@@ -8149,12 +8229,56 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     return () => {
       isCancelled = true;
     };
-  }, [authenticatedUser, language, workspaceBootstrapAttempt]);
+  // Cache validation does not restart this fetch after its successful result.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticatedUser, hasVerifiedAuth, language, workspaceBootstrapAttempt]);
+
+  useEffect(() => {
+    if (!usingStartupCache || !hasVerifiedAuth) return;
+    const retry = () => setWorkspaceBootstrapAttempt(attempt => attempt + 1);
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    const timer = cacheConnectionError ? setInterval(retry, 15000) : undefined;
+    return () => { window.removeEventListener('online', retry); window.removeEventListener('focus', retry); clearInterval(timer); };
+  }, [usingStartupCache, hasVerifiedAuth, cacheConnectionError]);
+
+  useEffect(() => {
+    if (cacheRefreshDeferred && !isPerformanceMode) {
+      setCacheRefreshDeferred(false);
+      setWorkspaceBootstrapAttempt(attempt => attempt + 1);
+    }
+  }, [cacheRefreshDeferred, isPerformanceMode]);
+
+  useEffect(() => {
+    if (usingStartupCache || !hasVerifiedAuth || !authenticatedUser || !activeCloudLibrary || workspaceIsDirty
+      || workspaceOwnerId !== authenticatedUser.id || isLoadingCloudWorkspace || isSwitchingLibrary || isImportPromptOpen) return;
+    const timer = setTimeout(() => {
+      void saveCloudWorkspaceCache({ user: authenticatedUser, library: activeCloudLibrary, libraries: cloudLibraries,
+        workspace: { songs, setlists, projects, joinedSetlists, joinedProjects, lastSavedAt } }).catch(() => {
+        toast.info(language === 'zh' ? '目前可正常使用，但這台裝置的離線快取未能更新。' : 'The workspace is available, but this device could not update its offline cache.', { id: 'cloud-cache-warning' });
+      });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [usingStartupCache, hasVerifiedAuth, authenticatedUser, activeCloudLibrary, cloudLibraries, workspaceIsDirty,
+    workspaceOwnerId, isLoadingCloudWorkspace, isSwitchingLibrary, isImportPromptOpen, songs, setlists, projects, joinedSetlists, joinedProjects, lastSavedAt, language, toast]);
+
+  React.useLayoutEffect(() => {
+    if (!startupCache || authStatus !== 'unauthenticated' || rawAuthenticatedUser) return;
+    // An explicit sign-out or rejected session returns to the personal local
+    // workspace; another account must never inherit the cached team's contents.
+    clearCloudStartupPointer();
+    setCacheAllowed(false);
+    setCacheValidated(true);
+    setSongs(restoredWorkspace.songs); setSavedSongs(cloneSong(restoredWorkspace.songs));
+    setSetlists(restoredWorkspace.setlists); setSavedSetlists(cloneSong(restoredWorkspace.setlists));
+    setProjects(restoredWorkspace.projects); setSavedProjects(cloneSong(restoredWorkspace.projects));
+    setJoinedSetlists(restoredWorkspace.joinedSetlists); setJoinedProjects(restoredWorkspace.joinedProjects ?? []);
+  }, [authStatus, rawAuthenticatedUser, startupCache, restoredWorkspace]);
 
   const pendingSyncWorkspaceRef = useRef({ songs, setlists, projects });
   pendingSyncWorkspaceRef.current = { songs, setlists, projects };
   useEffect(() => {
-    if (!authenticatedUser || !cloudRepositoryRef.current || !activeLibraryId || isTeamWorkspace || isLoadingCloudWorkspace || isPerformanceMode) {
+    if (usingStartupCache || !authenticatedUser || !cloudRepositoryRef.current || !activeLibraryId || isTeamWorkspace || isLoadingCloudWorkspace || isPerformanceMode) {
       return;
     }
 
@@ -8246,10 +8370,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     void flushPending();
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, [authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, isPerformanceMode, language, toast]);
+  }, [usingStartupCache, authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, isPerformanceMode, language, toast]);
 
   useEffect(() => {
-    if (isPerformanceMode || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
+    if (usingStartupCache || isPerformanceMode || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
       return;
     }
 
@@ -8270,7 +8394,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
         autoSaveTimeoutRef.current = null;
       }
     };
-  }, [isPerformanceMode, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
+  }, [usingStartupCache, isPerformanceMode, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
@@ -12545,11 +12669,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     || setlistPanelView === 'list'
     || setlistPanelView === 'manageProjects';
 
-  const isRestoringWorkspace = (isAuthConfigured && authStatus === 'loading')
+  const isRestoringWorkspace = (isAuthConfigured && (authStatus === 'loading' || authStatus === 'offline') && !usingStartupCache)
     || Boolean(authenticatedUser && (workspaceBootstrap?.userId !== authenticatedUser.id || !workspaceBootstrap.ready))
     || (navigationReady && !navigationMemoryReady);
   const startupLibraryName = workspaceBootstrap?.userId === authenticatedUser?.id ? workspaceBootstrap?.libraryName : null;
-  const startupError = workspaceBootstrap?.userId === authenticatedUser?.id ? workspaceBootstrap?.error : null;
+  const startupError = authStatus === 'offline' && !usingStartupCache
+    ? (language === 'zh' ? '目前無法連線，這台裝置尚未快取此工作區。請恢復連線後重試。' : 'No connection or cached workspace is available on this device. Reconnect and retry.')
+    : workspaceBootstrap?.userId === authenticatedUser?.id ? workspaceBootstrap?.error : null;
   const startupMessage = startupError
     ? (language === 'zh' ? `無法載入${startupLibraryName ? ` ${startupLibraryName}` : '工作區'}` : `Could not load ${startupLibraryName || 'workspace'}`)
     : language === 'zh'
@@ -12560,7 +12686,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
     <>
     {isRestoringWorkspace && <AppLoadingScreen message={startupMessage}
       error={startupError}
-      onRetry={() => setWorkspaceBootstrapAttempt(attempt => attempt + 1)} retryLabel={language === 'zh' ? '重試' : 'Retry'} />}
+      onRetry={() => { retryAuthentication?.(); setWorkspaceBootstrapAttempt(attempt => attempt + 1); }} retryLabel={language === 'zh' ? '重試' : 'Retry'} />}
     <div
       data-app-root
       ref={appViewportRef}
@@ -12812,14 +12938,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   {isAuthenticated ? (
                     <button
                       type="button"
-                      onClick={() => (syncStatus === 'failed' || syncStatus === 'offline' ? toast.error(syncStatusFeedback) : toast.success(syncStatusFeedback))}
+                      onClick={() => {
+                        if (usingStartupCache) {
+                          toast.info(connectionDetail);
+                          if (!cacheConnecting) { retryAuthentication?.(); setWorkspaceBootstrapAttempt(attempt => attempt + 1); }
+                        } else if (isOfflineMode) toast.info(connectionDetail);
+                        else if (syncStatus === 'failed') toast.error(syncStatusFeedback);
+                        else toast.success(syncStatusFeedback);
+                      }}
                       className={`flex h-10 w-10 items-center justify-center rounded-2xl ring-1 ring-inset transition-colors ${syncStatusTone}`}
                       title={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusFeedback}`}
                       aria-label={`${language === 'zh' ? '同步狀態' : 'Sync status'}: ${syncStatusFeedback}`}
                     >
                       {syncStatus === 'syncing'
                         ? <LoaderCircle size={18} className="animate-spin" />
-                        : syncStatus === 'offline'
+                        : isOfflineMode
                           ? <CloudOff size={18} />
                           : syncStatus === 'failed'
                             ? <CloudAlert size={18} />
@@ -13224,7 +13357,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 <img src={logoSrc} alt="ChordMaster" className="h-9 w-9 rounded-xl shadow-sm ring-1 ring-gray-200" />
 
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-bold tracking-tight text-[color:var(--color-text)]">{APP_NAME}</div>
+                  <div className="flex min-w-0 items-center gap-1.5"><span className="truncate text-sm font-bold tracking-tight text-[color:var(--color-text)]">{APP_NAME}</span>{connectionIndicator}</div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                     {isSheetView ? (
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
@@ -13379,9 +13512,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                 <div className="flex min-w-0 items-center gap-2">
                   <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
                   <h2 className="truncate font-display text-lg font-bold tracking-tight text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</h2>
-                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">
+                  {connectionIndicator ?? <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-500">
                     v{APP_VERSION}
-                  </span>
+                  </span>}
                 </div>
 
                 <div className="h-4 w-px shrink-0 bg-gray-200" />
@@ -13655,9 +13788,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
           ) : usesTabletHeader ? (
             <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
               <div className="flex min-w-0 items-center gap-2">
-                <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
+                {mainViewportWidth < 960 && connectionIndicator ? connectionIndicator : <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />}
                 <div className={mainViewportWidth < 960 ? 'hidden' : 'min-w-0'}>
-                  <div className="truncate font-display text-lg font-bold tracking-tight text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</div>
+                  <div className="flex min-w-0 items-center gap-2"><span className="truncate font-display text-lg font-bold tracking-tight text-gray-900 dark:text-[color:var(--color-text)]">{APP_NAME}</span>{mainViewportWidth >= 960 ? connectionIndicator : null}</div>
                   <div className="mt-0.5 flex min-w-0 items-center gap-2">
                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] ${
                       isSetlistMode
@@ -13912,9 +14045,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                   <div className="flex min-w-0 items-center gap-2">
                     <img src={logoSrc} alt="ChordMaster" className="h-8 w-8 rounded-xl shadow-sm ring-1 ring-gray-200" />
                     <h2 className="truncate font-display text-lg font-bold tracking-tight">{APP_NAME}</h2>
-                    <span className="hidden rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-500 sm:inline-flex">
+                    {connectionIndicator ?? <span className="hidden rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-500 sm:inline-flex">
                       v{APP_VERSION}
-                    </span>
+                    </span>}
                   </div>
                   <div className="hidden h-4 w-px bg-gray-200 sm:block" />
                   <div className="flex min-w-0 items-center gap-2">
@@ -13939,11 +14072,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                       <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${
                         syncStatus === 'failed'
                           ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
-                          : syncStatus === 'offline'
+                          : isOfflineMode
                             ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
                             : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
                       }`}>
-                        {syncStatus === 'offline' ? <CloudOff size={15} /> : <Cloud size={15} />}
+                        {isOfflineMode ? <CloudOff size={15} /> : <Cloud size={15} />}
                         <span>{syncStatusLabel}</span>
                       </div>
                       {activeAppView === 'sheet' && !isSetlistMode && hasSongs && (!isTeamWorkspace || canEditTeamSongs) && (
@@ -15117,11 +15250,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace }: { initialWorkspac
                         <div className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
                           syncStatus === 'failed'
                             ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
-                            : syncStatus === 'offline'
+                            : isOfflineMode
                               ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
                               : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
                         }`}>
-                          {syncStatus === 'offline' ? <CloudOff size={14} /> : <Cloud size={14} />}
+                          {isOfflineMode ? <CloudOff size={14} /> : <Cloud size={14} />}
                           <span>{syncStatusLabel}</span>
                         </div>
                         <div className="mt-3 flex items-center gap-3">

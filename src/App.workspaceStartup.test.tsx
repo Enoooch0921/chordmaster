@@ -6,10 +6,14 @@ import { ToastProvider } from './components/Toast';
 import { loadActiveLibraryPreference, saveActiveLibraryPreference } from './lib/activeLibraryPreference';
 import { getNavigationStorageKey, saveNavigationLocation } from './lib/setlistNavigationMemory';
 import type { WorkspaceSnapshot } from './types';
+import type { CloudWorkspaceCache } from './lib/cloudWorkspaceCache';
 
-const state = vi.hoisted(() => ({ auth: 'authenticated', list: vi.fn(), load: vi.fn(), setActive: vi.fn() }));
+const state = vi.hoisted(() => ({ auth: 'authenticated', userId: 'user', cache: null as CloudWorkspaceCache | null,
+  saveCache: vi.fn(), list: vi.fn(), load: vi.fn(), setActive: vi.fn() }));
+vi.mock('./lib/cloudWorkspaceCache', async original => ({ ...await original<typeof import('./lib/cloudWorkspaceCache')>(),
+  loadCloudStartupCache: async () => state.cache, saveCloudWorkspaceCache: state.saveCache }));
 vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({
-  user: state.auth === 'authenticated' ? { id: 'user', email: 'test@example.invalid', name: 'Test' } : null,
+  user: state.auth === 'authenticated' ? { id: state.userId, email: 'test@example.invalid', name: 'Test' } : null,
   session: state.auth === 'authenticated' ? { access_token: 'test' } : null,
   status: state.auth, isConfigured: state.auth !== 'unconfigured', signInWithGoogle: vi.fn(), signOut: vi.fn()
 }) }));
@@ -54,7 +58,8 @@ beforeAll(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn(); HTMLElement.prototype.scrollTo = vi.fn();
 });
 beforeEach(() => {
-  localStorage.clear(); state.auth = 'authenticated'; state.list.mockReset(); state.load.mockReset(); state.setActive.mockReset();
+  localStorage.clear(); state.auth = 'authenticated'; state.userId = 'user'; state.cache = null; state.saveCache.mockReset(); state.saveCache.mockResolvedValue(undefined);
+  state.list.mockReset(); state.load.mockReset(); state.setActive.mockReset();
   localWorkspace = { songs: [makeSong('personal-song', '個人快取歌曲')], setlists: [], projects: [], joinedSetlists: [], joinedProjects: [], lastSavedAt: 1 };
   remoteWorkspace = { ...localWorkspace, songs: [makeSong('team-song', '點燃（官方版）')] };
   state.list.mockResolvedValue([personal, team]); state.load.mockResolvedValue(remoteWorkspace);
@@ -111,4 +116,130 @@ it('keeps local mode available without waiting for a cloud workspace', async () 
   state.auth = 'unconfigured'; render(view());
   expect(await screen.findByRole('button', { name: '開啟歌曲：個人快取歌曲' })).toBeInTheDocument();
   expect(state.list).not.toHaveBeenCalled(); expect(root()).not.toHaveAttribute('aria-hidden');
+});
+
+const cacheTeam = () => {
+  const library = { ...team, kind: 'team' as const, role: 'owner' as const };
+  state.cache = { version: 1, user: { id: 'user', email: 'test@example.invalid', name: 'Test' }, library,
+    libraries: [{ ...personal, kind: 'personal', role: 'owner' }, library], workspace: structuredClone(remoteWorkspace), cachedAt: 100 };
+};
+
+it.each(['loading', 'offline'])('opens the remembered team cache during %s auth without a network request', async auth => {
+  cacheTeam(); state.auth = auth;
+  render(view());
+  expect(await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toBeInTheDocument();
+  expect(root()).not.toHaveAttribute('aria-hidden'); expect(root()).not.toHaveAttribute('inert');
+  expect(document.querySelector('[data-main-panel]')?.firstElementChild).toBe(document.querySelector('[data-topbar]'));
+  expect(document.querySelector('[data-connection-mode="offline"]')).toHaveTextContent('離線模式');
+  expect(screen.queryByRole('button', { name: '開啟歌曲：個人快取歌曲' })).toBeNull();
+  expect(state.list).not.toHaveBeenCalled(); expect(state.saveCache).not.toHaveBeenCalled();
+});
+
+it('keeps cached scores visible while discovery hangs, then adopts the confirmed server version', async () => {
+  cacheTeam();
+  const libraries = deferred<typeof team[]>(); state.list.mockReturnValue(libraries.promise);
+  remoteWorkspace.songs[0].title = '點燃（最新修訂）';
+  render(view());
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  expect(root()).not.toHaveAttribute('inert');
+  await act(async () => libraries.resolve([personal, team]));
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（最新修訂）' });
+  expect(document.querySelector('[data-connection-mode="offline"]')).toBeNull();
+  expect(screen.getByRole('status', { name: '連線狀態: Online' })).toHaveTextContent('Online');
+  expect(document.querySelector('[data-main-panel]')?.firstElementChild).toBe(document.querySelector('[data-topbar]'));
+  await waitFor(() => expect(state.saveCache).toHaveBeenCalledWith(expect.objectContaining({
+    library: expect.objectContaining({ id: 'team' }), workspace: expect.objectContaining({ songs: remoteWorkspace.songs })
+  })));
+});
+
+it('preserves cached content and the selected team on failure, then retries in place', async () => {
+  cacheTeam(); state.load.mockRejectedValueOnce(new Error('Network unavailable'));
+  render(view());
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  await waitFor(() => expect(document.querySelector('[data-connection-mode="offline"]')).toHaveAttribute('title', expect.stringContaining('可繼續看譜')));
+  expect(root()).not.toHaveAttribute('aria-hidden'); expect(loadActiveLibraryPreference('user')).toBe('team');
+  fireEvent.click(screen.getByRole('button', { name: /同步狀態:.*離線模式/ }));
+  await waitFor(() => expect(document.querySelector('[data-connection-mode="offline"]')).toBeNull());
+  expect(screen.queryByRole('button', { name: '開啟歌曲：個人快取歌曲' })).toBeNull();
+  expect(state.load).toHaveBeenCalledTimes(2);
+});
+
+it('does not show another account’s cache or resurrect deleted songs from an empty server snapshot', async () => {
+  cacheTeam(); state.userId = 'other';
+  const pending = deferred<WorkspaceSnapshot>(); state.load.mockReturnValue(pending.promise);
+  render(view());
+  await waitFor(() => expect(state.load).toHaveBeenCalled());
+  expect(screen.queryByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toBeNull();
+  await act(async () => pending.resolve({ songs: [], setlists: [], projects: [], joinedSetlists: [], joinedProjects: [], lastSavedAt: null }));
+  expect(screen.queryByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toBeNull();
+});
+
+it('treats an empty confirmed team snapshot as authoritative over its cached songs', async () => {
+  cacheTeam(); remoteWorkspace = { ...remoteWorkspace, songs: [] };
+  state.load.mockResolvedValue(remoteWorkspace);
+  render(view());
+  await waitFor(() => expect(state.load).toHaveBeenCalledWith('team'));
+  await waitFor(() => expect(document.querySelector('[data-connection-mode="offline"]')).toBeNull());
+  expect(screen.queryByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toBeNull();
+});
+
+it('restores the cached meeting offline without copying its songs into personal storage', async () => {
+  const song = remoteWorkspace.songs[0];
+  remoteWorkspace.setlists = [{ id: 'meeting', name: '聚會一', displayMode: 'chord-movable-key', createdAt: 1, updatedAt: 1,
+    songs: [{ id: 'entry', setlistId: 'meeting', songId: song.id, songData: song, order: 0, sectionOrder: ['verse'] }] }];
+  cacheTeam(); state.auth = 'offline';
+  const personalBackup = JSON.stringify(localWorkspace.songs);
+  localStorage.setItem('chordmaster.song-library.v1', personalBackup);
+  saveNavigationLocation(getNavigationStorageKey('user', 'team'), { version: 1, workspaceMode: 'setlists',
+    filter: { kind: 'all' }, parentFilter: { kind: 'all' }, view: 'detail', setlistId: 'meeting', songId: 'entry' });
+  render(view());
+  await waitFor(() => expect(document.querySelector('[data-setlist-preview-song-id="entry"]')).not.toBeNull());
+  expect(root()).not.toHaveAttribute('aria-hidden');
+  expect(localStorage.getItem('chordmaster.song-library.v1')).toBe(personalBackup);
+  expect(screen.queryByRole('textbox', { name: '歌單名稱' })).toBeNull();
+});
+
+it('keeps a song selected during cached browsing when background loading completes', async () => {
+  remoteWorkspace.songs.push(makeSong('second', '第二首'));
+  cacheTeam();
+  const pending = deferred<WorkspaceSnapshot>(); state.load.mockReturnValue(pending.promise);
+  render(view());
+  fireEvent.click(await screen.findByRole('button', { name: '開啟歌曲：第二首' }));
+  await act(async () => pending.resolve(remoteWorkspace));
+  await waitFor(() => expect(document.querySelector('[data-connection-mode="offline"]')).toBeNull());
+  expect(screen.getByRole('button', { name: '開啟歌曲：第二首' })).toHaveAttribute('aria-current', 'true');
+});
+
+it('defers a newly loaded score until cached Performance Mode ends', async () => {
+  const song = remoteWorkspace.songs[0];
+  remoteWorkspace.setlists = [{ id: 'meeting', name: '聚會一', displayMode: 'chord-movable-key', createdAt: 1, updatedAt: 1,
+    songs: [{ id: 'entry', setlistId: 'meeting', songId: song.id, songData: song, order: 0, sectionOrder: ['verse'] }] }];
+  cacheTeam();
+  saveNavigationLocation(getNavigationStorageKey('user', 'team'), { version: 1, workspaceMode: 'setlists',
+    filter: { kind: 'all' }, parentFilter: { kind: 'all' }, view: 'detail', setlistId: 'meeting', songId: 'entry' });
+  const pending = deferred<WorkspaceSnapshot>(); state.load.mockReturnValueOnce(pending.promise);
+  render(view());
+  fireEvent.click((await screen.findAllByRole('button', { name: /^演出模式$/ }))[0]);
+  await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).not.toBeNull());
+  await act(async () => pending.resolve(remoteWorkspace));
+  expect(document.querySelector('[data-performance-overlay]')).not.toBeNull();
+  expect(document.querySelector('[data-connection-mode="offline"]')).toHaveAttribute('title', expect.stringContaining('退出演出模式後更新'));
+  fireEvent.click(screen.getByRole('button', { name: '退出' }));
+  await waitFor(() => expect(document.querySelector('[data-connection-mode="offline"]')).toBeNull());
+});
+
+it('switches the compact connection hint in place when the network disconnects and reconnects', async () => {
+  let online = true;
+  vi.spyOn(navigator, 'onLine', 'get').mockImplementation(() => online);
+  render(view());
+  await screen.findByRole('status', { name: '連線狀態: Online' });
+  const header = document.querySelector('[data-topbar]');
+  online = false;
+  act(() => window.dispatchEvent(new Event('offline')));
+  expect(screen.getByRole('status', { name: '連線狀態: 離線模式' })).toHaveTextContent('離線模式');
+  expect(document.querySelector('[data-main-panel]')?.firstElementChild).toBe(header);
+  online = true;
+  act(() => window.dispatchEvent(new Event('online')));
+  expect(screen.getByRole('status', { name: '連線狀態: Online' })).toHaveTextContent('Online');
+  expect(document.querySelector('[data-main-panel]')?.firstElementChild).toBe(header);
 });

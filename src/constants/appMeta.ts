@@ -86,6 +86,18 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-28',
+        title: 'Offline startup and compact connection status',
+        bullets: [
+          'Open previously loaded songs, setlists and projects from a cache scoped to the current account and workspace, without waiting for a slow connection or flashing the personal workspace.',
+          'Show Offline Mode or Online as a small dot and label inside the existing toolbar, without an extra banner or header height.',
+          'Reconnect and refresh in the background while preserving the selected song. Keep cached scores viewable and resume editing after checking the session and current server version.',
+          'Keep Performance Mode stable during background updates, and retain the installed page and asset versions together for reliable offline opening.'
+        ]
+      },
+
+      {
+        version: '0.11.3',
+        date: '2026-10-28',
         title: 'Score modification times and sidebar update status',
         bullets: [
           'Show library and setlist score modification dates side by side in version comparisons, including seconds and the device time zone.',
@@ -690,6 +702,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-28',
+        title: '離線啟動與精簡連線提示',
+        bullets: [
+          '先從依帳號與工作區保存的本機快取開啟已載入過的歌曲、歌單與專案，弱網路時不必等待，也不會先跳回個人區。',
+          '既有工具列以小圓點與離線模式／Online 顯示連線狀態，不新增頂部橫幅或高度。',
+          '背景自動重連與更新，保留正在看的歌曲；離線期間可看譜，確認登入與最新版本後恢復編輯。',
+          '演出模式中暫緩套用新版本，頁面與程式資產保留同一版本，提升離線重開的可靠性。'
+        ]
+      },
+
+      {
+        version: '0.11.3',
         date: '2026-10-28',
         title: '譜面修改時間與左側歌曲更新提示',
         bullets: [

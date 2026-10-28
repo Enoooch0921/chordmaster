@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 const source = readFileSync('public/sw.js', 'utf8');
 const setup = () => {
   const listeners: Record<string, (event: any) => void> = {};
-  const cache = { put: vi.fn() };
+  const cache = { put: vi.fn(), match: vi.fn() };
   const caches = { open: vi.fn(async () => cache), keys: vi.fn(async () => ['chordmaster-pwa-old', 'unrelated']), delete: vi.fn(async () => true), match: vi.fn() };
   const self = { registration: { scope: 'https://example.test/chordmaster/' }, location: { href: 'https://example.test/chordmaster/sw.js', origin: 'https://example.test' }, skipWaiting: vi.fn(), clients: { claim: vi.fn() }, addEventListener: (type: string, callback: any) => { listeners[type] = callback; } };
   const response = { ok: true, clone() { return this; }, text: async () => '<script src="./assets/main.js"></script>' };
@@ -33,12 +33,32 @@ describe('safe offline app updates', () => {
     expect(self.skipWaiting).not.toHaveBeenCalled(); expect(caches.delete).not.toHaveBeenCalled();
   });
   it('serves an already cached navigation and lazy chunk when the network fails', async () => {
-    const { listeners, caches, fetch, response } = setup();
-    fetch.mockRejectedValue(new Error('Offline')); caches.match.mockResolvedValue(response);
+    const { listeners, cache, caches, fetch, response } = setup();
+    fetch.mockRejectedValue(new Error('Offline')); caches.match.mockResolvedValue(response); cache.match.mockResolvedValue(response);
     for (const mode of ['navigate', 'cors']) {
       let pending!: Promise<unknown>;
       listeners.fetch({ request: { method: 'GET', url: `https://example.test/chordmaster/${mode === 'navigate' ? '' : 'assets/main.js'}`, mode }, respondWith: (promise: Promise<unknown>) => { pending = promise; } });
       expect(await pending).toBe(response);
     }
+  });
+  it('opens the installed shell immediately when a weak network request would never finish', async () => {
+    const { listeners, cache, fetch, response } = setup();
+    fetch.mockImplementation(() => new Promise(() => {}));
+    cache.match.mockResolvedValue(response);
+    let pending!: Promise<unknown>;
+    listeners.fetch({ request: { method: 'GET', url: 'https://example.test/chordmaster/?team=team', mode: 'navigate' }, respondWith: (promise: Promise<unknown>) => { pending = promise; } });
+    expect(await pending).toBe(response);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(cache.put).not.toHaveBeenCalled();
+  });
+  it('fetches the page only when this release has no cached shell', async () => {
+    const { listeners, cache, caches, fetch, response } = setup();
+    caches.match.mockResolvedValue({ stale: true });
+    let pending!: Promise<unknown>;
+    const request = { method: 'GET', url: 'https://example.test/chordmaster/', mode: 'navigate' };
+    listeners.fetch({ request, respondWith: (promise: Promise<unknown>) => { pending = promise; } });
+    expect(await pending).toBe(response);
+    expect(fetch).toHaveBeenCalledWith(request);
+    expect(cache.put).not.toHaveBeenCalled();
   });
 });

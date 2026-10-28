@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
-import type { Session } from '@supabase/supabase-js';
+import { isAuthRetryableFetchError, type Session } from '@supabase/supabase-js';
 import { AuthenticatedUser } from '../types';
 import { hasSupabaseConfig, supabase } from './supabase';
+import { clearCloudStartupPointer } from './cloudWorkspaceCache';
 
-type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unconfigured';
+type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unconfigured' | 'offline';
 const SESSION_EXPIRY_SAFETY_WINDOW_SECONDS = 30;
 export const NATIVE_AUTH_NEXT_PATH_STORAGE_KEY = 'chordmaster.native-auth-next-path.v1';
 
@@ -101,6 +102,7 @@ export const resolveActiveSession = async (): Promise<Session | null> => {
 
   const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
   if (refreshError) {
+    if (isAuthRetryableFetchError(refreshError)) throw refreshError;
     return null;
   }
 
@@ -108,7 +110,9 @@ export const resolveActiveSession = async (): Promise<Session | null> => {
 };
 
 export const useSupabaseAuth = () => {
+  const [retryAttempt, setRetryAttempt] = useState(0);
   const [session, setSession] = useState<Session | null>(null);
+  const knownSession = useRef<Session | null>(null);
   const [status, setStatus] = useState<AuthStatus>(hasSupabaseConfig ? 'loading' : 'unconfigured');
 
   useEffect(() => {
@@ -118,40 +122,72 @@ export const useSupabaseAuth = () => {
     }
 
     let isMounted = true;
+    let generation = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const syncSession = async (nextSession?: Session | null) => {
+      const request = ++generation;
       try {
-        const resolvedSession = isSessionUsable(nextSession ?? null)
-          ? nextSession ?? null
+        const localSession = nextSession ?? knownSession.current;
+        if (navigator.onLine === false && !isSessionUsable(localSession)) {
+          setStatus(knownSession.current ? 'authenticated' : 'offline');
+          return;
+        }
+        const resolvedSession = isSessionUsable(localSession)
+          ? localSession
           : await resolveActiveSession();
 
-        if (!isMounted) {
+        if (!isMounted || request !== generation) {
           return;
         }
 
+        knownSession.current = resolvedSession;
+        if (!resolvedSession) clearCloudStartupPointer();
         setSession(resolvedSession);
         setStatus(resolvedSession ? 'authenticated' : 'unauthenticated');
-      } catch {
-        if (!isMounted) {
+      } catch (error) {
+        if (!isMounted || request !== generation) {
           return;
         }
 
+        const networkError = navigator.onLine === false || isAuthRetryableFetchError(error) || error instanceof TypeError;
+        if (networkError && knownSession.current) return;
+        knownSession.current = null;
         setSession(null);
-        setStatus('unauthenticated');
+        setStatus(networkError ? 'offline' : 'unauthenticated');
       }
     };
 
     void syncSession();
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      void syncSession(nextSession);
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'SIGNED_OUT') {
+        generation += 1;
+        clearTimeout(timer);
+        clearCloudStartupPointer();
+        knownSession.current = null;
+        setSession(null);
+        setStatus('unauthenticated');
+        return;
+      }
+      // Supabase holds its auth lock while invoking this callback. Resolve or
+      // refresh only after returning, so a weak connection cannot deadlock it.
+      clearTimeout(timer);
+      timer = setTimeout(() => { void syncSession(nextSession); }, 0);
     });
+    const reconnect = () => { void syncSession(); };
+    window.addEventListener('online', reconnect);
+    window.addEventListener('focus', reconnect);
 
     return () => {
       isMounted = false;
+      generation += 1;
+      clearTimeout(timer);
+      window.removeEventListener('online', reconnect);
+      window.removeEventListener('focus', reconnect);
       data.subscription.unsubscribe();
     };
-  }, []);
+  }, [retryAttempt]);
 
   const user = useMemo(() => mapSessionUser(session), [session]);
 
@@ -168,6 +204,7 @@ export const useSupabaseAuth = () => {
     if (error) {
       throw error;
     }
+    clearCloudStartupPointer();
   };
 
   return {
@@ -176,6 +213,7 @@ export const useSupabaseAuth = () => {
     status,
     isConfigured: hasSupabaseConfig,
     signInWithGoogle,
-    signOut
+    signOut,
+    retry: () => setRetryAttempt(attempt => attempt + 1)
   };
 };

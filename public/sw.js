@@ -95,18 +95,16 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
-        .then(async (response) => {
-          if (response.ok) {
-            const cache = await caches.open(CACHE_NAME);
-            await cache.put(toScopedUrl('./'), response.clone());
-          }
-          return response;
-        })
-        .catch(async () => {
-          return await caches.match(request) ||
-            await caches.match(toScopedUrl('./'));
-        })
+      (async () => {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match(toScopedUrl('./')) || await cache.match(request);
+        // This HTML belongs to the worker's fully installed asset set. Serve it
+        // immediately even when a weak connection never rejects its fetch.
+        // Registration still checks for updates; a complete new worker takes
+        // over once the old pages close, without mixing two releases' assets.
+        if (cached) return cached;
+        return fetch(request);
+      })()
     );
     return;
   }
