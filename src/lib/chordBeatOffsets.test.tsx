@@ -39,7 +39,25 @@ it('keeps offsets through chord copying, transposition and undo/redo',()=>{
  const edited=applyPreviewDraft(session,s);expect(bar(undoPreviewDraft(edited).draftSong).chordMarks?.[1].beatOffset).toBeUndefined();expect(bar(redoPreviewDraft(undoPreviewDraft(edited)).draftSong).chordMarks?.[1].beatOffset).toBe(.25);
 });
 it('renders the explicit 2e anchor in every row layout, key and Nashville view used by preview and PDF',()=>{
- for(const rows of [1,2,3]as const)for(const numbers of [false,true]){const s={...setChordBeatOffset(song(),target,.25),barRowCount:rows,showNashvilleNumbers:numbers};const {container}=render(<ChordSheet song={s} currentKey="D" language="zh"/>);const anchor=container.querySelector('[data-chord-beat-position="2e"]') as HTMLElement;expect(anchor).not.toBeNull();expect(anchor.style.transform).toBe('');const labelLeft=(anchor.querySelector('[data-chord-beat-label]') as HTMLElement).style.left;const labelPercent=Number(labelLeft.match(/calc\(([^%]+)%/)?.[1]);expect(labelPercent*Number(anchor.dataset.chordEngravingSpan)).toBeCloseTo(25,4);expect(labelLeft).toContain('+ 3px)');expect(anchor.querySelector('[data-chord-beat-label]')?.textContent).toBe('2e');expect(container.querySelectorAll('[data-chord-beat-offset]')).toHaveLength(1);cleanup();}
+ for (const rows of [1, 2, 3] as const) for (const numbers of [false, true]) {
+  const s = {...setChordBeatOffset(song(), target, .25), barRowCount: rows, showNashvilleNumbers: numbers};
+  const {container} = render(<ChordSheet song={s} currentKey="D" language="zh"/>);
+  const aligned = container.querySelector('[data-notation-aligned-chords]');
+  if (aligned) {
+   expect(aligned.querySelector('[data-chord-event-position="2e"]')).not.toBeNull();
+   expect([...aligned.querySelectorAll('[data-chord-beat-labels]')].map(node => node.textContent)).toContain('2e');
+  } else {
+   const anchor = container.querySelector('[data-chord-beat-position="2e"]') as HTMLElement;
+   expect(anchor).not.toBeNull(); expect(anchor.style.transform).toBe('');
+   const labelLeft = (anchor.querySelector('[data-chord-beat-label]') as HTMLElement).style.left;
+   const labelPercent = Number(labelLeft.match(/calc\(([^%]+)%/)?.[1]);
+   expect(labelPercent * Number(anchor.dataset.chordEngravingSpan)).toBeCloseTo(25, 4);
+   expect(labelLeft).toContain('+ 3px)');
+   expect(anchor.querySelector('[data-chord-beat-label]')?.textContent).toBe('2e');
+   expect(container.querySelectorAll('[data-chord-beat-offset]')).toHaveLength(1);
+  }
+  cleanup();
+ }
 });
 it('keeps late chord ink in its span while retaining the exact beat label',()=>{
  const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(44);

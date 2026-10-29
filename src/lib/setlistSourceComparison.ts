@@ -13,7 +13,7 @@ const names: Record<string, string> = {
   references: '參考音源', pickup: '弱起拍', lyricsDoc: '歌詞', chordTimingVersion: '和弦時點格式',
   chords: '和弦', closed: '小節關閉', riff: '簡譜', rhythm: '節奏', annotation: '備註', label: '標籤', riffLabel: '簡譜標籤', rhythmLabel: '節奏標籤',
   keyChangeTo: '轉調', riffVoices: '簡譜聲部', rhythmVoices: '節奏聲部', resetTempo: '恢復原速', repeatStart: '反覆開始',
-  repeatEnd: '反覆結束', doubleBar: '雙小節線', finalBar: '終止線', ending: '房子', leftText: '左側文字', rightText: '右側文字',
+  repeatEnd: '反覆結束', doubleBar: '後雙小節線', doubleBarStart: '前雙小節線', finalBar: '終止線', ending: '房子', leftText: '左側文字', rightText: '右側文字',
   leftMarker: '左側記號', rightMarker: '右側記號', unisonMark: '齊奏', rhythmMark: '節奏記號', chordMarks: '和弦記號',
   chordSubdivisions: '細分拍和弦', chordPassVariants: '指定遍數和弦', unmeteredChordLines: '未定拍和弦',
   band: '樂團版本', vocal: '歌手版本', chinese: '中文歌詞', english: '英文歌詞', bpm: 'BPM', key: '調性',

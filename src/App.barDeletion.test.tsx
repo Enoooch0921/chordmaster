@@ -145,6 +145,8 @@ it.each(['songs', 'setlists'] as const)('copies several bars and overwrites the 
   const hover = vi.spyOn(document, 'querySelector').mockImplementation((selector: string) => selector === '[data-preview-hoverable]:hover'
     ? querySelector('[data-preview-clipboard-bar="batch-2"]') : querySelector(selector));
   try { dispatchClipboard('paste'); } finally { hover.mockRestore(); }
+  expect(batchBar(2)).toHaveTextContent('F');
+  fireEvent.click(screen.getByRole('menuitem', { name: '貼上小節' }));
   expect(batchBars()).toHaveLength(4);
   expect(batchBar(2)).toHaveTextContent('C');
   expect(batchBar(3)).toHaveTextContent('Dm');

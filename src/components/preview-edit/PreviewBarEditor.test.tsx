@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Key, Song } from '../../types';
 import { applyPreviewDraft, createPreviewEditSession, setPreviewNotationCursor } from '../../lib/previewEditSession';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
 import PreviewBarEditor from './PreviewBarEditor';
+import { PREVIEW_KEYBOARD_SCALE_KEY } from '../../hooks/usePreviewKeyboardScale';
 import { PICKUP_EDITOR_BAR_ID, PICKUP_EDITOR_SECTION_ID } from '../../utils/pickupUtils';
 
 const song: Song = {
@@ -35,7 +36,8 @@ const renderEditor = ({
   hasCopiedJianpu = false,
   hasCopiedRhythm = false,
   storedKey = 'C' as Key,
-  displayedKey = 'C' as Key
+  displayedKey = 'C' as Key,
+  storageMode = 'letters' as 'letters' | 'nashville'
 } = {}) => {
   const callbacks = {
     onApplyDraft: vi.fn(),
@@ -61,7 +63,7 @@ const renderEditor = ({
       deviceLayout={deviceLayout}
       storedKey={storedKey}
       displayedKey={displayedKey}
-      storageMode="letters"
+      storageMode={storageMode}
       hasCopiedBar={hasCopiedBar}
       hasCopiedJianpu={hasCopiedJianpu}
       hasCopiedRhythm={hasCopiedRhythm}
@@ -76,6 +78,41 @@ const renderEditor = ({
 };
 
 describe('PreviewBarEditor', () => {
+  it.each([
+    ['3/#5', 'E/G#'], ['7/#2', 'B/D#'], ['2/#4', 'D/F#'],
+    ['1/b6', 'C/Ab'], ['1/b7', 'C/Bb'], ['3/b6', 'E/Ab']
+  ])('shows %s with its original degree meaning in the letter keyboard', (chord, expected) => {
+    const source: Song = { ...song, originalKey: 'C#', currentKey: 'C', sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [chord] }] }] };
+    const session = createPreviewEditSession({ song: source, target: { ...target, slotIndex: 0 }, inputMode: 'letters' });
+    const { onApplyDraft } = renderEditor({ session, storedKey: 'C#', displayedKey: 'C', storageMode: 'nashville' });
+    expect(screen.getByRole('textbox', { name: '和弦直接輸入' })).toHaveValue(expected);
+    expect(onApplyDraft).not.toHaveBeenCalled();
+  });
+
+  it('keeps a moved desktop keyboard in place across bars and can collapse it', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return new DOMRect(parseFloat(this.style.left) || 20, parseFloat(this.style.top) || 50, 620, 260);
+    });
+    const session = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { rerenderSession } = renderEditor({ session });
+    const grip = screen.getByRole('button', { name: '移動鍵盤（可用方向鍵）' });
+    fireEvent.keyDown(grip, { key: 'ArrowRight' });
+    fireEvent.keyDown(grip, { key: 'ArrowDown' });
+    const panel = screen.getByRole('dialog');
+    const position = { left: panel.style.left, top: panel.style.top };
+    const nextSong = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-2', chords: ['F'] }] }] };
+    rerenderSession(createPreviewEditSession({ song: nextSong, inputMode: 'letters', target: {
+      ...target, barId: 'bar-2', anchorKey: 'song-1|section-1|bar-2|chords|1',
+      anchorRect: { left: 300, top: 400, right: 340, bottom: 440, width: 40, height: 40 }
+    } }));
+    expect(panel.style.left).toBe(position.left);
+    expect(panel.style.top).toBe(position.top);
+    await userEvent.click(screen.getByRole('button', { name: '收合鍵盤' }));
+    expect(panel.querySelector('[data-keyboard-surface]')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: '展開鍵盤' }));
+    expect(panel.querySelector('[data-keyboard-surface]')).not.toBeNull();
+  });
+
   it.each(['phone', 'tablet', 'desktop'] as const)('closes and reopens only the empty selected cell without shifting later bars on %s', async deviceLayout => {
     const user = userEvent.setup();
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [
@@ -120,16 +157,16 @@ describe('PreviewBarEditor', () => {
     expect(draft.sections[0].bars[0].chords).toEqual(['C', 'Em7b5', '', '']);
   });
 
-  it.each(['phone', 'tablet', 'desktop'] as const)('cycles the barline button through double, final and off on %s', async (deviceLayout) => {
+  it.each(['phone', 'tablet', 'desktop'] as const)('cycles through double after, double before, final and normal on %s', async (deviceLayout) => {
     const user = userEvent.setup();
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], repeatStart: true, repeatEnd: true }] }] };
     let session = createPreviewEditSession({ song: source, target, inputMode: 'letters' });
     const { onApplyDraft, rerenderSession } = renderEditor({ session, deviceLayout });
-    for (const state of ['double', 'final', 'off', 'double']) {
+    for (const [index, state] of ['double', 'double-start', 'final', 'off', 'double'].entries()) {
       await user.click(screen.getByRole('button', { name: /切換小節線/ }));
       const edited = onApplyDraft.mock.calls.at(-1)![0] as Song;
       expect(edited.sections[0].bars[0]).toMatchObject({
-        doubleBar: state === 'double', finalBar: state === 'final', repeatStart: true, repeatEnd: false, chords: ['C']
+        doubleBar: state === 'double', doubleBarStart: state === 'double-start', finalBar: state === 'final', repeatStart: index === 0, repeatEnd: false, chords: ['C']
       });
       session = applyPreviewDraft(session, edited);
       rerenderSession(session);
@@ -174,6 +211,7 @@ describe('PreviewBarEditor', () => {
     const source: Song = {...song, sections:[{...song.sections[0], bars:[{...song.sections[0].bars[0], chords:['C','','C/E',''], chordPassVariants:[{pass:2,chords:['C/E','','C7','']}]}]}]};
     const session=createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'});
     const {onApplyDraft}=renderEditor({session,deviceLayout});
+    fireEvent.click(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' }));
     fireEvent.change(screen.getByRole('textbox',{name:'第2遍 第3拍和弦'}),{target:{value:'G7'}});
     expect(onApplyDraft.mock.calls.at(-1)?.[0].sections[0].bars[0]).toMatchObject({chords:['C','','C/E',''],chordPassVariants:[{pass:2,chords:['C/E','','G7','']}]});
   });
@@ -189,6 +227,7 @@ describe('PreviewBarEditor', () => {
     const source:Song={...song,sections:[{...song.sections[0],bars:[{...song.sections[0].bars[0],chordSubdivisions:[{beat:0,offset:.5,chord:'G/B'}]}]}]};
     const session=createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'});
     const {onApplyDraft}=renderEditor({session,deviceLayout});
+    fireEvent.click(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' }));
     fireEvent.change(screen.getByRole('textbox',{name:'追加和弦 1'}),{target:{value:'Am/C'}});
     const changed=onApplyDraft.mock.calls.at(-1)?.[0];expect(changed.sections[0].bars[0].chords).toEqual(['C']);expect(changed.sections[0].bars[0].chordSubdivisions).toEqual([{beat:0,offset:.5,chord:'Am/C'}]);
     fireEvent.change(screen.getByRole('combobox',{name:'追加和弦 1 拍位'}),{target:{value:'1.75'}});
@@ -596,9 +635,9 @@ describe('PreviewBarEditor', () => {
     });
 
     expect(document.querySelector('[data-rhythm-key-row="copy-paste"]')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '複製節奏' }));
+    await user.click(screen.getByRole('button', { name: '複製小節' }));
     expect(onCopyRhythm).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole('button', { name: '貼上節奏' }));
+    await user.click(screen.getByRole('button', { name: '選擇貼上內容' }));
     expect(onPasteRhythm).toHaveBeenCalledTimes(1);
   });
 
@@ -646,9 +685,9 @@ describe('PreviewBarEditor', () => {
     });
 
     expect(document.querySelector('[data-jianpu-key-row="bar-actions"]')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '複製簡譜' }));
+    await user.click(screen.getByRole('button', { name: '複製小節' }));
     expect(onCopyJianpu).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole('button', { name: '貼上簡譜' }));
+    await user.click(screen.getByRole('button', { name: '選擇貼上內容' }));
     expect(onPasteJianpu).toHaveBeenCalledTimes(1);
   });
 
@@ -1355,6 +1394,39 @@ describe('PreviewBarEditor', () => {
     expect(nextSong.sections[0].bars[0].chords[1]).toBe('Bb/Db');
   });
 
+  it.each(['cadd9', 'cdim', 'gmaj7', 'csus4', 'g/B'])('keeps the quality and slash intact while typing %s one character at a time', input => {
+    let session = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session });
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' }) as HTMLInputElement;
+    for (const char of input) {
+      fireEvent.change(capture, { target: { value: capture.value + char } });
+      session = applyPreviewDraft(session, onApplyDraft.mock.calls.at(-1)![0]);
+      rerenderSession(session);
+    }
+    expect(capture.value).toBe(input[0].toUpperCase() + input.slice(1));
+    expect(session.draftSong.sections[0].bars[0].chordSubdivisions ?? []).toHaveLength(0);
+  });
+
+  it.each(['GAmBmCm', 'gambmcm', 'gmaj7am', 'cadd9dm'])('recognizes live typing %s without opening the subdivision panel', async input => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C', '/', '', 'G/B'] }] }] };
+    let session = createPreviewEditSession({ song: source, target: { ...target, slotIndex: 2 }, inputMode: 'letters' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session });
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+    for (const char of input) {
+      fireEvent.change(capture, { target: { value: (capture as HTMLInputElement).value + char } });
+      const nextSong = onApplyDraft.mock.calls.at(-1)![0] as Song;
+      session = applyPreviewDraft(session, nextSong);
+      rerenderSession(session);
+    }
+    const bar = session.draftSong.sections[0].bars[0];
+    expect(bar.chords[3]).toBe('G/B');
+    expect(bar.chordSubdivisions?.map(entry => entry.offset)).toEqual(input.toLowerCase() === 'gambmcm' ? [.25, .5, .75] : [.5]);
+    expect(bar.chordSubdivisions?.at(-1)?.chord).toBe(input.toLowerCase() === 'gambmcm' ? 'Cm' : input === 'gmaj7am' ? 'Am' : 'Dm');
+    expect(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.change(capture, { target: { value: 'G' } });
+    expect(onApplyDraft.mock.calls.at(-1)![0].sections[0].bars[0].chordSubdivisions).toEqual([]);
+  });
+
   it('moves between beats with plain arrows while the desktop chord capture owns focus', () => {
     const chordSong: Song = {
       ...song,
@@ -1440,7 +1512,7 @@ describe('PreviewBarEditor', () => {
     rerenderSession(createPreviewEditSession({ song: repeatEndSong, target: firstTarget, inputMode: 'letters' }));
     capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
     fireEvent.keyDown(capture, { key: '\\', code: 'Backslash' });
-    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0]).toMatchObject({ finalBar: true, repeatEnd: false });
+    expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0]).toMatchObject({ doubleBar: true, finalBar: false, repeatEnd: false });
   });
 
   it('adds repeat ending numbers with Option digit shortcuts while chord editing', () => {
@@ -1629,4 +1701,71 @@ describe('preview pickup keyboard', () => {
     expect(latest.draftSong.sections).toEqual(source.sections);
     expect(renderCount).toBeLessThan(30);
   });
+});
+
+
+describe('desktop keyboard size', () => {
+  const initialViewport = { width: window.innerWidth, height: window.innerHeight };
+  beforeEach(() => {
+    localStorage.removeItem(PREVIEW_KEYBOARD_SCALE_KEY);
+    window.innerWidth = 1440; window.innerHeight = 960;
+  });
+  afterEach(() => {
+    localStorage.removeItem(PREVIEW_KEYBOARD_SCALE_KEY);
+    window.innerWidth = initialViewport.width; window.innerHeight = initialViewport.height;
+  });
+
+  it('shrinks only the keyboard, keeps the preference across bar changes and can reset it', () => {
+    const callbacks = renderEditor();
+    const panel = screen.getByRole('dialog', { name: '預覽快捷編輯' });
+    fireEvent.click(screen.getByRole('button', { name: '縮小鍵盤' }));
+    fireEvent.click(screen.getByRole('button', { name: '縮小鍵盤' }));
+    expect(panel.style.transform).toBe('scale(0.8)');
+    expect(JSON.parse(localStorage.getItem(PREVIEW_KEYBOARD_SCALE_KEY)!)).toEqual({ spacious: 80 });
+    const nextSong = { ...song, sections: [{ ...song.sections[0], bars: [...song.sections[0].bars, { id: 'bar-2', chords: ['G'] }] }] };
+    callbacks.rerenderSession(createPreviewEditSession({ song: nextSong, target: { ...target, barId: 'bar-2' }, inputMode: 'letters' }));
+    expect(panel.style.transform).toBe('scale(0.8)');
+    fireEvent.click(screen.getByRole('button', { name: '鍵盤大小 80%，恢復預設 100%' }));
+    expect(panel.style.transform).toBe('scale(1)');
+    expect(callbacks.onApplyDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([['70', '縮小鍵盤'], ['120', '放大鍵盤']])('restores %s%% and disables the corresponding boundary control', (percent, label) => {
+    localStorage.setItem(PREVIEW_KEYBOARD_SCALE_KEY, JSON.stringify({ spacious: Number(percent) }));
+    renderEditor();
+    expect(screen.getByRole('button', { name: label })).toBeDisabled();
+    expect(screen.getByRole('dialog').style.transform).toBe(`scale(${Number(percent) / 100})`);
+  });
+
+  it.each(['phone', 'tablet'] as const)('keeps the %s dock at its normal size without overwriting the desktop preference', deviceLayout => {
+    localStorage.setItem(PREVIEW_KEYBOARD_SCALE_KEY, JSON.stringify({ spacious: 80 }));
+    renderEditor({ deviceLayout });
+    expect(screen.queryByRole('group', { name: '鍵盤大小' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog').style.transform).toBe('');
+    expect(JSON.parse(localStorage.getItem(PREVIEW_KEYBOARD_SCALE_KEY)!)).toEqual({ spacious: 80 });
+  });
+});
+
+it('selects a double barline before the measure without erasing its final boundary', async () => {
+  const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['C'], repeatStart: true, finalBar: true }] }] };
+  const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target, inputMode: 'letters' }) });
+  const trigger = screen.queryByRole('button', { name: '選擇小節線與反覆' });
+  if (trigger) fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole('button', { name: '前雙小節線 ||' }));
+  expect((onApplyDraft.mock.calls.at(-1)![0] as Song).sections[0].bars[0]).toMatchObject({ doubleBarStart: true, repeatStart: false, finalBar: true });
+});
+
+it.each(['\\', '|'])('keeps the barline key indicator synchronized when cycling with %s', key => {
+  let session = createPreviewEditSession({ song, target, inputMode: 'letters' });
+  const { onApplyDraft, rerenderSession } = renderEditor({ session });
+  for (const [state,label] of [['double','後雙'],['double-start','前雙'],['final','終止'],['off','一般']]) {
+    fireEvent.keyDown(screen.getByRole('textbox',{name:'和弦直接輸入'}), {key,code:'Backslash',shiftKey:key==='|'});
+    const edited = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    session = applyPreviewDraft(session,edited);
+    rerenderSession(session);
+    const button = screen.getByRole('button',{name:/切換小節線/});
+    expect(button).toHaveAttribute('data-barline-cycle',state);
+    expect(button).toHaveTextContent(label);
+    expect(edited.sections[0].bars[0].chords).toEqual(['C']);
+  }
 });

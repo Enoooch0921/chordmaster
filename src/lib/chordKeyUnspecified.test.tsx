@@ -46,7 +46,7 @@ describe('source harmony with unspecified key',()=>{
   const user=userEvent.setup(),onApplyDraft=vi.fn(),session=createPreviewEditSession({song:source(),target,inputMode:'letters'});
   render(<PreviewBarEditor session={session} language="zh" deviceLayout={layout} storedKey="G" displayedKey="B" storageMode="letters" onApplyDraft={onApplyDraft} onInputModeChange={()=>{}} onNotationModeChange={()=>{}} onNotationCursorChange={()=>{}} onJianpuInputAbsoluteChange={()=>{}} onNavigate={()=>{}} onStructure={()=>{}} onUndo={()=>{}} onRedo={()=>{}} onDone={()=>{}} onCancel={()=>{}}/>);
   expect(screen.getByText(/目的調未標，保留原譜級數/)).toBeInTheDocument();
-  if(layout==='desktop'){const input=screen.getByRole('textbox',{name:'和弦直接輸入'});expect(input).toHaveValue('4');fireEvent.change(input,{target:{value:'#4'}})}else{await user.click(screen.getByRole('button',{name:'拍內和弦與指定遍數和弦'}));expect(screen.getByRole('button',{name:'切換為字母和弦'})).toBeDisabled();await user.click(screen.getByRole('button',{name:/^6$/}))}
+  if(layout==='desktop'){const input=screen.getByRole('textbox',{name:'和弦直接輸入'});expect(input).toHaveValue('4');fireEvent.change(input,{target:{value:'#4'}})}else{expect(screen.getByRole('button',{name:'拍內和弦與指定遍數和弦'})).toHaveAttribute('aria-pressed','false');expect(screen.getByRole('button',{name:'切換為字母和弦'})).toBeDisabled();await user.click(screen.getByRole('button',{name:/^6$/}))}
   const edited=onApplyDraft.mock.calls.at(-1)![0] as Song;expect(edited.sections[0].bars[1].chords[0]).toBe(layout==='desktop'?'#4':'6');expect(edited.sections[0].bars[1].chordKeyUnspecified).toBe(true);
  });
  it('adds a source degree subdivision and gives appropriate editing guidance',async()=>{

@@ -332,6 +332,7 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   }
 
   body.exporting-pdf [data-print-page] .sheet-bar.sheet-has-repeat-start,
+  body.exporting-pdf [data-print-page] .sheet-bar.sheet-has-double-bar-start,
   body.exporting-pdf [data-print-page] .sheet-bar.sheet-after-repeat-end,
   body.exporting-pdf [data-print-page] .sheet-bar.sheet-after-double-bar,
   body.exporting-pdf [data-print-page] .sheet-bar.sheet-after-final-bar {
@@ -345,6 +346,7 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   body.exporting-pdf [data-print-page] .sheet-repeat-start,
   body.exporting-pdf [data-print-page] .sheet-repeat-end,
   body.exporting-pdf [data-print-page] .sheet-double-bar,
+  body.exporting-pdf [data-print-page] .sheet-double-bar-start,
   body.exporting-pdf [data-print-page] .sheet-final-bar {
     inset-block: 1px !important;
   }
@@ -355,7 +357,8 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
     z-index: 999 !important;
   }
 
-  body.exporting-pdf [data-print-page] .sheet-repeat-start {
+  body.exporting-pdf [data-print-page] .sheet-repeat-start,
+  body.exporting-pdf [data-print-page] .sheet-double-bar-start {
     left: 0 !important;
   }
 
@@ -373,11 +376,13 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
     display: flex !important;
   }
 
-  body.exporting-pdf [data-print-page] .sheet-double-bar .sheet-repeat-preview {
+  body.exporting-pdf [data-print-page] .sheet-double-bar .sheet-repeat-preview,
+  body.exporting-pdf [data-print-page] .sheet-double-bar-start .sheet-repeat-preview {
     display: block !important;
   }
 
-  body.exporting-pdf [data-print-page] .sheet-double-bar .sheet-repeat-print-fallback {
+  body.exporting-pdf [data-print-page] .sheet-double-bar .sheet-repeat-print-fallback,
+  body.exporting-pdf [data-print-page] .sheet-double-bar-start .sheet-repeat-print-fallback {
     display: none !important;
   }
 
@@ -505,3 +510,29 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 .ui-motion-chevron { transition: transform var(--ui-release-duration) var(--ease-ui-out); }
 [data-ui-input="keyboard"] .ui-motion-chevron { transition: none; }
 @media (prefers-reduced-motion: reduce) { .ui-motion-chevron { transition: none; } }
+
+/* Notation on editor surfaces follows the theme; chart paper keeps its ink. */
+:root, [data-print-preview], [data-print-page], body.exporting-pdf {
+  --notation-ink: #334155;
+  --notation-symbol-ink: #1f2937;
+  --notation-line-ink: rgba(71, 85, 105, 0.9);
+  --notation-rhythm-ink: #111827;
+}
+.dark {
+  --notation-ink: #e6edf3;
+  --notation-symbol-ink: #e6edf3;
+  --notation-line-ink: #b8c4d0;
+  --notation-rhythm-ink: #e6edf3;
+}
+
+/* Short landscape docks retain a full key row; secondary settings scroll with keys. */
+[data-preview-bar-editor][data-compact-dock] > header,
+[data-preview-bar-editor][data-compact-dock] > footer {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+[data-preview-bar-editor][data-compact-dock] > [data-keyboard-surface] {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}

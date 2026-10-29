@@ -1,3 +1,4 @@
+import NotationSelectionPointer from './NotationSelectionPointer';
 import React from 'react';
 import { type JianpuNoteRange, applyJianpuAutoDurationShorthand, findJianpuNoteRanges, findJianpuPlaceholderRanges, getJianpuDurationUnits, getJianpuGraceNotes, getJianpuPhraseSegments, getJianpuOpenPhraseCount, splitJianpuTokens } from '../utils/jianpuUtils';
 import { parseTimeSignature } from '../utils/rhythmUtils';
@@ -169,8 +170,8 @@ const Jianpu: React.FC<JianpuProps> = ({
   ), [scale, tokenList]);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = React.useState<number | null>(null);
-  const notationColor = color || '#334155';
-  const symbolColor = color || '#1f2937';
+  const notationColor = color || 'var(--notation-ink, #334155)';
+  const symbolColor = color || 'var(--notation-symbol-ink, #1f2937)';
   const updateContainerWidth = React.useCallback(() => {
     const element = rootRef.current;
     if (!element) {
@@ -636,6 +637,7 @@ const Jianpu: React.FC<JianpuProps> = ({
   return (
     <div
       ref={rootRef}
+      data-jianpu-notation
       className={`relative w-full overflow-visible select-none ${className}`}
       style={{ height: `${metrics.height}px` }}
     >
@@ -908,7 +910,7 @@ const Jianpu: React.FC<JianpuProps> = ({
             )}
 
             {isSelectedNote && renderMode !== 'editor' && (
-              <span data-preview-edit-ui data-jianpu-selected-note-pointer
+              <NotationSelectionPointer data-preview-edit-ui data-jianpu-selected-note-pointer
                 data-jianpu-selected-note-insert-caret={hasTrailingInsertSpace || undefined}
                 className="notation-note-pointer pointer-events-none absolute z-20"
                 style={{ left: hasTrailingInsertSpace ? trailingInsertLeft : centerLeft, top: metrics.digitCenterY + selectionMetrics.height / 2 + 3 }} />
@@ -1104,6 +1106,7 @@ const Jianpu: React.FC<JianpuProps> = ({
               />
             ) : (
               <span
+                data-jianpu-onset={(note.tokenIndex * tokenCapacityUnits + note.unitStart) / (16 / parseTimeSignature(timeSignature).beatValue)}
                 className="absolute font-medium text-slate-700 leading-none"
                 style={{
                   left: centerLeft,
@@ -1252,7 +1255,7 @@ const Jianpu: React.FC<JianpuProps> = ({
                 data-jianpu-phrase={slur.phrase ? slur.type : undefined}
                 d={`M ${startX} ${anchorY} C ${startX + controlOffset} ${controlY} ${endX - controlOffset} ${controlY} ${endX} ${anchorY}`}
                 fill="none"
-                stroke={color ? notationColor : 'rgba(71, 85, 105, 0.9)'}
+                stroke={color ? notationColor : 'var(--notation-line-ink, rgba(71, 85, 105, 0.9))'}
                 strokeWidth={compact ? 1 : renderMode === 'editor' ? 1.2 : 1.4}
                 strokeLinecap="round"
               />

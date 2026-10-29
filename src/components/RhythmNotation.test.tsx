@@ -223,3 +223,23 @@ describe('RhythmNotation', () => {
   });
 
 });
+
+it('shows a triplet marker even when its group is incomplete, without joining notes across beats', () => {
+  const { container, rerender } = render(<RhythmNotation notation="e3r e q e e q" timeSignature="4/4" compact />);
+  expect(container.querySelector('[data-rhythm-incomplete-triplet]')).toHaveTextContent('3');
+  expect(container.querySelectorAll('[data-rhythm-primary-beam]')).toHaveLength(0);
+  rerender(<RhythmNotation notation="er e q e e q" timeSignature="4/4" compact />);
+  expect(container.querySelector('[data-rhythm-incomplete-triplet]')).toBeNull();
+  expect(container.querySelectorAll('[data-rhythm-primary-beam]')).toHaveLength(1);
+  expect(container.querySelectorAll('[data-rhythm-beamed-symbol]')).toHaveLength(2);
+});
+
+it('restores the selected rhythm event frame when returning from another input mode', () => {
+  const { getByRole, rerender } = render(<RhythmNotation notation="er e q e e q" timeSignature="4/4" compact selectedInsertIndex={8} showInsertCursor onInsertSelect={() => {}} />);
+  expect(getByRole('button', { name: 'Select rhythm note 4' })).toHaveStyle({ backgroundColor: 'rgba(99, 102, 241, 0.18)' });
+  rerender(<RhythmNotation notation="er e q e e q" timeSignature="4/4" compact selectedInsertIndex={null} showInsertCursor={false} onInsertSelect={() => {}} />);
+  expect(getByRole('button', { name: 'Select rhythm note 4' })).toHaveAttribute('aria-pressed', 'false');
+  rerender(<RhythmNotation notation="er e q e e q" timeSignature="4/4" compact selectedInsertIndex={8} showInsertCursor onInsertSelect={() => {}} />);
+  expect(getByRole('button', { name: 'Select rhythm note 4' })).toHaveAttribute('aria-pressed', 'true');
+  expect(getByRole('button', { name: 'Select rhythm note 4' })).toHaveStyle({ boxShadow: 'inset 0 0 0 1px rgba(99, 102, 241, 0.22)' });
+});

@@ -62,6 +62,7 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
     () => new Set(geometry.beams.flatMap((beam) => beam.eventIndices)),
     [geometry.beams]
   );
+  const groupedTripletIndices = new Set(geometry.triplets.flatMap(group => group.eventIndices));
 
   React.useLayoutEffect(() => {
     const svg = svgRef.current;
@@ -240,6 +241,10 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
                   dotted: false
                 })}
               </text>
+            )}
+            {event.triplet && !groupedTripletIndices.has(event.index) && (
+              <text data-rhythm-incomplete-triplet x={head.x} y={-2 * scale}
+                textAnchor="middle" fontSize={6 * scale} fontFamily="sans-serif" fill={color}>3</text>
             )}
             {dot && (
               <circle data-rhythm-dot cx={dot.x} cy={dot.y} r={0.72 * scale} fill={color} />

@@ -115,6 +115,7 @@ export interface Bar {
   repeatStart?: boolean; // |:
   repeatEnd?: boolean;   // :|
   doubleBar?: boolean;  // two thin lines ||
+  doubleBarStart?: boolean; // two thin lines before this measure
   finalBar?: boolean;    // final thin + thick barline
   ending?: string; // e.g. "1", "2", or "1,2"
 }

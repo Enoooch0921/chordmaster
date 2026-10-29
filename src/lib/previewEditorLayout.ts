@@ -9,36 +9,10 @@ export interface PreviewEditorDeviceSignals {
 }
 
 export const getPreviewEditorBottomInset = (
-  deviceLayout: PreviewEditorDeviceLayout,
+  _deviceLayout: PreviewEditorDeviceLayout,
   panelHeight: number,
   gap = 16
-) => deviceLayout === 'desktop'
-  ? 0
-  : Math.max(0, Math.round(panelHeight)) + gap;
-
-/**
- * A touch user has already brought the bar into view by tapping it. Opening the
- * dock, changing notation mode, or advancing the cursor within that same bar
- * must therefore leave the preview's vertical scroll position alone. Only
- * keyboard-driven navigation to another bar needs automatic repositioning.
- *
- * This applies to both docked touch keyboards and the floating desktop editor:
- * `scrollIntoView()` can otherwise move a fully visible lower bar by hundreds
- * of pixels before placing the floating panel above it.
- */
-export const shouldAutoScrollPreviewEditTarget = (
-  _deviceLayout: PreviewEditorDeviceLayout,
-  previousBarKey: string | null,
-  currentBarKey: string | null,
-  requestedByKeyboardNavigation = false
-) => (
-  currentBarKey === null
-  || (
-    requestedByKeyboardNavigation
-    && previousBarKey !== null
-    && previousBarKey !== currentBarKey
-  )
-);
+) => Math.max(0, Math.round(panelHeight)) + gap;
 
 /**
  * iPadOS can expose a fine pointer whenever a Magic Keyboard or mouse is

@@ -1500,6 +1500,7 @@ const SongEditor: React.FC<Props> = ({
         bar.repeatStart ||
         bar.repeatEnd ||
         bar.doubleBar ||
+        bar.doubleBarStart ||
         bar.finalBar ||
         bar.ending
       )
@@ -1999,6 +2000,7 @@ const SongEditor: React.FC<Props> = ({
         && !currentBar?.repeatStart
         && !currentBar?.repeatEnd
         && !currentBar?.doubleBar
+        && !currentBar?.doubleBarStart
         && !currentBar?.finalBar
         && !currentBar?.ending
         && !currentBar?.label
@@ -6427,6 +6429,16 @@ const SongEditor: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
+                      onClick={() => updateBar(sIdx, bIdx, { doubleBarStart: !bar.doubleBarStart })}
+                      className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.doubleBarStart ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                      title={copy.editor.doubleBarStart}
+                      aria-label={copy.editor.doubleBarStart}
+                      aria-pressed={Boolean(bar.doubleBarStart)}
+                    >
+                      <BarlineGlyph /><span className="text-[9px]">{language === 'zh' ? '前' : 'L'}</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => updateBar(sIdx, bIdx, { doubleBar: !bar.doubleBar })}
                       className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.doubleBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
                       title={copy.editor.doubleBar}
@@ -8199,6 +8211,16 @@ const SongEditor: React.FC<Props> = ({
                           title={copy.editor.endRepeat}
                         >
                           <span className="font-bold text-[10px]">:|</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateBar(sIdx, bIdx, { doubleBarStart: !bar.doubleBarStart })}
+                          className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.doubleBarStart ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                          title={copy.editor.doubleBarStart}
+                          aria-label={copy.editor.doubleBarStart}
+                          aria-pressed={Boolean(bar.doubleBarStart)}
+                        >
+                          <BarlineGlyph /><span className="text-[9px]">{language === 'zh' ? '前' : 'L'}</span>
                         </button>
                         <button
                           type="button"

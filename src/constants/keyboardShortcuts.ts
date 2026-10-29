@@ -73,14 +73,18 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
     },
     shortcuts: [
       {
+        keys: ['Ctrl/Cmd + click', 'Shift + click'],
+        action: { en: 'Select individual measures or a continuous range', zh: '逐一多選小節，或連續選取首尾之間的小節' }
+      },
+      {
         keys: ['Ctrl/Cmd + C'],
-        action: { en: 'Copy selected bars, or the hovered notation lane', zh: '複製選取的小節，或滑鼠預選的內容區' },
+        action: { en: 'Copy complete selected or hovered measures', zh: '複製選取或滑鼠所在的完整小節' },
         context: { en: 'Whole-bar selection takes priority; text selection keeps normal copy', zh: '整小節選取優先；選取文字時維持文字複製' }
       },
       {
         keys: ['Ctrl/Cmd + V'],
-        action: { en: 'Paste into the hovered bar, or the selected destination', zh: '貼到滑鼠所在小節，或選取的目的小節' },
-        context: { en: 'Notation replaces only its own lane; whole bars overwrite from the destination and extend the section if needed', zh: '只替換複製的內容區；整小節從目的位置直接覆蓋，超出段落時才新增小節' }
+        action: { en: 'Choose measures, chords, rhythm or jianpu to paste', zh: '選擇貼上小節、和弦、節奏或簡譜' },
+        context: { en: 'Choose content before pasting into the hovered or selected destination; Escape cancels', zh: '選擇內容後貼到滑鼠所在或選取的小節；Escape 取消' }
       },
       {
         keys: ['Backspace', 'Delete'],
@@ -116,8 +120,12 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
         context: { en: 'Chord mode', zh: '和弦模式' }
       },
       {
-        keys: ['[', ']', '\\'],
-        action: { en: 'Toggle repeat start, repeat end, or final barline', zh: '切換反覆開始、反覆結束或終止線' }
+        keys: ['[', ']'],
+        action: { en: 'Toggle repeat start or repeat end', zh: '切換反覆開始或反覆結束' }
+      },
+      {
+        keys: ['\\', '|'],
+        action: { en: 'Cycle barline: double after, double before, final, normal', zh: '循環小節線：後雙、前雙、終止、一般' }
       },
       {
         keys: ['Option/Alt + 1-9'],

@@ -86,6 +86,18 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-29',
+        title: "Preview editing, keyboard controls and notation alignment",
+        bullets: [
+          "Drag and resize the desktop notation keyboard, remember its placement and scale, and dock the keyboard on phones and tablets while keeping the edited measure visible.",
+          "Copy complete measures once, then choose measures, chords, rhythm or jianpu when pasting; support Command/Ctrl selection, Shift ranges and the paste shortcut.",
+          "Recognize consecutive chords without case sensitivity, align chords to rhythm or melody as notes are entered, and preserve readable spacing and consistent slash baselines.",
+          "Cycle normal, leading double, trailing double and final barlines with matching keyboard indicators; keep selection outlines and note pointers clear of musical barlines.",
+          "Fix dark-mode notation contrast, triplet-rest conversion and slash-chord spelling while preserving explicitly written flat scale degrees."
+        ]
+      },
+      {
+        version: '0.11.9',
+        date: '2026-10-29',
         title: "Independent connection status and print-only continuation labels",
         bullets: [
           "Check server reachability at startup, when returning to the App, and periodically without switching songs; separate connection status from cached scores and pending saves.",
@@ -756,6 +768,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-29',
+        title: "編譜鍵盤、批量貼上與和弦對齊",
+        bullets: [
+          "電腦版鍵盤支援拖曳、縮放並記住位置與大小；手機和平板置底，編輯中的小節保持可見。",
+          "一次複製完整小節，貼上時再選小節、和弦、節奏或簡譜；支援 Command／Ctrl 多選、Shift 連續選取與貼上快捷鍵。",
+          "直接輸入 gam 等連續和弦即可辨識拍內和弦；輸入節奏或旋律時即時對齊，保留和弦間距與一致的斜線高度。",
+          "小節線在後雙、前雙、終止及一般之間循環，鍵盤顯示目前狀態；虛線選取框與音符箭頭避開樂譜小節線。",
+          "修正深色模式記譜對比、三連音休止符轉回一般時值，以及斜線和弦拼寫；保留明確輸入的降六、降七等級數語境。"
+        ]
+      },
+      {
+        version: '0.11.9',
         date: '2026-10-29',
         title: "獨立連線判斷與列印專用續頁標記",
         bullets: [

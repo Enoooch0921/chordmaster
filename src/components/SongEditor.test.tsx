@@ -56,7 +56,7 @@ const renderEditor = (song: Song, jianpuPitchContext?: JianpuPitchContext) => {
 describe('SongEditor shared notation commands', () => {
   it('switches from a final barline to a double barline in the song editor', () => {
     const onChange = renderEditor(makeSong({ finalBar: true }));
-    fireEvent.click(screen.getAllByRole('button', { name: '雙小節線 ||' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '後雙小節線 ||' })[0]);
     expect((onChange.mock.calls.at(-1)![0] as Song).sections[0].bars[0]).toMatchObject({ doubleBar: true, finalBar: false, repeatEnd: false });
   });
 
@@ -432,4 +432,10 @@ describe('SongEditor shared notation commands', () => {
     expect(nextSong.sections[0].bars).toHaveLength(2);
     expect(nextSong.sections[0].bars.map((bar) => bar.chords)).toEqual([['C'], ['G']]);
   });
+});
+
+it('adds a leading double barline while preserving the final boundary in the song editor', () => {
+  const onChange = renderEditor(makeSong({ repeatStart: true, finalBar: true }));
+  fireEvent.click(screen.getAllByRole('button', { name: '前雙小節線 ||' })[0]);
+  expect((onChange.mock.calls.at(-1)![0] as Song).sections[0].bars[0]).toMatchObject({ doubleBarStart: true, repeatStart: false, finalBar: true });
 });

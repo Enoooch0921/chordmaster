@@ -23,7 +23,11 @@ it('changes an owned setlist’s personal view without changing its shared arran
   localStorage.setItem('chordmaster.selected-setlist-id.v1', 'set');
   const { unmount } = render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
   const chart = () => document.querySelector('[data-setlist-preview-song-id="entry"]')!;
-  const firstChord = () => chart()?.querySelector('[data-preview-owner-slot="0"]')?.textContent;
+  const firstChord = () => {
+    const chord = chart()?.querySelector('[data-preview-owner-slot="0"]')?.cloneNode(true) as HTMLElement | undefined;
+    chord?.querySelectorAll('.sr-only').forEach(label => label.remove());
+    return chord?.textContent;
+  };
   await waitFor(() => expect(firstChord()).toBe('C'));
   const latest = () => (refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0].workspace;
   const shared = JSON.stringify(latest().setlists);
