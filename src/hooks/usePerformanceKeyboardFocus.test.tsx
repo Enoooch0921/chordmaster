@@ -6,13 +6,14 @@ beforeEach(() => {
   vi.useFakeTimers(); vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
 });
 afterEach(() => { vi.useRealTimers(); document.body.innerHTML = ''; });
-const setup = () => {
+const setup = (fullscreenTarget = false) => {
   const capture = createRef<HTMLInputElement>(); const overlay = createRef<HTMLDivElement>();
   capture.current = document.createElement('input'); overlay.current = document.createElement('div');
+  overlay.current.tabIndex = -1;
   document.body.append(capture.current, overlay.current);
   const focus = vi.spyOn(capture.current, 'focus');
-  const hook = renderHook(({ enabled }) => usePerformanceKeyboardFocus(enabled, capture, overlay), { initialProps: { enabled: true } });
-  return { ...hook, capture, focus };
+  const hook = renderHook(({ enabled }) => usePerformanceKeyboardFocus(enabled, capture, overlay, fullscreenTarget), { initialProps: { enabled: true } });
+  return { ...hook, capture, overlay, focus };
 };
 describe('iPad standalone page-turner focus recovery', () => {
   it('continues asserting native focus after 30 minutes even when DOM focus has not changed', () => {
@@ -40,4 +41,22 @@ describe('iPad standalone page-turner focus recovery', () => {
     act(() => { oldRestore(); window.dispatchEvent(new Event('focus')); vi.advanceTimersByTime(60000); });
     expect(focus).not.toHaveBeenCalled();
   });
+});
+
+// WebKit may dismiss native fullscreen when any editable input takes focus,
+// even if inputMode=none suppresses the software keyboard.
+it('keeps native fullscreen through initial focus, heartbeats and foreground recovery', () => {
+  const { focus, overlay, result } = setup(true);
+  let fullscreen = true;
+  focus.mockImplementation(() => { fullscreen = false; });
+  act(() => {
+    vi.advanceTimersByTime(6000);
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new Event('pageshow'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    result.current();
+  });
+  expect(fullscreen).toBe(true);
+  expect(focus).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(overlay.current);
 });

@@ -85,6 +85,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-30',
+        title: 'Stable iPad fullscreen and chord keyboard',
+        bullets: [
+          'Keep page-turner focus on a non-editable surface during native fullscreen, including entry and foreground recovery.',
+          'Remember the selected letter or number chord keyboard after closing, Performance Mode and reload.',
+          'Delete on an empty chord beat moves to the previous beat without deleting the measure.'
+        ]
+      },
+      {
+        version: '0.11.12',
         date: '2026-10-29',
         title: "Balanced chord spacing and beat labels",
         bullets: [
@@ -788,6 +798,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-30',
+        title: 'iPad 全螢幕與和弦鍵盤穩定性',
+        bullets: [
+          '原生全螢幕以非輸入框接收翻頁按鍵，避免 iPad 的輸入焦點造成退出，保留踏板與回到前景的恢復。',
+          '記住選定的字母／級數和弦鍵盤，關閉、進出演出模式與重新載入後不再重設。',
+          '空白和弦拍按刪除或 Backspace 返回上一拍，不刪除空白小節。'
+        ]
+      },
+      {
+        version: '0.11.12',
         date: '2026-10-29',
         title: "和弦間距與拍號標籤",
         bullets: [

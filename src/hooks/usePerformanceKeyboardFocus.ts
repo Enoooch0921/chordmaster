@@ -4,17 +4,22 @@ import { useCallback, useEffect, useRef, type RefObject } from 'react';
 export const usePerformanceKeyboardFocus = (
   enabled: boolean,
   capture: RefObject<HTMLElement | null>,
-  overlay: RefObject<HTMLElement | null>
+  overlay: RefObject<HTMLElement | null>,
+  fullscreenTarget = false
 ) => {
   const active = useRef(enabled);
   active.current = enabled;
   const restore = useCallback(() => {
     if (!active.current || document.visibilityState === 'hidden' || document.querySelector('dialog[open]')) return;
-    const target = capture.current ?? overlay.current;
+    // Editable focus can dismiss native fullscreen in iPad WebKit, even with
+    // inputMode=none. Select the overlay before the async entry request settles.
+    const nativeFullscreen = document.fullscreenElement
+      ?? (document as Document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement;
+    const target = fullscreenTarget || nativeFullscreen ? overlay.current : capture.current ?? overlay.current;
     // Do not skip when activeElement is already target: the native responder may
     // have expired after idle/Bluetooth reconnection without a DOM blur event.
     target?.focus({ preventScroll: true });
-  }, [capture, overlay]);
+  }, [capture, overlay, fullscreenTarget]);
   useEffect(() => {
     if (!enabled) return;
     const frame = requestAnimationFrame(restore);

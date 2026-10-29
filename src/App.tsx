@@ -1,3 +1,4 @@
+import { loadChordInputPreference, saveChordInputPreference } from './lib/chordInputPreference';
 import PreviewPasteMenu, { PreviewPasteChoices } from './components/PreviewPasteMenu';
 import { usePreviewKeyboardVisibility } from './hooks/usePreviewKeyboardVisibility';
 import { SwipeActionGroup, SwipeActionRow } from './components/SwipeActionRow';
@@ -1581,6 +1582,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
   const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
   const [previewEditSession, setPreviewEditSession] = useState<PreviewEditSession | null>(null);
+  const [preferredChordInputMode, setPreferredChordInputMode] = useState(loadChordInputPreference);
+  const rememberChordInputMode = React.useCallback((mode: PreviewEditSession['chordInputMode']) => {
+    setPreferredChordInputMode(mode);
+    saveChordInputPreference(mode);
+  }, []);
   const [previewSelectedBars, setPreviewSelectedBars] = useState<PreviewBarSelectionTarget[]>([]);
   const previewSelectionAnchorRef = useRef<PreviewBarSelectionTarget | null>(null);
   const [previewBarClipboard, setPreviewBarClipboard] = useState<PreviewBarClipboard | null>(null);
@@ -4353,10 +4359,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   const syncPreviewChordKeyboardWithDisplayMode = React.useCallback((showNashvilleNumbers: boolean) => {
+    rememberChordInputMode(showNashvilleNumbers ? 'nashville' : 'letters');
     setPreviewEditSession((current) => (
       current ? setPreviewEditChordDisplayMode(current, showNashvilleNumbers) : current
     ));
-  }, []);
+  }, [rememberChordInputMode]);
 
   const handleToggleSongNashvilleMode = () => {
     if (!song) {
@@ -5720,6 +5727,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
 
+    rememberChordInputMode(mode === 'nashville-number-system' ? 'nashville' : 'letters');
     setPreviewEditSession(current => current
       ? setPreviewEditChordInputMode(current, mode === 'nashville-number-system' ? 'nashville' : 'letters')
       : current);
@@ -7435,7 +7443,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   const focusPerformanceKeyboardCapture = usePerformanceKeyboardFocus(
-    isPerformanceMode, performanceKeyboardCaptureRef, performanceOverlayRef
+    isPerformanceMode, performanceKeyboardCaptureRef, performanceOverlayRef,
+    performanceFullscreen.canRequestFullscreen
   );
 
   // Show the performance-mode chrome and (re)arm the 2s idle timer that hides it.
@@ -9090,7 +9099,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         anchorKey,
         anchorRect: findPreviewAnchorRect(anchorKey) ?? current.target.anchorRect
       };
-      let nextSession = createPreviewEditSession({ song: settledSong, target: sectionTarget, inputMode: 'letters' });
+      let nextSession = createPreviewEditSession({ song: settledSong, target: sectionTarget, chordInputMode: current.chordInputMode });
       if (result.created) nextSession = applyPreviewDraft(nextSession, result.song);
       setPreviewEditSession(nextSession);
       setActiveSectionId(section.id);
@@ -9844,7 +9853,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 song: editableSong,
                 target: nextTarget,
                 notationMode: requestedNotationMode ?? 'chords',
-                chordInputMode: navigationSong.showNashvilleNumbers ? 'nashville' : 'letters',
+                chordInputMode: preferredChordInputMode ?? (navigationSong.showNashvilleNumbers ? 'nashville' : 'letters'),
                 cursorByMode: initialCursorByMode
               });
         });
@@ -9870,7 +9879,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     } else {
       focusEditorField(nextSectionIndex, bIdx, fallbackField);
     }
-  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSectionId, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, hasFinePointer, isEditing, isPreviewQuickEditEnabled, lastPreviewNonChordMode, makePreviewTargetAnchorKey, previewEditorDeviceLayout, previewSectionActionTarget, refreshPreviewEditAnchorRect, rememberPreviewNonChordMode]);
+  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSectionId, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, hasFinePointer, isEditing, isPreviewQuickEditEnabled, lastPreviewNonChordMode, makePreviewTargetAnchorKey, previewEditorDeviceLayout, previewSectionActionTarget, refreshPreviewEditAnchorRect, rememberPreviewNonChordMode, preferredChordInputMode]);
 
   const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
     if (!canOpenEditor) {
@@ -14353,7 +14362,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   displayedKey={displayedKey}
                   storageMode={storageMode}
                   onApplyDraft={applyPreviewEditDraft}
-                  onInputModeChange={(mode) => setPreviewEditSession((current) => current ? setPreviewEditChordInputMode(current, mode) : current)}
+                  onInputModeChange={(mode) => {
+                    rememberChordInputMode(mode);
+                    setPreviewEditSession((current) => current ? setPreviewEditChordInputMode(current, mode) : current);
+                  }}
                   onNotationModeChange={handlePreviewNotationModeChange}
                   onNotationCursorChange={handlePreviewNotationCursorChange}
                   onJianpuInputAbsoluteChange={handlePreviewJianpuInputAbsoluteChange}

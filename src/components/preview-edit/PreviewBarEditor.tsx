@@ -790,8 +790,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 	        applyJianpuAction({ type: event.shiftKey ? 'toggle-triplet' : 'toggle-slur' });
       } else if (isChordEditing && event.key === 'Backspace') {
         event.preventDefault();
-        if (displayedChord) deleteLastChordCharacter();
-        else if (!deleteEmptyBarIfPossible()) onNavigate('previous');
+        deleteLastChordCharacter();
       } else if (isChordEditing && event.key === 'Delete') {
         event.preventDefault();
         if (displayedChord) deleteLastChordCharacter();
@@ -894,7 +893,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   };
 
   const deleteLastChordCharacter = () => {
-    if (!displayedChordRun) return;
+    if (!displayedChordRun) {
+      onNavigate('previous');
+      return;
+    }
     const characters = Array.from(displayedChordRun);
     applyDirectChordText(characters.slice(0, -1).join(''));
   };
@@ -1357,7 +1359,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 text-lg`} onClick={() => appendQualityFragment('aug')} aria-label={language === 'zh' ? '加入增和弦' : 'Append augmented'}>+</button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${bassMode ? activeButtonClass : ''}`} onClick={() => setBassMode((value) => !value)} aria-label={language === 'zh' ? '選擇 Slash Bass' : 'Choose slash bass'}>/</button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${deviceLayout === 'phone' ? '!text-[10px]' : ''}`} disabled={bar.chordKeyUnspecified} onClick={() => onInputModeChange(chordInputMode === 'letters' ? 'nashville' : 'letters')} aria-label={chordInputMode === 'letters' ? (language === 'zh' ? '切換為 Nashville' : 'Switch to Nashville') : (language === 'zh' ? '切換為字母和弦' : 'Switch to letter chords')}>{chordInputMode === 'letters' ? '123' : 'ABC'}</button>
-            <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 px-0`} onClick={deleteLastChordCharacter} disabled={!displayedChord} aria-label={language === 'zh' ? '刪除最後一個字元' : 'Delete last character'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
+            <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 px-0`} onClick={deleteLastChordCharacter} aria-label={language === 'zh' ? '刪除最後一個字元' : 'Delete last character'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
           </div>
 
           <div className="grid min-h-0 grid-cols-10 gap-1.5" data-key-surface="utility">
@@ -1942,7 +1944,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             } else if (event.key === 'Backspace' && !displayedChord) {
               event.preventDefault();
               event.stopPropagation();
-              if (!deleteEmptyBarIfPossible()) onNavigate('previous');
+              onNavigate('previous');
             }
           }}
           autoComplete="off"

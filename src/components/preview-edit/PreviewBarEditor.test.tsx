@@ -1554,16 +1554,17 @@ describe('PreviewBarEditor', () => {
     expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].chords[1]).toBe('C1');
   });
 
-  it('deletes the selected bar on Backspace only when the whole bar is empty', () => {
+  it('moves back without removing the measure on Backspace when the whole bar is empty', () => {
     const emptySong: Song = {
       ...song,
       sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [] }] }]
     };
-    const { onStructure } = renderEditor({
+    const { onStructure, onNavigate } = renderEditor({
       session: createPreviewEditSession({ song: emptySong, target, inputMode: 'letters' })
     });
     fireEvent.keyDown(screen.getByRole('textbox', { name: '和弦直接輸入' }), { key: 'Backspace' });
-    expect(onStructure).toHaveBeenCalledWith('delete');
+    expect(onStructure).not.toHaveBeenCalled();
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith('previous');
   });
 
   it('keeps Backspace navigation when the selected chord slot is empty but the bar has content', () => {
@@ -1768,4 +1769,18 @@ it.each(['\\', '|'])('keeps the barline key indicator synchronized when cycling 
     expect(button).toHaveTextContent(label);
     expect(edited.sections[0].bars[0].chords).toEqual(['C']);
   }
+});
+
+
+it.each(['phone', 'tablet', 'desktop'] as const)('moves to the previous beat when deleting an empty chord on %s', async deviceLayout => {
+  const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [] }] }] };
+  const { onNavigate, onStructure, onApplyDraft } = renderEditor({
+    session: createPreviewEditSession({ song: source, target, inputMode: 'letters' }), deviceLayout
+  });
+  const remove = screen.getByRole('button', { name: '刪除最後一個字元' });
+  expect(remove).toBeEnabled();
+  await userEvent.click(remove);
+  expect(onNavigate).toHaveBeenCalledExactlyOnceWith('previous');
+  expect(onStructure).not.toHaveBeenCalled();
+  expect(onApplyDraft).not.toHaveBeenCalled();
 });
