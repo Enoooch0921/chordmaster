@@ -92,3 +92,52 @@ it('allows a small optical correction for slash chords within the same beat boun
   expect(fit.anchor).toBe(80);
   expect(fit.scale).toBe(1);
 });
+
+
+it.each([
+  ['Pre-Chorus / Chorus bar 7', 142.08, [28.3, 37.5, 12.86, 11.07]],
+  ['Tag after the repeat start', 128.8, [28.3, 37.5, 12.86, 11.07]],
+  ['Ending after the repeat end', 142.8, [36.42, 15, 11.54, 15]],
+] as const)('balances visible gaps and preserves beat bounds in %s', (_, width, widths) => {
+  const metrics = widths.map((w, index) => ({anchor: width * (index + .5) / 4, width: w, span: 1}));
+  const before = fitAnchoredChords(metrics, width, {edgePadding: 4});
+  const after = fitAnchoredChords(metrics, width, {edgePadding: 4, balanceSpacing: true});
+  const spread = (fits: typeof after) => {
+    const gaps = fits.slice(1).map((fit, index) => fit.left - fits[index].left - metrics[index].width * fits[index].scale);
+    return Math.max(...gaps) - Math.min(...gaps);
+  };
+  expect(spread(after)).toBeLessThan(spread(before) - 3);
+  after.forEach((fit, index) => {
+    expect(fit.left).toBeGreaterThanOrEqual(3.999);
+    expect(fit.left + metrics[index].width * fit.scale).toBeLessThanOrEqual(width - 3.999);
+    expect(Math.abs(fit.left + metrics[index].width * fit.scale / 2 - metrics[index].anchor)).toBeLessThanOrEqual(Math.min(10, width / 4 * .22) + .001);
+    expect(fit.scale).toBeGreaterThanOrEqual(.85);
+  });
+});
+
+it('leaves a clear gap before the final slash chord without over-condensing the subdivisions', () => {
+  const width = 140.3;
+  const metrics = [.125,.375,.5625,.6875,.875].map((anchor, index) => ({
+    anchor: anchor * width, width: [36.54,15,11.54,24.33,37.48][index], span: [1,1,.5,.5,1][index],
+  }));
+  const fits = fitAnchoredChords(metrics, width, {edgePadding: 4});
+  expect(fits[4].left - (fits[3].left + metrics[3].width * fits[3].scale)).toBeGreaterThanOrEqual(5.999);
+  expect(fits[3].scale).toBeGreaterThan(.6);
+  expect(fits[4].scale).toBe(.8);
+});
+
+
+it('balances the second-beat slash between its neighbors without moving their beat positions', () => {
+  const width = 140.3;
+  const metrics = [.125,.375,.5625,.6875,.875].map((anchor, index) => ({
+    anchor: anchor * width, width: [36.54,15,11.54,24.33,37.48][index], span: [1,1,.5,.5,1][index],
+  }));
+  const original = fitAnchoredChords(metrics, width, {edgePadding: 4});
+  const fits = fitAnchoredChords(metrics.map((metric,index) => ({...metric, continuation: index === 1})), width, {edgePadding: 4});
+  const leftGap = fits[1].left - fits[0].left - metrics[0].width * fits[0].scale;
+  const rightGap = fits[2].left - fits[1].left - metrics[1].width * fits[1].scale;
+  expect(leftGap).toBeCloseTo(rightGap, 4);
+  expect(leftGap).toBeGreaterThan(9);
+  expect(Math.abs(fits[1].left + 15 / 2 - metrics[1].anchor)).toBeLessThanOrEqual(140.3 * .1875 * .22);
+  [0,2,3,4].forEach(index => expect(fits[index]).toEqual(original[index]));
+});

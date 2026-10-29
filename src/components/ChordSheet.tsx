@@ -3508,6 +3508,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                     const canAlignChords = timedEvents.length > 0 && timedEvents.every(entry => !/^(?:0|%|\|)/.test(entry.chord.trim()));
                                     const alignedAnchors = canAlignChords ? chordBeatAnchors(timedEvents, beatsPerBar) : null;
                                     if (alignedAnchors) return <div className="relative">{renderChordBeatTargets()}<NotationAlignedChordRow anchors={alignedAnchors} spans={timedEvents.map((_, index) => chordAttackSpan(timedEvents, index))}
+                                      continuations={timedEvents.map(entry => entry.chord.trim() === '/')}
+                                      balanceSpacing={timedEvents.length === beatsPerBar && timedEvents.every((entry, index) => entry.beat === index && entry.offset === 0)}
                                       labels={timedEvents.map(entry => { const group = timedEvents.filter(item => item.beat === entry.beat); return chordBeatGroupLabels(group)[group.indexOf(entry)]; })}
                                       className={contentLeftInsetClass}>
                                       {timedEvents.map((entry, index) => <div key={index}

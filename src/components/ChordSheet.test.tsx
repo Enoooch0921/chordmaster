@@ -2911,3 +2911,19 @@ it.each([
   expect(container.querySelector('[data-jianpu-onset="0"]')).toBeInTheDocument();
   expect(JSON.stringify(source)).toBe(before);
 });
+
+
+it('balances full beats near repeat bars while retaining the timed subdivision layout', () => {
+  const source: Song = {...song, sections:[{id:'s',title:'Tag',bars:[
+    {id:'repeat',chords:['Bm7','A/C#>','D>','E>'],repeatStart:true},
+    {id:'end-repeat',chords:['E'],repeatEnd:true},
+    {id:'ending',chords:['1sus2','/','1<','/']},
+    {id:'split',chords:['Amaj7<','/','A','A/C#'],chordSubdivisions:[{beat:2,offset:.5,chord:'Bm'}]},
+  ]}]};
+  const before=JSON.stringify(source);
+  const {container}=render(<ChordSheet song={source} currentKey="A" language="zh"/>);
+  for(const id of ['repeat','ending']) expect(container.querySelector(`[data-preview-clipboard-bar="${id}"] [data-chord-balanced-spacing]`)).toBeInTheDocument();
+  expect(container.querySelector('[data-preview-clipboard-bar="split"] [data-chord-balanced-spacing]')).toBeNull();
+  expect(container.querySelectorAll('[data-chord-marker="pull"]')).toHaveLength(3);
+  expect(JSON.stringify(source)).toBe(before);
+});

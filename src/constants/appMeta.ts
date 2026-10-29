@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-29',
+        title: "Balanced chord spacing and beat labels",
+        bullets: [
+          "Balance visual spacing between chords of different widths with bounded beat-position adjustments and modest condensation, preserving space beside barlines and repeat signs.",
+          "Keep subdivisions separated from the following full-beat chord, center labels such as 3 and 3& above their chords, and balance whitespace around continuation slashes.",
+          "Exclude anticipation arrows from chord-width measurements while retaining accidental overhangs; preserve rhythm notes, melody and stored beat positions."
+        ]
+      },
+      {
+        version: '0.11.11',
+        date: '2026-10-29',
         title: "Stable chord beat positions",
         bullets: [
           "Place chords on a full-measure beat grid so eighth, quarter, dotted and sustained notes no longer shift harmony horizontally.",
@@ -778,6 +788,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-29',
+        title: "和弦間距與拍號標籤",
+        bullets: [
+          "改善不同長度和弦的視覺間距，在原拍位附近微調並適度壓縮長和弦，保留小節線與反覆線旁的留白。",
+          "拍內和弦與後方整拍和弦保留清楚間隔，3、3& 等拍號標籤跟隨對應和弦置中；延續斜線平衡左右空隙。",
+          "提前進拍箭頭不再影響和弦寬度計算，升降記號仍納入避讓；節奏音符、旋律及原始拍點維持不變。"
+        ]
+      },
+      {
+        version: '0.11.11',
         date: '2026-10-29',
         title: "和弦拍位與譜列一致性",
         bullets: [
