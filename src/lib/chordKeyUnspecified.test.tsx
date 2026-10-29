@@ -22,7 +22,7 @@ describe('source harmony with unspecified key',()=>{
   expect([...unknown().querySelectorAll('[data-untimed-chord]')].map(x=>x.textContent)).toEqual(['1/3','5']);
   expect(container.querySelectorAll('[data-chord-key-unspecified]')).toHaveLength(2);
   expect(container.querySelector('[data-preview-clipboard-bar="known"]')?.textContent).toContain(numbers?'1':'A');
-  const events=()=>[...container.querySelectorAll('[data-preview-clipboard-bar="tag"] [data-chord-event-position]')].map(x=>x.textContent?.replace(/\s/g,''));
+  const events=()=>[...container.querySelectorAll('[data-preview-clipboard-bar="tag"] [data-chord-event-position]')].map(x=>`${x.getAttribute('aria-label') ?? ''}${x.textContent?.replace(/\s/g,'')}`);
   expect(events().join('')).toContain('3&5');
   const tag=container.querySelector('[data-preview-clipboard-bar="tag"]')!;
   expect(tag.querySelector('details')?.textContent).toContain('Source degrees; destination unmarked');

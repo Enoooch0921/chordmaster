@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-29',
+        title: "Stable chord beat positions",
+        bullets: [
+          "Place chords on a full-measure beat grid so eighth, quarter, dotted and sustained notes no longer shift harmony horizontally.",
+          "Use consistent chord positions and baselines with melody, rhythm or harmony alone, including incomplete, sparse and deleted notation.",
+          "Preserve subdivisions, collision fitting and chord compression, empty-beat selection, editing carets and anticipation markers."
+        ]
+      },
+      {
+        version: '0.11.10',
+        date: '2026-10-29',
         title: "Preview editing, keyboard controls and notation alignment",
         bullets: [
           "Drag and resize the desktop notation keyboard, remember its placement and scale, and dock the keyboard on phones and tablets while keeping the edited measure visible.",
@@ -768,6 +778,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-29',
+        title: "和弦拍位與譜列一致性",
+        bullets: [
+          "和弦改依完整小節的拍位排列，八分音符、四分音符、附點及延長音不再造成和弦前後偏移。",
+          "有旋律、有節奏與只有和弦的小節共用拍位與高度；旋律尚未輸入完整、留空或刪除時，和弦位置保持穩定。",
+          "保留拍內和弦的細分位置、長和弦避讓與壓縮，以及空拍選取、編輯游標和提前進拍記號。"
+        ]
+      },
+      {
+        version: '0.11.10',
         date: '2026-10-29',
         title: "編譜鍵盤、批量貼上與和弦對齊",
         bullets: [

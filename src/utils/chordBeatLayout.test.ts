@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chordBeatGroupLabels, chordBeatTrackWeights, chordRhythmAnchors, chordJianpuAnchors, fitAnchoredChords } from './chordBeatLayout';
+import { chordBeatGroupLabels, chordBeatTrackWeights, chordBeatAnchors, fitAnchoredChords } from './chordBeatLayout';
 
 const dense = [0, .25, .5, .75].map(offset => ({beat: 2, offset, chord: 'A'}));
 
@@ -31,32 +31,23 @@ describe('chord beat grouping', () => {
 });
 
 
-describe('notation-aligned chord anchors', () => {
-  const attacks = [0, 1, 2, 2.5, 3].map(position => ({ beat: Math.floor(position), offset: position % 1, chord: 'G' }));
-  it('maps the supplied G / G Am G/B example to the actual rhythm heads', () => {
-    expect(chordRhythmAnchors(attacks, 'er e q e e q', '4/4')).toEqual([.0625, .375, .5625, .6875, .875]);
+describe('fixed chord beat anchors', () => {
+  it('keeps full beats equally spaced regardless of the harmony or notation duration', () => {
+    const attacks = ['G', '/', 'Am', 'G/B'].map((chord, beat) => ({ beat, offset: 0, chord }));
+    expect(chordBeatAnchors(attacks, 4)).toEqual([.125, .375, .625, .875]);
+    expect(chordBeatAnchors([attacks[0]], 4)).toEqual([.125]);
   });
-  it.each(['w', 'h h', 'q. e q q', 'bad', 'q q q q q'])('retains the original placement for long or invalid rhythm %s', notation => {
-    expect(chordRhythmAnchors([attacks[0]], notation, '4/4')).toBeNull();
+  it('shares the third beat between G and Am while preserving surrounding beat centers', () => {
+    const attacks = [0, 1, 2, 2.5, 3].map(position => ({ beat: Math.floor(position), offset: position % 1, chord: 'G' }));
+    expect(chordBeatAnchors(attacks, 4)).toEqual([.125, .375, .5625, .6875, .875]);
   });
-  it('aligns entered notes immediately and keeps missing attacks in their own beat', () => {
-    expect(chordRhythmAnchors(attacks, 'q', '4/4')).toEqual([.125, .375, .5625, .6875, .875]);
-    expect(chordRhythmAnchors(attacks, 'q q q q', '4/4')).toEqual([.125, .375, .625, .6875, .875]);
-    expect(chordJianpuAnchors(attacks, '1 | x | x | x', '4/4')).toEqual([.125, .375, .5625, .6875, .875]);
+  it('preserves sixteenth order and isolated offbeat positions', () => {
+    expect(chordBeatAnchors(dense, 4)).toEqual([.53125, .59375, .65625, .71875]);
+    expect(chordBeatAnchors([{beat: 2, offset: .5, chord: 'C'}], 4)).toEqual([.6875]);
   });
-  it('aligns melody beat subdivisions using automatic duration shorthand', () => {
-    expect(chordJianpuAnchors(attacks, '1 | 2 | 34 | 5', '4/4')).toEqual([.125, .375, .5625, .6875, .875]);
-  });
-  it('retains the first-position chord for a melody sustained across the bar', () => {
-    expect(chordJianpuAnchors([attacks[0]], '1 | - | - | -', '4/4')).toBeNull();
-  });
-  it('does not align a chord to an invisible melody placeholder', () => {
-    expect(chordJianpuAnchors([attacks[0]], 'x | 2 | 3 | 4', '4/4')).toBeNull();
-  });
-  it('uses the eighth-note beat capacity in compound meter', () => {
-    const positions = [0, 1, 2, 3, 4, 5].map(beat => ({beat, offset:0, chord:'C'}));
-    expect(chordRhythmAnchors(positions, 'e e e e e e', '6/8')).toEqual(positions.map(({beat}) => (beat + .5) / 6));
-    chordJianpuAnchors(positions, '123 | 456', '6/8')!.forEach((value, index) => expect(value).toBeCloseTo((index + .5) / 6));
+  it.each([3, 6])('uses all %i beats in other meters', beats => {
+    const attacks = Array.from({length: beats}, (_, beat) => ({beat, offset: 0, chord: 'C'}));
+    expect(chordBeatAnchors(attacks, beats)).toEqual(attacks.map(({beat}) => (beat + .5) / beats));
   });
 });
 

@@ -1,6 +1,3 @@
-import { getCompactRhythmCenterUnit } from '../lib/rhythmGeometry';
-import { parseRhythmNotation, rhythmUnitsEqual } from './rhythmUtils';
-import { applyJianpuAutoDurationShorthand, findJianpuNoteRanges, findJianpuPlaceholderRanges, getJianpuDurationUnits, splitJianpuTokens } from './jianpuUtils';
 import { chordEventLabel } from './chordSubdivisions';
 
 type ChordAttack = { beat: number; offset: number; chord: string };
@@ -28,53 +25,12 @@ export function chordAttackSpan(events: readonly ChordAttack[], index: number) {
   return next?.beat === event.beat ? next.offset - event.offset : 1 - event.offset;
 }
 
-/** Missing notation keeps a provisional beat position while entered attacks align immediately. */
-function completePartialAnchors(anchors: (number | null)[], events: readonly ChordAttack[], beats: number) {
-  return anchors.some(anchor => anchor !== null)
-    ? anchors.map((anchor, index) => anchor ?? (events[index].beat + events[index].offset + chordAttackSpan(events, index) / 2) / beats)
-    : null;
-}
-
-/** Sustained-only and invalid notation retain their original engraving. */
-export function chordRhythmAnchors(events: readonly ChordAttack[], notation: string, timeSignature: string): number[] | null {
-  const parsed = parseRhythmNotation(notation, timeSignature);
-  if (!events.length || parsed.invalidTokens.length || parsed.overflow) return null;
-  const chordBeatUnits = parsed.barUnits / (parseInt(timeSignature, 10) || 4);
-  const anchors = events.map(attack => {
-    const note = parsed.events.find(event => !event.isHidden && rhythmUnitsEqual(event.startUnit, (attack.beat + attack.offset) * chordBeatUnits));
-    return note && note.durationUnits <= chordBeatUnits ? getCompactRhythmCenterUnit(note) / parsed.barUnits : null;
-  });
-  return completePartialAnchors(anchors, events, parseInt(timeSignature, 10) || 4);
-}
-
-/** Use the same token capacity, shorthand and carry rules as the melody renderer. */
-export function chordJianpuAnchors(events: readonly ChordAttack[], notation: string, timeSignature: string): number[] | null {
-  const { beatUnits, barUnits } = parseRhythmNotation('', timeSignature);
-  const chordBeatUnits = barUnits / (parseInt(timeSignature, 10) || 4);
-  const tokens = notation.includes('|') ? notation.split('|').map(token => token.trim()) : splitJianpuTokens(notation);
-  if (!events.length || !tokens.length) return null;
-  const notes: { onset: number; duration: number; center: number }[] = [];
-  let carry = 0;
-  tokens.forEach((token, beat) => {
-    const raw = findJianpuNoteRanges(token);
-    const gaps = findJianpuPlaceholderRanges(token);
-    const parsed = applyJianpuAutoDurationShorthand(raw, raw.length + gaps.length, gaps.length > 0, beatUnits);
-    const items = [...parsed, ...gaps].sort((a, b) => a.start - b.start);
-    let cursor = carry;
-    items.forEach(item => {
-      const duration = 'units' in item ? item.units : getJianpuDurationUnits(item.duration, item.dotted, item.triplet);
-      const onset = (beat * beatUnits + cursor) / chordBeatUnits;
-      if ('pitch' in item && item.pitch !== '-') notes.push({ onset, duration: duration / chordBeatUnits, center: (beat + (cursor + duration / 2) / beatUnits) / tokens.length });
-      else if ('pitch' in item && item.pitch === '-' && notes.length) notes[notes.length - 1].duration = onset + duration / chordBeatUnits - notes[notes.length - 1].onset;
-      cursor += duration;
-    });
-    carry = Math.max(0, cursor - beatUnits);
-  });
-  const anchors = events.map(attack => {
-    const note = notes.find(note => rhythmUnitsEqual(note.onset, attack.beat + attack.offset));
-    return note && note.duration <= 1 ? note.center : null;
-  });
-  return completePartialAnchors(anchors, events, parseInt(timeSignature, 10) || 4);
+/** Center harmony in its beat or subdivision, independently of note durations.
+ * Unsplit beats keep their midpoint; split beats share that same fixed beat cell.
+ * Always use the measure meter, even while melody/rhythm entry is incomplete.
+ */
+export function chordBeatAnchors(events: readonly ChordAttack[], beats: number): number[] {
+  return events.map((event, index) => (event.beat + event.offset + chordAttackSpan(events, index) / 2) / beats);
 }
 
 /** Center the complete chord on its attack; borrow nearby whitespace before shrinking.

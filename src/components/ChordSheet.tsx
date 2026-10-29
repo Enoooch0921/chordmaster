@@ -11,7 +11,7 @@ import { isClosedBar } from '../utils/closedBar';
 import { getChordPassEvents } from '../utils/chordPassVariants';
 import { getChordEvents, chordEventLabel } from '../utils/chordSubdivisions';
 import NotationAlignedChordRow from './NotationAlignedChordRow';
-import { chordBeatGroupLabels, chordBeatTrackWeights, chordRhythmAnchors, chordJianpuAnchors, chordAttackSpan } from '../utils/chordBeatLayout';
+import { chordBeatGroupLabels, chordBeatTrackWeights, chordBeatAnchors, chordAttackSpan } from '../utils/chordBeatLayout';
 import { getChordBeatOffset, chordBeatPositionLabel } from '../utils/chordBeatOffsets';
 import RhythmVoiceStack from './RhythmVoiceStack';
 import { visibleRhythmVoices } from '../utils/rhythmVoices';
@@ -3497,38 +3497,32 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                         const empty = !timedEvents.some(entry => entry.beat === beat && entry.subdivisionIndex === null);
                                         return <div key={beat} data-preview-slot-hit data-preview-slot-index={beat} data-preview-hover-field="chords"
                                           data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id}|chords|${beat}`}
-                                          className={`relative cursor-pointer rounded-[4px] ${selected ? PREVIEW_CHORD_SLOT_ACTIVE_CLASS : ''}`}
+                                          className={`relative pointer-events-auto z-10 cursor-pointer rounded-[4px] ${selected ? PREVIEW_CHORD_SLOT_ACTIVE_CLASS : ''}`}
                                           onClick={event => { event.stopPropagation(); emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords', beat); }}>
                                           {selected && empty && <PreviewChordInputCaret className="absolute bottom-[4px] left-[5px]" />}
                                         </div>;
                                       })}
                                     </div> : null;
-                                    const alignmentRhythm = bar.rhythm?.trim() ? bar.rhythm : extraVoices[0]?.rhythm;
-                                    const alignmentRiff = hasVisiblePreviewRiff(previewRiffNotation) ? previewRiffNotation : extraRiffVoices[0]?.notation;
-                                    const canAlignChords = timedEvents.every(entry => !/^(?:0|%|\|)/.test(entry.chord.trim()));
-                                    const rhythmAnchors = canAlignChords && showBottomRhythmLane && alignmentRhythm
-                                      ? chordRhythmAnchors(timedEvents, alignmentRhythm, effectiveTimeSignature) : null;
-                                    // A long rhythm note supplies no discrete beat anchor. Use melody attacks
-                                    // when present, so a whole-note Am still lines up with a first-beat C.
-                                    const melodyAnchors = canAlignChords && !rhythmAnchors && alignmentRiff
-                                      ? chordJianpuAnchors(timedEvents, alignmentRiff, effectiveTimeSignature) : null;
-                                    // Subdivided harmony keeps its clean beat layout even without notation below.
-                                    const beatAnchors = canAlignChords && !alignmentRhythm && !alignmentRiff && bar.chordSubdivisions?.length
-                                      ? timedEvents.map((entry, index) => (entry.beat + entry.offset + chordAttackSpan(timedEvents, index) / 2) / beatsPerBar) : null;
-                                    const alignedAnchors = rhythmAnchors ?? melodyAnchors ?? beatAnchors;
-                                    const alignmentMode = rhythmAnchors ? 'rhythm' : melodyAnchors ? 'jianpu' : 'beats';
-                                    if (alignedAnchors) return <div className="relative">{renderChordBeatTargets()}<NotationAlignedChordRow anchors={alignedAnchors} positions={timedEvents.map(entry => entry.beat + entry.offset)} spans={timedEvents.map((_, index) => chordAttackSpan(timedEvents, index))} notationMode={alignmentMode}
+                                    // The harmony grid does not follow the duration-centered notation heads.
+                                    // Keep special rest/repeat symbols and unmetered passages on their engraving path.
+                                    const canAlignChords = timedEvents.length > 0 && timedEvents.every(entry => !/^(?:0|%|\|)/.test(entry.chord.trim()));
+                                    const alignedAnchors = canAlignChords ? chordBeatAnchors(timedEvents, beatsPerBar) : null;
+                                    if (alignedAnchors) return <div className="relative">{renderChordBeatTargets()}<NotationAlignedChordRow anchors={alignedAnchors} spans={timedEvents.map((_, index) => chordAttackSpan(timedEvents, index))}
                                       labels={timedEvents.map(entry => { const group = timedEvents.filter(item => item.beat === entry.beat); return chordBeatGroupLabels(group)[group.indexOf(entry)]; })}
                                       className={contentLeftInsetClass}>
                                       {timedEvents.map((entry, index) => <div key={index}
                                         data-chord-event-position={chordEventLabel(entry.beat, entry.offset)}
+                                        aria-label={chordEventLabel(entry.beat, entry.offset)}
+                                        data-chord-beat-offset={entry.offset || undefined}
+                                        data-chord-beat-position={entry.offset ? chordEventLabel(entry.beat, entry.offset) : undefined}
                                         data-chord-event-kind={entry.subdivisionIndex === null ? 'primary' : 'additional'}
                                         data-preview-owner-slot={entry.subdivisionIndex === null ? entry.beat : undefined}
                                         className="relative flex h-[24px] min-w-max items-end"
                                         onClick={event => { event.stopPropagation(); emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords', entry.beat, entry.rawIndex ?? undefined); }}>
-                                        <span className="sr-only">{chordEventLabel(entry.beat, entry.offset)}</span>
                                         {entry.chord ? <FormattedChord chordString={displayBarChord(entry.chord)} compactModifier={compactModifier} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily}
-                                          color={entry.rawIndex === null ? undefined : getChordMarkTextColor(bar, entry.rawIndex)} specialLabel={entry.rawIndex === null ? undefined : getChordSpecialLabel(bar, entry.rawIndex, language)} /> : <PreviewChordInputCaret />}
+                                          color={entry.rawIndex === null ? undefined : getChordMarkTextColor(bar, entry.rawIndex)} specialLabel={entry.rawIndex === null ? undefined : getChordSpecialLabel(bar, entry.rawIndex, language)}
+                                          avoidEndingCollision={Boolean(bar.ending && entry.beat === 0)} /> : <PreviewChordInputCaret />}
+                                        {entry.chord && entry.subdivisionIndex === null && isActiveChordEditBar && resolvedActiveChordSlot?.slotIndex === entry.beat && <PreviewChordInputCaret className="absolute bottom-px -right-[3px]" />}
                                       </div>)}
                                     </NotationAlignedChordRow></div>;
 
