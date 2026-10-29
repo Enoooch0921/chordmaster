@@ -50,10 +50,10 @@ it('keeps late chord ink in its span while retaining the exact beat label',()=>{
   const anchor=container.querySelector('[data-chord-beat-offset="0.5"]') as HTMLElement;
   expect(anchor.dataset.chordBeatPosition).toBe('3&');
   expect((anchor.querySelector('[data-chord-beat-label]') as HTMLElement).style.left).toBe('calc(50% + 3px)');
-  expect((anchor.children[1].firstElementChild as HTMLElement).style.transform).toBe('translateX(6px) scaleX(1)');
+  expect((anchor.querySelector('[data-chord-fit-slot]') as HTMLElement).style.getPropertyValue('--chord-fit-inset')).toBe('6px');
   cleanup();natural.mockReturnValue(12);
   const shorter=render(<ChordSheet song={s} currentKey="E" language="zh"/>);
   const next=shorter.container.querySelector('[data-chord-beat-offset="0.5"]') as HTMLElement;
-  expect((next.children[1].firstElementChild as HTMLElement).style.transform).toBe('translateX(22px) scaleX(1)');
+  expect((next.querySelector('[data-chord-fit-slot]') as HTMLElement).style.getPropertyValue('--chord-fit-inset')).toBe('22px');
  } finally {cleanup();width.mockRestore();natural.mockRestore();}
 });

@@ -42,6 +42,7 @@ import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import BeatSlashGlyph from './BeatSlashGlyph';
 import ChordTimingArrow from './ChordTimingArrow';
+import { ChordFitScope, ChordFitGrid, FittedBeatChord } from './ChordFitGrid';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getJianpuOpenPhraseCount, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { hasMeaningfulChordContent, hasVisibleChordTokens } from '../utils/barUtils';
 import { getChordDisplaySlotEntries, getChordDisplaySlotOwnership } from '../utils/chordSlots';
@@ -236,7 +237,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
       <div className={`relative inline-flex min-w-0 ${color ? 'chord-colorized' : ''}`} style={markStyle}>
         {content}
         {specialLabel && (
-          <span className="pointer-events-none absolute -right-2.5 -top-3 z-30 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-amber-300 bg-amber-100 px-[3px] text-[8px] font-black leading-none text-amber-800 shadow-[0_1px_2px_rgba(146,64,14,0.16)]">
+          <span data-chord-fit-decoration className="pointer-events-none absolute -right-2.5 -top-3 z-30 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-amber-300 bg-amber-100 px-[3px] text-[8px] font-black leading-none text-amber-800 shadow-[0_1px_2px_rgba(146,64,14,0.16)]">
             {specialLabel}
           </span>
         )}
@@ -330,7 +331,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   const renderModifiers = () => (
     <>
       {fermata && (
-        <div className={fermataWrapperClass}>
+        <div data-chord-fit-decoration className={fermataWrapperClass}>
           <span
             className="font-rhythm text-[22px] leading-none text-gray-900 select-none whitespace-pre"
             style={{ fontVariantLigatures: 'normal', fontFeatureSettings: '"liga" 1, "calt" 1' }}
@@ -341,7 +342,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
         </div>
       )}
       {accent && (
-        <div className={accentWrapperClass}>
+        <div data-chord-fit-decoration className={accentWrapperClass}>
           <svg viewBox="0 0 24 24" className="w-full h-full text-gray-900" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M6 8l12 4-12 4" />
           </svg>
@@ -2158,7 +2159,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
   // geometry transitions on its rows animate those ancestor measurements,
   // making chords and barlines drift inside otherwise stationary paper.
   return (
-    <div className="flex flex-col gap-8 print:gap-0">
+    <ChordFitScope className="flex flex-col gap-8 print:gap-0">
       {sectionDrag && typeof document !== 'undefined' && createPortal(
         <div
           data-preview-section-drag-ghost
@@ -3505,10 +3506,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                       ? occupiedChordAnchors[0]
                                       : null;
                                     const renderBeatSlotChordGrid = (className: string) => (
-                                      <div
+                                      <ChordFitGrid
+                                        evenSpacing={occupiedChordAnchors.length === beatsPerBar && occupiedChordAnchors.every(anchor => anchor.span === 1 && anchor.chord.trim() !== '/' && !getChordBeatOffset(bar, anchor.chordIndex))}
                                         data-preview-hover-field={onElementClick ? 'chords' : undefined}
                                         className={className}
-                                        style={{ gridTemplateColumns: `repeat(${beatsPerBar}, minmax(0, 1fr))` }}
+                                        style={{ gridTemplateColumns: `var(--chord-fit-columns, repeat(${beatsPerBar}, minmax(0, 1fr)))` }}
                                         onClick={(event) => emitElementClick(event, row.sIdx, row.startBIdx + bIdx, 'chords')}
                                       >
                                         {Array.from({ length: beatsPerBar }, (_, slotIndex) => {
@@ -3558,25 +3560,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                 };
                                               })
                                             : fullRenderedAnchors;
-                                          const meaningfulRenderedAnchors = renderedAnchors.filter((anchor) => anchor.trimmedChord !== '/');
-                                          const hasLongChordInBar = meaningfulRenderedAnchors.some((anchor) => (
-                                            anchor.trimmedChord !== '/'
-                                            && (anchor.renderedChord.includes('/') || anchor.renderedChord.length >= 6)
-                                          ));
-                                          const shouldUniformCompress = hasLongChordInBar && meaningfulRenderedAnchors.length >= 3;
-                                          const longestChordLength = meaningfulRenderedAnchors.reduce((maximum, anchor) => (
-                                            Math.max(maximum, anchor.renderedChord.length)
-                                          ), 0);
-                                          const uniformChordMaxScale = shouldUniformCompress
-                                            ? longestChordLength >= 8
-                                              ? 0.72
-                                              : longestChordLength >= 7
-                                                ? 0.74
-                                                : 0.76
-                                            : 1;
-
                                           return renderedAnchors.map((anchor) => {
-                                            const { renderedChord, trimmedChord } = anchor;
+                                            const { renderedChord } = anchor;
                                             const beatOffset = getChordBeatOffset(bar, anchor.chordIndex);
                                             const isSelectedChord = Boolean(
                                               resolvedActiveChordSlot
@@ -3584,16 +3569,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                               && resolvedActiveChordSlot.barId === bar.id
                                               && resolvedActiveChordSlot.slotIndex === anchor.slotIndex
                                             );
-                                            const isSlashPlaceholder = trimmedChord === '/';
-                                            const hasRoomToBreathe = !isSlashPlaceholder && (anchor.slotsUntilNext ?? 1) >= 2;
                                             // Free space up to the next chord is engraving room,
                                             // not additional beat ownership or a different onset.
                                             const engravingSpan = Math.max(anchor.span, anchor.slotsUntilNext);
-                                            const maxScale = isSlashPlaceholder
-                                              ? 1
-                                              : hasRoomToBreathe
-                                                ? 1
-                                                : uniformChordMaxScale;
 
 	                                            return (
 	                                              <div
@@ -3611,15 +3589,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                 }}
                                               >
                                                 {beatOffset && <span data-chord-beat-label style={{ left: `calc(${beatOffset / engravingSpan * 100}% + 3px)` }} className="pointer-events-none absolute -top-[5px] text-[8px] font-medium leading-none text-slate-600">{chordBeatPositionLabel(anchor.slotIndex, beatOffset)}</span>}
-                                                <AutoShrink
-                                                  align="left"
+                                                <FittedBeatChord
                                                   startOffsetFraction={beatOffset ? beatOffset / engravingSpan : 0}
-                                                  minScale={0}
-                                                  fitNarrow
-	                                                  maxScale={maxScale}
-	                                                  overflowVisible
-	                                                  shrinkAxis="x-only"
-	                                                  className="h-[24px] items-end"
 	                                                >
 	                                                  <div className="pointer-events-auto inline-flex min-w-0 origin-center items-end leading-none">
 	                                                    <FormattedChord
@@ -3634,12 +3605,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
                                                     />
                                                     {isSelectedChord && <PreviewChordInputCaret className="mb-px ml-px" />}
                                                   </div>
-                                                </AutoShrink>
+                                                </FittedBeatChord>
                                               </div>
                                             );
                                           });
                                         })()}
-                                      </div>
+                                      </ChordFitGrid>
                                     );
                                     const hasCenteredPercentRepeat = occupiedChordAnchors.length === 1 && occupiedChordAnchors[0].chord.trim() === '%';
                                     const isCenteredSpecialSelected = Boolean(
@@ -3970,7 +3941,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
           </div>
         </div>
       )})}
-    </div>
+    </ChordFitScope>
   );
 };
 

@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-29',
+        title: "Even chord spacing and independent measure fitting",
+        bullets: [
+          "Balance four-on-the-beat chord spacing using facing glyph outlines, including raised extensions and accidentals.",
+          "Keep the original chord height and notation; fit each measure independently so a long chord cannot condense neighboring measures.",
+          "Preserve subdivision timing, score layout, and PDF fitting."
+        ]
+      },
+      {
+        version: '0.11.7',
+        date: '2026-10-29',
         title: 'Remove legacy songs from setlists',
         bullets: [
           'Fix removal failures caused by defaults added when loading older scores, including the only song in a setlist.',
@@ -737,6 +747,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-29',
+        title: "和弦間距與小節獨立壓縮",
+        bullets: [
+          "調整一拍一個和弦時的視覺間距，將上標與升降記號一起納入計算。",
+          "保留原本字高與和弦寫法，每個小節獨立壓縮，避免長和弦連帶壓扁其他小節。",
+          "維持細分拍位置、原譜面結構與 PDF 排版。"
+        ]
+      },
+      {
+        version: '0.11.7',
         date: '2026-10-29',
         title: '修正舊版歌曲移出歌單失敗',
         bullets: [
