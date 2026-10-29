@@ -51,7 +51,7 @@ import {
   inspectSharedSongImport as inspectEdgeSharedSongImport,
   resolveShareLink as resolveEdgeShareLink
 } from './sharing';
-import { supabase } from './supabase';
+import { checkSupabaseConnection, supabase } from './supabase';
 import { compactHistoryChange, historyFieldPatch, historySignature, type WorkspaceHistoryEntry, type HistoryRpcPatch, type HistoryTrashResource } from './workspaceHistory';
 import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
 import { normalizeTeamManagementScope } from './teamScope';
@@ -277,6 +277,8 @@ export interface SetlistSaveOptions {
 }
 
 export interface WorkspaceRepository {
+  /** Optional for local adapters; confirms service reachability, not saved content. */
+  checkConnection?(signal: AbortSignal): Promise<void>;
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   loadLibraryWorkspace(libraryId: string): Promise<WorkspaceSnapshot>;
   loadLibraryContent(libraryId: string, signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>>;
@@ -1599,6 +1601,7 @@ export const createCloudRepository = (params: {
   };
 
   return {
+    checkConnection(signal) { return checkSupabaseConnection(signal); },
     async loadJoinedWorkspace() {
       // Background reads must not reload or persist the user's own workspace.
       // A failed project read must not look like revoked membership.

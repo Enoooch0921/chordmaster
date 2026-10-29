@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-29',
+        title: "Independent connection status and print-only continuation labels",
+        bullets: [
+          "Check server reachability at startup, when returning to the App, and periodically without switching songs; separate connection status from cached scores and pending saves.",
+          "Show continuation labels only in PDFs and printed pages, keeping the live score view clear."
+        ]
+      },
+      {
+        version: '0.11.8',
+        date: '2026-10-29',
         title: "Even chord spacing and independent measure fitting",
         bullets: [
           "Balance four-on-the-beat chord spacing using facing glyph outlines, including raised extensions and accidentals.",
@@ -747,6 +756,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-29',
+        title: "獨立連線判斷與列印專用續頁標記",
+        bullets: [
+          "啟動、返回 App 與前景使用時獨立確認伺服器連線，不必切換歌曲；連線狀態與快取版本、待同步變更分開顯示。",
+          "「續」標記僅在 PDF 與列印頁面顯示，App 現場看譜時隱藏。"
+        ]
+      },
+      {
+        version: '0.11.8',
         date: '2026-10-29',
         title: "和弦間距與小節獨立壓縮",
         bullets: [

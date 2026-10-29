@@ -2714,3 +2714,14 @@ describe('ChordSheet preview notation interactions', () => {
     expect(selectedOverlay?.getAttribute('class')).toContain('preview-section-active-chord');
   });
 });
+
+it('keeps continuation text only in a print-specific span on subsequent pages', () => {
+  const source: Song = { ...song, sections: [{ id: 'long', title: 'Verse', bars: Array.from({ length: 80 }, (_, i) => ({ id: `bar-${i}`, chords: ['C'] })) }] };
+  const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+  const pages = container.querySelectorAll('[data-print-page]');
+  expect(pages.length).toBeGreaterThan(1);
+  expect(pages[0].querySelector('[data-sheet-print-only]')).toBeNull();
+  const continuation = pages[1].querySelector('[data-sheet-print-only]');
+  expect(continuation).toHaveTextContent('(續)');
+  expect(continuation?.parentElement?.textContent).toContain(source.title);
+});

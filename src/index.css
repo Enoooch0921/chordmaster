@@ -208,6 +208,11 @@ body.exporting-pdf {
   color-scheme: light;
 }
 
+/* Keep continuation labels in exported pages without showing them on stage. */
+[data-sheet-print-only] { display: none; }
+body.exporting-pdf [data-pdf-capture-root] [data-sheet-print-only] { display: inline; }
+@media print { [data-sheet-print-only] { display: inline; } }
+
 body.exporting-pdf [data-pdf-capture-root] [data-print-preview] {
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;

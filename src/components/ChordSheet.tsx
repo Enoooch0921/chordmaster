@@ -2353,7 +2353,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
             </div>
           ) : (
             <div className="shrink-0 flex justify-between items-center gap-3 mb-4 border-b border-gray-200 pb-2">
-              <span className="min-w-0 truncate text-sm font-bold text-gray-400 uppercase tracking-widest">{song.title} ({copy.continued})</span>
+              <span className="min-w-0 truncate text-sm font-bold text-gray-400 uppercase tracking-widest">{song.title}<span data-sheet-print-only="true"> ({copy.continued})</span></span>
               {pageBadge}
             </div>
           )}

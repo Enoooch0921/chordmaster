@@ -50,6 +50,7 @@ import { invitationTarget } from './lib/invitationJourney';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
 import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
 import { useJoinedWorkspaceRefresh } from './hooks/useJoinedWorkspaceRefresh';
+import { useBackendConnection } from './hooks/useBackendConnection';
 import { useLibraryWorkspaceRefresh } from './hooks/useLibraryWorkspaceRefresh';
 import { useSetlistDisplayModePreference } from './hooks/useSetlistDisplayModePreference';
 import { useSongEditingPresence } from './hooks/useSongEditingPresence';
@@ -2498,26 +2499,37 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       : undefined
   ), [activeDraftNavigationPreviewSong]);
   const workspaceModeBadge = isSetlistMode ? copy.setlistModeBadge : copy.songModeBadge;
-  const isOfflineMode = usingStartupCache || !networkOnline || syncStatus === 'offline'
-    || libraryWorkspaceRefreshFailed || (isJoinedSetlist && joinedWorkspaceRefreshFailed);
+  const backendConnection = useBackendConnection(
+    hasVerifiedAuth ? cloudRepositoryRef.current?.checkConnection : undefined, authenticatedUser?.id ?? ''
+  );
+  // Cache verification and save failures are not evidence of a disconnected service.
+  const fallbackConnection = authStatus === 'offline' || cacheConnectionError || libraryWorkspaceRefreshFailed
+    || (isJoinedSetlist && joinedWorkspaceRefreshFailed) ? 'offline'
+    : usingStartupCache && !cacheRefreshDeferred ? 'checking' : 'online';
+  const connectionMode = !networkOnline ? 'offline' : backendConnection === 'unknown' ? fallbackConnection : backendConnection;
+  const isOfflineMode = connectionMode === 'offline';
   const offlineModeLabel = language === 'zh' ? '離線模式' : 'Offline Mode';
-  const connectionDetail = usingStartupCache
-    ? language === 'zh'
-      ? cacheRefreshDeferred ? '新版本已讀取，退出演出模式後更新。' : cacheConnectionError || authStatus === 'offline' ? '離線模式：可繼續看譜，連線後自動更新。' : '離線模式：背景連線中，確認版本後可編輯。'
-      : cacheRefreshDeferred ? 'Updates will appear after Performance Mode.' : 'Offline Mode: keep viewing scores. Updates resume when connected.'
-    : isOfflineMode ? (language === 'zh' ? '離線模式：保留目前內容，恢復連線後自動同步。' : 'Offline Mode: keeping your current content and reconnecting automatically.')
-      : (language === 'zh' ? 'Online：已連線。' : 'Online: connected.');
-  const connectionIndicator = isAuthenticated ? <span role="status" aria-label={`${language === 'zh' ? '連線狀態' : 'Connection status'}: ${isOfflineMode ? offlineModeLabel : 'Online'}`}
-    data-connection-mode={isOfflineMode ? 'offline' : 'online'} title={connectionDetail}
-    className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-4 ${isOfflineMode ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
-    <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${isOfflineMode ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-    {isOfflineMode ? offlineModeLabel : 'Online'}
+  const connectionLabel = isOfflineMode ? offlineModeLabel : connectionMode === 'checking'
+    ? (language === 'zh' ? '連線中' : 'Connecting') : 'Online';
+  const connectionDetail = isOfflineMode
+    ? (language === 'zh' ? '離線模式：可繼續看譜，保留目前內容，恢復連線後自動同步。' : 'Offline Mode: keep viewing scores. Your content is kept and reconnects automatically.')
+    : connectionMode === 'checking'
+      ? (language === 'zh' ? '正在確認伺服器連線，可繼續看譜。' : 'Checking the server connection. You can keep viewing scores.')
+      : usingStartupCache
+        ? language === 'zh'
+          ? cacheRefreshDeferred ? 'Online：新版本已讀取，退出演出模式後更新。' : 'Online：已連線，背景確認譜面版本中，暫時唯讀。'
+          : cacheRefreshDeferred ? 'Online: updates will appear after Performance Mode.' : 'Online: verifying the score version; temporarily read-only.'
+        : (language === 'zh' ? 'Online：已連線。' : 'Online: connected.');
+  const connectionIndicator = isAuthenticated ? <span role="status" aria-label={`${language === 'zh' ? '連線狀態' : 'Connection status'}: ${connectionLabel}`}
+    data-connection-mode={connectionMode} title={connectionDetail}
+    className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-4 ${connectionMode !== 'online' ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+    <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${connectionMode !== 'online' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+    {connectionLabel}
   </span> : null;
-  const syncStatusLabel = isOfflineMode ? offlineModeLabel : syncStatus === 'saved'
-    ? copy.cloudSyncSaved
-    : syncStatus === 'syncing'
-      ? copy.cloudSyncSyncing
-      : copy.cloudSyncFailed;
+  const syncStatusLabel = isOfflineMode ? offlineModeLabel : syncStatus === 'offline'
+    ? (language === 'zh' ? '等待同步' : 'Waiting to sync')
+    : syncStatus === 'saved' ? copy.cloudSyncSaved
+    : syncStatus === 'syncing' ? copy.cloudSyncSyncing : copy.cloudSyncFailed;
   const syncStatusFeedback = isOfflineMode ? connectionDetail : isTeamWorkspace && syncStatus === 'saved' && !libraryWorkspaceRefreshFailed
     ? `${syncStatusLabel} · ${language === 'zh' ? '歌曲庫自動同步' : 'Song library sync is automatic'}`
     : syncStatusLabel;
