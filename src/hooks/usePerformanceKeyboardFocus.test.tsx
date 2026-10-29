@@ -60,3 +60,15 @@ it('keeps native fullscreen through initial focus, heartbeats and foreground rec
   expect(focus).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(overlay.current);
 });
+
+
+it('never focuses the input on rapid restore calls before the fullscreen request settles', () => {
+  const { focus, overlay, result } = setup(true);
+  // No timers or fullscreenElement yet: these calls model pointer/touch,
+  // blur and foreground callbacks arriving during the asynchronous request.
+  act(() => {
+    for (let i = 0; i < 20; i++) result.current();
+  });
+  expect(focus).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(overlay.current);
+});

@@ -15699,7 +15699,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 willChange: 'transform',
               }}
             >
-	              <div ref={performanceSheetRef} className="performance-sheet" style={{ '--performance-columns': performanceColumns } as React.CSSProperties}>
+	              <div ref={performanceSheetRef} data-print-preview className="performance-sheet" style={{ colorScheme: 'light', '--performance-columns': performanceColumns } as React.CSSProperties}>
 	                {isLyricsMode && isSetlistMode && isLyricsContinuous ? (
                     <LyricsBook title={selectedSetlist?.name ?? ''} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode />
                   ) : isLyricsMode ? (

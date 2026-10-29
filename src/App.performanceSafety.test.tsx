@@ -60,3 +60,15 @@ describe('on-stage offline and page-turner stability', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next page' })); expect(page()).toBe(3);
   }, 15000);
 });
+
+
+it('keeps all performance chart pages inside a light paper scope while the app is dark', async () => {
+  localStorage.setItem('chordmaster.theme-mode.v1', 'dark');
+  await start();
+  expect(document.documentElement).toHaveClass('dark');
+  const paper = document.querySelector('[data-performance-overlay] .performance-sheet')!;
+  const pages = [...paper.querySelectorAll('[data-print-page]')];
+  expect(pages.length).toBeGreaterThan(1);
+  for (const page of pages) expect(page.closest('[data-print-preview]')).toBe(paper);
+  expect(paper).toHaveStyle({ colorScheme: 'light' });
+});

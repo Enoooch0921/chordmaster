@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-30',
+        title: 'Readable performance charts in dark mode',
+        bullets: [
+          'Keep performance charts, lyrics and lyric books on light paper with their original ink colors while the interface remains dark.',
+          'Retain the fullscreen focus fix and cover rapid focus recovery before the entry request completes.'
+        ]
+      },
+      {
+        version: '0.11.13',
+        date: '2026-10-30',
         title: 'Stable iPad fullscreen and chord keyboard',
         bullets: [
           'Keep page-turner focus on a non-editable surface during native fullscreen, including entry and foreground recovery.',
@@ -798,6 +807,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-30',
+        title: '深色主題下的演出譜面',
+        bullets: [
+          '演出和弦譜、歌詞與連續歌詞本維持白紙黑字及原本記譜顏色，操作介面仍可使用深色主題。',
+          '保留全螢幕焦點修復，新增進入請求尚未完成時連續恢復焦點的回歸測試。'
+        ]
+      },
+      {
+        version: '0.11.13',
         date: '2026-10-30',
         title: 'iPad 全螢幕與和弦鍵盤穩定性',
         bullets: [
