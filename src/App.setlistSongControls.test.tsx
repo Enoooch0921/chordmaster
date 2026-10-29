@@ -34,11 +34,11 @@ const rowOrder = () => Array.from(document.querySelectorAll('[data-setlist-song-
 const elementFromPoint = vi.fn();
 const pointer = { pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1, clientX: 40, clientY: 100 };
 const targetRow = (id: string) => elementFromPoint.mockReturnValue(row(id));
-const mount = async () => {
+const mount = async (expectedEntryId = 'entry-second') => {
   saveNavigationLocation(navigationKey(), remembered);
   if (state.cloud) localStorage.setItem('chordmaster.active-library.controls-user.v1', 'team');
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
-  await waitFor(() => expect(row('entry-second')).not.toBeNull());
+  await waitFor(() => expect(row(expectedEntryId)).not.toBeNull());
   await waitFor(() => expect(currentSong()).toBe('entry-first'));
 };
 
@@ -317,6 +317,21 @@ it('uses the same phonetic search when choosing songs to add', async () => {
 });
 
 const liveWorkspace = () => (state.refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0].workspace;
+it('removes the only song while preserving the empty setlist and its source song', async () => {
+  fixture.setlists[0].songs = [fixture.setlists[0].songs[0]];
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  await mount('entry-first');
+  const originalSongs = structuredClone(liveWorkspace().songs);
+  fireEvent.click(within(row('entry-first')).getByRole('button', { name: '歌曲操作：第一首歌曲' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: '移出歌單' }));
+  await waitFor(() => expect(rowOrder()).toEqual([]));
+  expect(liveWorkspace().setlists).toHaveLength(1);
+  expect(liveWorkspace().setlists[0].songs).toEqual([]);
+  expect(liveWorkspace().songs).toEqual(originalSongs);
+  expect(currentSong()).toBeNull();
+  expect(screen.getByRole('button', { name: '加入歌曲' })).toBeEnabled();
+  confirm.mockRestore();
+});
 it('restores the source BPM only in the selected setlist copy', async () => {
   fixture.songs[1].tempo = 92;
   fixture.setlists[0].songs[1].songData = { ...fixture.songs[1], tempo: 110 };

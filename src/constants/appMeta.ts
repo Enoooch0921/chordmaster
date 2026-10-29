@@ -85,6 +85,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-29',
+        title: 'Remove legacy songs from setlists',
+        bullets: [
+          'Fix removal failures caused by defaults added when loading older scores, including the only song in a setlist.',
+          'Preserve the empty setlist, source song, undo and redo, and protection against concurrent score edits.'
+        ]
+      },
+      {
+        version: '0.11.6',
         date: '2026-10-28',
         title: "Invitation journeys, lyric search and clearer editing",
         bullets: [
@@ -728,6 +737,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-29',
+        title: '修正舊版歌曲移出歌單失敗',
+        bullets: [
+          '修正舊譜載入時補齊預設欄位，導致歌曲無法移出歌單的問題，包含歌單只剩一首歌曲的情況。',
+          '保留空歌單、來源歌曲、復原與重做，以及有人同時修改譜面時的保護。'
+        ]
+      },
+      {
+        version: '0.11.6',
         date: '2026-10-28',
         title: "邀請體驗、歌詞搜尋與介面修正",
         bullets: [
