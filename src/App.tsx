@@ -1749,6 +1749,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // Shared selection bag for the add-songs page. Repeated ids intentionally
   // represent duplicate additions of the same library song.
   const [setlistAddSongSelection, setSetlistAddSongSelection] = useState<string[]>([]);
+  const setlistAddSongsResultsRef = useRef<HTMLDivElement>(null);
   const [setlistSortMode, setSetlistSortMode] = useState<SetlistSortMode>(loadSetlistSortPreference);
   const [showArchivedSetlists, setShowArchivedSetlists] = useState(false);
   const [librarySortMode, setLibrarySortMode] = useState<LibrarySortMode>(loadLibrarySortPreference);
@@ -12238,24 +12239,41 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   const desktopSetlistAddSongsPanel = selectedSetlist ? (
     <>
-      <div className="setlist-browser-header">
+      <div className="setlist-add-scroll" data-setlist-add-scroll>
+      <div className="setlist-browser-header setlist-add-header">
+        <div className="setlist-add-heading">
         <button type="button" className="pm-back" aria-label={copy.backToPreview} onClick={()=>{setIsSetlistActionsMenuOpen(false);setSetlistSongSearchQuery('');setSetlistAddSongSelection([]);setSetlistPanelView('detail');}}><ChevronLeft size={17}/>{selectedSetlist.name || copy.untitledSetlist}</button>
         <div className="setlist-browser-title"><h2 tabIndex={-1}>{copy.addToSetlist}</h2></div>
+        </div>
         <p className="pm-header-note">{setlistAddSongSelection.length>0 ? (language==='zh'?`已選 ${setlistAddSongSelection.length} 首`:`${setlistAddSongSelection.length} selected`) : (language==='zh'?'可選多首，同一首可重複加入。':'Select songs; the same song can be added more than once.')}</p>
 
-        <label className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
-          <Search size={14} className="text-gray-400" />
+      </div>
+      <div className="setlist-add-search">
+        <label className="setlist-browser-search">
+          <Search size={16} aria-hidden="true" />
           <input
             type="text"
             value={setlistSongSearchQuery}
-            onChange={(event) => setSetlistSongSearchQuery(event.target.value)}
+            onChange={(event) => {
+              setSetlistSongSearchQuery(event.target.value);
+              const pane = event.currentTarget.closest<HTMLElement>('[data-setlist-add-scroll]');
+              if (pane) pane.scrollTop = 0;
+              if (setlistAddSongsResultsRef.current) setlistAddSongsResultsRef.current.scrollTop = 0;
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
+            enterKeyHint="done"
+            aria-label={copy.searchSongsToAdd}
             placeholder={copy.searchSongsToAdd}
-            className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
           />
         </label>
       </div>
 
-      <div className="setlist-detail-scroll">
+      <div ref={setlistAddSongsResultsRef} className="setlist-detail-scroll" data-setlist-detail-scroll>
         <div className="divide-y divide-gray-200">
           {filteredSongsForSetlist.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-500">
@@ -12340,7 +12358,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         </div>
       </div>
 
-      <div className="border-t border-gray-200 bg-white px-4 py-3">
+      </div>
+      <div className="setlist-add-actions shrink-0 border-t border-gray-200 bg-white px-4 py-3">
         <button
           type="button"
           disabled={setlistAddSongSelection.length === 0}
@@ -12356,7 +12375,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         </button>
       </div>
 
-      {desktopSetlistSavedFooter}
+      {!isPhoneViewport && desktopSetlistSavedFooter}
     </>
   ) : desktopSetlistListPanel;
 
@@ -12704,7 +12723,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             className="min-w-0 min-h-0 flex-1 flex flex-col"
             style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           >
-            {isPhoneViewport && (
+            {isPhoneViewport && !(isSetlistMode && setlistPanelView === 'addSongs') && (
               <MobileSidebarNavigation
                 logoSrc={logoSrc} songsLabel={copy.songs} setlistsLabel={copy.setlists}
                 aboutLabel={copy.about} helpLabel={copy.help} doneLabel={copy.done}
@@ -13128,17 +13147,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
               {isSheetView ? (
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-                  <button
-                    type="button"
-                    onClick={handleToggleEditor}
-                    disabled={!canOpenEditor}
-                    className={`${getMobileTopbarActionClassName(isEditing ? 'primary' : 'default')} shrink-0 disabled:cursor-default disabled:opacity-40`}
-                    title={isEditing ? copy.closeEditor : copy.openEditor}
-                    aria-label={isEditing ? copy.closeEditor : copy.openEditor}
-                  >
-                    <Edit3 size={16} />
-                  </button>
-
                   <button
                     type="button"
                     onClick={handleToggleLyricsMode}
