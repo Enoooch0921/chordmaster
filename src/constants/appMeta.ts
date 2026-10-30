@@ -85,6 +85,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-31',
+        title: 'Smoother keyboards, mobile navigation and dialogs',
+        bullets: [
+          'Coordinate keyboard opening, collapsing and chart avoidance; respect manual scrolling during transitions.',
+          'Add moving selection highlights and brief content transitions to input modes and mobile song, setlist and settings tabs.',
+          'Smooth invitation, sharing and member dialogs, their internal views, and notification, tempo and action menus.',
+          'Release modal focus and scroll locks correctly on close; keep keyboard actions immediate and respect reduced motion.'
+        ]
+      },
+      {
+        version: '0.11.18',
         date: '2026-10-30',
         title: 'Unified keyboards and clearer music notation',
         bullets: [
@@ -850,6 +861,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-31',
+        title: '鍵盤、手機切換與視窗動態',
+        bullets: [
+          '鍵盤呼出、收合與譜面避讓同步過渡，手動捲動時不再繼續拉動譜面。',
+          '輸入模式與手機歌曲／歌單、譜面操作／帳號設定切換加入滑動選取底色與短暫內容過渡。',
+          '邀請、分享、成員管理與內部分頁，以及通知、速度和操作選單加入呼出與退場動畫。',
+          '修正關閉視窗後仍可能卡住焦點與捲動的情況；鍵盤操作維持即時，並支援減少動態效果。'
+        ]
+      },
+      {
+        version: '0.11.18',
         date: '2026-10-30',
         title: '統一鍵盤與樂譜符號排版',
         bullets: [
