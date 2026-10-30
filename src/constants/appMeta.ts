@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-30',
+        title: 'Saved chart context and reliable mobile layouts',
+        bullets: [
+          'Show the last successful chart edit and name changed songs and fields before switching workspaces.',
+          'Keep phone song search usable above the keyboard and remove the phone editor-mode toggle.',
+          'Separate adjacent slash chords and keep full-beat chord sizes consistent within each measure.',
+          'Recalculate app and performance bounds after leaving iPad fullscreen.'
+        ]
+      },
+      {
+        version: '0.11.14',
+        date: '2026-10-30',
         title: 'Readable performance charts in dark mode',
         bullets: [
           'Keep performance charts, lyrics and lyric books on light paper with their original ink colors while the interface remains dark.',
@@ -807,6 +818,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-30',
+        title: '譜面儲存提示與手機、iPad 排版',
+        bullets: [
+          '譜面顯示最後成功編輯時間；切換工作區時列出待儲存歌曲、來源與修改項目。',
+          '手機新增歌曲搜尋保留鍵盤上方的清單空間，並隱藏手機版編輯模式按鈕。',
+          '相鄰斜線和弦保留清楚間距，同一小節的整拍和弦一致縮放。',
+          '退出 iPad 全螢幕後重新校正主畫面與演出畫面的可用高度。'
+        ]
+      },
+      {
+        version: '0.11.14',
         date: '2026-10-30',
         title: '深色主題下的演出譜面',
         bullets: [
