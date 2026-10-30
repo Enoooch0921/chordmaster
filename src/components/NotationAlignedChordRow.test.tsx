@@ -24,3 +24,24 @@ it('moves the subbeat label with its fitted chord center', () => {
   expect(Number.parseFloat(label.style.left)).toBeCloseTo(center, 4);
   expect(Math.abs(center - .6875 * 160)).toBeGreaterThan(.5);
 });
+
+it('reserves a clear separation between the third and fourth beat slash chords', () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(160);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const naturalWidth = Number(this.firstElementChild?.getAttribute('data-natural-width')) || 160;
+    const width = naturalWidth * (Number(this.dataset.fitScale) || 1);
+    const left = Number.parseFloat(this.style.left) || 0;
+    return { x: left, y: 0, left, right: left + width, top: 0, bottom: 24, width, height: 24, toJSON() {} };
+  });
+  const { container } = render(<NotationAlignedChordRow anchors={[.125, .625, .875]} spans={[1,1,1]} labels={['','','']}>
+    <div data-natural-width="38">Em11</div>
+    <div data-natural-width="48">Bm7<span data-chord-bass>/A</span></div>
+    <div data-natural-width="50">F♯<span data-chord-bass>/A♯</span></div>
+  </NotationAlignedChordRow>);
+  const nodes = container.querySelectorAll<HTMLElement>('[data-aligned-chord-content]');
+  const right = Number.parseFloat(nodes[1].style.left) + 48 * Number(nodes[1].dataset.fitScale);
+  expect(Number.parseFloat(nodes[2].style.left) - right).toBeGreaterThanOrEqual(7.999);
+  expect(nodes[1]).toHaveAttribute('data-chord-beat-anchor', '0.625');
+  expect(nodes[2]).toHaveAttribute('data-chord-beat-anchor', '0.875');
+});

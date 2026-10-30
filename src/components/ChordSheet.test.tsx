@@ -2937,3 +2937,18 @@ it('balances full beats near repeat bars while retaining the timed subdivision l
   expect(container.querySelectorAll('[data-chord-marker="pull"]')).toHaveLength(3);
   expect(JSON.stringify(source)).toBe(before);
 });
+
+it.each([false, true])('preserves Chorus bar 3 beat ownership for the adjacent slash chords (numeric=%s)', numeric => {
+  const source: Song = { ...song, title: '即或不然的生命', originalKey: 'D', currentKey: 'D',
+    showNashvilleNumbers: numeric, barRowCount: 2,
+    sections: [{ id: 'chorus', title: 'Chorus', bars: [{ id: 'chorus-3', chords: ['2m11', '', '6m7/5', '3/#5'] }] }]
+  };
+  const before = JSON.stringify(source);
+  const { container } = render(<ChordSheet song={source} currentKey="D" language="zh" />);
+  const nodes = [...container.querySelectorAll<HTMLElement>('[data-preview-owner-slot]')];
+  expect(nodes.map(node => node.dataset.previewOwnerSlot)).toEqual(['0', '2', '3']);
+  expect(nodes.map(node => node.textContent)).toEqual(numeric ? ['2m11','6m7/5','3/#5'] : ['Em11','Bm7/A','F#/A#']);
+  expect(nodes[1].querySelector('[data-chord-bass]')).toBeInTheDocument();
+  expect(nodes[2].querySelector('[data-chord-bass]')).toBeInTheDocument();
+  expect(JSON.stringify(source)).toBe(before);
+});

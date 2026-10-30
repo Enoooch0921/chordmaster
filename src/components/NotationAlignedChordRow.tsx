@@ -50,6 +50,7 @@ export default function NotationAlignedChordRow({ anchors, spans, labels, contin
           ink: { width, boxes },
           span: spans[index],
           continuation: continuations?.[index],
+          slashBass: Boolean(content.querySelector('[data-chord-bass]')),
           opticalOffset: content.querySelector('[data-chord-bass]') ? 2 : 0
         };
       });

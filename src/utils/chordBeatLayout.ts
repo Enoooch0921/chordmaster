@@ -37,11 +37,17 @@ export function chordBeatAnchors(events: readonly ChordAttack[], beats: number):
 /** Center the complete chord on its attack; borrow nearby whitespace before shrinking.
  * Movement stays within 22% of the nearest attack distance (at most 10 chart px).
  */
-export function fitAnchoredChords(metrics: readonly { anchor: number; width: number; span?: number; opticalOffset?: number; continuation?: boolean; ink?: OpticalChord }[], width: number,
+export function fitAnchoredChords(metrics: readonly { anchor: number; width: number; span?: number; opticalOffset?: number; continuation?: boolean; slashBass?: boolean; ink?: OpticalChord }[], width: number,
   options: { edgePadding?: number; balanceSpacing?: boolean } = {}) {
   const edge = Math.min(Math.max(0, options.edgePadding ?? 0), Math.max(0, width / 4));
   // A full-beat chord following subdivisions needs a clearer visual break.
-  const gaps = metrics.map((metric, index) => index > 0 && (metrics[index - 1].span ?? 1) < 1 && (metric.span ?? 1) >= 1 ? 6 : 3);
+  const gaps = metrics.map((metric, index) => {
+    const previous = metrics[index - 1];
+    // Two slash chords on consecutive beats must not read as one long symbol.
+    // Keep the attack bounds and borrow whitespace before condensing either chord.
+    if (previous?.slashBass && metric.slashBass && (previous.span ?? 1) >= 1 && (metric.span ?? 1) >= 1) return 8;
+    return previous && (previous.span ?? 1) < 1 && (metric.span ?? 1) >= 1 ? 6 : 3;
+  });
   let preferred = metrics.map((metric, index) => metric.span && metric.span < 1 ? .5 + .4 * metric.span
     : index > 0 && (metrics[index - 1].span ?? 1) < 1 && metric.width > 24 ? .9 : 1);
   const tolerance = metrics.map((metric, index) => Math.max(0, Math.min(10,

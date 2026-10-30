@@ -141,3 +141,21 @@ it('balances the second-beat slash between its neighbors without moving their be
   expect(Math.abs(fits[1].left + 15 / 2 - metrics[1].anchor)).toBeLessThanOrEqual(140.3 * .1875 * .22);
   [0,2,3,4].forEach(index => expect(fits[index]).toEqual(original[index]));
 });
+
+it.each([100, 120, 140, 160, 200])('keeps adjacent full-beat slash chords distinct in a %ipx measure', width => {
+  // Chorus bar 3: 2m11, empty, 6m7/5, 3/#5. Widths model long slash spellings.
+  const metrics = [.125, .625, .875].map((anchor, index) => ({
+    anchor: anchor * width, width: [38, 48, 50][index], span: 1, slashBass: index > 0,
+  }));
+  const before = JSON.stringify(metrics);
+  const fits = fitAnchoredChords(metrics, width, { edgePadding: 4 });
+  const thirdBeatRight = fits[1].left + metrics[1].width * fits[1].scale;
+  expect(fits[2].left - thirdBeatRight).toBeGreaterThanOrEqual(7.999);
+  fits.forEach((fit, index) => {
+    expect(fit.anchor).toBe(metrics[index].anchor);
+    expect(fit.left).toBeGreaterThanOrEqual(3.999);
+    expect(fit.left + metrics[index].width * fit.scale).toBeLessThanOrEqual(width - 3.999);
+    expect(Math.abs(fit.left + metrics[index].width * fit.scale / 2 - fit.anchor)).toBeLessThanOrEqual(Math.min(10, width / 4 * .22) + .001);
+  });
+  expect(JSON.stringify(metrics)).toBe(before);
+});
