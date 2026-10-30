@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { parseRhythmNotation } from '../utils/rhythmUtils';
-import { buildCompactRhythmGeometry } from './rhythmGeometry';
+import { buildCompactRhythmGeometry, getTaperedRhythmTiePath } from './rhythmGeometry';
+
+it('keeps full tie tips closed while matching the thickness at cross-bar cut points', () => {
+  const start = { x: 10, y: 20 }, end = { x: 30, y: 20 };
+  const a = { x: 16, y: 24 }, b = { x: 24, y: 24 };
+  const numbers = (path: string) => path.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+  const full = numbers(getTaperedRhythmTiePath(start, a, b, end, 1.2));
+  expect(full.slice(0, 2)).toEqual([10, 20]);
+  expect(full.slice(6, 8)).toEqual([30, 20]);
+  expect(full.slice(-2)).toEqual([10, 20]);
+  const outgoing = numbers(getTaperedRhythmTiePath(start, a, b, { x: 30, y: 24 }, 1.2, false, true));
+  const incoming = numbers(getTaperedRhythmTiePath({ x: 10, y: 24 }, a, b, end, 1.2, true, false));
+  expect(outgoing[7] - outgoing[9]).toBeCloseTo(1.2);
+  expect(incoming[1] - incoming.at(-1)!).toBeCloseTo(1.2);
+  expect(outgoing[5]).toBe(outgoing[7]);
+  expect(incoming[3]).toBe(incoming[1]);
+});
 
 const geometryFor = (notation: string, scale = 1) => {
   const parsed = parseRhythmNotation(notation, '4/4');
@@ -48,5 +64,12 @@ describe('compact rhythm geometry', () => {
 
     expect(geometry.triplets[0].showBracket).toBe(true);
     expect(geometry.events[1].event.isRest).toBe(true);
+  });
+
+  it.each(['s3 s3 s3 e q q q', 's3 s3 s3 s3 s3 s3 q q q'])('marks each tuplet range when its beam also spans other notes: %s', notation => {
+    const geometry = geometryFor(notation);
+    expect(geometry.beams[0].eventIndices.length).toBeGreaterThan(3);
+    expect(geometry.triplets.length).toBeGreaterThan(0);
+    expect(geometry.triplets.every(group => group.showBracket)).toBe(true);
   });
 });

@@ -86,6 +86,18 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-30',
+        title: 'Unified keyboards and clearer music notation',
+        bullets: [
+          'Unify chord, rhythm and jianpu keys, color pickers and touch key previews; keep desktop colors visible when keys are collapsed.',
+          'Fit phone landscape keys without scrolling, move advanced rhythm values into the keyboard, and keep feedback outside its layout.',
+          'Prevent repeated chord modifiers and preserve slash-bass accidentals; fix rhythm backspace at the end of a passage.',
+          'Give dense four-chord measures more breathing room while preserving measure widths, beat anchors and type height.',
+          'Refine rhythm beams, crossheads, accents, ties and tuplet brackets, including visible numeral alignment and shared-beam grouping.'
+        ]
+      },
+      {
+        version: '0.11.17',
+        date: '2026-10-30',
         title: 'Clearer spacing for four-chord measures',
         bullets: [
           'Keep a visible gap between four full-beat chord changes without changing their spelling or attacks.',
@@ -838,6 +850,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-30',
+        title: '統一鍵盤與樂譜符號排版',
+        bullets: [
+          '統一和弦、節奏、簡譜鍵盤與顏色選單；手機和平板支援按住放大預覽，桌面收起字元鍵後保留顏色列。',
+          '改善手機橫式鍵盤，按鍵區不捲動；進階節奏鍵放入鍵盤，提示不再擠動鍵盤高度。',
+          '修正重複 sus、add、alt 與 Slash Bass 升降記號輸入，以及節奏尾端退格後覆寫前音的問題。',
+          '密集四和弦小節增加留白，維持等寬小節、原拍位及字高。',
+          '校正節奏連桿、叉頭、重音、延音線與三連音括線；三連音數字依可見外框置中。'
+        ]
+      },
+      {
+        version: '0.11.17',
         date: '2026-10-30',
         title: '四和弦小節間距調整',
         bullets: [

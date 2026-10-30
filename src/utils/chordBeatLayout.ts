@@ -49,11 +49,16 @@ export function fitAnchoredChords(metrics: readonly { anchor: number; width: num
     // Two slash chords on consecutive beats must not read as one long symbol.
     // Keep the attack bounds and borrow whitespace before condensing either chord.
     if (previous?.slashBass && metric.slashBass && (previous.span ?? 1) >= 1 && (metric.span ?? 1) >= 1) return 8;
-    if (previous && fullBeatRun) return 6;
+    if (previous && fullBeatRun) return 10;
     return previous && (previous.span ?? 1) < 1 && (metric.span ?? 1) >= 1 ? 6 : 3;
   });
   let preferred = metrics.map((metric, index) => metric.span && metric.span < 1 ? .5 + .4 * metric.span
     : index > 0 && (metrics[index - 1].span ?? 1) < 1 && metric.width > 24 ? .9 : 1);
+  if (fullBeatRun && metrics.reduce((sum, metric) => sum + metric.width, 0) + 10 * (metrics.length - 1) + edge * 2 > width) {
+    // Dense full-beat harmony keeps one type height and an absolute width cap.
+    // The bar and beat grid remain fixed; do not multiply a previous squeeze.
+    preferred = preferred.map(scale => Math.min(scale, .85));
+  }
   const tolerance = metrics.map((metric, index) => Math.max(0, Math.min(10,
     (index ? metric.anchor - metrics[index - 1].anchor : width) * .22,
     (index + 1 < metrics.length ? metrics[index + 1].anchor - metric.anchor : width) * .22

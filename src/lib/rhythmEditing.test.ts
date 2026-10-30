@@ -163,6 +163,13 @@ describe('rhythm replacement and modifiers', () => {
 });
 
 describe('rhythm gaps, deletion, and cursor movement', () => {
+  it('continues at the deleted tail instead of overwriting the remaining note', () => {
+    const removed = edit(makeSong({ rhythm: 'e e.' }), 5, { type: 'delete', mode: 'backspace' });
+    expect(rhythmOf(removed.song)).toBe('e');
+    expect(removed.cursor).toEqual({ cursorUnit: 2 });
+    const continued = edit(removed.song, removed.cursor.cursorUnit, { type: 'insert', token: 'q' });
+    expect(rhythmOf(continued.song)).toBe('e q');
+  });
   it('keeps later events at the same musical positions by writing hidden gaps', () => {
     const song = makeSong({ rhythm: 'q q q q' });
     const result = edit(song, 4, { type: 'delete' });

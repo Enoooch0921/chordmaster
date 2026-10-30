@@ -3,6 +3,18 @@ import { chordBeatGroupLabels, chordBeatTrackWeights, chordBeatAnchors, fitAncho
 
 const dense = [0, .25, .5, .75].map(offset => ({beat: 2, offset, chord: 'A'}));
 
+it('condenses dense harmony horizontally inside the original measure and beat grid', () => {
+  const width = 153;
+  // Includes the raised D-sharp's ink extending beyond the B/D# container.
+  const metrics = [24.3359375,39.2428,23.1484375,45.1875].map((w,index) => ({ width:w, anchor:(index+.5)/4*width, span:1 }));
+  const fits = fitAnchoredChords(metrics, width, { edgePadding:4, balanceSpacing:true });
+  fits.forEach((fit,index) => {
+    expect(fit.scale).toBeCloseTo(.85, 6);
+    expect(fit.anchor).toBe(metrics[index].anchor);
+    if (index) expect(fit.left-fits[index-1].left-metrics[index-1].width*fits[index-1].scale).toBeGreaterThanOrEqual(9.999);
+  });
+});
+
 it.each([120, 153, 200])('separates four full-beat harmonies in a %ipx measure without changing their attacks', width => {
   // 一道江河（2022 新版）, Verse 14: Bm, B/D#, Em, Gm7(b5).
   // Natural widths measured with the song's stage-sans font.
