@@ -3,6 +3,30 @@ import { chordBeatGroupLabels, chordBeatTrackWeights, chordBeatAnchors, fitAncho
 
 const dense = [0, .25, .5, .75].map(offset => ({beat: 2, offset, chord: 'A'}));
 
+it.each([120, 153, 200])('separates four full-beat harmonies in a %ipx measure without changing their attacks', width => {
+  // 一道江河（2022 新版）, Verse 14: Bm, B/D#, Em, Gm7(b5).
+  // Natural widths measured with the song's stage-sans font.
+  const metrics = [24.3359375, 34.8046875, 23.1484375, 45.1875].map((naturalWidth, index) => ({
+    anchor: (index + .5) / 4 * width,
+    width: naturalWidth,
+    span: 1,
+    slashBass: index === 1,
+    opticalOffset: index === 1 ? 2 : 0,
+  }));
+  const before = JSON.stringify(metrics);
+  const fits = fitAnchoredChords(metrics, width, { edgePadding: 4, balanceSpacing: true });
+  fits.forEach((fit, index) => {
+    expect(fit.anchor).toBe(metrics[index].anchor);
+    expect(fit.scale).toBeCloseTo(fits[0].scale, 6);
+    expect(fit.left).toBeGreaterThanOrEqual(4 - .0001);
+    const right = fit.left + metrics[index].width * fit.scale;
+    expect(right).toBeLessThanOrEqual(width - 4 + .0001);
+    if (fits[index + 1]) expect(fits[index + 1].left - right).toBeGreaterThanOrEqual(6 - .0001);
+    expect(Math.abs(fit.left + metrics[index].width * fit.scale / 2 - fit.anchor)).toBeLessThanOrEqual(Math.min(10, width / 4 * .22) + .0001);
+  });
+  expect(JSON.stringify(metrics)).toBe(before);
+});
+
 describe('chord beat grouping', () => {
   it('compacts a complete sixteenth run while preserving isolated and partial positions', () => {
     expect(chordBeatGroupLabels(dense)).toEqual(['3', 'e', '&', 'a']);

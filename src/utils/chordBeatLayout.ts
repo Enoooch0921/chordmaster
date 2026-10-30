@@ -40,12 +40,16 @@ export function chordBeatAnchors(events: readonly ChordAttack[], beats: number):
 export function fitAnchoredChords(metrics: readonly { anchor: number; width: number; span?: number; opticalOffset?: number; continuation?: boolean; slashBass?: boolean; ink?: OpticalChord }[], width: number,
   options: { edgePadding?: number; balanceSpacing?: boolean } = {}) {
   const edge = Math.min(Math.max(0, options.edgePadding ?? 0), Math.max(0, width / 4));
+  // A four-chord run needs a visible break at every beat, including plain roots.
+  const fullBeatRun = options.balanceSpacing && metrics.length >= 4
+    && metrics.every(metric => (metric.span ?? 1) >= 1 && !metric.continuation);
   // A full-beat chord following subdivisions needs a clearer visual break.
   const gaps = metrics.map((metric, index) => {
     const previous = metrics[index - 1];
     // Two slash chords on consecutive beats must not read as one long symbol.
     // Keep the attack bounds and borrow whitespace before condensing either chord.
     if (previous?.slashBass && metric.slashBass && (previous.span ?? 1) >= 1 && (metric.span ?? 1) >= 1) return 8;
+    if (previous && fullBeatRun) return 6;
     return previous && (previous.span ?? 1) < 1 && (metric.span ?? 1) >= 1 ? 6 : 3;
   });
   let preferred = metrics.map((metric, index) => metric.span && metric.span < 1 ? .5 + .4 * metric.span
@@ -130,7 +134,11 @@ export function fitAnchoredChords(metrics: readonly { anchor: number; width: num
       const beatWidth = (metrics.at(-1)!.anchor - metrics[0].anchor) / (metrics.length - 1);
       const fullBeats = metrics.every(metric => (metric.span ?? 1) >= 1);
       for (const factor of [.95, .9, .85]) {
-        const candidateScales = originalScales.map((scale, index) => scale * (fullBeats || metrics[index].width > beatWidth * .7 ? factor : 1));
+        // Full-beat limits are absolute: collision fitting may have already
+        // condensed the measure, so do not multiply that squeeze a second time.
+        const candidateScales = originalScales.map((scale, index) => fullBeats
+          ? Math.min(scale, factor)
+          : scale * (metrics[index].width > beatWidth * .7 ? factor : 1));
         const candidate = balance(candidateScales);
         const candidateScore = (candidate?.spread ?? Infinity) + 8 * (1 - factor);
         if (candidate && candidateScore < score) {

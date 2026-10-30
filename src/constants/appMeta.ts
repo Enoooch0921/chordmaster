@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-30',
+        title: 'Clearer spacing for four-chord measures',
+        bullets: [
+          'Keep a visible gap between four full-beat chord changes without changing their spelling or attacks.',
+          'Avoid applying a second strong compression while balancing a measure that already needed fitting.'
+        ]
+      },
+      {
+        version: '0.11.16',
+        date: '2026-10-30',
         title: 'Rhythm beams and iPad section dragging',
         bullets: [
           'Align Bach rhythm beams to the visible stems at every preview zoom level.',
@@ -829,6 +838,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-30',
+        title: '四和弦小節間距調整',
+        bullets: [
+          '四拍逐拍換和弦的小節保留清楚間距，維持原和弦名稱與拍位。',
+          '平均間距時避免再次過度壓窄已縮放的和弦。'
+        ]
+      },
+      {
+        version: '0.11.16',
         date: '2026-10-30',
         title: '節奏連桿與 iPad 段落拖曳',
         bullets: [
