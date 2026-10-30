@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   BACH_QUARTER_STEM_RIGHT_INSET_EM,
+  BACH_NOTE_VERTICAL_OUTLINE_METRICS,
   getBachGlyphAnchor,
   getBachNoteheadTopFromGlyphTop
 } from '../lib/bachRhythmMetrics';
@@ -72,6 +73,9 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
     const measure = () => {
       if (cancelled) return;
       const next: MeasuredGlyphAnchors = {};
+      const probe = svg.querySelector<SVGTextElement>('[data-rhythm-beam-metric-probe]');
+      const probeBox = typeof probe?.getBBox === 'function' ? probe.getBBox() : null;
+      const referenceY = probeBox && probeBox.height > 0 ? probeBox.y : null;
       if (vectorNotes) geometry.events.forEach(({ event, head, headRadiusY, stem }) => {
         if (event.isRest || event.isSlash) return;
         next[event.index] = {
@@ -87,14 +91,21 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
         const box = symbol.getBBox();
         if (!Number.isFinite(eventIndex) || box.width <= 0 || box.height <= 0) return;
         const displayBase = (symbol.dataset.rhythmDisplayBase || 'q') as RhythmBase;
+        // SVG text bounds include the font's line box, not the visible stem.
+        // An alphabetic-baseline probe cancels WebKit's central-baseline offset,
+        // including the different rounding applied at preview zoom levels.
+        const baseline = symbol.hasAttribute('data-rhythm-beamed-symbol') && referenceY !== null
+          ? box.y - referenceY : null;
+        const top = baseline !== null
+          ? baseline - BACH_NOTE_VERTICAL_OUTLINE_METRICS.q.glyphTop / 1000 * fontSize
+          : box.y;
         next[eventIndex] = {
-          top: box.y,
+          top,
           stemX: box.x + box.width - (fontSize * BACH_QUARTER_STEM_RIGHT_INSET_EM),
-          noteheadTop: getBachNoteheadTopFromGlyphTop(box.y, fontSize, displayBase),
-          // Up-stem ties belong below the notehead. The bottom of Bach's
-          // visible glyph box is the lower notehead contour for these glyphs,
-          // so keep this as a measured font anchor rather than a view offset.
-          noteheadBottom: box.y + box.height
+          noteheadTop: getBachNoteheadTopFromGlyphTop(top, fontSize, displayBase),
+          // Beamed quarter glyphs end at the alphabetic baseline; other
+          // symbols retain their existing measured tie anchor.
+          noteheadBottom: baseline ?? box.y + box.height
         };
       });
       setMeasuredGlyphAnchors((current) => anchorsEqual(current, next) ? current : next);
@@ -108,8 +119,10 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
 
     measure();
     void document.fonts?.ready.then(measure);
+    document.fonts?.addEventListener?.('loadingdone', measure);
     return () => {
       cancelled = true;
+      document.fonts?.removeEventListener?.('loadingdone', measure);
     };
   }, [geometry, fontSize, vectorNotes, onGlyphAnchorsChange]);
 
@@ -160,6 +173,11 @@ const CompactRhythmRenderer: React.FC<CompactRhythmRendererProps> = ({
       preserveAspectRatio="none"
       aria-hidden="true"
     >
+      {!vectorNotes && beamedEventIndices.size > 0 && <text
+        data-rhythm-beam-metric-probe
+        x={0} y={0} dominantBaseline="alphabetic" opacity={0}
+        fontFamily="Bach, NotoMusic, serif" fontSize={fontSize}
+      >{getRhythmEventGlyph({ base: 'q', isRest: false, dotted: false, isHidden: false, isSlash: false })}</text>}
       {geometry.events.map(({ event, head, headRadiusX, headRadiusY, stem, flagCount, dot, accent }) => {
         const isBeamed = beamedEventIndices.has(event.index);
         const displayBase = isBeamed ? 'q' : event.base;

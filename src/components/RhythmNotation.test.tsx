@@ -243,3 +243,22 @@ it('restores the selected rhythm event frame when returning from another input m
   expect(getByRole('button', { name: 'Select rhythm note 4' })).toHaveAttribute('aria-pressed', 'true');
   expect(getByRole('button', { name: 'Select rhythm note 4' })).toHaveStyle({ boxShadow: 'inset 0 0 0 1px rgba(99, 102, 241, 0.22)' });
 });
+
+it.each(['q q e. s er e','er e q e. s er e'])('anchors %s beams to visible Bach stems rather than the SVG font line box', notation => {
+  const original=Object.getOwnPropertyDescriptor(SVGElement.prototype,'getBBox');
+  Object.defineProperty(SVGElement.prototype,'getBBox',{configurable:true,value:function(this:SVGElement){
+    return {x:0,y:this.hasAttribute('data-rhythm-beam-metric-probe')?-15.015625:4.8125,width:6.71875,height:20.015625};
+  }});
+  try {
+    const {container}=render(<RhythmNotation notation={notation} timeSignature="4/4" compact scale={1.34}/>);
+    const beam=container.querySelector('[data-rhythm-primary-beam]')!;
+    const top=4.8125-(-15.015625)-.802*(17*1.34);
+    expect(Number(beam.getAttribute('y1'))).toBeCloseTo(top,5);
+    expect(Number(beam.getAttribute('y2'))).toBeCloseTo(top,5);
+    expect(container.querySelectorAll('[data-rhythm-beamed-symbol]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-rhythm-secondary-beam]')).toHaveLength(1);
+  } finally {
+    if(original)Object.defineProperty(SVGElement.prototype,'getBBox',original);
+    else Reflect.deleteProperty(SVGElement.prototype,'getBBox');
+  }
+});

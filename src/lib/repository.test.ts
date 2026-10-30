@@ -758,3 +758,21 @@ describe('guarded global workspace history',()=>{
   expect(mocks.from).not.toHaveBeenCalled();
  });
 });
+
+it.each([false,true])('copies a team song with its original title and no team link (existing=%s)', async duplicate => {
+  vi.clearAllMocks();installLocalStorageMock();mocks.rpc.mockResolvedValue({data:[],error:null});
+  const source=makeSong({title:'Washed',teamSource:{libraryId:'team-1',songId:'old-source',updatedAt:1,copiedAt:1,libraryName:'Team'}});
+  const before=JSON.stringify(source);const writes:Record<string,unknown>[]=[];
+  mocks.from.mockImplementation((table:string)=>{
+    if(table==='libraries')return makeBuilder({maybeSingle:vi.fn().mockResolvedValue({data:{id:'personal-1',kind:'personal',owner_user_id:'user-1'},error:null})});
+    if(table==='songs')return makeBuilder({
+      returns:vi.fn().mockResolvedValue({data:duplicate?[{id:'existing',library_id:'personal-1',title:'Washed',content_json:makeSong({id:'existing',title:'Washed'}),updated_at:'2026-10-30T00:00:00Z'}]:[],error:null}),
+      upsert:vi.fn(async(payload:Record<string,unknown>)=>{writes.push(payload);return{error:null};})
+    });
+    return makeBuilder();
+  });
+  const copy=await createRepository().copySongToPersonal(source);
+  expect(copy.title).toBe(duplicate?'Washed 2':'Washed');expect(copy.teamSource).toBeUndefined();
+  expect(writes).toHaveLength(1);expect(writes[0].library_id).toBe('personal-1');
+  expect((writes[0].content_json as StoredSong).teamSource).toBeUndefined();expect(JSON.stringify(source)).toBe(before);
+});

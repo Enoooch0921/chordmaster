@@ -830,7 +830,7 @@ const normalizeTeamSongDeleteResult = (payload: unknown): TeamSongDeleteResult =
 };
 
 const buildPersonalCopyTitle = (personalSongs: StoredSong[], sourceTitle: string) => {
-  const baseTitle = `${sourceTitle.trim() || 'Untitled Song'} (團隊轉存)`;
+  const baseTitle = sourceTitle.trim() || 'Untitled Song';
   const existingTitles = new Set(personalSongs.map((song) => normalizeMatchingTitle(song.title)));
   if (!existingTitles.has(normalizeMatchingTitle(baseTitle))) {
     return baseTitle;
@@ -1935,6 +1935,7 @@ export const createCloudRepository = (params: {
         ...cloneValue(normalizeSongBars(sourceSong)),
         id: crypto.randomUUID(),
         title: buildPersonalCopyTitle(personalWorkspace.songs, sourceSong.title),
+        teamSource: undefined,
         archivedAt: null,
         archivedBy: null,
         createdBy: params.userId,

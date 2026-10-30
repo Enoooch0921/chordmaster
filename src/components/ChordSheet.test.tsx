@@ -2758,15 +2758,18 @@ describe('ChordSheet preview notation interactions', () => {
   });
 });
 
-it('keeps continuation text only in a print-specific span on subsequent pages', () => {
+it('omits the song title and continued text from subsequent page headers', () => {
   const source: Song = { ...song, sections: [{ id: 'long', title: 'Verse', bars: Array.from({ length: 80 }, (_, i) => ({ id: `bar-${i}`, chords: ['C'] })) }] };
   const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
   const pages = container.querySelectorAll('[data-print-page]');
   expect(pages.length).toBeGreaterThan(1);
   expect(pages[0].querySelector('[data-sheet-print-only]')).toBeNull();
-  const continuation = pages[1].querySelector('[data-sheet-print-only]');
-  expect(continuation).toHaveTextContent('(續)');
-  expect(continuation?.parentElement?.textContent).toContain(source.title);
+  pages.forEach((page,index)=>{
+    if(!index)return;
+    const header=page.querySelector('[data-sheet-continuation-header]');
+    expect(header).not.toHaveTextContent(source.title);
+    expect(header).not.toHaveTextContent('續');
+  });
 });
 
 it('renders a leading double barline on first, middle and wrapped measures', () => {
@@ -2951,4 +2954,30 @@ it.each([false, true])('preserves Chorus bar 3 beat ownership for the adjacent s
   expect(nodes[1].querySelector('[data-chord-bass]')).toBeInTheDocument();
   expect(nodes[2].querySelector('[data-chord-bass]')).toBeInTheDocument();
   expect(JSON.stringify(source)).toBe(before);
+});
+
+it('holds the preview still during a touch section drag until the finger reaches an edge', () => {
+  vi.useFakeTimers();
+  try {
+    const {container}=render(<div data-print-preview-container onTouchMove={vi.fn()}>
+      <ChordSheet song={song} currentKey="C" language="zh" onElementClick={vi.fn()} onSectionReorder={vi.fn()} />
+    </div>);
+    const scroller=container.querySelector<HTMLElement>('[data-print-preview-container]')!;
+    scroller.getBoundingClientRect=()=>({left:0,top:100,right:500,bottom:600,width:500,height:500,x:0,y:100,toJSON(){}});
+    scroller.scrollTop=200;
+    const label=screen.getByRole('button',{name:/開啟段落操作 Verse/});
+    fireEvent.pointerDown(label,{pointerId:9,pointerType:'touch',button:0,clientX:20,clientY:115});
+    act(()=>vi.advanceTimersByTime(550));
+    expect(scroller.scrollTop).toBe(200);
+    fireEvent.pointerMove(label,{pointerId:9,pointerType:'touch',clientX:20,clientY:200});
+    const move=createEvent.touchMove(label,{touches:[{identifier:9,clientX:20,clientY:200}],cancelable:true,bubbles:true});
+    fireEvent(label,move);expect(move.defaultPrevented).toBe(true);
+    act(()=>vi.advanceTimersByTime(50));expect(scroller.scrollTop).toBe(200);
+    fireEvent.pointerMove(label,{pointerId:9,pointerType:'touch',clientX:20,clientY:90});
+    act(()=>vi.advanceTimersByTime(32));
+    expect(scroller.scrollTop).toBeLessThan(200);expect(scroller.scrollTop).toBeGreaterThanOrEqual(170);
+    fireEvent.pointerCancel(label,{pointerId:9,pointerType:'touch'});
+    const after=createEvent.touchMove(label,{touches:[{identifier:9,clientX:20,clientY:200}],cancelable:true,bubbles:true});
+    fireEvent(label,after);expect(after.defaultPrevented).toBe(false);
+  } finally {vi.useRealTimers();}
 });

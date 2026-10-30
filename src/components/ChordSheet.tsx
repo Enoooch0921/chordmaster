@@ -1495,9 +1495,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
     const scrollRoot = candidate.scrollRoot;
     if (!scrollRoot) return;
     const rect = scrollRoot.getBoundingClientRect();
-    const edge = Math.min(72, rect.height * 0.18);
-    if (clientY < rect.top + edge) scrollRoot.scrollTop -= 22;
-    if (clientY > rect.bottom - edge) scrollRoot.scrollTop += 22;
+    if (rect.height <= 0) return;
+    const edge = Math.min(24, rect.height * 0.08);
+    // Holding a label near an edge must not start scrolling by itself.
+    // Move toward the narrow edge zone before allowing controlled auto-scroll.
+    if (clientY < candidate.startY - 8 && clientY < rect.top + edge) scrollRoot.scrollTop -= 6;
+    if (clientY > candidate.startY + 8 && clientY > rect.bottom - edge) scrollRoot.scrollTop += 6;
   };
   const stopSectionDragAutoScroll = () => {
     if (sectionDragAutoScrollFrameRef.current !== null) {
@@ -1600,6 +1603,17 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
     clearSectionDragLongPress();
     stopSectionDragAutoScroll();
   }, []);
+  React.useEffect(() => {
+    if (!onSectionReorder) return;
+    const containTouchDrag = (event: TouchEvent) => {
+      const candidate = sectionDragCandidateRef.current;
+      if (!candidate?.active || candidate.pointerType === 'mouse' || event.touches.length !== 1) return;
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+    document.addEventListener('touchmove', containTouchDrag, { capture: true, passive: false });
+    return () => document.removeEventListener('touchmove', containTouchDrag, true);
+  }, [onSectionReorder]);
   const getLabelLaneDropTarget = (candidate: PreviewLabelLaneDragCandidate, clientY: number): BarLabelLane => {
     const rowRect = candidate.rowElement?.getBoundingClientRect();
     if (!rowRect || rowRect.height <= 0) {
@@ -2376,8 +2390,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
               </div>
             </div>
           ) : (
-            <div className="shrink-0 flex justify-between items-center gap-3 mb-4 border-b border-gray-200 pb-2">
-              <span className="min-w-0 truncate text-sm font-bold text-gray-400 uppercase tracking-widest">{song.title}<span data-sheet-print-only="true"> ({copy.continued})</span></span>
+            <div data-sheet-continuation-header className="shrink-0 flex justify-end items-center gap-3 mb-4 border-b border-gray-200 pb-2">
               {pageBadge}
             </div>
           )}

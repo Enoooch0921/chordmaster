@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-30',
+        title: 'Rhythm beams and iPad section dragging',
+        bullets: [
+          'Align Bach rhythm beams to the visible stems at every preview zoom level.',
+          'Hold the sheet still while dragging a section; scroll slowly only at the preview edge.',
+          'Remove repeated song titles from continuation pages.',
+          'Keep original song names when copying team songs to the personal library.'
+        ]
+      },
+      {
+        version: '0.11.15',
+        date: '2026-10-30',
         title: 'Saved chart context and reliable mobile layouts',
         bullets: [
           'Show the last successful chart edit and name changed songs and fields before switching workspaces.',
@@ -818,6 +829,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-30',
+        title: '節奏連桿與 iPad 段落拖曳',
+        bullets: [
+          '節奏連桿對齊實際符桿，避免 iPad 放大譜面時偏移。',
+          '長按段落標籤拖曳時固定譜面，只在靠近預覽邊緣時緩慢捲動。',
+          '移除續頁左上角重複歌名。',
+          '團隊歌曲轉存個人曲庫保留原歌名，不再附加團隊轉存字樣。'
+        ]
+      },
+      {
+        version: '0.11.15',
         date: '2026-10-30',
         title: '譜面儲存提示與手機、iPad 排版',
         bullets: [
