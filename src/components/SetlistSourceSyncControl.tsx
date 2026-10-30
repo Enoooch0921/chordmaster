@@ -1,3 +1,5 @@
+import { AnimatePresence } from 'motion/react';
+import AnimatedNativeDialog from './ui/AnimatedNativeDialog';
 import { ArrowLeftRight, ArrowRight, Check, X } from 'lucide-react';
 import { compareSetlistSourceScores } from '../lib/setlistSourceComparison';
 import './SetlistSourceSyncControl.css';
@@ -22,7 +24,6 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
   const [invalidated, setInvalidated] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null), mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { if (preview && !dialog.current?.open) dialog.current?.showModal(); }, [preview]);
   const statusLabel = (state: SetlistSourceStatus) => ({
     aligned: zh ? '譜面相同，無須同步。' : 'Scores match. No sync needed.',
     'setlist-changed': zh ? '這份歌單有新的譜面修改，曲庫尚未更新。' : 'This setlist has new score edits. The library source is unchanged.',
@@ -106,7 +107,7 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
     </div>
     {message && <p role="status" className="mt-1 text-emerald-800">{message}</p>}
     {!preview && error && <p role="alert" className="mt-1 text-rose-800">{error}</p>}
-    {preview && <dialog ref={dialog} aria-labelledby={titleId} onCancel={event => { if (busy) event.preventDefault(); else close(); }} className="source-sync-dialog">
+    <AnimatePresence initial={false}>{preview && <AnimatedNativeDialog key="comparison" kind="modal" ref={dialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) close(); }} className="source-sync-dialog">
       <div className="source-sync-layout">
         <header className="source-sync-heading"><div>
           <h2 id={titleId}>{needsChoice ? (zh ? '比對兩份譜面' : 'Compare the two scores') : preview.status === 'source-newer' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library') : (zh ? '用歌單版本更新歌曲庫' : 'Update library from this setlist')}</h2>
@@ -147,6 +148,6 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
         </div>
         <footer className="source-sync-footer">{direction && <p className="source-sync-scope" aria-live="polite"><Check size={17} aria-hidden="true" /><span>{scope}</span></p>}<button type="button" disabled={busy} onClick={() => void showPreview()} className="source-sync-button">{zh ? '重新比對' : 'Refresh comparison'}</button><div><button type="button" disabled={busy} onClick={close} className="source-sync-button">{zh ? '取消' : 'Cancel'}</button><button type="button" disabled={busy || invalidated || !direction || (direction === 'save-as' ? !newTitle.trim() : !changes.length)} onClick={() => void confirm()} className="source-sync-button primary">{busy ? (zh ? '正在更新…' : 'Updating…') : confirmLabel}</button></div></footer>
       </div>
-    </dialog>}
+    </AnimatedNativeDialog>}</AnimatePresence>
   </div>;
 }

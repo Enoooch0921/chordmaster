@@ -1,4 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useNativeDialogMotion } from '../hooks/useNativeDialogMotion';
+import { useContentSwitchMotion } from '../hooks/useContentSwitchMotion';
+import { useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Check, ChevronDown, Copy, LoaderCircle, Search, UserMinus, UserPlus, X } from 'lucide-react';
 import { EDITABLE_TEAM_ROLES, TEAM_ROLES, canManageTeamMember, getAssignableTeamRoles, getTeamRoleDescription, getTeamRoleLabel } from '../constants/teamRoles';
@@ -32,9 +34,9 @@ interface TeamManagementDialogProps {
 function TeamRoleGuide({ language }: { language: AppLanguage }) {
   const zh = language === 'zh';
   return (
-    <details className="group border-t border-stone-100">
+    <details className="ui-details group border-t border-stone-100">
       <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 text-[11px] text-stone-500 hover:text-stone-800 [&::-webkit-details-marker]:hidden">
-        <ChevronDown size={12} className="transition-transform group-open:rotate-180" />{zh ? '權限說明' : 'About roles'}
+        <ChevronDown size={12} className="ui-motion-chevron group-open:rotate-180" />{zh ? '權限說明' : 'About roles'}
       </summary>
       <dl className="space-y-3 pb-4 text-xs leading-5">{TEAM_ROLES.map((role) => <div key={role} className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3"><dt className="font-medium text-stone-700">{getTeamRoleLabel(role, language)}</dt><dd className="text-stone-500">{getTeamRoleDescription(role, language)}</dd></div>)}</dl>
       <p className="pb-4 text-xs leading-5 text-stone-500">{zh ? '改為僅可檢視會移除歌單協作指派；日後恢復編輯角色時，需重新指派。' : 'Changing to View Only removes setlist assignments. Reassign them if editing access is restored later.'}</p>
@@ -76,16 +78,9 @@ export default function TeamManagementDialog(props: TeamManagementDialogProps) {
   const canManage = currentUserRole === 'owner' || currentUserRole === 'admin';
   const creating = creatingInvite || pendingActionId === 'create-invite';
 
-  useEffect(() => {
-    const dialog = dialogRef.current!;
-    const previousOverflow = document.body.style.overflow;
-    dialog.showModal();
-    document.body.style.overflow = 'hidden';
-    return () => {
-      dialog.close();
-      document.body.style.overflow = previousOverflow;
-    };
-  }, []);
+  useNativeDialogMotion(dialogRef, 'modal');
+  const viewRef = useRef<HTMLDivElement>(null);
+  useContentSwitchMotion(viewRef, view, true);
 
   const runAction = async (id: string, action: () => Promise<void>) => {
     if (actionInFlight.current || busy || loading) return;
@@ -115,9 +110,9 @@ export default function TeamManagementDialog(props: TeamManagementDialogProps) {
     <dialog ref={dialogRef} aria-labelledby={titleId} aria-modal="true" aria-busy={busy || loading}
       onKeyDown={(event) => event.stopPropagation()}
       onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}
-      className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-[640px] overflow-hidden rounded-2xl border border-stone-200 bg-white p-0 text-stone-900 shadow-[0_24px_80px_-20px_rgba(28,25,23,0.3)] backdrop:bg-stone-950/35 backdrop:backdrop-blur-[2px]"
+      className="fixed inset-0 m-auto h-[min(680px,90dvh)] max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-[640px] overflow-hidden rounded-2xl border border-stone-200 bg-white p-0 text-stone-900 shadow-[0_24px_80px_-20px_rgba(28,25,23,0.3)] backdrop:bg-stone-950/35 backdrop:backdrop-blur-[2px]"
     >
-      <div className="flex max-h-[90dvh] min-h-0 flex-col">
+      <div ref={viewRef} className="flex h-full max-h-[90dvh] min-h-0 flex-col">
         <header className="flex shrink-0 items-center gap-3 px-4 pb-2 pt-4 sm:px-6">
           <div className="min-w-0 flex-1">
             <h2 id={titleId} className="truncate text-xl font-semibold tracking-tight" title={teamName}>{teamName}</h2>

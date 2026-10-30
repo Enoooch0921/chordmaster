@@ -1,4 +1,6 @@
 import React from 'react';
+import { useIsPresent } from 'motion/react';
+import { AnimatedPopover } from '../ui/InteractionMotion';
 import { createPortal } from 'react-dom';
 import { Palette } from 'lucide-react';
 import { ANNOTATION_COLOR_OPTIONS } from '../../constants/annotationColors';
@@ -14,19 +16,20 @@ interface Props {
 }
 
 export default function NotationColorControls({ label, language, selected, disabled, persistent, onSelect }: Props) {
+  const present = useIsPresent();
   const [open, setOpen] = React.useState(false);
   const [position, setPosition] = React.useState<{ left: number; top: number; width: number } | null>(null);
   const trigger = React.useRef<HTMLButtonElement>(null);
   const popup = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => { setOpen(false); }, [label, persistent]);
   React.useEffect(() => {
-    if (open && position && popup.current && !popup.current.contains(document.activeElement)) {
+    if (open && present && position && popup.current && !popup.current.contains(document.activeElement)) {
       (popup.current.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')
         ?? popup.current.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus({ preventScroll: true });
     }
-  }, [open, position]);
+  }, [open, position, present]);
   React.useLayoutEffect(() => {
-    if (!open || persistent) return;
+    if (!open || persistent || !present) return;
     const place = () => {
       if (!trigger.current || !popup.current) return;
       const viewport = window.visualViewport;
@@ -57,7 +60,7 @@ export default function NotationColorControls({ label, language, selected, disab
       document.removeEventListener('pointerdown', outside);
       document.removeEventListener('keydown', escape, true);
     };
-  }, [open, persistent]);
+  }, [open, persistent, present]);
   const choices = <div data-preview-color-controls className={`grid grid-cols-6 gap-1 ${persistent ? 'flex-1' : ''}`}>
     {ANNOTATION_COLOR_OPTIONS.map(option => <button key={option.id} type="button" disabled={disabled}
       aria-label={`${label}: ${language === 'zh' ? option.labelZh : option.label}`} aria-pressed={selected === option.id}
@@ -73,12 +76,12 @@ export default function NotationColorControls({ label, language, selected, disab
     <button ref={trigger} type="button" data-preview-color-trigger disabled={disabled} aria-label={language === 'zh' ? '顏色' : 'Color'} aria-haspopup="dialog" aria-expanded={open}
       className="flex min-h-11 min-w-12 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-slate-300 bg-slate-100 text-slate-600 disabled:opacity-35"
       onClick={() => { setPosition(null); setOpen(value => !value); }}><Palette size={16} aria-hidden="true"/><span className="text-[11px]">{language === 'zh' ? '顏色' : 'Color'}</span></button>
-    {open && createPortal(<div ref={popup} data-preview-edit-ui data-preview-color-popover data-keyboard-refined role="dialog" aria-label={language === 'zh' ? `${label}選擇` : `${label} chooser`}
-      className="fixed z-[6500] rounded-xl border border-slate-200 bg-[var(--color-surface-raised)] p-2 shadow-xl"
+    {createPortal(<AnimatedPopover open={open && present} ready={Boolean(position)} instantExit={!present} panelRef={popup} origin="100% 100%" data-preview-edit-ui data-preview-color-popover data-keyboard-refined role="dialog" aria-label={language === 'zh' ? `${label}選擇` : `${label} chooser`}
+      shellClassName="fixed z-[6500]" className="rounded-xl border border-slate-200 bg-[var(--color-surface-raised)] p-2 shadow-xl"
       style={{ width: Math.min(360, (window.visualViewport?.width ?? window.innerWidth) - 16), left: position?.left ?? 8, top: position?.top ?? 8, visibility: position ? 'visible' : 'hidden' }}
       onKeyDown={event => event.stopPropagation()}
       onMouseDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()}>
       <div className="mb-2 text-[12px] font-semibold text-[var(--color-text)]">{label}</div>{choices}
-    </div>, document.body)}
+    </AnimatedPopover>, document.body)}
   </>;
 }

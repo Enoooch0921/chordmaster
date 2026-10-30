@@ -492,6 +492,47 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   --ease-ui-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ui-press-duration: 100ms;
   --ui-release-duration: 160ms;
+  --ui-fade-duration: 125ms;
+}
+.ui-sliding-selection {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 6px;
+  transition: transform var(--ui-release-duration) var(--ease-ui-out), opacity var(--ui-fade-duration) var(--ease-ui-out);
+}
+[data-ui-input="keyboard"] .ui-sliding-selection { transition: none; }
+@media (prefers-reduced-motion: reduce) { .ui-sliding-selection { transition-property: opacity; } }
+
+/* Native dialogs keep their top layer/focus behavior while their surfaces move. */
+[data-native-dialog-motion]::backdrop {
+  opacity: 1;
+  transition: opacity 200ms var(--ease-ui-out);
+}
+[data-native-dialog-backdrop="hidden"]::backdrop { opacity: 0; }
+[data-native-dialog-instant]::backdrop { transition: none !important; }
+[data-native-dialog-motion][data-native-dialog-closing] { opacity: 0; }
+[data-native-dialog-motion][data-native-dialog-closing]::backdrop { opacity: 0; transition-duration: 160ms; }
+[data-native-dialog-motion][data-native-dialog-sheet="true"]::backdrop { transition-duration: 240ms; }
+[data-native-dialog-motion][data-native-dialog-sheet="true"][data-native-dialog-closing]::backdrop { transition-duration: 200ms; }
+[data-ui-input="pointer"] [data-native-dialog-motion] button {
+  transition: transform var(--ui-press-duration) var(--ease-ui-out), background-color var(--ui-release-duration) var(--ease-ui-out), color var(--ui-release-duration) var(--ease-ui-out);
+}
+[data-ui-input="pointer"] [data-native-dialog-motion] button:active:not(:disabled) { transform: scale(0.97); }
+.ui-details::details-content {
+  opacity: 0;
+  transition: opacity var(--ui-release-duration) var(--ease-ui-out), content-visibility var(--ui-release-duration) allow-discrete;
+}
+.ui-details[open]::details-content { opacity: 1; }
+@supports (interpolate-size: allow-keywords) {
+  .ui-details { interpolate-size: allow-keywords; }
+  .ui-details::details-content { block-size: 0; overflow: clip; transition: block-size 200ms var(--ease-ui-out), opacity var(--ui-release-duration) var(--ease-ui-out), content-visibility 200ms allow-discrete; }
+  .ui-details[open]::details-content { block-size: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-native-dialog-motion]::backdrop { transition-duration: 125ms !important; }
+  [data-ui-input="pointer"] [data-native-dialog-motion] button { transition-property: opacity, background-color, color; }
+  [data-ui-input="pointer"] [data-native-dialog-motion] button:active:not(:disabled) { transform: none; opacity: 0.8; }
+  .ui-details::details-content { transition-property: opacity, content-visibility; }
 }
 [data-ui-input="pointer"] .ui-press {
   transition-property: transform, opacity, background-color, border-color, color;
@@ -526,13 +567,15 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 }
 
 /* Short landscape docks retain a full key row; secondary settings scroll with keys. */
-[data-preview-bar-editor][data-compact-dock] > header,
-[data-preview-bar-editor][data-compact-dock] > footer {
+[data-preview-bar-editor][data-compact-dock] > [data-keyboard-motion] > header,
+[data-preview-bar-editor][data-compact-dock] > [data-keyboard-motion] > footer {
   padding-top: 0;
   padding-bottom: 0;
 }
 
-[data-preview-bar-editor][data-compact-dock] > [data-keyboard-surface] {
+[data-preview-bar-editor][data-compact-dock] [data-keyboard-surface] {
   padding-top: 4px;
   padding-bottom: 4px;
 }
+
+[data-ui-input="keyboard"] .ui-details::details-content { transition: none; }

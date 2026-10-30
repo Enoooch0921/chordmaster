@@ -1,3 +1,5 @@
+import { useIsPresent } from 'motion/react';
+import { AnimatedPopover } from './ui/InteractionMotion';
 import React from 'react';
 import { ClipboardPaste, X } from 'lucide-react';
 import type { AppLanguage } from '../types';
@@ -28,10 +30,12 @@ export default function PreviewPasteMenu({ language, count, left, top, onChoose,
   language: AppLanguage; count: number; left: number; top: number;
   onChoose: (kind: NotationPasteKind) => void; onClose: () => void;
 }) {
+  const present = useIsPresent();
   const menuRef = React.useRef<HTMLDivElement>(null);
   const closeRef = React.useRef(onClose);
   closeRef.current = onClose;
   React.useEffect(() => {
+    if (!present) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const node = menuRef.current;
     node?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus({ preventScroll: true });
@@ -43,9 +47,9 @@ export default function PreviewPasteMenu({ language, count, left, top, onChoose,
       document.removeEventListener('pointerdown', outside, true);
       if (document.activeElement === document.body || node?.contains(document.activeElement)) previous?.isConnected && previous.focus({ preventScroll: true });
     };
-  }, []);
-  return <div ref={menuRef} role="menu" aria-label={language === 'zh' ? '選擇貼上內容' : 'Choose what to paste'} data-preview-edit-ui data-preview-paste-menu
-    className="fixed z-[5400] w-[280px] max-w-[calc(100vw-16px)] rounded-xl bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
+  }, [present]);
+  return <AnimatedPopover open={present} animateOnMount propagate panelRef={menuRef} origin="0% 0%" role="menu" aria-label={language === 'zh' ? '選擇貼上內容' : 'Choose what to paste'} data-preview-edit-ui data-preview-paste-menu
+    shellClassName="fixed z-[5400]" className="w-[280px] max-w-[calc(100vw-16px)] rounded-xl bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
     style={{ left: Math.min(Math.max(8, left), Math.max(8, window.innerWidth - 288)), top: Math.min(Math.max(8, top), Math.max(8, window.innerHeight - 148)) }}
     onKeyDown={event => {
       event.stopPropagation();
@@ -62,5 +66,5 @@ export default function PreviewPasteMenu({ language, count, left, top, onChoose,
       <button type="button" onClick={onClose} aria-label={language === 'zh' ? '取消貼上' : 'Cancel paste'} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"><X size={16} /></button>
     </div>
     <PreviewPasteChoices language={language} count={count} onChoose={onChoose} />
-  </div>;
+  </AnimatedPopover>;
 }

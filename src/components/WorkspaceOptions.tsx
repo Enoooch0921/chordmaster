@@ -41,8 +41,8 @@ export default function WorkspaceOptions({ language, libraries, activeId, active
         className="px-2"
       /> : null}
       <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2 border-t border-gray-100">
-        {canManage ? <button type="button" disabled={disabled} onClick={onManage} aria-haspopup="dialog" className="inline-flex min-h-11 items-center gap-1.5 px-2 text-xs font-medium text-gray-600 hover:text-indigo-700 disabled:opacity-40"><Users size={14} />{zh ? '管理成員' : 'Manage members'}</button> : null}
-        <button type="button" disabled={disabled} onClick={onCreate} aria-expanded={createOpen} className="inline-flex min-h-11 items-center gap-1 px-2 text-xs text-gray-500 hover:text-indigo-700 disabled:opacity-40"><Plus size={14} />{zh ? '建立團隊' : 'Create team'}</button>
+        {canManage ? <button type="button" disabled={disabled} onClick={onManage} aria-haspopup="dialog" className="ui-press inline-flex min-h-11 items-center gap-1.5 px-2 text-xs font-medium text-gray-600 hover:text-indigo-700 disabled:opacity-40"><Users size={14} />{zh ? '管理成員' : 'Manage members'}</button> : null}
+        <button type="button" disabled={disabled} onClick={onCreate} aria-expanded={createOpen} className="ui-press inline-flex min-h-11 items-center gap-1 px-2 text-xs text-gray-500 hover:text-indigo-700 disabled:opacity-40"><Plus size={14} />{zh ? '建立團隊' : 'Create team'}</button>
       </div>
     </div>
   );

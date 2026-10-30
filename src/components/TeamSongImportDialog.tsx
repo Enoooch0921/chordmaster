@@ -1,3 +1,7 @@
+import { AnimatePresence } from 'motion/react';
+import { PresenceSurface } from './ui/InteractionMotion';
+import { useUiMotion } from '../hooks/useUiMotion';
+import { backdropVariants, modalVariants } from '../lib/uiMotion';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, Copy, LoaderCircle, RefreshCw, Search, X } from 'lucide-react';
 import {
@@ -97,7 +101,7 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
     });
   }, [personalSongs, query]);
 
-  if (!open) return null;
+  const preference = useUiMotion();
 
   const selectedSet = new Set(selectedIds);
   const allVisibleSelected = visibleSongs.length > 0 && visibleSongs.every((song) => selectedSet.has(song.id));
@@ -175,8 +179,8 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[180] flex items-stretch justify-center bg-stone-950/45 sm:items-center sm:px-3 sm:py-6 backdrop-blur-[2px]">
-      <div role="dialog" aria-modal="true" aria-label={language === 'zh' ? '從個人區匯入歌曲' : 'Import songs from personal library'} className="flex h-[100dvh] max-h-[100dvh] w-full max-w-2xl flex-col overflow-hidden bg-white pt-[env(safe-area-inset-top)] shadow-2xl sm:h-[min(760px,90dvh)] sm:rounded-2xl sm:border sm:border-gray-200">
+    <AnimatePresence initial={false} custom={preference}>{open && <PresenceSurface custom={preference} variants={backdropVariants} initial="hidden" animate="visible" exit="exit" className="fixed inset-0 z-[180] flex items-stretch justify-center bg-stone-950/45 sm:items-center sm:px-3 sm:py-6 backdrop-blur-[2px]">
+      <PresenceSurface custom={preference} variants={modalVariants} initial="hidden" animate="visible" exit="exit" role="dialog" aria-modal="true" aria-label={language === 'zh' ? '從個人區匯入歌曲' : 'Import songs from personal library'} className="flex h-[100dvh] max-h-[100dvh] w-full max-w-2xl flex-col overflow-hidden bg-white pt-[env(safe-area-inset-top)] shadow-2xl sm:h-[min(760px,90dvh)] sm:rounded-2xl sm:border sm:border-gray-200">
         <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="text-base font-black text-gray-900">
@@ -366,8 +370,8 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
             </div>
           </>
         )}
-      </div>
-    </div>
+      </PresenceSurface>
+    </PresenceSurface>}</AnimatePresence>
   );
 };
 

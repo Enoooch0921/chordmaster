@@ -1,3 +1,5 @@
+import { AnimatePresence } from 'motion/react';
+import { useNativeDialogMotion } from '../hooks/useNativeDialogMotion';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { Check, LoaderCircle, RefreshCw, Search, UserRoundCog, X } from 'lucide-react';
@@ -16,7 +18,11 @@ interface SetlistAssignmentDialogProps {
   onToggle: (userId: string, enabled: boolean) => void;
 }
 
-export const SetlistAssignmentDialog: React.FC<SetlistAssignmentDialogProps> = ({
+export const SetlistAssignmentDialog: React.FC<SetlistAssignmentDialogProps> = props => (
+  <AnimatePresence initial={false}>{props.open && <AssignmentDialogBody key="assignment" {...props}/>}</AnimatePresence>
+);
+
+const AssignmentDialogBody: React.FC<SetlistAssignmentDialogProps> = ({
   open,
   language,
   setlistName,
@@ -31,18 +37,7 @@ export const SetlistAssignmentDialog: React.FC<SetlistAssignmentDialogProps> = (
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   const titleId = React.useId();
   React.useEffect(() => { if (open) setQuery(''); }, [open]);
-  React.useLayoutEffect(() => {
-    if (!open) return;
-    const dialog = dialogRef.current!;
-    const previousOverflow = document.body.style.overflow;
-    dialog.showModal();
-    document.body.style.overflow = 'hidden';
-    return () => {
-      dialog.close();
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [open]);
-  if (!open) return null;
+  useNativeDialogMotion(dialogRef);
   const assignedIds = new Set((snapshot?.assignments ?? []).map((assignment) => assignment.userId));
   const isUpdating = Boolean(updatingUserId);
   const visibleMembers = (snapshot?.assignableMembers ?? []).filter((member) =>

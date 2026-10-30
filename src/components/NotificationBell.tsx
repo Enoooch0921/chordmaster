@@ -1,3 +1,4 @@
+import { AnimatedPopover } from './ui/InteractionMotion';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAnchoredPortalPanel } from './useAnchoredPortalPanel';
@@ -41,7 +42,7 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
       triggerRef.current?.focus({ preventScroll: true });
     }
   }, [open]);
-  const { panelStyle, isPositioned } = useAnchoredPortalPanel({ isOpen: open, align: 'right', triggerRef, panelRef, onRequestClose: close, zIndex: 300 });
+  const { panelStyle, isPositioned, transformOrigin } = useAnchoredPortalPanel({ isOpen: open, align: 'right', triggerRef, panelRef, onRequestClose: close, zIndex: 300 });
   useEffect(() => {
     if (open && isPositioned) panelRef.current?.focus({ preventScroll: true });
   }, [open, isPositioned]);
@@ -72,10 +73,10 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
         )}
       </button>
 
-      {open && createPortal(
+      {createPortal(
         <>
-          <div className="fixed inset-0 z-[299]" onClick={close} />
-          <div ref={panelRef} tabIndex={-1} role="dialog" aria-label={labels.title} style={panelStyle} className="flex max-h-[min(560px,calc(100dvh-2rem))] w-96 max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
+          {open && <div className="fixed inset-0 z-[299]" onClick={close} />}
+          <AnimatedPopover open={open} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} tabIndex={-1} role="dialog" aria-label={labels.title} style={panelStyle} className="flex max-h-[min(560px,calc(100dvh-2rem))] w-96 max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
             <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-3">
               <span className="min-w-0 flex-1 text-base font-semibold text-gray-900">{labels.title}</span>
               {unreadCount > 0 && (
@@ -142,7 +143,7 @@ export const NotificationBell = ({ notifications, labels, onOpen, onMarkAllRead 
                 })}
               </div>
             )}
-          </div>
+          </AnimatedPopover>
         </>, document.body
       )}
     </div>

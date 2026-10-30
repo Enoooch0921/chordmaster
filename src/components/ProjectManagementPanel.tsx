@@ -21,7 +21,7 @@ export function ManagementActions({ label, actions, disabled = false, triggerCon
   }, [open, close]);
   useEffect(() => { if (open && isPositioned) panel.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true }); }, [open, isPositioned]);
   return <>
-    <button ref={trigger} type='button' className={triggerContent ? 'pm-new-button' : 'pm-icon-button'} disabled={disabled} aria-label={label} aria-haspopup='menu' aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>{triggerContent ?? <MoreHorizontal size={19} />}</button>
+    <button ref={trigger} type='button' className={triggerContent ? 'pm-new-button ui-press' : 'pm-icon-button ui-press'} disabled={disabled} aria-label={label} aria-haspopup='menu' aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>{triggerContent ?? <MoreHorizontal size={19} />}</button>
     {createPortal(<AnimatedPopover open={open} ready={isPositioned} origin={transformOrigin} panelRef={panel} id={id} role='menu' aria-label={label} data-placement={placement} style={panelStyle} className='pm-actions-menu'
       onKeyDown={event => {
         const buttons = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
@@ -123,7 +123,7 @@ export default function ProjectManagementPanel(props: Props) {
       {project ? <div key={project.id} data-project-management-detail={project.id}>
         <section className='pm-section' aria-labelledby='pm-members-heading' data-project-sharing-id={project.id} aria-busy={membersLoading || pendingHere}>
           <div className='pm-section-heading'><h3 id='pm-members-heading'>{zh ? '成員與權限' : 'Members and permissions'}{canViewMembers && <span>{membersLoading && !memberStatus ? '…' : participants.length}</span>}</h3>
-            <div className='pm-section-actions'>{canViewMembers && <button type='button' className='pm-icon-button' aria-label={zh ? '重新整理成員' : 'Refresh members'} disabled={membersLoading || pendingHere} onClick={() => props.onRefreshMembers(project.id)}><RefreshCw size={16} /></button>}{props.canShare(project) && <button type='button' className='pm-text-button' disabled={props.sharing} onClick={() => props.onShare(project)}><Share2 size={15} />{props.sharing ? (zh ? '準備中…' : 'Preparing…') : (zh ? '邀請' : 'Invite')}</button>}</div>
+            <div className='pm-section-actions'>{canViewMembers && <button type='button' className='pm-icon-button' aria-label={zh ? '重新整理成員' : 'Refresh members'} disabled={membersLoading || pendingHere} onClick={() => props.onRefreshMembers(project.id)}><RefreshCw size={16} /></button>}{props.canShare(project) && <button type='button' className='pm-text-button ui-press' disabled={props.sharing} onClick={() => props.onShare(project)}><Share2 size={15} />{props.sharing ? (zh ? '準備中…' : 'Preparing…') : (zh ? '邀請' : 'Invite')}</button>}</div>
           </div>
           {!canViewMembers ? <p className='pm-message'>{zh ? '目前無法查看此專案的共享成員。' : 'Shared members are unavailable for this project.'}</p>
             : membersError ? <p role='alert' className='pm-message pm-error'>{zh ? '無法載入成員。請重新整理再試。' : 'Members could not be loaded. Refresh to retry.'}</p>

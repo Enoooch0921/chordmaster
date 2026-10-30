@@ -77,6 +77,25 @@ const renderEditor = ({
   };
 };
 
+it('updates the shared selection indicator immediately across notation and text modes', () => {
+  const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
+  const { rerenderSession, onNotationModeChange } = renderEditor({ session: base, deviceLayout: 'tablet' });
+  const indicator = document.querySelector<HTMLElement>('[data-notation-mode-indicator]')!;
+  expect(indicator).toHaveAttribute('aria-hidden', 'true');
+  expect(indicator.style.transform).toBe('translateX(0%)');
+  fireEvent.click(screen.getByRole('button', { name: '切換到節奏' }));
+  expect(onNotationModeChange).toHaveBeenCalledWith('rhythm');
+  rerenderSession({ ...base, notationMode: 'rhythm' });
+  expect(indicator.style.transform).toBe('translateX(100%)');
+  rerenderSession({ ...base, notationMode: 'jianpu' });
+  expect(indicator.style.transform).toBe('translateX(200%)');
+  fireEvent.click(screen.getByRole('button', { name: '文字欄位' }));
+  expect(indicator.style.transform).toBe('translateX(300%)');
+  expect(screen.getByRole('button', { name: '文字欄位' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '切換到簡譜' }));
+  expect(indicator.style.transform).toBe('translateX(200%)');
+});
+
 it.each(['sus', 'add', 'alt', '加入增和弦', '選擇 Slash Bass'])('previews the held %s modifier without applying it before release', label => {
   const { onApplyDraft } = renderEditor({ deviceLayout:'tablet' });
   const button = screen.getByRole('button', { name:label });
@@ -124,7 +143,7 @@ describe('PreviewBarEditor', () => {
     expect(panel.style.left).toBe(position.left);
     expect(panel.style.top).toBe(position.top);
     await userEvent.click(screen.getByRole('button', { name: '收合鍵盤' }));
-    expect(panel.querySelector('[data-keyboard-surface]')).toBeNull();
+    await waitFor(() => expect(panel.querySelector('[data-keyboard-surface]')).toBeNull());
     await userEvent.click(screen.getByRole('button', { name: '展開鍵盤' }));
     expect(panel.querySelector('[data-keyboard-surface]')).not.toBeNull();
   });
@@ -187,7 +206,7 @@ describe('PreviewBarEditor', () => {
       session = applyPreviewDraft(session, edited);
       rerenderSession(session);
       expect(document.querySelector('[data-barline-cycle]')).toHaveAttribute('data-barline-cycle', state);
-      expect(document.querySelector('[data-keyboard-picker]')).not.toBeInTheDocument();
+      await waitFor(() => expect(document.querySelector('[data-keyboard-picker]')).not.toBeInTheDocument());
     }
   });
 
@@ -1308,7 +1327,7 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: '|: Repeat Start' })).not.toHaveTextContent('Repeat Start');
     await user.click(screen.getByRole('button', { name: '|: Repeat Start' }));
     expect((onApplyDraft.mock.calls.at(-1)?.[0] as Song).sections[0].bars[0].repeatStart).toBe(true);
-    expect(document.querySelector('[data-keyboard-picker]')).not.toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('[data-keyboard-picker]')).not.toBeInTheDocument());
   });
 
   it('keeps all structure operations in one fixed picker', async () => {
@@ -1678,7 +1697,7 @@ describe('PreviewBarEditor', () => {
     const session = createPreviewEditSession({ song, target: { ...target, field }, inputMode: 'letters' });
     renderEditor({ session });
     await user.click(screen.getByRole('button', { name: '收合鍵盤' }));
-    expect(document.querySelector('[data-keyboard-surface]')).toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-keyboard-surface]')).toBeNull());
     const toolbar = document.querySelector('[data-desktop-color-toolbar]') as HTMLElement;
     expect(toolbar).toBeVisible();
     expect(within(toolbar).getAllByRole('button')).toHaveLength(6);
@@ -1690,14 +1709,14 @@ describe('PreviewBarEditor', () => {
     expect(screen.getByRole('button', { name: '整小節輸入' })).not.toHaveTextContent('•••');
   });
 
-  it('keeps desktop chord keys in function-only mode when switching notation modes', () => {
+  it('keeps desktop chord keys in function-only mode when switching notation modes', async () => {
     const base = createPreviewEditSession({ song, target, inputMode: 'letters' });
     const { rerenderSession } = renderEditor({ session: base });
     expect(document.querySelector('[data-chord-key-row="roots"]')).toBeNull();
     rerenderSession({ ...base, notationMode: 'rhythm' });
     rerenderSession({ ...base, notationMode: 'chords' });
     expect(document.querySelector('[data-chord-key-row="roots"]')).toBeNull();
-    expect(document.querySelector('[data-desktop-color-toolbar]')).toBeVisible();
+    await waitFor(() => expect(document.querySelector('[data-desktop-color-toolbar]')).toBeVisible());
   });
 
   it('shows capacity feedback outside the key grid', () => {
@@ -1781,10 +1800,10 @@ describe('PreviewBarEditor', () => {
 describe('preview pickup keyboard', () => {
   const pickupTarget = { ...target, sectionId: PICKUP_EDITOR_SECTION_ID, barId: PICKUP_EDITOR_BAR_ID,
     field: 'jianpu' as const, slotIndex: 0, cursor: { kind: 'jianpu' as const, beatIndex: 0, unitIndex: 0, noteIndex: null } };
-  it.each(['desktop', 'phone'] as const)('edits a half-beat pickup on %s without exposing chords or changing regular bars', deviceLayout => {
+  it.each(['desktop', 'phone'] as const)('edits a half-beat pickup on %s without exposing chords or changing regular bars', async deviceLayout => {
     const source = { ...song, pickup: { id: 'pickup', timeSignature: '1/8' } };
     const { onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song: source, target: pickupTarget }), deviceLayout });
-    expect(screen.getByRole('combobox', { name: '弱起長度' })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '弱起長度' })).toBeVisible());
     expect(screen.queryByRole('button', { name: '切換到和弦' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '輸入簡譜 5' }));
     const changed = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
@@ -1803,7 +1822,7 @@ describe('preview pickup keyboard', () => {
     expect(onApplyDraft.mock.calls.at(-1)?.[0]).toMatchObject({ sections: source.sections, pickup: undefined });
   });
 
-  it('continues typing, navigates, changes a selected note and deletes without looping or overwriting', () => {
+  it('continues typing, navigates, changes a selected note and deletes without looping or overwriting', async () => {
     const source = { ...song, pickup: { id: 'pickup', timeSignature: '1/4' } };
     let latest = createPreviewEditSession({ song: source, target: pickupTarget });
     let renderCount = 0;
@@ -1826,7 +1845,7 @@ describe('preview pickup keyboard', () => {
     expect(latest.cursorByMode.jianpu).toMatchObject({ unitIndex: 4, noteIndex: null });
     fireEvent.click(screen.getByRole('button', { name: '輸入簡譜 7' }));
     expect(latest.draftSong.pickup?.riff).toBe('5_6_');
-    expect(screen.getByRole('status')).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('status')).toBeVisible());
     fireEvent.click(screen.getByRole('button', { name: 'Previous beat' }));
     fireEvent.click(screen.getByRole('button', { name: '輸入簡譜 2' }));
     expect(latest.draftSong.pickup?.riff).toBe('5_2_');

@@ -1,3 +1,5 @@
+import { useIsPresent } from 'motion/react';
+import { AnimatedPopover } from './ui/InteractionMotion';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Archive, ArchiveRestore, FolderInput, Trash2, CheckSquare, Share2 } from 'lucide-react';
@@ -18,10 +20,12 @@ interface SetlistContextMenuProps {
 }
 
 export default function SetlistContextMenu({ language, title, archived, x, y, onArchive, onMove, onDelete, onClose, onSelect, onShare }: SetlistContextMenuProps) {
+  const present = useIsPresent();
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x, top: y });
 
   useLayoutEffect(() => {
+    if (!present) return;
     const menu = menuRef.current;
     if (!menu) return;
     const rect = menu.getBoundingClientRect();
@@ -30,9 +34,10 @@ export default function SetlistContextMenu({ language, title, archived, x, y, on
       top: Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))
     });
     menu.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
-  }, [x, y]);
+  }, [x, y, present]);
 
   useEffect(() => {
+    if (!present) return;
     const dismissOutside = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) onClose();
     };
@@ -45,7 +50,7 @@ export default function SetlistContextMenu({ language, title, archived, x, y, on
       window.removeEventListener('resize', dismiss);
       window.removeEventListener('scroll', dismiss, true);
     };
-  }, [onClose]);
+  }, [onClose, present]);
 
   const run = (action: () => void) => {
     onClose();
@@ -53,12 +58,12 @@ export default function SetlistContextMenu({ language, title, archived, x, y, on
   };
 
   return createPortal(
-    <div
-      ref={menuRef}
+    <AnimatedPopover open={present} animateOnMount propagate panelRef={menuRef}
+      origin={`${Math.max(0, x - position.left)}px ${Math.max(0, y - position.top)}px`}
       role="menu"
       aria-label={title}
       style={position}
-      className="fixed z-[5300] w-56 max-w-[calc(100vw-16px)] rounded-xl border border-gray-200 bg-white p-1.5 shadow-xl"
+      shellClassName="fixed z-[5300]" className="w-56 max-w-[calc(100vw-16px)] rounded-xl border border-gray-200 bg-white p-1.5 shadow-xl"
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {
         if (event.key === 'Escape' || event.key === 'Tab') {
@@ -88,7 +93,7 @@ export default function SetlistContextMenu({ language, title, archived, x, y, on
       <button type="button" role="menuitem" onClick={() => run(onDelete)} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold text-rose-600 hover:bg-rose-50 focus:bg-rose-50 focus:outline-none">
         <Trash2 size={16} />{language === 'zh' ? '刪除' : 'Delete'}
       </button>
-    </div>,
+    </AnimatedPopover>,
     document.body
   );
 }

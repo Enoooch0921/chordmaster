@@ -21,15 +21,15 @@
   --keyboard-active: #2f7951;
   --keyboard-pressed: #294536;
 }
-[data-preview-bar-editor][data-keyboard-refined] {
+[data-keyboard-motion][data-keyboard-refined] {
   background: var(--keyboard-surface) !important;
   border-color: var(--keyboard-border) !important;
   border-radius: 16px 16px 0 0 !important;
   box-shadow: 0 -4px 28px #1a352414 !important;
   backdrop-filter: none !important;
 }
-[data-preview-bar-editor][data-keyboard-refined][data-device-layout="desktop"] { border-radius: 14px !important; }
-[data-preview-bar-editor][data-keyboard-refined] > header {
+[data-keyboard-motion][data-keyboard-refined][data-device-layout="desktop"] { border-radius: 14px !important; }
+[data-keyboard-motion][data-keyboard-refined] > header {
   background: var(--keyboard-header) !important;
   border-color: var(--keyboard-border) !important;
   backdrop-filter: none !important;
@@ -82,13 +82,27 @@
   box-shadow: none !important;
 }
 [data-keyboard-refined] [data-notation-mode-segments] button {
+  background: transparent !important;
   box-shadow: none !important;
   color: var(--keyboard-muted) !important;
   font-size: 11px !important;
+  transition: color var(--ui-release-duration) var(--ease-ui-out), transform var(--ui-press-duration) var(--ease-ui-out);
 }
 [data-keyboard-refined] [data-notation-mode-segments] button[aria-pressed="true"] {
-  background: var(--keyboard-key) !important;
   color: var(--keyboard-text) !important;
+}
+[data-keyboard-refined] [data-notation-mode-segments] button:active:not(:disabled) { transform: scale(0.97) !important; }
+[data-notation-mode-indicator] {
+  border-radius: 6px;
+  background: var(--keyboard-key);
+  box-shadow: 0 1px 2px #193d2412;
+}
+[data-ui-input="keyboard"] [data-notation-mode-indicator],
+[data-ui-input="keyboard"] [data-notation-mode-segments] button { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  [data-notation-mode-indicator] { transition: none; }
+  [data-keyboard-refined] [data-notation-mode-segments] button { transition-property: color; }
+  [data-keyboard-refined] [data-notation-mode-segments] button:active:not(:disabled) { transform: none !important; }
 }
 [data-keyboard-refined] [data-rhythm-symbol] { font-size: 32px !important; }
 [data-keyboard-refined] [data-jianpu-input-glyph] { position: relative; }
@@ -142,7 +156,7 @@
 [data-keyboard-key-preview][data-keyboard-refined] { background: var(--keyboard-key) !important; color: var(--keyboard-text) !important; border-color: var(--keyboard-border) !important; }
 [data-keyboard-key-preview][data-keyboard-refined] > span { background: var(--keyboard-key) !important; border-color: var(--keyboard-border) !important; }
 
-[data-preview-bar-editor][data-keyboard-refined] { color: var(--keyboard-text); }
+[data-keyboard-motion][data-keyboard-refined] { color: var(--keyboard-text); }
 [data-keyboard-refined] [data-keyboard-status] > div:last-child { color: var(--keyboard-text) !important; }
 [data-keyboard-refined] [data-keyboard-status] [role="status"] { color: var(--keyboard-muted) !important; }
 }

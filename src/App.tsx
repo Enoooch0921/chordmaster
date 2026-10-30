@@ -1,3 +1,5 @@
+import SlidingSelection from './components/ui/SlidingSelection';
+import { useContentSwitchMotion } from './hooks/useContentSwitchMotion';
 import { loadChordInputPreference, saveChordInputPreference } from './lib/chordInputPreference';
 import PreviewPasteMenu, { PreviewPasteChoices } from './components/PreviewPasteMenu';
 import { usePreviewKeyboardVisibility } from './hooks/usePreviewKeyboardVisibility';
@@ -5,7 +7,7 @@ import { SwipeActionGroup, SwipeActionRow } from './components/SwipeActionRow';
 import { canCloseBar, isClosedBar } from './utils/closedBar';
 import { AnimatedDisclosure, AnimatedPopover, PresenceSurface, PresenceBackdrop } from './components/ui/InteractionMotion';
 import { useUiMotion } from './hooks/useUiMotion';
-import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants } from './lib/uiMotion';
+import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants, popoverVariants } from './lib/uiMotion';
 import SetlistSongActions from './components/SetlistSongActions';
 import './components/SongLibraryPanel.css';
 import ProjectManagementPanel, { ManagementActions } from './components/ProjectManagementPanel';
@@ -244,7 +246,6 @@ import {
   updateSectionTitle
 } from './lib/songEditing';
 import {
-  getPreviewEditorBottomInset,
   resolvePreviewEditorDeviceLayout
 } from './lib/previewEditorLayout';
 import {
@@ -1607,13 +1608,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, []);
   const [previewSectionActionTarget, setPreviewSectionActionTarget] = useState<PreviewSectionActionTarget | null>(null);
   const previewSectionActionTimerRef = useRef<number | null>(null);
-  const [previewEditorPanelHeight, setPreviewEditorPanelHeight] = useState(0);
-  const handlePreviewEditorPanelHeightChange = React.useCallback((height: number) => {
-    const roundedHeight = Math.max(0, Math.round(height));
-    setPreviewEditorPanelHeight((currentHeight) => (
-      currentHeight === roundedHeight ? currentHeight : roundedHeight
-    ));
-  }, []);
   const [isPreviewEditExitPromptOpen, setIsPreviewEditExitPromptOpen] = useState(false);
   const [pendingWorkspaceSwitch, setPendingWorkspaceSwitch] = useState<string | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('zh');
@@ -2201,6 +2195,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       || (/Macintosh/i.test(previewEditorUserAgent) && previewEditorPlatform === 'MacIntel' && previewEditorTouchPoints > 1)
       || (Capacitor.getPlatform() === 'ios' && !previewEditorIsPhoneDevice && viewportWidth >= PHONE_VIEWPORT_BREAKPOINT)
   });
+  const mobileActionsContentRef = useRef<HTMLDivElement>(null);
+  const mobileWorkspaceContentRef = useRef<HTMLDivElement>(null);
+  useContentSwitchMotion(mobileActionsContentRef, mobileActionsSection, isPhoneViewport && isMobileActionsSheetOpen);
+  useContentSwitchMotion(mobileWorkspaceContentRef, workspaceMode, isPhoneViewport && isMobileNavOpen);
   const mobileMetadataMotion = useBottomSheetMotion(mobileMetadataRef, isPhoneViewport && isMobileMetadataOpen, () => setIsMobileMetadataOpen(false));
   useModalFocus(isPhoneViewport && isMobileMetadataOpen && mobileMetadataMotion.mounted, mobileMetadataRef);
   useModalScrollLock(
@@ -2491,9 +2489,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         cursor: activePreviewEditSession.cursorByMode[activePreviewEditSession.notationMode]
       }
     : null;
-  const previewEditorBottomInset = activePreviewEditSession
-    ? getPreviewEditorBottomInset(previewEditorDeviceLayout, previewEditorPanelHeight)
-    : 0;
   const activeDraftEditorSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
   const selectedSetlistSourceStatus = React.useMemo(() => (
     isSetlistMode && selectedSetlistSourceSong && activeDraftEditorSong
@@ -2771,7 +2766,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 void handleCreateShareLink('song');
                 setIsToolbarOverflowMenuOpen(false);
               }}
-              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]"
+              className="ui-press mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]"
             >
               <Share2 size={14} />
               <span>{copy.shareCurrentSong}</span>
@@ -2785,7 +2780,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 void handleCreateShareLink('setlist');
                 setIsToolbarOverflowMenuOpen(false);
               }}
-              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]"
+              className="ui-press mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]"
             >
               <Share2 size={14} />
               <span>{copy.shareCurrentSetlist}</span>
@@ -10450,7 +10445,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [activePreviewEditSession?.notationMode, activePreviewEditSession?.previewIdentity, activePreviewEditSession?.target.barId, activePreviewEditSession?.target.kind, previewEditorDeviceLayout]);
 
   usePreviewKeyboardVisibility(
-    activePreviewEditSession?.target.kind === 'bar' ? activePreviewEditSession.target.anchorKey : null,
+    activePreviewEditSession?.target.kind === 'bar' && canOpenEditor && !isLyricsMode ? activePreviewEditSession.target.anchorKey : null,
     previewRef, previewCanvasRef, sheetRef, refreshPreviewEditAnchorRect
   );
 
@@ -11495,7 +11490,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             type="button"
             onClick={() => void handleCreateShareLink('setlist')}
             disabled={isExportingPdf || isRevokingSetlistShare}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
+            className="ui-press inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
           >
             <Share2 size={13} />
             <span>{activeSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
@@ -11807,7 +11802,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         {canViewProjectMembers && <span className="setlist-project-member-count">{isLoadingProjectShareStatus ? '…' : projectShareStatusError ? <CloudAlert size={15}/> : activeProjectShareStatus?.participants.length ?? 0}</span>}
       </button>
     : selectedJoinedProject && canShareSelectedProject
-      ? <button type="button" className="setlist-project-members" aria-label={language === 'zh' ? '分享專案' : 'Share project'}
+      ? <button type="button" className="ui-press setlist-project-members" aria-label={language === 'zh' ? '分享專案' : 'Share project'}
           onClick={() => void handleCreateProjectShareLink(selectedJoinedProject.id)} disabled={creatingProjectShareLinkId === selectedJoinedProject.id}>
           <Share2 size={16}/><span>{language === 'zh' ? '分享' : 'Share'}</span>
         </button>
@@ -12078,7 +12073,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         <div className="setlist-detail-toolbar">
           <span>{setlistSongsWithSource.length}{language === 'zh' ? ' 首歌曲' : ' songs'}</span>
           <div className="flex items-center gap-2">
-            {canShareSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="pm-text-button"
+            {canShareSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="ui-press pm-text-button"
               aria-label={language === 'zh' ? '邀請加入歌單' : 'Invite to setlist'} disabled={isRevokingSetlistShare}
               onClick={() => { void handleCreateShareLink('setlist'); }}><Share2 size={15}/>{language === 'zh' ? '邀請' : 'Invite'}</button>}
             {canEditSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="pm-new-button" aria-label={copy.addToSetlist}
@@ -12741,6 +12736,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
             {showSidebarWorkspacePanels ? librarySwitcherPanel : null}
 
+            <div ref={mobileWorkspaceContentRef} data-mobile-workspace-content className="flex min-h-0 flex-1 flex-col">
             {isSetlistMode ? (
               <SwipeActionGroup resetKey={`${activeLibraryId ?? 'local'}:${setlistPanelView}:${serializeSetlistProjectFilter(setlistProjectFilter)}`}>
               <SetlistNavigator
@@ -12994,6 +12990,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 {desktopSetlistSavedFooter}
               </div>
             )}
+            </div>
           </motion.div>
         </motion.div>
       </aside>
@@ -13442,8 +13439,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       )}
                     </button>
 
-                    {isGoogleAccountMenuOpen && (
-                      <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                    <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
                         <div className="rounded-xl bg-gray-50 px-3 py-2">
                           <div className="truncate text-sm font-semibold text-gray-800">{authenticatedUser.name}</div>
                           <div className="mt-0.5 truncate text-[11px] text-gray-500">{authenticatedUser.email}</div>
@@ -13456,8 +13452,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                           <LogOut size={14} />
                           <span>{copy.signOut}</span>
                         </button>
-                      </div>
-                    )}
+                      </AnimatedPopover>
                   </div>
                 ) : (
                   showGoogleAuth && googleUser ? (
@@ -13488,8 +13483,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         )}
                       </button>
 
-                      {isGoogleAccountMenuOpen && (
-                        <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                      <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
                           <div className="rounded-xl bg-gray-50 px-3 py-2">
                             <div className="truncate text-sm font-semibold text-gray-800">{googleUser.name}</div>
                             <div className="mt-0.5 truncate text-[11px] text-gray-500">{googleUser.email}</div>
@@ -13502,8 +13496,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                             <LogOut size={14} />
                             <span>{copy.signOut}</span>
                           </button>
-                        </div>
-                      )}
+                        </AnimatedPopover>
                     </div>
                   ) : showGoogleAuth ? (
                     <div className="flex shrink-0 items-center gap-2">
@@ -13695,8 +13688,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       )}
                     </button>
 
-                    {isGoogleAccountMenuOpen && (
-                      <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                    <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
                         <div className="rounded-xl bg-gray-50 px-3 py-2">
                           <div className="truncate text-sm font-semibold text-gray-800">{authenticatedUser.name}</div>
                           <div className="mt-0.5 truncate text-[11px] text-gray-500">{authenticatedUser.email}</div>
@@ -13709,8 +13701,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                           <LogOut size={14} />
                           <span>{copy.signOut}</span>
                         </button>
-                      </div>
-                    )}
+                      </AnimatedPopover>
                   </div>
                 ) : (
                   showGoogleAuth && googleUser ? (
@@ -13741,8 +13732,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         )}
                       </button>
 
-                      {isGoogleAccountMenuOpen && (
-                        <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+                      <AnimatedPopover open={isGoogleAccountMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-56 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
                           <div className="rounded-xl bg-gray-50 px-3 py-2">
                             <div className="truncate text-sm font-semibold text-gray-800">{googleUser.name}</div>
                             <div className="mt-0.5 truncate text-[11px] text-gray-500">{googleUser.email}</div>
@@ -13755,8 +13745,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                             <LogOut size={14} />
                             <span>{copy.signOut}</span>
                           </button>
-                        </div>
-                      )}
+                        </AnimatedPopover>
                     </div>
                   ) : showGoogleAuth ? (
                     <div className="flex shrink-0 items-center gap-2">
@@ -13814,7 +13803,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         <button
                           type="button"
                           onClick={() => void handleCreateShareLink('song')}
-                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
+                          className="ui-press inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
                         >
                           <Share2 size={15} />
                           <span>{copy.shareCurrentSong}</span>
@@ -13824,7 +13813,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         <button
                           type="button"
                           onClick={() => void handleCreateShareLink('setlist')}
-                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
+                          className="ui-press inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
                         >
                           <Share2 size={15} />
                           <span>{copy.shareCurrentSetlist}</span>
@@ -14030,8 +14019,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                             <MoreHorizontal size={16} />
                             <span>{language === 'zh' ? '更多' : 'More'}</span>
                           </button>
-                          {isToolbarOverflowMenuOpen && (
-                            <div role="menu" className="absolute right-0 top-full z-30 mt-2 w-48 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
+                          <AnimatedPopover open={isToolbarOverflowMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-48 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl">
                               {homeScreenInstallMenuItem}
                               <button
                                 type="button"
@@ -14075,8 +14063,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                                 </span>
                                 <span className="text-[11px] font-bold">{song.showAbsoluteJianpu ? copy.on : copy.off}</span>
                               </button>
-                            </div>
-                          )}
+                            </AnimatedPopover>
                         </div>
                       ) : (
                         <>
@@ -14349,10 +14336,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               onMouseDown={handlePreviewMouseDown}
               onClickCapture={handlePreviewClickCapture}
               onScroll={handlePreviewScroll}
-              style={{
-                scrollPaddingBottom: previewEditorBottomInset ? `${previewEditorBottomInset}px` : undefined,
-                paddingBottom: previewEditorBottomInset ? `${previewEditorBottomInset}px` : undefined
-              }}
               className={`h-full overflow-auto p-3 sm:p-4 lg:p-8 xl:p-12 [overflow-anchor:none] [scrollbar-gutter:stable_both-edges] [touch-action:pan-x_pan-y] ${isPreviewDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
             >
               <div
@@ -14392,6 +14375,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               aria-hidden="true"
               className="fixed left-0 top-0 h-px w-px opacity-0 pointer-events-none"
             />
+            <AnimatePresence initial={false} custom={uiMotion}>
             {activePreviewEditSession && activePreviewEditSession.target.field !== 'sectionName' && activeDraftNavigationPreviewSong && canOpenEditor && !isLyricsMode && (() => {
               const storedKey = getBarStoredKey(activePreviewEditSession.draftSong, activePreviewEditSession.target);
               const displayedChartKey = getBarDisplayKey(
@@ -14434,10 +14418,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   onRedo={handleActiveRedo}
                   onDone={() => commitPreviewEditSession()}
                   onCancel={() => setPreviewEditSession(null)}
-                  onPanelHeightChange={handlePreviewEditorPanelHeightChange}
                 />
               );
             })()}
+            </AnimatePresence>
             {activePreviewEditSession?.target.field === 'sectionName' && canOpenEditor && !isLyricsMode && (
               <PreviewSectionTitleEditor
                 session={activePreviewEditSession}
@@ -14466,12 +14450,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 }}
               />
             )}
+            <AnimatePresence initial={false} custom={uiMotion}>
             {previewPasteMenu && canOpenEditor && previewPasteMenu.previewIdentity === activePreviewIdentity && <PreviewPasteMenu
               language={language} count={previewPasteMenu.content.items.length} left={previewPasteMenu.left} top={previewPasteMenu.top}
               onClose={() => setPreviewPasteMenu(null)} onChoose={kind => {
                 pasteHoveredPreviewContent({ ...previewPasteMenu.content, kind }, previewPasteMenu.hovered, previewPasteMenu.targets);
                 setPreviewPasteMenu(null);
               }} />}
+            </AnimatePresence>
+            <AnimatePresence initial={false} custom={uiMotion}>
             {previewBarContextMenu && canOpenEditor && !isLyricsMode && activeEditorSong && previewBarContextMenu.previewIdentity === activePreviewIdentity && (() => {
               const sourceSong = getPreviewBatchSong()!;
               const selectedBars = getBarsByIdentities(sourceSong, getPreviewBatchTargets(previewBarContextMenu));
@@ -14494,14 +14481,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               const menuButtonClass = 'flex min-h-10 w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-700';
               const endingButtonClass = 'flex h-8 min-w-0 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700';
               return (
-                <div
+                <PresenceSurface
+                  custom={uiMotion} variants={popoverVariants} initial={uiMotion.instant ? false : "hidden"} animate="visible" exit="exit"
                   ref={previewBarMenuRef}
                   data-preview-bar-batch-menu
                   role="menu"
                   aria-label={language === 'zh' ? '小節批量操作' : 'Batch bar actions'}
                   data-preview-edit-ui
                   className="fixed z-[5300] w-[280px] overflow-y-auto overscroll-contain rounded-xl bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
-                  style={{ left: menuLeft, top: menuTop, maxHeight: `calc(100dvh - ${menuTop + 8}px)` }}
+                  style={{ transformOrigin: "0% 0%", left: menuLeft, top: menuTop, maxHeight: `calc(100dvh - ${menuTop + 8}px)` }}
                   onKeyDown={event => {
                     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setPreviewBarContextMenu(null); }
                     if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -14573,9 +14561,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     </button>
                   </div>
                   </>}
-                </div>
+                </PresenceSurface>
               );
             })()}
+            </AnimatePresence>
             {activeEditorSong && previewMetaEditTarget && canOpenEditor && !isLyricsMode && (
               <RecoveryBoundary label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><PreviewWysiwygEditor
                 song={activeEditorSong}
@@ -14826,7 +14815,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 <PresenceSurface
                   {...drawerMotion}
                   role="dialog" aria-label={copy.editor.more}
-                  className="fixed inset-x-0 bottom-0 z-[80] flex max-h-[90dvh] flex-col overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-white shadow-[0_-24px_60px_rgba(15,23,42,0.18)]"
+                  className="fixed inset-x-0 bottom-0 z-[80] flex h-[min(640px,90dvh)] max-h-[90dvh] flex-col overflow-hidden rounded-t-[28px] border-t border-gray-200 bg-white shadow-[0_-24px_60px_rgba(15,23,42,0.18)]"
                 >
                   <div className="mx-auto mt-2 h-1.5 shrink-0 w-12 rounded-full bg-gray-200" />
                   <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
@@ -14841,12 +14830,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   </div>
 
                   {isSheetView ? (
-                    <nav aria-label={language === 'zh' ? '更多選項分類' : 'More options'} className="flex shrink-0 gap-2 border-b border-gray-100 px-4 py-3">
-                      <button type="button" aria-pressed={mobileActionsSection === 'sheet'} onClick={() => setMobileActionsSection('sheet')} className={`min-h-11 flex-1 rounded-xl px-3 text-sm font-semibold ${mobileActionsSection === 'sheet' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}>{language === 'zh' ? '譜面操作' : 'Sheet actions'}</button>
-                      <button type="button" aria-pressed={mobileActionsSection === 'settings'} onClick={() => setMobileActionsSection('settings')} className={`min-h-11 flex-1 rounded-xl px-3 text-sm font-semibold ${mobileActionsSection === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}>{language === 'zh' ? '帳號與設定' : 'Account & settings'}</button>
+                    <nav aria-label={language === 'zh' ? '更多選項分類' : 'More options'} className="shrink-0 border-b border-gray-100 px-4 py-3">
+                      <div className="relative grid grid-cols-2 gap-2 rounded-xl">
+                        <SlidingSelection index={mobileActionsSection === 'sheet' ? 0 : 1} count={2} inset={0} gap={8}
+                          className="bg-indigo-50 dark:bg-indigo-950" style={{ borderRadius: 12 }}/>
+                        <button type="button" aria-pressed={mobileActionsSection === 'sheet'} onClick={() => setMobileActionsSection('sheet')} className={`ui-press relative min-h-11 rounded-xl px-3 text-sm font-semibold ${mobileActionsSection === 'sheet' ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}>{language === 'zh' ? '譜面操作' : 'Sheet actions'}</button>
+                        <button type="button" aria-pressed={mobileActionsSection === 'settings'} onClick={() => setMobileActionsSection('settings')} className={`ui-press relative min-h-11 rounded-xl px-3 text-sm font-semibold ${mobileActionsSection === 'settings' ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}>{language === 'zh' ? '帳號與設定' : 'Account & settings'}</button>
+                      </div>
                     </nav>
                   ) : null}
-                  <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                  <div ref={mobileActionsContentRef} data-mobile-actions-content className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                     {homeScreenInstallMenuItem}
                     {isSheetView && mobileActionsSection === 'sheet' ? (
                       <>
@@ -14888,7 +14881,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                           <button
                             type="button"
                             onClick={() => { setIsMobileActionsSheetOpen(false); void handleCreateShareLink('song'); }}
-                            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                            className="ui-press flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
                           >
                             <Share2 size={14} />
                             <span>{copy.shareCurrentSong}</span>
@@ -14898,7 +14891,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                           <button
                             type="button"
                             onClick={() => { setIsMobileActionsSheetOpen(false); void handleCreateShareLink('setlist'); }}
-                            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
+                            className="ui-press flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100"
                           >
                             <Share2 size={14} />
                             <span>{copy.shareCurrentSetlist}</span>
@@ -15131,6 +15124,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         </>
       )}
 
+      <AnimatePresence initial={false} custom={uiMotion}>
       {isCreateSetlistOpen && (
         <ResponsiveDialog
           title={language === 'zh' ? '先確認名稱與專案' : 'Name and organize this setlist'}
@@ -15205,6 +15199,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           </form>
         </ResponsiveDialog>
       )}
+      </AnimatePresence>
 
       <AnimatePresence initial={false} custom={uiMotion}>
         {isImportPromptOpen && authenticatedUser && (
@@ -15395,6 +15390,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         )}
       </AnimatePresence>
 
+      <AnimatePresence initial={false} custom={uiMotion}>
       {setlistContextMenu && isSetlistMode && setlistPanelView === 'list' && (() => {
         const target = setlists.find((item) => item.id === setlistContextMenu.id);
         if (!target || !canManageSetlist(target)) return null;
@@ -15421,6 +15417,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           />
         );
       })()}
+      </AnimatePresence>
 
       <AnimatePresence initial={false} custom={uiMotion}>
         {isMultiSelectMode && (
@@ -15568,6 +15565,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         )}
       </AnimatePresence>
 
+      <AnimatePresence initial={false} custom={uiMotion}>
       {pendingWorkspaceSwitch && <WorkspaceSaveDialog
         language={language}
         workspaceName={activeCloudLibrary?.name}
@@ -15576,6 +15574,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onSave={() => { const id = pendingWorkspaceSwitch; setPendingWorkspaceSwitch(null); void handleSwitchCloudLibrary(id, 'save'); }}
         onDiscard={() => { const id = pendingWorkspaceSwitch; setPendingWorkspaceSwitch(null); void handleSwitchCloudLibrary(id, 'discard'); }}
       />}
+      </AnimatePresence>
       <AnimatePresence custom={uiMotion}>
         {isPreviewEditExitPromptOpen && previewEditSession?.dirty && (
           <PresenceSurface
@@ -15637,6 +15636,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         )}
       </AnimatePresence>
 
+      <AnimatePresence initial={false} custom={uiMotion}>
       {isTeamManagementOpen && canManageActiveTeam ? (
         <TeamManagementDialog
           key={activeCloudLibrary?.id}
@@ -15663,6 +15663,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           onRemoveMember={handleRemoveTeamMember}
         />
       ) : null}
+
+      </AnimatePresence>
 
       <TeamSongImportDialog
         open={isTeamSongImportOpen}

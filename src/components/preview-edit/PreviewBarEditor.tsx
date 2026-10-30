@@ -1,4 +1,8 @@
 import './PreviewKeyboard.css';
+import KeyboardSurface from './KeyboardSurface';
+import SlidingSelection from '../ui/SlidingSelection';
+import { AnimatedDisclosure, AnimatedPopover } from '../ui/InteractionMotion';
+import { useIsPresent } from 'motion/react';
 import { applyPickupEditorSong, toPickupEditorSong } from '../../lib/pickupEditing';
 import { PICKUP_EDITOR_SECTION_ID, pickupTimeSignatureForUnits, resizePickup } from '../../utils/pickupUtils';
 import BarlineGlyph from '../BarlineGlyph';
@@ -327,6 +331,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [bassMode, setBassMode] = React.useState(false);
   const [landscapeChordPage, setLandscapeChordPage] = React.useState<'input'|'tools'>('input');
   const [collapsed, setCollapsed] = React.useState(false);
+  const present = useIsPresent();
   const [subdivisionsExpanded, setSubdivisionsExpanded] = React.useState(false);
   const [graceDraft, setGraceDraft] = React.useState<JianpuGraceNote[] | null>(null);
   const [desktopKeysVisible, setDesktopKeysVisible] = React.useState(() => (
@@ -647,6 +652,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }
 
   React.useEffect(() => {
+    if (!present) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       const element = event.target as HTMLElement | null;
       const isTyping = element?.tagName === 'INPUT' || element?.tagName === 'TEXTAREA' || element?.tagName === 'SELECT' || element?.isContentEditable;
@@ -1117,7 +1123,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       : { position: 'fixed', left: '50%', top: '50%', width: 'min(520px, calc(100vw - 24px))', transform: 'translate(-50%, -50%)' };
     const isDeleted = session.targetStatus === 'deleted' || (isPickup && !sourceSession.draftSong.pickup);
     return (
-      <section
+      <KeyboardSurface docked={isDocked}
         ref={panelRef}
         data-preview-bar-editor data-keyboard-refined
         data-preview-edit-ui
@@ -1139,15 +1145,15 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           <button type="button" className={`${toolbarButtonClass} !text-rose-700`} onClick={onCancel} aria-label="Cancel"><X size={16} /></button>
           <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-700 !text-white`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={16} /><span className="ml-1">{language === 'zh' ? '完成' : 'Done'}</span></button>
         </div>
-      </section>
+      </KeyboardSurface>
     );
   }
 
-  if (hasUnmeteredChords(bar) || (bar.chordTimingUnspecified && notationMode === 'chords' && session.target.field === 'chords')) return <section ref={panelRef} data-preview-bar-editor data-keyboard-refined data-preview-edit-ui data-device-layout={deviceLayout} role="dialog" aria-label={language==='zh'?'未定拍位和弦編輯':'Unmetered chord editor'} className="z-[5000] flex flex-col gap-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-xl" style={panelStyle}>
+  if (hasUnmeteredChords(bar) || (bar.chordTimingUnspecified && notationMode === 'chords' && session.target.field === 'chords')) return <KeyboardSurface docked={isDocked} ref={panelRef} data-preview-bar-editor data-keyboard-refined data-preview-edit-ui data-device-layout={deviceLayout} role="dialog" aria-label={language==='zh'?'未定拍位和弦編輯':'Unmetered chord editor'} className="z-[5000] flex flex-col gap-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-xl" style={panelStyle}>
     <header className="flex shrink-0 items-center gap-2">{dragGrip}{scaleControls}<span className="min-w-0 flex-1 truncate text-sm font-bold">{section.title}</span><button type="button" className={toolbarButtonClass} onClick={onUndo} disabled={!session.past.length} aria-label="Undo"><Undo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onRedo} disabled={!session.future.length} aria-label="Redo"><Redo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onCancel} aria-label="Cancel"><X size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onDone} aria-label={language==='zh'?'完成':'Done'}><Check size={15}/></button></header>
     <UnmeteredChordsEditor keyUnspecified={bar.chordKeyUnspecified} withinMeasure={!hasUnmeteredChords(bar)} lines={hasUnmeteredChords(bar)?bar.unmeteredChordLines!:[bar.chords]} language={language} onChange={lines=>hasUnmeteredChords(bar)?updateFields({unmeteredChordLines:lines}):onApplyDraft(updateBarById(session.draftSong,session.target,old=>({...old,chords:lines.flat()})))}/>
     {!hasUnmeteredChords(bar)&&<button type="button" className="self-start rounded-md border border-slate-300 px-2 py-1 text-xs" onClick={()=>updateFields({chordTimingUnspecified:undefined})}>{language==='zh'?'設定和弦拍位':'Set chord beat positions'}</button>}
-  </section>;
+  </KeyboardSurface>;
 
   const closedCell = isClosedBar(sourceBar);
   const canToggleClosedCell = !isPickup && !voiceTarget && (closedCell || canCloseBar(sourceBar));
@@ -1351,14 +1357,15 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
           </>}
 
-          {activePicker && pickerAnchor && pickerSize && typeof document !== 'undefined' && createPortal(
-            <div
+          {typeof document !== 'undefined' && createPortal(
+            <AnimatedPopover open={Boolean(activePicker && pickerAnchor && pickerSize && present)} instantExit={!present}
+              origin={`${pickerArrowLeft}px 100%`} className="relative h-full"
               data-preview-picker-popover
               data-keyboard-picker={activePicker} data-keyboard-refined
               data-picker-placement="anchored"
               role="dialog"
-              aria-label={pickerTitles[activePicker]}
-              className="fixed z-[5100]"
+              aria-label={activePicker ? pickerTitles[activePicker] : undefined}
+              shellClassName="fixed z-[5100]"
               style={{ left: pickerLeft, top: pickerTop, width: pickerWidth, height: pickerHeight }}
             >
               <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-2.5 shadow-[0_8px_28px_rgba(15,23,42,0.16)]">
@@ -1486,7 +1493,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
                 style={{ left: pickerArrowLeft - 6 }}
                 aria-hidden="true"
               />
-            </div>
+            </AnimatedPopover>
           , document.body)}
         </div>
       )}
@@ -1744,9 +1751,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     : notationMode === 'rhythm'
       ? (language === 'zh' ? '下一個節奏' : 'Next rhythm')
       : (language === 'zh' ? '下一音' : 'Next note');
+  const visibleNotationModes = PREVIEW_NOTATION_MODES.filter(candidate => !isPickup || candidate !== 'chords');
+  const selectedModeIndex = mode === 'text' ? visibleNotationModes.length : Math.max(0, visibleNotationModes.indexOf(notationMode));
 
   return (
-    <section
+    <KeyboardSurface docked={isDocked}
       ref={panelRef}
       data-preview-bar-editor data-keyboard-refined
       data-preview-edit-ui
@@ -1776,11 +1785,13 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <div
           data-notation-mode-segments
           style={isPickup ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' } : undefined}
-          className="grid h-11 w-28 shrink-0 grid-cols-4 rounded-[13px] border border-white/80 bg-slate-300/70 p-0.5 shadow-inner min-[360px]:w-36 sm:w-44"
+          className="relative grid h-11 w-28 shrink-0 grid-cols-4 rounded-[13px] border border-white/80 bg-slate-300/70 p-0.5 shadow-inner min-[360px]:w-36 sm:w-44"
           role="group"
           aria-label={language === 'zh' ? '輸入法' : 'Input mode'}
         >
-          {PREVIEW_NOTATION_MODES.filter(candidate => !isPickup || candidate !== 'chords').map((candidateMode) => {
+          <SlidingSelection data-notation-mode-indicator index={selectedModeIndex}
+            count={isPickup ? visibleNotationModes.length : visibleNotationModes.length + 1}/>
+          {visibleNotationModes.map((candidateMode) => {
             const selected = candidateMode === notationMode && mode !== 'text';
             return (
               <button
@@ -1924,7 +1935,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
       {keyPreview.preview}
       <KeyboardNotice message={notationActionError} anchorRef={panelRef}/>
-      {!collapsed && keyboardContent}
+      <div data-keyboard-disclosure data-collapsed={collapsed ? "true" : "false"} className="min-h-0 shrink-0">
+        <AnimatedDisclosure open={!collapsed} resize><div data-keyboard-content>{keyboardContent}</div></AnimatedDisclosure>
+      </div>
       {deviceLayout === 'desktop' && !isPickup && !voiceTarget && <NotationColorControls label={previewColorLabel} language={language} selected={selectedPreviewColor} disabled={previewColorDisabled} persistent onSelect={applyPreviewColor}/>}
 
 
@@ -1944,7 +1957,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           </button>
         </footer>
       )}
-    </section>
+    </KeyboardSurface>
   );
 };
 

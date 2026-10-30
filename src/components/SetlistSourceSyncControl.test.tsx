@@ -7,7 +7,7 @@ vi.mock('../lib/setlistSourceSync', async original => ({ ...await original<typeo
 import SetlistSourceSyncControl from './SetlistSourceSyncControl';
 const song: Song = { title: 'Song', currentKey: 'C', originalKey: 'C', timeSignature: '4/4', sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'bar', chords: ['C'] }] }] };
 const edited = structuredClone(song); edited.sections[0].bars[0].chords = ['G'];
-beforeAll(() => { HTMLDialogElement.prototype.showModal = function () { this.open = true; }; });
+beforeAll(() => { HTMLDialogElement.prototype.showModal = function () { this.open = true; }; HTMLDialogElement.prototype.close = function () { this.open = false; }; });
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.preview.mockResolvedValue({ libraryId: 'team', entryId: 'entry', source: { ...song, id: 'song', updatedAt: 1 }, sourceRevision: '2026-10-26T00:00:00Z', overrideJson: { songData: edited }, setlistName: '聚會一', status: 'setlist-changed', baseline: null });
