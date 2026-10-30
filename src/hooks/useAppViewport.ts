@@ -1,21 +1,41 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
 
 /** Keep the application in the visual viewport; only its own scroll panes move. */
-export function useAppViewport() {
+export function useAppViewport(overlay?: RefObject<HTMLDivElement | null>, overlayVisible = false) {
   const root = useRef<HTMLDivElement | null>(null);
   const update = useCallback(() => {
-    if (!root.current) return;
     const viewport = window.visualViewport;
     if (viewport && Math.abs(viewport.scale - 1) > 0.01) return;
-    const height = viewport?.height ?? window.innerHeight;
-    const top = viewport?.offsetTop ?? 0;
-    if (height > 0) root.current.style.height = `${height}px`;
-    root.current.style.top = `${top}px`;
-  }, []);
+    const top = Math.max(0, viewport?.offsetTop ?? 0);
+    const visualHeight = viewport?.height || window.innerHeight;
+    // During fullscreen exit, the browser bars can return before VisualViewport
+    // catches up. Keep the bottom inside both reported viewport bounds.
+    const height = Math.min(visualHeight, Math.max(0, window.innerHeight - top));
+    for (const element of [root.current, overlay?.current]) {
+      if (!element) continue;
+      if (height > 0) element.style.height = `${height}px`;
+      element.style.top = `${top}px`;
+    }
+  }, [overlay]);
   const attach = useCallback((element: HTMLDivElement | null) => { root.current = element; update(); }, [update]);
+  // The performance overlay mounts independently of the persistent app root.
+  useLayoutEffect(update, [update, overlayVisible]);
   useLayoutEffect(() => {
     let frame: number | null = null;
     const schedule = () => { if (frame === null) frame = requestAnimationFrame(() => { frame = null; update(); }); };
+    const settleTimers = new Set<number>();
+    const settle = () => {
+      settleTimers.forEach(timer => window.clearTimeout(timer));
+      settleTimers.clear();
+      schedule();
+      // Fullscreen/rotation events may precede the toolbar animation's final
+      // dimensions. Bounded follow-ups also cover a missing final resize event.
+      for (const delay of [100, 250, 500, 1000]) {
+        const timer = window.setTimeout(() => { settleTimers.delete(timer); schedule(); }, delay);
+        settleTimers.add(timer);
+      }
+    };
+    const visible = () => { if (document.visibilityState !== 'hidden') settle(); };
     let touch: { x: number; y: number; startX: number; startY: number; axis: 'x' | 'y' | null; scrollers: HTMLElement[] } | null = null;
     const start = (event: TouchEvent) => {
       touch = null;
@@ -60,14 +80,21 @@ export function useAppViewport() {
       document.addEventListener('touchend', end, { passive: true });
       document.addEventListener('touchcancel', end, { passive: true });
     }
-    window.addEventListener('resize', schedule); window.addEventListener('pageshow', schedule); window.addEventListener('focus', schedule);
+    window.addEventListener('resize', schedule); window.addEventListener('pageshow', settle); window.addEventListener('focus', settle);
+    window.addEventListener('orientationchange', settle);
+    document.addEventListener('fullscreenchange', settle); document.addEventListener('webkitfullscreenchange', settle);
+    document.addEventListener('visibilitychange', visible);
     window.visualViewport?.addEventListener('resize', schedule); window.visualViewport?.addEventListener('scroll', schedule);
     update();
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
+      settleTimers.forEach(timer => window.clearTimeout(timer));
       document.removeEventListener('touchstart', start, true); document.removeEventListener('touchmove', move, true);
       document.removeEventListener('touchend', end); document.removeEventListener('touchcancel', end);
-      window.removeEventListener('resize', schedule); window.removeEventListener('pageshow', schedule); window.removeEventListener('focus', schedule);
+      window.removeEventListener('resize', schedule); window.removeEventListener('pageshow', settle); window.removeEventListener('focus', settle);
+      window.removeEventListener('orientationchange', settle);
+      document.removeEventListener('fullscreenchange', settle); document.removeEventListener('webkitfullscreenchange', settle);
+      document.removeEventListener('visibilitychange', visible);
       window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule);
     };
   }, [update]);

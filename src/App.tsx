@@ -1901,7 +1901,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     error?: string;
     isLoading?: boolean;
   }>>({});
-  const appViewportRef = useAppViewport();
+  const performanceOverlayRef = useRef<HTMLDivElement>(null);
+  const appViewportRef = useAppViewport(performanceOverlayRef, isPerformanceMode);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const mobileMetadataRef = React.useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLDivElement>(null);
@@ -1945,7 +1946,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [showPreviewBackToTop, setShowPreviewBackToTop] = useState(false);
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
-  const performanceOverlayRef = useRef<HTMLDivElement>(null);
   const performanceKeyboardCaptureRef = useRef<HTMLInputElement>(null);
   const performanceSheetRef = useRef<HTMLDivElement>(null);
   const performanceTranslatorRef = useRef<HTMLDivElement>(null);

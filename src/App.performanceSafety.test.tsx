@@ -72,3 +72,31 @@ it('keeps all performance chart pages inside a light paper scope while the app i
   for (const page of pages) expect(page.closest('[data-print-preview]')).toBe(paper);
   expect(paper).toHaveStyle({ colorScheme: 'light' });
 });
+
+it('restores app and windowed performance bounds after fullscreen exit with a stale visual viewport', async () => {
+  const oldHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+  const oldViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+  const viewport = Object.assign(new EventTarget(), { height: 1210, offsetTop: 0, scale: 1 });
+  const setHeight = (height: number) => Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+  try {
+    setHeight(1210);
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    await start();
+    const root = document.querySelector<HTMLElement>('[data-app-root]')!;
+    const overlay = document.querySelector<HTMLElement>('[data-performance-overlay]')!;
+    expect(root.style.height).toBe('1210px');
+    expect(overlay.style.height).toBe('1210px');
+    // Native fullscreen has ended, but the performance view is still open.
+    setHeight(1078);
+    fireEvent(document, new Event('webkitfullscreenchange'));
+    await waitFor(() => expect(overlay.style.height).toBe('1078px'));
+    expect(root.style.height).toBe('1078px');
+    fireEvent.click(screen.getByRole('button', { name: '退出' }));
+    await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).toBeNull());
+    expect(root.style.height).toBe('1078px');
+  } finally {
+    if (oldHeight) Object.defineProperty(window, 'innerHeight', oldHeight);
+    if (oldViewport) Object.defineProperty(window, 'visualViewport', oldViewport);
+    else Reflect.deleteProperty(window, 'visualViewport');
+  }
+}, 15000);

@@ -2,7 +2,7 @@ import { act, fireEvent, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppViewport } from './useAppViewport';
 let viewport: EventTarget & { height: number; offsetTop: number; scale: number };
-beforeEach(() => { vi.useFakeTimers(); viewport = Object.assign(new EventTarget(), { height: 700, offsetTop: 0, scale: 1 }); vi.stubGlobal('visualViewport', viewport); });
+beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('innerHeight',900); viewport = Object.assign(new EventTarget(), { height: 700, offsetTop: 0, scale: 1 }); vi.stubGlobal('visualViewport', viewport); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); document.body.replaceChildren(); });
 const point = (x: number, y: number) => ({ clientX: x, clientY: y });
 const touch = (target: Element, type: string, touches: ReturnType<typeof point>[]) => { const event = new Event(type, { bubbles: true, cancelable: true }); Object.defineProperty(event, 'touches', { value: touches }); fireEvent(target, event); return event; };
@@ -45,4 +45,52 @@ it('uses native overscroll containment without a global blocking touch handler w
  const {root}=setup();
  touch(root,'touchstart',[point(100,100)]);
  expect(touch(root,'touchmove',[point(100,150)]).defaultPrevented).toBe(false);
+});
+
+it.each(['fullscreenchange', 'webkitfullscreenchange'])('fits the restored window when %s arrives before viewport resize', type => {
+ vi.stubGlobal('innerHeight',1210);viewport.height=1210;
+ const {root,frame}=setup();expect(root.style.height).toBe('1210px');
+ // The browser toolbar has returned, while VisualViewport still has its fullscreen height.
+ vi.stubGlobal('innerHeight',1078);
+ fireEvent(document,new Event(type));frame();
+ expect(root.style.height).toBe('1078px');
+});
+
+it('rechecks dimensions after the fullscreen animation even without a later resize event', () => {
+ vi.stubGlobal('innerHeight',1210);viewport.height=1210;
+ const {root,frame}=setup();
+ fireEvent(document,new Event('fullscreenchange'));frame();
+ vi.stubGlobal('innerHeight',1078);
+ act(()=>vi.advanceTimersByTime(150));expect(root.style.height).toBe('1078px');
+ viewport.height=1050;viewport.offsetTop=12;
+ act(()=>vi.advanceTimersByTime(450));
+ expect(root.style.height).toBe('1050px');expect(root.style.top).toBe('12px');
+});
+
+it('fits a newly mounted performance overlay and keeps it aligned through native fullscreen exit', () => {
+ const root=document.createElement('div');document.body.append(root);
+ const overlay={current:null as HTMLDivElement|null};
+ const hook=renderHook(({open})=>useAppViewport(overlay,open),{initialProps:{open:false}});
+ act(()=>hook.result.current(root));
+ overlay.current=document.createElement('div');document.body.append(overlay.current);
+ hook.rerender({open:true});expect(overlay.current.style.height).toBe('700px');
+ viewport.height=1210;vi.stubGlobal('innerHeight',1210);
+ fireEvent(document,new Event('fullscreenchange'));act(()=>vi.advanceTimersByTime(20));
+ expect(root.style.height).toBe('1210px');expect(overlay.current.style.height).toBe('1210px');
+ vi.stubGlobal('innerHeight',1078);viewport.offsetTop=10;
+ fireEvent(document,new Event('webkitfullscreenchange'));act(()=>vi.advanceTimersByTime(20));
+ expect(root.style.height).toBe('1068px');expect(overlay.current.style.height).toBe('1068px');
+ expect(overlay.current.style.top).toBe('10px');
+ hook.unmount();
+});
+
+it('cancels pending fullscreen recalibration and removes its listeners on unmount', () => {
+ const {root,hook,frame}=setup();
+ fireEvent(document,new Event('fullscreenchange'));frame();
+ expect(vi.getTimerCount()).toBeGreaterThan(0);
+ hook.unmount();expect(vi.getTimerCount()).toBe(0);
+ viewport.height=300;
+ for(const type of ['fullscreenchange','webkitfullscreenchange','visibilitychange'])fireEvent(document,new Event(type));
+ fireEvent(window,new Event('orientationchange'));act(()=>vi.advanceTimersByTime(1200));
+ expect(root.style.height).toBe('700px');expect(vi.getTimerCount()).toBe(0);
 });
