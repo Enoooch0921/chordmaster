@@ -45,3 +45,26 @@ it('reserves a clear separation between the third and fourth beat slash chords',
   expect(nodes[1]).toHaveAttribute('data-chord-beat-anchor', '0.625');
   expect(nodes[2]).toHaveAttribute('data-chord-beat-anchor', '0.875');
 });
+
+it('renders Washed first and second beat chords with the same transform scale', () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(140);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const naturalWidth = Number(this.firstElementChild?.getAttribute('data-natural-width')) || 140;
+    const width = naturalWidth * (Number(this.dataset.fitScale) || 1);
+    const left = Number.parseFloat(this.style.left) || 0;
+    return { x: left, y: 0, left, right: left + width, top: 0, bottom: 24, width, height: 24, toJSON() {} };
+  });
+  const { container } = render(<NotationAlignedChordRow anchors={[.125,.375,.625,.875]} spans={[1,1,1,1]}
+    labels={['','','','']} continuations={[false,false,true,true]} balanceSpacing>
+    {[38,13,15,15].map((width,index) => <div key={index} data-natural-width={width} data-chord-bass={index === 0 ? '' : undefined}>
+      {['B/D#','E','/','/'][index]}
+    </div>)}
+  </NotationAlignedChordRow>);
+  const nodes = container.querySelectorAll<HTMLElement>('[data-aligned-chord-content]');
+  expect(nodes).toHaveLength(4);
+  expect(nodes[0].dataset.fitScale).toBe(nodes[1].dataset.fitScale);
+  expect(nodes[0].style.transform).toBe(nodes[1].style.transform);
+  expect(nodes[0]).toHaveAttribute('data-chord-beat-anchor', '0.125');
+  expect(nodes[1]).toHaveAttribute('data-chord-beat-anchor', '0.375');
+});

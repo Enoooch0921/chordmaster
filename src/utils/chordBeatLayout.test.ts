@@ -159,3 +159,22 @@ it.each([100, 120, 140, 160, 200])('keeps adjacent full-beat slash chords distin
   });
   expect(JSON.stringify(metrics)).toBe(before);
 });
+
+it.each([120, 140])('keeps Washed full-beat chords at one scale in a %ipx measure', width => {
+  // B/D#, E, /, /: a long slash chord followed by a short root.
+  const metrics = [38, 13, 15, 15].map((w, index) => ({
+    anchor: width * (index + .5) / 4, width: w, span: 1,
+    slashBass: index === 0, opticalOffset: index === 0 ? 2 : 0, continuation: index > 1,
+  }));
+  const before = JSON.stringify(metrics);
+  const fits = fitAnchoredChords(metrics, width, { edgePadding: 4, balanceSpacing: true });
+  expect(fits[0].scale).toBeCloseTo(fits[1].scale, 6);
+  expect(Math.max(...fits.map(fit => fit.scale)) - Math.min(...fits.map(fit => fit.scale))).toBeLessThan(.000001);
+  fits.forEach((fit, index) => {
+    expect(fit.anchor).toBe(metrics[index].anchor);
+    expect(fit.left).toBeGreaterThanOrEqual(3.999);
+    expect(fit.left + metrics[index].width * fit.scale).toBeLessThanOrEqual(width - 3.999);
+    if (index) expect(fit.left - fits[index-1].left - metrics[index-1].width * fits[index-1].scale).toBeGreaterThanOrEqual(2.999);
+  });
+  expect(JSON.stringify(metrics)).toBe(before);
+});

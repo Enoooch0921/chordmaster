@@ -99,6 +99,8 @@ export function fitAnchoredChords(metrics: readonly { anchor: number; width: num
   if (centers && options.balanceSpacing && metrics.length > 2) {
     // Balance facing ink within the beat bounds. When a long chord prevents
     // that, allow modest horizontal compression without changing its height.
+    // Full-beat chords share one scale, so a long slash chord does not look
+    // smaller than the neighboring root. Subdivisions keep their separate fit.
     const balance = (candidateScales: number[]) => {
       const initial = place(candidateScales);
       if (!initial) return null;
@@ -126,8 +128,9 @@ export function fitAnchoredChords(metrics: readonly { anchor: number; width: num
     const originalScales = scales;
     if (score > 3) {
       const beatWidth = (metrics.at(-1)!.anchor - metrics[0].anchor) / (metrics.length - 1);
+      const fullBeats = metrics.every(metric => (metric.span ?? 1) >= 1);
       for (const factor of [.95, .9, .85]) {
-        const candidateScales = originalScales.map((scale, index) => scale * (metrics[index].width > beatWidth * .7 ? factor : 1));
+        const candidateScales = originalScales.map((scale, index) => scale * (fullBeats || metrics[index].width > beatWidth * .7 ? factor : 1));
         const candidate = balance(candidateScales);
         const candidateScore = (candidate?.spread ?? Infinity) + 8 * (1 - factor);
         if (candidate && candidateScore < score) {
