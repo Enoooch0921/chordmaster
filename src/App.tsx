@@ -17,6 +17,9 @@ import { useAppViewport } from './hooks/useAppViewport';
 import { useWorkspaceSwitcherDismiss } from './hooks/useWorkspaceSwitcherDismiss';
 import { useBottomSheetMotion } from './hooks/useBottomSheetMotion';
 import { useModalFocus } from './hooks/useModalFocus';
+import WorkspaceSaveDialog from './components/WorkspaceSaveDialog';
+import { getWorkspaceChanges, describeScoreChanges, hasUnsavedWorkspaceChanges } from './lib/workspaceChangeSummary';
+import { getChartEditedAt, getSetlistChartEditedAt, stampChartEdits, adoptChartEditTimes } from './lib/chartRevision';
 import { useModalScrollLock } from './hooks/useModalScrollLock';
 import { usePerformanceKeyboardFocus } from './hooks/usePerformanceKeyboardFocus';
 import { createPerformanceKeyGate } from './lib/performanceKeyGate';
@@ -1612,6 +1615,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     ));
   }, []);
   const [isPreviewEditExitPromptOpen, setIsPreviewEditExitPromptOpen] = useState(false);
+  const [pendingWorkspaceSwitch, setPendingWorkspaceSwitch] = useState<string | null>(null);
   const [language, setLanguage] = useState<AppLanguage>('zh');
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
   const toast = useToast();
@@ -1875,7 +1879,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const setlistAssignmentTargetIdRef = useRef<string | null>(null);
   const assignmentAccessRefreshGenerationRef = useRef(0);
   const libraryTransitionOwnerRef = useRef<symbol | null>(null);
-  const switchCloudLibraryHandlerRef = useRef<((libraryId: string) => Promise<void>) | null>(null);
+  const switchCloudLibraryHandlerRef = useRef<((libraryId: string, decision?: 'save' | 'discard') => Promise<void>) | null>(null);
   const workspacePersistenceInFlightRef = useRef<Promise<void> | null>(null);
   const revokedLibraryIdsRef = useRef(new Set<string>());
   const cloudMutationCountRef = useRef(0);
@@ -2030,9 +2034,29 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     ?? (isShowingArchivedSongs ? userLibrarySongs[0] : null)
     ?? EMPTY_LIBRARY_PREVIEW_SONG;
   const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
-  const setlistIsDirty = serializeSetlists(setlists) !== serializeSetlists(savedSetlists);
-  const projectIsDirty = serializeProjects(projects) !== serializeProjects(savedProjects);
-  const workspaceIsDirty = libraryIsDirty || setlistIsDirty || projectIsDirty;
+  const workspaceIsDirty = React.useMemo(() => hasUnsavedWorkspaceChanges(
+    { songs, setlists, projects }, { songs: savedSongs, setlists: savedSetlists, projects: savedProjects }
+  ), [songs, setlists, projects, savedSongs, savedSetlists, savedProjects]);
+  const workspaceChanges = React.useMemo(() => pendingWorkspaceSwitch ? getWorkspaceChanges(
+    { songs, setlists, projects }, { songs: savedSongs, setlists: savedSetlists, projects: savedProjects }, language
+  ) : [], [pendingWorkspaceSwitch, songs, setlists, projects, savedSongs, savedSetlists, savedProjects, language]);
+  const previewDraftChange = React.useMemo(() => {
+    if (!previewEditSession?.dirty) return null;
+    const list = setlists.find(item => item.songs.some(entry => entry.id === previewEditSession.previewIdentity));
+    return {
+      location: list ? (language === 'zh' ? `歌單「${list.name || copy.untitledSetlist}」` : `Setlist “${list.name || copy.untitledSetlist}”`) : (language === 'zh' ? '歌曲庫' : 'Song library'),
+      name: previewEditSession.draftSong.title || copy.untitledSong,
+      detail: describeScoreChanges(previewEditSession.baseSong, previewEditSession.draftSong, language)
+    };
+  }, [previewEditSession, setlists, language, copy.untitledSetlist, copy.untitledSong]);
+  const workspaceSwitchChanges = previewDraftChange
+    ? [...workspaceChanges.filter(change => change.location !== previewDraftChange.location || change.name !== previewEditSession?.baseSong.title), {
+      ...previewDraftChange,
+      detail: [...new Set([
+        ...workspaceChanges.filter(change => change.location === previewDraftChange.location && change.name === previewEditSession?.baseSong.title).flatMap(change => change.detail.split(language === 'zh' ? '、' : ', ')),
+        ...previewDraftChange.detail.split(language === 'zh' ? '、' : ', ')
+      ])].join(language === 'zh' ? '、' : ', ')
+    }] : workspaceChanges;
   const teamDraft = useTeamWorkspaceDraft({
     userId: authenticatedUser?.id, libraryId: activeLibraryId, enabled: isTeamWorkspace && workspaceOwnerId === authenticatedUser?.id,
     loading: isLoadingCloudWorkspace || isSwitchingLibrary || usingStartupCache,
@@ -2302,6 +2326,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       ?? firstAvailableSetlist
     : firstAvailableSetlist;
   const isJoinedSetlist = selectedSetlist !== null && (selectedSetlist as JoinedSetlist).isJoined === true;
+  const savedChartEditedAt = React.useCallback((songId: string, setlistId?: string, entryId?: string) => {
+    if (setlistId && entryId) {
+      const list = savedSetlists.find(item => item.id === setlistId)
+        ?? joinedSetlists.find(item => item.id === setlistId)
+        ?? allJoinedProjectSetlists.find(item => item.id === setlistId);
+      return getSetlistChartEditedAt(list, entryId, savedSongs);
+    }
+    return getChartEditedAt(savedSongs.find(item => item.id === songId));
+  }, [savedSongs, savedSetlists, joinedSetlists, allJoinedProjectSetlists]);
   const canEditOwnedTeamSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'> | null | undefined) => (
     canArrangeTeamSetlist(activeLibraryRole, authenticatedUser?.id, setlist)
   );
@@ -3413,6 +3446,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     nextProjects: Project[] = projects
   ) => {
     if (usingStartupCache) throw new Error(language === 'zh' ? '目前為離線模式，連線確認後才能儲存修改。' : 'Offline Mode. Reconnect before saving edits.');
+    const input = { songs: nextSongs, setlists: nextSetlists };
+    const stamped = stampChartEdits(input, { songs: savedSongs, setlists: savedSetlists }, Date.now());
+    nextSongs = stamped.songs;
+    nextSetlists = stamped.setlists;
+    const adoptSavedTimes = () => {
+      setSongs(current => adoptChartEditTimes({ songs: current, setlists: [] }, { songs: input.songs, setlists: [] }, { songs: nextSongs, setlists: [] }).songs);
+      setSetlists(current => adoptChartEditTimes({ songs: [], setlists: current }, { songs: [], setlists: input.setlists }, { songs: [], setlists: nextSetlists }).setlists);
+    };
     let localSavedAt: number | null = null;
     let localStorageError: unknown = null;
     if (isTeamWorkspace && authenticatedUser && activeLibraryId) {
@@ -3445,6 +3486,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           ? `本機儲存失敗，畫面中的變更尚未安全保存。${detail ? `\n\n${detail}` : ''}`
           : `Local save failed. The changes visible on screen have not been stored safely.${detail ? `\n\n${detail}` : ''}`);
       }
+      adoptSavedTimes();
       setSavedSongs(cloneSong(nextSongs));
       setSavedSetlists(cloneSong(nextSetlists));
       setSavedProjects(cloneSong(nextProjects));
@@ -3552,6 +3594,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     } catch {
       toast.info(language === 'zh' ? '雲端已儲存，但無法清除本機待同步記錄。' : 'Saved to the cloud, but the local pending-sync record could not be cleared.');
     }
+    adoptSavedTimes();
     setSavedSongs(cloneSong(nextSongs));
     setSavedSetlists(cloneSong(nextSetlists));
     setSavedProjects(cloneSong(nextProjects));
@@ -4006,7 +4049,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setShowArchivedSetlists(false);
   };
 
-  const handleSwitchCloudLibrary = async (libraryId: string) => {
+  const handleSwitchCloudLibrary = async (libraryId: string, decision?: 'save' | 'discard') => {
     if (usingStartupCache) {
       toast.info(language === 'zh' ? '目前為離線模式，連線確認後即可切換工作區。' : 'Offline Mode. Reconnect to switch workspaces.');
       return;
@@ -4022,15 +4065,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
     if (previewEditSessionRef.current?.dirty) {
-      pendingPreviewTransitionRef.current = () => {
-        // Let the Finish/Discard state update commit, then invoke the latest
-        // handler closure so its dirty snapshots and refs are current.
-        window.requestAnimationFrame(() => {
-          const latestHandler = switchCloudLibraryHandlerRef.current;
-          if (latestHandler) void latestHandler(libraryId);
-        });
-      };
-      setIsPreviewEditExitPromptOpen(true);
+      if (!decision) { setPendingWorkspaceSwitch(libraryId); return; }
+      if (decision === 'save') commitPreviewEditSession(previewEditSessionRef.current);
+      else setPreviewEditSession(null);
+      // Read the newly committed/discarded draft from the next render.
+      window.requestAnimationFrame(() => {
+        void switchCloudLibraryHandlerRef.current?.(libraryId, decision);
+      });
       return;
     }
     const previousLibraryId = activeLibraryIdRef.current;
@@ -4042,6 +4083,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         ? '你已失去這個團隊的存取權；未儲存修改目前只保留在畫面上。切換曲庫會捨棄這些修改，確定要繼續嗎？'
         : 'You no longer have access to this team. Unsaved edits only remain on this screen. Switching libraries will discard them. Continue?');
       if (!confirmed) return;
+    }
+    if (workspaceIsDirty && !isLeavingRevokedLibrary && !isAutoSaveEnabled && !decision) {
+      setPendingWorkspaceSwitch(libraryId);
+      return;
     }
     const transitionOwner = Symbol('manual-library-switch');
     libraryTransitionOwnerRef.current = transitionOwner;
@@ -4060,15 +4105,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       setIsLoadingProjectShareStatus(false);
 
       if (workspaceIsDirty && !isLeavingRevokedLibrary) {
-        if (isAutoSaveEnabled) {
-          await persistWorkspace(songs, setlists, projects, { allowDuringLibraryTransition: true });
+        if (decision === 'discard') {
+          restoreSavedWorkspace();
         } else {
-          const shouldSave = window.confirm(copy.confirmSaveBeforeSwitch);
-          if (shouldSave) {
-            await persistWorkspace(songs, setlists, projects, { allowDuringLibraryTransition: true });
-          } else {
-            restoreSavedWorkspace();
-          }
+          await persistWorkspace(songs, setlists, projects, { allowDuringLibraryTransition: true });
         }
       }
 
@@ -7346,6 +7386,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   >
                     {isLyricsMode ? <LyricsSheet song={derivedSong} language={language} exportMode /> : <ChordSheet
                       song={derivedSong}
+                      lastEditedAt={savedChartEditedAt(item.songId, effectiveSelectedSetlist.id, item.id)}
                       language={language}
                       currentKey={derivedSong.currentKey}
                     />}
@@ -8091,7 +8132,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [usingStartupCache, authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, isPerformanceMode, language, toast]);
 
   useEffect(() => {
-    if (usingStartupCache || historyForwardBusy || isPerformanceMode || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
+    if (usingStartupCache || historyForwardBusy || isPerformanceMode || pendingWorkspaceSwitch || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
       return;
     }
 
@@ -8112,7 +8153,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         autoSaveTimeoutRef.current = null;
       }
     };
-  }, [usingStartupCache, historyForwardBusy, isPerformanceMode, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
+  }, [usingStartupCache, historyForwardBusy, isPerformanceMode, pendingWorkspaceSwitch, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
@@ -10212,6 +10253,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     return (
       <RecoveryBoundary label="譜面預覽"><ChordSheet
         song={renderedSong}
+        lastEditedAt={savedChartEditedAt(song.id)}
         language={language}
         currentKey={renderedSong.currentKey}
         showWrittenKeyInMetadata={!isSetlistMode}
@@ -10231,7 +10273,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       /></RecoveryBoundary>
     );
-  }, [activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
+  }, [savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -10326,6 +10368,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           >
             <RecoveryBoundary label="譜面預覽"><ChordSheet
               song={previewSong}
+              lastEditedAt={savedChartEditedAt(item.songId, selectedSetlistId ?? undefined, item.id)}
               language={language}
               currentKey={previewSong.currentKey}
               onElementClick={canOpenEditor ? (sIdx, bIdx, field, target) => handleSetlistElementClick(item.id, previewSong, sIdx, bIdx, field, target) : undefined}
@@ -10347,7 +10390,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         ))}
       </div>
     );
-  }, [allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
+  }, [savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -15517,6 +15560,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         )}
       </AnimatePresence>
 
+      {pendingWorkspaceSwitch && <WorkspaceSaveDialog
+        language={language}
+        workspaceName={activeCloudLibrary?.name}
+        changes={workspaceSwitchChanges}
+        onCancel={() => setPendingWorkspaceSwitch(null)}
+        onSave={() => { const id = pendingWorkspaceSwitch; setPendingWorkspaceSwitch(null); void handleSwitchCloudLibrary(id, 'save'); }}
+        onDiscard={() => { const id = pendingWorkspaceSwitch; setPendingWorkspaceSwitch(null); void handleSwitchCloudLibrary(id, 'discard'); }}
+      />}
       <AnimatePresence custom={uiMotion}>
         {isPreviewEditExitPromptOpen && previewEditSession?.dirty && (
           <PresenceSurface
@@ -15531,7 +15582,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_28px_80px_rgba(15,23,42,0.3)]"
             >
               <h2 className="text-lg font-black text-slate-900">{language === 'zh' ? '預覽編輯尚未完成' : 'Preview edit is unfinished'}</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{language === 'zh' ? '要先完成這次修改、捨棄草稿，還是留在目前位置繼續編輯？' : 'Finish this edit, discard the draft, or stay here and keep editing?'}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{language === 'zh'
+                ? `${previewDraftChange?.location} ·「${previewDraftChange?.name}」：${previewDraftChange?.detail}。要完成這次修改嗎？`
+                : `${previewDraftChange?.location} · “${previewDraftChange?.name}”: ${previewDraftChange?.detail}. Finish this edit?`}</p>
               <div className="mt-5 grid gap-2 sm:grid-cols-3">
                 <button
                   type="button"
@@ -15709,6 +15762,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 	                  activeSetlistPreviewSong && (
 	                    <RecoveryBoundary label="譜面預覽"><ChordSheet
 	                      song={activeSetlistPreviewSong}
+	                      lastEditedAt={savedChartEditedAt(selectedSetlistSong?.songId ?? '', selectedSetlist?.id, selectedSetlistSong?.id)}
 	                      language={language}
 	                      currentKey={activeSetlistPreviewSong.currentKey}
 	                      previewIdentity={selectedSetlistSong?.id ?? null}
@@ -15717,6 +15771,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 	                ) : (
 	                  <RecoveryBoundary label="譜面預覽"><ChordSheet
 	                    song={song}
+	                    lastEditedAt={savedChartEditedAt(song.id)}
 	                    language={language}
 	                    currentKey={song.currentKey}
 	                    previewIdentity={song.id}

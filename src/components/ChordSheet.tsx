@@ -24,6 +24,7 @@ import { getSectionBadgeStyle } from '../utils/sectionBadgeStyle';
  */
 
 import React from 'react';
+import { getChartEditedAt } from '../lib/chartRevision';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { Song, Section, Bar, Key, AppLanguage, NavigationMarker, BarLabelLane } from '../types';
@@ -799,6 +800,7 @@ const VALUE_ANCHORED_META_FIELDS = new Set<ChordSheetMetaField>(['key', 'perform
 
 interface ChordSheetProps {
   song: Song;
+  lastEditedAt?: number | null;
   language: AppLanguage;
   currentKey: Key;
   transposeFromOriginal?: boolean;
@@ -1365,7 +1367,8 @@ const ChordBeatGroup: React.FC<{
   </div>
 );
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, onSectionReorder }) => {
+  const editedAt = lastEditedAt === undefined ? getChartEditedAt(song) : lastEditedAt;
   const phraseCarries = React.useMemo(() => song.sections.map(section => {
     let primary = 0;
     const voices: Record<string, number> = {};
@@ -3994,7 +3997,11 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, language, currentKey, tra
           <div className="shrink-0 mt-4 pt-4 border-t border-gray-100 flex justify-between items-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">
             <span>{copy.generatedBy}</span>
             <span>{language === 'zh' ? `${copy.page} ${pIdx + 1} / ${pages.length}` : `${copy.page} ${pIdx + 1} of ${pages.length}`}</span>
-            <span>{new Date().toLocaleDateString()}</span>
+            <span data-chart-edited-at={editedAt ?? undefined} title={language === 'zh' ? '最後編輯' : 'Last edited'}>
+              {editedAt ? new Date(editedAt).toLocaleString(language === 'zh' ? 'zh-TW' : 'en-US', {
+                year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
+              }) : '—'}
+            </span>
           </div>
         </div>
       )})}

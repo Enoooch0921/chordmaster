@@ -1381,8 +1381,9 @@ const setlistSongsSignature = (songs: SetlistSong[]) => JSON.stringify(
   reindexSetlistSongs(songs).map(({ capo: _sharedCapo, personalCapoOverride: _personalCapo, sourceBaseline: _baseline, ...rest }) => rest)
 );
 
-// Compare the complete score JSON, including metadata, independently of key order.
+// Compare score JSON independently of key order, excluding only its saved edit date.
 const entryScoreSignature = (score: Song) => JSON.stringify(normalizeSongBars(score), (_key, value) => (
+  _key === 'lastEditedAt' ? undefined :
   value && typeof value === 'object' && !Array.isArray(value)
     ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
     : value
@@ -1401,7 +1402,7 @@ const prepareEntryTrashExpected = async (libraryId: string, id: string, expected
     .eq('id', id).eq('setlists.library_id', libraryId).maybeSingle();
   if (error) throw error;
   const score = row?.override_json?.songData;
-  if (!row || row.song_id !== expected.songId
+  if (!row || (expected.songId !== undefined && row.song_id !== expected.songId)
     || (expected.setlistId !== undefined && row.setlist_id !== expected.setlistId)
     || !score || entryScoreSignature(score) !== entryScoreSignature(expected.songData as Song)) {
     throw new Error('History conflict: entry content changed');
@@ -2098,7 +2099,17 @@ export const createCloudRepository = (params: {
             const original=direction==='undo'?edit.after:edit.before, item=direction==='undo'?edit.before:edit.after;
             if(!original||!item)throw new Error('This action requires a server deletion backup.');
             const patch=historyFieldPatch('entry',edit.id,original as unknown as Record<string,unknown>,item as unknown as Record<string,unknown>);
-            if (patch) patches.push(patch);
+            if (patch) {
+              if ('songData' in patch.before) {
+                // A save may have advanced only the edit date since this
+                // history entry was recorded. Verify the score, then guard
+                // the exact current JSON so concurrent score edits still fail.
+                const guarded = await prepareEntryTrashExpected(libraryId, edit.id, original as unknown as Record<string, unknown>);
+                patch.before.songData = guarded.songData;
+                if (patch.after.songData) patch.after.songData = { ...patch.after.songData as Song, lastEditedAt: Date.now() };
+              }
+              patches.push(patch);
+            }
           }
         } else {
           const fields = (value: typeof expected) => change.resource === 'project'

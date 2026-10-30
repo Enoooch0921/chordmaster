@@ -674,6 +674,18 @@ describe('cloud repository project deletion', () => {
 
 describe('guarded global workspace history',()=>{
  beforeEach(()=>{vi.clearAllMocks();mocks.rpc.mockResolvedValue({data:null,error:null});});
+ it.each([false,true])('guards the current saved date without permitting concurrent score edits (conflict=%s)',async conflict=>{
+  const {createWorkspaceHistoryEntry}=await import('./workspaceHistory');
+  const before=makeSong({lastEditedAt:100,sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]});const after={...before,title:'Edited'};
+  const entry={id:'entry',setlistId:'list',songId:before.id,order:0,sectionOrder:[],songData:before};
+  const list:Setlist={id:'list',name:'Meeting',displayMode:'chord-movable-key',createdAt:1,updatedAt:1,songs:[entry]};
+  const history=createWorkspaceHistoryEntry({zh:'編輯',en:'edit'},[{resource:'setlist',id:'list',before:list,after:{...list,songs:[{...entry,songData:after}]}}])!;
+  const server={...after,lastEditedAt:500,...(conflict?{tempo:99}:{})};
+  mocks.from.mockReturnValue(makeBuilder({maybeSingle:vi.fn().mockResolvedValue({data:{song_id:before.id,setlist_id:'list',override_json:{songData:server}},error:null})}));
+  const repository=createRepository();repository.setActiveLibrary('library');
+  if(conflict){await expect(repository.applyWorkspaceHistory(history,'undo')).rejects.toThrow('History conflict');expect(mocks.rpc).not.toHaveBeenCalled();}
+  else {await repository.applyWorkspaceHistory(history,'undo');expect(mocks.rpc).toHaveBeenCalledWith('patch_workspace_history',expect.objectContaining({p_patches:[expect.objectContaining({resource:'entry',before:expect.objectContaining({songData:server}),after:expect.objectContaining({songData:expect.objectContaining({title:before.title,lastEditedAt:expect.any(Number)})})})]}));}
+ });
  it('removes a legacy score using its exact server JSON after comparing normalized content',async()=>{
   const rawScore=makeSong({sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]});
   const overrides={overrideKey:'C' as const,sectionOrder:[],songData:rawScore};

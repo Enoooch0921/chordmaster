@@ -25,7 +25,7 @@ export interface HistoryWorkspace { songs: StoredSong[]; setlists: Setlist[]; pr
 export interface WorkspaceHistoryState { past: WorkspaceHistoryEntry[]; future: WorkspaceHistoryEntry[] }
 export const EMPTY_WORKSPACE_HISTORY: WorkspaceHistoryState = { past: [], future: [] };
 export const WORKSPACE_HISTORY_LIMIT = 50;
-const transient = new Set(['updatedAt', 'updatedBy', 'createdAt', 'createdBy', 'archivedBy', 'personalCapoOverride', 'sourceBaseline', 'sourceArchivedAt', 'assignedToCurrentUser']);
+const transient = new Set(['updatedAt', 'lastEditedAt', 'updatedBy', 'createdAt', 'createdBy', 'archivedBy', 'personalCapoOverride', 'sourceBaseline', 'sourceArchivedAt', 'assignedToCurrentUser']);
 
 export interface HistoryRpcPatch { resource: HistoryResource | 'entry' | 'order'; id: string; before: Record<string, unknown>; after: Record<string, unknown> }
 export function historyFieldPatch(resource: HistoryRpcPatch['resource'], id: string, expected: Record<string, unknown>, desired: Record<string, unknown>): HistoryRpcPatch | null {

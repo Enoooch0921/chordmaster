@@ -1,4 +1,5 @@
 import { PICKUP_EDITOR_SECTION_ID } from '../utils/pickupUtils';
+import { scoreSignature } from './chartRevision';
 import type { Song } from '../types';
 import { getDefaultJianpuCursor } from './jianpuEditing';
 import { getDefaultRhythmCursor } from './rhythmEditing';
@@ -360,7 +361,7 @@ export const applyPreviewDraft = (
     draftSong,
     past: canMerge ? session.past : [...session.past, session.draftSong],
     future: [],
-    dirty: draftSong !== session.baseSong,
+    dirty: scoreSignature(draftSong) !== scoreSignature(session.baseSong),
     lastMergeKey: mergeKey,
     lastMutationAt: now
   };
@@ -374,7 +375,7 @@ export const undoPreviewDraft = (session: PreviewEditSession): PreviewEditSessio
     draftSong: previous,
     past: session.past.slice(0, -1),
     future: [session.draftSong, ...session.future],
-    dirty: previous !== session.baseSong,
+    dirty: scoreSignature(previous) !== scoreSignature(session.baseSong),
     lastMergeKey: null,
     lastMutationAt: 0,
     targetStatus: songHasTarget(previous, session.target) ? 'active' : 'deleted'
@@ -389,7 +390,7 @@ export const redoPreviewDraft = (session: PreviewEditSession): PreviewEditSessio
     draftSong: next,
     past: [...session.past, session.draftSong],
     future: session.future.slice(1),
-    dirty: next !== session.baseSong,
+    dirty: scoreSignature(next) !== scoreSignature(session.baseSong),
     lastMergeKey: null,
     lastMutationAt: 0,
     targetStatus: songHasTarget(next, session.target) ? 'active' : 'deleted'

@@ -20,6 +20,16 @@ const song: Song = {
 };
 
 describe('ChordSheet preview input caret', () => {
+  it('shows the saved edit time and leaves undated charts blank instead of using today', () => {
+    const time = new Date('2026-10-28T14:15:00+08:00').getTime();
+    const draft = { ...song, lastEditedAt: time + 86400000 };
+    const { container, rerender } = render(<ChordSheet song={draft} language="zh" currentKey="C" lastEditedAt={time} />);
+    expect(container.querySelector('[data-chart-edited-at]')).toHaveAttribute('data-chart-edited-at', String(time));
+    expect(container.querySelector('[data-chart-edited-at]')).toHaveTextContent(new Date(time).toLocaleString('zh-TW', { year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false }).replace(/\s+/g, ' '));
+    rerender(<ChordSheet song={draft} language="zh" currentKey="C" lastEditedAt={null} />);
+    expect(container.querySelector('[data-chart-edited-at]')).toBeNull();
+    expect(container.querySelector('[title="最後編輯"]')).toHaveTextContent('—');
+  });
   it.each(['G7', 'Cm7', 'Cmaj7', 'G7b9', 'G7(b9)', 'C6/9'])('separates raised extension figures from baseline quality words in %s', chord => {
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [chord] }] }] };
     const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
