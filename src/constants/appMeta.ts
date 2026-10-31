@@ -86,6 +86,19 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-31',
+        title: 'Click playback and background audio',
+        bullets: [
+          'Render complete Click measures for media-loop playback, removing the background dependency on page timers.',
+          'Keep playback active when leaving the page and resync beats on return; manual stop stays stopped.',
+          'Use Ableton Live Classic for new preferences while retaining existing sound choices.',
+          'Prepare replacement sounds before switching, show loading progress, retry once, and quietly retain the previous sound on failure.',
+          'Handle song selection on touch release with scroll protection; keep the same controls across tablet and wide-screen layouts.',
+          'Background and lock-screen behavior in iPhone/iPad Home Screen installations still requires physical-device verification.'
+        ]
+      },
+      {
+        version: '0.12.1',
+        date: '2026-10-31',
         title: 'Mobile and tablet drummer layout fixes',
         bullets: [
           'Keep the phone Drummer mode entry beside the setlist title, leaving more room to scroll songs.',
@@ -896,6 +909,19 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-31',
+        title: 'Click 播放穩定性與背景播放',
+        bullets: [
+          '改用整小節媒體循環播放，背景節拍不再依賴頁面計時器。',
+          '切換 App 或分頁時保留播放，返回畫面同步拍點；手動停止後保持停止。',
+          '新使用者預設 Ableton Live Classic，既有音色選擇仍保留。',
+          '換音色時先準備新聲音、顯示載入進度，自動重試一次；失敗時靜默保留原音色。',
+          '觸控放開即選曲並防止滑動誤觸，平板與寬螢幕維持一致的底部四鍵排列。',
+          'iPhone／iPad 主畫面版本的背景與鎖屏持續播放，仍需實體裝置確認。'
+        ]
+      },
+      {
+        version: '0.12.1',
         date: '2026-10-31',
         title: '手機與平板鼓手排版修正',
         bullets: [

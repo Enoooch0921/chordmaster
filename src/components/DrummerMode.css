@@ -719,9 +719,10 @@
 /* RhythmNotation owns its SVG height; stretching its inner SVG shifts triplets. */
 .drummer-subdivisions [data-rhythm-geometry-svg] { height: 100%; }
 
-/* Tablets share the landscape phone control order, with roomier touch targets. */
-@media (min-width: 600px) and (max-width: 1439px) and (min-height: 501px) {
+/* Keep the landscape control order across tablets, desktop widths and page zoom. */
+@media (min-width: 600px) and (min-height: 501px) {
   .drummer-mode[data-stage] .drummer-console-layout {
+    width: min(100%, 600px); margin-inline: auto; padding: 0;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-rows: 64px minmax(116px, auto) 72px 44px;
     gap: 12px; align-content: start;
@@ -732,7 +733,8 @@
     grid-column: 1 / -1; grid-row: 1; align-self: stretch; margin: 0;
   }
   .drummer-mode[data-stage] .drummer-tempo {
-    grid-column: 1 / 4; grid-row: 2; margin: 0;
+    grid-column: 1 / 4; grid-row: 2; margin: 0; padding: 0;
+    width: 100%; max-width: none; justify-self: stretch;
     grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 4px;
   }
   .drummer-mode[data-stage] .drummer-tempo > button { width: 56px; height: 72px; }
@@ -766,3 +768,8 @@
   .drummer-mode[data-stage] .drummer-song-navigation button svg { width: 28px; height: 28px; }
   .drummer-mode[data-stage] .drummer-settings { grid-column: 1 / -1; grid-row: 4; }
 }
+
+.drummer-sound-loading { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12px; color: var(--color-text-muted); }
+.drummer-sound-loading > span { width: 14px; height: 14px; border: 2px solid var(--color-border); border-top-color: var(--color-indigo-700); border-radius: 50%; animation: drummer-sound-spin .8s linear infinite; }
+@keyframes drummer-sound-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .drummer-sound-loading > span { animation: none; } }

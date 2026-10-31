@@ -16,10 +16,46 @@ const tempo = () => screen.getByRole('textbox', { name: '節拍器速度 BPM' })
 const songs = () => within(screen.getByRole('region', { name: '鼓手歌單' }));
 function mount(value = session) { return render(<DrummerMode {...value} language="zh" onClose={vi.fn()}/>); }
 beforeEach(() => {
-  localStorage.clear(); vi.clearAllMocks(); fullscreen.isFullscreen = false; audio.playing = false; audio.starting = false;
+  localStorage.clear(); vi.clearAllMocks(); audio.start.mockResolvedValue(true); fullscreen.isFullscreen = false; audio.playing = false; audio.starting = false;
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 });
 describe('drummer session controls', () => {
+  const touch = (element: HTMLElement, kind: 'pointerDown' | 'pointerUp' | 'pointerCancel', x: number, y: number) => {
+    const event = createEvent[kind](element, { bubbles: true, cancelable: true });
+    Object.defineProperties(event, { pointerType: { value: 'touch' }, pointerId: { value: 4 }, isPrimary: { value: true }, clientX: { value: x }, clientY: { value: y } });
+    fireEvent(element, event);
+  };
+  it('selects a touch-released song without a following click and ignores its duplicate click', () => {
+    mount(session);
+    const target = songs().getByRole('button', { name: /^2 第二首/ });
+    touch(target, 'pointerDown', 40, 80); touch(target, 'pointerUp', 40, 80);
+    expect(target).toHaveAttribute('aria-current', 'true');
+    expect(audio.start).toHaveBeenCalledTimes(1);
+    fireEvent.click(target, { detail: 1 });
+    expect(audio.start).toHaveBeenCalledTimes(1);
+    fireEvent.click(target, { detail: 0 }); // Keyboard and assistive activation still work.
+    expect(audio.start).toHaveBeenCalledTimes(2);
+  });
+  it('does not select while swiping, scrolling or cancelling a song touch', () => {
+    mount(session);
+    const target = songs().getByRole('button', { name: /^2 第二首/ });
+    touch(target, 'pointerDown', 40, 80); touch(target, 'pointerUp', 40, 120);
+    fireEvent.click(target, { detail: 1 });
+    touch(target, 'pointerDown', 40, 80);
+    document.querySelector('.drummer-list-scroll')!.scrollTop = 30;
+    touch(target, 'pointerUp', 40, 80);
+    touch(target, 'pointerDown', 40, 80); touch(target, 'pointerCancel', 40, 80); touch(target, 'pointerUp', 40, 80);
+    expect(audio.start).not.toHaveBeenCalled();
+    expect(target).not.toHaveAttribute('aria-current', 'true');
+  });
+  it('continues selecting songs while an earlier audio start is pending', () => {
+    audio.starting = true;
+    mount(session);
+    fireEvent.click(songs().getByRole('button', { name: /^2 第二首/ }));
+    expect(songs().getByRole('button', { name: /^2 第二首/ })).toHaveAttribute('aria-current', 'true');
+    expect(audio.start).toHaveBeenCalled();
+  });
+
   it.each([1, 2])('reveals the previous visual row when moving back in a %s-column phone list', columns => {
     mount({ ...session, initialId: 'c' });
     const list = document.querySelector<HTMLElement>('.drummer-list-scroll')!;
@@ -53,20 +89,20 @@ describe('drummer session controls', () => {
     expect(list.scrollTop).toBe(expectedScroll);
     expect(songs().getByRole('button', { name: /^4 第一首/ })).toHaveAttribute('aria-current', 'true');
   });
-  it.each(['ableton-classic', 'drive'])('defaults to MultiTracks and remembers %s across songs and reopening', soundId => {
+  it.each(['multitracks', 'drive'])('defaults to Ableton Live Classic and remembers %s across songs and reopening', soundId => {
     const first = mount();
     const sound = screen.getByLabelText('音色');
-    expect(sound).toHaveValue('multitracks');
+    expect(sound).toHaveValue('ableton-classic');
     fireEvent.click(screen.getByRole('button', { name: '播放' }));
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ sound: 'multitracks' }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: 'ableton-classic' }));
     fireEvent.change(sound, { target: { value: soundId } });
     fireEvent.click(songs().getByRole('button', { name: /2 第二首/ }));
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ sound: soundId, bpm: 110 }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: soundId, bpm: 110 }));
     first.unmount();
     mount();
     expect(screen.getByLabelText('音色')).toHaveValue(soundId);
     fireEvent.click(screen.getByRole('button', { name: '播放' }));
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ sound: soundId }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: soundId }));
   });
   it('enters live mode without interrupting the click and keeps chart/song selection linked', () => {
     audio.playing = true;
@@ -79,7 +115,7 @@ describe('drummer session controls', () => {
     expect(audio.start).not.toHaveBeenCalled();
     fireEvent.click(songs().getByRole('button', { name: /2 第二首/ }));
     expect(screen.getByTestId('chart')).toHaveTextContent('第二首');
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ bpm: 110 }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ bpm: 110 }));
     fireEvent.click(screen.getByRole('button', { name: '一般模式' }));
     expect(fullscreen.exitFullscreen).toHaveBeenCalledOnce();
     expect(screen.getByRole('dialog', { name: '鼓手模式' })).toHaveAttribute('data-stage', 'false');
@@ -139,10 +175,40 @@ describe('drummer session controls', () => {
     const sound = screen.getByLabelText('音色');
     expect(sound).toBeEnabled();
     fireEvent.change(sound, { target: { value: 'drive' } });
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ sound: 'drive', bpm: 72, beats: 4, subdivision: 1 }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: 'drive', bpm: 72, beats: 4, subdivision: 1 }));
     fireEvent.change(sound, { target: { value: 'ableton-classic' } });
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ sound: 'ableton-classic', bpm: 72 }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: 'ableton-classic', bpm: 72 }));
     expect(JSON.parse(localStorage.getItem('chordmaster.drummer-preferences.v1')!)).toMatchObject({ sound: 'ableton-classic' });
+  });
+  it('resumes the new sound after a native picker interrupts playback', () => {
+    audio.playing = true;
+    const mounted = mount();
+    const sound = screen.getByLabelText('音色');
+    fireEvent.focus(sound);
+    audio.playing = false;
+    mounted.rerender(<DrummerMode {...session} language="zh" onClose={vi.fn()}/>);
+    fireEvent.change(sound, { target: { value: 'drive' } });
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: 'drive' }));
+  });
+  it('shows preparation progress while loading sound and uses quiet recovery', async () => {
+    audio.playing = true;
+    let resolve!: (result: boolean) => void;
+    audio.start.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: /聲音與拍號/ }));
+    fireEvent.change(screen.getByLabelText('音色'), { target: { value: 'drive' } });
+    expect(screen.getByRole('progressbar', { name: '準備音色' })).toBeInTheDocument();
+    expect(audio.start.mock.calls.at(-1)?.[1]).toEqual({ quiet: true, fallbackSound: 'ableton-classic' });
+    await act(async () => resolve(true));
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.getByLabelText('音色')).toHaveValue('drive');
+  });
+  it('restores the previous sound selection after a failed live switch', async () => {
+    audio.playing = true; audio.start.mockResolvedValue(false);
+    mount();
+    fireEvent.change(screen.getByLabelText('音色'), { target: { value: 'drive' } });
+    await waitFor(() => expect(screen.getByLabelText('音色')).toHaveValue('ableton-classic'));
+    expect(JSON.parse(localStorage.getItem('chordmaster.drummer-preferences.v1')!).sound).toBe('ableton-classic');
   });
   it('changes sound silently while stopped and marks selection without status words', () => {
     mount();
@@ -162,9 +228,9 @@ describe('drummer session controls', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '本曲節拍細分：八分' })).toHaveFocus();
     fireEvent.click(songs().getByRole('button', { name: /1 第一首/ }));
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ subdivision: 1 }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ subdivision: 1 }));
     fireEvent.click(songs().getByRole('button', { name: /2 第二首/ }));
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ subdivision: 2 }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ subdivision: 2 }));
     first.unmount();
     const reopened = mount({ ...session, initialId: 'b' });
     expect(screen.getByRole('button', { name: '本曲節拍細分：八分' })).toBeInTheDocument();
@@ -192,9 +258,9 @@ describe('drummer session controls', () => {
     fireEvent.click(screen.getByRole('button', { name: '第 1 拍：重音，點按切換' }));
     expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ beatLevels: [0, 1, 1, 1] }));
     fireEvent.click(songs().getByRole('button', { name: /2 第二首/ }));
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ beatLevels: [3, 1, 1, 1], subdivision: 1 }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ beatLevels: [3, 1, 1, 1], subdivision: 1 }));
     fireEvent.click(songs().getByRole('button', { name: /1 第一首/ }));
-    expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ beatLevels: [0, 1, 1, 1] }));
+    expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ beatLevels: [0, 1, 1, 1] }));
     fireEvent.click(screen.getByRole('button', { name: '第 1 拍：靜音，點按切換' }));
     fireEvent.click(screen.getByRole('button', { name: '第 1 拍：輕拍，點按切換' }));
     expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ beatLevels: [2, 1, 1, 1] }));
@@ -253,9 +319,9 @@ describe('drummer session controls', () => {
     mount();
     expect(screen.queryByRole('button', { name: '靜音，保持計拍' })).not.toBeInTheDocument();
     expect(audio.stop).not.toHaveBeenCalled();
-    expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ muted: false, volume: .7, accent: 1, regular: .6, subdivision: 1, sound: 'multitracks' }));
+    expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ muted: false, volume: .7, accent: 1, regular: .6, subdivision: 1, sound: 'ableton-classic' }));
     expect(audio.update.mock.lastCall?.[0]).not.toHaveProperty('tone');
-    expect(screen.getByLabelText('音色')).toHaveValue('multitracks');
+    expect(screen.getByLabelText('音色')).toHaveValue('ableton-classic');
   });
   it('does not pass editor shortcuts through the overlay, but supports Enter in the tempo field', () => {
     mount();
@@ -272,7 +338,7 @@ it('uses previous/next to start songs directly and disables setlist boundaries',
   mount();
   expect(screen.getByRole('button', { name: '上一首' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: '下一首' }));
-  expect(tempo()).toHaveValue('110'); expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ bpm: 110 }));
+  expect(tempo()).toHaveValue('110'); expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ bpm: 110 }));
   expect(songs().getByRole('button', { name: /2 第二首/ })).toHaveAttribute('aria-current', 'true');
   fireEvent.click(screen.getByRole('button', { name: '上一首' })); expect(tempo()).toHaveValue('72');
   fireEvent.click(songs().getByRole('button', { name: /4 第一首/ })); expect(screen.getByRole('button', { name: '下一首' })).toBeDisabled();
@@ -315,7 +381,7 @@ it('applies rapid MIDI tempo ticks cumulatively and routes song presses through 
   act(()=>events.message({deviceId:'one',data:[0x90,41,100],timestamp:1170}));
   expect(tempo()).toHaveValue('75');
   act(()=>events.message({deviceId:'one',data:[0x90,39,100],timestamp:1200}));
-  expect(tempo()).toHaveValue('110');expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({bpm:110}));
+  expect(tempo()).toHaveValue('110');expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({bpm:110}));
   act(()=>{events.message({deviceId:'one',data:[0x80,39,0],timestamp:1300});events.message({deviceId:'one',data:[0x90,39,100],timestamp:1400});events.message({deviceId:'one',data:[0x80,39,0],timestamp:1450});events.message({deviceId:'one',data:[0x90,39,100],timestamp:1500});});
   expect(songs().getByRole('button',{name:/4 第一首/})).toHaveAttribute('aria-current','true');
 });
@@ -354,7 +420,7 @@ it('sets an inactive song subdivision from the list without playback or changing
   fireEvent.click(screen.getByRole('menuitemradio',{name:'八分'}));
   expect(audio.start).not.toHaveBeenCalled(); expect(tempo()).toHaveValue('72');
   fireEvent.click(songs().getByRole('button',{name:/2 第二首/}));
-  expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({subdivision:2,bpm:110}));
+  expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({subdivision:2,bpm:110}));
 });
 
 it('restores the original tempo from a permanent control and shows no missing-tempo spacer', () => {

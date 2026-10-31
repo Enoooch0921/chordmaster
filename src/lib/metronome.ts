@@ -56,6 +56,14 @@ export function parseClickMeter(value: string): { count: number; denominator: nu
 type ScheduledClick = { time: number; endTime: number; source: AudioBufferSourceNode };
 type PlaybackAudioSession = { type: string };
 const LOOKAHEAD = 0.1;
+const AUDIO_START_TIMEOUT = 8000;
+function audioDeadline<T>(operation: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('audio-start-timeout')), AUDIO_START_TIMEOUT);
+    operation.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+}
+
 
 export class Metronome {
   private context: AudioContext | null = null;
@@ -70,6 +78,24 @@ export class Metronome {
   private lastBeat = -1;
   private generation = 0;
   private disposed = false;
+  private rebuildContext = false;
+  private lastClockTime = 0;
+  private lastClockAdvance = 0;
+  private interrupt(rebuild = false) {
+    if (!this.playing) return;
+    this.rebuildContext ||= rebuild;
+    this.stop(); this.onInterrupt();
+  }
+  private tick() {
+    if (!this.playing || !this.context) return;
+    // Some browsers omit statechange, or keep reporting running with a frozen clock.
+    if (this.context.state !== 'running') { this.interrupt(); return; }
+    const now = performance.now();
+    if (this.context.currentTime !== this.lastClockTime) {
+      this.lastClockTime = this.context.currentTime; this.lastClockAdvance = now;
+    } else if (now - this.lastClockAdvance > 2000) { this.interrupt(true); return; }
+    try { this.schedule(); } catch { this.interrupt(true); }
+  }
   private sampleLoads = new Map<ClickSound, Promise<ClickSamples>>();
   private samples: ClickSamples | null = null;
   private audioSession: PlaybackAudioSession | null = null;
@@ -102,14 +128,19 @@ export class Metronome {
         }
       }
     } catch { /* Unsupported or restricted audio-session API; keep Web Audio usable. */ }
+    if (this.context && (this.context.state === 'closed' || this.rebuildContext)) {
+      this.context.onstatechange = null;
+      if (this.context.state !== 'closed') void this.context.close().catch(() => {});
+      this.rebuildContext = false;
+      this.context = null; this.master = null; this.sampleLoads.clear();
+    }
     if (!this.context) {
       this.context = this.createContext();
       this.master = this.context.createGain();
       this.master.connect(this.context.destination);
       this.context.onstatechange = () => {
         if (this.playing && this.context?.state !== 'running') {
-          this.stop();
-          this.onInterrupt();
+          this.interrupt();
         }
       };
     }
@@ -118,26 +149,38 @@ export class Metronome {
 
   // Unlock audio during the explicit Connect gesture, before a hardware key
   // arrives. Preparing is silent and must not start or interrupt the clock.
-  prepare() { return this.ensureContext().resume(); }
+  prepare() { return audioDeadline(this.ensureContext().resume()); }
 
   async start(config: MetronomeConfig): Promise<boolean> {
     if (this.disposed || !isPlayableTempo(config.bpm) || config.beats < 1 || config.beats > 16) return false;
-    this.stop();
+    const switchingSound = this.playing && this.config?.sound !== config.sound;
+    if (switchingSound) this.generation++;
+    else this.stop();
     const generation = this.generation;
     this.ensureContext();
-    this.config = { ...config };
+    if (!switchingSound) this.config = { ...config };
     let sampleLoad = this.sampleLoads.get(config.sound);
     if (!sampleLoad) {
-      sampleLoad = this.loadSamples(this.context, config.sound).catch(error => {
-        this.sampleLoads.delete(config.sound); // Retry only this sound after a failed fetch or decode.
+      sampleLoad = audioDeadline(this.loadSamples(this.context, config.sound)).catch(error => {
+        if (this.sampleLoads.get(config.sound) === sampleLoad) this.sampleLoads.delete(config.sound); // Retry only this sound after a failed fetch or decode.
         throw error;
       });
       this.sampleLoads.set(config.sound, sampleLoad);
     }
     // Resume in the user gesture; fetch/decode both samples before starting beat one.
-    const [, samples] = await Promise.all([this.context.resume(), sampleLoad]);
+    let samples: ClickSamples;
+    try {
+      [, samples] = await Promise.all([audioDeadline(this.context.resume()), sampleLoad]);
+    } catch (error) {
+      // Loading a replacement must not silence the currently working click.
+      if (generation === this.generation && switchingSound && this.playing) return false;
+      throw error;
+    }
     if (generation !== this.generation || this.disposed) return false;
     if (this.context.state !== 'running') throw new Error('audio-interrupted');
+    if (switchingSound) {
+      this.stop(); this.config = { ...config };
+    }
     this.samples = samples;
     this.master!.gain.value = this.config.muted ? 0 : this.config.volume;
     this.anchorTime = this.context.currentTime + 0.04;
@@ -145,7 +188,9 @@ export class Metronome {
     this.nextPulse = 0;
     this.playing = true;
     this.schedule();
-    this.timer = setInterval(() => this.schedule(), 25);
+    this.lastClockTime = this.context.currentTime;
+    this.lastClockAdvance = performance.now();
+    this.timer = setInterval(() => this.tick(), 25);
     return true;
   }
 
@@ -156,17 +201,19 @@ export class Metronome {
     if (this.playing && previous?.sound !== config.sound) return;
     this.config = { ...config };
     if (!this.context || !this.master || !this.playing || !previous) return;
+    try {
     const now = this.context.currentTime;
     this.master.gain.setValueAtTime(config.muted ? 0 : config.volume, now);
     // Preserve fractional beat position when tempo changes. Cancel only future clicks.
     const pulse = this.anchorPulse + (now - this.anchorTime) * previous.bpm / 60;
     this.anchorTime = now;
     this.anchorPulse = pulse;
-    for (const click of this.scheduled) if (click.time > now) click.source.stop();
+    for (const click of this.scheduled) if (click.time > now) { try { click.source.stop(); } catch { /* The browser may already have ended this node. */ } }
     this.scheduled = this.scheduled.filter(click => click.time <= now);
     this.visual = this.visual.filter(click => click.time <= now);
     this.nextPulse = Math.max(0, (Math.floor((pulse + 1e-8) * config.subdivision) + 1) / config.subdivision);
     this.schedule();
+    } catch { this.interrupt(true); }
   }
 
   private schedule() {

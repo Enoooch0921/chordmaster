@@ -62,7 +62,9 @@ describe('audio clock scheduling', () => {
     const engine = new Metronome(undefined, () => ctx as unknown as AudioContext, load);
     await engine.start(config);
     expect(sources.at(-1)?.buffer).toBe(samples.accent);
-    await expect(engine.start({ ...config, sound: 'ableton-classic' })).rejects.toThrow('classic unavailable');
+    expect(await engine.start({ ...config, sound: 'ableton-classic' })).toBe(false);
+    expect(engine.playing).toBe(true);
+    expect(sources[0].stop).not.toHaveBeenCalled();
     await engine.start(config);
     expect(load).toHaveBeenCalledTimes(2);
     expect(sources.at(-1)?.buffer).toBe(samples.accent);
@@ -74,6 +76,33 @@ describe('audio clock scheduling', () => {
     expect(load).toHaveBeenCalledTimes(3);
     expect(load.mock.calls.map(call => call[1])).toEqual(['multitracks', 'ableton-classic', 'ableton-classic']);
     expect(sources.at(-1)?.buffer).toBe(samples.accent);
+    engine.dispose();
+  });
+  it('keeps scheduling the old click while another sound loads, then swaps only when ready', async () => {
+    const { ctx, sources, samples } = audio();
+    const replacement = { regular: { duration: .1 }, accent: { duration: .1 } } as ClickSamples;
+    let resolve!: (samples: ClickSamples) => void;
+    const load = vi.fn().mockResolvedValueOnce(samples).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    const engine = new Metronome(undefined, () => ctx as unknown as AudioContext, load);
+    await engine.start(config);
+    const pending = engine.start({ ...config, sound: 'drive' });
+    expect(engine.playing).toBe(true); expect(sources[0].stop).not.toHaveBeenCalled();
+    ctx.currentTime = .49; vi.advanceTimersByTime(25);
+    expect(sources.at(-1)!.buffer).toBe(samples.regular);
+    resolve(replacement); expect(await pending).toBe(true);
+    expect(sources.at(-1)!.buffer).toBe(replacement.accent);
+    engine.dispose();
+  });
+  it('retains the old sound even when loading the replacement times out', async () => {
+    const { ctx, samples, sources } = audio();
+    Object.defineProperty(ctx, 'currentTime', { get: () => performance.now() / 1000 });
+    const load = vi.fn().mockResolvedValueOnce(samples).mockImplementationOnce(() => new Promise(() => {}));
+    const engine = new Metronome(undefined, () => ctx as unknown as AudioContext, load);
+    await engine.start(config);
+    const pending = engine.start({ ...config, sound: 'drive' });
+    await vi.advanceTimersByTimeAsync(8100);
+    expect(await pending).toBe(false); expect(engine.playing).toBe(true);
+    expect(sources.at(-1)!.buffer).toBe(samples.accent);
     engine.dispose();
   });
   it('never replaces the chosen sound when an older sound finishes loading later', async () => {
@@ -211,6 +240,73 @@ describe('audio clock scheduling', () => {
     expect(interrupted).toHaveBeenCalledOnce();
     engine.dispose();
   });
+  it('detects interruption without a statechange event and can restart', async () => {
+    const { ctx } = audio(), interrupted = vi.fn();
+    const engine = new Metronome(interrupted, () => ctx as unknown as AudioContext, ctx.loadSamples);
+    await engine.start(config);
+    ctx.state = 'suspended'; vi.advanceTimersByTime(25);
+    expect(engine.playing).toBe(false); expect(interrupted).toHaveBeenCalledOnce();
+    ctx.state = 'running'; expect(await engine.start(config)).toBe(true);
+    engine.dispose();
+  });
+  it('detects a frozen running audio clock instead of displaying silent playback', async () => {
+    const { ctx } = audio(), interrupted = vi.fn();
+    const engine = new Metronome(interrupted, () => ctx as unknown as AudioContext, ctx.loadSamples);
+    await engine.start(config);
+    vi.advanceTimersByTime(2050);
+    expect(engine.playing).toBe(false); expect(interrupted).toHaveBeenCalledOnce();
+    engine.dispose();
+  });
+  it('rebuilds a frozen running context for an explicit retry', async () => {
+    const first = audio(), second = audio();
+    const create = vi.fn().mockReturnValueOnce(first.ctx).mockReturnValueOnce(second.ctx);
+    const engine = new Metronome(undefined, create, first.ctx.loadSamples);
+    await engine.start(config); vi.advanceTimersByTime(2050);
+    expect(await engine.start(config)).toBe(true);
+    expect(create).toHaveBeenCalledTimes(2); expect(first.ctx.close).toHaveBeenCalledOnce();
+    engine.dispose();
+  });
+  it('reports a scheduling failure during adjustment instead of throwing into the UI', async () => {
+    const { ctx } = audio(), interrupted = vi.fn();
+    const engine = new Metronome(interrupted, () => ctx as unknown as AudioContext, ctx.loadSamples);
+    await engine.start(config);
+    vi.spyOn(ctx, 'createBufferSource').mockImplementationOnce(() => { throw new Error('audio-node-failed'); });
+    ctx.currentTime = .49;
+    expect(() => engine.update({ ...config, bpm: 121 })).not.toThrow();
+    expect(engine.playing).toBe(false); expect(interrupted).toHaveBeenCalledOnce();
+    engine.dispose();
+  });
+  it('recreates a closed context on the next explicit play gesture', async () => {
+    const first = audio(), second = audio();
+    const create = vi.fn().mockReturnValueOnce(first.ctx).mockReturnValueOnce(second.ctx);
+    const engine = new Metronome(undefined, create, first.ctx.loadSamples);
+    await engine.start(config); first.ctx.state = 'closed'; first.ctx.onstatechange?.();
+    expect(await engine.start(config)).toBe(true); expect(create).toHaveBeenCalledTimes(2);
+    engine.dispose();
+  });
+  it.each(['resume', 'samples'])('times out a hung %s so a subsequent play can recover', async stalled => {
+    const { ctx } = audio();
+    if (stalled === 'resume') ctx.resume.mockImplementationOnce(() => new Promise(() => {}));
+    else ctx.loadSamples.mockImplementationOnce(() => new Promise(() => {}));
+    const engine = new Metronome(undefined, () => ctx as unknown as AudioContext, ctx.loadSamples);
+    const pending = expect(engine.start(config)).rejects.toThrow('audio-start-timeout');
+    await vi.advanceTimersByTimeAsync(8100); await pending;
+    expect(engine.playing).toBe(false);
+    expect(await engine.start(config)).toBe(true);
+    engine.dispose();
+  });
+  it('continues scheduling for 30 simulated minutes without accumulating retained clicks', async () => {
+    const { ctx, sources } = audio(), interrupted = vi.fn();
+    const engine = new Metronome(interrupted, () => ctx as unknown as AudioContext, ctx.loadSamples);
+    await engine.start({ ...config, subdivision: 4 });
+    for (let tick = 1; tick <= 72000; tick++) {
+      ctx.currentTime = tick * .025; vi.advanceTimersByTime(25); engine.getBeat();
+    }
+    expect(engine.playing).toBe(true); expect(interrupted).not.toHaveBeenCalled();
+    expect(sources.length).toBeGreaterThan(14000);
+    expect(sources.at(-1)!.start.mock.calls[0][0]).toBeGreaterThan(1799);
+    engine.dispose();
+  }, 15000);
   it('rejects invalid tempo without allocating an audio context', async () => {
     const create = vi.fn(); const engine = new Metronome(undefined, create);
     expect(await engine.start({ ...config, bpm: NaN })).toBe(false);

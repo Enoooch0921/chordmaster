@@ -29,7 +29,7 @@ interface Props extends DrummerSession { language: AppLanguage; onClose: (instan
 type Preferences = Pick<MetronomeConfig, 'sound' | 'volume' | 'accent' | 'regular' | 'subdivisions'>;
 type Subdivision = MetronomeConfig['subdivision'];
 const PREFERENCE_KEY = 'chordmaster.drummer-preferences.v1';
-const defaults: Preferences = { sound: 'multitracks', volume: 0.7, accent: 1, regular: 0.75, subdivisions: 0.4 };
+const defaults: Preferences = { sound: 'ableton-classic', volume: 0.7, accent: 1, regular: 0.75, subdivisions: 0.4 };
 function loadPreferences(): Preferences {
   try {
     const saved = JSON.parse(localStorage.getItem(PREFERENCE_KEY) || '{}');
@@ -193,6 +193,9 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   const [midiOpen, setMidiOpen] = useState(false);
   const [soundOpen, setSoundOpen] = useState(false);
   const soundPanel = useRef<HTMLElement>(null), soundTrigger = useRef<HTMLButtonElement>(null);
+  const [loadingSound, setLoadingSound] = useState<ClickSound | null>(null);
+  const confirmedSound = useRef(preferences.sound);
+  const soundChangeGeneration = useRef(0), soundPickerWasPlaying = useRef(false);
   const soundOpenRef = useRef(false), wasSoundOpen = useRef(false), wasMidiOpen = useRef(false);
   soundOpenRef.current = soundOpen;
   const midiPanel = useRef<HTMLElement>(null), midiTrigger = useRef<HTMLButtonElement>(null);
@@ -202,6 +205,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   useEffect(() => {
     if (soundOpen) soundPanel.current?.querySelector<HTMLButtonElement>('button')?.focus();
     else if (wasSoundOpen.current) soundTrigger.current?.focus();
+    if (!soundOpen) soundPickerWasPlaying.current = false;
     wasSoundOpen.current = soundOpen;
   }, [soundOpen]);
   useEffect(() => {
@@ -391,6 +395,8 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     setTapCount(estimate.count);
     if (estimate.bpm !== null) setTempo(estimate.bpm);
   };
+  const songTouch = useRef<{ id: string; pointer: number; x: number; y: number; scroll: number } | null>(null);
+  const handledSongTouch = useRef<{ id: string; time: number } | null>(null);
   const select = (id: string) => {
     const selected = entries.find(entry => entry.id === id);
     if (!selected) return;
@@ -444,9 +450,9 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     ? [t('附點四分', 'Dotted quarter'), t('二等分', 'Two per beat'), t('八分', 'Eighth'), t('四等分', 'Four per beat')][value - 1]
     : value === 3 ? t('三連音', 'Triplets') : noteNames[(signature?.denominator ?? 4) * value];
   const strengthNames = [t('靜音', 'Silent'), t('輕拍', 'Soft'), t('一般', 'Regular'), t('重音', 'Accent')];
-  const notice = click.notice === 'hidden' ? t('離開畫面後已停止，回來請重新播放。', 'Stopped when the page was hidden. Press play to resume.')
+  const notice = click.notice === 'hidden' ? t('回到畫面後正在恢復 Click。', 'Restoring Click after returning to the page.')
     : click.notice === 'interrupted' ? t('音訊已中斷，請確認輸出後重新播放。', 'Audio was interrupted. Check the output and press play.')
-    : click.notice === 'failed' ? t('無法啟動聲音，請再按播放；若仍無聲，請重新開啟鼓手模式。', 'Audio could not start. Try play again or reopen drummer mode.') : '';
+    : click.notice === 'failed' ? t('音色未能載入或啟動；若原音色仍在播放會繼續保留，否則請再按播放。', 'The sound could not load or start. A playing sound is kept; otherwise press play to retry.') : '';
   if (!active) return createPortal(<div ref={dialog} className="drummer-mode" role="dialog" aria-modal="true" aria-label={t('鼓手模式', 'Drummer mode')}><p>{t('這份歌單還沒有可播放的歌曲。', 'This setlist has no songs.')}</p><button onClick={() => onClose()}>{t('返回歌單', 'Back to setlist')}</button></div>, document.body);
 
   return createPortal(<div ref={dialog} className="drummer-mode" role="dialog" aria-modal="true" aria-labelledby="drummer-title" data-drummer-mode data-stage={stage} data-fullscreen={fullscreen.isFullscreen} data-view={view}
@@ -546,7 +552,25 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
             const key = subdivisionKey(entry.id, text, rowGrouped);
             const value = songSubdivisions[key] ?? 1;
             return <div key={entry.id} className="drummer-song-entry" data-current={entry.id === activeId}>
-            <button className="drummer-song-row" aria-label={`${index + 1} ${entry.song.title || t('未命名歌曲', 'Untitled song')} · ${tempos[entry.id] ?? (isPlayableTempo(entry.song.tempo) ? entry.song.tempo : t('速度未設定', 'No tempo'))} BPM`} aria-current={entry.id === activeId ? 'true' : undefined} onClick={() => select(entry.id)}>
+            <button className="drummer-song-row" aria-label={`${index + 1} ${entry.song.title || t('未命名歌曲', 'Untitled song')} · ${tempos[entry.id] ?? (isPlayableTempo(entry.song.tempo) ? entry.song.tempo : t('速度未設定', 'No tempo'))} BPM`} aria-current={entry.id === activeId ? 'true' : undefined}
+            onPointerDown={event => {
+              if (!['touch', 'pen'].includes(event.pointerType) || event.isPrimary === false) return;
+              songTouch.current = { id: entry.id, pointer: event.pointerId, x: event.clientX, y: event.clientY, scroll: songList.current?.scrollTop ?? 0 };
+            }}
+            onPointerCancel={() => { songTouch.current = null; }}
+            onPointerUp={event => {
+              const touch = songTouch.current; songTouch.current = null;
+              if (!touch || touch.id !== entry.id || touch.pointer !== event.pointerId) return;
+              handledSongTouch.current = { id: entry.id, time: performance.now() };
+              if (Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 10 || Math.abs((songList.current?.scrollTop ?? 0) - touch.scroll) > 10) return;
+              // Select on touch release even if Safari drops the following click.
+              event.preventDefault(); select(entry.id);
+            }}
+            onClick={event => {
+              const handled = handledSongTouch.current;
+              if (event.detail > 0 && handled?.id === entry.id && performance.now() - handled.time < 1000) return;
+              select(entry.id);
+            }}>
             <span className="drummer-song-order" aria-hidden="true">{index + 1}.</span>
             <span className="drummer-song-tempo">{tempos[entry.id] ?? (isPlayableTempo(entry.song.tempo) ? entry.song.tempo : '—')}<small>BPM</small></span>
             <span className="drummer-song-name"><small>{meters[entry.id] ?? (entry.song.timeSignatureUnspecified ? t('拍號待設定', 'Meter needed') : entry.song.timeSignature)}</small><span className="drummer-song-title" title={entry.song.title}>{entry.song.title || t('未命名歌曲', 'Untitled song')}</span></span>
@@ -582,24 +606,43 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
       <section ref={soundPanel} className="drummer-midi-panel drummer-sound-panel" role="dialog" aria-modal="true" aria-labelledby="drummer-sound-title">
         <header><h2 id="drummer-sound-title">{t('聲音與拍號', 'Sound & meter')}</h2><button aria-label={t('關閉聲音設定', 'Close sound settings')} onClick={() => setSoundOpen(false)}><X size={22}/></button></header>
           <div className="drummer-settings-body">
-            <label>{t('音色', 'Click sound')}<select value={preferences.sound} onChange={e => {
+            <label>{t('音色', 'Click sound')}<select aria-label={t('音色', 'Click sound')} aria-busy={Boolean(loadingSound)} value={preferences.sound}
+              onFocus={() => { soundPickerWasPlaying.current ||= busyRef.current; }}
+              onPointerDown={() => { soundPickerWasPlaying.current = busyRef.current; }}
+              onKeyDown={() => { soundPickerWasPlaying.current ||= busyRef.current; }}
+              onChange={e => {
               const sound = e.target.value as ClickSound;
+              const resumePlayback = busyRef.current || soundPickerWasPlaying.current;
+              soundPickerWasPlaying.current = false;
+              const request = ++soundChangeGeneration.current;
               if (sound === preferences.sound) return;
+              const previous = confirmedSound.current;
               setPreferences(p => ({ ...p, sound }));
-              // start() cancels pending loads/clicks before loading the new samples.
-              // Never update only the label while the old buffer keeps sounding.
-              if (busyRef.current && canPlay) void click.start({ ...config, sound });
+              if (resumePlayback && canPlay) {
+                setLoadingSound(sound);
+                void (async () => {
+                  // One retry covers transient fetch/decode failures. Keep the old clock running.
+                  const recovery = { quiet: true as const, fallbackSound: previous };
+                  let started = await click.start({ ...config, sound }, recovery);
+                  if (started === false && request === soundChangeGeneration.current) started = await click.start({ ...config, sound }, recovery);
+                  if (request !== soundChangeGeneration.current) return;
+                  if (started === false) setPreferences(p => p.sound === sound ? { ...p, sound: previous } : p);
+                  else confirmedSound.current = sound;
+                  setLoadingSound(null);
+                })();
+              } else confirmedSound.current = sound;
             }}>
               {(Object.keys(CLICK_SOUNDS) as ClickSound[]).map(sound => <option key={sound} value={sound}>{CLICK_SOUNDS[sound]}</option>)}
             </select></label>
-            <p>{t('切換音色後會重新起拍，這台裝置會記住你的選擇。', 'Changing the sound restarts the beat. Your choice is saved on this device.')}</p>
+            {loadingSound && <div className="drummer-sound-loading" role="progressbar" aria-label={t('準備音色', 'Preparing sound')}><span/>{t('準備音色…', 'Preparing sound…')}</div>}
+            <p>{t('新音色準備好後會重新起拍；載入失敗時保留原音色。', 'The new sound restarts the beat when ready; a failed load keeps the previous sound.')}</p>
             <label>{t('拍號', 'Meter')}<select disabled={busy} value={meterText} onChange={e => setMeters(values => ({ ...values, [activeId]: e.target.value }))}>
               {!meter && <option value={meterText}>{t('選擇拍號', 'Choose meter')}</option>}
               {Array.from(new Set(['4/4', '3/4', '6/8', '12/8', '2/4', '5/4', '7/8', ...(meter ? [meterText] : [])])).map(value => <option key={value}>{value}</option>)}
             </select></label>
             {meter?.compound && <label>{t('BPM 計拍單位', 'BPM beat unit')}<select disabled={busy} value={grouped ? 'group' : 'base'} onChange={e => setGroupings(values => ({ ...values, [activeId]: e.target.value === 'group' }))}><option value="base">{t('八分音符', 'Eighth note')}</option><option value="group">{t('附點四分音符', 'Dotted quarter')}</option></select></label>}
             {(['volume', 'accent', 'regular', 'subdivisions'] as const).map((key, index) => <label className="drummer-volume" key={key}>{[t('總音量', 'Volume'), t('重音', 'Accent'), t('一般拍', 'Beat'), t('細分拍', 'Subdivision')][index]}<input type="range" min="0" max="1" step="0.05" value={preferences[key]} onChange={e => setPreferences(p => ({ ...p, [key]: Number(e.target.value) }))}/><output>{Math.round(preferences[key] * 100)}%</output></label>)}
-            <p>{t('速度與拍號僅用於本次鼓手模式。請保持畫面開啟；離開畫面會停止播放。', 'Tempo and meter changes apply to this session only. Keep this view open; hiding the app stops playback.')}</p>
+            <p>{t('速度與拍號僅用於本次鼓手模式。支援的瀏覽器可在背景繼續播放；回到畫面會同步目前拍點。', 'Tempo and meter changes apply to this session only. Keep this view open; hiding the app stops playback.')}</p>
           </div>
       </section>
     </div>
