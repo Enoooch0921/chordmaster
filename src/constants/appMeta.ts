@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-31',
+        title: 'Urgent fix: gapless Click measures',
+        bullets: [
+          'Replace the audible HTML media loop with a native AudioBufferSourceNode loop to remove the pause between beat four and beat one.',
+          'Keep beat display on the audio clock and replace tempo/sound buffers at a scheduled audio time.',
+          'Keep silent media-session support separate from audible Click timing; mobile background playback still requires device verification.'
+        ]
+      },
+      {
+        version: '0.12.2',
+        date: '2026-10-31',
         title: 'Click playback and background audio',
         bullets: [
           'Render complete Click measures for media-loop playback, removing the background dependency on page timers.',
@@ -909,6 +919,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-31',
+        title: '緊急修復：Click 跨小節停頓',
+        bullets: [
+          'Click 聲音改用原生 AudioBufferSourceNode 無縫循環，修正第 4 拍接回第 1 拍的停頓。',
+          '拍點顯示跟隨音訊時鐘，速度或音色更新在預定音訊時間接替。',
+          '靜音媒體工作階段支援與 Click 聲音分離；行動裝置背景播放仍待實機確認。'
+        ]
+      },
+      {
+        version: '0.12.2',
         date: '2026-10-31',
         title: 'Click 播放穩定性與背景播放',
         bullets: [

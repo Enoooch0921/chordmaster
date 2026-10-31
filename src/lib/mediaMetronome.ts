@@ -1,7 +1,7 @@
 import { loadClickSamples, isPlayableTempo, type ClickSamples, type ClickSound, type MetronomeConfig } from './metronome';
 
 /** Render an entire repeating measure; background playback needs no JS timer. */
-export function renderClickLoop(config: MetronomeConfig, samples: ClickSamples, rate = 48000) {
+export function renderClickPcm(config: MetronomeConfig, samples: ClickSamples, rate = 48000) {
   const frames = Math.round(config.beats * 60 / config.bpm * rate);
   if (!isPlayableTempo(config.bpm) || config.beats < 1 || config.beats > 16 || frames <= 0) throw new Error('invalid-click-loop');
   const mix = new Float32Array(frames);
@@ -19,6 +19,11 @@ export function renderClickLoop(config: MetronomeConfig, samples: ClickSamples, 
       mix[(onset + frame) % frames] += value / channels.length * level * (config.muted ? 0 : config.volume);
     }
   }
+  return mix;
+}
+
+export function renderClickLoop(config: MetronomeConfig, samples: ClickSamples, rate = 48000) {
+  const mix = renderClickPcm(config, samples, rate), frames = mix.length;
   const bytes = new ArrayBuffer(44 + frames * 2), view = new DataView(bytes);
   const text = (at: number, value: string) => Array.from(value).forEach((char, index) => view.setUint8(at + index, char.charCodeAt(0)));
   text(0, 'RIFF'); view.setUint32(4, 36 + frames * 2, true); text(8, 'WAVE'); text(12, 'fmt ');
@@ -36,63 +41,71 @@ function deadline<T>(promise: Promise<T>) {
   });
 }
 
-/** The media element owns the playback clock, including when Safari suspends JS. */
+/** Native AudioBufferSourceNode looping is gapless; HTML media loops are not. */
 export class MediaMetronome {
   private audio: HTMLAudioElement | null = null;
   private context: AudioContext | null = null;
   private loads = new Map<ClickSound, Promise<ClickSamples>>();
   private config: MetronomeConfig | null = null;
-  private url: string | null = null;
   private silentUrl: string | null = null;
   private generation = 0;
   private active = false;
   private disposed = false;
-  private replacing = false;
+  private recovering = false;
+  private anchorTime = 0;
+  private anchorPulse = 0;
+  private sources = new Set<AudioBufferSourceNode>();
+  private source: AudioBufferSourceNode | null = null;
   private session: { type: string } | null = null;
   private previousSession: string | null = null;
   constructor(private onInterrupt: () => void = () => {}, private createAudio: () => HTMLAudioElement = () => {
     const audio = document.createElement('audio');
     audio.hidden = true; audio.dataset.drummerClickPlayer = '';
     document.body.append(audio); return audio;
-  }, private createContext: () => AudioContext = () => new (window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(), private load = loadClickSamples) {}
-  get playing() { return this.active && Boolean(this.audio && !this.audio.paused && !this.audio.ended); }
+  }, private createContext: () => AudioContext = () => new (window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({ latencyHint: 'interactive' }), private load = loadClickSamples) {}
+  get playing() { return this.active && this.context?.state === 'running'; }
   private ensure() {
     if (this.disposed) throw new Error('audio-disposed');
     try {
       const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
       if (session) { if (!this.session) { this.session = session; this.previousSession = session.type; } session.type = 'playback'; }
-    } catch { /* Older browsers still support ordinary media playback. */ }
+    } catch { /* Older browsers still support ordinary audio playback. */ }
     if (!this.audio) {
       this.audio = this.createAudio(); this.audio.loop = true; this.audio.preload = 'auto';
       this.audio.setAttribute('playsinline', '');
-      this.audio.onpause = this.audio.onerror = () => {
-        if (this.active && !this.replacing) { this.active = false; this.onInterrupt(); }
+    }
+    if (this.context?.state === 'closed') { this.context.onstatechange = null; this.context = null; this.loads.clear(); }
+    if (!this.context) {
+      const context = this.context = this.createContext();
+      context.onstatechange = () => {
+        if (!this.active || this.disposed || this.context !== context || context.state === 'running' || this.recovering) return;
+        this.recovering = true;
+        void deadline(context.resume()).catch(() => {}).finally(() => {
+          this.recovering = false;
+          if (this.active && this.context === context && context.state !== 'running') { this.stop(); this.onInterrupt(); }
+        });
       };
     }
-    if (this.context?.state === 'closed') { this.context = null; this.loads.clear(); }
-    this.context ??= this.createContext(); // Decode only; never route media through Web Audio.
     return this.audio;
   }
   async prepare() {
     const audio = this.ensure();
-    if (this.playing) return;
     if (!this.silentUrl) {
       const silent = { sound: 'ableton-classic', bpm: 120, beats: 1, subdivision: 1, volume: 0, accent: 0, regular: 0, subdivisions: 0, muted: true } as MetronomeConfig;
       const buffer = { numberOfChannels: 1, sampleRate: 48000, duration: .001, getChannelData: () => new Float32Array(48) } as unknown as AudioBuffer;
       this.silentUrl = URL.createObjectURL(renderClickLoop(silent, { regular: buffer, accent: buffer }));
     }
     if (audio.src !== this.silentUrl) audio.src = this.silentUrl;
-    this.url ??= this.silentUrl;
-    // Start the media element inside the user gesture, before fetching/decoding.
-    await deadline(audio.play());
+    // Optional media session support is silent and never determines Click timing.
+    void deadline(audio.play()).catch(() => {});
+    await deadline(this.context!.resume());
   }
-  start(config: MetronomeConfig) { return this.replace(config, 0); }
-  private async replace(config: MetronomeConfig, phase: number): Promise<boolean> {
+  start(config: MetronomeConfig) { return this.replace(config, false); }
+  private async replace(config: MetronomeConfig, preservePhase: boolean): Promise<boolean> {
     if (!isPlayableTempo(config.bpm) || this.disposed) return false;
     const generation = ++this.generation;
     const wasPlaying = this.playing;
-    const audio = this.ensure();
-    let nextUrl: string | null = null;
+    this.ensure();
     try {
       const unlock = wasPlaying ? Promise.resolve() : this.prepare();
       let loading = this.loads.get(config.sound);
@@ -105,40 +118,46 @@ export class MediaMetronome {
       }
       const [samples] = await Promise.all([loading, unlock]);
       if (generation !== this.generation || this.disposed) return false;
-      nextUrl = URL.createObjectURL(renderClickLoop(config, samples));
-      const previous = this.url;
-      this.replacing = true; audio.src = nextUrl;
-      audio.currentTime = phase * 60 / config.bpm;
-      try { await deadline(audio.play()); }
-      catch (error) {
-        if (generation === this.generation && previous && wasPlaying) { audio.src = previous; await deadline(audio.play()); }
-        throw error;
-      }
-      if (generation !== this.generation || this.disposed) return false;
-      this.url = nextUrl; nextUrl = null; if (previous && previous !== this.silentUrl) URL.revokeObjectURL(previous);
+      if (this.context!.state !== 'running') throw new Error('audio-interrupted');
+      const pcm = renderClickPcm(config, samples);
+      const buffer = this.context!.createBuffer(1, pcm.length, 48000);
+      buffer.copyToChannel(pcm, 0);
+      const source = this.context!.createBufferSource();
+      source.buffer = buffer; source.loop = true; source.loopStart = 0; source.loopEnd = buffer.duration;
+      source.connect(this.context!.destination);
+      source.onended = () => { source.disconnect(); this.sources.delete(source); };
+      const when = this.context!.currentTime + .015;
+      const phase = preservePhase && this.config ? ((this.anchorPulse + (when - this.anchorTime) * this.config.bpm / 60) % config.beats + config.beats) % config.beats : 0;
+      source.start(when, phase * 60 / config.bpm);
+      if (this.source) { try { this.source.stop(when); } catch { /* Already stopped. */ } }
+      this.sources.add(source); this.source = source;
+      this.anchorTime = when; this.anchorPulse = phase;
       this.config = { ...config }; this.active = true; return true;
     } catch (error) {
       if (generation === this.generation && this.playing) return false;
-      if (generation === this.generation && !this.active) audio.pause();
+      if (generation === this.generation && !this.active) this.audio?.pause();
       throw error;
-    } finally {
-      if (nextUrl) URL.revokeObjectURL(nextUrl);
-      if (generation === this.generation) this.replacing = false;
     }
   }
   update(config: MetronomeConfig) {
     if (!this.playing || !this.config || JSON.stringify(config) === JSON.stringify(this.config) || config.sound !== this.config.sound) return;
-    const phase = this.audio!.currentTime * this.config.bpm / 60 % config.beats;
-    void this.replace(config, phase).catch(() => { this.stop(); this.onInterrupt(); });
+    void this.replace(config, true).catch(() => { this.stop(); this.onInterrupt(); });
   }
-  getBeat() { return this.playing && this.config ? Math.floor(this.audio!.currentTime * this.config.bpm / 60) % this.config.beats : -1; }
-  stop() { this.generation++; this.active = false; this.replacing = false; this.audio?.pause(); }
+  getBeat() {
+    if (!this.playing || !this.config || !this.context || this.context.currentTime < this.anchorTime) return -1;
+    const pulse = this.anchorPulse + (this.context.currentTime - this.anchorTime) * this.config.bpm / 60;
+    return Math.floor(pulse + 1e-8) % this.config.beats;
+  }
+  stop() {
+    this.generation++; this.active = false;
+    for (const source of this.sources) { try { source.stop(); } catch { /* Already stopped. */ } }
+    this.sources.clear(); this.source = null; this.audio?.pause();
+  }
   dispose() {
     this.stop(); this.disposed = true;
-    if (this.audio) { this.audio.onpause = this.audio.onerror = null; this.audio.removeAttribute('src'); this.audio.load(); this.audio.remove?.(); }
-    if (this.url && this.url !== this.silentUrl) URL.revokeObjectURL(this.url);
+    if (this.audio) { this.audio.removeAttribute('src'); this.audio.load(); this.audio.remove?.(); }
     if (this.silentUrl) URL.revokeObjectURL(this.silentUrl);
-    void this.context?.close().catch(() => {});
+    if (this.context) { this.context.onstatechange = null; void this.context.close().catch(() => {}); }
     try { if (this.session?.type === 'playback' && this.previousSession !== null) this.session.type = this.previousSession; } catch { /* Session may no longer be available. */ }
     this.loads.clear();
   }

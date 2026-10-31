@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { MediaMetronome, renderClickLoop } from './mediaMetronome';
+import { MediaMetronome, renderClickLoop, renderClickPcm } from './mediaMetronome';
 import type { ClickSamples, MetronomeConfig } from './metronome';
 const config: MetronomeConfig = { sound: 'ableton-classic', bpm: 120, beats: 4, subdivision: 1, volume: 1, accent: 1, regular: .5, subdivisions: .25, muted: false };
 const buffer = { duration: .002, sampleRate: 48000, numberOfChannels: 1, getChannelData: () => new Float32Array([1, 1, 1, 1]) } as unknown as AudioBuffer;
@@ -8,7 +8,13 @@ function setup() {
   const media = { src: '', loop: false, preload: '', currentTime: 0, paused: true, ended: false, onpause: null, onerror: null,
     setAttribute: vi.fn(), removeAttribute: vi.fn(), load: vi.fn(),
     play: vi.fn(async () => { media.paused = false; }), pause: vi.fn(() => { media.paused = true; }) };
-  const decoder = { close: vi.fn(async () => {}) } as unknown as AudioContext;
+  const sources: any[] = [];
+  const context = { currentTime: 0, state: 'running', destination: {}, onstatechange: null,
+    resume: vi.fn(async () => {}), close: vi.fn(async () => {}),
+    createBuffer: vi.fn((_channels: number, frames: number, rate: number) => ({ duration: frames / rate, copyToChannel: vi.fn() })),
+    createBufferSource: vi.fn(() => { const source = { buffer: null, loop: false, loopStart: 0, loopEnd: 0, connect: vi.fn(), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null }; sources.push(source); return source; }),
+  };
+  const decoder = context as unknown as AudioContext;
   const load = vi.fn(async () => samples), interrupted = vi.fn();
   const engine = new MediaMetronome(interrupted, () => media as unknown as HTMLAudioElement, () => decoder, load);
   let id = 0;
@@ -16,7 +22,7 @@ function setup() {
   if (!URL.revokeObjectURL) URL.revokeObjectURL = () => {};
   vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:click-${++id}`);
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
-  return { media, decoder, load, engine, interrupted };
+  return { media, decoder, context, sources, load, engine, interrupted };
 }
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 it('renders the correct duration, beat strengths, subdivision and mute into a WAV', async () => {
@@ -37,24 +43,26 @@ it('renders the correct duration, beat strengths, subdivision and mute into a WA
     expect(sample(0)).toBe(0);
   } finally { vi.stubGlobal('Blob', BlobOriginal); }
 });
-it('plays through the media element without scheduling timers and follows its real clock', async () => {
-  const { media, engine } = setup();
+it('uses a native gapless audio buffer loop and follows the audio clock without timers', async () => {
+  const { media, engine, context, sources } = setup();
   const timer = vi.spyOn(globalThis, 'setInterval');
-  expect(await engine.start(config)).toBe(true); expect(media.loop).toBe(true);
+  expect(await engine.start(config)).toBe(true);
+  expect(sources[0].loop).toBe(true); expect(sources[0].loopEnd).toBe(2);
+  expect(sources[0].start).toHaveBeenCalledWith(.015, 0);
   expect(timer).not.toHaveBeenCalled();
-  media.currentTime = 1.1; expect(engine.getBeat()).toBe(2);
+  context.currentTime = 1.115; expect(engine.getBeat()).toBe(2);
   expect(engine.playing).toBe(true);
   engine.stop(); expect(media.paused).toBe(true); expect(engine.getBeat()).toBe(-1);
   engine.dispose();
 });
 it('keeps the previous loop running when a replacement fails, then retries', async () => {
-  const { media, engine, load } = setup();
-  await engine.start(config); const source = media.src;
+  const { sources, engine, load } = setup();
+  await engine.start(config); const source = sources[0];
   load.mockRejectedValueOnce(new Error('offline'));
   expect(await engine.start({ ...config, sound: 'drive' })).toBe(false);
-  expect(media.src).toBe(source); expect(engine.playing).toBe(true);
+  expect(source.stop).not.toHaveBeenCalled(); expect(engine.playing).toBe(true);
   expect(await engine.start({ ...config, sound: 'drive' })).toBe(true);
-  expect(media.src).not.toBe(source);
+  expect(sources).toHaveLength(2); expect(source.stop).toHaveBeenCalledWith(.015);
   engine.dispose();
 });
 it('does not play a pending loop after stopping or a newer song selection', async () => {
@@ -68,10 +76,23 @@ it('does not play a pending loop after stopping or a newer song selection', asyn
   expect(URL.revokeObjectURL).toHaveBeenCalled();
 });
 it('only replaces a loop for actual configuration changes, preserving beat phase', async () => {
-  const { engine, media } = setup();
-  await engine.start(config); const source = media.src;
-  media.currentTime = .75; engine.update({ ...config }); expect(media.src).toBe(source);
+  const { engine, context, sources } = setup();
+  await engine.start(config);
+  context.currentTime = .75; engine.update({ ...config }); expect(sources).toHaveLength(1);
   engine.update({ ...config, bpm: 60 });
-  await vi.waitFor(() => expect(media.currentTime).toBe(1.5));
+  await vi.waitFor(() => expect(sources).toHaveLength(2));
+  expect(sources[1].start).toHaveBeenCalledWith(.765, 1.5);
+  expect(sources[0].stop).toHaveBeenCalledWith(.765);
   expect(engine.playing).toBe(true); engine.dispose();
+});
+
+it.each([72, 110, 120, 128, 137, 180])('keeps last-to-first PCM tick spacing equal at %i BPM', bpm => {
+  const pcm = renderClickPcm({ ...config, bpm, beatLevels: [3, 3, 3, 3], regular: 1 }, samples);
+  const onsets: number[] = [];
+  for (let index = 0; index < pcm.length; index++) if (pcm[index] > .9 && (index === 0 || pcm[index - 1] <= .9)) onsets.push(index);
+  expect(onsets).toHaveLength(4);
+  const interval = 48000 * 60 / bpm;
+  const acrossBoundary = pcm.length - onsets[3] + onsets[0];
+  expect(Math.abs(acrossBoundary - interval)).toBeLessThanOrEqual(1);
+  expect(Math.abs(onsets[1] - onsets[0] - acrossBoundary)).toBeLessThanOrEqual(1);
 });
