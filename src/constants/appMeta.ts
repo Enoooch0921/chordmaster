@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-31',
+        title: 'Mobile and tablet drummer layout fixes',
+        bullets: [
+          'Keep the phone Drummer mode entry beside the setlist title, leaving more room to scroll songs.',
+          'Align subdivision symbols at their original proportions, including triplets in landscape mode.',
+          'Use the phone landscape control order on tablets: beats above tempo, with playback, TAP and song changes together below.',
+          'Enlarge tablet song-change buttons and reserve space for tempo reset so it does not overlap playback.'
+        ]
+      },
+      {
+        version: '0.12.0',
+        date: '2026-10-31',
         title: "Drummer mode and performance controls",
         bullets: [
           "Open Drummer mode from a setlist and tap a song to start its click, with per-song subdivision and accent controls.",
@@ -885,6 +896,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-31',
+        title: '手機與平板鼓手排版修正',
+        bullets: [
+          '手機的鼓手模式入口移至歌單標題旁，讓歌曲清單有更多捲動空間。',
+          '節拍細分音符保留正確比例，修正橫向模式三連音等符號的對齊。',
+          '平板沿用手機橫向操作順序：拍點在上、速度在中，播放、TAP 與上下首集中底部。',
+          '加大平板切歌按鈕，並為還原速度保留獨立空間，避免與播放鍵重疊。'
+        ]
+      },
+      {
+        version: '0.12.0',
         date: '2026-10-31',
         title: "鼓手模式與演出控制",
         bullets: [

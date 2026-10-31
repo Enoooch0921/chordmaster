@@ -12156,6 +12156,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           {isJoinedSetlist || !canEditSelectedSetlist ? <h2 tabIndex={-1}>{selectedSetlist.name || copy.untitledSetlist}</h2> : <input aria-label={language==='zh'?'歌單名稱':'Setlist name'} className="setlist-title-input" value={selectedSetlist.name}
             onFocus={()=>{historyRenameGroup.current=crypto.randomUUID();}} onBlur={()=>{historyRenameGroup.current=undefined;}}
             onChange={event=>handleSetlistNameChange(selectedSetlist.id,event.target.value)} placeholder={copy.untitledSetlist}/>}
+          {isPhoneViewport && <button type="button" className="drummer-entry drummer-entry-compact" data-drummer-trigger onClick={openDrummerMode} disabled={!setlistPreviewSongs.length}>
+            <Drum size={16}/><span>{language === 'zh' ? '鼓手模式' : 'Drummer mode'}</span>
+          </button>}
           {isSetlistSongSortMode ? <button type="button" className="pm-text-button" onClick={()=>{finishSetlistSongPointerDrag();setIsSetlistSongSortMode(false);}}><Check size={15}/>{language==='zh'?'完成排序':'Done'}</button> : (isJoinedSetlist || canEditSelectedSetlist || canShareSelectedSetlist || canReorderSelectedSetlist) && <ManagementActions label={language==='zh'?'歌單操作':'Setlist actions'} actions={[
             ...(canReorderSelectedSetlist ? [{label:language==='zh'?'調整歌曲順序':'Reorder songs',icon:<ListMusic size={16}/>,run:()=>setIsSetlistSongSortMode(true)}] : []),
             ...(canShareSelectedSetlist ? [{label:copy.shareCurrentSetlist,icon:<Share2 size={16}/>,run:()=>{void handleCreateShareLink('setlist');},disabled:isExportingPdf||isRevokingSetlistShare}] : []),
@@ -12179,9 +12182,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               onClick={() => { setSetlistAddSongSelection([]); setSetlistPanelView('addSongs'); }}><Plus size={16}/>{language === 'zh' ? '加入歌曲' : 'Add songs'}</button>}
           </div>
         </div>
-        <button type="button" className="drummer-entry" data-drummer-trigger onClick={openDrummerMode} disabled={!setlistPreviewSongs.length}>
+        {!isPhoneViewport && <button type="button" className="drummer-entry" data-drummer-trigger onClick={openDrummerMode} disabled={!setlistPreviewSongs.length}>
           <Drum size={18}/><span>{language === 'zh' ? '鼓手模式' : 'Drummer mode'}</span><ChevronRight size={16}/>
-        </button>
+        </button>}
         {isTeamWorkspace && activeLibraryRole==='setlist_manager' && <p className="pm-header-note">{language==='zh'?'譜面由歌曲管理員或總管理員維護。':'Song managers and administrators maintain scores.'}</p>}
       </div>
 
