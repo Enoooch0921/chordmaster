@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-31',
+        title: 'Copy personal songs to teams',
+        bullets: [
+          'Copy one song from its action menu or select multiple songs in Manage songs and copy them together.',
+          'Choose a team where you can edit songs, review the selection, and keep your personal originals.',
+          'Create separate copies for matching team songs without overwriting existing arrangements; copy up to 500 songs at a time.',
+          'Use the shared dialog transitions, mobile layout and keyboard controls; stop stale or unsynced transfers.'
+        ]
+      },
+      {
+        version: '0.11.19',
+        date: '2026-10-31',
         title: 'Smoother keyboards, mobile navigation and dialogs',
         bullets: [
           'Coordinate keyboard opening, collapsing and chart avoidance; respect manual scrolling during transitions.',
@@ -861,6 +872,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-31',
+        title: '個人歌曲複製到團隊',
+        bullets: [
+          '歌曲選單可單首複製，管理歌曲時可勾選多首，一起複製到團隊。',
+          '選擇有歌曲編輯權限的團隊，確認後複製並保留個人原譜。',
+          '團隊已有對應或同名歌曲時另建副本，不覆蓋既有編排；每次最多 500 首。',
+          '沿用視窗過渡與鍵盤操作，改善手機橫向版面；未同步、工作區或權限變更時停止傳送。'
+        ]
+      },
+      {
+        version: '0.11.19',
         date: '2026-10-31',
         title: '鍵盤、手機切換與視窗動態',
         bullets: [
