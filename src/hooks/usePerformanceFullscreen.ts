@@ -34,9 +34,9 @@ export function usePerformanceFullscreen() {
     || (root.webkitRequestFullscreen && doc.webkitFullscreenEnabled !== false)
   );
 
-  const exitFullscreen = useCallback(() => {
+  const exitFullscreen = useCallback((explicit = false) => {
     wantsFullscreen.current = false;
-    if (ownedTarget.current && fullscreenElement() === ownedTarget.current) leaveFullscreen();
+    if (fullscreenElement() && (explicit || fullscreenElement() === ownedTarget.current)) leaveFullscreen();
     // Keep the target until a pending request settles, so a quick exit cannot
     // leave the browser fullscreen after performance mode has closed.
   }, []);

@@ -72,6 +72,18 @@ describe('performance fullscreen session', () => {
     expect(browser.exit).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('honors an explicit exit even when fullscreen was already active (prefixed: %s)', prefixed => {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
+    const browser = mockFullscreen(prefixed);
+    browser.setCurrent(document.documentElement);
+    const { result } = renderHook(usePerformanceFullscreen);
+    act(() => result.current.requestFullscreen());
+    expect(browser.enter).not.toHaveBeenCalled();
+    act(() => result.current.exitFullscreen(true));
+    expect(browser.exit).toHaveBeenCalledOnce();
+    expect(result.current.isFullscreen).toBe(false);
+  });
+
   it('handles denied requests and allows a later user-initiated retry', async () => {
     Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
     const browser = mockFullscreen();

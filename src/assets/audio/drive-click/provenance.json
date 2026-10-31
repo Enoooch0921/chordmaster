@@ -1,0 +1,29 @@
+{
+  "addedAt": "2026-10-31",
+  "sourceName": "Click(150).wav",
+  "sourceUrl": "https://drive.google.com/file/d/1S8JmXEYsJWs0lTbYY3k7v54qgmLjCutX/view",
+  "sourceSha256": "bd85405de06a907122b131e99bdb1984ac244af47a53d97148da44970f24f685",
+  "sourceTempoBpm": 150,
+  "sampleRate": 48000,
+  "channels": 2,
+  "bitsPerSample": 24,
+  "processing": "Exact contiguous PCM24 one-shot excerpts from the user-provided WAV, including the attack and decay. No normalization, resampling, pitch shift, EQ or synthesis. The original accented beat and regular beat remain distinct. Runtime gain controls set strength; the audio scheduler determines song tempo, independent of the 150 BPM source loop.",
+  "files": [
+    {
+      "file": "accent.wav",
+      "frameStart": 76272,
+      "frameEndExclusive": 85872,
+      "durationSeconds": 0.2,
+      "sourceStartSeconds": 1.589,
+      "sha256": "72b9a91f61c18ccdff4b17601f7cc95de4aee07df52545503c08f0240dff982e"
+    },
+    {
+      "file": "regular.wav",
+      "frameStart": 95520,
+      "frameEndExclusive": 105120,
+      "durationSeconds": 0.2,
+      "sourceStartSeconds": 1.99,
+      "sha256": "0e06a991450aedf6ef8432094facdc0b674acf267f006b412eb62379e34eac1f"
+    }
+  ]
+}

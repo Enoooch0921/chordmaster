@@ -1,0 +1,83 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
+import App from './App';
+import { ToastProvider } from './components/Toast';
+import { saveNavigationLocation, getNavigationStorageKey } from './lib/setlistNavigationMemory';
+import type { StoredSong, WorkspaceSnapshot } from './types';
+let fixture: WorkspaceSnapshot;
+vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: null, session: null, status: 'signed-out', isConfigured: false, signInWithGoogle: vi.fn(), signOut: vi.fn() }) }));
+vi.mock('./lib/workspace', async original => ({ ...await original<typeof import('./lib/workspace')>(), loadPersistentWorkspaceSnapshot: async () => fixture }));
+vi.mock('./hooks/useLibraryWorkspaceRefresh', () => ({ useLibraryWorkspaceRefresh: () => false }));
+vi.mock('./hooks/useJoinedWorkspaceRefresh', () => ({ useJoinedWorkspaceRefresh: () => false }));
+beforeAll(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  window.matchMedia = vi.fn().mockImplementation(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+  HTMLElement.prototype.scrollIntoView = vi.fn(); HTMLElement.prototype.scrollTo = vi.fn();
+});
+beforeEach(() => {
+  localStorage.clear();
+  const original: StoredSong = { id: 'original', title: '歌曲庫原曲', tempo: 60, currentKey: 'C', originalKey: 'C', timeSignature: '4/4', updatedAt: 1, sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'bar', chords: ['C'] }] }] };
+  const entry = { id: 'entry', setlistId: 'meeting', songId: original.id, songData: { ...original, title: '本次歌單版本', tempo: 92 }, order: 0, sectionOrder: ['verse'] };
+  const setlist = { id: 'meeting', name: '共享歌單測試', displayMode: 'chord-movable-key' as const, createdAt: 1, updatedAt: 1, songs: [entry] };
+  fixture = { songs: [original], setlists: [setlist], joinedSetlists: [], projects: [], joinedProjects: [], lastSavedAt: 1 };
+  saveNavigationLocation(getNavigationStorageKey(null, null), { version: 1, workspaceMode: 'setlists', filter: { kind: 'all' }, parentFilter: { kind: 'all' }, view: 'detail', setlistId: 'meeting', songId: 'entry' });
+});
+it('opens from the setlist using the arrangement tempo, then exits without changing the chart', async () => {
+  render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+  const entry = (await screen.findAllByRole('button', { name: '鼓手模式' }))[0];
+  fireEvent.click(entry);
+  const dialog = await screen.findByRole('dialog', { name: '鼓手模式' });
+  expect(within(dialog).getByRole('textbox', { name: '節拍器速度 BPM' })).toHaveValue('92');
+  fireEvent.click(within(dialog).getByRole('button', { name: '增加 1 BPM' }));
+  expect(within(dialog).getByRole('textbox', { name: '節拍器速度 BPM' })).toHaveValue('93');
+  fireEvent.click(within(dialog).getByRole('button', { name: '退出鼓手模式' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '鼓手模式' })).toBeNull());
+  expect(document.querySelector<HTMLElement>('[data-app-root]')?.inert).toBe(false);
+  fireEvent.click(entry);
+  expect(within(await screen.findByRole('dialog', { name: '鼓手模式' })).getByRole('textbox', { name: '節拍器速度 BPM' })).toHaveValue('92');
+  expect(fixture.setlists[0].songs[0].songData?.tempo).toBe(92);
+}, 15000);
+it('allows a joined read-only setlist to use the metronome without edit permissions', async () => {
+  const setlist = fixture.setlists[0];
+  fixture = { ...fixture, setlists: [], joinedSetlists: [{ ...setlist, isJoined: true }] };
+  render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+  fireEvent.click((await screen.findAllByRole('button', { name: '鼓手模式' }))[0]);
+  expect(within(await screen.findByRole('dialog', { name: '鼓手模式' })).getByRole('button', { name: '播放' })).toBeEnabled();
+}, 15000);
+it('keeps drummer entry available and places guitarist below Google in toolbar overflow', async () => {
+  render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+  expect((await screen.findAllByRole('button',{name:'鼓手模式'})).length).toBeGreaterThan(0);
+  expect(screen.queryByRole('menuitemcheckbox',{name:'吉他手模式'})).not.toBeInTheDocument();
+  const more = (await screen.findAllByRole('button',{name:/^更多$/}))[0];
+  fireEvent.click(more);
+  const toggle = await screen.findByRole('menuitemcheckbox',{name:'吉他手模式'});
+  const google = screen.getByRole('button',{name:'使用 Google 登入'});
+  expect(google.nextElementSibling).toBe(toggle);
+  expect(toggle).toHaveAttribute('aria-checked','false');
+  fireEvent.click(toggle);
+  fireEvent.click(more);
+  expect(await screen.findByRole('menuitemcheckbox',{name:'吉他手模式'})).toHaveAttribute('aria-checked','true');
+},15000);
+
+it.each([true, false])('preserves sidebar expanded=%s across drummer mode and ignores synthetic hover on return', async expanded => {
+  render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+  const entry = (await screen.findAllByRole('button', { name: '鼓手模式' }))[0];
+  const sidebar = document.querySelector<HTMLElement>('[data-sidebar]')!;
+  const hoverSurface = sidebar.firstElementChild as HTMLElement;
+  vi.spyOn(hoverSurface, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 80, 900));
+  if (expanded) fireEvent.mouseEnter(hoverSurface, { clientY: 10 });
+  expect(sidebar.dataset.sidebarExpanded).toBe(String(expanded));
+  fireEvent.click(entry);
+  const dialog = await screen.findByRole('dialog', { name: '鼓手模式' });
+  fireEvent.mouseLeave(hoverSurface);
+  expect(sidebar.dataset.sidebarExpanded).toBe(String(expanded));
+  fireEvent.click(within(dialog).getByRole('button', { name: '退出鼓手模式' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '鼓手模式' })).toBeNull());
+  fireEvent.mouseEnter(hoverSurface, { clientY: 10 });
+  expect(sidebar.dataset.sidebarExpanded).toBe(String(expanded));
+  fireEvent.mouseMove(hoverSurface, { clientY: 10 });
+  expect(sidebar.dataset.sidebarExpanded).toBe('true');
+  fireEvent.mouseLeave(hoverSurface);
+  expect(sidebar.dataset.sidebarExpanded).toBe('false');
+}, 15000);

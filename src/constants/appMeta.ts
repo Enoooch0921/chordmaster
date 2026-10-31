@@ -86,6 +86,19 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-31',
+        title: "Drummer mode and performance controls",
+        bullets: [
+          "Open Drummer mode from a setlist and tap a song to start its click, with per-song subdivision and accent controls.",
+          "Adjust BPM with TAP, +/- and reset; choose MultiTracks, Drive or Ableton Live Classic click sounds.",
+          "Use a compact phone landscape console, or Performance mode with a complete A4 chart on larger landscape screens.",
+          "Customize MIDI and keyboard mappings for TAP, playback, tempo, song changes and chart pages; MIDI also supports relative encoders.",
+          "Supported browsers request media playback for Click in silent mode; leaving the page still stops playback.",
+          "Move Guitarist mode into the menu and improve mode transitions, fullscreen exit and immediate button feedback."
+        ]
+      },
+      {
+        version: '0.11.20',
+        date: '2026-10-31',
         title: 'Copy personal songs to teams',
         bullets: [
           'Copy one song from its action menu or select multiple songs in Manage songs and copy them together.',
@@ -872,6 +885,19 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-31',
+        title: "鼓手模式與演出控制",
+        bullets: [
+          "從歌單開啟鼓手模式，點歌即播放 Click，可逐首調整節拍細分與重音。",
+          "支援 TAP 測速、速度加減與還原，提供 MultiTracks、Drive、Ableton Live Classic 三種 Click 音色。",
+          "手機橫向採精簡節拍器與歌曲卡片；大螢幕橫向演出模式保留整張 A4 樂譜與點按翻頁。",
+          "MIDI 與鍵盤可自訂 TAP、播放、速度、上下首與樂譜翻頁，MIDI 保留相對值速度旋鈕設定。",
+          "支援的瀏覽器以媒體播放類型播放 Click，改善靜音模式無聲；離開頁面仍停止播放。",
+          "吉他手模式移至選單，改善模式切換、全螢幕退出與按鍵即時回饋。"
+        ]
+      },
+      {
+        version: '0.11.20',
         date: '2026-10-31',
         title: '個人歌曲複製到團隊',
         bullets: [

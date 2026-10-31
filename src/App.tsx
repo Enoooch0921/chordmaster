@@ -144,6 +144,9 @@ import CapoPicker from './components/CapoPicker';
 import TempoPicker from './components/TempoPicker';
 import SongMetadataPanel from './components/SongMetadataPanel';
 import ReferencePlayer from './components/ReferencePlayer';
+import DrummerMode, { type DrummerSession } from './components/DrummerMode';
+import { transitionDrummerWorkspace } from './lib/drummerTransition';
+import { Drum } from 'lucide-react';
 import { CompactSegmentedControl } from './components/SetlistCompactControls';
 import { NotificationBell } from './components/NotificationBell';
 import { ShareContactPicker } from './components/ShareContactPicker';
@@ -1664,6 +1667,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [savedSongs, setSavedSongs] = useState<StoredSong[]>(cloneSong(initialLibrary.songs));
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(loadWorkspaceMode);
   const [guitaristMode, setGuitaristMode] = useState<boolean>(loadGuitaristMode);
+  const [drummerSession, setDrummerSession] = useState<DrummerSession | null>(null);
+  const drummerWorkspaceActive = useRef(false);
+  const suppressSidebarHoverUntilMove = useRef(false);
+  const drummerSidebarSnapshot = useRef<{ pinned: boolean; hovered: boolean; mobileOpen: boolean } | null>(null);
+  const closeDrummerMode = React.useCallback((instant = false) => transitionDrummerWorkspace(() => {
+    const sidebar = drummerSidebarSnapshot.current;
+    if (sidebar) {
+      setIsSidebarPinned(sidebar.pinned);
+      setIsSidebarHovered(sidebar.hovered);
+      setIsMobileNavOpen(sidebar.mobileOpen);
+    }
+    setDrummerSession(null);
+  }, instant).finally(() => {
+    if (!document.querySelector('[data-drummer-mode]')) drummerWorkspaceActive.current = false;
+  }), []);
   const [selectedSongId, setSelectedSongId] = useState(initialLibrary.selectedSongId);
   const [setlists, setSetlists] = useState<Setlist[]>(initialSetlists.setlists);
   const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(cloneSong(initialSetlists.setlists));
@@ -2688,6 +2706,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       </div>
     ) : null
   );
+  const renderGuitaristModeToggle = (inMenu = false) => isSetlistMode ? (
+    <button type="button" data-guitarist-mode-toggle
+      role={inMenu ? 'menuitemcheckbox' : undefined}
+      aria-label={language === 'zh' ? '吉他手模式' : 'Guitarist mode'}
+      aria-checked={inMenu ? guitaristMode : undefined}
+      aria-pressed={inMenu ? undefined : guitaristMode}
+      onClick={() => { setGuitaristMode(current => !current); if (inMenu) setIsToolbarOverflowMenuOpen(false); }}
+      className={`mt-1 flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${guitaristMode ? 'bg-indigo-50 text-indigo-700 dark:bg-[color:var(--color-indigo-900)] dark:text-[color:var(--color-indigo-100)]' : 'text-gray-600 hover:bg-gray-50 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'}`}>
+      <span className="flex items-center gap-2"><Guitar size={14}/><span>{language === 'zh' ? '吉他手模式' : 'Guitarist mode'}</span></span>
+      <span className="text-[11px] font-bold">{guitaristMode ? copy.on : copy.off}</span>
+    </button>
+  ) : null;
   const toolbarOverflowPanel = (
     <AnimatedPopover open={isToolbarOverflowMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
       {homeScreenInstallMenuItem}
@@ -2810,6 +2840,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         </button>
       ) : null}
 
+      {renderGuitaristModeToggle(true)}
       <div className="mt-1 grid grid-cols-3 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
         {([
           { value: 'light', icon: Sun, label: language === 'zh' ? '淺色' : 'Light' },
@@ -7335,11 +7366,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
   };
 
-  const historyGestureSession=useThreeFingerHistory({ enabled: isSheetView && !isPerformanceMode && !globalHistory.busy && !historyForwardBusy && !draggingSetlistSongId && !isKeyboardShortcutsOpen
+  const historyGestureSession=useThreeFingerHistory({ enabled: !drummerSession && isSheetView && !isPerformanceMode && !globalHistory.busy && !historyForwardBusy && !draggingSetlistSongId && !isKeyboardShortcutsOpen
     && !isSwitchingLibrary && !isLoadingCloudWorkspace && (canOpenEditor || globalHistory.canUndo || globalHistory.canRedo),
     onUndo: handleActiveUndo, onRedo: handleActiveRedo });
   useSongHistoryShortcuts({
-    enabled: isSheetView && !historyForwardBusy && !draggingSetlistSongId && (canOpenEditor || globalHistory.canUndo || globalHistory.canRedo) && !isPerformanceMode && !isKeyboardShortcutsOpen
+    enabled: !drummerSession && isSheetView && !historyForwardBusy && !draggingSetlistSongId && (canOpenEditor || globalHistory.canUndo || globalHistory.canRedo) && !isPerformanceMode && !isKeyboardShortcutsOpen
       && !isSwitchingLibrary && !isLoadingCloudWorkspace,
     onUndo: handleActiveUndo,
     onRedo: handleActiveRedo,
@@ -9551,7 +9582,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   React.useEffect(() => { setPreviewPasteMenu(null); }, [activePreviewIdentity]);
 
   usePreviewClipboardShortcuts({
-    enabled: !previewPasteMenu && isSheetView && canOpenEditor && !isLyricsMode && !isPerformanceMode
+    enabled: !drummerSession && !previewPasteMenu && isSheetView && canOpenEditor && !isLyricsMode && !isPerformanceMode
       && !isKeyboardShortcutsOpen && !isSwitchingLibrary && !isLoadingCloudWorkspace,
     clipboardRef: previewClipboardRef,
     onCopy: copyHoveredPreviewContent,
@@ -9602,6 +9633,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         || event.shiftKey
         || event.isComposing
         || isEditableKeyboardTarget(event.target)
+        || (event.target instanceof Element && Boolean(event.target.closest('[data-drummer-mode]')))
       ) {
         return;
       }
@@ -10363,6 +10395,24 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     song: item.songData ?? sourceSong,
   })), [setlistSongsWithSource]);
 
+  const openDrummerMode = (event?: React.MouseEvent<HTMLButtonElement>) => {
+    if (!selectedSetlist || !setlistPreviewSongs.length) return;
+    drummerSidebarSnapshot.current = { pinned: isSidebarPinned, hovered: isSidebarHovered, mobileOpen: isMobileNavOpen };
+    drummerWorkspaceActive.current = true;
+    suppressSidebarHoverUntilMove.current = true;
+    setIsMobileActionsSheetOpen(false);
+    setActiveReferenceKind(null);
+    setIsPerformanceMode(false);
+    // A performance uses a stable snapshot; background sync cannot retime its click.
+    transitionDrummerWorkspace(() => setDrummerSession({
+      instanceId: crypto.randomUUID(),
+      id: selectedSetlist.id,
+      name: selectedSetlist.name,
+      initialId: selectedSetlistSong?.id ?? setlistPreviewSongs[0].item.id,
+      entries: setlistPreviewSongs.map(({ item, song }) => ({ id: item.id, song: cloneSong(song) })),
+    }), false, event?.currentTarget);
+  };
+
   const setlistPreviewSheet = React.useMemo(() => {
     if (setlistPreviewSongs.length === 0) {
       if (!allowDefaultSetlistSelection && !selectedSetlistId) {
@@ -10796,6 +10846,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }
 
   const handleSidebarHoverTrigger = (event: React.MouseEvent<HTMLElement>) => {
+    if (drummerWorkspaceActive.current) return;
+    // Removing an overlay can synthesize mouseenter at a stationary pointer.
+    if (suppressSidebarHoverUntilMove.current) {
+      if (event.type !== 'mousemove') return;
+      suppressSidebarHoverUntilMove.current = false;
+    }
     if (isPhoneViewport) {
       return;
     }
@@ -12123,6 +12179,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               onClick={() => { setSetlistAddSongSelection([]); setSetlistPanelView('addSongs'); }}><Plus size={16}/>{language === 'zh' ? '加入歌曲' : 'Add songs'}</button>}
           </div>
         </div>
+        <button type="button" className="drummer-entry" data-drummer-trigger onClick={openDrummerMode} disabled={!setlistPreviewSongs.length}>
+          <Drum size={18}/><span>{language === 'zh' ? '鼓手模式' : 'Drummer mode'}</span><ChevronRight size={16}/>
+        </button>
         {isTeamWorkspace && activeLibraryRole==='setlist_manager' && <p className="pm-header-note">{language==='zh'?'譜面由歌曲管理員或總管理員維護。':'Song managers and administrators maintain scores.'}</p>}
       </div>
 
@@ -12554,9 +12613,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           onMouseEnter={handleSidebarHoverTrigger}
           onMouseMove={handleSidebarHoverTrigger}
           onMouseLeave={() => {
-            if (!isSidebarPinned) {
-              setIsSidebarHovered(false);
-            }
+            if (drummerWorkspaceActive.current) return;
+            suppressSidebarHoverUntilMove.current = false;
+            if (!isSidebarPinned) setIsSidebarHovered(false);
           }}
           className={`absolute inset-y-0 left-0 flex overflow-hidden border-r border-gray-200 bg-white dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)] ${
             isPhoneViewport
@@ -12647,22 +12706,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     <Plus size={18} />
                   </button>
                 )}
-                {isSetlistMode && (
-                  <button
-                    type="button"
-                    onClick={() => setGuitaristMode((current) => !current)}
-                    className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
-                      guitaristMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                    title={language === 'zh'
-                      ? (guitaristMode ? '吉他手模式（開啟中）：自動為未設定的歌補上 Capo，點擊關閉' : '吉他手模式：自動為未設定的歌補上吉他友善 Capo')
-                      : (guitaristMode ? 'Guitarist mode (on): auto-fills capo for unset songs — click to turn off' : 'Guitarist mode: auto-fill guitar-friendly capo for unset songs')}
-                    aria-label={language === 'zh' ? '吉他手模式' : 'Guitarist mode'}
-                    aria-pressed={guitaristMode}
-                  >
-                    <Guitar size={18} />
-                  </button>
-                )}
+                <div className="mt-3 flex w-full justify-center border-t border-gray-200 pt-3">
+                  <button type="button" data-drummer-trigger onClick={openDrummerMode} disabled={!selectedSetlist || !setlistPreviewSongs.length}
+                    className="ui-press flex h-11 w-11 items-center justify-center rounded-2xl bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-40"
+                    title={language === 'zh' ? '鼓手模式' : 'Drummer mode'} aria-label={language === 'zh' ? '鼓手模式' : 'Drummer mode'}><Drum size={18}/></button>
+                </div>
               </div>
 
               <div className="mt-auto flex w-full flex-col items-center gap-3 px-2">
@@ -14945,24 +14993,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         )}
                         </div> : null}
 
-                        {isSetlistMode && (
-                          <button
-                            type="button"
-                            onClick={() => setGuitaristMode((current) => !current)}
-                            aria-label={language === 'zh' ? '吉他手模式' : 'Guitarist mode'}
-                            aria-pressed={guitaristMode}
-                            className={`flex min-h-14 w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition-colors ${
-                              guitaristMode
-                                ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                                : 'border-gray-200 bg-white text-gray-700'
-                            }`}
-                          >
-                            <Guitar size={20} className="shrink-0" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-sm font-bold">{language === 'zh' ? '吉他手模式' : 'Guitarist mode'}</span>
-                              <span className="mt-1 block text-xs text-gray-500">{language === 'zh' ? '自動選擇吉他友善 Capo' : 'Automatically choose guitar-friendly capo'}</span>
-                            </span>
-                            <span className="shrink-0 text-sm font-bold">{guitaristMode ? copy.on : copy.off}</span>
+                        {isSetlistMode && selectedSetlist && (
+                          <button type="button" className="drummer-entry" data-drummer-trigger onClick={openDrummerMode} disabled={!setlistPreviewSongs.length}>
+                            <Drum size={20}/><span>{language === 'zh' ? '鼓手模式' : 'Drummer mode'}</span><ChevronRight size={18}/>
                           </button>
                         )}
 
@@ -15120,6 +15153,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         ) : null}
                       </div>
                     ) : null}
+                    {renderGuitaristModeToggle()}
                     </div>
                   </div>
                 </PresenceSurface>
@@ -15745,6 +15779,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onRefresh={() => { void loadSetlistEditorAssignments(); }}
         onToggle={(userId, enabled) => { void handleToggleSetlistAssignment(userId, enabled); }}
       />
+
+      {drummerSession && <DrummerMode key={drummerSession.instanceId ?? drummerSession.id ?? drummerSession.name} {...drummerSession} language={language} onClose={closeDrummerMode}/>}
 
       {activeReferenceKind && activeReferenceSong && (
         <ReferencePlayer
