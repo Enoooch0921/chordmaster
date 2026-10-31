@@ -25,6 +25,35 @@ describe('drummer session controls', () => {
     Object.defineProperties(event, { pointerType: { value: 'touch' }, pointerId: { value: 4 }, isPrimary: { value: true }, clientX: { value: x }, clientY: { value: y } });
     fireEvent(element, event);
   };
+  it.each(['mouse', 'touch'])('toggles the current song off and on with %s without losing its selection or tempo', input => {
+    const view = mount();
+    const activate = () => {
+      const target = songs().getByRole('button', { name: /^1 第一首/ });
+      if (input === 'touch') { touch(target, 'pointerDown', 40, 80); touch(target, 'pointerUp', 40, 80); }
+      fireEvent.click(target, { detail: 1 });
+    };
+    const refresh = () => view.rerender(<DrummerMode {...session} language="zh" onClose={vi.fn()}/>);
+    activate();
+    expect(audio.start).toHaveBeenCalledOnce();
+    audio.playing = true; refresh();
+    audio.stop.mockClear(); audio.start.mockClear();
+    activate();
+    expect(audio.stop).toHaveBeenCalledOnce();
+    expect(audio.start).not.toHaveBeenCalled();
+    expect(songs().getByRole('button', { name: /^1 第一首/ })).toHaveAttribute('aria-current', 'true');
+    expect(tempo()).toHaveValue('72');
+    audio.playing = false; refresh();
+    activate();
+    expect(audio.start).toHaveBeenCalledOnce();
+    expect(audio.start).toHaveBeenCalledWith(expect.objectContaining({ bpm: 72 }));
+  });
+  it.each(['playing', 'starting'] as const)('stops the current song when it is %s', state => {
+    audio[state] = true;
+    mount();
+    fireEvent.click(songs().getByRole('button', { name: /^1 第一首/ }));
+    expect(audio.stop).toHaveBeenCalledOnce();
+    expect(audio.start).not.toHaveBeenCalled();
+  });
   it('selects a touch-released song without a following click and ignores its duplicate click', () => {
     mount(session);
     const target = songs().getByRole('button', { name: /^2 第二首/ });

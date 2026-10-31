@@ -414,6 +414,15 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
       void click.start({ ...config, subdivision: songSubdivisions[subdivisionKey(id, selectedMeterText, selectedGrouped)] ?? 1, bpm: selectedBpm, beats: selectedBeats, beatLevels: patterns[`${id}:${selectedBeats}`] ?? defaultBeatLevels(selectedBeats) });
     }
   };
+  const activateSong = (id: string) => {
+    if (id === activeIdRef.current && busyRef.current) {
+      busyRef.current = false;
+      click.stop();
+      setSubdivisionOpen(false);
+      return;
+    }
+    select(id);
+  };
   const adjacentSong = (offset: number) => {
     const next = entries[entries.findIndex(entry => entry.id === activeIdRef.current) + offset];
     if (next) select(next.id);
@@ -543,7 +552,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
         </div>
       </section>
       <section className="drummer-song-list" aria-label={t('鼓手歌單', 'Drummer setlist')}>
-        <div className="drummer-list-heading"><h2>{t('歌單', 'Setlist')}</h2><span>{t('點歌即播放', 'Tap a song to play')} · {entries.length} {t('首', 'songs')}</span></div>
+        <div className="drummer-list-heading"><h2>{t('歌單', 'Setlist')}</h2><span>{t('點歌播放／停止', 'Tap a song to play/stop')} · {entries.length} {t('首', 'songs')}</span></div>
         <div ref={songList} className="drummer-list-scroll">
           {entries.map((entry, index) => {
             const text = meters[entry.id] ?? entry.song.timeSignature;
@@ -564,12 +573,12 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
               handledSongTouch.current = { id: entry.id, time: performance.now() };
               if (Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 10 || Math.abs((songList.current?.scrollTop ?? 0) - touch.scroll) > 10) return;
               // Select on touch release even if Safari drops the following click.
-              event.preventDefault(); select(entry.id);
+              event.preventDefault(); activateSong(entry.id);
             }}
             onClick={event => {
               const handled = handledSongTouch.current;
               if (event.detail > 0 && handled?.id === entry.id && performance.now() - handled.time < 1000) return;
-              select(entry.id);
+              activateSong(entry.id);
             }}>
             <span className="drummer-song-order" aria-hidden="true">{index + 1}.</span>
             <span className="drummer-song-tempo">{tempos[entry.id] ?? (isPlayableTempo(entry.song.tempo) ? entry.song.tempo : '—')}<small>BPM</small></span>

@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-10-31',
+        title: 'Toggle Click by tapping a song',
+        bullets: [
+          'Tap the current song to stop Click; tap it again to play. A pending start can also be cancelled.',
+          'Tap another song to switch and play immediately; previous/next controls keep their existing behavior.'
+        ]
+      },
+      {
+        version: '0.12.3',
+        date: '2026-10-31',
         title: 'Urgent fix: gapless Click measures',
         bullets: [
           'Replace the audible HTML media loop with a native AudioBufferSourceNode loop to remove the pause between beat four and beat one.',
@@ -919,6 +928,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-10-31',
+        title: '點歌名切換 Click 播放／停止',
+        bullets: [
+          '點目前歌曲可停止 Click，再點一次播放；載入中也能再次點按取消。',
+          '點其他歌曲立即切歌並播放；上一首／下一首操作維持直接切歌。'
+        ]
+      },
+      {
+        version: '0.12.3',
         date: '2026-10-31',
         title: '緊急修復：Click 跨小節停頓',
         bullets: [
