@@ -1,9 +1,9 @@
 import { AnimatePresence } from 'motion/react';
-import { PresenceSurface } from './ui/InteractionMotion';
+import ResponsiveDialog from './ResponsiveDialog';
+import { useContentSwitchMotion } from '../hooks/useContentSwitchMotion';
 import { useUiMotion } from '../hooks/useUiMotion';
-import { backdropVariants, modalVariants } from '../lib/uiMotion';
-import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, Copy, LoaderCircle, RefreshCw, Search, X } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Check, Copy, LoaderCircle, RefreshCw, Search } from 'lucide-react';
 import {
   AppLanguage,
   StoredSong,
@@ -18,6 +18,12 @@ interface TeamSongImportDialogProps {
   language: AppLanguage;
   personalSongs: StoredSong[];
   loadingSongs: boolean;
+  initialSelectedIds?: string[];
+  copyOnly?: boolean;
+  destinationTeams?: { id: string; name: string }[];
+  destinationId?: string;
+  destinationName?: string;
+  onDestinationChange?: (id: string) => void;
   onClose: () => void;
   inspectSongs: (sourceSongIds: string[]) => Promise<TeamSongImportInspection>;
   importSongs: (items: TeamSongImportRequestItem[]) => Promise<TeamSongImportResult>;
@@ -28,6 +34,8 @@ interface ResolutionState {
   targetSongId?: string;
 }
 
+const EMPTY_SELECTION: string[] = [];
+
 const normalizeSearchText = (value: string) => value.trim().toLocaleLowerCase();
 
 const getStoredSongVersion = (song: StoredSong) => {
@@ -35,7 +43,7 @@ const getStoredSongVersion = (song: StoredSong) => {
   return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 };
 
-const getSongSummary = (song: StoredSong, language: AppLanguage) => {
+const getSongSummary = (song: StoredSong, language: AppLanguage, showId = true) => {
   const version = getStoredSongVersion(song);
   return [
     song.currentKey || song.originalKey ? `Key ${song.currentKey || song.originalKey}` : '',
@@ -43,18 +51,18 @@ const getSongSummary = (song: StoredSong, language: AppLanguage) => {
     typeof song.tempo === 'number' ? `${song.tempo} BPM` : '',
     song.lyricist ? `${language === 'zh' ? '詞' : 'Lyrics'} ${song.lyricist}` : '',
     song.composer ? `${language === 'zh' ? '曲' : 'Music'} ${song.composer}` : '',
-    `${language === 'zh' ? '來源歌曲 ID' : 'Source song ID'} ${song.id}`
+    showId ? `${language === 'zh' ? '來源歌曲 ID' : 'Source song ID'} ${song.id}` : ''
   ].filter(Boolean).join(' · ');
 };
 
-const getCandidateSummary = (candidate: TeamSongImportCandidate, language: AppLanguage) => [
+const getCandidateSummary = (candidate: TeamSongImportCandidate, language: AppLanguage, showId = true) => [
   candidate.currentKey || candidate.originalKey
     ? `Key ${candidate.currentKey || candidate.originalKey}`
     : '',
   candidate.version ? `${language === 'zh' ? '版本' : 'Version'} ${candidate.version}` : '',
   candidate.lyricist ? `${language === 'zh' ? '詞' : 'Lyrics'} ${candidate.lyricist}` : '',
   candidate.composer ? `${language === 'zh' ? '曲' : 'Music'} ${candidate.composer}` : '',
-  `${language === 'zh' ? '團隊歌曲 ID' : 'Team song ID'} ${candidate.songId}`
+  showId ? `${language === 'zh' ? '團隊歌曲 ID' : 'Team song ID'} ${candidate.songId}` : ''
 ].filter(Boolean).join(' · ');
 
 export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
@@ -62,6 +70,12 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
   language,
   personalSongs,
   loadingSongs,
+  initialSelectedIds = EMPTY_SELECTION,
+  copyOnly = false,
+  destinationTeams,
+  destinationId,
+  destinationName,
+  onDestinationChange,
   onClose,
   inspectSongs,
   importSongs
@@ -74,14 +88,27 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    setQuery('');
-    setSelectedIds([]);
+  const request = useRef(0);
+  const busy = useRef(false);
+  const current = useRef({ open, destinationId });
+  current.current = { open, destinationId };
+  const contentRef = useRef<HTMLDivElement>(null);
+  useContentSwitchMotion(contentRef, inspection ? 'review' : 'select', open);
+  useLayoutEffect(() => {
+    request.current++;
+    busy.current = false;
     setInspection(null);
     setResolutions({});
     setError(null);
-  }, [open]);
+    setIsInspecting(false);
+    setIsImporting(false);
+  }, [open, destinationId]);
+  useLayoutEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setSelectedIds([...new Set(initialSelectedIds)]);
+  }, [open, initialSelectedIds]);
+  useEffect(() => () => { request.current++; }, []);
 
   const visibleSongs = useMemo(() => {
     const normalizedQuery = normalizeSearchText(query);
@@ -107,7 +134,7 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
   const allVisibleSelected = visibleSongs.length > 0 && visibleSongs.every((song) => selectedSet.has(song.id));
   const selectedSongs = selectedIds
     .map((id) => personalSongs.find((song) => song.id === id))
-    .filter((song): song is StoredSong => Boolean(song));
+    .filter((song): song is StoredSong => Boolean(song) && !song!.archivedAt);
 
   const toggleSong = (songId: string) => {
     setSelectedIds((current) => current.includes(songId)
@@ -126,14 +153,23 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
   };
 
   const startInspection = async () => {
-    if (selectedIds.length === 0) return;
+    if (selectedSongs.length === 0 || selectedSongs.length > 500 || busy.current) return;
+    const token = ++request.current; busy.current = true;
     try {
       setIsInspecting(true);
       setError(null);
-      const nextInspection = await inspectSongs(selectedIds);
+      const requestedIds = selectedSongs.map(song => song.id);
+      const nextInspection = await inspectSongs(requestedIds);
+      if (request.current !== token || !current.current.open) return;
+      const inspectedIds = new Set(nextInspection.songs.map(song => song.sourceSongId));
+      if (inspectedIds.size !== requestedIds.length || nextInspection.songs.length !== requestedIds.length || requestedIds.some(id => !inspectedIds.has(id))) {
+        throw new Error(language === 'zh' ? '部分歌曲已變更或無法讀取，請返回重新選擇。' : 'Some songs changed or are unavailable. Select the songs again.');
+      }
       const nextResolutions: Record<string, ResolutionState> = {};
       nextInspection.songs.forEach((item) => {
-        nextResolutions[item.sourceSongId] = item.existingSongId
+        nextResolutions[item.sourceSongId] = copyOnly && (item.existingSongId || item.possibleMatches.length > 0)
+          ? { resolution: 'duplicate' }
+          : item.existingSongId
           ? { resolution: 'overwrite', targetSongId: item.existingSongId }
           : item.possibleMatches.length > 0
             ? { resolution: 'duplicate' }
@@ -142,14 +178,16 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
       setInspection(nextInspection);
       setResolutions(nextResolutions);
     } catch (reason) {
+      if (request.current !== token || !current.current.open) return;
       setError(reason instanceof Error ? reason.message : (language === 'zh' ? '無法檢查匯入歌曲。' : 'Unable to inspect songs.'));
     } finally {
-      setIsInspecting(false);
+      if (request.current === token) { busy.current = false; setIsInspecting(false); }
     }
   };
 
   const runImport = async () => {
-    if (!inspection) return;
+    if (!inspection || busy.current) return;
+    const token = ++request.current; busy.current = true;
     const items: TeamSongImportRequestItem[] = inspection.songs.map((item) => {
       const selected = resolutions[item.sourceSongId] ?? { resolution: 'create' as const };
       const legacyCandidateIds = new Set(item.possibleMatches.map((candidate) => candidate.songId));
@@ -170,32 +208,30 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
       setIsImporting(true);
       setError(null);
       await importSongs(items);
-      onClose();
+      if (request.current === token && current.current.open) onClose();
     } catch (reason) {
+      if (request.current !== token || !current.current.open) return;
       setError(reason instanceof Error ? reason.message : (language === 'zh' ? '無法匯入歌曲。' : 'Unable to import songs.'));
     } finally {
-      setIsImporting(false);
+      if (request.current === token) { busy.current = false; setIsImporting(false); }
     }
   };
 
   return (
-    <AnimatePresence initial={false} custom={preference}>{open && <PresenceSurface custom={preference} variants={backdropVariants} initial="hidden" animate="visible" exit="exit" className="fixed inset-0 z-[180] flex items-stretch justify-center bg-stone-950/45 sm:items-center sm:px-3 sm:py-6 backdrop-blur-[2px]">
-      <PresenceSurface custom={preference} variants={modalVariants} initial="hidden" animate="visible" exit="exit" role="dialog" aria-modal="true" aria-label={language === 'zh' ? '從個人區匯入歌曲' : 'Import songs from personal library'} className="flex h-[100dvh] max-h-[100dvh] w-full max-w-2xl flex-col overflow-hidden bg-white pt-[env(safe-area-inset-top)] shadow-2xl sm:h-[min(760px,90dvh)] sm:rounded-2xl sm:border sm:border-gray-200">
-        <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-base font-black text-gray-900">
-              {language === 'zh' ? '從個人區匯入團隊曲庫' : 'Import from your personal library'}
-            </div>
-            <div className="mt-0.5 text-xs font-medium text-gray-500">
-              {inspection
-                ? (language === 'zh' ? '步驟 2 / 2 · 確認匯入方式' : 'Step 2 of 2 · Review import')
-                : (language === 'zh' ? '步驟 1 / 2 · 選擇要匯入的歌曲' : 'Step 1 of 2 · Select songs')}
-            </div>
-          </div>
-          <button type="button" onClick={onClose} disabled={isImporting} className="flex size-11 shrink-0 items-center justify-center rounded-xl text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40" aria-label={language === 'zh' ? '關閉' : 'Close'}>
-            <X size={18} />
-          </button>
-        </div>
+    <AnimatePresence initial={false} custom={preference}>{open && <ResponsiveDialog
+      title={copyOnly ? (language === 'zh' ? '複製到團隊' : 'Copy to team') : (language === 'zh' ? '從個人區匯入團隊曲庫' : 'Import from your personal library')}
+      subtitle={inspection ? (language === 'zh' ? '確認歌曲與目標團隊' : 'Review songs and destination') : (language === 'zh' ? '選擇歌曲與目標團隊' : 'Choose songs and destination')}
+      closeLabel={language === 'zh' ? '關閉' : 'Close'} busy={isImporting} onClose={onClose}>
+      <div ref={contentRef} className="flex min-h-0 flex-1 flex-col">
+        {destinationTeams && <div className="shrink-0 border-b border-gray-100 px-4 py-3 [@media(max-height:500px)]:py-2">
+          <label className="block text-xs font-semibold text-gray-600 [@media(max-height:500px)]:flex [@media(max-height:500px)]:items-center [@media(max-height:500px)]:gap-2">{language === 'zh' ? '目標團隊' : 'Destination team'}
+            <select aria-label={language === 'zh' ? '目標團隊' : 'Destination team'} value={destinationId ?? ''} disabled={loadingSongs || isInspecting || isImporting || Boolean(inspection)} onChange={event => onDestinationChange?.(event.target.value)} className="mt-1 min-h-11 w-full [@media(max-height:500px)]:mt-0 [@media(max-height:500px)]:min-w-0 [@media(max-height:500px)]:flex-1 rounded-xl border border-gray-200 bg-white px-3 text-base text-gray-900">
+              {destinationTeams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
+            </select>
+          </label>
+          <p className="mt-2 text-xs leading-5 text-gray-500 [@media(max-height:500px)]:hidden">{language === 'zh' ? '保留個人原譜；團隊已有的歌曲會另建副本。' : 'Keep your personal originals; existing team songs get a separate copy.'}</p>
+        </div>}
+        {!destinationTeams && destinationName && <p className="shrink-0 px-4 pt-3 text-xs text-gray-500">{language === 'zh' ? `目標團隊：${destinationName}` : `Destination: ${destinationName}`}</p>}
 
         {error ? (
           <div role="alert" className="mx-4 mt-3 flex max-h-28 shrink-0 items-start overflow-y-auto gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-700">
@@ -206,21 +242,22 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
 
         {!inspection ? (
           <>
-            <div className="shrink-0 border-b border-gray-100 px-4 py-3">
-              <label className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
+            <div className="shrink-0 border-b border-gray-100 px-4 py-3 [@media(max-height:500px)]:flex [@media(max-height:500px)]:items-center [@media(max-height:500px)]:gap-2 [@media(max-height:500px)]:py-2">
+              <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-indigo-300 focus-within:bg-white">
                 <Search size={14} className="text-gray-400" />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={language === 'zh' ? '搜尋個人歌曲' : 'Search personal songs'} aria-label={language === 'zh' ? '搜尋個人歌曲' : 'Search personal songs'} className="min-h-8 min-w-0 flex-1 bg-transparent text-base text-gray-800 outline-none" />
+                <input value={query} enterKeyHint="done" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} onChange={(event) => setQuery(event.target.value)} placeholder={language === 'zh' ? '搜尋個人歌曲' : 'Search personal songs'} aria-label={language === 'zh' ? '搜尋個人歌曲' : 'Search personal songs'} className="min-h-8 min-w-0 flex-1 bg-transparent text-base text-gray-800 outline-none" />
               </label>
-              <div className="mt-2 flex items-center justify-between gap-2 text-xs font-bold">
-                <span className="text-gray-500">{language === 'zh' ? `已選 ${selectedIds.length} 首` : `${selectedIds.length} selected`}</span>
-                <button type="button" onClick={toggleAllVisible} disabled={visibleSongs.length === 0} className="min-h-11 rounded-lg px-2 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40">
+              <div className="mt-2 flex items-center justify-between gap-2 text-xs font-bold [@media(max-height:500px)]:mt-0 [@media(max-height:500px)]:shrink-0">
+                <span className="text-gray-500">{language === 'zh' ? `已選 ${selectedSongs.length} 首` : `${selectedSongs.length} selected`}</span>
+                {selectedSongs.length > 500 && <span role="alert" className="text-rose-700">{language === 'zh' ? '每次最多 500 首' : 'Up to 500 songs at a time'}</span>}
+                <button type="button" onClick={toggleAllVisible} disabled={visibleSongs.length === 0 || loadingSongs || isInspecting} className="min-h-11 rounded-lg px-2 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40">
                   {allVisibleSelected
                     ? (language === 'zh' ? '取消全選' : 'Deselect results')
                     : (language === 'zh' ? '全選目前結果' : 'Select results')}
                 </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
+            <div data-team-import-list className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
               {loadingSongs ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-sm font-semibold text-gray-500"><LoaderCircle size={18} className="animate-spin" />{language === 'zh' ? '載入個人曲庫…' : 'Loading personal library…'}</div>
               ) : visibleSongs.length === 0 ? (
@@ -230,11 +267,11 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
                   {visibleSongs.map((song) => {
                     const selected = selectedSet.has(song.id);
                     return (
-                      <button key={song.id} type="button" onClick={() => toggleSong(song.id)} aria-pressed={selected} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${selected ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white hover:border-indigo-200'}`}>
+                      <button key={song.id} type="button" disabled={isInspecting} onClick={() => { if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur(); toggleSong(song.id); }} aria-pressed={selected} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${selected ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white hover:border-indigo-200'}`}>
                         <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${selected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 bg-white text-transparent'}`}><Check size={14} strokeWidth={3} /></span>
                         <span className="min-w-0 flex-1">
                           <span className="block break-words text-sm font-bold text-gray-900">{song.title || (language === 'zh' ? '未命名歌曲' : 'Untitled Song')}</span>
-                          <span className="mt-0.5 block break-words text-xs leading-5 text-gray-500">{getSongSummary(song, language)}</span>
+                          <span className="mt-0.5 block break-words text-xs leading-5 text-gray-500">{getSongSummary(song, language, !copyOnly)}</span>
                         </span>
                       </button>
                     );
@@ -244,7 +281,7 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
             </div>
             <div className="flex shrink-0 items-center justify-end gap-2 border-t border-gray-200 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <button type="button" onClick={onClose} className="min-h-11 rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50">{language === 'zh' ? '取消' : 'Cancel'}</button>
-              <button type="button" onClick={() => void startInspection()} disabled={selectedIds.length === 0 || isInspecting || loadingSongs} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">
+              <button type="button" onClick={() => void startInspection()} disabled={selectedSongs.length === 0 || selectedSongs.length > 500 || isInspecting || loadingSongs} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">
                 {isInspecting ? <LoaderCircle size={15} className="animate-spin" /> : <ChevronGlyph />}
                 <span>{language === 'zh' ? '下一步' : 'Continue'}</span>
               </button>
@@ -272,9 +309,11 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
                     <div key={item.sourceSongId} className="rounded-xl border border-gray-200 bg-white p-3">
                       <div className="min-w-0">
                         <div className="break-words text-sm font-black text-gray-900">{item.title}</div>
-                        {sourceSong ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{getSongSummary(sourceSong, language)}</div> : null}
+                        {sourceSong ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{getSongSummary(sourceSong, language, !copyOnly)}</div> : null}
                       </div>
-                      {hasConflict ? (
+                      {hasConflict && copyOnly ? (
+                        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">{language === 'zh' ? '團隊已有對應或同名歌曲，會另建副本，保留現有版本。' : 'The team already has a matching song. Create a separate copy and keep its existing version.'}</p>
+                      ) : hasConflict ? (
                         <div className="mt-3 rounded-xl bg-amber-50 p-2.5">
                           <div className="text-[11px] font-bold text-amber-800">
                             {item.existingSongId
@@ -346,7 +385,7 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
                                       : 'border-amber-200 bg-amber-50/70'} disabled:cursor-default disabled:opacity-100`}
                                   >
                                     <span className="block truncate text-[11px] font-bold text-gray-800">{candidate.title || item.title}</span>
-                                    <span className="mt-0.5 block break-words text-[11px] leading-4 text-gray-600">{getCandidateSummary(candidate, language)}</span>
+                                    <span className="mt-0.5 block break-words text-[11px] leading-4 text-gray-600">{getCandidateSummary(candidate, language, !copyOnly)}</span>
                                   </button>
                                 );
                               })}
@@ -365,13 +404,13 @@ export const TeamSongImportDialog: React.FC<TeamSongImportDialogProps> = ({
               <button type="button" onClick={() => { setInspection(null); setError(null); }} disabled={isImporting} className="min-h-11 rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-40">{language === 'zh' ? '返回選擇' : 'Back'}</button>
               <button type="button" onClick={() => void runImport()} disabled={isImporting} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-50">
                 {isImporting ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={15} />}
-                <span>{language === 'zh' ? `匯入 ${inspection.songs.length} 首` : `Import ${inspection.songs.length}`}</span>
+                <span>{language === 'zh' ? `${copyOnly ? '複製' : '匯入'} ${inspection.songs.length} 首` : `${copyOnly ? 'Copy' : 'Import'} ${inspection.songs.length}`}</span>
               </button>
             </div>
           </>
         )}
-      </PresenceSurface>
-    </PresenceSurface>}</AnimatePresence>
+      </div>
+    </ResponsiveDialog>}</AnimatePresence>
   );
 };
 

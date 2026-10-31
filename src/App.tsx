@@ -1852,6 +1852,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
   const [isImportingPersonalSongs, setIsImportingPersonalSongs] = useState(false);
   const [isTeamSongImportOpen, setIsTeamSongImportOpen] = useState(false);
+  const [teamSongImportContext, setTeamSongImportContext] = useState<{ sourceLibraryId: string; targetLibraryId: string; copyOnly: boolean; initialIds: string[] } | null>(null);
+  const teamSongImportContextRef = useRef(teamSongImportContext);
+  teamSongImportContextRef.current = isTeamSongImportOpen ? teamSongImportContext : null;
+  const teamImportLibrariesRef = useRef(cloudLibraries);
+  teamImportLibrariesRef.current = cloudLibraries;
   const [personalImportSongs, setPersonalImportSongs] = useState<StoredSong[]>([]);
   const [isLoadingPersonalImportSongs, setIsLoadingPersonalImportSongs] = useState(false);
   const [setlistAssignmentTargetId, setSetlistAssignmentTargetId] = useState<string | null>(null);
@@ -2009,6 +2014,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const activeLibraryRoleRef = useRef(activeLibraryRole);
   activeLibraryRoleRef.current = activeLibraryRole;
   const canEditTeamSongs = !usingStartupCache && (!isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole));
+  const personalCopyTeams = cloudLibraries.filter(library => library.kind === 'team' && TEAM_EDIT_ROLES.has(library.role));
+  const canCopyPersonalSongsToTeam = !usingStartupCache && !isTeamWorkspace && activeCloudLibrary?.kind === 'personal'
+    && Boolean(cloudRepositoryRef.current) && personalCopyTeams.length > 0;
   const isShowingArchivedSongs = showArchivedSongs && canEditTeamSongs;
   const userLibrarySongs = React.useMemo(() => songs.filter(item => !isLocalOnlySymbolTestSong(item)), [songs]);
   const hasSongs = userLibrarySongs.some(item => !item.archivedAt) || (isShowingArchivedSongs && userLibrarySongs.length > 0);
@@ -6390,16 +6398,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     window.requestAnimationFrame(() => resolve());
   });
 
-  const flushTeamSongDraftsBeforeMutation = async () => {
+  const flushTeamSongDraftsBeforeMutation = async (ensureCurrent?: () => void) => {
     const pendingPreviewSession = previewEditSessionRef.current;
     if (pendingPreviewSession?.dirty) {
       commitPreviewEditSession(pendingPreviewSession);
       await waitForWorkspaceStateCommit();
     }
 
+    ensureCurrent?.();
     const nextSongs = songsRef.current;
     const nextSetlists = setlistsRef.current;
     await persistWorkspace(nextSongs, nextSetlists);
+    ensureCurrent?.();
     return { songs: nextSongs, setlists: nextSetlists };
   };
 
@@ -6456,54 +6466,87 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncStatus, teamLibraryReloadIsUnsafe, teamLibraryUpdatePending, isPreviewEditingActive, isEditing, isLibraryEditing, isPerformanceMode]);
 
-  const handleOpenTeamSongImport = async () => {
+  const requireTeamSongImportContext = (context = teamSongImportContextRef.current) => {
+    if (!navigator.onLine) throw new Error(language === 'zh' ? '連線後才能複製到團隊。' : 'Reconnect before copying to a team.');
+    const target = teamImportLibrariesRef.current.find(library => library.id === context?.targetLibraryId);
+    if (!context || teamSongImportContextRef.current !== context || libraryTransitionOwnerRef.current
+      || activeLibraryIdRef.current !== context.sourceLibraryId || !target || target.kind !== 'team' || !TEAM_EDIT_ROLES.has(target.role)) {
+      throw new Error(language === 'zh' ? '工作區或權限已變更，請重新選擇歌曲與團隊。' : 'The workspace or permissions changed. Please choose the songs and team again.');
+    }
+    return { context, target };
+  };
+
+  const handleOpenTeamSongImport = async (initialIds: string[] = []) => {
+    if (!navigator.onLine) { toast.info(language === 'zh' ? '連線後才能複製到團隊。' : 'Reconnect before copying to a team.'); return; }
     const repository = cloudRepositoryRef.current;
-    if (!repository || !isTeamWorkspace || !canEditTeamSongs) {
-      toast.error(language === 'zh' ? '你沒有匯入到這個團隊曲庫的權限。' : 'You do not have permission to import into this team song library.');
+    const target = isTeamWorkspace ? activeCloudLibrary : personalCopyTeams[0];
+    if (!repository || !activeLibraryId || !target || target.kind !== 'team' || !TEAM_EDIT_ROLES.has(target.role) || usingStartupCache) {
+      toast.error(language === 'zh' ? '需要團隊歌曲編輯權限才能複製歌曲。' : 'Team song editing permission is required to copy songs.');
       return;
     }
-
+    const context = { sourceLibraryId: activeLibraryId, targetLibraryId: target.id, copyOnly: !isTeamWorkspace, initialIds };
+    teamSongImportContextRef.current = context;
+    setTeamSongImportContext(context);
+    setIsTeamSongImportOpen(true);
+    setPersonalImportSongs([]);
+    setIsLoadingPersonalImportSongs(true);
     try {
-      await flushTeamSongDraftsBeforeMutation();
-      setIsTeamSongImportOpen(true);
-      setIsLoadingPersonalImportSongs(true);
-      const personalWorkspace = await repository.loadPersonalWorkspace();
-      const importableSongs = personalWorkspace.songs.filter((item) => !isLocalOnlySymbolTestSong(item));
-      setPersonalImportSongs(importableSongs);
-      if (importableSongs.filter((item) => !item.archivedAt).length === 0) {
-        toast.info(language === 'zh' ? '個人區目前沒有可匯入的歌曲。' : 'Your personal workspace has no songs to import.');
-      }
+      requireTeamSongImportContext(context);
+      const currentWorkspace = await flushTeamSongDraftsBeforeMutation(() => {
+        requireTeamSongImportContext(context);
+        if (cloudRepositoryRef.current !== repository) throw new Error(copy.authUnavailable);
+      });
+      requireTeamSongImportContext(context);
+      if (context.copyOnly && authenticatedUser && loadPendingSync({ userId: authenticatedUser.id, libraryId: context.sourceLibraryId })) throw new Error(language === 'zh' ? '請先同步個人歌曲，再複製到團隊。' : 'Sync your personal songs before copying to a team.');
+      const personalWorkspace = context.copyOnly ? currentWorkspace : await repository.loadPersonalWorkspace();
+      requireTeamSongImportContext(context);
+      if (cloudRepositoryRef.current !== repository) return;
+      setPersonalImportSongs(personalWorkspace.songs.filter(item => !isLocalOnlySymbolTestSong(item)));
     } catch (error) {
+      if (teamSongImportContextRef.current !== context) return;
+      teamSongImportContextRef.current = null;
       setIsTeamSongImportOpen(false);
       toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
     } finally {
-      setIsLoadingPersonalImportSongs(false);
+      if (teamSongImportContextRef.current === context) setIsLoadingPersonalImportSongs(false);
     }
   };
 
   const handleInspectTeamSongImport = async (sourceSongIds: string[]) => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || !activeLibraryId || !isTeamWorkspace || !canEditTeamSongs) {
-      throw new Error(language === 'zh' ? '你沒有匯入到這個團隊曲庫的權限。' : 'You do not have permission to import into this team song library.');
-    }
-    return repository.inspectTeamSongImport(activeLibraryId, sourceSongIds);
+    const { context } = requireTeamSongImportContext();
+    if (!repository) throw new Error(copy.authUnavailable);
+    const result = await repository.inspectTeamSongImport(context.targetLibraryId, sourceSongIds);
+    requireTeamSongImportContext(context);
+    if (cloudRepositoryRef.current !== repository) throw new Error(copy.authUnavailable);
+    return result;
   };
 
   const handleRunTeamSongImport = async (items: TeamSongImportRequestItem[]): Promise<TeamSongImportResult> => {
     const repository = cloudRepositoryRef.current;
-    if (!repository || !activeLibraryId || !isTeamWorkspace || !canEditTeamSongs) {
-      throw new Error(language === 'zh' ? '你沒有匯入到這個團隊曲庫的權限。' : 'You do not have permission to import into this team song library.');
-    }
+    const { context, target } = requireTeamSongImportContext();
+    if (!repository) throw new Error(copy.authUnavailable);
+    if (context.copyOnly && items.some(item => item.resolution === 'overwrite')) throw new Error(language === 'zh' ? '複製到團隊不會覆蓋原有歌曲，請重新檢查。' : 'Copying to a team does not overwrite existing songs. Review again.');
+    const release = beginCloudMutation();
     try {
       setIsImportingPersonalSongs(true);
-      await flushTeamSongDraftsBeforeMutation();
-      const result = await repository.importPersonalSongsToTeam(activeLibraryId, items);
-      await refreshActiveTeamSongs(true);
-      toast.success(language === 'zh'
-        ? `已匯入 ${result.createdCount + result.duplicateCount} 首，覆蓋 ${result.overwrittenCount} 首。歌名保持不變。`
-        : `Imported ${result.createdCount + result.duplicateCount}; overwritten ${result.overwrittenCount}. Titles were preserved.`);
+      await flushTeamSongDraftsBeforeMutation(() => {
+        requireTeamSongImportContext(context);
+        if (cloudRepositoryRef.current !== repository) throw new Error(copy.authUnavailable);
+      });
+      requireTeamSongImportContext(context);
+      if (cloudRepositoryRef.current !== repository) throw new Error(copy.authUnavailable);
+      if (context.copyOnly && authenticatedUser && loadPendingSync({ userId: authenticatedUser.id, libraryId: context.sourceLibraryId })) throw new Error(language === 'zh' ? '請先同步個人歌曲，再複製到團隊。' : 'Sync your personal songs before copying to a team.');
+      const result = await repository.importPersonalSongsToTeam(context.targetLibraryId, items);
+      if (cloudRepositoryRef.current === repository && teamSongImportContextRef.current === context && activeLibraryIdRef.current === context.sourceLibraryId) {
+        if (!context.copyOnly) await refreshActiveTeamSongs(true);
+        toast.success(context.copyOnly
+          ? (language === 'zh' ? `已複製 ${result.createdCount + result.duplicateCount} 首到「${target.name}」` : `Copied ${result.createdCount + result.duplicateCount} songs to “${target.name}”`)
+          : (language === 'zh' ? `已匯入 ${result.createdCount + result.duplicateCount} 首，覆蓋 ${result.overwrittenCount} 首。歌名保持不變。` : `Imported ${result.createdCount + result.duplicateCount}; overwritten ${result.overwrittenCount}. Titles were preserved.`));
+      }
       return result;
     } finally {
+      release();
       setIsImportingPersonalSongs(false);
     }
   };
@@ -12780,6 +12823,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                           { label: isLibraryEditing ? (language === 'zh' ? '完成管理' : 'Finish managing') : (language === 'zh' ? '管理歌曲' : 'Manage songs'), icon: <Edit3 size={16} />, run: handleToggleLibraryEditing },
                           ...(archivedSongCount > 0 ? [{ label: showArchivedSongs ? (language === 'zh' ? '隱藏已封存歌曲' : 'Hide archived songs') : (language === 'zh' ? `包含封存歌曲 (${archivedSongCount})` : `Include archived songs (${archivedSongCount})`), icon: <Archive size={16} />, run: () => setShowArchivedSongs(current => !current) }] : []),
                           { label: copy.exportJson, icon: <Download size={16} />, run: handleExportSongLibraryJson },
+                          ...(canCopyPersonalSongsToTeam ? [{ label: language === 'zh' ? '複製到團隊…' : 'Copy to team…', icon: <Upload size={16} />, run: () => void handleOpenTeamSongImport(), disabled: isImportingPersonalSongs }] : []),
                           ...(!isTeamWorkspace ? [{ label: copy.importJson, icon: <Upload size={16} />, run: handleImportSongLibraryClick }] : []),
                           ...(isTeamWorkspace && personalCloudLibrary && personalCloudLibrary.id !== activeLibraryId ? [{ label: language === 'zh' ? '從個人區批量匯入' : 'Import personal songs', icon: <Copy size={16} />, run: () => void handleOpenTeamSongImport(), disabled: isImportingPersonalSongs }] : [])
                         ]} />
@@ -12826,6 +12870,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         </div>
                         {hiddenSelectedCount > 0 && <p className="song-library-bulk-note">{language === 'zh' ? `另有 ${hiddenSelectedCount} 首在其他搜尋結果中` : `${hiddenSelectedCount} selected songs are outside these results`}</p>}
                         <div className="song-library-bulk-actions">
+                          {canCopyPersonalSongsToTeam && <button type="button" className="song-library-button ui-press" disabled={isImportingPersonalSongs || !songs.some(item => selectedLibrarySongIds.includes(item.id) && !item.archivedAt)} onClick={() => void handleOpenTeamSongImport(selectedLibrarySongIds)}><Upload size={15}/><span>{language === 'zh' ? '複製到團隊…' : 'Copy to team…'}</span></button>}
                           <button
                             type="button"
                             onClick={() => void handleShareSelectedSongs()}
@@ -12969,6 +13014,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                             <div className="song-library-row-actions">
                               <ManagementActions label={language === 'zh' ? `歌曲操作：${title}` : `Song actions: ${title}`} actions={[
                                 ...(hasLinkedTeamUpdate ? [{ label: language === 'zh' ? '同步團隊最新版' : 'Sync latest team version', icon: <Download size={16} />, run: () => void handleSyncPersonalSongFromTeam(item.id) }] : []),
+                                ...(canCopyPersonalSongsToTeam && !item.archivedAt ? [{ label: language === 'zh' ? '複製到團隊…' : 'Copy to team…', icon: <Upload size={16} />, run: () => void handleOpenTeamSongImport([item.id]), disabled: isImportingPersonalSongs }] : []),
                                 ...(isTeamWorkspace ? [{ label: language === 'zh' ? '轉存到個人區' : 'Copy to personal', icon: <Download size={16} />, run: () => void handleCopyTeamSongToPersonal(item.id) }] : []),
                                 ...(item.archivedAt ? [
                                   { label: language === 'zh' ? '取消封存' : 'Restore', icon: <ArchiveRestore size={16} />, run: () => void updateTeamSongArchiveState([item.id], false).catch((error) => { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }) },
@@ -15671,7 +15717,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         language={language}
         personalSongs={personalImportSongs}
         loadingSongs={isLoadingPersonalImportSongs}
-        onClose={() => setIsTeamSongImportOpen(false)}
+        initialSelectedIds={teamSongImportContext?.initialIds}
+        copyOnly={teamSongImportContext?.copyOnly}
+        destinationTeams={teamSongImportContext?.copyOnly ? personalCopyTeams : undefined}
+        destinationId={teamSongImportContext?.targetLibraryId}
+        destinationName={cloudLibraries.find(library => library.id === teamSongImportContext?.targetLibraryId)?.name}
+        onDestinationChange={id => {
+          const context = teamSongImportContextRef.current;
+          if (!context || !personalCopyTeams.some(team => team.id === id) || isImportingPersonalSongs || isLoadingPersonalImportSongs) return;
+          const next = { ...context, targetLibraryId: id };
+          teamSongImportContextRef.current = next;
+          setTeamSongImportContext(next);
+        }}
+        onClose={() => { teamSongImportContextRef.current = null; setIsTeamSongImportOpen(false); }}
         inspectSongs={handleInspectTeamSongImport}
         importSongs={handleRunTeamSongImport}
       />

@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { StoredSong, TeamSongImportInspection } from '../types';
 import TeamSongImportDialog from './TeamSongImportDialog';
+
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
 
 type ImportDetailStoredSong = StoredSong & { version?: string | number };
 
@@ -226,4 +231,56 @@ describe('TeamSongImportDialog', () => {
       ]);
     });
   });
+});
+
+describe('從個人區複製到團隊', () => {
+  const teams = [{ id: 'team-a', name: '團隊甲' }, { id: 'team-b', name: '團隊乙' }];
+  const inspection: TeamSongImportInspection = { songs: [{ sourceSongId: 'source-grace', title: '恩典之路', existingSongId: 'team-existing', existingTitle: '團隊原譜', possibleMatches: [] }] };
+  const base = () => ({ open: true, language: 'zh' as const, personalSongs, loadingSongs: false, copyOnly: true, destinationTeams: teams, destinationId: 'team-a', initialSelectedIds: ['source-grace', 'source-archived'], onDestinationChange: vi.fn(), onClose: vi.fn(), inspectSongs: vi.fn(async () => inspection), importSongs: vi.fn(async () => ({ createdCount: 0, overwrittenCount: 0, duplicateCount: 1, songs: [] })) });
+  it('preselects the active songs and creates a copy rather than overwriting an existing team song', async () => {
+    const props = base(); render(<TeamSongImportDialog {...props} />);
+    expect(screen.getByText('已選 1 首')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    const confirm = await screen.findByRole('button', { name: '複製 1 首' });
+    expect(props.inspectSongs).toHaveBeenCalledWith(['source-grace']);
+    expect(screen.queryByRole('button', { name: '覆蓋團隊版' })).toBeNull();
+    expect(screen.getByRole('combobox', { name: '目標團隊' })).toBeDisabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(props.importSongs).toHaveBeenCalledWith([{ sourceSongId: 'source-grace', resolution: 'duplicate' }]));
+    expect(props.onClose).toHaveBeenCalledOnce();
+  });
+  it('discards a late inspection for the previous destination and keeps the source selection', async () => {
+    let finish!: (value: TeamSongImportInspection) => void;
+    const props = base(); props.inspectSongs.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const view = render(<TeamSongImportDialog {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    expect(screen.getByRole('button', { name: /^恩典之路/ })).toBeDisabled();
+    view.rerender(<TeamSongImportDialog {...props} destinationId="team-b" />);
+    finish(inspection);
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: '複製 1 首' })).toBeNull();
+    expect(screen.getByText('已選 1 首')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    expect(await screen.findByRole('button', { name: '複製 1 首' })).toBeEnabled();
+  });
+  it('retains the review and lets the user retry after a failed copy', async () => {
+    const props = base(); props.importSongs.mockRejectedValueOnce(new Error('連線中斷'));
+    render(<TeamSongImportDialog {...props} />);fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    fireEvent.click(await screen.findByRole('button', { name: '複製 1 首' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('連線中斷');
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '複製 1 首' })).toBeEnabled();
+  });
+  it('blocks batches above the server limit before sending an inspection', () => {
+    const props = base();const songs = Array.from({ length: 501 }, (_, i) => makeSong({ id: `batch-${i}`, title: `歌曲${i}` }));
+    render(<TeamSongImportDialog {...props} personalSongs={songs} initialSelectedIds={songs.map(song => song.id)} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('每次最多 500 首');
+    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();expect(props.inspectSongs).not.toHaveBeenCalled();
+  });
+});
+
+it('rejects an inspection that does not match the selected source songs', async () => {
+ const inspectSongs = vi.fn(async () => ({songs:[]}));const importSongs=vi.fn();
+ render(<TeamSongImportDialog open language="zh" personalSongs={personalSongs} loadingSongs={false} initialSelectedIds={['source-grace']} inspectSongs={inspectSongs} importSongs={importSongs} onClose={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:'下一步'}));expect(await screen.findByRole('alert')).toHaveTextContent('部分歌曲已變更或無法讀取');expect(importSongs).not.toHaveBeenCalled();
 });
