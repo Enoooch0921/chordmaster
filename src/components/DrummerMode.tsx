@@ -8,6 +8,7 @@ import { useMetronome } from '../hooks/useMetronome';
 import { usePerformanceFullscreen } from '../hooks/usePerformanceFullscreen';
 import { useUiMotion } from '../hooks/useUiMotion';
 import { useDrummerViewport } from '../hooks/useDrummerViewport';
+import { useDrummerChartVisibility } from '../hooks/useDrummerChartVisibility';
 import { useDrummerMidi } from '../hooks/useDrummerMidi';
 import type { MidiConnector } from '../lib/midiInput';
 import type { KeyboardAction } from '../lib/drummerMidi';
@@ -219,6 +220,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   }, [midiOpen]);
   const [view, setView] = useState<'songs' | 'score'>('songs');
   const [stage, setStage] = useState(false);
+  const chartVisible = useDrummerChartVisibility(view, stage);
   const stageActive = useRef(false);
   const stagePointerExit = useRef(false);
   const scoreControls = useRef<DrummerScoreControls>(null);
@@ -304,7 +306,9 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   }, [entries, activeId, busy]);
 
   useEffect(() => { try { localStorage.setItem(PREFERENCE_KEY, JSON.stringify(preferences)); } catch { /* Private storage. */ } }, [preferences]);
-  useEffect(() => { click.update(config); }, [click.update, config]);
+  // A configuration effect must not supersede an explicit song start while
+  // its replacement buffer is being prepared. Apply the latest edits afterward.
+  useEffect(() => { if (!click.starting) click.update(config); }, [click.update, click.starting, config]);
   useEffect(() => { setDraft(bpm?.toString() ?? ''); setInvalidTempo(false); }, [bpm, activeId]);
   useEffect(() => {
     taps.current.reset(); setTapCount(0);
@@ -415,20 +419,22 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   const select = (id: string) => {
     const selected = entries.find(entry => entry.id === id);
     if (!selected) return;
-    click.stop();
     activeIdRef.current = id;
     setActiveId(id);
     setPlaybackEntry(selected);
     setSubdivisionOpen(false);
     const selectedBpm = tempos[id] ?? selected.song.tempo;
+    setDraft(isPlayableTempo(selectedBpm) ? String(selectedBpm) : '');
+    setInvalidTempo(false);
     const selectedMeterText = meters[id] ?? (selected.song.timeSignatureUnspecified ? '' : selected.song.timeSignature);
     const selectedMeter = parseClickMeter(selectedMeterText);
     busyRef.current = isPlayableTempo(selectedBpm) && Boolean(selectedMeter);
+    // Hand off the native loop without suspending and reopening the audio route.
     if (isPlayableTempo(selectedBpm) && selectedMeter) {
       const selectedGrouped = Boolean(selectedMeter.compound && groupings[id]);
       const selectedBeats = selectedMeter.count / (selectedGrouped ? 3 : 1);
       void click.start({ ...config, subdivision: songSubdivisions[subdivisionKey(id, selectedMeterText, selectedGrouped)] ?? 1, bpm: selectedBpm, beats: selectedBeats, beatLevels: patterns[`${id}:${selectedBeats}`] ?? defaultBeatLevels(selectedBeats) });
-    }
+    } else click.stop();
   };
   const activateSong = (id: string) => {
     if (id === activeIdRef.current && busyRef.current) {
@@ -615,7 +621,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     </div>
     </div>
       <section className="drummer-score" inert={midiOpen || soundOpen} aria-hidden={midiOpen || soundOpen || undefined} aria-label={t('鼓手樂譜', 'Drummer chart')}>
-        <DrummerScore key={active.id} song={active.song} language={language} live={stage} controlsRef={scoreControls}/>
+        {chartVisible && <DrummerScore key={active.id} song={active.song} language={language} live={stage} controlsRef={scoreControls}/>}
       </section>
     {rowPicker && <div ref={rowMenu} className="drummer-subdivisions drummer-row-subdivisions" role="menu" aria-label={t('選擇歌曲節拍細分', 'Choose song subdivision')} style={{left:rowPicker.left,top:rowPicker.top}} onKeyDown={event => {
       const options = Array.from(rowMenu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);

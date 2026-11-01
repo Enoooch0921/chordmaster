@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-01',
+        title: 'Smoother song changes and phone controls',
+        bullets: [
+          'Hand off Click on the same native audio route when changing songs, starting the new song at beat one.',
+          'Skip hidden chart rendering in phone setlists, phone landscape and portrait Performance mode.',
+          'Keep song starts separate from pending settings updates and show the selected tempo immediately.',
+          'Separate the phone meter and beats, and keep the full tempo-reset button above playback controls.'
+        ]
+      },
+      {
+        version: '0.12.5',
+        date: '2026-11-01',
         title: 'Reliable drummer controls and clearer chart changes',
         bullets: [
           'Recover native Click output after app interruptions; preload sounds and balance their volume against Ableton Live Classic.',
@@ -941,6 +952,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-01',
+        title: '切歌更順暢與手機控制間距修正',
+        bullets: [
+          '切歌直接交接 Click，不先關閉再重啟音訊，新歌曲由第一拍開始。',
+          '手機歌單、手機橫向與直向演出模式不再重算隱藏樂譜，減少切歌卡頓。',
+          '新歌曲啟動期間保留該次啟動，完成後再套用最新設定，選曲與速度立即顯示。',
+          '手機拍號與拍點拉開間距，還原速度按鈕保留完整點按空間，不再壓到播放區。'
+        ]
+      },
+      {
+        version: '0.12.5',
         date: '2026-11-01',
         title: '鼓手播放、同步與清楚的小節差異',
         bullets: [

@@ -292,7 +292,7 @@
   .drummer-header > button:first-child > span { display: none; }
   .drummer-view-switch button { padding: 8px; }
   .drummer-current { display: flex; flex-direction: column; }
-  .drummer-tempo-meta { order: 1; }
+  .drummer-tempo-meta { order: 1; margin-bottom: 12px; }
   .drummer-beats { order: 2; }
   .drummer-tempo { order: 3; width: 100%; }
   .drummer-transport { order: 4; }
@@ -791,3 +791,16 @@
 .drummer-mode[data-tempo-editing="true"] .drummer-score { display: none; }
 .drummer-mode[data-native-keyboard="true"] .drummer-midi-panel { max-height: 100%; }
 @media (prefers-reduced-motion: reduce) { .drummer-sound-loading > span { animation: none; } }
+
+/* Portrait phones reserve the full reset hit area above transport controls. */
+@media (max-width: 599px) and (orientation: portrait) {
+  .drummer-mode .drummer-tempo label {
+    display: grid; grid-template-columns: minmax(0, 1fr) 28px 44px minmax(0, 1fr);
+    grid-template-rows: auto 44px; align-items: center;
+  }
+  .drummer-mode .drummer-tempo input { grid-column: 1 / -1; grid-row: 1; }
+  .drummer-mode .drummer-tempo label > span:not(.sr-only) { grid-column: 2; grid-row: 2; }
+  .drummer-mode .drummer-reset-tempo {
+    position: static; grid-column: 3; grid-row: 2; width: 44px; height: 44px;
+  }
+}

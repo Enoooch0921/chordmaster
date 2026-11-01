@@ -230,3 +230,23 @@ it('keeps visual beat phase on the actual rounded PCM loop over ten thousand mea
   expect(sources).toHaveLength(1); expect(sources[0].stop).not.toHaveBeenCalled();
   engine.dispose();
 });
+
+it('hands off a playing song at beat one without suspending audio or reopening the media helper', async () => {
+  const { engine, context, media, sources, load } = setup();
+  await engine.start(config);
+  context.currentTime = .8;
+  await engine.start({ ...config, bpm: 148, beats: 3 });
+  expect(context.suspend).not.toHaveBeenCalled();
+  expect(context.resume).toHaveBeenCalledOnce();
+  expect(media.pause).not.toHaveBeenCalled();
+  expect(media.play).toHaveBeenCalledOnce();
+  expect(load).toHaveBeenCalledOnce();
+  expect(sources).toHaveLength(2);
+  const handoff = sources[1].start.mock.calls[0][0];
+  expect(handoff).toBeGreaterThanOrEqual(context.currentTime);
+  expect(handoff - context.currentTime).toBeLessThan(.05);
+  expect(sources[1].start).toHaveBeenCalledWith(handoff, 0);
+  expect(sources[0].stop).toHaveBeenCalledWith(handoff);
+  expect(engine.playing).toBe(true);
+  engine.dispose();
+});
