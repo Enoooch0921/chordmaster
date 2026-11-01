@@ -1,29 +1,6 @@
-import regularClickUrl from '../assets/audio/ableton-classic/Metronome.wav?url';
-import accentClickUrl from '../assets/audio/ableton-classic/MetronomeUp.wav?url';
-import multitracksRegularUrl from '../assets/audio/multitracks-click/regular.wav?url';
-import multitracksAccentUrl from '../assets/audio/multitracks-click/accent.wav?url';
-import driveRegularUrl from '../assets/audio/drive-click/regular.wav?url';
-import driveAccentUrl from '../assets/audio/drive-click/accent.wav?url';
-
-export type ClickSamples = { regular: AudioBuffer; accent: AudioBuffer };
-export type ClickSound = 'multitracks' | 'drive' | 'ableton-classic';
-export const CLICK_SOUNDS: Record<ClickSound, string> = { multitracks: 'MultiTracks Click', drive: 'Drive Click', 'ableton-classic': 'Ableton Live Classic' };
-const SAMPLE_URLS: Record<ClickSound, [string, string]> = {
-  multitracks: [multitracksRegularUrl, multitracksAccentUrl],
-  drive: [driveRegularUrl, driveAccentUrl],
-  'ableton-classic': [regularClickUrl, accentClickUrl],
-};
-
-export async function loadClickSamples(context: AudioContext, sound: ClickSound): Promise<ClickSamples> {
-  const decode = async (url: string) => {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('click-samples-unavailable');
-    return context.decodeAudioData(await response.arrayBuffer());
-  };
-  const urls = SAMPLE_URLS[sound];
-  const [regular, accent] = await Promise.all(urls.map(decode));
-  return { regular, accent };
-}
+import { loadClickSamples, type ClickSamples, type ClickSound } from './clickSamples';
+export { CLICK_SOUNDS, loadClickSamples } from './clickSamples';
+export type { ClickSamples, ClickSound } from './clickSamples';
 
 /** Foreground metronome. Only the audio clock determines when a click sounds. */
 export interface MetronomeConfig {

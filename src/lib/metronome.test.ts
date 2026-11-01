@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Metronome, loadClickSamples, parseClickMeter, type ClickSamples, type MetronomeConfig } from './metronome';
+import { Metronome, parseClickMeter, type ClickSamples, type MetronomeConfig } from './metronome';
 
 const config: MetronomeConfig = { sound: 'multitracks', bpm: 120, beats: 4, subdivision: 1, volume: .7, accent: 1, regular: .7, subdivisions: .4, muted: false };
 function audio() {
@@ -314,23 +314,6 @@ describe('audio clock scheduling', () => {
     expect(create).not.toHaveBeenCalled();
     engine.dispose();
   });
-});
-it.each(['multitracks', 'drive', 'ableton-classic'] as const)('loads the %s WAV pair and rejects an unavailable asset before decoding it', async sound => {
-  const bytes = new ArrayBuffer(8);
-  const fetch = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => bytes });
-  vi.stubGlobal('fetch', fetch);
-  const regular = { duration: .11542 }, accent = { duration: .11542 };
-  const decodeAudioData = vi.fn().mockResolvedValueOnce(regular).mockResolvedValueOnce(accent);
-  const samples = await loadClickSamples({ decodeAudioData } as unknown as AudioContext, sound);
-  expect(samples).toEqual({ regular, accent });
-  expect(fetch.mock.calls.map(call => call[0])).toEqual(expect.arrayContaining([
-    expect.stringContaining(sound === 'ableton-classic' ? 'ableton-classic/Metronome.wav' : `${sound === 'drive' ? 'drive-click' : 'multitracks-click'}/regular.wav`),
-    expect.stringContaining(sound === 'ableton-classic' ? 'ableton-classic/MetronomeUp.wav' : `${sound === 'drive' ? 'drive-click' : 'multitracks-click'}/accent.wav`),
-  ]));
-  expect(decodeAudioData).toHaveBeenCalledTimes(2);
-  fetch.mockResolvedValue({ ok: false });
-  await expect(loadClickSamples({ decodeAudioData } as unknown as AudioContext, sound)).rejects.toThrow('click-samples-unavailable');
-  expect(decodeAudioData).toHaveBeenCalledTimes(2);
 });
 it('parses common and compound meters without guessing unconfirmed values', () => {
   expect(parseClickMeter('6/8')).toEqual({ count: 6, denominator: 8, compound: true });

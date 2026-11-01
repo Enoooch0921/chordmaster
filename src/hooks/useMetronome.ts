@@ -7,6 +7,7 @@ export function useMetronome() {
   const mounted = useRef(true);
   const attempt = useRef(0);
   const wantsPlayback = useRef(false), resumeOnVisible = useRef(false);
+  const requestRecovery = useRef<(() => void) | null>(null);
   const lastConfig = useRef<MetronomeConfig | null>(null);
   const [playing, setPlaying] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -19,10 +20,12 @@ export function useMetronome() {
   }, []);
   const stop = useCallback(() => {
     wantsPlayback.current = false; resumeOnVisible.current = false;
-    pause();
+    pause(); setNotice(null);
   }, [pause]);
   const interrupted = useCallback(() => {
     pause(); setNotice('interrupted');
+    resumeOnVisible.current = wantsPlayback.current && Boolean(lastConfig.current);
+    requestRecovery.current?.();
   }, [pause]);
   const start = useCallback(async (config: MetronomeConfig, recovery?: { quiet: true; fallbackSound: MetronomeConfig['sound'] }) => {
     const currentAttempt = ++attempt.current;
@@ -40,6 +43,7 @@ export function useMetronome() {
       }
       if (mounted.current && currentAttempt === attempt.current) {
         if (!started) lastConfig.current = restored && recovery ? { ...config, sound: recovery.fallbackSound } : previousConfig;
+        if (started || restored) resumeOnVisible.current = false;
         setPlaying(current.playing);
         if (!current.playing) setBeat(-1);
         if (!started && !recovery?.quiet) setNotice('failed');
@@ -61,32 +65,63 @@ export function useMetronome() {
 
   useEffect(() => {
     mounted.current = true;
+    let repairing = false, retries = 0, retry: number | undefined;
     const hide = () => {
       resumeOnVisible.current = wantsPlayback.current && Boolean(lastConfig.current);
-      // The media element keeps playing without page timers in the background.
+      retries = 0;
+      if (retry !== undefined) window.clearTimeout(retry);
+      // Leave the native audio loop running while the page is hidden.
     };
     const show = () => {
-      if (document.hidden || !resumeOnVisible.current || !wantsPlayback.current || !lastConfig.current) return;
-      resumeOnVisible.current = false;
-      if (!engine.current?.playing) void start(lastConfig.current);
+      if (!mounted.current || document.hidden || repairing || !resumeOnVisible.current || !wantsPlayback.current || !lastConfig.current) return;
+      repairing = true;
+      if (retry !== undefined) window.clearTimeout(retry);
+      const currentAttempt = ++attempt.current;
+      const current = engine.current ??= new Metronome(interrupted);
+      setStarting(true); setNotice(null);
+      void current.recover(lastConfig.current).catch(() => false).then(recovered => {
+        if (!mounted.current || currentAttempt !== attempt.current || !wantsPlayback.current) return;
+        if (document.hidden) { resumeOnVisible.current = true; setPlaying(current.playing); return; }
+        const ready = recovered && current.playing;
+        resumeOnVisible.current = !ready;
+        setPlaying(ready); if (!ready) setBeat(-1);
+        if (!ready && retries < 2) retry = window.setTimeout(show, [300, 1000][retries++]);
+        else if (!ready) setNotice('interrupted');
+      }).finally(() => {
+        repairing = false;
+        if (mounted.current && currentAttempt === attempt.current) setStarting(false);
+      });
     };
+    const gesture = () => { if (resumeOnVisible.current) { retries = 0; show(); } };
+    requestRecovery.current = show;
     const onVisibility = () => { if (document.hidden) hide(); else show(); };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', hide);
     window.addEventListener('pageshow', show);
+    window.addEventListener('focus', show);
+    document.addEventListener('pointerdown', gesture, true);
+    document.addEventListener('keydown', gesture, true);
+    const audioSession = (navigator as Navigator & { audioSession?: EventTarget }).audioSession;
+    audioSession?.addEventListener?.('statechange', show);
     return () => {
       mounted.current = false;
+      requestRecovery.current = null;
+      if (retry !== undefined) window.clearTimeout(retry);
       attempt.current++;
       engine.current?.dispose(); engine.current = null;
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', hide);
       window.removeEventListener('pageshow', show);
+      window.removeEventListener('focus', show);
+      document.removeEventListener('pointerdown', gesture, true);
+      document.removeEventListener('keydown', gesture, true);
+      audioSession?.removeEventListener?.('statechange', show);
     };
-  }, [pause, start]);
+  }, [interrupted]);
 
   useEffect(() => {
     const session = navigator.mediaSession;
-    if (!session) return;
+    if (!session || (!playing && !starting)) return;
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
       ['play', () => { if (lastConfig.current) void start(lastConfig.current); }],
       ['pause', stop], ['stop', stop],
@@ -96,7 +131,7 @@ export function useMetronome() {
       try { session.setActionHandler(action, handler); registered.push(action); } catch { /* Optional platform action. */ }
     }
     return () => { for (const action of registered) { try { session.setActionHandler(action, null); } catch { /* Platform changed. */ } } };
-  }, [start, stop]);
+  }, [playing, starting, start, stop]);
 
   useEffect(() => {
     if (!playing) return;

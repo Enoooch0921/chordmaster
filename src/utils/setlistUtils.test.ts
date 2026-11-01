@@ -136,8 +136,8 @@ describe('setlist capo resolution', () => {
   it('uses shared capo values only when shared capo resolution is enabled', () => {
     const setlistSong = { ...makeSetlistSong('capo-item', 0), overrideKey: 'Eb' as const, capo: 5 };
 
-    expect(resolveSetlistSongCapo(setlistSong, sourceSong, false, { includeSharedCapo: true })).toBe(5);
-    expect(resolveSetlistSongCapo(setlistSong, sourceSong, false, { includeSharedCapo: false })).toBe(0);
+    expect(resolveSetlistSongCapo(setlistSong, sourceSong, { includeSharedCapo: true })).toBe(5);
+    expect(resolveSetlistSongCapo(setlistSong, sourceSong, { includeSharedCapo: false })).toBe(0);
   });
 
   it('lets personal capo override shared and source capo values', () => {
@@ -148,18 +148,17 @@ describe('setlist capo resolution', () => {
       personalCapoOverride: 2
     };
 
-    expect(resolveSetlistSongCapo(setlistSong, sourceSong, false, { includeSharedCapo: false })).toBe(2);
+    expect(resolveSetlistSongCapo(setlistSong, sourceSong, { includeSharedCapo: false })).toBe(2);
   });
 
-  it('keeps guitarist mode as a personal overlay when no personal capo is set', () => {
+  it('does not invent a capo from the song key when no personal capo is set', () => {
     const setlistSong = { ...makeSetlistSong('capo-item', 0), overrideKey: 'Eb' as const, capo: 5 };
 
-    expect(resolveSetlistSongCapo(setlistSong, sourceSong, true, { includeSharedCapo: false })).toBe(1);
+    expect(resolveSetlistSongCapo(setlistSong, sourceSong, { includeSharedCapo: false })).toBe(0);
     expect(applySetlistSongOverrides(
       sourceSong,
       setlist,
       setlistSong,
-      false,
       { includeSharedCapo: false }
     ).capo).toBe(0);
   });

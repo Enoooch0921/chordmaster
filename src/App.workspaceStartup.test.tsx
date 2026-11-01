@@ -211,7 +211,7 @@ it('keeps a song selected during cached browsing when background loading complet
   expect(screen.getByRole('button', { name: '開啟歌曲：第二首' })).toHaveAttribute('aria-current', 'true');
 });
 
-it('defers a newly loaded score until cached Performance Mode ends', async () => {
+it('applies a newly loaded score without exiting cached Performance Mode', async () => {
   const song = remoteWorkspace.songs[0];
   remoteWorkspace.setlists = [{ id: 'meeting', name: '聚會一', displayMode: 'chord-movable-key', createdAt: 1, updatedAt: 1,
     songs: [{ id: 'entry', setlistId: 'meeting', songId: song.id, songData: song, order: 0, sectionOrder: ['verse'] }] }];
@@ -222,11 +222,13 @@ it('defers a newly loaded score until cached Performance Mode ends', async () =>
   render(view());
   fireEvent.click((await screen.findAllByRole('button', { name: /^演出模式$/ }))[0]);
   await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).not.toBeNull());
-  await act(async () => pending.resolve(remoteWorkspace));
-  expect(document.querySelector('[data-performance-overlay]')).not.toBeNull();
-  expect(document.querySelector('[data-connection-mode="online"]')).toHaveAttribute('title', expect.stringContaining('退出演出模式後更新'));
-  fireEvent.click(screen.getByRole('button', { name: '退出' }));
-  await waitFor(() => expect(document.querySelector('[data-connection-mode="offline"]')).toBeNull());
+  const refreshed = structuredClone(remoteWorkspace);
+  refreshed.setlists[0].songs[0].overrideKey = 'D';
+  await act(async () => pending.resolve(refreshed));
+  await waitFor(() => expect(document.querySelector('[data-connection-mode="online"]')).toHaveAttribute('title', 'Online：已連線。'));
+  const overlay = document.querySelector<HTMLElement>('[data-performance-overlay]')!;
+  expect(overlay).not.toBeNull();
+  expect(overlay).toHaveTextContent('D');
 });
 
 it('switches the compact connection hint in place when the network disconnects and reconnects', async () => {

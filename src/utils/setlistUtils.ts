@@ -1,5 +1,4 @@
 import { JoinedProject, JoinedSetlist, Key, Section, Setlist, SetlistSong, Song } from '../types';
-import { getSuggestedGuitarCapo } from './musicUtils';
 
 export const getSectionReferenceId = (section: Section, index: number) => section.id || `section-${index}`;
 
@@ -190,29 +189,20 @@ export const getEffectiveSetlistSongCapo = (
       : fallbackCapo
 );
 
-// Guitarist mode: a live, non-destructive overlay. Songs with an explicit capo
-// (base > 0) keep their value; only songs that resolve to capo 0/unset get an
-// auto-filled guitar-friendly capo. Returns the effective capo to display.
+/** Resolve only explicit personal/shared/source capo settings. */
 export const resolveSetlistSongCapo = (
   setlistSong: SetlistSong,
   sourceSong: Pick<Song, 'capo' | 'currentKey'>,
-  guitaristMode: boolean,
   options: SetlistCapoResolutionOptions = {}
 ): number => {
   const fallbackCapo = options.includeSharedCapo === false ? 0 : sourceSong.capo ?? 0;
-  const base = getEffectiveSetlistSongCapo(setlistSong, fallbackCapo, options) ?? 0;
-  if (!guitaristMode || base > 0) {
-    return base;
-  }
-  const effectiveKey = (setlistSong.overrideKey ?? sourceSong.currentKey) as Key;
-  return getSuggestedGuitarCapo(effectiveKey);
+  return getEffectiveSetlistSongCapo(setlistSong, fallbackCapo, options) ?? 0;
 };
 
 export const applySetlistSongOverrides = (
   song: Song,
   setlist: Setlist,
   setlistSong: SetlistSong,
-  guitaristMode = false,
   capoOptions: SetlistCapoResolutionOptions = {}
 ): Song => {
   const sectionMap = new Map<string, Section>();
@@ -231,7 +221,7 @@ export const applySetlistSongOverrides = (
   return {
     ...JSON.parse(JSON.stringify(song)) as Song,
     currentKey: (setlistSong.overrideKey ?? song.currentKey) as Key,
-    capo: resolveSetlistSongCapo(setlistSong, song, guitaristMode, capoOptions),
+    capo: resolveSetlistSongCapo(setlistSong, song, capoOptions),
     showNashvilleNumbers: setlist.displayMode === 'nashville-number-system',
     showAbsoluteJianpu: setlist.displayMode === 'chord-fixed-key',
     sections: orderedSections

@@ -154,3 +154,54 @@ it('keeps current versions in named columns and makes the chosen source and affe
  expect(row.children[0]).toHaveTextContent('C');expect(row.children[1]).toHaveTextContent('G');
  expect(mocks.sync).not.toHaveBeenCalled();
 });
+
+it('states that lyrics text matches when only the translation language setting differs', async () => {
+ const value = await mocks.preview();
+ const lyricsDoc = {chinese:'相同的中文歌詞',english:'Same words'};
+ mocks.preview.mockResolvedValue({...value,source:{...value.source,lyricsDoc},overrideJson:{songData:{...edited,lyricsDoc:{...lyricsDoc,translationLanguage:'ko'}}}});
+ mount();
+ fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
+ expect(await screen.findByText('歌詞文字相同；語言或段落設定的差異會另行列出。')).toBeInTheDocument();
+ await screen.findByRole('row',{name:'歌詞 · 翻譯語言設定'});
+ expect(screen.queryByText('相同的中文歌詞')).toBeNull();
+ expect(screen.queryByText('Same words')).toBeNull();
+ expect(mocks.sync).not.toHaveBeenCalled();
+});
+
+it('disables an outdated update action when a fresh preview differs only in chord notation', async () => {
+ const value=await mocks.preview();
+ const source={...song,originalKey:'A',currentKey:'A',sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['5','','','']}]}]};
+ const entry={...source,sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['E']}]}]};
+ mocks.preview.mockResolvedValue({...value,source,overrideJson:{songData:entry},status:'source-newer'});
+ mount();fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
+ expect(await screen.findByRole('heading',{name:'譜面內容相同'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'無須更新'})).toBeDisabled();
+ expect(screen.queryByText(/這份歌單尚未修改/)).toBeNull();
+ expect(mocks.sync).not.toHaveBeenCalled();
+});
+
+it('explains pickup removal with presence and duration rather than a bare time signature', async () => {
+ const value=await mocks.preview();
+ mocks.preview.mockResolvedValue({...value,source:{...value.source,pickup:{id:'pickup',timeSignature:'1/4'}},overrideJson:{songData:song}});
+ mount();fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
+ const difference=await screen.findByRole('row',{name:'弱起拍'});
+ const cells=within(difference).getAllByRole('cell');
+ expect(cells[0]).toHaveTextContent('有弱起拍');expect(cells[0]).toHaveTextContent('長度：1 拍（四分音符）');
+ expect(cells[0]).toHaveTextContent('未填入旋律或節奏');
+ expect(cells[1]).toHaveTextContent('無弱起拍');expect(difference).not.toHaveTextContent('拍號：1/4');
+ expect(mocks.sync).not.toHaveBeenCalled();
+});
+
+it('shows aligned miniature measures for added continuation marks without initiating a sync', async () => {
+ const value=await mocks.preview();
+ const library={...song,sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['D','D/E']}]}]};
+ const entry={...song,sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['D','/','D/E','/']}]}]};
+ mocks.preview.mockResolvedValue({...value,source:library,overrideJson:{songData:entry}});
+ mount();fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
+ const difference=await screen.findByRole('row',{name:'Verse · 第 1 小節 · 延續拍標示'});
+ expect(within(difference).getAllByRole('img')).toHaveLength(2);
+ expect(within(difference).getByText('第 2、4 拍標示延續（/）')).toBeInTheDocument();
+ expect([...difference.querySelectorAll('[data-changed]')].map(element=>element.textContent)).toEqual(['/','/']);
+ expect(screen.getByRole('button',{name:'用歌單版本更新歌曲庫'})).toBeEnabled();
+ expect(mocks.sync).not.toHaveBeenCalled();
+});

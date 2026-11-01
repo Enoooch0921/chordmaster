@@ -45,20 +45,22 @@ it('allows a joined read-only setlist to use the metronome without edit permissi
   fireEvent.click((await screen.findAllByRole('button', { name: '鼓手模式' }))[0]);
   expect(within(await screen.findByRole('dialog', { name: '鼓手模式' })).getByRole('button', { name: '播放' })).toBeEnabled();
 }, 15000);
-it('keeps drummer entry available and places guitarist below Google in toolbar overflow', async () => {
-  render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
-  expect((await screen.findAllByRole('button',{name:'鼓手模式'})).length).toBeGreaterThan(0);
-  expect(screen.queryByRole('menuitemcheckbox',{name:'吉他手模式'})).not.toBeInTheDocument();
-  const more = (await screen.findAllByRole('button',{name:/^更多$/}))[0];
-  fireEvent.click(more);
-  const toggle = await screen.findByRole('menuitemcheckbox',{name:'吉他手模式'});
-  const google = screen.getByRole('button',{name:'使用 Google 登入'});
-  expect(google.nextElementSibling).toBe(toggle);
-  expect(toggle).toHaveAttribute('aria-checked','false');
-  fireEvent.click(toggle);
-  fireEvent.click(more);
-  expect(await screen.findByRole('menuitemcheckbox',{name:'吉他手模式'})).toHaveAttribute('aria-checked','true');
-},15000);
+it('keeps drummer entry and Google sign-in while removing guitarist mode and its saved overlay', async () => {
+  localStorage.setItem('chordmaster.guitarist-mode.v1', 'true');
+  fixture.setlists[0].songs[0].overrideKey = 'Eb';
+  const view = render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+  expect((await screen.findAllByRole('button', { name: '鼓手模式' })).length).toBeGreaterThan(0);
+  const topbar = within(document.querySelector<HTMLElement>('[data-topbar]')!);
+  expect(topbar.getByRole('button', { name: '0' })).toBeInTheDocument();
+  expect(document.querySelector('[data-guitarist-mode-toggle]')).toBeNull();
+  expect(localStorage.getItem('chordmaster.guitarist-mode.v1')).toBeNull();
+  fireEvent.click(screen.getAllByRole('button', { name: /^更多$/ })[0]);
+  expect(await screen.findByRole('button', { name: '使用 Google 登入' })).toBeInTheDocument();
+  expect(screen.queryByRole('menuitemcheckbox', { name: '吉他手模式' })).toBeNull();
+  expect(screen.queryByText('吉他手模式')).toBeNull();
+  expect(fixture.setlists[0].songs[0].capo).toBeUndefined();
+  view.unmount();
+}, 15000);
 
 it.each([true, false])('preserves sidebar expanded=%s across drummer mode and ignores synthetic hover on return', async expanded => {
   render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);

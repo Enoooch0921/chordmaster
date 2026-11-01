@@ -772,4 +772,22 @@
 .drummer-sound-loading { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12px; color: var(--color-text-muted); }
 .drummer-sound-loading > span { width: 14px; height: 14px; border: 2px solid var(--color-border); border-top-color: var(--color-indigo-700); border-radius: 50%; animation: drummer-sound-spin .8s linear infinite; }
 @keyframes drummer-sound-spin { to { transform: rotate(360deg); } }
+
+/* Keep native BPM entry above the software keyboard without panning the page. */
+.drummer-mode[data-tempo-editing="true"] { display: flex; flex-direction: column; }
+.drummer-mode[data-tempo-editing="true"] .drummer-left-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.drummer-mode[data-tempo-editing="true"] .drummer-left-body { display: block; min-height: 0; flex: 1; overflow: hidden; }
+.drummer-mode[data-tempo-editing="true"] .drummer-workspace { display: block; min-height: 0; height: 100%; }
+.drummer-mode[data-tempo-editing="true"] .drummer-controls { min-height: 0; max-height: 100%; height: 100%; margin: 0; overflow-y: auto; }
+.drummer-mode[data-tempo-editing="true"] .drummer-console-layout { display: block; height: auto; }
+.drummer-mode[data-tempo-editing="true"] .drummer-current { display: contents; }
+.drummer-mode[data-tempo-editing="true"] .drummer-tempo { display: flex; width: 100%; max-width: 480px; margin: 4px auto; }
+.drummer-mode[data-tempo-editing="true"] .drummer-song-heading,
+.drummer-mode[data-tempo-editing="true"] .drummer-tempo-meta,
+.drummer-mode[data-tempo-editing="true"] .drummer-beats,
+.drummer-mode[data-tempo-editing="true"] .drummer-transport,
+.drummer-mode[data-tempo-editing="true"] .drummer-settings,
+.drummer-mode[data-tempo-editing="true"] .drummer-song-list,
+.drummer-mode[data-tempo-editing="true"] .drummer-score { display: none; }
+.drummer-mode[data-native-keyboard="true"] .drummer-midi-panel { max-height: 100%; }
 @media (prefers-reduced-motion: reduce) { .drummer-sound-loading > span { animation: none; } }

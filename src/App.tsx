@@ -182,7 +182,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Guitar, Check, Minus, Keyboard, Eraser, Pin, PinOff } from 'lucide-react';
+import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Check, Minus, Keyboard, Eraser, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -281,7 +281,6 @@ const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.
 const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
 const LIBRARY_SORT_STORAGE_KEY = 'chordmaster.library-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
-const GUITARIST_MODE_STORAGE_KEY = 'chordmaster.guitarist-mode.v1';
 const PREVIEW_QUICK_EDIT_STORAGE_KEY = 'chordmaster.preview-quick-edit.v1';
 const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
@@ -1269,14 +1268,6 @@ const loadWorkspaceMode = (): WorkspaceMode => {
   return window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY) === 'setlists' ? 'setlists' : 'songs';
 };
 
-const loadGuitaristMode = (): boolean => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  return window.localStorage.getItem(GUITARIST_MODE_STORAGE_KEY) === 'true';
-};
-
 const loadPreviewQuickEditPreference = (): boolean => {
   if (typeof window === 'undefined') return true;
   return window.localStorage.getItem(PREVIEW_QUICK_EDIT_STORAGE_KEY) !== 'false';
@@ -1666,7 +1657,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [songs, setSongs] = useState<StoredSong[]>(initialLibrary.songs);
   const [savedSongs, setSavedSongs] = useState<StoredSong[]>(cloneSong(initialLibrary.songs));
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(loadWorkspaceMode);
-  const [guitaristMode, setGuitaristMode] = useState<boolean>(loadGuitaristMode);
   const [drummerSession, setDrummerSession] = useState<DrummerSession | null>(null);
   const drummerWorkspaceActive = useRef(false);
   const suppressSidebarHoverUntilMove = useRef(false);
@@ -1821,7 +1811,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [workspaceBootstrapAttempt, setWorkspaceBootstrapAttempt] = useState(0);
   const [cacheConnectionError, setCacheConnectionError] = useState<string | null>(null);
   const [cacheConnecting, setCacheConnecting] = useState(false);
-  const [cacheRefreshDeferred, setCacheRefreshDeferred] = useState(false);
   const [isImportPromptOpen, setIsImportPromptOpen] = useState(false);
   const [isImportingLocalWorkspace, setIsImportingLocalWorkspace] = useState(false);
   const [leavingSharedSetlistId, setLeavingSharedSetlistId] = useState<string | null>(null);
@@ -2119,24 +2108,39 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     for (const editor of songPresence.editors) grouped.set(editor.songId, [...(grouped.get(editor.songId) ?? []), editor]);
     return grouped;
   }, [songPresence.editors]);
+  // Personal libraries also receive writes from another device signed into
+  // this account. Team membership/assignment reconciliation stays separate.
+  useEffect(() => {
+    const repository = cloudRepositoryRef.current;
+    if (!isCloudMode || usingStartupCache || !repository || !authenticatedUser?.id
+        || isTeamWorkspace || !activeLibraryId || workspaceOwnerId !== authenticatedUser.id
+        || isLoadingCloudWorkspace || isSwitchingLibrary) return;
+    return repository.subscribeToLibraryChanges(activeLibraryId, kind => {
+      if (kind === 'songs') setLibrarySongRefreshVersion(version => version + 1);
+      else if (kind === 'setlists' || kind === 'projects') setLibraryRefreshVersion(version => version + 1);
+    });
+  }, [isCloudMode, usingStartupCache, authenticatedUser?.id, isTeamWorkspace, activeLibraryId,
+    workspaceOwnerId, isLoadingCloudWorkspace, isSwitchingLibrary]);
+
   const libraryWorkspaceRefreshFailed = useLibraryWorkspaceRefresh({
     repository: cloudRepositoryRef.current,
     scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
     libraryId: activeLibraryId,
-    refreshCollections: isTeamWorkspace,
+    refreshCollections: true,
+    collectionRefreshMs: isTeamWorkspace ? 15000 : 5000,
     refreshVersion: libraryRefreshVersion,
     songRefreshVersion: librarySongRefreshVersion,
     enabled: isCloudMode && !usingStartupCache && workspaceOwnerId === authenticatedUser?.id
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
-    paused: isPerformanceMode || isPreviewEditingActive || workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
-      || (isTeamWorkspace && (isEditing || isLibraryEditing || isPerformanceMode))
+    paused: isPreviewEditingActive || workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
+      || (isTeamWorkspace && (isEditing || isLibraryEditing))
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
       || (isTeamWorkspace && !teamDraft.ready) || Boolean(teamDraft.pending) || Boolean(teamDraft.error),
     workspace: { songs, setlists, projects },
     canApply: () => {
       if (workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
           || libraryTransitionOwnerRef.current || workspaceIsDirtyRef.current
-          || previewEditingActiveRef.current || isPerformanceModeRef.current) return false;
+          || previewEditingActiveRef.current) return false;
       // Offline edits must finish their existing merge/flush before a cloud read
       // can become the new local baseline.
       return isTeamWorkspace || !loadPendingSync({ userId: authenticatedUser!.id, libraryId: activeLibraryId! });
@@ -2168,7 +2172,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     repository: cloudRepositoryRef.current,
     scope: `${authenticatedUser?.id ?? ''}:${activeLibraryId ?? ''}`,
     enabled: isCloudMode && !usingStartupCache && !isTeamWorkspace && !isLoadingCloudWorkspace && !isSwitchingLibrary,
-    paused: isPerformanceMode || isPreviewEditingActive || activeCloudMutationCount > 0 || syncStatus === 'syncing'
+    paused: isPreviewEditingActive || activeCloudMutationCount > 0 || syncStatus === 'syncing'
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
       || Boolean(leavingSharedSetlistId) || Boolean(leavingSharedProjectId),
     joinedSetlists,
@@ -2479,7 +2483,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           activeSetlistEditableSong ?? selectedSetlistSourceSong,
           effectiveSelectedSetlist,
           selectedSetlistSong,
-          guitaristMode,
           setlistCapoResolutionOptions
         ),
         references: selectedSetlistSourceSong.references,
@@ -2491,7 +2494,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           : {})
       }
     : null
-  ), [selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, activeSetlistEditableSong, guitaristMode, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistDisplayPreference.barNumberMode, joinedSetlistDisplayPreference.barRowCount]);
+  ), [selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, activeSetlistEditableSong, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistDisplayPreference.barNumberMode, joinedSetlistDisplayPreference.barRowCount]);
   const activeEditorSong = isSetlistMode
     ? (activeSetlistEditableSong ?? selectedSetlistSourceSong ?? null)
     : activeLibraryEditableSong;
@@ -2543,7 +2546,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               activeDraftEditorSong,
               effectiveSelectedSetlist,
               selectedSetlistSong,
-              guitaristMode,
               setlistCapoResolutionOptions
             ),
             references: selectedSetlistSourceSong.references,
@@ -2556,7 +2558,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           }
         : activeNavigationPreviewSong)
     : activeDraftEditorSong
-  ), [isSetlistMode, activeDraftEditorSong, selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, guitaristMode, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistDisplayPreference.barNumberMode, joinedSetlistDisplayPreference.barRowCount, activeNavigationPreviewSong]);
+  ), [isSetlistMode, activeDraftEditorSong, selectedSetlistSong, selectedSetlistSourceSong, effectiveSelectedSetlist, setlistCapoResolutionOptions, isJoinedSetlist, joinedSetlistDisplayPreference.barNumberMode, joinedSetlistDisplayPreference.barRowCount, activeNavigationPreviewSong]);
   const activeJianpuPitchContext = React.useMemo(() => (
     activeDraftNavigationPreviewSong
       ? buildJianpuPitchContext(activeDraftNavigationPreviewSong)
@@ -2569,7 +2571,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // Cache verification and save failures are not evidence of a disconnected service.
   const fallbackConnection = authStatus === 'offline' || cacheConnectionError || libraryWorkspaceRefreshFailed
     || (isJoinedSetlist && joinedWorkspaceRefreshFailed) ? 'offline'
-    : usingStartupCache && !cacheRefreshDeferred ? 'checking' : 'online';
+    : usingStartupCache ? 'checking' : 'online';
   const connectionMode = !networkOnline ? 'offline' : backendConnection === 'unknown' ? fallbackConnection : backendConnection;
   const isOfflineMode = connectionMode === 'offline';
   const offlineModeLabel = language === 'zh' ? '離線模式' : 'Offline Mode';
@@ -2581,8 +2583,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       ? (language === 'zh' ? '正在確認伺服器連線，可繼續看譜。' : 'Checking the server connection. You can keep viewing scores.')
       : usingStartupCache
         ? language === 'zh'
-          ? cacheRefreshDeferred ? 'Online：新版本已讀取，退出演出模式後更新。' : 'Online：已連線，背景確認譜面版本中，暫時唯讀。'
-          : cacheRefreshDeferred ? 'Online: updates will appear after Performance Mode.' : 'Online: verifying the score version; temporarily read-only.'
+          ? 'Online：已連線，背景確認譜面版本中，暫時唯讀。'
+          : 'Online: verifying the score version; temporarily read-only.'
         : (language === 'zh' ? 'Online：已連線。' : 'Online: connected.');
   const connectionIndicator = isAuthenticated ? <span role="status" aria-label={`${language === 'zh' ? '連線狀態' : 'Connection status'}: ${connectionLabel}`}
     data-connection-mode={connectionMode} title={connectionDetail}
@@ -2706,18 +2708,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       </div>
     ) : null
   );
-  const renderGuitaristModeToggle = (inMenu = false) => isSetlistMode ? (
-    <button type="button" data-guitarist-mode-toggle
-      role={inMenu ? 'menuitemcheckbox' : undefined}
-      aria-label={language === 'zh' ? '吉他手模式' : 'Guitarist mode'}
-      aria-checked={inMenu ? guitaristMode : undefined}
-      aria-pressed={inMenu ? undefined : guitaristMode}
-      onClick={() => { setGuitaristMode(current => !current); if (inMenu) setIsToolbarOverflowMenuOpen(false); }}
-      className={`mt-1 flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${guitaristMode ? 'bg-indigo-50 text-indigo-700 dark:bg-[color:var(--color-indigo-900)] dark:text-[color:var(--color-indigo-100)]' : 'text-gray-600 hover:bg-gray-50 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'}`}>
-      <span className="flex items-center gap-2"><Guitar size={14}/><span>{language === 'zh' ? '吉他手模式' : 'Guitarist mode'}</span></span>
-      <span className="text-[11px] font-bold">{guitaristMode ? copy.on : copy.off}</span>
-    </button>
-  ) : null;
   const toolbarOverflowPanel = (
     <AnimatedPopover open={isToolbarOverflowMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
       {homeScreenInstallMenuItem}
@@ -2840,7 +2830,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         </button>
       ) : null}
 
-      {renderGuitaristModeToggle(true)}
       <div className="mt-1 grid grid-cols-3 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
         {([
           { value: 'light', icon: Sun, label: language === 'zh' ? '淺色' : 'Light' },
@@ -2924,7 +2913,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     ? resolveSetlistSongCapo(
       selectedSetlistSong,
       selectedSetlistSourceSong ?? { capo: 0, currentKey: currentSetlistKey },
-      guitaristMode,
       setlistCapoResolutionOptions
     )
     : (setlistCapoResolutionOptions.includeSharedCapo === false ? 0 : selectedSetlistSourceSong?.capo ?? 0);
@@ -3037,7 +3025,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
   const getSetlistSongInfoSummary = (item: SetlistSong, sourceSong: Song) => {
     const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-    const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode, setlistCapoResolutionOptions);
+    const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, setlistCapoResolutionOptions);
     const displaySong = item.songData ?? sourceSong;
     const versionSummary = getSongVersionSummary(displaySong);
     const translator = displaySong.translator?.trim();
@@ -3865,6 +3853,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     handleUpdateSetlistSong(itemId, current => ({
       ...current,
       songData: { ...cloneSong(current.songData ?? entry.sourceSong), tempo }
+    }));
+  };
+
+  const handleSetlistSongBarRowCountChange = (itemId: string, barRowCount: 1 | 2 | 3) => {
+    if (!canEditSelectedSetlistContent) return;
+    const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
+    if (!entry) return;
+    if (activePreviewEditSession?.previewIdentity === itemId) {
+      applyPreviewEditDraft({ ...activePreviewEditSession.draftSong, barRowCount }, { mergeKey: 'barRowCount' });
+      return;
+    }
+    if ((entry.item.songData ?? entry.sourceSong).barRowCount === barRowCount) return;
+    handleUpdateSetlistSong(itemId, current => ({
+      ...current,
+      songData: { ...cloneSong(current.songData ?? entry.sourceSong), barRowCount }
     }));
   };
 
@@ -6447,7 +6450,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const refreshActiveTeamSongs = async (force = false) => {
     const repository = cloudRepositoryRef.current;
     if (!repository || !isTeamWorkspace || !activeLibraryId) return;
-    if (isPerformanceModeRef.current) { setTeamLibraryUpdatePending(true); return; }
     if (teamLibraryReloadIsUnsafeRef.current && !force) {
       setTeamLibraryUpdatePending(true);
       return;
@@ -6459,7 +6461,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       const nextSongs = await repository.loadLibrarySongs(activeLibraryId);
       if (requestGeneration !== teamLibraryRefreshGenerationRef.current) return;
       if (activeLibraryIdRef.current !== activeLibraryId) return;
-      if (teamLibraryReloadIsUnsafeRef.current || isPerformanceModeRef.current) {
+      if (teamLibraryReloadIsUnsafeRef.current) {
         setTeamLibraryUpdatePending(true);
         return;
       }
@@ -6491,11 +6493,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   useEffect(() => {
-    if (!teamLibraryUpdatePending || syncStatus !== 'saved' || teamLibraryReloadIsUnsafe || isPreviewEditingActive || isEditing || isLibraryEditing || isPerformanceMode) return;
+    if (!teamLibraryUpdatePending || syncStatus !== 'saved' || teamLibraryReloadIsUnsafe || isPreviewEditingActive || isEditing || isLibraryEditing) return;
     void refreshActiveTeamSongs(false);
     // refreshActiveTeamSongs intentionally reads the latest values through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncStatus, teamLibraryReloadIsUnsafe, teamLibraryUpdatePending, isPreviewEditingActive, isEditing, isLibraryEditing, isPerformanceMode]);
+  }, [syncStatus, teamLibraryReloadIsUnsafe, teamLibraryUpdatePending, isPreviewEditingActive, isEditing, isLibraryEditing]);
 
   const requireTeamSongImportContext = (context = teamSongImportContextRef.current) => {
     if (!navigator.onLine) throw new Error(language === 'zh' ? '連線後才能複製到團隊。' : 'Reconnect before copying to a team.');
@@ -7434,7 +7436,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   item.songData ?? sourceSong,
                   effectiveSelectedSetlist,
                   item,
-                  guitaristMode,
                   setlistCapoResolutionOptions
                 );
                 const derivedSong = {
@@ -7920,10 +7921,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         if (isCancelled) {
           return;
         }
-        if (cacheCanRemainVisible && isPerformanceModeRef.current) {
-          setCacheRefreshDeferred(true);
-          return;
-        }
 
         const hasLocalData = initialLibrary.songs.length > 0 || initialSetlists.setlists.length > 0;
         const migrationCompleted = hasCompletedMigration(authenticatedUser.id);
@@ -8071,12 +8068,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     return () => { window.removeEventListener('online', retry); window.removeEventListener('focus', retry); clearInterval(timer); };
   }, [usingStartupCache, hasVerifiedAuth, cacheConnectionError]);
 
-  useEffect(() => {
-    if (cacheRefreshDeferred && !isPerformanceMode) {
-      setCacheRefreshDeferred(false);
-      setWorkspaceBootstrapAttempt(attempt => attempt + 1);
-    }
-  }, [cacheRefreshDeferred, isPerformanceMode]);
 
   useEffect(() => {
     if (usingStartupCache || !hasVerifiedAuth || !authenticatedUser || !activeCloudLibrary || workspaceIsDirty
@@ -8107,13 +8098,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const pendingSyncWorkspaceRef = useRef({ songs, setlists, projects });
   pendingSyncWorkspaceRef.current = { songs, setlists, projects };
   useEffect(() => {
-    if (usingStartupCache || !authenticatedUser || !cloudRepositoryRef.current || !activeLibraryId || isTeamWorkspace || isLoadingCloudWorkspace || isPerformanceMode) {
+    if (usingStartupCache || !authenticatedUser || !cloudRepositoryRef.current || !activeLibraryId || isTeamWorkspace || isLoadingCloudWorkspace) {
       return;
     }
 
     const performPendingFlush = async () => {
       const pending = loadPendingSync({ userId: authenticatedUser.id, libraryId: activeLibraryId! });
-      if (!pending || !navigator.onLine || isPerformanceModeRef.current || workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
+      if (!pending || !navigator.onLine || workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
         || (pending.userId && pending.userId !== authenticatedUser.id)
         || (pending.libraryId && pending.libraryId !== activeLibraryId)) {
         return;
@@ -8125,7 +8116,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       try {
         setSyncStatus('syncing');
         const remoteWorkspace = await repository.loadLibraryWorkspace(activeLibraryId);
-        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId || isPerformanceModeRef.current) return;
+        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId) return;
         const mergedWorkspace = mergeWorkspaceByUpdatedAt(pending, remoteWorkspace);
         const savedAt = Math.max(
           pending.savedAt,
@@ -8147,7 +8138,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
         // Do not replace edits or clear a newer queued snapshot created while
         // the request was in flight (including pagehide/offline saves).
-        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId || isPerformanceModeRef.current
+        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId
           || pendingSyncWorkspaceRef.current.songs !== initialWorkspace.songs
           || pendingSyncWorkspaceRef.current.setlists !== initialWorkspace.setlists
           || pendingSyncWorkspaceRef.current.projects !== initialWorkspace.projects
@@ -8199,10 +8190,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     void flushPending();
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, [usingStartupCache, authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, isPerformanceMode, language, toast]);
+  }, [usingStartupCache, authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, language, toast]);
 
   useEffect(() => {
-    if (usingStartupCache || historyForwardBusy || isPerformanceMode || pendingWorkspaceSwitch || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
+    if (usingStartupCache || historyForwardBusy || pendingWorkspaceSwitch || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
       return;
     }
 
@@ -8223,7 +8214,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         autoSaveTimeoutRef.current = null;
       }
     };
-  }, [usingStartupCache, historyForwardBusy, isPerformanceMode, pendingWorkspaceSwitch, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
+  }, [usingStartupCache, historyForwardBusy, pendingWorkspaceSwitch, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
@@ -8323,11 +8314,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(GUITARIST_MODE_STORAGE_KEY, guitaristMode ? 'true' : 'false');
+      window.localStorage.removeItem('chordmaster.guitarist-mode.v1');
     } catch {
       // Ignore storage failures and keep the app usable.
     }
-  }, [guitaristMode]);
+  }, []);
 
   useEffect(() => {
     try {
@@ -10360,7 +10351,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               item.songData ?? sourceSong,
               effectiveSelectedSetlist,
               item,
-              guitaristMode,
               setlistCapoResolutionOptions
             ),
             references: sourceSong.references,
@@ -10381,7 +10371,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [
     activeDraftNavigationPreviewSong,
     effectiveSelectedSetlist,
-    guitaristMode,
     isJoinedSetlist,
     joinedSetlistDisplayPreference.barNumberMode,
     joinedSetlistDisplayPreference.barRowCount,
@@ -10389,6 +10378,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setlistCapoResolutionOptions,
     setlistSongsWithSource
   ]);
+
+  const liveDrummerSession = React.useMemo(() => {
+    if (!drummerSession) return null;
+    if (effectiveSelectedSetlist?.id !== drummerSession.id) return { ...drummerSession, entries: [] };
+    return { ...drummerSession, name: effectiveSelectedSetlist.name,
+      entries: setlistPreviewSongs.map(({ item, song }) => ({ id: item.id, song })) };
+  }, [drummerSession, effectiveSelectedSetlist, setlistPreviewSongs]);
 
   const setlistLyricsEntries = React.useMemo(() => setlistSongsWithSource.map(({ item, sourceSong }) => ({
     id: item.id,
@@ -10403,7 +10399,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setIsMobileActionsSheetOpen(false);
     setActiveReferenceKind(null);
     setIsPerformanceMode(false);
-    // A performance uses a stable snapshot; background sync cannot retime its click.
+    // Keep the instance/initial selection stable; live entries update below.
+    // DrummerMode pins the active playback timing until stop or song change.
     transitionDrummerWorkspace(() => setDrummerSession({
       instanceId: crypto.randomUUID(),
       id: selectedSetlist.id,
@@ -12202,7 +12199,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             {setlistSongsWithSource.map(({ item, sourceSong }, index) => {
               const isActive = item.id === selectedSetlistSong?.id;
               const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-              const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, guitaristMode, setlistCapoResolutionOptions);
+              const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, setlistCapoResolutionOptions);
               const displaySong = item.songData ?? sourceSong;
               const sourceStatus = isActive && setlistSourceStatuses.has(item.id)
                 ? selectedSetlistSourceStatus : setlistSourceStatuses.get(item.id) ?? 'aligned';
@@ -12244,7 +12241,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         <GripVertical size={12} className="setlist-song-number-grip" aria-hidden="true" />
                       </button>
                     ) : <span className="setlist-song-static-number"><span className="setlist-song-number">{index + 1}</span></span>}
-                    {canEditSelectedSetlist && !isSetlistSongSortMode && <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={() => handleRemoveSetlistSong(item.id)} />}
+                    {canEditSelectedSetlist && !isSetlistSongSortMode && <SetlistSongActions label={language === 'zh' ? `歌曲操作：${displaySong.title}` : `Song actions: ${displaySong.title}`} removeLabel={copy.removeFromSetlist} onRemove={() => handleRemoveSetlistSong(item.id)}
+                      language={language}
+                      barRowCount={(activePreviewEditSession?.previewIdentity === item.id ? activePreviewEditSession.draftSong.barRowCount : displaySong.barRowCount) ?? 2}
+                      onBarRowCountChange={canEditSelectedSetlistContent ? count => handleSetlistSongBarRowCountChange(item.id, count) : undefined}
+                    />}
                   </div>
                     <button type="button" onClick={() => handleSelectSetlistSong(item.id)} aria-current={isActive ? 'true' : undefined} className="setlist-song-select">
                       <span className="setlist-song-title-line">
@@ -15156,7 +15157,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         ) : null}
                       </div>
                     ) : null}
-                    {renderGuitaristModeToggle()}
                     </div>
                   </div>
                 </PresenceSurface>
@@ -15783,7 +15783,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onToggle={(userId, enabled) => { void handleToggleSetlistAssignment(userId, enabled); }}
       />
 
-      {drummerSession && <DrummerMode key={drummerSession.instanceId ?? drummerSession.id ?? drummerSession.name} {...drummerSession} language={language} onClose={closeDrummerMode}/>}
+      {liveDrummerSession && <DrummerMode key={liveDrummerSession.instanceId ?? liveDrummerSession.id ?? liveDrummerSession.name} {...liveDrummerSession} language={language} onClose={closeDrummerMode}/>}
 
       {activeReferenceKind && activeReferenceSong && (
         <ReferencePlayer

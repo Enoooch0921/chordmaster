@@ -1,15 +1,12 @@
+import { getContinuationOnlyChange, describeContinuationChange } from './sourceDifferenceText';
 import type { AppLanguage, SetlistSong, SetlistSourceBaseline, Song, StoredSong } from '../types';
 import { normalizeSongBars } from './workspace';
 import { supabase } from './supabase';
+import { describePickupChange } from './pickupComparison';
+import { hasLyricsTextChange } from './setlistSourceComparison';
 
-// Source content only. Performance keys, Capo and display preferences belong to
-// the setlist/account. Keep this list aligned with setlist_source_score in SQL.
-const SCORE_FIELDS = [
-  'title', 'lyricist', 'composer', 'translator', 'groove', 'shuffle',
-  'originalKey', 'originalKeyMode', 'originalKeyUnspecified',
-  'tempo', 'timeSignature', 'timeSignatureUnspecified', 'jianpuInputAbsolute',
-  'references', 'pickup', 'sections', 'lyricsDoc', 'chordTimingVersion'
-] as const;
+// Notification equality is musical; server writes still compare exact JSON.
+import { SOURCE_SCORE_FIELDS as SCORE_FIELDS, normalizeSourceChordNotation, sourceScoreMeaningSignature } from './setlistSourceMeaning';
 
 const canonical = (value: unknown): unknown => Array.isArray(value)
   ? value.map(canonical)
@@ -18,16 +15,7 @@ const canonical = (value: unknown): unknown => Array.isArray(value)
       .sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)]))
     : value;
 
-export const setlistSourceScoreSignature = (song: Song | undefined): string => {
-  if (!song) return 'null';
-  const normalized = normalizeSongBars(song);
-  const score = Object.fromEntries(SCORE_FIELDS.map(field => [field, normalized[field]]));
-  if (normalized.lyricsDoc) {
-    const { displayLanguage, fontSize, lineHeight, ...content } = normalized.lyricsDoc;
-    score.lyricsDoc = content;
-  }
-  return JSON.stringify(canonical(score));
-};
+export const setlistSourceScoreSignature = sourceScoreMeaningSignature;
 
 export const hasSetlistSourceScoreChange = (before: Song | undefined, after: Song | undefined) => (
   Boolean(before && after) && setlistSourceScoreSignature(before) !== setlistSourceScoreSignature(after)
@@ -164,11 +152,21 @@ export const describeSetlistSourceChanges = (source: Song, edited: Song, languag
     rhythmLabel: '節奏標籤', keyChangeTo: '轉調', bars: '小節', titleSection: '段落名稱'
   }[field] ?? '演奏記號／聲部');
   for (const field of SCORE_FIELDS.filter(field => field !== 'sections')) {
-    if (field === 'lyricsDoc') {
+    if (field === 'pickup') {
+      if (!equal(source.pickup, edited.pickup)) changes.push(describePickupChange(source.pickup, edited.pickup, source.timeSignature, edited.timeSignature, language));
+    } else if (field === 'lyricsDoc') {
       const clean = (doc: Song['lyricsDoc']) => doc && (({ displayLanguage, fontSize, lineHeight, ...rest }) => rest)(doc);
-      if (!equal(clean(source.lyricsDoc), clean(edited.lyricsDoc))) changes.push(zh ? '歌詞內容' : 'Lyrics content');
+      if (!equal(clean(source.lyricsDoc), clean(edited.lyricsDoc))) {
+        const oldDoc = clean(source.lyricsDoc), nextDoc = clean(edited.lyricsDoc);
+        const { translationLanguage: oldLanguage, ...oldContent } = oldDoc ?? {};
+        const { translationLanguage: nextLanguage, ...nextContent } = nextDoc ?? {};
+        if (!equal(oldContent, nextContent)) changes.push(hasLyricsTextChange(source, edited)
+          ? (zh ? '歌詞文字' : 'Lyrics text') : (zh ? '歌詞段落／設定' : 'Lyrics section/settings'));
+        if ((oldLanguage || 'en') !== (nextLanguage || 'en')) changes.push(zh ? '歌詞翻譯語言設定' : 'Lyrics translation language');
+      }
     } else if (!equal(source[field], edited[field])) changes.push(zh ? label(field) : field);
   }
+  const sourceMeaning = normalizeSourceChordNotation(source), editedMeaning = normalizeSourceChordNotation(edited);
   const sourceIds = source.sections.map(s => s.id), editedIds = edited.sections.map(s => s.id);
   if (!equal(sourceIds, editedIds)) changes.push(zh ? '譜面段落新增、刪除或重排（不含歌單演出順序）' : 'Score sections added, removed or reordered (excluding setlist performance order)');
   for (const section of source.sections) {
@@ -186,8 +184,17 @@ export const describeSetlistSourceChanges = (source: Song, edited: Song, languag
     section.bars.forEach((bar, index) => {
       const old = previous.bars.find(b => b.id === bar.id);
       if (!old) return;
-      const changed = [...new Set([...Object.keys(old), ...Object.keys(bar)])].filter(key => key !== 'id' && !equal(old[key], bar[key]));
-      if (changed.length) changes.push(`${section.title} · ${zh ? '第 ' + (index + 1) + ' 小節' : 'Bar ' + (index + 1)}：${changed.map(k => zh ? label(k) : k).join('、')}${changed.includes('chords') ? ` (${old.chords.join(' ')} → ${bar.chords.join(' ')})` : ''}`);
+      const oldSectionIndex = source.sections.findIndex(item => item.id === section.id);
+      const oldBarIndex = previous.bars.findIndex(item => item.id === bar.id);
+      const newSectionIndex = edited.sections.indexOf(section);
+      const oldMeaning = sourceMeaning.sections[oldSectionIndex]?.bars[oldBarIndex] as unknown as Record<string, unknown>;
+      const newMeaning = editedMeaning.sections[newSectionIndex]?.bars[index] as unknown as Record<string, unknown>;
+      const changed = [...new Set([...Object.keys(old), ...Object.keys(bar)])].filter(key => key !== 'id'
+        && !equal(old[key], bar[key]) && !equal(oldMeaning?.[key], newMeaning?.[key]));
+      const continuation = changed.includes('chords') ? getContinuationOnlyChange(oldMeaning?.chords, newMeaning?.chords) : null;
+      if (continuation) changes.push(`${section.title} · ${zh ? '第 ' + (index + 1) + ' 小節' : 'Bar ' + (index + 1)}：${describeContinuationChange(continuation, language)}`);
+      const otherChanged = continuation ? changed.filter(key => key !== 'chords') : changed;
+      if (otherChanged.length) changes.push(`${section.title} · ${zh ? '第 ' + (index + 1) + ' 小節' : 'Bar ' + (index + 1)}：${otherChanged.map(k => zh ? label(k) : k).join('、')}${otherChanged.includes('chords') ? ` (${old.chords.join(' ')} → ${bar.chords.join(' ')})` : ''}`);
     });
   }
   return changes;

@@ -1,10 +1,18 @@
+import { compareMeasurePreviews, type ComparisonMeasure } from './sourceComparisonMeasure';
+import { getSongTimeSignatureStates } from './songEditing';
+import { getContinuationOnlyChange, describeContinuationPositions, describeRhythm } from './sourceDifferenceText';
 import type { AppLanguage, Bar, Song } from '../types';
+import { describePickup } from './pickupComparison';
+import { normalizeSourceChordNotation } from './setlistSourceMeaning';
 import { normalizeSongBars } from './workspace';
+import { getLyricsBlocks } from '../utils/lyricsDocument';
+import { lyricsLanguageName } from '../utils/lyricsLanguages';
 
 export interface SourceComparisonRow {
   label: string;
   library: string;
   setlist: string;
+  measures?: {library:ComparisonMeasure;setlist:ComparisonMeasure};
 }
 const names: Record<string, string> = {
   title: '歌名', lyricist: '版本／作詞', composer: '作曲', translator: '翻譯', groove: '風格', shuffle: 'Shuffle',
@@ -27,6 +35,9 @@ const content = (value: unknown): unknown => Array.isArray(value) ? value.map(co
   : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key, v]) => key !== 'id' && v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => [key, content(v)])) : value;
 const equal = (a: unknown, b: unknown) => JSON.stringify(content(a)) === JSON.stringify(content(b));
 const format = (value: unknown, zh: boolean, field?: string): string => {
+  if (field === 'chords' && Array.isArray(value)) return value.length ? value.map(chord => chord || '—').join(' · ') : (zh ? '無和弦' : 'No chords');
+  if (field === 'tempo' && typeof value === 'number') return `${value} BPM`;
+  if (field === 'rhythm' && typeof value === 'string') return describeRhythm(value, zh ? 'zh' : 'en');
   if (field === 'closed') return value === true ? (zh ? '關閉' : 'Closed') : (zh ? '開啟' : 'Open');
   if (value === undefined || value === null || value === '') return zh ? '未設定' : 'Not set';
   if (typeof value === 'boolean') return value ? (zh ? '有' : 'Yes') : (zh ? '無' : 'No');
@@ -44,15 +55,66 @@ const fullSection = (section: Song['sections'][number], zh: boolean) => {
   return [format(Object.fromEntries(Object.entries(markings).filter(([, value]) => value !== false)), zh), ...bars.map((bar, index) => `${zh ? `第 ${index + 1} 小節` : `Bar ${index + 1}`}：${fullBar(bar, zh)}`)].filter(Boolean).join('\n');
 };
 
+export const hasLyricsTextChange = (source: Song, entry: Song) => {
+  const text = (song: Song) => ({
+    chinese: song.lyricsDoc?.chinese ?? '', english: song.lyricsDoc?.english ?? '',
+    blocks: getLyricsBlocks(song.lyricsDoc).map(({ marker, chinese, english }) => ({ marker, chinese, english }))
+  });
+  return !equal(text(source), text(entry));
+};
+
+// Keep unchanged lines out of the comparison, including after an insertion.
+const compareTextLines = (oldText: string | undefined, nextText: string | undefined, label: string, zh: boolean): SourceComparisonRow[] => {
+  if ((oldText ?? '') === (nextText ?? '')) return [];
+  const a = oldText ? oldText.split(/\r?\n/) : [], b = nextText ? nextText.split(/\r?\n/) : [];
+  const rows: SourceComparisonRow[] = [];
+  const bounded = a.length * b.length <= 1_000_000;
+  const lcs = bounded ? Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1)) : [];
+  if (bounded) for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--)
+    lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  let i = 0, j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) { i++; j++; continue; }
+    const startA = i, startB = j, removed: string[] = [], added: string[] = [];
+    while ((i < a.length || j < b.length) && !(i < a.length && j < b.length && a[i] === b[j])) {
+      if (!bounded) {
+        if (i < a.length) removed.push(a[i++]);
+        if (j < b.length) added.push(b[j++]);
+      } else if (j < b.length && (i === a.length || lcs[i][j + 1] > lcs[i + 1][j])) added.push(b[j++]);
+      else removed.push(a[i++]);
+    }
+    const range = (start: number, count: number) => count > 1 ? `${start + 1}–${start + count}` : `${start + 1}`;
+    const position = removed.length && added.length && startA === startB && removed.length === added.length
+      ? (zh ? `第 ${range(startA, removed.length)} 行` : `Line ${range(startA, removed.length)}`)
+      : [removed.length ? (zh ? `曲庫第 ${range(startA, removed.length)} 行` : `Library line ${range(startA, removed.length)}`) : '',
+        added.length ? (zh ? `歌單第 ${range(startB, added.length)} 行` : `Setlist line ${range(startB, added.length)}`) : ''].filter(Boolean).join(' / ');
+    rows.push({ label: `${label} · ${position}`, library: removed.length ? removed.join('\n') : (zh ? '無此行' : 'Line absent'), setlist: added.length ? added.join('\n') : (zh ? '已移除此行' : 'Line removed') });
+  }
+  return rows;
+};
+
 /** Current library and current setlist values stay in fixed, named columns. */
 export function compareSetlistSourceScores(source: Song, entry: Song, language: AppLanguage): SourceComparisonRow[] {
   const a = normalizeSongBars(structuredClone(source)), b = normalizeSongBars(structuredClone(entry));
+  const aMeaning = normalizeSourceChordNotation(a), bMeaning = normalizeSourceChordNotation(b);
+  const aMeters=getSongTimeSignatureStates(a),bMeters=getSongTimeSignatureStates(b);
   const zh = language === 'zh';
   const rows: SourceComparisonRow[] = [];
-  const fields = (before: object, after: object, ignored: string[], prefix = '') => {
+  const fields = (before: object, after: object, ignored: string[], prefix = '', beforeMeaning: object = before, afterMeaning: object = after, measurePair?:SourceComparisonRow['measures']) => {
     const old = before as Record<string, unknown>, next = after as Record<string, unknown>;
     for (const field of new Set([...Object.keys(old), ...Object.keys(next)])) {
-      if (!ignored.includes(field) && !equal(old[field], next[field])) rows.push({ label: prefix + (zh ? field === 'title' && prefix ? '段落名稱' : names[field] ?? '演奏記號' : field), library: format(old[field], zh, field), setlist: format(next[field], zh, field) });
+      if (ignored.includes(field) || equal(old[field], next[field])
+        || equal((beforeMeaning as Record<string, unknown>)[field], (afterMeaning as Record<string, unknown>)[field])) continue;
+      const continuation = field === 'chords' ? getContinuationOnlyChange((beforeMeaning as Record<string, unknown>)[field], (afterMeaning as Record<string, unknown>)[field]) : null;
+      const preview=field==='chords'&&measurePair?{measures:measurePair}:{};
+      if (continuation&&measurePair) {
+        measurePair.library.description=describeContinuationPositions(continuation.before,language);
+        measurePair.setlist.description=describeContinuationPositions(continuation.after,language);
+      }
+      if (continuation) rows.push({...preview,label:prefix+(zh?'延續拍標示':'Continuation marks'),
+        library:describeContinuationPositions(continuation.before,language)+'\n'+format(old[field],zh,field),
+        setlist:describeContinuationPositions(continuation.after,language)+'\n'+format(next[field],zh,field)});
+      else rows.push({ ...preview, label: prefix + (zh ? field === 'title' && prefix ? '段落名稱' : names[field] ?? '演奏記號' : field), library: format(old[field], zh, field), setlist: format(next[field], zh, field) });
     }
   };
   const scoreFields = ['title','lyricist','composer','translator','groove','shuffle','originalKey','originalKeyMode','originalKeyUnspecified','tempo','timeSignature','timeSignatureUnspecified','jianpuInputAbsolute','references','pickup','lyricsDoc','chordTimingVersion'];
@@ -64,7 +126,25 @@ export function compareSetlistSourceScores(source: Song, entry: Song, language: 
     }
     return [key,value];
   }));
-  fields(pick(a), pick(b), []);
+  fields(pick(a), pick(b), ['lyricsDoc', 'pickup']);
+  if (!equal(a.pickup, b.pickup)) rows.push({ label: zh ? '弱起拍' : 'Pickup', library: describePickup(a.pickup, a.timeSignature, language), setlist: describePickup(b.pickup, b.timeSignature, language) });
+  const oldDoc = a.lyricsDoc ?? { chinese: '' }, nextDoc = b.lyricsDoc ?? { chinese: '' };
+  fields(oldDoc, nextDoc, ['chinese', 'english', 'blocks', 'displayLanguage', 'fontSize', 'lineHeight', 'translationLanguage'], zh ? '歌詞 · ' : 'Lyrics · ');
+  if ((oldDoc.translationLanguage || 'en') !== (nextDoc.translationLanguage || 'en')) rows.push({
+    label: zh ? '歌詞 · 翻譯語言設定' : 'Lyrics · Translation language',
+    library: oldDoc.translationLanguage ? lyricsLanguageName(oldDoc.translationLanguage, language) : (zh ? '未設定（預設英文）' : 'Not set (defaults to English)'),
+    setlist: nextDoc.translationLanguage ? lyricsLanguageName(nextDoc.translationLanguage, language) : (zh ? '未設定（預設英文）' : 'Not set (defaults to English)')
+  });
+  for (const field of ['chinese', 'english'] as const) rows.push(...compareTextLines(oldDoc[field], nextDoc[field], zh ? names[field] : field === 'chinese' ? 'Chinese lyrics' : 'Translated lyrics', zh));
+  const oldBlocks = oldDoc.blocks ?? [], nextBlocks = nextDoc.blocks ?? [];
+  for (let i = 0; i < Math.max(oldBlocks.length, nextBlocks.length); i++) {
+    const old = oldBlocks[i] ?? {}, next = nextBlocks[i] ?? {};
+    const label = `${zh ? '歌詞' : 'Lyrics'} · ${nextBlocks[i]?.marker || oldBlocks[i]?.marker || (zh ? `第 ${i + 1} 段` : `Section ${i + 1}`)}`;
+    fields(old, next, ['id', 'chinese', 'english'], label + ' · ');
+    // The legacy bodies normally mirror these blocks. Show their edits once.
+    for (const field of ['chinese', 'english'] as const) if ((oldDoc[field] ?? '') === (nextDoc[field] ?? ''))
+      rows.push(...compareTextLines(oldBlocks[i]?.[field], nextBlocks[i]?.[field], `${label} · ${zh ? names[field] : field}`, zh));
+  }
   const usedSections = new Set<number>();
   b.sections.forEach((section, index) => {
     let oldIndex = a.sections.findIndex(old => old.id === section.id);
@@ -80,7 +160,10 @@ export function compareSetlistSourceScores(source: Song, entry: Song, language: 
       const label = zh ? `${section.title} · 第 ${barIndex + 1} 小節` : `${section.title} · Bar ${barIndex + 1}`;
       if (oldBarIndex < 0) { rows.push({label, library: zh?'無此小節':'Bar absent', setlist: fullBar(bar,zh)}); return; }
       usedBars.add(oldBarIndex);
-      fields(old.bars[oldBarIndex], bar, ['id'], label + ' · ');
+      const oldMeaning=aMeaning.sections[oldIndex].bars[oldBarIndex],nextMeaning=bMeaning.sections[index].bars[barIndex];
+      const measures=!equal(old.bars[oldBarIndex].chords,bar.chords)&&!equal(oldMeaning.chords,nextMeaning.chords)
+        ? compareMeasurePreviews(old.bars[oldBarIndex],bar,aMeters.barActiveTimeSignatures[oldIndex][oldBarIndex],bMeters.barActiveTimeSignatures[index][barIndex],oldMeaning,nextMeaning) : undefined;
+      fields(old.bars[oldBarIndex], bar, ['id'], label + ' · ', oldMeaning, nextMeaning, measures);
     });
     old.bars.forEach((bar,barIndex) => {
       if (!usedBars.has(barIndex)) rows.push({label: zh?`${old.title} · 曲庫第 ${barIndex + 1} 小節`:`${old.title} · Library bar ${barIndex + 1}`,library:fullBar(bar,zh),setlist:zh?'此歌單已移除此小節':'Removed from this setlist'});

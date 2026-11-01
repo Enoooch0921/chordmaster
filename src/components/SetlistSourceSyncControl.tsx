@@ -1,11 +1,12 @@
+import SourceComparisonCell from './SourceComparisonCell';
 import { AnimatePresence } from 'motion/react';
 import AnimatedNativeDialog from './ui/AnimatedNativeDialog';
 import { ArrowLeftRight, ArrowRight, Check, X } from 'lucide-react';
-import { compareSetlistSourceScores } from '../lib/setlistSourceComparison';
+import { compareSetlistSourceScores, hasLyricsTextChange } from '../lib/setlistSourceComparison';
 import './SetlistSourceSyncControl.css';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { AppLanguage } from '../types';
-import { describeSetlistSourceChanges, previewSetlistSourceSync, reconcileSetlistSource,
+import { hasSetlistSourceScoreChange, describeSetlistSourceChanges, previewSetlistSourceSync, reconcileSetlistSource,
   type SetlistSourceDirection, type SetlistSourceReconciliation, type SetlistSourceStatus, type SetlistSourceSyncPreview } from '../lib/setlistSourceSync';
 
 export default function SetlistSourceSyncControl({ libraryId, entryId, language, status, prepare, onReconciled, onSaveAs, compact = false }: {
@@ -34,8 +35,9 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
   const actionLabel = status === 'source-newer' ? (zh ? '預覽歌曲庫 → 此歌單' : 'Preview library → setlist')
     : status === 'setlist-changed' ? (zh ? '預覽歌單 → 歌曲庫' : 'Preview setlist → library')
     : (zh ? '比對差異與方向' : 'Compare versions and direction');
-  const needsChoice = preview?.status === 'conflict' || preview?.status === 'unknown';
-  const changes = preview ? direction === 'to-setlist'
+  const previewStatus = preview && !hasSetlistSourceScoreChange(preview.source, preview.overrideJson.songData) ? 'aligned' : preview?.status;
+  const needsChoice = previewStatus === 'conflict' || previewStatus === 'unknown';
+  const changes = preview && previewStatus !== 'aligned' ? direction === 'to-setlist'
     ? describeSetlistSourceChanges(preview.overrideJson.songData, preview.source, language)
     : describeSetlistSourceChanges(preview.source, preview.overrideJson.songData, language) : [];
   const showPreview = async () => {
@@ -48,7 +50,7 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
         setPreview(next); setInvalidated(false);
         copyId.current ??= crypto.randomUUID();
         setNewTitle(current => current || `${next.overrideJson.songData.title}${zh ? '（歌單版）' : ' (Setlist version)'}`);
-        setDirection(next.status === 'setlist-changed' ? 'to-library' : next.status === 'source-newer' ? 'to-setlist' : '');
+        setDirection(!hasSetlistSourceScoreChange(next.source, next.overrideJson.songData) ? '' : next.status === 'setlist-changed' ? 'to-library' : next.status === 'source-newer' ? 'to-setlist' : '');
       }
     } catch (error) {
       if (mounted.current) setError(String((error as { message?: string })?.message ?? error));
@@ -87,7 +89,7 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
         })}</time>
       : <span>{zh ? '尚無修改時間紀錄' : 'Modification time not recorded'}</span>;
   };
-  const confirmLabel = direction === 'to-setlist' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library')
+  const confirmLabel = previewStatus === 'aligned' ? (zh ? '無須更新' : 'No update needed') : direction === 'to-setlist' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library')
     : direction === 'to-library' ? (zh ? '用歌單版本更新歌曲庫' : 'Update library from this setlist')
     : direction === 'save-as' ? (zh ? '確認另存新歌曲' : 'Save as a new song')
     : (zh ? '請先選擇更新方向' : 'Choose an update direction');
@@ -110,14 +112,17 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
     <AnimatePresence initial={false}>{preview && <AnimatedNativeDialog key="comparison" kind="modal" ref={dialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) close(); }} className="source-sync-dialog">
       <div className="source-sync-layout">
         <header className="source-sync-heading"><div>
-          <h2 id={titleId}>{needsChoice ? (zh ? '比對兩份譜面' : 'Compare the two scores') : preview.status === 'source-newer' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library') : (zh ? '用歌單版本更新歌曲庫' : 'Update library from this setlist')}</h2>
+          <h2 id={titleId}>{previewStatus === 'aligned' ? (zh ? '譜面內容相同' : 'Scores match') : needsChoice ? (zh ? '比對兩份譜面' : 'Compare the two scores') : preview.status === 'source-newer' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library') : (zh ? '用歌單版本更新歌曲庫' : 'Update library from this setlist')}</h2>
           <p>{preview.overrideJson.songData.title} · {preview.setlistName}</p>
         </div><button type="button" disabled={busy} onClick={close} aria-label={zh ? '關閉比對' : 'Close comparison'} className="source-sync-close"><X size={20} /></button></header>
         <div className="source-sync-body">
           <p className="source-sync-state">{needsChoice
             ? (zh ? '先比較目前兩份版本，再決定取用哪一份。系統不會自動合併兩邊的修改。' : 'Compare the current versions, then choose which to use. Changes from both sides are not merged automatically.')
-            : statusLabel(preview.status)}</p>
+            : statusLabel(previewStatus ?? preview.status)}</p>
           {!needsChoice && direction && direction !== 'save-as' && <div className="source-sync-route" aria-label={zh ? '更新方向' : 'Update direction'}><span>{direction === 'to-setlist' ? (zh ? '歌曲庫' : 'Library') : preview.setlistName}</span><ArrowRight size={18} aria-hidden="true" /><span>{direction === 'to-setlist' ? preview.setlistName : (zh ? '歌曲庫' : 'Library')}</span></div>}
+          {preview.source.lyricsDoc || preview.overrideJson.songData.lyricsDoc ? <p className="source-sync-record-note mb-3" data-source-lyrics-summary>{hasLyricsTextChange(preview.source, preview.overrideJson.songData)
+            ? (zh ? '歌詞文字有變更，下方僅列出改動的行。' : 'Lyrics text changed. Only changed lines are listed below.')
+            : (zh ? '歌詞文字相同；語言或段落設定的差異會另行列出。' : 'Lyrics text matches. Language or section settings are listed separately.')}</p> : null}
           <h3 className="source-sync-difference-title">{zh ? '兩份版本的差異' : 'Differences between versions'}<span>{rows.length} {zh ? '項' : 'changes'}</span></h3>
           <div className="source-comparison" role="table" aria-label={zh ? '歌曲庫與歌單目前的譜面差異' : 'Current library and setlist differences'}>
             <div className="source-comparison-header" role="row"><div role="columnheader">{zh ? '歌曲庫版本' : 'Library version'}{' '}{direction === 'to-setlist' ? <small>{zh ? '將採用此版本' : 'Version to use'}</small> : direction === 'to-library' ? <small>{zh ? '將被更新' : 'Will be updated'}</small> : null}</div><div role="columnheader">{zh ? `歌單 · ${preview.setlistName}` : `Setlist · ${preview.setlistName}`}{' '}{direction === 'to-library' || direction === 'save-as' ? <small>{zh ? '將採用此版本' : 'Version to use'}</small> : direction === 'to-setlist' ? <small>{zh ? '將被更新' : 'Will be updated'}</small> : null}</div></div>
@@ -128,7 +133,7 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
                 <div role="cell">{renderModifiedTime(preview.setlistScoreUpdatedAt)}</div>
               </div>
             </div>
-            {rows.map((row,index) => <div key={index} className="source-comparison-row" role="rowgroup"><div className="source-comparison-label" aria-hidden="true">{row.label}</div><div className="source-comparison-values" role="row" aria-label={row.label}><div role="cell" className={direction === 'to-setlist' ? 'adopted' : undefined}>{row.library}</div><div role="cell" className={direction === 'to-library' || direction === 'save-as' ? 'adopted' : undefined}>{row.setlist}</div></div></div>)}
+            {rows.map((row,index) => <div key={index} className="source-comparison-row" role="rowgroup"><div className="source-comparison-label" aria-hidden="true">{row.label}</div><div className="source-comparison-values" role="row" aria-label={row.label}><div role="cell" className={direction === 'to-setlist' ? 'adopted' : undefined}><SourceComparisonCell text={row.library} measure={row.measures?.library} language={language}/></div><div role="cell" className={direction === 'to-library' || direction === 'save-as' ? 'adopted' : undefined}><SourceComparisonCell text={row.setlist} measure={row.measures?.setlist} language={language}/></div></div></div>)}
             {!rows.length && <p className="p-4 text-sm text-gray-500">{changes.length ? (zh ? '目前顯示的譜面內容相同，但編排記錄不同。' : 'The displayed scores match, but their arrangement records differ.') : (zh ? '譜面內容相同，無須更新。' : 'The scores match. No update is needed.')}</p>}
           </div>
           {!preview.setlistScoreUpdatedAt && <p className="source-sync-record-note">{zh ? '舊版歌單未記錄這首歌的修改時間；之後修改譜面時會自動記錄。' : 'Older setlists did not record this song’s modification time. Future score edits will record it automatically.'}</p>}

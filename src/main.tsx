@@ -146,6 +146,8 @@ const renderApp = () => {
       </BrowserRouter>
     </StrictMode>,
   );
+  // Warm small Click assets after mounting; no live audio context or autoplay.
+  void import('./lib/clickSamples').then(({ preloadClickSounds }) => preloadClickSounds()).catch(() => {});
 };
 
 void Promise.race([

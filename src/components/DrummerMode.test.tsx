@@ -133,6 +133,16 @@ describe('drummer session controls', () => {
     fireEvent.click(screen.getByRole('button', { name: '播放' }));
     expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: soundId }));
   });
+  it('ignores and clears a retired mixing preference while retaining sound and volume', () => {
+    localStorage.setItem('chordmaster.drummer-preferences.v1', JSON.stringify({ mixWithOtherAudio: true, sound: 'drive', volume: 0.4 }));
+    mount();
+    expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ sound: 'drive', volume: 0.4 }));
+    expect(audio.update.mock.lastCall?.[0]).not.toHaveProperty('mixWithOtherAudio');
+    fireEvent.click(screen.getByRole('button', { name: /聲音與拍號 ·/ }));
+    expect(screen.queryByRole('combobox', { name: '音訊播放' })).toBeNull();
+    expect(screen.queryByText('與其他 App 音樂混音')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('chordmaster.drummer-preferences.v1')!)).toEqual({ sound: 'drive', volume: 0.4, accent: 1, regular: 0.75, subdivisions: 0.4 });
+  });
   it('enters live mode without interrupting the click and keeps chart/song selection linked', () => {
     audio.playing = true;
     mount();
@@ -361,6 +371,15 @@ describe('drummer session controls', () => {
     expect(keydown).not.toHaveBeenCalled();
     window.removeEventListener('keydown', keydown);
   });
+  it('retains native decimal entry with one decimal place and no custom keypad', () => {
+    mount();
+    fireEvent.focus(tempo());
+    fireEvent.change(tempo(), { target: { value: '128.56' } });
+    expect(tempo()).toHaveValue('128.5');
+    fireEvent.blur(tempo());
+    expect(audio.update.mock.lastCall?.[0]).toEqual(expect.objectContaining({ bpm: 128.5 }));
+    expect(screen.queryByRole('dialog', { name: '設定速度' })).not.toBeInTheDocument();
+  });
 });
 
 it('uses previous/next to start songs directly and disables setlist boundaries', () => {
@@ -392,6 +411,8 @@ it('captures TAP on press without a duplicate on release/click', () => {
     fireEvent.click(tap, { detail: 1 });
   }
   expect(tempo()).toHaveValue('120'); expect(tap).toHaveTextContent('3 次');
+  expect(audio.start).not.toHaveBeenCalled();
+  expect(audio.prepare).not.toHaveBeenCalled();
 });
 
 it('applies rapid MIDI tempo ticks cumulatively and routes song presses through direct playback', async () => {
@@ -557,4 +578,102 @@ it('maps chart pages independently from songs and clamps page boundaries without
   fireEvent.click(screen.getByRole('button', { name: '設定 MIDI 控制器' }));
   expect(screen.getByRole('button', { name: '設定鍵盤樂譜上一頁' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '設定鍵盤樂譜下一頁' })).toBeInTheDocument();
+});
+
+it('receives live song/key/order changes without retiming the active click, then uses remote timing after stop', () => {
+  const view = mount();
+  fireEvent.click(screen.getByRole('button', { name: '播放' }));
+  audio.playing = true;
+  const remote = { ...session, name: '已更新歌單', entries: [
+    { ...session.entries[1], song: { ...session.entries[1].song, title: '第二首更新' } },
+    { ...session.entries[0], song: { ...session.entries[0].song, title: '第一首更新', currentKey: 'D' as const, tempo: 140, timeSignature: '3/4' } },
+    { id: 'new', song: song('手機新加入', 88) }
+  ] };
+  audio.update.mockClear(); audio.start.mockClear(); audio.stop.mockClear();
+  view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
+  expect(songs().getByRole('button', { name: /^2 第一首更新/ })).toHaveAttribute('aria-current', 'true');
+  expect(songs().getByRole('button', { name: /^3 手機新加入/ })).toBeInTheDocument();
+  expect(screen.getByTestId('chart')).toHaveTextContent('第一首更新');
+  expect(tempo()).toHaveValue('72');
+  expect(audio.update.mock.calls.every(([value]) => value.bpm === 72 && value.beats === 4)).toBe(true);
+  expect(audio.start).not.toHaveBeenCalled(); expect(audio.stop).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '增加 1 BPM' }));
+  expect(tempo()).toHaveValue('73');
+  // A local tempo adjustment remains a session preference across remote edits.
+  fireEvent.click(screen.getByRole('button', { name: '停止' }));
+  audio.playing = false;
+  view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
+  expect(tempo()).toHaveValue('73');
+  expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ bpm: 73, beats: 3 }));
+  fireEvent.click(songs().getByRole('button', { name: /^3 手機新加入/ }));
+  expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ bpm: 88, beats: 4 }));
+});
+
+it('keeps a remotely removed playing song until stop, then selects a surviving entry without auto-playing', () => {
+  const view = mount();
+  fireEvent.click(screen.getByRole('button', { name: '播放' }));
+  audio.playing = true;
+  const remote = { ...session, entries: [session.entries[1]] };
+  view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
+  expect(tempo()).toHaveValue('72');
+  expect(screen.getByTestId('chart')).toHaveTextContent('第一首');
+  expect(songs().queryByRole('button', { name: /第一首/ })).toBeNull();
+  audio.start.mockClear();
+  fireEvent.click(screen.getByRole('button', { name: '停止' }));
+  audio.playing = false;
+  view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
+  expect(tempo()).toHaveValue('110');
+  expect(audio.start).not.toHaveBeenCalled();
+  view.rerender(<DrummerMode {...remote} entries={[]} language="zh" onClose={vi.fn()}/>);
+  expect(screen.getByText('這份歌單還沒有可播放的歌曲。')).toBeInTheDocument();
+});
+
+it('applies an incoming tempo after stopping when the drummer has not overridden it', () => {
+  const view = mount();
+  fireEvent.click(screen.getByRole('button', { name: '播放' }));
+  audio.playing = true;
+  const remote = { ...session, entries: session.entries.map(entry => entry.id === 'a'
+    ? { ...entry, song: { ...entry.song, tempo: 140 } } : entry) };
+  view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
+  expect(tempo()).toHaveValue('72');
+  fireEvent.click(screen.getByRole('button', { name: '停止' }));
+  audio.playing = false;
+  view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
+  expect(tempo()).toHaveValue('140');
+});
+
+
+it('keeps the same chart page and DOM when the same song receives a remote key edit', () => {
+  const initial = { ...session, entries: [{ id: 'a', song: song('雙頁', 72) }] };
+  const view = mount(initial);
+  fireEvent.click(screen.getByRole('button', { name: '演出模式' }));
+  const area = screen.getByLabelText('翻頁樂譜');
+  vi.spyOn(area, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 200 } as DOMRect);
+  fireEvent(area, new MouseEvent('pointerdown', { clientX: 150, clientY: 100, bubbles: true }));
+  fireEvent(area, new MouseEvent('pointerup', { clientX: 150, clientY: 100, bubbles: true }));
+  const page = screen.getByText('第二頁內容');
+  expect(page).not.toHaveAttribute('aria-hidden');
+  view.rerender(<DrummerMode {...initial} entries={[{ ...initial.entries[0], song: { ...initial.entries[0].song, currentKey: 'D' } }]} language="zh" onClose={vi.fn()}/>);
+  expect(screen.getByLabelText('翻頁樂譜')).toBe(area);
+  expect(screen.getByText('第二頁內容')).toBe(page);
+  expect(page).not.toHaveAttribute('aria-hidden');
+  expect(screen.getByText('第一頁內容')).toHaveAttribute('aria-hidden', 'true');
+  // If a page is removed remotely, clamp before paint instead of hiding all pages.
+  view.rerender(<DrummerMode {...initial} entries={[{ ...initial.entries[0], song: song('單頁更新', 72) }]} language="zh" onClose={vi.fn()}/>);
+  expect(screen.getByLabelText('翻頁樂譜')).toBe(area);
+  expect(screen.getByTestId('chart')).toHaveTextContent('單頁更新');
+});
+
+
+it('leaves a manually scrolled song list in place when remote entries update', () => {
+  const view = mount();
+  const list = document.querySelector<HTMLElement>('.drummer-list-scroll')!;
+  list.scrollTop = 240;
+  vi.spyOn(list, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 200, height: 200 } as DOMRect);
+  const selected = songs().getByRole('button', { name: /^1 第一首/ });
+  vi.spyOn(selected, 'getBoundingClientRect').mockReturnValue({ top: -240, bottom: -140 } as DOMRect);
+  view.rerender(<DrummerMode {...session} entries={[...session.entries, { id: 'new', song: song('手機新增', 88) }]} language="zh" onClose={vi.fn()}/>);
+  expect(list.scrollTop).toBe(240);
+  expect(songs().getByRole('button', { name: /^1 第一首/ })).toBe(selected);
+  expect(selected).toHaveAttribute('aria-current', 'true');
 });

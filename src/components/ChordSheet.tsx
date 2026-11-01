@@ -2324,6 +2324,19 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
                         {language === 'zh' ? '原調未定' : 'Original key unconfirmed'}
                       </span>
                     ) : null}
+                    {capo > 0 && (
+                      <>
+                        <span className="text-gray-400">|</span>
+                        <div
+                          {...getMetaAnchorProps('capo')}
+                          data-sheet-capo
+                          className={`flex items-center gap-1.5 shrink-0 ${onMetaClick ? 'cursor-pointer rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : ''}`}
+                        >
+                          <span className="text-indigo-600 font-semibold">Capo {capo}</span>
+                          <span className="text-gray-400 font-medium">(<FormattedKeySequence keys={displayedPlayKeySequence} mode={currentKeyMode(song)} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />)</span>
+                        </div>
+                      </>
+                    )}
                     {typeof song.tempo === 'number' && (
                       <>
                         <span className="text-gray-400">|</span>
@@ -2373,18 +2386,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
                         </>
                       )}
                     </div>
-                    {capo > 0 && (
-                      <>
-                        <span className="text-gray-400">|</span>
-                        <div
-                          {...getMetaAnchorProps('capo')}
-                          className={`flex items-center gap-1.5 shrink-0 ${onMetaClick ? 'cursor-pointer rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : ''}`}
-                        >
-                          <span className="text-indigo-600 font-semibold">Capo {capo}</span>
-                          <span className="text-gray-400 font-medium">(<FormattedKeySequence keys={displayedPlayKeySequence} mode={currentKeyMode(song)} nashvilleFontFamily={nashvilleFontFamily} chordFontFamily={chordFontFamily} />)</span>
-                        </div>
-                      </>
-                    )}
+
                   </div>
                 </AutoShrink>
               </div>
@@ -2539,9 +2541,15 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
                 </div>
               );
 
-              // Keep notation attached to its chord row even when a sparse A4
-              // page has spare height. Voice count still reserves its full space.
+              // One-/two-line rows keep notation near their chords on sparse
+              // pages. Three-line rows share the available height, regardless
+              // of whether a row contains a melody or only chords. Extra voices
+              // still reserve their own space instead of stretching other rows.
               const notationRowHeight = getNotationRowHeight(row);
+              const constrainNotationHeight = barRowCount !== 3 || Boolean(
+                row.hasLowerNotationRows
+                && (row.extraRhythmRows || row.extraJianpuRows || row.extraChordPassRows)
+              );
 
               return (
                 <motion.div
@@ -2556,7 +2564,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
                   data-preview-layout-weight={row.layoutWeight}
                   data-preview-section-drop-target={row.startBIdx === 0 ? section?.id || '' : undefined}
                   style={{
-                    ...(row.kind === 'music' && (row.hasLowerNotationRows || barRowCount !== 3) && !row.unmetered && !row.bars.some(bar => bar.chordTimingUnspecified) ? { maxHeight: notationRowHeight } : {}),
+                    ...(row.kind === 'music' && constrainNotationHeight && !row.unmetered && !row.bars.some(bar => bar.chordTimingUnspecified) ? { maxHeight: notationRowHeight } : {}),
                     ...(row.extraRhythmRows || row.extraJianpuRows || row.extraChordPassRows || row.bars.some(bar=>bar?.chordTimingUnspecified) ? {
                     minHeight: notationRowHeight,
                     flexGrow: row.layoutWeight

@@ -7,6 +7,7 @@ import RecoveryBoundary from './RecoveryBoundary';
 import { useMetronome } from '../hooks/useMetronome';
 import { usePerformanceFullscreen } from '../hooks/usePerformanceFullscreen';
 import { useUiMotion } from '../hooks/useUiMotion';
+import { useDrummerViewport } from '../hooks/useDrummerViewport';
 import { useDrummerMidi } from '../hooks/useDrummerMidi';
 import type { MidiConnector } from '../lib/midiInput';
 import type { KeyboardAction } from '../lib/drummerMidi';
@@ -85,12 +86,15 @@ const DrummerScore = React.memo(function DrummerScore({ song, language, live, co
   const [viewportHeight, setViewportHeight] = useState(1123);
   const [page, setPage] = useState(0), [pageCount, setPageCount] = useState(1);
   const swipe = useRef<{x: number; y: number} | null>(null);
-  useLayoutEffect(() => { setPage(0); }, [song, live]);
+  useLayoutEffect(() => { setPage(0); }, [live]);
   useLayoutEffect(() => {
     const pages = Array.from(paper.current?.querySelectorAll<HTMLElement>('[data-print-page]') ?? []);
-    setPageCount(Math.max(1, pages.length));
+    const count = Math.max(1, pages.length);
+    const visiblePage = Math.min(page, count - 1);
+    setPageCount(count);
+    if (visiblePage !== page) setPage(visiblePage);
     pages.forEach((node, index) => {
-      const hidden = live && index !== page;
+      const hidden = live && index !== visiblePage;
       node.dataset.drummerPageActive = String(!hidden);
       if (hidden) node.setAttribute('aria-hidden', 'true'); else node.removeAttribute('aria-hidden');
     });
@@ -165,6 +169,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   const zh = language === 'zh';
   const t = (chinese: string, english: string) => zh ? chinese : english;
   const [activeId, setActiveId] = useState(() => entries.find(entry => entry.id === initialId)?.id ?? entries[0]?.id);
+  const [playbackEntry, setPlaybackEntry] = useState<DrummerSession['entries'][number] | null>(null);
   const [tempos, setTempos] = useState<Record<string, number>>({});
   const [meters, setMeters] = useState<Record<string, string>>({});
   const [groupings, setGroupings] = useState<Record<string, boolean>>({});
@@ -265,14 +270,19 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     return () => { clear(); window.removeEventListener('blur', clear); document.removeEventListener('visibilitychange', clear); };
   }, []);
   const tempoInput = useRef<HTMLInputElement>(null);
+  useDrummerViewport(dialog, tempoInput);
   const click = useMetronome();
   const requestClose = useCallback(() => { click.stop(); fullscreen.exitFullscreen(stageActive.current); onClose(closeInstant.current); }, [click.stop, fullscreen.exitFullscreen, onClose]);
   const activeIndex = entries.findIndex(entry => entry.id === activeId);
-  const active = entries[activeIndex];
-  const bpm = tempos[activeId] ?? (isPlayableTempo(active?.song.tempo) ? active.song.tempo : undefined);
+  const busy = click.playing || click.starting;
+  // Sync chart/key/title immediately, but an incoming edit must not retime the
+  // native loop. A removed playing entry survives only until playback stops.
+  const active = entries[activeIndex] ?? (busy && playbackEntry?.id === activeId ? playbackEntry : undefined);
+  const timingSong = busy && playbackEntry?.id === activeId ? playbackEntry.song : active?.song;
+  const bpm = tempos[activeId] ?? (isPlayableTempo(timingSong?.tempo) ? timingSong.tempo : undefined);
   const [draft, setDraft] = useState(bpm?.toString() ?? '');
   const [invalidTempo, setInvalidTempo] = useState(false);
-  const meterText = meters[activeId] ?? (active?.song.timeSignatureUnspecified ? '' : active?.song.timeSignature ?? '');
+  const meterText = meters[activeId] ?? (timingSong?.timeSignatureUnspecified ? '' : timingSong?.timeSignature ?? '');
   const meter = parseClickMeter(meterText);
   const grouped = Boolean(meter?.compound && groupings[activeId]);
   const activeSubdivisionKey = subdivisionKey(activeId, meterText, grouped);
@@ -281,11 +291,17 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   const patternKey = `${activeId}:${beats}`;
   const beatLevels = useMemo(() => patterns[patternKey] ?? defaultBeatLevels(beats), [patterns, patternKey, beats]);
   const config = useMemo<MetronomeConfig>(() => ({ ...preferences, subdivision, bpm: bpm ?? 120, beats, beatLevels, muted: false }), [preferences, subdivision, bpm, beats, beatLevels]);
-  const busy = click.playing || click.starting;
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const canPlay = bpm !== undefined && Boolean(meter);
   const previousActiveId = useRef(activeId);
+  const liveEntries = useRef(entries);
+  liveEntries.current = entries;
+  useEffect(() => {
+    if (!busy && !entries.some(entry => entry.id === activeId)) {
+      setActiveId(entries[0]?.id);
+    }
+  }, [entries, activeId, busy]);
 
   useEffect(() => { try { localStorage.setItem(PREFERENCE_KEY, JSON.stringify(preferences)); } catch { /* Private storage. */ } }, [preferences]);
   useEffect(() => { click.update(config); }, [click.update, config]);
@@ -294,7 +310,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     taps.current.reset(); setTapCount(0);
   }, [activeId]);
   useEffect(() => {
-    const movingBack = entries.findIndex(entry => entry.id === activeId) < entries.findIndex(entry => entry.id === previousActiveId.current);
+    const movingBack = liveEntries.current.findIndex(entry => entry.id === activeId) < liveEntries.current.findIndex(entry => entry.id === previousActiveId.current);
     previousActiveId.current = activeId;
     const list = songList.current;
     if (!list) return;
@@ -322,10 +338,9 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
       else if (bottom > bounds.bottom) list.scrollTop += bottom - bounds.bottom;
     };
     revealCurrent();
-    const observer = new ResizeObserver(revealCurrent);
-    observer.observe(list);
-    return () => observer.disconnect();
-  }, [activeId, entries]);
+    window.addEventListener('resize', revealCurrent);
+    return () => window.removeEventListener('resize', revealCurrent);
+  }, [activeId]);
   useEffect(() => {
     if (!subdivisionOpen) return;
     subdivisionMenu.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
@@ -403,6 +418,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     click.stop();
     activeIdRef.current = id;
     setActiveId(id);
+    setPlaybackEntry(selected);
     setSubdivisionOpen(false);
     const selectedBpm = tempos[id] ?? selected.song.tempo;
     const selectedMeterText = meters[id] ?? (selected.song.timeSignatureUnspecified ? '' : selected.song.timeSignature);
@@ -424,11 +440,12 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     select(id);
   };
   const adjacentSong = (offset: number) => {
-    const next = entries[entries.findIndex(entry => entry.id === activeIdRef.current) + offset];
+    const index = entries.findIndex(entry => entry.id === activeIdRef.current);
+    const next = entries[index < 0 ? (offset > 0 ? 0 : -1) : index + offset];
     if (next) select(next.id);
   };
   const adjustTempo = (delta: number) => {
-    const target = activeIdRef.current, original = entries.find(entry => entry.id === target)?.song.tempo;
+    const target = activeIdRef.current, original = timingSong?.tempo;
     setTempos(current => {
       const previous = current[target] ?? original;
       if (!isPlayableTempo(previous)) return current;
@@ -437,7 +454,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   };
   const togglePlayback = () => {
     if (busyRef.current) { busyRef.current = false; click.stop(); }
-    else if (canPlay) { busyRef.current = true; void click.start(config); }
+    else if (canPlay) { setPlaybackEntry(active ?? null); busyRef.current = true; void click.start(config); }
   };
   const midi = useDrummerMidi({ settingsOpen: midiOpen || soundOpen || subdivisionOpen || Boolean(rowPicker), connector: midiConnector, onAction: (action, delta, timestamp) => {
     if (action === 'tempo') adjustTempo(delta ?? 0);
@@ -462,7 +479,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   const notice = click.notice === 'hidden' ? t('回到畫面後正在恢復 Click。', 'Restoring Click after returning to the page.')
     : click.notice === 'interrupted' ? t('音訊已中斷，請確認輸出後重新播放。', 'Audio was interrupted. Check the output and press play.')
     : click.notice === 'failed' ? t('音色未能載入或啟動；若原音色仍在播放會繼續保留，否則請再按播放。', 'The sound could not load or start. A playing sound is kept; otherwise press play to retry.') : '';
-  if (!active) return createPortal(<div ref={dialog} className="drummer-mode" role="dialog" aria-modal="true" aria-label={t('鼓手模式', 'Drummer mode')}><p>{t('這份歌單還沒有可播放的歌曲。', 'This setlist has no songs.')}</p><button onClick={() => onClose()}>{t('返回歌單', 'Back to setlist')}</button></div>, document.body);
+  if (!active) return createPortal(<div ref={dialog} className="drummer-mode" role="dialog" aria-modal="true" aria-label={t('鼓手模式', 'Drummer mode')}><p>{t('這份歌單還沒有可播放的歌曲。', 'This setlist has no songs.')}</p><button onClick={() => requestClose()}>{t('返回歌單', 'Back to setlist')}</button></div>, document.body);
 
   return createPortal(<div ref={dialog} className="drummer-mode" role="dialog" aria-modal="true" aria-labelledby="drummer-title" data-drummer-mode data-stage={stage} data-fullscreen={fullscreen.isFullscreen} data-view={view}
     onKeyDownCapture={event => {
@@ -527,7 +544,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
           <div className="drummer-tempo">
             <button data-drummer-action="tempoDown" aria-label={t('減少 1 BPM', 'Decrease 1 BPM')} disabled={bpm === undefined || bpm <= 20} onClick={() => adjustTempo(-1)}><Minus size={24}/></button>
             <label><input ref={tempoInput} aria-label={t('節拍器速度 BPM', 'Metronome tempo BPM')} aria-describedby="drummer-beat-unit" style={{ '--tempo-digits': Math.max(3, draft.length) } as React.CSSProperties} inputMode="decimal" autoComplete="off" value={draft} placeholder="—" aria-invalid={invalidTempo || undefined}
-              onFocus={event => event.currentTarget.select()} onChange={event => setDraft(event.target.value.replace(/[^\d.]/g, ''))} onBlur={commitTempo} onKeyDown={event => { if (event.key === 'Enter') { commitTempo(); event.currentTarget.blur(); } }}/><span>BPM</span><button className="drummer-reset-tempo" aria-label={t('還原速度', 'Reset tempo')} title={isPlayableTempo(active.song.tempo) ? `${t('還原速度', 'Reset tempo')} · ${active.song.tempo} BPM` : t('未設定原始速度', 'No original tempo')} disabled={!isPlayableTempo(active.song.tempo) || bpm === active.song.tempo} onClick={event => {event.preventDefault(); if (isPlayableTempo(active.song.tempo)) setTempo(active.song.tempo!);}}><RotateCcw size={16}/></button><span id="drummer-beat-unit" className="sr-only">{t('BPM 計拍單位：', 'BPM beat unit: ')}{beatUnit}</span></label>
+              onFocus={event => event.currentTarget.select()} onChange={event => { const raw = event.target.value.replace(/[^\d.]/g, ''); const [whole, ...fraction] = raw.split('.'); setDraft(whole.slice(0, 3) + (raw.includes('.') ? '.' + fraction.join('').slice(0, 1) : '')); }} onBlur={commitTempo} onKeyDown={event => { if (event.key === 'Enter') { commitTempo(); event.currentTarget.blur(); } }}/><span>BPM</span><button className="drummer-reset-tempo" aria-label={t('還原速度', 'Reset tempo')} title={isPlayableTempo(active.song.tempo) ? `${t('還原速度', 'Reset tempo')} · ${active.song.tempo} BPM` : t('未設定原始速度', 'No original tempo')} disabled={!isPlayableTempo(active.song.tempo) || bpm === active.song.tempo} onClick={event => {event.preventDefault(); if (isPlayableTempo(active.song.tempo)) setTempo(active.song.tempo!);}}><RotateCcw size={16}/></button><span id="drummer-beat-unit" className="sr-only">{t('BPM 計拍單位：', 'BPM beat unit: ')}{beatUnit}</span></label>
             <button data-drummer-action="tempoUp" aria-label={t('增加 1 BPM', 'Increase 1 BPM')} disabled={bpm === undefined || bpm >= 400} onClick={() => adjustTempo(1)}><Plus size={24}/></button>
           </div>
           <div className="drummer-beats" role="group" aria-label={t('每拍重音', 'Beat accents')} style={{ gridTemplateColumns: `repeat(${Math.min(beats, 6)}, minmax(0, 1fr))` }}>
@@ -651,7 +668,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
             </select></label>
             {meter?.compound && <label>{t('BPM 計拍單位', 'BPM beat unit')}<select disabled={busy} value={grouped ? 'group' : 'base'} onChange={e => setGroupings(values => ({ ...values, [activeId]: e.target.value === 'group' }))}><option value="base">{t('八分音符', 'Eighth note')}</option><option value="group">{t('附點四分音符', 'Dotted quarter')}</option></select></label>}
             {(['volume', 'accent', 'regular', 'subdivisions'] as const).map((key, index) => <label className="drummer-volume" key={key}>{[t('總音量', 'Volume'), t('重音', 'Accent'), t('一般拍', 'Beat'), t('細分拍', 'Subdivision')][index]}<input type="range" min="0" max="1" step="0.05" value={preferences[key]} onChange={e => setPreferences(p => ({ ...p, [key]: Number(e.target.value) }))}/><output>{Math.round(preferences[key] * 100)}%</output></label>)}
-            <p>{t('速度與拍號僅用於本次鼓手模式。支援的瀏覽器可在背景繼續播放；回到畫面會同步目前拍點。', 'Tempo and meter changes apply to this session only. Keep this view open; hiding the app stops playback.')}</p>
+            <p>{t('速度與拍號僅用於本次鼓手模式。演出播放在支援的瀏覽器可於背景繼續播放；回到畫面會同步目前拍點。', 'Tempo and meter changes apply to this session only. Performance playback may continue in the background on supported browsers; the beat display resynchronizes on return.')}</p>
           </div>
       </section>
     </div>

@@ -34,15 +34,22 @@ const page = () => Number(document.querySelector('[data-performance-page]')!.get
 const pedal = (type: 'keydown' | 'keyup', key = 'PageDown', repeat = false) => fireEvent(window, new KeyboardEvent(type, { key, code: key, repeat, bubbles: true, cancelable: true }));
 
 describe('on-stage offline and page-turner stability', () => {
-  it('pauses owned and shared background reads and keeps keyboard/manual turns through disconnect and reconnect', async () => {
+  it('keeps live updates and keyboard/manual turns through disconnect and reconnect', async () => {
     await start();
-    expect((sync.owned.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(true);
-    expect((sync.joined.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(true);
+    expect((sync.owned.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(false);
+    expect((sync.joined.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(false);
     act(() => { pedal('keydown'); pedal('keyup'); }); expect(page()).toBe(2);
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     act(() => window.dispatchEvent(new Event('offline')));
     act(() => { pedal('keydown'); pedal('keydown', 'PageDown', true); pedal('keyup'); }); expect(page()).toBe(3);
     const at = page();
+    const overlay = document.querySelector('[data-performance-overlay]');
+    const remote = structuredClone(fixture);
+    remote.setlists[0].songs[0].overrideKey = 'D';
+    const owned = (sync.owned.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0];
+    act(() => owned.onUpdate(remote));
+    expect(page()).toBe(at);
+    expect(document.querySelector('[data-performance-overlay]')).toBe(overlay);
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
     act(() => { window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')); });
     expect(page()).toBe(at);

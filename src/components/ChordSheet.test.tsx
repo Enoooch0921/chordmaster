@@ -844,6 +844,28 @@ describe('ChordSheet preview input caret', () => {
     expect(container.querySelector('[data-preview-section-id="section-1"]')).toHaveStyle({ maxHeight: barRowCount === 1 ? '34px' : '68px' });
   });
 
+  it.each([
+    { riff: '1 | 2 | 3 | 4' },
+    { rhythm: 'q q q q' },
+    { riff: '1 | 2 | 3 | 4', rhythm: 'q q q q' }
+  ])('keeps three-line melody/rhythm rows at the same flexible height as chord-only rows (%j)', notation => {
+    const source: Song = { ...song, barRowCount: 3, sections: [
+      { id: 'intro', title: 'Intro', bars: [{ id: 'intro-bar', chords: ['C'], ...notation }] },
+      { id: 'verse', title: 'Verse', bars: [{ id: 'verse-bar', chords: ['C'] }] }
+    ] };
+    const before = JSON.stringify(source);
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    for (const id of ['intro', 'verse']) {
+      const row = container.querySelector(`[data-preview-section-id="${id}"]`) as HTMLElement;
+      expect(row).toHaveClass('flex-1');
+      expect(row.style.maxHeight).toBe('');
+      expect(row.style.minHeight).toBe('');
+    }
+    expect(container.querySelector('[data-preview-bottom-lane]')).toHaveStyle({ top: '40px' });
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
   it('keeps sparse multi-voice notation near its chords while reserving every voice row', () => {
     const source: Song = { ...song, barRowCount: 3, sections: [{ id: 'section-1', title: 'Verse', bars: [{ id: 'bar-1', chords: ['C'], rhythm: 'q q q q', riff: '1 | 2 | 3 | 4',
       rhythmVoices: [{ id: 'kick', label: 'Kick', rhythm: 'q' }], riffVoices: [{ id: 'bass', label: 'Bass', riff: '5' }, { id: 'flute', label: 'Flute', riff: '3' }]
@@ -2980,4 +3002,29 @@ it('holds the preview still during a touch section drag until the finger reaches
     const after=createEvent.touchMove(label,{touches:[{identifier:9,clientX:20,clientY:200}],cancelable:true,bubbles:true});
     fireEvent(label,after);expect(after.defaultPrevented).toBe(false);
   } finally {vi.useRealTimers();}
+});
+
+it.each([1, 2])('shows Capo %i immediately after the chart key, before tempo and meter', capo => {
+  const onMetaClick = vi.fn();
+  const { container, rerender } = render(<ChordSheet song={{ ...song, tempo: 120, capo }} language="en" currentKey="C" previewIdentity="capo-check" onMetaClick={onMetaClick}/>);
+  const key = container.querySelector('[data-preview-edit-hit="capo-check|meta|key"]')!;
+  const control = container.querySelector<HTMLElement>('[data-sheet-capo]')!;
+  const tempo = container.querySelector('[data-preview-edit-hit="capo-check|meta|tempo"]')!;
+  const meter = container.querySelector('[data-preview-edit-hit="capo-check|meta|timeSignature"]')!;
+  expect(control).toHaveTextContent(`Capo ${capo}`);
+  expect(key.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(control.compareDocumentPosition(tempo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(tempo.compareDocumentPosition(meter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(control.previousElementSibling?.previousElementSibling).toBe(key);
+  fireEvent.click(control);
+  expect(onMetaClick).toHaveBeenCalledWith('capo', expect.objectContaining({ anchorKey: 'capo-check|meta|capo' }));
+  rerender(<ChordSheet song={{ ...song, tempo: 120, capo: 0 }} language="en" currentKey="C" previewIdentity="capo-check" onMetaClick={onMetaClick}/>);
+  expect(container.querySelector('[data-sheet-capo]')).toBeNull();
+  expect(container.querySelector('[data-preview-edit-hit="capo-check|meta|key"]')).toBe(key);
+});
+
+it.each([0, undefined])('hides the chart Capo label when capo is %s', capo => {
+  const { container } = render(<ChordSheet song={{ ...song, capo }} language="en" currentKey="C"/>);
+  expect(container.querySelector('[data-sheet-capo]')).toBeNull();
+  expect(screen.queryByText(/^Capo /)).toBeNull();
 });

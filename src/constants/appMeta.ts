@@ -85,6 +85,19 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-01',
+        title: 'Reliable drummer controls and clearer chart changes',
+        bullets: [
+          'Recover native Click output after app interruptions; preload sounds and balance their volume against Ableton Live Classic.',
+          'Keep native BPM input with one decimal place and improve mobile keyboard positioning and touch recovery.',
+          'Refresh setlist changes during normal and Performance modes while preserving the active Click timing and chart position.',
+          'Add per-song measure-height shortcuts and show meaningful chart changes with aligned miniature measures.',
+          'Remove Guitarist mode and show a positive Capo beside the chart Key; hide Capo 0.',
+          'Other-app music mixing is excluded; physical iPhone/iPad background and lock-screen verification remains pending.'
+        ]
+      },
+      {
+        version: '0.12.4',
         date: '2026-10-31',
         title: 'Toggle Click by tapping a song',
         bullets: [
@@ -928,6 +941,19 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-01',
+        title: '鼓手播放、同步與清楚的小節差異',
+        bullets: [
+          '改善切換 App 後的 Click 原生音訊恢復，開啟時預載音色，並以 Ableton Live Classic 平衡三組音量。',
+          '保留一位小數的原生 BPM 輸入，改善手機鍵盤遮擋與收鍵盤後的觸控定位。',
+          '一般與演出模式持續接收歌單更新，保留選曲、翻頁位置與播放中的 Click 時序。',
+          '歌單加入每首小節高度快捷設定，版本比對忽略等價和弦記法，並以小節顯示真正內容差異。',
+          '移除吉他手模式，Capo 放在樂譜 Key 右側，0 不顯示。',
+          '不包含其他 App 音樂混音共存功能；背景、鎖屏及聲音輸出仍待實體 iPhone／iPad 確認。'
+        ]
+      },
+      {
+        version: '0.12.4',
         date: '2026-10-31',
         title: '點歌名切換 Click 播放／停止',
         bullets: [

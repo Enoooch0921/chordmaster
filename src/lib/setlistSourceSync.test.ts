@@ -116,3 +116,11 @@ it('builds a separate song from the edited score without changing the source or 
   expect(() => createSetlistSourceCopy(preview, '新編版', 'song')).toThrow('own name and identity');
   expect(() => createSetlistSourceCopy(preview, ' ', 'new-song')).toThrow('own name and identity');
 });
+
+it('describes translation settings separately from actual lyrics text edits', () => {
+ const library = {...song,lyricsDoc:{chinese:'原歌詞',english:'Same words'}};
+ const entry = {...library,lyricsDoc:{...library.lyricsDoc,translationLanguage:'ko'}};
+ expect(describeSetlistSourceChanges(library,entry,'zh')).toEqual(['歌詞翻譯語言設定']);
+ entry.lyricsDoc.chinese='新歌詞';
+ expect(describeSetlistSourceChanges(library,entry,'zh')).toEqual(['歌詞文字','歌詞翻譯語言設定']);
+});
