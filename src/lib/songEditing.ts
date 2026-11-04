@@ -1067,9 +1067,10 @@ export const duplicateSection = (
   };
 };
 
-export const insertSectionAfter = (
+const insertSectionAtSide = (
   song: Song,
   sectionId: string,
+  side: 'before' | 'after',
   title = ''
 ): SectionMutationResult => {
   const located = findSongSection(song, sectionId);
@@ -1084,7 +1085,7 @@ export const insertSectionAfter = (
 
   const section = createEmptySection(title);
   const sections = [...song.sections];
-  sections.splice(located.sectionIndex + 1, 0, section);
+  sections.splice(located.sectionIndex + (side === 'after' ? 1 : 0), 0, section);
   return {
     song: { ...song, sections: normalizeSectionKeyChanges(song, sections) },
     sectionId: section.id ?? sectionId,
@@ -1092,6 +1093,14 @@ export const insertSectionAfter = (
     created: true
   };
 };
+
+export const insertSectionAfter = (song: Song, sectionId: string, title = ''): SectionMutationResult => (
+  insertSectionAtSide(song, sectionId, 'after', title)
+);
+
+export const insertSectionBefore = (song: Song, sectionId: string, title = ''): SectionMutationResult => (
+  insertSectionAtSide(song, sectionId, 'before', title)
+);
 
 export const deleteSection = (song: Song, sectionId: string): Song => {
   if (song.sections.length <= 1) return song;

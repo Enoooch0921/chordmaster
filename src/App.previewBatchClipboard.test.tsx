@@ -62,6 +62,7 @@ it.each(['小節', '和弦', '節奏', '簡譜'])('copies complete bars once and
   expect(screen.queryByRole('menuitem', { name: '複製和弦' })).toBeNull();
   fireEvent.click(screen.getByRole('menuitem', { name: '複製小節' }));
   fireEvent.contextMenu(bar(4), { clientX: 150, clientY: 150 });
+  fireEvent.click(screen.getByRole('menuitem', { name: '貼上…' }));
   const group = screen.getByRole('group', { name: '貼上' });
   expect(within(group).getAllByRole('menuitem').map(item => item.textContent)).toEqual(['小節', '和弦', '節奏', '簡譜']);
   expect(screen.getByRole('menuitem', { name: '貼到前方' })).not.toBeDisabled();
@@ -168,4 +169,86 @@ it('retains chord and rhythm selection across the subdivision editor and mode sw
   fireEvent.click(screen.getByRole('button', { name: '切換到節奏' }));
   expect(bar(0).querySelector('[data-rhythm-cursor-unit]')).toHaveAttribute('data-rhythm-cursor-unit', cursor);
   expect(within(bar(0)).getByRole('button', { name: 'Select rhythm note 4' })).toHaveAttribute('aria-pressed', 'true');
+}, 15000);
+
+it.each(['songs', 'setlists'])('inserts one blank bar before the right-clicked bar and restores it with undo in %s', async mode => {
+  await start(mode);
+  const originalOrder = [...document.querySelectorAll<HTMLElement>('[data-preview-clipboard-bar]')].map(node => node.dataset.previewClipboardBar);
+  fireEvent.contextMenu(bar(0), { clientX: 150, clientY: 150 });
+  expect(screen.queryByRole('group', { name: '貼上' })).toBeNull();
+  expect(screen.queryByRole('menuitem', { name: '清除房子' })).toBeNull();
+  fireEvent.click(screen.getByRole('menuitem', { name: '在前面插入一小節' }));
+  const inserted = document.querySelector<HTMLElement>('[data-preview-selected-bar]')!;
+  expect(inserted).not.toBeNull();
+  expect(inserted.querySelector('[data-chord-root]')).toBeNull();
+  expect([...document.querySelectorAll<HTMLElement>('[data-preview-clipboard-bar]')].slice(1).map(node => node.dataset.previewClipboardBar)).toEqual(originalOrder);
+  expect(bar(0).querySelector('[data-chord-root]')?.textContent).toBe('C');
+  fireEvent.click(document.querySelector<HTMLButtonElement>('[data-preview-undo]')!);
+  await waitFor(() => expect([...document.querySelectorAll<HTMLElement>('[data-preview-clipboard-bar]')].map(node => node.dataset.previewClipboardBar)).toEqual(originalOrder));
+}, 15000);
+
+it.each(['songs', 'setlists'])('inserts a section before the first label, opens naming, and preserves the original score in %s', async mode => {
+  await start(mode);
+  fireEvent.click(screen.getByRole('button', { name: '開啟段落操作 Verse' }));
+  fireEvent.click(await screen.findByRole('button', { name: '在前面插入段落' }));
+  const input = await screen.findByRole('textbox', { name: '段落名稱' });
+  fireEvent.change(input, { target: { value: 'Intro' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() => expect(screen.getByRole('button', { name: '開啟段落操作 Intro' })).toBeInTheDocument());
+  const labels = screen.getAllByRole('button', { name: /^開啟段落操作 / }).map(node => node.getAttribute('aria-label'));
+  expect(labels).toEqual(['開啟段落操作 Intro', '開啟段落操作 Verse']);
+  expect(bar(0).querySelector('[data-chord-root]')?.textContent).toBe('C');
+  expect(fixture.songs[0].sections).toHaveLength(1);
+}, 15000);
+
+it('inserts a section before its displayed target in a reordered setlist', async () => {
+  const song = fixture.setlists[0].songs[0].songData!;
+  song.sections.push({ id: 'chorus', title: 'Chorus', bars: [{ id: 'chorus-bar', chords: ['G'] }] });
+  fixture.setlists[0].songs[0].sectionOrder = ['chorus', 'verse'];
+  await start('setlists');
+  fireEvent.click(screen.getByRole('button', { name: '開啟段落操作 Verse' }));
+  fireEvent.click(await screen.findByRole('button', { name: '在前面插入段落' }));
+  const input = await screen.findByRole('textbox', { name: '段落名稱' });
+  fireEvent.change(input, { target: { value: 'Intro' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() => expect(screen.getAllByRole('button', { name: /^開啟段落操作 / }).map(node => node.getAttribute('aria-label'))).toEqual(['開啟段落操作 Chorus', '開啟段落操作 Intro', '開啟段落操作 Verse']));
+}, 15000);
+
+it('opens ending options only on request and returns keyboard focus to the parent action', async () => {
+  await start();
+  fireEvent.contextMenu(bar(0), { clientX: 150, clientY: 150 });
+  fireEvent.click(screen.getByRole('menuitem', { name: '房子…' }));
+  expect(screen.getByRole('menuitem', { name: '清除房子' })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('menuitem', { name: '1' }), { key: 'Escape' });
+  expect(screen.getByRole('menuitem', { name: '房子…' })).toHaveFocus();
+  fireEvent.click(screen.getByRole('menuitem', { name: '房子…' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '1' }));
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(bar(0)).toHaveTextContent('1');
+}, 15000);
+
+it.each(['songs', 'setlists'])('keeps an inserted section when naming is cancelled and removes it with one undo in %s', async mode => {
+  await start(mode);
+  fireEvent.click(screen.getByRole('button', { name: '開啟段落操作 Verse' }));
+  fireEvent.click(await screen.findByRole('button', { name: '在前面插入段落' }));
+  fireEvent.click(await screen.findByRole('button', { name: '取消段落名稱編輯' }));
+  expect(screen.getAllByRole('button', { name: /^開啟段落操作 / }).map(node => node.getAttribute('aria-label'))).toEqual(['開啟段落操作 新段落', '開啟段落操作 Verse']);
+  fireEvent.click(document.querySelector<HTMLButtonElement>('[data-preview-undo]')!);
+  await waitFor(() => expect(screen.queryByRole('button', { name: '開啟段落操作 新段落' })).toBeNull());
+  expect(bar(0).querySelector('[data-chord-root]')?.textContent).toBe('C');
+}, 15000);
+
+it('inserts before a bar inside a draft without losing input and supports draft undo and cancel', async () => {
+  await start();
+  fireEvent.click(bar(0).querySelector<HTMLElement>('[data-preview-slot-index="0"]')!);
+  fireEvent.change(await screen.findByRole('textbox', { name: '和弦直接輸入' }), { target: { value: 'Em7' } });
+  fireEvent.contextMenu(bar(0));
+  fireEvent.click(screen.getByRole('menuitem', { name: '在前面插入一小節' }));
+  expect(document.querySelectorAll('[data-preview-clipboard-bar]')).toHaveLength(9);
+  expect(bar(0)).toHaveTextContent('Em7');
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  expect(document.querySelectorAll('[data-preview-clipboard-bar]')).toHaveLength(8);
+  expect(bar(0)).toHaveTextContent('Em7');
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(bar(0).querySelector('[data-chord-root]')?.textContent).toBe('C');
 }, 15000);

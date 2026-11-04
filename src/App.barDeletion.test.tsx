@@ -161,7 +161,7 @@ it.each(['songs', 'setlists'] as const)('clears, closes, reopens and undoes the 
   const original = await renderBatchPreview(mode);
   fireEvent.contextMenu(batchBar(0));
   expect(screen.getByRole('menuitem', { name: '關閉此小節' })).toBeDisabled();
-  expect(screen.getByText('請先清空小節，再關閉')).toBeInTheDocument();
+  expect(screen.getByRole('menuitem', { name: '關閉此小節' })).toHaveAttribute('title', '請先清空小節，再關閉');
   fireEvent.click(screen.getByRole('menuitem', { name: '清空此小節' }));
   expect(batchBar(0)).not.toHaveTextContent('C');
   expect(batchBar(1)).toHaveTextContent('Dm');

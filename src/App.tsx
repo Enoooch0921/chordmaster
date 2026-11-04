@@ -1,7 +1,7 @@
 import SlidingSelection from './components/ui/SlidingSelection';
 import { useContentSwitchMotion } from './hooks/useContentSwitchMotion';
 import { loadChordInputPreference, saveChordInputPreference } from './lib/chordInputPreference';
-import PreviewPasteMenu, { PreviewPasteChoices } from './components/PreviewPasteMenu';
+import PreviewPasteMenu from './components/PreviewPasteMenu';
 import { usePreviewKeyboardVisibility } from './hooks/usePreviewKeyboardVisibility';
 import { SwipeActionGroup, SwipeActionRow } from './components/SwipeActionRow';
 import { canCloseBar, isClosedBar } from './utils/closedBar';
@@ -138,6 +138,7 @@ import type { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
 const PreviewWysiwygEditor = React.lazy(() => import('./components/PreviewWysiwygEditor'));
 import PreviewBarEditor from './components/preview-edit/PreviewBarEditor';
 import PreviewSectionActionMenu from './components/preview-edit/PreviewSectionActionMenu';
+import PreviewBarMenuActions from './components/preview-edit/PreviewBarMenuActions';
 import PreviewSectionTitleEditor from './components/preview-edit/PreviewSectionTitleEditor';
 import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
 const SongEditor = React.lazy(() => import('./components/SongEditor'));
@@ -184,7 +185,7 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Check, Minus, Keyboard, Eraser, Pin, PinOff } from 'lucide-react';
+import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Check, Minus, Keyboard, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
@@ -241,6 +242,7 @@ import {
   getChordStorageModeForTarget,
   insertBar,
   insertSectionAfter,
+  insertSectionBefore,
   mergeSectionToPrevious,
   pasteBarsAtBar,
   PasteBarsMode,
@@ -3831,7 +3833,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     );
   };
 
-  const handleSetlistSongContentChange = (nextSong: Song) => {
+  const handleSetlistSongContentChange = (nextSong: Song, insertion?: { sectionId: string; beforeSectionId: string }) => {
     if (!selectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) {
       return;
     }
@@ -3851,7 +3853,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         ? nextSong.currentKey
         : (currentSetlistSong.overrideKey ?? nextSong.currentKey),
       ...(!isCloudMode ? { capo: nextSong.capo ?? 0 } : {}),
-      sectionOrder: syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong, nextSong),
+      sectionOrder: (() => {
+        const order = syncSetlistSectionOrder(currentSetlistSong.sectionOrder, activeSetlistEditableSong, nextSong);
+        if (!insertion) return order;
+        const withoutInserted = order.filter(id => id !== insertion.sectionId);
+        const index = withoutInserted.indexOf(insertion.beforeSectionId);
+        if (index < 0) return order;
+        withoutInserted.splice(index, 0, insertion.sectionId);
+        return withoutInserted;
+      })(),
       songData: cloneSong(normalizeSongBars(nextSong))
     }));
   };
@@ -8721,10 +8731,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     window.requestAnimationFrame(refreshPreviewEditAnchorRect);
   }, [activeEditorSong, activePreviewIdentity, findPreviewAnchorRect, hasFinePointer, refreshPreviewEditAnchorRect]);
 
-  const finishPreviewSectionAction = React.useCallback((action: 'duplicate' | 'merge-previous' | 'delete') => {
+  const finishPreviewSectionAction = React.useCallback((action: 'insert-before' | 'duplicate' | 'merge-previous' | 'delete') => {
     const target = previewSectionActionTarget;
     const editorSong = activeEditorSong;
-    if (!target || !editorSong || target.previewIdentity !== activePreviewIdentity) return;
+    if (!canOpenEditor || !target || !editorSong || target.previewIdentity !== activePreviewIdentity) return;
     if (action === 'delete' && editorSong.sections.length <= 1) return;
     if (action === 'delete') {
       const confirmed = window.confirm(
@@ -8736,18 +8746,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
 
     const editableSong = ensureSongEditingIds(editorSong);
+    // A persisted blank, unnamed section is pruned by structural repair. Give
+    // insertion a name before opening the title editor, including on Cancel.
     const result = action === 'duplicate'
       ? duplicateSection(editableSong, target.sectionId)
       : action === 'merge-previous'
         ? mergeSectionToPrevious(editableSong, target.sectionId)
-        : null;
+        : action === 'insert-before' ? insertSectionBefore(editableSong, target.sectionId, language === 'zh' ? '新段落' : 'New section') : null;
     const nextSong = action === 'delete'
       ? deleteSection(editableSong, target.sectionId)
       : result?.song ?? editableSong;
     if (nextSong === editableSong) return;
 
     if (isSetlistMode) {
-      handleSetlistSongContentChange(nextSong);
+      handleSetlistSongContentChange(nextSong, action === 'insert-before' && result
+        ? { sectionId: result.sectionId, beforeSectionId: target.sectionId } : undefined);
     } else {
       handleSongChange(nextSong);
     }
@@ -8759,7 +8772,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       ?? null;
     setPreviewSectionActionTarget(null);
     setPreviewEditSession(null);
+    setActiveBar(null);
     setActiveSectionId(nextActiveSectionId);
+    if (action === 'insert-before' && result?.created) {
+      const anchorKey = `${target.previewIdentity}|${result.sectionId}|section|sectionName|title`;
+      setPreviewEditSession(createPreviewEditSession({
+        song: nextSong,
+        target: {
+          kind: 'section', previewIdentity: target.previewIdentity,
+          sectionId: result.sectionId, barId: result.firstBarId ?? '', field: 'sectionName',
+          slotIndex: 0, rawChordIndex: null, anchorKey, anchorRect: target.anchorRect
+        },
+        inputMode: 'letters'
+      }));
+      window.requestAnimationFrame(() => window.requestAnimationFrame(refreshPreviewEditAnchorRect));
+    }
     if (nextActiveSectionId) {
       window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
         sheetRef.current
@@ -8767,7 +8794,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }));
     }
-  }, [activeEditorSong, activePreviewIdentity, handleSetlistSongContentChange, handleSongChange, isSetlistMode, language, previewSectionActionTarget]);
+  }, [activeEditorSong, activePreviewIdentity, canOpenEditor, handleSetlistSongContentChange, handleSongChange, isSetlistMode, language, previewSectionActionTarget, refreshPreviewEditAnchorRect]);
 
   React.useEffect(() => {
     clearPendingPreviewSectionAction();
@@ -14583,6 +14610,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 canDelete={activeEditorSong.sections.length > 1}
                 canMergePrevious={activeEditorSong.sections.findIndex((section) => section.id === previewSectionActionTarget.sectionId) > 0}
                 onRename={() => openPreviewSectionTitleEditor(previewSectionActionTarget)}
+                onInsertBefore={() => finishPreviewSectionAction('insert-before')}
                 onDuplicate={() => finishPreviewSectionAction('duplicate')}
                 onMergePrevious={() => finishPreviewSectionAction('merge-previous')}
                 onDelete={() => finishPreviewSectionAction('delete')}
@@ -14608,7 +14636,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               const allClosed = selectedCount > 0 && selectedBars.every(({ bar }) => isClosedBar(bar));
               const canClose = selectedCount > 0 && selectedBars.every(({ bar }) => canCloseBar(bar));
               const canClear = selectedBars.some(({ bar }) => !canCloseBar(bar));
-              const cellLabel = selectedCount > 1 ? (language === 'zh' ? '選取小節' : 'selected bars') : (language === 'zh' ? '此小節' : 'this bar');
               const clipboardContent = previewClipboardRef.current?.content;
               const clipboardCount = clipboardContent?.items.length ?? 0;
               const canPaste = clipboardCount > 0;
@@ -14619,9 +14646,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 : Math.min(Math.max(8, previewBarContextMenu.clientX), Math.max(8, window.innerWidth - menuWidth - 8));
               const menuTop = typeof window === 'undefined'
                 ? previewBarContextMenu.clientY
-                : Math.min(Math.max(8, previewBarContextMenu.clientY), Math.max(8, window.innerHeight - 550));
+                : Math.min(Math.max(8, previewBarContextMenu.clientY), Math.max(8, window.innerHeight - 380));
               const menuButtonClass = 'flex min-h-10 w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-700';
-              const endingButtonClass = 'flex h-8 min-w-0 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700';
               return (
                 <PresenceSurface
                   custom={uiMotion} variants={popoverVariants} initial={uiMotion.instant ? false : "hidden"} animate="visible" exit="exit"
@@ -14630,7 +14656,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   role="menu"
                   aria-label={language === 'zh' ? '小節批量操作' : 'Batch bar actions'}
                   data-preview-edit-ui
-                  className="fixed z-[5300] w-[280px] overflow-y-auto overscroll-contain rounded-xl bg-white p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
+                  className="fixed z-[5300] w-[280px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl bg-[var(--color-surface)] p-2 shadow-[0_18px_48px_rgba(15,23,42,0.22)]"
                   style={{ transformOrigin: "0% 0%", left: menuLeft, top: menuTop, maxHeight: `calc(100dvh - ${menuTop + 8}px)` }}
                   onKeyDown={event => {
                     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setPreviewBarContextMenu(null); }
@@ -14651,66 +14677,33 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       <ClipboardPaste size={14} />
                       <span>{language === 'zh' ? '新增小節並貼上' : 'Add bars and paste'}</span>
                     </button>
-                  ) : <>
-                  <div className="mb-1 border-b border-slate-100 px-2 pb-2 text-[11px] font-black text-slate-500">
-                    {language === 'zh' ? `已選 ${selectedCount} 小節` : `${selectedCount} bar${selectedCount === 1 ? '' : 's'} selected`}
-                  </div>
-                  <button type="button" role="menuitem" className={menuButtonClass} aria-label={language === 'zh' ? `清空${cellLabel}` : `Clear ${cellLabel}`} disabled={!canClear} onClick={() => changePreviewBarCells('clear')}>
-                    <Eraser size={16} className="shrink-0" aria-hidden="true" />
-                    <span><span className="block">{language === 'zh' ? `清空${cellLabel}` : `Clear ${cellLabel}`}</span><span className="mt-0.5 block text-xs font-normal text-slate-500">{language === 'zh' ? '移除內容與記號，保留小節位置' : 'Remove content and marks; keep the cell'}</span></span>
-                  </button>
-                  <button type="button" role="menuitem" className={`${menuButtonClass} disabled:!opacity-100 disabled:!text-slate-400`} aria-label={language === 'zh' ? `${allClosed ? '重新開啟' : '關閉'}${cellLabel}` : `${allClosed ? 'Reopen' : 'Close'} ${cellLabel}`} disabled={!allClosed && !canClose} onClick={() => changePreviewBarCells(allClosed ? 'reopen' : 'close')}>
-                    {allClosed ? <Plus size={16} className="shrink-0" aria-hidden="true" /> : <Minus size={16} className="shrink-0" aria-hidden="true" />}
-                    <span><span className="block">{language === 'zh' ? `${allClosed ? '重新開啟' : '關閉'}${cellLabel}` : `${allClosed ? 'Reopen' : 'Close'} ${cellLabel}`}</span><span className="mt-0.5 block text-xs font-normal text-slate-500">{language === 'zh' ? allClosed ? '恢復空白格，可繼續輸入' : canClose ? '顯示橫線，後方小節不移動' : '請先清空小節，再關閉' : allClosed ? 'Restore an empty cell for entry' : canClose ? 'Show a line; keep later bars in place' : 'Clear the bar before closing it'}</span></span>
-                  </button>
-                  <div role="separator" className="my-2 border-t border-slate-100" />
-                  <button type="button" role="menuitem" aria-label={language === 'zh' ? (selectedCount > 1 ? '刪除選取小節' : '刪除小節') : (selectedCount > 1 ? 'Delete selected bars' : 'Delete bar')} className={`${menuButtonClass} !text-red-700 hover:!bg-red-50 hover:!text-red-800`} disabled={!selectedCount} onClick={() => {
-                    if (previewBarContextMenu.previewIdentity !== activePreviewIdentity) return;
-                    deletePreviewBars(sourceSong, getPreviewBatchTargets(previewBarContextMenu));
-                  }}>
-                    <Trash2 size={16} className="shrink-0" aria-hidden="true" />
-                    <span><span className="block">{language === 'zh' ? (selectedCount > 1 ? '刪除選取小節' : '刪除小節') : (selectedCount > 1 ? 'Delete selected bars' : 'Delete bar')}</span><span className="mt-0.5 block text-xs font-normal text-red-700">{language === 'zh' ? '移除小節，後方小節往前移' : 'Remove bars; move later bars forward'}</span></span>
-                  </button>
-                  <div role="separator" className="my-2 border-t border-slate-100" />
-                  <button type="button" role="menuitem" aria-label={language === 'zh' ? '複製小節' : 'Copy bars'} className={menuButtonClass} onClick={copyPreviewSelectedBars}>
-                    <Copy size={14} /><span>{language === 'zh' ? '複製小節' : 'Copy bars'}</span>
-                    <span className="ml-auto text-xs text-slate-500">⌘C</span>
-                  </button>
-                  <PreviewPasteChoices language={language} count={clipboardCount} disabled={!canPaste} onChoose={kind => {
-                    if (clipboardContent) pasteHoveredPreviewContent({ ...clipboardContent, kind }, { ...previewBarContextMenu, field: 'bars' });
-                  }} />
-                      <button type="button" role="menuitem" disabled={!canInsertBars} className={menuButtonClass} onClick={() => pastePreviewBarsAtContextTarget('before')}>
-                        <ClipboardPaste size={14} />
-                        <span>{language === 'zh' ? '貼到前方' : 'Paste before'}</span>
-                      </button>
-                      <button type="button" role="menuitem" disabled={!canInsertBars} className={menuButtonClass} onClick={() => pastePreviewBarsAtContextTarget('after')}>
-                        <ClipboardPaste size={14} />
-                        <span>{language === 'zh' ? '貼到後方' : 'Paste after'}</span>
-                      </button>
-                  <div className="mt-2 border-t border-slate-100 pt-2">
-                    <div className="mb-1 flex items-center gap-1 px-2 text-[11px] font-black text-slate-500">
-                      <Hash size={12} />
-                      <span>{language === 'zh' ? '房子' : 'Ending'}</span>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1">
-                      {(['1', '2', '3', '1,2'] as const).map((ending) => (
-                        <button
-                          key={ending}
-                          type="button"
-                          role="menuitem"
-                          className={endingButtonClass}
-                          onClick={() => applyPreviewEndingToTargets(ending, 'set', previewBarContextMenu)}
-                        >
-                          {ending}
-                        </button>
-                      ))}
-                    </div>
-                    <button type="button" role="menuitem" className={`${menuButtonClass} mt-1`} onClick={() => applyPreviewEndingToTargets(undefined, 'set', previewBarContextMenu)}>
-                      <Minus size={14} />
-                      <span>{language === 'zh' ? '清除房子' : 'Clear ending'}</span>
-                    </button>
-                  </div>
-                  </>}
+                  ) : <PreviewBarMenuActions
+                    key={`${previewBarContextMenu.previewIdentity}:${previewBarContextMenu.sectionId}:${previewBarContextMenu.barId}:${previewBarContextMenu.clientX}:${previewBarContextMenu.clientY}`}
+                    language={language} selectedCount={selectedCount} allClosed={allClosed} canClose={canClose} canClear={canClear}
+                    clipboardCount={clipboardCount} canInsertCopiedBars={Boolean(canInsertBars)}
+                    onCopy={copyPreviewSelectedBars}
+                    onPaste={kind => { if (clipboardContent) pasteHoveredPreviewContent({ ...clipboardContent, kind }, { ...previewBarContextMenu, field: 'bars' }); }}
+                    onPasteAt={pastePreviewBarsAtContextTarget}
+                    onInsertBefore={() => {
+                      if (previewBarContextMenu.previewIdentity !== activePreviewIdentity) return;
+                      const newBar = createEmptyBar();
+                      const nextSong = insertBar(sourceSong, previewBarContextMenu, 'before', newBar);
+                      if (nextSong === sourceSong) return;
+                      if (activePreviewEditSession) applyPreviewEditDraft(nextSong);
+                      else commitPreviewBarBatchSong(nextSong, sourceSong);
+                      const insertedTarget = { previewIdentity: previewBarContextMenu.previewIdentity, sectionId: previewBarContextMenu.sectionId, barId: newBar.id! };
+                      setPreviewSelectedBars([insertedTarget]);
+                      previewSelectionAnchorRef.current = insertedTarget;
+                      setPreviewBarContextMenu(null);
+                      if (!activePreviewEditSession) setActiveBar(null);
+                    }}
+                    onClear={() => changePreviewBarCells('clear')}
+                    onToggleClosed={() => changePreviewBarCells(allClosed ? 'reopen' : 'close')}
+                    onEnding={ending => applyPreviewEndingToTargets(ending, 'set', previewBarContextMenu)}
+                    onDelete={() => {
+                      if (previewBarContextMenu.previewIdentity === activePreviewIdentity) deletePreviewBars(sourceSong, getPreviewBatchTargets(previewBarContextMenu));
+                    }}
+                  />}
                 </PresenceSurface>
               );
             })()}

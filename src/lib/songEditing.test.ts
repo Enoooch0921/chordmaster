@@ -29,6 +29,7 @@ import {
   insertBar,
   insertChordBeatBeforeSlot,
   insertSectionAfter,
+  insertSectionBefore,
   normalizeChordTextInput,
   normalizeChordBeatTokens,
   setBarChordText,
@@ -600,6 +601,17 @@ describe('section commands', () => {
       sectionSong.sections[0].bars.map((bar) => bar.chords)
     );
     expect(sectionSong).toEqual(original);
+  });
+
+  it('inserts before the first section without changing its music or key change', () => {
+    const original = structuredClone(sectionSong);
+    const result = insertSectionBefore(sectionSong, 'section-a');
+    expect(result.created).toBe(true);
+    expect(result.song.sections.map(section => section.id)).toEqual([result.sectionId, 'section-a']);
+    expect(result.song.sections[0].bars).toEqual([{ id: result.firstBarId, chords: [] }]);
+    expect(result.song.sections[1]).toEqual(sectionSong.sections[0]);
+    expect(sectionSong).toEqual(original);
+    expect(insertSectionBefore(sectionSong, 'missing').song).toBe(sectionSong);
   });
 
   it('inserts a new blank section after the source section', () => {

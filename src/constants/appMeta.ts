@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-04',
+        title: "Compact chart menus and insert-before actions",
+        bullets: [
+          "Shorter bar context menus keep paste options and ending marks in a second level.",
+          "Insert a blank bar before the clicked bar, or insert and name a section before any section label, including the first.",
+          "Keep setlist section order and undo behavior when inserting before existing content.",
+          "Capitalize the first letter of words in chart annotations and custom navigation text, such as Build and To Chorus."
+        ]
+      },
+      {
+        version: '0.12.8',
+        date: '2026-11-04',
         title: "Clearer score replacement directions",
         bullets: [
           "Keep library and setlist names visible above long comparisons, with an arrow pointing from the chosen score to the version being replaced.",
@@ -975,6 +986,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-04',
+        title: "精簡右鍵選單與前插操作",
+        bullets: [
+          "精簡小節右鍵選單，貼上種類與房子設定收進次層。",
+          "可在目前小節前插入一小節；點段落標籤可在前方新增段落，包含第一個段落，並直接命名。",
+          "前插保留歌單自訂段落順序，支援復原與編輯中的取消操作。",
+          "譜面註記與自訂導覽標籤自動顯示單字首字母大寫，例如 Build、To Chorus。"
+        ]
+      },
+      {
+        version: '0.12.8',
         date: '2026-11-04',
         title: "更清楚的譜面覆蓋方向",
         bullets: [

@@ -185,7 +185,7 @@ const formatEndingDisplay = (ending: string | undefined) => {
   return /^\d+$/.test(trimmed) ? `${trimmed}.` : trimmed;
 };
 
-const formatBarAnnotation = (annotation: string) => annotation;
+const formatBarAnnotation = formatInitialCaps;
 
 const PREVIEW_CHORD_SLOT_ACTIVE_CLASS = 'preview-section-active-chord';
 const PREVIEW_CENTERED_CHORD_ACTIVE_CLASS = 'preview-section-active-chord pointer-events-none absolute inset-0 rounded';
@@ -2918,8 +2918,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
                         : undefined,
                     }));
                     const barLabel = getBarDisplayLabel(bar);
-                    const leftNavigationText = bar?.leftText?.trim();
-                    const rightNavigationText = bar?.rightText?.trim() || getDefaultRightNavigationText(bar?.rightMarker);
+                    const leftNavigationText = formatInitialCaps(bar?.leftText?.trim() ?? '');
+                    const rightNavigationText = formatInitialCaps(bar?.rightText?.trim() ?? '') || getDefaultRightNavigationText(bar?.rightMarker);
                     const isRightTextOnlyMarker = Boolean(bar?.rightMarker && TEXT_ONLY_NAVIGATION_MARKERS.has(bar.rightMarker));
                     const hasBarLabel = Boolean(barLabel);
                     const globalBarNumber = (sectionBarOffsets[row.sIdx] ?? 0) + (song.sections[row.sIdx]?.bars.slice(0,row.startBIdx+bIdx).filter(bar=>!hasUnmeteredChords(bar) && !isClosedBar(bar)).length ?? 0) + 1;

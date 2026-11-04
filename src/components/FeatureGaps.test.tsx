@@ -51,10 +51,12 @@ it('renders the selected key mode in score headers without turning major chords 
   expect(container.querySelector('[data-preview-owner-slot="0"]')).not.toHaveTextContent('Dm');
 });
 
-it('preserves annotation case in the score and subdivision rows keep timing markers outside shrink clipping', () => {
+it('capitalizes displayed annotation words while subdivision timing markers stay outside shrink clipping', () => {
   const annotation = 'EG G4 F/C 8 beats · rit. pno';
-  const { container } = render(<ChordSheet song={{ ...source, sections: [{ ...source.sections[0], bars: [{ id: 'bar', chords: ['E/A<', '', '', ''], chordSubdivisions: [{ beat: 0, offset: .5, chord: 'D/A' }], annotation }] }] }} currentKey="D" language="zh" />);
-  expect(screen.getByText(annotation)).toBeInTheDocument();
+  const annotatedSong: Song = { ...source, sections: [{ ...source.sections[0], bars: [{ id: 'bar', chords: ['E/A<', '', '', ''], chordSubdivisions: [{ beat: 0, offset: .5, chord: 'D/A' }], annotation }] }] };
+  const { container } = render(<ChordSheet song={annotatedSong} currentKey="D" language="zh" />);
+  expect(screen.getByText('EG G4 F/C 8 Beats · Rit. Pno')).toBeInTheDocument();
+  expect(annotatedSong.sections[0].bars[0].annotation).toBe(annotation);
   const row = container.querySelector('[data-notation-aligned-chords="beats"]');
   expect(row).not.toBeNull();
   expect(row?.querySelector('[data-chord-event-kind="primary"] [data-chord-marker="push"]')).not.toBeNull();
@@ -178,6 +180,6 @@ it('keeps tempo changes as compact key-change badges without increasing row spac
   expect(badge).toHaveClass('-top-[10px]');
   expect(badge).toHaveTextContent('Key: E');
   expect(badge).toHaveTextContent('68.5');
-  expect(screen.getByText('AG 8 beats')).toBeInTheDocument();
+  expect(screen.getByText('AG 8 Beats')).toBeInTheDocument();
   for (const row of container.querySelectorAll<HTMLElement>('[data-preview-layout-weight]')) expect(row.style.marginTop).toBe('');
 });

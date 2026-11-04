@@ -23,6 +23,7 @@ describe('PreviewSectionActionMenu', () => {
         canDelete={false}
         canMergePrevious={false}
         onRename={vi.fn()}
+        onInsertBefore={vi.fn()}
         onDuplicate={onDuplicate}
         onMergePrevious={vi.fn()}
         onDelete={vi.fn()}
@@ -48,6 +49,7 @@ describe('PreviewSectionActionMenu', () => {
         canDelete
         canMergePrevious
         onRename={vi.fn()}
+        onInsertBefore={vi.fn()}
         onDuplicate={vi.fn()}
         onMergePrevious={onMergePrevious}
         onDelete={vi.fn()}
@@ -69,13 +71,14 @@ describe('PreviewSectionActionMenu', () => {
         canDelete
         canMergePrevious={false}
         onRename={vi.fn()}
+        onInsertBefore={vi.fn()}
         onDuplicate={vi.fn()}
         onMergePrevious={vi.fn()}
         onDelete={vi.fn()}
         onClose={vi.fn()}
       />
     );
-    expect(screen.getByText('段落操作')).toBeInTheDocument();
+    expect(screen.getByLabelText('段落操作')).toBeInTheDocument();
 
     rerender(
       <PreviewSectionActionMenu
@@ -86,6 +89,7 @@ describe('PreviewSectionActionMenu', () => {
         canDelete
         canMergePrevious
         onRename={vi.fn()}
+        onInsertBefore={vi.fn()}
         onDuplicate={vi.fn()}
         onMergePrevious={vi.fn()}
         onDelete={vi.fn()}
