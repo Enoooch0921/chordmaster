@@ -31,7 +31,7 @@ it('compares graphical changes and uploads a local personal setlist with a durab
  const dialog=await screen.findByRole('dialog');
  await waitFor(()=>expect(dialog.querySelectorAll('[data-score-excerpt]')).toHaveLength(2));
  expect(live().songs[0].sections[0].bars[0].chords).toEqual(['C']);
- fireEvent.click(within(dialog).getByRole('button',{name:'用歌單版本更新歌曲庫'}));
+ fireEvent.click(within(dialog).getByRole('button',{name:'用歌單版本覆蓋歌曲庫'}));
  await waitFor(()=>expect(live().songs[0].sections[0].bars[0].chords).toEqual(['G']));
  await waitFor(()=>expect(document.querySelector('[data-source-sync-overlay]')).toBeNull());
  expect(state.preview).not.toHaveBeenCalled();expect(state.reconcile).not.toHaveBeenCalled();
@@ -43,7 +43,7 @@ it('lets an unknown local legacy copy compare and explicitly choose a version',a
  fireEvent.click(await screen.findByRole('button',{name:'比對差異與方向'}));
  expect(await screen.findByRole('button',{name:'請先選擇更新方向'})).toBeDisabled();
  fireEvent.click(screen.getByRole('radio',{name:/取用歌曲庫版本，更新這份歌單/}));
- fireEvent.click(screen.getByRole('button',{name:'從歌曲庫更新此歌單'}));
+ fireEvent.click(screen.getByRole('button',{name:'用歌曲庫版本覆蓋此歌單'}));
  await waitFor(()=>expect(live().setlists[0].songs[0].songData!.sections[0].bars[0].chords).toEqual(['C']));
  expect(live().songs[0].sections[0].bars[0].chords).toEqual(['C']);
 },15000);
@@ -53,7 +53,7 @@ it('exposes the same preview and protected RPC sync in an owned cloud personal l
  state.reconcile.mockResolvedValue({source:{...fixture.songs[0],sections:entry.songData!.sections,updatedAt:2},entry,direction:'to-library',setlistUpdatedAt:2});
  await mount();fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
  await screen.findByRole('dialog');expect(state.preview).toHaveBeenCalledWith('personal','entry');expect(state.reconcile).not.toHaveBeenCalled();
- fireEvent.click(screen.getByRole('button',{name:'用歌單版本更新歌曲庫'}));
+ fireEvent.click(screen.getByRole('button',{name:'用歌單版本覆蓋歌曲庫'}));
  await waitFor(()=>expect(state.reconcile).toHaveBeenCalledWith(expect.objectContaining({libraryId:'personal',entryId:'entry'}),'to-library'));
  await waitFor(()=>expect(document.querySelector('[data-source-sync-overlay]')).toBeNull());
 },15000);

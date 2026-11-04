@@ -1,13 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import type { Song } from '../types';
-const mocks = vi.hoisted(() => ({ preview: vi.fn(), sync: vi.fn() }));
+const mocks = vi.hoisted(() => ({ preview: vi.fn(), sync: vi.fn(), download: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../lib/setlistSourceSync', async original => ({ ...await original<typeof import('../lib/setlistSourceSync')>(),
   previewSetlistSourceSync: mocks.preview, reconcileSetlistSource: mocks.sync }));
+vi.mock('../lib/recovery', () => ({ downloadRecoveryData: mocks.download }));
 import SetlistSourceSyncControl from './SetlistSourceSyncControl';
 const song: Song = { title: 'Song', currentKey: 'C', originalKey: 'C', timeSignature: '4/4', sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'bar', chords: ['C'] }] }] };
 const edited = structuredClone(song); edited.sections[0].bars[0].chords = ['G'];
-beforeAll(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); HTMLDialogElement.prototype.showModal = function () { this.open = true; }; HTMLDialogElement.prototype.close = function () { this.open = false; }; });
+beforeAll(() => { HTMLElement.prototype.scrollIntoView = vi.fn(); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); HTMLDialogElement.prototype.showModal = function () { this.open = true; }; HTMLDialogElement.prototype.close = function () { this.open = false; }; });
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.preview.mockResolvedValue({ libraryId: 'team', entryId: 'entry', source: { ...song, id: 'song', updatedAt: 1 }, sourceRevision: '2026-10-26T00:00:00Z', overrideJson: { songData: edited }, setlistName: '聚會一', status: 'setlist-changed', baseline: null });
@@ -26,7 +27,7 @@ it('requires an explicit preview and confirmation before uploading', async () =>
   await screen.findByRole('row', { name: 'Verse · 第 1 小節 · 和弦' });
   expect(prepare).toHaveBeenCalledOnce();
   expect(mocks.sync).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '用歌單版本更新歌曲庫' }));
+  fireEvent.click(screen.getByRole('button', { name: '用歌單版本覆蓋歌曲庫' }));
   await waitFor(() => expect(onSynced).toHaveBeenCalledOnce());
   expect(screen.getByRole('status')).toHaveTextContent('已用「聚會一」的版本更新歌曲庫');
 });
@@ -59,9 +60,9 @@ it('offers only the refresh direction for an unchanged stale copy', async () => 
   mocks.preview.mockResolvedValue({ ...value, status: 'source-newer' });
   mount();
   fireEvent.click(screen.getByRole('button', { name: '預覽歌單 → 歌曲庫' }));
-  await screen.findByRole('button', { name: '從歌曲庫更新此歌單' });
-  expect(screen.queryByRole('button', { name: '用歌單版本更新歌曲庫' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '從歌曲庫更新此歌單' }));
+  await screen.findByRole('button', { name: '用歌曲庫版本覆蓋此歌單' });
+  expect(screen.queryByRole('button', { name: '用歌單版本覆蓋歌曲庫' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '用歌曲庫版本覆蓋此歌單' }));
   await waitFor(() => expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ status: 'source-newer' }), 'to-setlist'));
 });
 it.each(['conflict','unknown'])('requires choosing a version explicitly for %s', async status => {
@@ -72,7 +73,7 @@ it.each(['conflict','unknown'])('requires choosing a version explicitly for %s',
   expect(await screen.findByRole('button', { name: '請先選擇更新方向' })).toBeDisabled();
   expect(mocks.sync).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('radio', { name: /取用歌曲庫版本，更新這份歌單/ }));
-  fireEvent.click(screen.getByRole('button', { name: '從歌曲庫更新此歌單' }));
+  fireEvent.click(screen.getByRole('button', { name: '用歌曲庫版本覆蓋此歌單' }));
   await waitFor(() => expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ status }), 'to-setlist'));
 });
 it('blocks another upload after a conflict until a fresh preview is loaded', async () => {
@@ -81,12 +82,15 @@ it('blocks another upload after a conflict until a fresh preview is loaded', asy
   await screen.findByRole('dialog');
   await screen.findByRole('row', { name: 'Verse · 第 1 小節 · 和弦' });
   mocks.sync.mockRejectedValueOnce({ message: '歌曲庫已被其他人修改' });
-  fireEvent.click(screen.getByRole('button', { name: '用歌單版本更新歌曲庫' }));
+  fireEvent.click(screen.getByRole('button', { name: '用歌單版本覆蓋歌曲庫' }));
   await screen.findByRole('alert');
-  expect(screen.getByRole('button', { name: '用歌單版本更新歌曲庫' })).toBeDisabled();
+  expect(document.querySelector('.source-sync-pinned')).toHaveAttribute('data-sync-direction', 'invalidated');
+  expect(document.querySelector('.source-sync-direction-arrow')).toBeNull();
+  expect(screen.getByText('比對已失效，請重新比對後再確認。')).toBeVisible();
+  expect(screen.getByRole('button', { name: '用歌單版本覆蓋歌曲庫' })).toBeDisabled();
   expect(onSynced).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '重新比對' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '用歌單版本更新歌曲庫' })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('button', { name: '用歌單版本覆蓋歌曲庫' })).toBeEnabled());
 });
 it('cancels without changing the source', async () => {
   mount(); fireEvent.click(screen.getByRole('button', { name: '預覽歌單 → 歌曲庫' }));
@@ -104,6 +108,8 @@ it('saves the reviewed setlist version under a new name without reconciling the 
   await screen.findByRole('dialog');
   fireEvent.click(screen.getByText('想保留兩份？另存新歌曲'));
   fireEvent.click(screen.getByRole('radio', { name: '另存成新歌曲，保留原曲' }));
+  expect(document.querySelector('.source-sync-direction-arrow')).toBeNull();
+  expect(screen.getByRole('group', { name: '另存新歌曲，保留兩份原版本' })).toBeInTheDocument();
   const input = screen.getByRole('textbox', { name: '新歌曲名稱' });
   fireEvent.change(input, { target: { value: '   ' } });
   expect(screen.getByRole('button', { name: '確認另存新歌曲' })).toBeDisabled();
@@ -126,7 +132,7 @@ it('retains the chosen name and new identity when refreshing after a failed save
   fireEvent.click(screen.getByRole('button', { name: '確認另存新歌曲' }));
   await screen.findByRole('alert');
   fireEvent.click(screen.getByRole('button', { name: '重新比對' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '用歌單版本更新歌曲庫' })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('button', { name: '用歌單版本覆蓋歌曲庫' })).toBeEnabled());
   if (!screen.queryByRole('radio', { name: '另存成新歌曲，保留原曲' })) fireEvent.click(screen.getByText('想保留兩份？另存新歌曲'));
   fireEvent.click(screen.getByRole('radio', { name: '另存成新歌曲，保留原曲' }));
   expect(screen.getByRole('textbox', { name: '新歌曲名稱' })).toHaveValue('保留的歌名');
@@ -139,18 +145,24 @@ it('keeps current versions in named columns and makes the chosen source and affe
  const value=await mocks.preview(); mocks.preview.mockResolvedValue({...value,status:'conflict'});
  mount(); fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
  await screen.findByRole('dialog');
- expect(screen.getByRole('columnheader',{name:'歌曲庫版本'})).toBeInTheDocument();
- expect(screen.getByRole('columnheader',{name:'歌單 · 聚會一'})).toBeInTheDocument();
+ expect(screen.getByRole('columnheader',{name:'歌曲庫版本 尚未選擇'})).toBeInTheDocument();
+ expect(screen.getByRole('columnheader',{name:'歌單 · 聚會一 尚未選擇'})).toBeInTheDocument();
  const row=screen.getByRole('row',{name:'Verse · 第 1 小節 · 和弦'});
  expect(row.children[0]).toHaveTextContent('C'); expect(row.children[1]).toHaveTextContent('G');
  expect(screen.getAllByRole('radio').every(r=>!(r as HTMLInputElement).checked)).toBe(true);
  fireEvent.click(screen.getByRole('radio',{name:/取用歌曲庫版本，更新這份歌單/}));
- expect(screen.getByRole('columnheader',{name:'歌曲庫版本 將採用此版本'})).toBeInTheDocument();
- expect(screen.getByRole('columnheader',{name:'歌單 · 聚會一 將被更新'})).toBeInTheDocument();
- expect(screen.getByText('只更新「聚會一」中的這首歌。歌曲庫與其他歌單保持不變。')).toBeInTheDocument();
+ expect(screen.getByRole('group',{name:'歌曲庫 → 歌單'})).toHaveAttribute('data-sync-direction','to-setlist');
+ expect(document.querySelector('[data-sync-version="library"]')).toHaveAttribute('data-adopted');
+ expect(document.querySelector('.source-sync-pinned')?.closest('.source-sync-body')).toBeNull();
+ expect(screen.getByRole('columnheader',{name:'歌曲庫版本 取用這份譜面'})).toBeInTheDocument();
+ expect(screen.getByRole('columnheader',{name:'歌單 · 聚會一 這份譜面將被覆蓋'})).toBeInTheDocument();
+ expect(screen.getByText('將用歌曲庫版本，覆蓋「聚會一」中這首歌的譜面。')).toBeInTheDocument();
  fireEvent.click(screen.getByRole('radio',{name:/取用歌單版本，更新歌曲庫原曲/}));
- expect(screen.getByRole('columnheader',{name:'歌曲庫版本 將被更新'})).toBeInTheDocument();
- expect(screen.getByRole('columnheader',{name:'歌單 · 聚會一 將採用此版本'})).toBeInTheDocument();
+ expect(screen.getByRole('group',{name:'歌曲庫 ← 歌單'})).toHaveAttribute('data-sync-direction','to-library');
+ expect(document.querySelector('[data-sync-version="library"]')).not.toHaveAttribute('data-adopted');
+ expect(document.querySelector('[data-sync-version="setlist"]')).toHaveAttribute('data-adopted');
+ expect(screen.getByRole('columnheader',{name:'歌曲庫版本 這份譜面將被覆蓋'})).toBeInTheDocument();
+ expect(screen.getByRole('columnheader',{name:'歌單 · 聚會一 取用這份譜面'})).toBeInTheDocument();
  expect(row.children[0]).toHaveTextContent('C');expect(row.children[1]).toHaveTextContent('G');
  expect(mocks.sync).not.toHaveBeenCalled();
 });
@@ -223,6 +235,38 @@ it('shows actual score measures for added continuation marks without initiating 
  expect(difference.querySelectorAll('[data-diff-fields="chords"]')).toHaveLength(2);
  expect(difference.querySelector('[data-diff-side="setlist"]')).toHaveTextContent('D / D/E /');
  expect(difference.querySelector('[data-diff-side="library"]')).toHaveTextContent('D D/E');
- expect(screen.getByRole('button',{name:'用歌單版本更新歌曲庫'})).toBeEnabled();
+ expect(screen.getByRole('button',{name:'用歌單版本覆蓋歌曲庫'})).toBeEnabled();
+ expect(mocks.sync).not.toHaveBeenCalled();
+});
+
+it('opens backup options from the fixed footer and downloads individually importable copies without syncing', async () => {
+ mount(); fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
+ await screen.findByRole('dialog');
+ fireEvent.click(screen.getByRole('button',{name:'備份選項'}));
+ const summary=screen.getByText('更新範圍、備份與版本紀錄');
+ expect(summary.closest('details')).toHaveAttribute('open');expect(summary).toHaveFocus();
+ for (const [label, chord, side] of [['下載歌曲庫備份','C','library'],['下載歌單備份','G','setlist']]) {
+  fireEvent.click(screen.getByRole('button',{name:label}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:label})).toBeEnabled());
+  const [payload,filename]=mocks.download.mock.calls.at(-1)!;
+  expect(payload.songs).toHaveLength(1);
+  expect(payload.songs[0].id).not.toBe('song');
+  expect(payload.songs[0].sections[0].bars[0].chords).toEqual([chord]);
+  expect(payload.comparison).toMatchObject({side,sourceSongId:'song',setlistName:'聚會一'});
+  expect(filename).toMatch(/\.json$/);
+ }
+ expect(mocks.sync).not.toHaveBeenCalled();
+ expect(screen.getByRole('button',{name:'用歌單版本覆蓋歌曲庫'})).toBeEnabled();
+});
+it('keeps the chosen update direction after a failed backup download and allows retry', async () => {
+ mocks.download.mockRejectedValueOnce(new Error('download unavailable'));
+ mount();fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
+ await screen.findByRole('dialog');fireEvent.click(screen.getByRole('button',{name:'備份選項'}));
+ fireEvent.click(screen.getByRole('button',{name:'下載歌單備份'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('備份下載失敗');
+ expect(screen.getByRole('button',{name:'用歌單版本覆蓋歌曲庫'})).toBeEnabled();
+ expect(screen.getByRole('group',{name:'歌曲庫 ← 歌單'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'下載歌單備份'}));
+ await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
  expect(mocks.sync).not.toHaveBeenCalled();
 });

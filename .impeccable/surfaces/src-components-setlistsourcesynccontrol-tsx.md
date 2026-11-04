@@ -34,3 +34,13 @@ Verified local synthetic comparisons at 1280×900 and 390×844 in both themes, i
 The same compact notice, fixed comparison columns and graphical score differences now serve owned personal cloud libraries and local workspaces. Local commands validate both the live draft and the latest IndexedDB copy, then atomically save a backup and the accepted version. Unknown historical baselines require an explicit choice. Joined setlists remain outside source reconciliation.
 
 Verified the real App with synthetic local data at 1280×900 and 390×844, in light and dark themes. The mobile confirmation remains visible, notation colors remain readable, and a successful sync removes the notice after a full reload. App integration tests also cover personal cloud preview and reconciliation.
+
+## Persistent replacement direction — 2026-11-04
+
+Keep library on the left and the named setlist on the right. A fixed two-column band outside the scrolling body labels the source “取用這份譜面” and destination “這份譜面將被覆蓋”; its arrow points from source to destination. Unknown/conflicting versions start unselected. Save-as has no replacement arrow, and invalidated comparisons replace adoption styling with a refresh instruction. Accessible table column headers retain both identities and roles.
+
+The fixed footer names the actual replacement action and offers backup options. Each download is a single-song JSON file with a fresh identity and a version-labelled title, using the existing append-single import flow. Downloads do not reconcile or mutate scores. System backups and concurrency checks remain intact.
+
+Only the body can scroll. The dialog and layout use overflow clipping so WebKit focus scrolling cannot move the fixed header/footer. Phone confirmation uses a full-width row. On very short phones the explicit action label supplies the repeated scope; backup options remain accessible while explanatory footer copy is reduced. Long names remain available in accessible text and title attributes.
+
+Verified synthetic 18-measure comparisons in WebKit at 320×568, 390×844, 834×1194, 1194×834 and 844×390, including both directions, dark English long names, scrolling and backup download. Component/App/source-sync tests cover direction, stale versions, save-as and independent backup downloads.

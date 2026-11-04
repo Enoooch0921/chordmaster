@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-04',
+        title: "Clearer score replacement directions",
+        bullets: [
+          "Keep library and setlist names visible above long comparisons, with an arrow pointing from the chosen score to the version being replaced.",
+          "Name the source and destination explicitly in the fixed confirmation area; give the main action a full row on phones.",
+          "Download either reviewed version as a separate song backup, ready to import as a new personal song.",
+          "Keep comparison headers and actions in place when Safari scrolls to focused controls, including narrow and landscape layouts."
+        ]
+      },
+      {
+        version: '0.12.7',
+        date: '2026-11-04',
         title: "Setlist score comparisons and steadier iPad performance",
         bullets: [
           "Add source update notices, visual score comparisons and guarded synchronization to personal setlists, including local offline workspaces.",
@@ -964,6 +975,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-04',
+        title: "更清楚的譜面覆蓋方向",
+        bullets: [
+          "長清單捲動時，頂部固定顯示歌曲庫、歌單名稱與更新方向箭頭。",
+          "明確標示「取用這份譜面」與「這份譜面將被覆蓋」，底部按鈕直接寫出覆蓋目的地；手機主要按鈕獨立一列。",
+          "可分別下載目前比對的歌曲庫與歌單版本備份，匯入個人曲庫時新增為歌曲副本。",
+          "修正 Safari 選取清單底部選項時整個比對視窗被捲走的情況，兼顧小螢幕與橫向顯示。"
+        ]
+      },
+      {
+        version: '0.12.7',
         date: '2026-11-04',
         title: "歌單圖示比對與 iPad 演出修正",
         bullets: [
