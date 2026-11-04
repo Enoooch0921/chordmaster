@@ -22,11 +22,24 @@ function leaveFullscreen() {
   } catch { /* The browser may already be leaving fullscreen. */ }
 }
 
-export function usePerformanceFullscreen() {
+export function usePerformanceFullscreen(onExited?: () => void) {
   const [isFullscreen, setIsFullscreen] = useState(() => Boolean(fullscreenElement()));
+  const wasFullscreen = useRef(Boolean(fullscreenElement()));
+  const onExitedRef = useRef(onExited);
+  onExitedRef.current = onExited;
   const ownedTarget = useRef<Element | null>(null);
   const wantsFullscreen = useRef(false);
   const mounted = useRef(true);
+  const syncFullscreen = useCallback(() => {
+    const active = Boolean(fullscreenElement());
+    const exited = wasFullscreen.current && !active;
+    wasFullscreen.current = active;
+    setIsFullscreen(active);
+    if (!active) ownedTarget.current = null;
+    // Only a real transition closes the presentation. Unsupported or denied
+    // fullscreen requests must keep windowed performance mode available.
+    if (exited) onExitedRef.current?.();
+  }, []);
   const root = document.documentElement as FullscreenElement;
   const doc = document as FullscreenDocument;
   const canRequestFullscreen = Boolean(
@@ -34,9 +47,9 @@ export function usePerformanceFullscreen() {
     || (root.webkitRequestFullscreen && doc.webkitFullscreenEnabled !== false)
   );
 
-  const exitFullscreen = useCallback(() => {
+  const exitFullscreen = useCallback((explicit = false) => {
     wantsFullscreen.current = false;
-    if (ownedTarget.current && fullscreenElement() === ownedTarget.current) leaveFullscreen();
+    if (fullscreenElement() && (explicit || fullscreenElement() === ownedTarget.current)) leaveFullscreen();
     // Keep the target until a pending request settles, so a quick exit cannot
     // leave the browser fullscreen after performance mode has closed.
   }, []);
@@ -54,32 +67,28 @@ export function usePerformanceFullscreen() {
         : target.webkitRequestFullscreen?.();
       void Promise.resolve(result).then(() => {
         if (!wantsFullscreen.current && fullscreenElement() === target) leaveFullscreen();
-        if (mounted.current) setIsFullscreen(Boolean(fullscreenElement()));
+        if (mounted.current) syncFullscreen();
       }).catch(() => {
         if (ownedTarget.current === target && fullscreenElement() !== target) ownedTarget.current = null;
-        if (mounted.current) setIsFullscreen(Boolean(fullscreenElement()));
+        if (mounted.current) syncFullscreen();
       });
     } catch {
       if (ownedTarget.current === target) ownedTarget.current = null;
       // Windowed performance mode remains usable if the browser rejects it.
     }
-  }, [canRequestFullscreen]);
+  }, [canRequestFullscreen, syncFullscreen]);
 
   useEffect(() => {
     mounted.current = true;
-    const sync = () => {
-      setIsFullscreen(Boolean(fullscreenElement()));
-      if (!fullscreenElement()) ownedTarget.current = null;
-    };
-    document.addEventListener('fullscreenchange', sync);
-    document.addEventListener('webkitfullscreenchange', sync);
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    document.addEventListener('webkitfullscreenchange', syncFullscreen);
     return () => {
       mounted.current = false;
+      document.removeEventListener('fullscreenchange', syncFullscreen);
+      document.removeEventListener('webkitfullscreenchange', syncFullscreen);
       exitFullscreen();
-      document.removeEventListener('fullscreenchange', sync);
-      document.removeEventListener('webkitfullscreenchange', sync);
     };
-  }, [exitFullscreen]);
+  }, [exitFullscreen, syncFullscreen]);
 
   return { isFullscreen, canRequestFullscreen, requestFullscreen, exitFullscreen };
 }

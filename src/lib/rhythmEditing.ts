@@ -238,6 +238,7 @@ const preserveEventModifiers = (
 ): RhythmEditableEvent => {
   if (nextEvent.isRest || nextEvent.isSlash) {
     const keepTripletRest = existingEvent.triplet
+      && !existingEvent.isRest
       && existingEvent.base === nextEvent.base
       && nextEvent.isRest
       && !nextEvent.triplet;
@@ -454,7 +455,19 @@ export const applyRhythmEdit = (
       }
       const positionedTemplate = positionEvent(template, existingEvent.startUnit);
       const replacement = preserveEventModifiers(existingEvent, positionedTemplate, context.timeSignature);
-      const nextBoundary = context.events[existingIndex + 1]?.startUnit ?? context.barUnits;
+      // Explicitly changing a rest between ordinary and triplet timing must
+      // remove/add the tuplet value, then carry following events by that delta.
+      const changesRestTuplet = existingEvent.isRest && template.isRest
+        && existingEvent.base === template.base && existingEvent.triplet !== template.triplet;
+      if (changesRestTuplet) {
+        const delta = replacement.durationUnits - existingEvent.durationUnits;
+        const tail = context.events.slice(existingIndex + 1).map(event => positionEvent(event, event.startUnit + delta));
+        if (rhythmUnitsGreater(tail.at(-1)?.endUnit ?? replacement.endUnit, context.barUnits)) {
+          return result(song, safeCursor, '這個位置沒有足夠的節拍空間。');
+        }
+        nextEvents.splice(existingIndex + 1, tail.length, ...tail);
+      }
+      const nextBoundary = nextEvents[existingIndex + 1]?.startUnit ?? context.barUnits;
       if (rhythmUnitsGreater(replacement.endUnit, nextBoundary)) {
         return result(song, safeCursor, '這個位置沒有足夠的節拍空間。');
       }

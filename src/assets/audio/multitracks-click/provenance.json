@@ -1,0 +1,39 @@
+{
+  "retrievedAt": "2026-10-31",
+  "sourcePage": "https://www.multitracks.com/songs/Bethel-Music/Victory/Goodness-of-God/multitracks/",
+  "sourceTrack": "Click Track (stem 23348806), public preview, user-confirmed timbre",
+  "sourcePreview": "https://mtracks.azureedge.net/public/audio/stems/preview/23348806.m4a",
+  "sourceSha256": "73979336792448087da8423de6ada10980acc91455349c20a6ac475d09913aa3",
+  "sourceFormat": "AAC, stereo, 44100 Hz; this is a preview excerpt, not an original lossless master",
+  "processing": "ffmpeg AAC decode to stereo PCM16 at original 44100 Hz, then sample-exact contiguous single-click cuts. No normalization, filtering, synthesis, pitch shift, time stretch, channel mixing or fade. Near-silent boundaries (at most two PCM16 units) retain pre-ringing and the decay through the quantization noise floor. Only runtime beat gain changes.",
+  "sampleRate": 44100,
+  "channels": 2,
+  "bitsPerSample": 16,
+  "mapping": "The reference alternates these higher/lower clicks. The metronome uses the higher click for strong whole beats and lower click for other beats/subdivisions; rhythm remains controlled by each song setting.",
+  "files": [
+    {
+      "file": "accent.wav",
+      "role": "higher click for accented beats",
+      "decodedFrameStart": 350447,
+      "decodedFrameEndExclusive": 359949,
+      "previewStartSeconds": 7.946643990929705,
+      "previewEndSeconds": 8.162108843537416,
+      "frames": 9502,
+      "durationSeconds": 0.21546485260770976,
+      "peak": 0.258087158203125,
+      "sha256": "82793aaacc7506bb1797ccdb2eace0a5ceabf7b658bc6934f6a49d89c28600db"
+    },
+    {
+      "file": "regular.wav",
+      "role": "lower click for ordinary beats and subdivisions",
+      "decodedFrameStart": 371461,
+      "decodedFrameEndExclusive": 381018,
+      "previewStartSeconds": 8.423151927437642,
+      "previewEndSeconds": 8.639863945578231,
+      "frames": 9557,
+      "durationSeconds": 0.21671201814058957,
+      "peak": 0.341064453125,
+      "sha256": "4ec41ae443e39d61558b82748ede44c0670464d67383d48be7027195fdebf7a6"
+    }
+  ]
+}

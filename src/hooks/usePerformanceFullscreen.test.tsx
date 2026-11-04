@@ -48,6 +48,29 @@ afterEach(() => {
 });
 
 describe('performance fullscreen session', () => {
+  it.each([false, true])('notifies presentation exit exactly once for a real browser exit (prefixed: %s)', async prefixed => {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
+    const browser = mockFullscreen(prefixed);
+    const exited = vi.fn();
+    const { result } = renderHook(() => usePerformanceFullscreen(exited));
+    act(() => browser.setCurrent(null));
+    expect(exited).not.toHaveBeenCalled();
+    await act(async () => result.current.requestFullscreen());
+    act(() => { browser.setCurrent(null); browser.setCurrent(null); });
+    expect(exited).toHaveBeenCalledOnce();
+    expect(result.current.isFullscreen).toBe(false);
+  });
+
+  it('keeps the windowed presentation when fullscreen is denied', async () => {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
+    const browser = mockFullscreen();
+    browser.enter.mockRejectedValueOnce(new Error('NotAllowedError'));
+    const exited = vi.fn();
+    const { result } = renderHook(() => usePerformanceFullscreen(exited));
+    await act(async () => result.current.requestFullscreen());
+    expect(exited).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])('requests fullscreen within the click and exits only its own session (prefixed: %s)', async prefixed => {
     Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
     const browser = mockFullscreen(prefixed);
@@ -70,6 +93,18 @@ describe('performance fullscreen session', () => {
     act(() => { result.current.requestFullscreen(); result.current.exitFullscreen(); });
     expect(browser.enter).not.toHaveBeenCalled();
     expect(browser.exit).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('honors an explicit exit even when fullscreen was already active (prefixed: %s)', prefixed => {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
+    const browser = mockFullscreen(prefixed);
+    browser.setCurrent(document.documentElement);
+    const { result } = renderHook(usePerformanceFullscreen);
+    act(() => result.current.requestFullscreen());
+    expect(browser.enter).not.toHaveBeenCalled();
+    act(() => result.current.exitFullscreen(true));
+    expect(browser.exit).toHaveBeenCalledOnce();
+    expect(result.current.isFullscreen).toBe(false);
   });
 
   it('handles denied requests and allows a later user-initiated retry', async () => {

@@ -87,7 +87,29 @@ select pg_temp.assert_true(exists(select 1 from public.team_invites where email=
 select pg_temp.assert_true(public.create_team_invite('admin-test-team','default-person@example.invalid')->>'role'='viewer','two-argument invitation defaults to viewer');
 select pg_temp.expect_error($q$select public.create_team_invite('admin-test-team','new-admin@example.invalid','admin')$q$,'admin invitation cannot grant admin');
 select pg_temp.expect_error($q$insert into public.team_invites(library_id,email,role,token,invited_by) values ('admin-test-team','bypass@example.invalid','viewer','bypass',auth.uid())$q$,'direct invite writes blocked');
-select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000005','admin')$q$,'admin cannot promote another admin');
+-- Each regular role can be promoted by an admin, but cannot grant admin itself.
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000006',true);
+select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000005','admin')$q$,'editor cannot grant admin');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000004',true);
+select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000005','admin')$q$,'setlist manager cannot grant admin');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000005',true);
+select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000006','admin')$q$,'viewer cannot grant admin');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
+select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000005','admin');
+select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000004','admin');
+select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000006','admin');
+select pg_temp.assert_true((select count(*)=3 from public.library_members where library_id='admin-test-team' and user_id in ('10000000-0000-0000-0000-000000000004','10000000-0000-0000-0000-000000000005','10000000-0000-0000-0000-000000000006') and role='admin'),'admin promotes viewer, setlist manager and editor');
+select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000005','viewer')$q$,'newly promoted admin immediately protected');
+select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-other','10000000-0000-0000-0000-000000000005','admin')$q$,'admin cannot grant across teams');
+select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-personal','10000000-0000-0000-0000-000000000005','admin')$q$,'admin cannot grant in personal library');
+select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000007','admin')$q$,'admin cannot grant to non-member');
+select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000005','owner')$q$,'admin cannot grant ownership');
+-- Reset these fixture roles as owner for the remaining permission regression checks.
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000005','viewer');
+select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000004','setlist_manager');
+select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000006','editor');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
 select pg_temp.expect_error($q$select public.update_team_member_role('admin-test-team','10000000-0000-0000-0000-000000000003','viewer')$q$,'admin cannot demote peer admin');
 select pg_temp.expect_error($q$select public.remove_team_member('admin-test-team','10000000-0000-0000-0000-000000000003')$q$,'admin cannot remove peer admin');
 select pg_temp.expect_error($q$select public.remove_team_member('admin-test-team','10000000-0000-0000-0000-000000000001')$q$,'admin cannot remove owner');

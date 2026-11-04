@@ -43,11 +43,14 @@ const GAP = 28;
 const COLUMN_WIDTH = (PAGE_WIDTH - 2 * PAGE_PADDING - GAP) / 2;
 const BOOK_SECTION_HEADING_HEIGHT = 30; // 12 px above the badge, no gap below it.
 const CAPACITY = PAGE_HEIGHT - 2 * PAGE_PADDING - 24;
+const settingClass = 'min-h-10 min-w-0 rounded-md border border-stone-200 bg-white px-2 text-sm text-stone-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500';
 const indentFor = (block: LyricsBlock, fontSize: number) => block.marker && !/^Verse(?:\s|$)/i.test(lyricsSectionLabel(block.marker)) ? fontSize : 0;
 
 export default function LyricsBook({ title, entries, language, settings, onSettingsChange, onSongChange, onSelectSong, onEditSong, reading = false, onReadingChange, exportMode = false }: Props) {
   const zh = language === 'zh';
   const isReading = reading && !exportMode;
+  const layout = settings.layout ?? 'readable';
+  const readable = layout === 'readable';
   const fontSize = settings.fontSize;
   const lineHeight = fontSize * settings.lineHeight;
   const fontFamily = settings.font === 'kaiti' ? LYRICS_BOOK_FONT : 'Arial, sans-serif';
@@ -88,6 +91,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
           : undefined;
         return {
           id: item.id,
+          songId: item.entry.id,
           rowCount: heights?.length ?? Math.max(1, ...fields.map(field => nextRows[item.id][field]?.length ?? 1)),
           lineHeight,
           heights,
@@ -97,7 +101,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
         };
       });
       setRows(current => JSON.stringify(current) === JSON.stringify(nextRows) ? current : nextRows);
-      const nextPages = paginateLyricsBook(measured, CAPACITY, settings.language === 'bilingual' ? 1 : 2);
+      const nextPages = paginateLyricsBook(measured, CAPACITY, settings.language === 'bilingual' ? 1 : 2, layout);
       setPages(current => JSON.stringify(current) === JSON.stringify(nextPages) ? current : nextPages);
     };
     measure();
@@ -107,18 +111,22 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
     return () => { disposed = true; observer?.disconnect(); };
   }, [blocks, title, settings, editing, isReading]);
 
-  const gatheringTitle = () => title ? <div data-book-title style={{ fontWeight: 700, fontSize: 24, lineHeight: '32px', paddingBottom: 8 }}><span style={{ background: '#e7e7e7', border: '1px solid #333', boxDecorationBreak: 'clone' }}>{title}</span></div> : null;
+  const titleHighlight: React.CSSProperties = { background: '#d9d9d9', padding: '0 4px', boxDecorationBreak: 'clone', printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' };
+  const gatheringTitle = () => title ? <div data-book-title style={{ fontWeight: 700, fontSize: 24, lineHeight: '32px', paddingBottom: 8 }}><span style={{ background: '#e7e7e7', border: '1px solid #333', boxDecorationBreak: 'clone', printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}>{title}</span></div> : null;
   const songTitle = (item: BookBlock, measuring = false) => <div data-book-song-title style={{ fontWeight: 700, lineHeight: `${lineHeight}px` }}>
-    {editable && !measuring ? <button type="button" title={zh ? '編輯這首歌的段落' : 'Edit this song’s sections'} onClick={() => onEditSong?.(item.entry.id)} className="text-left" style={{ font: 'inherit', background: '#d9d9d9', padding: '0 4px' }}>《{item.entry.song.title}》</button> : <span style={{ background: '#d9d9d9', boxDecorationBreak: 'clone', padding: '0 4px' }}>《{item.entry.song.title}》</span>}
+    {editable && !measuring ? <button type="button" title={zh ? '編輯這首歌的段落' : 'Edit this song’s sections'} onClick={() => onEditSong?.(item.entry.id)} className="text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500" style={{ ...titleHighlight, font: 'inherit' }}>《{item.entry.song.title}》</button> : <span style={titleHighlight}>《{item.entry.song.title}》</span>}
   </div>;
-  const renderFragment = (fragment: LyricsFragment) => {
+  const renderFragment = (fragment: LyricsFragment, columnPosition: number) => {
     const item = blockMap.get(fragment.blockId);
     if (!item) return null;
     const { block, entry } = item;
     const label = lyricsSectionLabel(block.marker);
-    return <div key={`${item.id}-${fragment.start}`} data-book-block={item.id}>
+    return <div key={`${item.id}-${fragment.start}`} data-book-block={item.id} className="relative">
       {item.bookStart && !fragment.continued && gatheringTitle()}
       {item.first && !fragment.continued && <div data-setlist-preview-song-id={entry.id}>{songTitle(item)}</div>}
+      {readable && !isReading && columnPosition === 0 && (!item.first || fragment.continued) && <div data-book-continuation className="absolute -top-7 left-0 flex max-w-full text-sm font-bold leading-5" style={titleHighlight}>
+        <span className="shrink-0">《</span><span className="truncate" title={entry.song.title}>{entry.song.title}</span><span className="shrink-0">》{zh ? '（續）' : '(continued)'}</span>
+      </div>}
       {label && <h3 style={{ height: BOOK_SECTION_HEADING_HEIGHT, font: 'bold 14px/18px Arial, sans-serif', margin: 0, paddingTop: 12 }}><span className="inline-flex h-[18px] items-center rounded-sm border px-1.5" style={getSectionBadgeStyle(getSectionColor(label).accent)}>{label}{fragment.continued ? ' (cont.)' : ''}</span></h3>}
       {item.missing ? <div style={{ height: lineHeight, fontFamily: 'Arial, sans-serif', fontSize: 14 }} className="text-stone-500">{zh ? '尚無此語言歌詞' : 'No lyrics in this language'}{editable && <button type="button" data-preview-only-control className="ml-2 underline" onClick={() => onEditSong?.(entry.id)}>{zh ? '添加歌詞' : 'Add lyrics'}</button>}</div> : <div className="lyrics-book-languages grid" style={{ gridTemplateColumns: fields.length === 2 ? '1fr 1fr' : '1fr', gap: GAP }}>
         {paired ? <PairedLyrics pairs={pairedBlocks.get(item.id)!} start={isReading ? 0 : fragment.start} end={isReading ? pairedBlocks.get(item.id)!.length : fragment.end} layout={pairLayout}
@@ -161,15 +169,25 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
   const readingPages: LyricsPage[] = [{ columns: [blocks.map(item => ({ blockId: item.id, start: 0, end: 0, continued: false }))] }];
   const displayedPages = isReading ? readingPages : pages;
 
-  return <div className="lyrics-sheet lyrics-book flex flex-col gap-6 text-stone-900" data-preview-suppress-pan="true" style={{ fontFamily }}>
+  return <div className="lyrics-sheet lyrics-book flex flex-col gap-6 text-stone-900" data-book-layout={isReading ? 'reading' : layout} data-preview-suppress-pan="true" style={{ fontFamily }}>
     {!exportMode && <div data-preview-only-control className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-white p-4 text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
-      <span className="font-bold">{zh ? '連續歌詞' : 'Continuous lyrics'}</span>
-      <button type="button" className="rounded border px-3 py-2" onClick={() => onReadingChange?.(!isReading)}>{isReading ? (zh ? 'A4 排版' : 'A4 layout') : (zh ? '大字閱讀' : 'Reading view')}</button>
-      <select aria-label={zh ? '歌單歌詞字體' : 'Setlist lyrics font'} value={settings.font} onChange={e => onSettingsChange?.({ ...settings, font: e.target.value as LyricsBookSettings['font'] })}><option value="kaiti">{zh ? '楷體（聚會樣式）' : 'KaiTi (gathering)'}</option><option value="sans">{zh ? '黑體' : 'Sans serif'}</option></select>
-      <select aria-label={zh ? '歌單歌詞字級' : 'Setlist lyrics size'} value={fontSize} onChange={e => onSettingsChange?.({ ...settings, fontSize: Number(e.target.value) })}>{[14, 16, 18, 20, 24].map(pt => <option key={pt} value={pt * 4 / 3}>{pt} pt</option>)}</select>
-      <select aria-label={zh ? '歌單歌詞行距' : 'Setlist lyrics spacing'} value={settings.lineHeight} onChange={e => onSettingsChange?.({ ...settings, lineHeight: Number(e.target.value) })}>{[1.5, 1.875, 2].map(value => <option key={value} value={value}>{Number((fontSize * value * .75).toFixed(1))} pt {zh ? '行距' : 'leading'}</option>)}</select>
-      <select aria-label={zh ? '歌單歌詞語言' : 'Setlist lyrics language'} value={settings.language} onChange={e => onSettingsChange?.({ ...settings, language: e.target.value as LyricsBookSettings['language'] })}><option value="chinese">中文</option><option value="english">{zh ? '對照語言' : 'Translation'}</option><option value="bilingual">{zh ? '雙語對照' : 'Bilingual'}</option><option value="mixed">{zh ? '雙語混合（逐行）' : 'Chinese / English (alternating lines)'}</option></select>
-      <p className="w-full text-xs text-stone-500">{zh ? '按歌單順序接續排版，填滿左欄後接右欄及下一頁。點歌詞直接編輯，點歌名整理段落。' : 'Songs flow down the left column, then the right and subsequent pages. Click lyrics to edit, or a title to manage sections.'}{missingCount > 0 && ` ${zh ? `${missingCount} 首尚無所選語言歌詞。` : `${missingCount} songs have no lyrics in the selected language.`}`}</p>
+      <div className="flex w-full flex-wrap items-center gap-3">
+        <span className="mr-auto font-bold">{zh ? '歌單歌詞' : 'Setlist lyrics'}</span>
+        <div role="group" aria-label={zh ? '歌詞版面' : 'Lyrics layout'} className="flex flex-wrap gap-1 rounded-lg bg-stone-100 p-1">
+          {(['readable', 'compact', 'reading'] as const).map(value => {
+            const selected = value === 'reading' ? isReading : !isReading && layout === value;
+            return <button key={value} type="button" aria-pressed={selected} className={`min-h-10 rounded-md px-3 py-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${selected ? 'bg-white text-indigo-800 shadow-sm' : 'text-stone-600 hover:bg-white/70'}`} onClick={() => {
+              if (value !== 'reading') onSettingsChange?.({ ...settings, layout: value });
+              onReadingChange?.(value === 'reading');
+            }}>{value === 'readable' ? (zh ? 'A4 易讀版' : 'A4 reading') : value === 'compact' ? (zh ? 'A4 省紙版' : 'A4 compact') : (zh ? '大字閱讀' : 'Reading view')}</button>;
+          })}
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-stone-600">{zh ? '字體' : 'Font'}<select className={settingClass} aria-label={zh ? '歌單歌詞字體' : 'Setlist lyrics font'} value={settings.font} onChange={e => onSettingsChange?.({ ...settings, font: e.target.value as LyricsBookSettings['font'] })}><option value="kaiti">{zh ? '楷體（聚會樣式）' : 'KaiTi (gathering)'}</option><option value="sans">{zh ? '黑體' : 'Sans serif'}</option></select></label>
+      <label className="flex items-center gap-2 text-stone-600">{zh ? '字級' : 'Size'}<select className={settingClass} aria-label={zh ? '歌單歌詞字級' : 'Setlist lyrics size'} value={fontSize} onChange={e => onSettingsChange?.({ ...settings, fontSize: Number(e.target.value) })}>{[14, 16, 18, 20, 24].map(pt => <option key={pt} value={pt * 4 / 3}>{pt} pt</option>)}</select></label>
+      <label className="flex items-center gap-2 text-stone-600">{zh ? '行距' : 'Leading'}<select className={settingClass} aria-label={zh ? '歌單歌詞行距' : 'Setlist lyrics spacing'} value={settings.lineHeight} onChange={e => onSettingsChange?.({ ...settings, lineHeight: Number(e.target.value) })}>{[1.5, 1.875, 2].map(value => <option key={value} value={value}>{Number((fontSize * value * .75).toFixed(1))} pt</option>)}</select></label>
+      <label className="flex min-w-0 items-center gap-2 text-stone-600">{zh ? '語言' : 'Language'}<select className={settingClass} aria-label={zh ? '歌單歌詞語言' : 'Setlist lyrics language'} value={settings.language} onChange={e => onSettingsChange?.({ ...settings, language: e.target.value as LyricsBookSettings['language'] })}><option value="chinese">中文</option><option value="english">{zh ? '對照語言' : 'Translation'}</option><option value="bilingual">{zh ? '雙語對照' : 'Bilingual'}</option><option value="mixed">{zh ? '雙語混合（逐行）' : 'Chinese / English (alternating lines)'}</option></select></label>
+      <p className="w-full text-xs leading-5 text-stone-600">{isReading ? (zh ? '連續閱讀整份歌單，不分欄、不分頁。' : 'Read the setlist continuously, without columns or pages.') : readable ? (zh ? '整首歌優先同欄、同頁，方便來回找主歌與副歌；長歌按完整段落換欄。' : 'Keep each song in one column and on one page where possible; longer songs move by whole sections.') : (zh ? '依序填滿左右欄及下一頁，減少用紙；歌詞段落可能跨欄、跨頁。' : 'Fill columns and pages in order to save paper; sections may cross columns or pages.')} {editable && (zh ? '點歌詞直接編輯，點歌名整理段落。' : 'Click lyrics to edit, or a title to manage sections.')}{missingCount > 0 && ` ${zh ? `${missingCount} 首尚無所選語言歌詞。` : `${missingCount} songs have no lyrics in the selected language.`}`}</p>
     </div>}
     {!isReading && <div ref={measureRef} aria-hidden="true" data-preview-only-control style={{ position: 'absolute', visibility: 'hidden', left: -10000, top: 0, width: settings.language === 'bilingual' ? 2 * COLUMN_WIDTH + GAP : COLUMN_WIDTH, height: 0, overflow: 'hidden', fontSize, lineHeight: `${lineHeight}px` }}>
       {blocks.map(item => <div key={item.id} data-book-measure={item.id}>

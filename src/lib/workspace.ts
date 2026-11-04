@@ -18,7 +18,7 @@ import { normalizeSongReferences } from '../utils/referenceUtils';
 import { normalizeTempoBpm } from '../utils/tempoUtils';
 import { isAnnotationColorId } from '../constants/annotationColors';
 import { repairSongStructure } from './songEditing';
-import { readWorkspaceDatabase, writeWorkspaceDatabase } from './workspaceDatabase';
+import { mutateWorkspaceDatabase, readWorkspaceDatabase, writeWorkspaceDatabase } from './workspaceDatabase';
 
 export const SONG_LIBRARY_STORAGE_KEY = 'chordmaster.song-library.v1';
 export const SETLIST_STORAGE_KEY = 'chordmaster.setlists.v1';
@@ -239,6 +239,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           repeatStart: Boolean(safeBar.repeatStart),
           repeatEnd: Boolean(safeBar.repeatEnd),
           doubleBar: Boolean(safeBar.doubleBar),
+          doubleBarStart: safeBar.doubleBarStart === true ? true : undefined,
           finalBar: Boolean(safeBar.finalBar),
           ending: normalizeOptionalText(safeBar.ending)
         };
@@ -381,6 +382,7 @@ const normalizeSetlistSong = (
       ? sanitizeSetlistSectionOrder(rawSectionOrder, sectionOrderSourceSong)
       : rawSectionOrder,
     songData: normalizedSongData,
+    scoreUpdatedAt: typeof setlistSong.scoreUpdatedAt === 'number' && Number.isFinite(setlistSong.scoreUpdatedAt) ? setlistSong.scoreUpdatedAt : undefined,
     sourceBaseline: setlistSong.sourceBaseline?.songId === songId
       && setlistSong.sourceBaseline.sourceContent && setlistSong.sourceBaseline.entryContent
       && typeof setlistSong.sourceBaseline.sourceRevision === 'string'
@@ -797,6 +799,30 @@ export const persistPersistentWorkspaceSnapshot = async (
   });
   persistentWorkspaceWrite = operation;
   return operation;
+};
+
+/** Reconcile against the latest durable workspace, preserving unrelated tab edits. */
+export const mutatePersistentWorkspaceSnapshot = async (
+  mutate: (workspace: WorkspaceSnapshot) => { workspace: WorkspaceSnapshot; backup: unknown }
+): Promise<WorkspaceSnapshot> => {
+  let result: WorkspaceSnapshot;
+  const operation = persistentWorkspaceWrite.catch(() => undefined).then(async () => {
+    await mutateWorkspaceDatabase(raw => {
+      const current = parseWorkspaceEnvelope(typeof raw === 'string' ? raw : null);
+      if (!current) throw new Error('本機譜面尚未安全儲存，請先儲存後重新比對。');
+      const next = mutate(normalizeWorkspaceEnvelope(current));
+      const savedAt = Date.now();
+      result = { ...next.workspace, lastSavedAt: savedAt };
+      return {
+        serialized: JSON.stringify(createWorkspaceEnvelope(result.songs, result.setlists, result.projects, savedAt)),
+        backupKey: `setlist-source-sync-backup:${crypto.randomUUID()}`,
+        backup: JSON.stringify(next.backup)
+      };
+    });
+  });
+  persistentWorkspaceWrite = operation;
+  await operation;
+  return result!;
 };
 
 export const normalizeMatchingTitle = (title: string) => title.trim().toLowerCase().replace(/\s+/g, ' ');

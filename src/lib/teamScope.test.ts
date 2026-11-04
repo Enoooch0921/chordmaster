@@ -60,7 +60,7 @@ describe('team management scope', () => {
     expect(getTeamScopeSummary('setlist_manager', undefined, 'en')).not.toMatch(/\d/);
     expect(getTeamScopeBoundary('setlist_manager', 'zh')).toContain('不能修改歌詞、和弦或段落');
     expect(getTeamScopeBoundary('owner', 'zh')).toContain('指派或撤銷總管理員');
-    expect(getTeamScopeBoundary('admin', 'zh')).toContain('不能變更擁有者或其他總管理員，也不能指派總管理員');
+    expect(getTeamScopeBoundary('admin', 'zh')).toContain('也可將一般成員升為總管理員；不能變更擁有者或其他總管理員');
   });
 
   it('preserves complete server scope and removes unrelated fields', () => {

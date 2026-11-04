@@ -1,0 +1,20 @@
+{
+  "source": "Ableton Live 12 Suite 12.4.15 (2026-10-16_0bfbf08671), installed by the user",
+  "source_path": "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Misc/Metronome/Samples/",
+  "copied_on": "2026-10-31",
+  "processing": "None. Files copied byte-for-byte. Runtime changes gain only.",
+  "files": [
+    {
+      "file": "Metronome.wav",
+      "sha256": "6183135ea7ba06be573325cc9f1c6dd2918a2a16337b9c96823d206424b91a08",
+      "sample_rate": 44100,
+      "frames": 5090
+    },
+    {
+      "file": "MetronomeUp.wav",
+      "sha256": "886e3bf7716e7b43e1c1192da82c8cb9847bfdcfef696771493fbf7740afcd21",
+      "sample_rate": 44100,
+      "frames": 5090
+    }
+  ]
+}

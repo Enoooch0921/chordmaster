@@ -17,16 +17,22 @@ beforeAll(() => {
 afterEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 it('changes an owned setlist’s personal view without changing its shared arrangement or mode', async () => {
   localStorage.clear();
-  const source = { id: 'song', updatedAt: 1, title: '個人顯示檢查', originalKey: 'C' as const, currentKey: 'C' as const, timeSignature: '4/4', sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'bar', chords: ['C'], riff: '1 | 2 | 3 | 4' }] }] };
+  const source = { id: 'song', updatedAt: 1, title: '個人顯示檢查', originalKey: 'C' as const, currentKey: 'C' as const, timeSignature: '4/4', barRowCount: 3 as const, sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'bar', chords: ['C'], riff: '1 | 2 | 3 | 4' }] }] };
   fixture = { songs: [source], setlists: [{ id: 'set', name: 'Personal mode set', displayMode: 'chord-movable-key', createdAt: 1, updatedAt: 1, songs: [{ id: 'entry', setlistId: 'set', songId: source.id, order: 0, sectionOrder: [], songData: source }] }], projects: [], joinedProjects: [], joinedSetlists: [], lastSavedAt: 1 };
   localStorage.setItem('chordmaster.workspace-mode.v1', 'setlists');
   localStorage.setItem('chordmaster.selected-setlist-id.v1', 'set');
   const { unmount } = render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
   const chart = () => document.querySelector('[data-setlist-preview-song-id="entry"]')!;
-  const firstChord = () => chart()?.querySelector('[data-preview-owner-slot="0"]')?.textContent;
+  const firstChord = () => chart()?.querySelector('[data-preview-owner-slot="0"] [data-chord-root], [data-preview-owner-slot="0"] [data-chord-degree]')?.textContent;
   await waitFor(() => expect(firstChord()).toBe('C'));
   const latest = () => (refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0].workspace;
   const shared = JSON.stringify(latest().setlists);
+  const height = screen.getByRole('group', { name: '歌單小節高度' });
+  expect(chart().querySelector('[data-sheet-bar-row-count]')).toHaveAttribute('data-sheet-bar-row-count', '2');
+  fireEvent.click(within(height).getByRole('button', { name: '3 行' }));
+  await waitFor(() => expect(chart().querySelector('[data-sheet-bar-row-count]')).toHaveAttribute('data-sheet-bar-row-count', '3'));
+  expect(JSON.stringify(latest().setlists)).toBe(shared);
+  expect(localStorage.getItem('chordmaster.personal-setlist-bar-rows.v1:local')).toContain('3');
   const sharedShowNumbers = latest().setlists[0].songs[0].songData?.showNashvilleNumbers;
   const controls = screen.getByRole('group', { name: '個人顯示模式' });
   fireEvent.click(within(controls).getByRole('button', { name: '級數' }));
@@ -48,5 +54,8 @@ it('changes an owned setlist’s personal view without changing its shared arran
   unmount();
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
   await waitFor(() => expect(screen.getByRole('group', { name: '個人顯示模式' })).toBeInTheDocument());
+  expect(chart().querySelector('[data-sheet-bar-row-count]')).toHaveAttribute('data-sheet-bar-row-count', '3');
+  fireEvent.click(within(screen.getByRole('group', { name: '歌單小節高度' })).getByRole('button', { name: '2 行' }));
+  expect(chart().querySelector('[data-sheet-bar-row-count]')).toHaveAttribute('data-sheet-bar-row-count', '2');
   expect(within(screen.getByRole('group', { name: '個人顯示模式' })).getByRole('button', { name: '級數' })).toHaveAttribute('aria-pressed', 'true');
 }, 20000);

@@ -1,5 +1,7 @@
 import { JoinedProject, JoinedSetlist, Key, Section, Setlist, SetlistSong, Song } from '../types';
 import { getSuggestedGuitarCapo } from './musicUtils';
+import { getSongTimeSignatureStates } from '../lib/songEditing';
+import { getEffectiveTimeSignature } from './rhythmUtils';
 
 export const getSectionReferenceId = (section: Section, index: number) => section.id || `section-${index}`;
 
@@ -210,7 +212,7 @@ export const resolveSetlistSongCapo = (
 
 export const applySetlistSongOverrides = (
   song: Song,
-  setlist: Setlist,
+  setlist: Setlist & { barRowCount?: 1 | 2 | 3 },
   setlistSong: SetlistSong,
   guitaristMode = false,
   capoOptions: SetlistCapoResolutionOptions = {}
@@ -223,10 +225,30 @@ export const applySetlistSongOverrides = (
   const explicitOrder = setlistSong.sectionOrder.length > 0
     ? setlistSong.sectionOrder
     : getDefaultSectionOrder(song);
-  const orderedSections = explicitOrder
+  const orderedSectionIds = explicitOrder.filter(sectionId => sectionMap.has(sectionId));
+  const orderedSections = orderedSectionIds
     .map((sectionId) => sectionMap.get(sectionId))
     .filter((section): section is Section => Boolean(section))
     .map((section) => JSON.parse(JSON.stringify(section)) as Section);
+
+  // A setlist can move a section ahead of the meter change it originally
+  // followed (or after a temporary meter in another section). Keep each bar's
+  // source meter; insert restoration signs only in these derived preview copies.
+  const sourceMeters = getSongTimeSignatureStates(song);
+  const sectionIndexes = new Map(song.sections.map((section, index) => [getSectionReferenceId(section, index), index]));
+  let performanceMeter = getEffectiveTimeSignature(song.timeSignature);
+  orderedSections.forEach((section, sectionIndex) => {
+    const sourceIndex = sectionIndexes.get(orderedSectionIds[sectionIndex]);
+    section.bars.forEach((bar, barIndex) => {
+      const expectedMeter = sourceIndex === undefined ? undefined : sourceMeters.barActiveTimeSignatures[sourceIndex]?.[barIndex];
+      if (bar.timeSignature?.trim()) {
+        if (!bar.partialMeasure) performanceMeter = getEffectiveTimeSignature(bar.timeSignature, performanceMeter);
+      } else if (expectedMeter && expectedMeter !== performanceMeter) {
+        bar.timeSignature = expectedMeter;
+        performanceMeter = expectedMeter;
+      }
+    });
+  });
 
   return {
     ...JSON.parse(JSON.stringify(song)) as Song,
@@ -234,6 +256,7 @@ export const applySetlistSongOverrides = (
     capo: resolveSetlistSongCapo(setlistSong, song, guitaristMode, capoOptions),
     showNashvilleNumbers: setlist.displayMode === 'nashville-number-system',
     showAbsoluteJianpu: setlist.displayMode === 'chord-fixed-key',
+    barRowCount: setlist.barRowCount ?? 2,
     sections: orderedSections
   };
 };

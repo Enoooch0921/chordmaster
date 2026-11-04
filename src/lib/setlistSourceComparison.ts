@@ -1,10 +1,17 @@
 import type { AppLanguage, Bar, Song } from '../types';
 import { normalizeSongBars } from './workspace';
 
+export interface SourceScoreExcerpt {
+  song: Song;
+  sectionIndex: number;
+  barIndex?: number;
+}
 export interface SourceComparisonRow {
   label: string;
   library: string;
   setlist: string;
+  score?: { library?: SourceScoreExcerpt; setlist?: SourceScoreExcerpt; fields: string[] };
+  pickup?: { library: Song; setlist: Song };
 }
 const names: Record<string, string> = {
   title: '歌名', lyricist: '版本／作詞', composer: '作曲', translator: '翻譯', groove: '風格', shuffle: 'Shuffle',
@@ -13,7 +20,7 @@ const names: Record<string, string> = {
   references: '參考音源', pickup: '弱起拍', lyricsDoc: '歌詞', chordTimingVersion: '和弦時點格式',
   chords: '和弦', closed: '小節關閉', riff: '簡譜', rhythm: '節奏', annotation: '備註', label: '標籤', riffLabel: '簡譜標籤', rhythmLabel: '節奏標籤',
   keyChangeTo: '轉調', riffVoices: '簡譜聲部', rhythmVoices: '節奏聲部', resetTempo: '恢復原速', repeatStart: '反覆開始',
-  repeatEnd: '反覆結束', doubleBar: '雙小節線', finalBar: '終止線', ending: '房子', leftText: '左側文字', rightText: '右側文字',
+  repeatEnd: '反覆結束', doubleBar: '後雙小節線', doubleBarStart: '前雙小節線', finalBar: '終止線', ending: '房子', leftText: '左側文字', rightText: '右側文字',
   leftMarker: '左側記號', rightMarker: '右側記號', unisonMark: '齊奏', rhythmMark: '節奏記號', chordMarks: '和弦記號',
   chordSubdivisions: '細分拍和弦', chordPassVariants: '指定遍數和弦', unmeteredChordLines: '未定拍和弦',
   band: '樂團版本', vocal: '歌手版本', chinese: '中文歌詞', english: '英文歌詞', bpm: 'BPM', key: '調性',
@@ -45,7 +52,7 @@ const fullSection = (section: Song['sections'][number], zh: boolean) => {
 };
 
 /** Current library and current setlist values stay in fixed, named columns. */
-export function compareSetlistSourceScores(source: Song, entry: Song, language: AppLanguage): SourceComparisonRow[] {
+export function compareSetlistSourceScores(source: Song, entry: Song, language: AppLanguage, visual = false): SourceComparisonRow[] {
   const a = normalizeSongBars(structuredClone(source)), b = normalizeSongBars(structuredClone(entry));
   const zh = language === 'zh';
   const rows: SourceComparisonRow[] = [];
@@ -65,11 +72,17 @@ export function compareSetlistSourceScores(source: Song, entry: Song, language: 
     return [key,value];
   }));
   fields(pick(a), pick(b), []);
+  if (visual) {
+    const pickupRow = rows.find(row => row.label === (zh ? names.pickup : 'pickup'));
+    if (pickupRow) pickupRow.pickup = { library: a, setlist: b };
+  }
+  const excerpt = (song: Song, sectionIndex: number, barIndex?: number): SourceScoreExcerpt => ({ song, sectionIndex, ...(barIndex !== undefined ? { barIndex } : {}) });
+  const score = (library: SourceScoreExcerpt | undefined, setlist: SourceScoreExcerpt | undefined, fields: string[] = ['all']) => visual ? { score: { library, setlist, fields } } : {};
   const usedSections = new Set<number>();
   b.sections.forEach((section, index) => {
     let oldIndex = a.sections.findIndex(old => old.id === section.id);
     if (oldIndex < 0 && a.sections[index] && !usedSections.has(index) && !b.sections.some(next => next.id === a.sections[index].id)) oldIndex = index;
-    if (oldIndex < 0) { rows.push({label: section.title, library: zh?'無此段落':'Section absent', setlist: fullSection(section,zh)}); return; }
+    if (oldIndex < 0) { rows.push({label: section.title, library: zh?'無此段落':'Section absent', setlist: fullSection(section,zh), ...score(undefined, excerpt(b,index))}); return; }
     usedSections.add(oldIndex);
     const old = a.sections[oldIndex];
     fields(old, section, ['id','bars'], `${section.title} · `);
@@ -78,18 +91,27 @@ export function compareSetlistSourceScores(source: Song, entry: Song, language: 
       let oldBarIndex = old.bars.findIndex(item => item.id === bar.id);
       if (oldBarIndex < 0 && old.bars[barIndex] && !usedBars.has(barIndex) && !section.bars.some(next => next.id === old.bars[barIndex].id)) oldBarIndex = barIndex;
       const label = zh ? `${section.title} · 第 ${barIndex + 1} 小節` : `${section.title} · Bar ${barIndex + 1}`;
-      if (oldBarIndex < 0) { rows.push({label, library: zh?'無此小節':'Bar absent', setlist: fullBar(bar,zh)}); return; }
+      if (oldBarIndex < 0) { rows.push({label, library: zh?'無此小節':'Bar absent', setlist: fullBar(bar,zh), ...score(undefined, excerpt(b,index,barIndex))}); return; }
       usedBars.add(oldBarIndex);
-      fields(old.bars[oldBarIndex], bar, ['id'], label + ' · ');
+      if (visual) {
+        const before = old.bars[oldBarIndex];
+        const changed = [...new Set([...Object.keys(before), ...Object.keys(bar)])]
+          .filter(field => field !== 'id' && !equal(before[field as keyof Bar], bar[field as keyof Bar]));
+        if (changed.length) rows.push({
+          label: label + ' · ' + changed.map(field => zh ? names[field] ?? '演奏記號' : field).join('、'),
+          library: fullBar(before, zh), setlist: fullBar(bar, zh),
+          ...score(excerpt(a,oldIndex,oldBarIndex), excerpt(b,index,barIndex), changed)
+        });
+      } else fields(old.bars[oldBarIndex], bar, ['id'], label + ' · ');
     });
     old.bars.forEach((bar,barIndex) => {
-      if (!usedBars.has(barIndex)) rows.push({label: zh?`${old.title} · 曲庫第 ${barIndex + 1} 小節`:`${old.title} · Library bar ${barIndex + 1}`,library:fullBar(bar,zh),setlist:zh?'此歌單已移除此小節':'Removed from this setlist'});
+      if (!usedBars.has(barIndex)) rows.push({label: zh?`${old.title} · 曲庫第 ${barIndex + 1} 小節`:`${old.title} · Library bar ${barIndex + 1}`,library:fullBar(bar,zh),setlist:zh?'此歌單已移除此小節':'Removed from this setlist', ...score(excerpt(a,oldIndex,barIndex),undefined)});
     });
     const common = old.bars.filter(bar => section.bars.some(next => next.id === bar.id)).map(bar=>bar.id);
     const reordered = section.bars.filter(bar=>common.includes(bar.id)).map(bar=>bar.id);
-    if (!equal(common,reordered)) rows.push({label: `${section.title} · ${zh?'小節順序':'Bar order'}`,library: old.bars.map(bar=>summary(bar,zh)).join(' | '),setlist:section.bars.map(bar=>summary(bar,zh)).join(' | ')});
+    if (!equal(common,reordered)) rows.push({label: `${section.title} · ${zh?'小節順序':'Bar order'}`,library: old.bars.map(bar=>summary(bar,zh)).join(' | '),setlist:section.bars.map(bar=>summary(bar,zh)).join(' | '), ...score(excerpt(a,oldIndex),excerpt(b,index))});
   });
-  a.sections.forEach((section,index) => { if (!usedSections.has(index)) rows.push({label:section.title,library:fullSection(section,zh),setlist:zh?'此歌單已移除此段落':'Removed from this setlist'}); });
+  a.sections.forEach((section,index) => { if (!usedSections.has(index)) rows.push({label:section.title,library:fullSection(section,zh),setlist:zh?'此歌單已移除此段落':'Removed from this setlist', ...score(excerpt(a,index),undefined)}); });
   const common = a.sections.filter(section=>b.sections.some(next=>next.id===section.id)).map(section=>section.id);
   const reordered = b.sections.filter(section=>common.includes(section.id)).map(section=>section.id);
   if (!equal(common,reordered)) rows.push({label:zh?'段落順序':'Section order',library:a.sections.map(section=>section.title).join(' → '),setlist:b.sections.map(section=>section.title).join(' → ')});

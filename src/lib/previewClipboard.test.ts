@@ -204,7 +204,7 @@ describe('preview clipboard commands', () => {
 
   it('rejects mismatched multi-lane counts without partial changes', () => {
     const song = makeSong();
-    const result = pastePreviewContent(song, [target('c')], copyPreviewContent(song, [target('a'), target('b')], 'chords')!);
+    const result = pastePreviewContent(song, [target('a'), target('b'), target('c')], copyPreviewContent(song, [target('a'), target('b')], 'chords')!);
     expect(result).toMatchObject({ song, error: 'count-mismatch' });
     expect(result.song).toBe(song);
   });
@@ -244,4 +244,59 @@ describe('preview clipboard commands', () => {
     expect(undone.draftSong.title).toBe('Earlier unsaved edit');
     expect(redoPreviewDraft(undone).draftSong).toEqual(result.song);
   });
+});
+
+it.each(['chords', 'rhythm', 'jianpu'] as const)('pastes multiple %s bars from a single start, preserving other lanes and section boundaries', (kind) => {
+  const song = makeSong();
+  song.sections.push({ id: 'chorus', title: 'Chorus', bars: [{ id: 'd', chords: ['Am'], riff: '7' }] });
+  const clipboard = copyPreviewContent(song, [target('b'), target('a')], kind)!;
+  const result = pastePreviewContent(song, [target('b')], clipboard);
+  expect(result.error).toBeUndefined();
+  expect(result.targets).toEqual([target('b'), target('c')]);
+  const field = kind === 'jianpu' ? 'riff' : kind;
+  expect(result.song.sections[0].bars.slice(1).map(bar => bar[field])).toEqual(clipboard.items.map(item => item.bar[field]));
+  expect(result.song.sections[1]).toEqual(song.sections[1]);
+  for (const index of [1, 2]) {
+    const bar = result.song.sections[0].bars[index];
+    for (const other of ['chords', 'rhythm', 'riff', 'annotation', 'ending'] as const) {
+      if (other !== field) expect(bar[other]).toEqual(song.sections[0].bars[index][other]);
+    }
+  }
+  const extended = pastePreviewContent(song, [target('c')], clipboard);
+  expect(extended.song.sections[0].bars).toHaveLength(4);
+  expect(extended.song.sections[1]).toEqual(song.sections[1]);
+  expect(extended.song.sections[0].bars[3].id).not.toBe('b');
+});
+
+it.each(['rhythm', 'jianpu'] as const)('copies all %s voices independently and clears old destination voices', kind => {
+  const song = makeSong();
+  const voiceField = kind === 'jianpu' ? 'riffVoices' : 'rhythmVoices';
+  song.sections[0].bars[0].riffVoices = [{ id: 'harmony', label: 'Harmony', riff: '3 4 5 6' }];
+  song.sections[0].bars[0].rhythmVoices = [{ id: 'drums', label: 'Drums', rhythm: 'q q q q' }];
+  const clipboard = copyPreviewContent(song, [target('a'), target('b')], kind)!;
+  const result = pastePreviewContent(song, [target('b')], clipboard);
+  const pasted = result.song.sections[0].bars[1][voiceField];
+  expect(pasted).toEqual(song.sections[0].bars[0][voiceField]);
+  expect(pasted).not.toBe(clipboard.items[0].bar[voiceField]);
+  const cleared = pastePreviewContent(result.song, [target('b')], copyPreviewContent(song, [target('c')], kind)!);
+  expect(cleared.song.sections[0].bars[1][voiceField]).toBeUndefined();
+});
+
+it('rejects a later incompatible meter without applying earlier lanes or appending blanks', () => {
+  const song = makeSong();
+  const clipboard = copyPreviewContent(song, [target('a'), target('b')], 'jianpu')!;
+  clipboard.items[1].timeSignature = '3/4';
+  const result = pastePreviewContent(song, [target('c')], clipboard);
+  expect(result.error).toBe('time-signature');
+  expect(result.song).toBe(song);
+  expect(result.targets).toEqual([]);
+});
+
+it.each(['bars', 'marker'] as const)('copies a leading double barline as %s without altering the preceding bar', kind => {
+  const song = makeSong();
+  song.sections[0].bars[0].doubleBarStart = true;
+  const result = pastePreviewContent(song, [target('c')], copyPreviewContent(song, [target('a')], kind)!);
+  expect(result.error).toBeUndefined();
+  expect(result.song.sections[0].bars[2].doubleBarStart).toBe(true);
+  expect(result.song.sections[0].bars[1]).toEqual(song.sections[0].bars[1]);
 });

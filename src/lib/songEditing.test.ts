@@ -39,6 +39,7 @@ import {
   reorderSection,
   serializeChordBeatSlots,
   setChordAtBeatSlot,
+  setChordRunAtBeatSlot,
   setEndingForBars,
   setMultiMeasureRestAtBar,
   splitSectionAtBar,
@@ -786,7 +787,7 @@ describe('section commands', () => {
 });
 
 describe('edit what you see conversion', () => {
-  it.each(['b6', '#5', '1/b6', '1/#5', 'b6maj7', 'b6m7/3'])('keeps the explicit %s degree through storage and every key change', input => {
+  it.each(['b6', '#5', 'b7', '#6', '1/b6', '1/#5', '1/b7', 'b6maj7', 'b6m7/3', '3/#5', '3/b6', '7/#2', '2/#4'])('keeps the explicit %s degree through storage and every key change', input => {
     for (const storedKey of ALL_KEYS) for (const displayedKey of ALL_KEYS) {
       for (const storageMode of ['letters', 'nashville'] as const) {
         const stored = convertDisplayedChordToStoredChord({ input, inputMode: 'nashville', storageMode, storedKey, displayedKey });
@@ -794,6 +795,41 @@ describe('edit what you see conversion', () => {
         expect(displayed, `${input} ${storedKey} → ${displayedKey} (${storageMode})`).toBe(input);
       }
     }
+  });
+
+  it.each([
+    ['3/#5', 'E/G#'], ['37/#5', 'E7/G#'], ['7/#2', 'B/D#'],
+    ['2/#4', 'D/F#'], ['6/#1', 'A/C#'], ['4m/b6', 'Fm/Ab'],
+    ['1/b6', 'C/Ab'], ['1/b7', 'C/Bb'], ['b6', 'Ab'], ['b7', 'Bb'],
+    ['b6maj7', 'Abmaj7'], ['b7/4', 'Bb/F'], ['b6m7/3', 'Abm7/E'],
+    ['3/b6', 'E/Ab'], ['7/b3', 'B/Eb'], ['1/#6', 'C/A#'],
+    ['1/b5', 'C/Gb'], ['1/#4', 'C/F#'], ['/b6', '/Ab'], ['/#5', '/G#'],
+    ['(3/#5)', '(E/G#)'], ['5/6m', 'G/Am']
+  ])('displays stored %s in C without losing its degree spelling through the original key', (chord, expected) => {
+    for (const storedKey of ALL_KEYS) {
+      expect(convertStoredChordToDisplayedChord({
+        chord, storageMode: 'nashville', outputMode: 'letters', storedKey, displayedKey: 'C'
+      }), `${chord} stored in ${storedKey}`).toBe(expected);
+      expect(convertStoredChordToDisplayedChord({
+        chord, storageMode: 'nashville', outputMode: 'nashville', storedKey, displayedKey: 'C'
+      })).toBe(chord);
+    }
+  });
+
+  it.each([
+    ['3/#5', 'D', 'F#/A#'], ['3/#5', 'F', 'A/C#'],
+    ['3/#5', 'Db', 'F/A'], ['3/#5', 'Ab', 'C/E'],
+    ['1/b6', 'D', 'D/Bb'], ['1/b6', 'F', 'F/Db'],
+    ['1/b6', 'Ab', 'Ab/Fb'], ['1/b7', 'D', 'D/C'],
+    ['1/b7', 'Ab', 'Ab/Gb'], ['7/#2', 'D', 'C#/E#']
+  ] as const)('preserves %s when displaying in %s from every storage key', (chord, displayedKey, expected) => {
+    for (const storedKey of ALL_KEYS) {
+      expect(convertStoredChordToDisplayedChord({ chord, storageMode: 'nashville', outputMode: 'letters', storedKey, displayedKey })).toBe(expected);
+    }
+  });
+
+  it.each(['E/G#', 'E/Ab', 'C/Ab', 'C/Bb', 'B/D#', 'B/Eb'])('does not guess away the explicitly authored letter spelling %s', chord => {
+    expect(convertStoredChordToDisplayedChord({ chord, storageMode: 'letters', outputMode: 'letters', storedKey: 'C', displayedKey: 'C' })).toBe(chord);
   });
 
   it('retains the distinction between flat six and sharp five in roots and slash basses', () => {
@@ -1026,4 +1062,25 @@ describe('bar cell actions', () => {
     expect(applyBarCellAction(original, [], 'clear')).toBe(original);
     expect(applyBarCellAction(original, [{ sectionId: 'section-1', barId: 'missing' }], 'clear')).toBe(original);
   });
+});
+
+it('keeps leading and trailing boundaries independent while excluding repeat-start on the same edge', () => {
+  const song = makeSong({ chords: ['C'], repeatStart: true, finalBar: true });
+  const target = { sectionId: 'section-1', barId: 'bar-1' };
+  const changed = updateEditableBarFields(song, target, { doubleBarStart: true });
+  expect(changed.sections[0].bars[0]).toMatchObject({ doubleBarStart: true, repeatStart: false, finalBar: true });
+  const restored = updateEditableBarFields(changed, target, { repeatStart: true });
+  expect(restored.sections[0].bars[0]).toMatchObject({ doubleBarStart: false, repeatStart: true, finalBar: true });
+});
+
+it('replaces only one beat with two or four chords and clears its previous offset', () => {
+  const source = makeSong({ chords: ['C', '/', 'G', 'G/B'], chordSubdivisions: [{ beat: 0, offset: .5, chord: 'Dm' }], chordMarks: { 2: { beatOffset: .5 } } });
+  const target = { sectionId: 'section-1', barId: 'bar-1', slotIndex: 2 };
+  const two = setChordRunAtBeatSlot(source, target, ['G', 'Am']);
+  expect(two.sections[0].bars[0].chordSubdivisions).toEqual([{ beat: 0, offset: .5, chord: 'Dm' }, { beat: 2, offset: .5, chord: 'Am' }]);
+  const four = setChordRunAtBeatSlot(two, target, ['G', 'Am', 'Bm', 'Cm']);
+  expect(four.sections[0].bars[0].chordSubdivisions?.filter(e => e.beat === 2).map(e => e.offset)).toEqual([.25, .5, .75]);
+  expect(getChordDisplaySlots(four.sections[0].bars[0].chords, 4)).toEqual(['C', '/', 'G', 'G/B']);
+  expect(setChordRunAtBeatSlot(four, target, ['G']).sections[0].bars[0].chordSubdivisions).toHaveLength(1);
+  expect(source.sections[0].bars[0].chordMarks?.[2]?.beatOffset).toBe(.5);
 });

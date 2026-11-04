@@ -116,8 +116,12 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
         context: { en: 'Chord mode', zh: '和弦模式' }
       },
       {
-        keys: ['[', ']', '\\'],
-        action: { en: 'Toggle repeat start, repeat end, or final barline', zh: '切換反覆開始、反覆結束或終止線' }
+        keys: ['[', ']'],
+        action: { en: 'Toggle repeat start or repeat end', zh: '切換反覆開始或反覆結束' }
+      },
+      {
+        keys: ['\\', '|'],
+        action: { en: 'Cycle barline: double after, double before, final, normal', zh: '循環小節線：後雙、前雙、終止、一般' }
       },
       {
         keys: ['Option/Alt + 1-9'],

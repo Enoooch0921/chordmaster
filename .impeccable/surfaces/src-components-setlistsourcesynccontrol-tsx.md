@@ -2,7 +2,7 @@
 version: 1
 slug: "src-components-setlistsourcesynccontrol-tsx"
 primary_target: "src/components/SetlistSourceSyncControl.tsx"
-related_targets: ["src/components/SetlistSourceSyncControl.css", "src/lib/setlistSourceComparison.ts", "src/lib/setlistSourceSync.ts"]
+related_targets: ["src/components/SetlistSourceSyncControl.css", "src/components/SourceScoreComparison.tsx", "src/lib/setlistSourceComparison.ts", "src/lib/setlistSourceSync.ts"]
 ---
 
 # Clear source reconciliation
@@ -21,3 +21,16 @@ The App uses a compact floating entry above its existing preview controls. It mu
 Keep source selection, comparison labels, directional arrows, scope and primary confirmation on component-scoped theme roles. Dark mode uses green-300 accents and green-200 text on green-950 selected surfaces; its primary action uses green-300 with green-950 text. Light mode uses green-700 with white text for confirmation. Never inherit the global inverse-text token on a fixed green action. The compact/noncompact entry also retains readable amber feedback in dark mode.
 
 Verified actual production component with isolated synthetic data at 1280×800 and 390×844, including both conflict directions and the light theme. Dark body, scope, selected fields and confirmation exceed 4.5:1. No source or setlist data was written.
+
+
+## Graphical differences — 2026-11-02
+
+Measure changes use read-only excerpts from the production ChordSheet renderer, retaining the complete song's meter, key and tie context. Group all changed fields in a measure together. Library differences use rose ink and setlist differences use blue ink, with named columns and accessible exact values; the adopted-version green remains independent. Added/removed bars and sections, pickup measures, and expanded baseline history use the same visual treatment. Metadata and lyrics retain direct values with the changed span highlighted. Score paper stays white with the same ink colors in both themes. Compact 9–11px context labels and 3/6px ink-highlight corners are deliberate notation-scale exceptions, not new general UI typography or control tokens.
+
+Verified local synthetic comparisons at 1280×900 and 390×844 in both themes, including actual note fonts, two fixed columns, no horizontal overflow, and the fixed confirmation footer. Source comparison, concurrency and persistence checks remain unchanged.
+
+## Personal libraries and local workspaces — 2026-11-04
+
+The same compact notice, fixed comparison columns and graphical score differences now serve owned personal cloud libraries and local workspaces. Local commands validate both the live draft and the latest IndexedDB copy, then atomically save a backup and the accepted version. Unknown historical baselines require an explicit choice. Joined setlists remain outside source reconciliation.
+
+Verified the real App with synthetic local data at 1280×900 and 390×844, in light and dark themes. The mobile confirmation remains visible, notation colors remain readable, and a successful sync removes the notice after a full reload. App integration tests also cover personal cloud preview and reconciliation.

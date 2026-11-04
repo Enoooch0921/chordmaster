@@ -34,3 +34,10 @@ Implementation: `src/components/SetlistBrowserHeader.tsx`, `src/components/Proje
 The subsequent root-search refinement measures 61px rather than 123px at a 339px sidebar. Its current evidence is `.impeccable/review/compact-search-20261028/root-after.png`, `root-mobile.png`, `root-narrow.png` and `root-dark-after.png`. The 390px phone and 304px narrow viewport retain the compact controls. Real App browser checks confirmed one click from expanded empty search into the intended project and then into 聚會一; `single-click-after-search.png` records the resulting editable meeting. Focused header/navigation/library validation passed 34 tests, typecheck and production build, and independent finish review returned **SHIP**. These changes remain local and unpublished. The earlier `root-dark-en.png` capture predates the root New contrast correction and is not current visual evidence.
 
 Continuous score reading tracks the largest visible song area. Explicit jumps remain selected during travel and yield immediately to deliberate manual input; viewport-bottom clamping, zoom grace and no-event WebKit jumps must not leave the previous song active or lock navigation.
+
+
+## Personal chart height and meter context — 2026-11-02
+
+Setlist reading controls include 2-line/3-line height alongside personal chord display mode. Default every setlist to two lines, independently of source-song density; remember each account/browser's explicit choice per setlist. The same effective height feeds preview, navigation and PDF export. Metadata height changes update this personal preference without editing shared score JSON.
+
+When a setlist reorders or omits sections, preserve each bar's effective meter from its original source context. Materialize necessary restoration signatures only in cloned display/export sections; a temporary 2/4 at the end of a moved Bridge cannot turn the following originally 4/4 chorus into 2/4. Intentional source meter inheritance remains valid. Verified against the current NAS score and 聚會二 order for 我願是無名的傳道者, with no NAS writes.

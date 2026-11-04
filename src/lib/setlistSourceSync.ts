@@ -1,4 +1,4 @@
-import type { AppLanguage, SetlistSong, SetlistSourceBaseline, Song, StoredSong } from '../types';
+import type { AppLanguage, SetlistSong, SetlistSourceBaseline, Song, StoredSong, WorkspaceSnapshot } from '../types';
 import { normalizeSongBars } from './workspace';
 import { supabase } from './supabase';
 
@@ -32,6 +32,22 @@ export const setlistSourceScoreSignature = (song: Song | undefined): string => {
 export const hasSetlistSourceScoreChange = (before: Song | undefined, after: Song | undefined) => (
   Boolean(before && after) && setlistSourceScoreSignature(before) !== setlistSourceScoreSignature(after)
 );
+
+/** Same score-field merge as the server, retaining destination reading preferences. */
+export function mergeSetlistSourceScore<T extends Song>(destination: T, incoming: Song): T {
+  const result = structuredClone(destination);
+  const source = normalizeSongBars(structuredClone(incoming));
+  for (const field of SCORE_FIELDS) {
+    if (source[field] === undefined) delete result[field];
+    else (result as Song)[field] = source[field] as never;
+  }
+  if (source.lyricsDoc) {
+    const { displayLanguage, fontSize, lineHeight, ...content } = source.lyricsDoc;
+    const { chinese, english, blocks, translationLanguage, ...preferences } = destination.lyricsDoc ?? {};
+    result.lyricsDoc = { ...preferences, ...content };
+  }
+  return result;
+}
 
 export type SetlistSourceStatus = 'aligned' | 'setlist-changed' | 'source-newer' | 'conflict' | 'unknown';
 export type SetlistSourceDirection = 'to-library' | 'to-setlist';
@@ -112,6 +128,8 @@ export interface SetlistSourceReconciliation {
   entry: SetlistSong;
   setlistUpdatedAt: number;
   direction: SetlistSourceDirection;
+  /** Latest durable workspace, only for a local reconciliation. */
+  localWorkspace?: WorkspaceSnapshot;
 }
 
 export const reconcileSetlistSource = async (preview: SetlistSourceSyncPreview, direction: SetlistSourceDirection): Promise<SetlistSourceReconciliation> => {

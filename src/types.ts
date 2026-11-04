@@ -115,6 +115,7 @@ export interface Bar {
   repeatStart?: boolean; // |:
   repeatEnd?: boolean;   // :|
   doubleBar?: boolean;  // two thin lines ||
+  doubleBarStart?: boolean; // two thin lines before this measure
   finalBar?: boolean;    // final thin + thick barline
   ending?: string; // e.g. "1", "2", or "1,2"
 }
@@ -232,8 +233,10 @@ export interface SetlistSong {
   sourceArchivedAt?: number | null;
   sectionOrder: string[];
   songData?: Song;
-  // Server-maintained provenance; never accepted from a browser write.
+  // Cloud provenance is server-maintained; local provenance is stored with the workspace.
   sourceBaseline?: SetlistSourceBaseline | null;
+  // Local entry score edits; cloud timestamps remain server-owned.
+  scoreUpdatedAt?: number;
 }
 
 export interface Setlist {

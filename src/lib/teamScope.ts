@@ -70,7 +70,7 @@ export const getTeamScopeSummary = (role: LibraryRole, scope: TeamManagementScop
 export const getTeamScopeBoundary = (role: LibraryRole, language: AppLanguage) => {
   const zh = language === 'zh';
   if (role === 'owner') return zh ? '可管理全部團隊歌曲、專案、歌單與成員，並指派或撤銷總管理員。' : 'Can manage every team song, project, setlist, and member, including appointing and removing admins.';
-  if (role === 'admin') return zh ? '可管理全部團隊歌曲、專案、歌單及一般成員權限；不能變更擁有者或其他總管理員，也不能指派總管理員。' : 'Can manage every team song, project, setlist, and regular member. Cannot change the owner or other admins, or appoint admins.';
+  if (role === 'admin') return zh ? '可管理全部團隊歌曲、專案、歌單及一般成員權限，也可將一般成員升為總管理員；不能變更擁有者或其他總管理員。' : 'Can manage every team song, project, setlist, and regular member, including promoting regular members to admin. Cannot change the owner or other admins.';
   if (role === 'editor') return zh ? '可編輯全部團隊歌曲，以及範圍內的專案與歌單內容。' : 'Can edit every team song and the projects and setlists in this scope.';
   if (role === 'setlist_manager') return zh ? '曲庫僅可檢視；範圍內的歌單可選曲、排序及設定共用調性，不能修改歌詞、和弦或段落。' : 'The song library is view only. Scoped setlists allow song selection, ordering, and shared keys; lyrics, chords, and sections cannot be edited.';
   return zh ? '不能修改共用內容；Capo 只影響自己的畫面。' : 'Shared content cannot be edited. Capo changes only affect your own view.';

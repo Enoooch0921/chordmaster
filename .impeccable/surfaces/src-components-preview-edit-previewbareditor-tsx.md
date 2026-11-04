@@ -65,3 +65,23 @@ The parent verification reports 328 relevant tests passing after the closed-hit 
 
 
 The final current-pass verification passed 328 tests, lint and production build. The full finish review requested a local dark Key contrast fix; the verdict pass returned `ship` after the inherited and selected labels and chevrons became readable in fresh captures. The Key trigger uses semantic dark colors when inheriting a key and inherits the active foreground for both its value and chevron. Closing the context menu restores the previous connected focus (or the desktop chord capture), keeping hardware entry usable. Final evidence and scope are in `bar-actions-20261027/verification.md` and `review.md`.
+
+## Multi-bar clipboard follow-up (2026-10-29)
+
+The copy area now has one 複製 heading with four equal horizontal actions: 小節、和弦、節奏、簡譜. Paste identifies the current clipboard kind; before/after insertion is enabled only for whole bars. Copy buttons have 44px hit height and full accessible labels. Left/Right arrows join the existing menu navigation keys. Cmd/Ctrl toggles and anchored Shift ranges work in song and setlist previews; Cmd/Ctrl+Shift adds a range. Multi-bar lane paste can start at a single cell and preserves unrelated content, including across undo. Evidence: `output/playwright/batch-clipboard-20261029/verification.md`, desktop/light and tablet/phone dark screenshots. 293 related tests, TypeScript and build passed; synthetic local data only, no deployment or physical-device claim.
+
+## Desktop keyboard scaling follow-up (2026-10-29)
+
+Added keyboard-only − / percentage / + controls beside the grip, with chevrons for collapse/expand. Compact/regular/spacious viewport profiles default to 70/80/100%, store custom 70–120% values independently, and reset independently via the percentage button. Desktop height is capped at 60% of the viewport so an enlarged panel retains chart space and scrolls its own content. Touch docks remain unscaled. Transformed bounds feed drag clamping and chart avoidance; resizes and scale changes publish layout updates even when ResizeObserver alone would not detect the transform.
+
+Live in-app browser verification: 900×600 defaults to 70% (434×329); manual 120% is capped at 744×360 with scrollable keys. 1366×768 defaults to 80%; 1440×960 defaults to 100%; returning to the compact profile restores its custom 90%, including after reload. Reset restores 70% without changing other profiles. Tests cover storage failures, malformed preferences, per-size defaults, remembering/resetting values, bar changes and unchanged phone/tablet layouts. Evidence: `output/playwright/keyboard-scale-20261029/compact-default.jpg` and `verification.md`. Local synthetic data; no production data writes or deployment.
+
+## Barline direction and reopen position (2026-10-29)
+
+The barline shortcut cycles 後雙小節線 → 前雙小節線 → 終止小節線 → 正常小節線. Double-line glyphs carry 前/後 labels; the five-option repeat/barline picker is widened to 280px. Explicit leading double preserves the opposite edge, conflicts only with a start repeat, and is saved/copied as `doubleBarStart`. The score renderer suppresses duplicate boundaries between adjacent measures and restores a leading double at a wrapped row; print/export styles use the same two thin strokes.
+
+Desktop drag/arrow movement now survives editor unmount/reopen and page reload. Preferred coordinates live outside score data; viewport clamps do not overwrite them. Phone/tablet docks ignore the preference. Live verification moved the keyboard to (1068, 679.5), closed it, opened another measure and reloaded: all restored the same position. At 900×600 the panel was safely clamped to (454, 259), 434×329; restoring the viewport recovered the original coordinates. Related regression tests, TypeScript and build passed. Evidence: `output/playwright/front-barline-20261029/keyboard-position.json`, `print-style.json`, and final local screenshot. Synthetic local data only; no deployment or physical-device claim.
+
+### Direct beat runs (2026-10-29)
+
+The ordinary keyboard stays open for beats with subdivisions. Desktop direct capture and physical keyboard fallback parse case-insensitive consecutive letter chords into one beat's two/four attacks without opening &+. Preserve quality words, slash basses, flat-root spelling and Nashville numbers. Character deletion edits the full displayed run, and reverting to one chord removes only that beat's extra entries. Continue using atomic draft commands and undo. Explicit advanced positions and numbered passes remain under &+.

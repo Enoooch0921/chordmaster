@@ -1,0 +1,53 @@
+.drummer-midi-button { flex-shrink: 0; font-size: 13px; }
+.drummer-midi-button[data-connected="true"] { color: var(--color-indigo-700); }
+.drummer-mode[data-stage="true"] .drummer-midi-button > span { display: none; }
+.drummer-mode[data-stage="true"] .drummer-midi-button { min-width: 44px; }
+.drummer-mode[data-stage="true"] .drummer-header h1 { overflow: hidden; text-overflow: ellipsis; }
+.drummer-midi-backdrop { position: absolute; inset: 0; z-index: 10; display: flex; justify-content: flex-end; background: rgb(0 0 0 / 35%); }
+.drummer-midi-panel { display: flex; flex-direction: column; width: min(100%, 540px); min-height: 0; background: var(--color-surface); color: var(--color-text); }
+.drummer-midi-panel header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--color-border); }
+.drummer-midi-panel h2 { margin: 0; font-size: 20px; font-weight: 700; }
+.drummer-midi-panel h3 { margin: 0; font-size: 16px; font-weight: 650; }
+.drummer-midi-panel p { margin: 4px 0 12px; font-size: 13px; line-height: 1.6; color: var(--color-text-muted); }
+.drummer-midi-panel header p { margin-bottom: 0; }
+.drummer-midi-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
+.drummer-midi-body > label { display: grid; gap: 6px; margin: 12px 0; font-size: 13px; }
+.drummer-midi-body select, .drummer-midi-body input { width: 100%; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1px solid var(--color-border-strong); border-radius: 8px; color: inherit; background: var(--color-surface); font: inherit; font-size: 16px; }
+.drummer-midi-connection, .drummer-midi-mapping-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.drummer-midi-connection button { background: var(--color-surface-sunken); }
+.drummer-midi-mapping-heading { margin: 24px 0 8px; }
+.drummer-midi-mapping-heading > span { font-size: 12px; color: var(--color-text-muted); }
+.drummer-midi-learning { padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--color-indigo-50); color: var(--color-indigo-900); border-radius: 8px; font-size: 14px; }
+.drummer-midi-learning button { flex-shrink: 0; }
+.dark .drummer-midi-learning { background: var(--color-indigo-900); color: var(--color-indigo-100); }
+.drummer-midi-mapping { display: flex; align-items: center; gap: 8px; min-height: 68px; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
+.drummer-midi-mapping > div { flex: 1; min-width: 0; font-size: 14px; }
+.drummer-midi-mapping small { display: block; margin-top: 4px; font-size: 12px; color: var(--color-text-muted); }
+.drummer-midi-mapping > button { background: var(--color-surface-sunken); font-size: 13px; }
+.drummer-midi-mapping .drummer-midi-clear { min-width: 44px; padding: 8px; background: transparent; }
+.drummer-midi-panel footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--color-border); padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.drummer-midi-panel footer > span { font-size: 12px; color: var(--color-text-muted); }
+.drummer-midi-panel .drummer-midi-save { min-height: 48px; background: var(--color-indigo-700); color: white; font-weight: 650; }
+.drummer-midi-panel .drummer-midi-save:hover { background: var(--color-indigo-800); }
+.drummer-midi-body .drummer-midi-notice { margin: 16px 0 0; color: var(--color-text); }
+@media (max-width: 560px) {
+  .drummer-midi-button > span { display: none; }
+  .drummer-header > .drummer-midi-button { min-width: 44px; padding: 8px; }
+  .drummer-midi-panel header, .drummer-midi-body, .drummer-midi-panel footer { padding-left: 16px; padding-right: 16px; }
+}
+.drummer-input-sources { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 20px; padding: 4px; border-radius: 10px; background: var(--color-surface-sunken); }
+.drummer-input-sources button { font-size: 14px; }
+.drummer-input-sources button[aria-pressed="true"] { background: var(--color-indigo-700); color: white; }
+.drummer-profile-fields { display: grid; gap: 12px; margin: 12px 0; }
+.drummer-profile-fields > label { display: grid; gap: 6px; min-width: 0; font-size: 13px; }
+.drummer-midi-panel[data-source="keyboard"] .drummer-midi-mapping-heading { margin-top: 12px; }
+.drummer-midi-panel[data-source="keyboard"] .drummer-input-sources { margin-bottom: 12px; }
+.drummer-midi-mapping[data-learning="true"] { color: var(--color-indigo-700); }
+@media (min-width: 560px) {
+  .drummer-profile-fields { grid-template-columns: 1fr 1fr; }
+  .drummer-control-mappings { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
+  .drummer-control-mappings .drummer-midi-mapping { min-height: 76px; gap: 4px; }
+  .drummer-control-mappings .drummer-midi-mapping > button:not(.drummer-midi-clear) { padding: 8px; }
+}
+
+.drummer-control-mappings .drummer-midi-mapping[data-action="tempo"] { grid-column: 1 / -1; }

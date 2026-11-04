@@ -14,12 +14,14 @@ describe('team role copy', () => {
     expect(getTeamRoleDescription('setlist_manager', 'zh')).toContain('不能更改團隊歌曲');
   });
 
-  it('reserves admin delegation for owners and keeps invitation defaults read only', () => {
+  it('allows owners and admins to promote members while protecting existing admins and invitation defaults', () => {
     expect(DEFAULT_TEAM_INVITE_ROLE).toBe('viewer');
     expect(EDITABLE_TEAM_ROLES).not.toContain('admin');
     expect(EDITABLE_TEAM_ROLES).not.toContain('owner');
     expect(getAssignableTeamRoles('owner')).toContain('admin');
-    expect(getAssignableTeamRoles('admin')).not.toContain('admin');
+    expect(getAssignableTeamRoles('admin')).toContain('admin');
+    expect(getAssignableTeamRoles('editor')).toEqual([]);
+    expect(getAssignableTeamRoles('setlist_manager')).toEqual([]);
     expect(getAssignableTeamRoles('viewer')).toEqual([]);
     expect(canManageTeamMember('owner', 'admin')).toBe(true);
     expect(canManageTeamMember('owner', 'owner')).toBe(false);

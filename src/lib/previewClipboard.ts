@@ -25,7 +25,7 @@ export function copyPreviewContent(song: Song, targets: SongBarIdentity[], kind:
   return items.length ? { kind, items } : null;
 }
 
-const markerFields = ['leftMarker', 'rightMarker', 'leftText', 'rightText', 'repeatStart', 'repeatEnd', 'doubleBar', 'finalBar', 'ending'] as const;
+const markerFields = ['leftMarker', 'rightMarker', 'leftText', 'rightText', 'repeatStart', 'repeatEnd', 'doubleBar', 'doubleBarStart', 'finalBar', 'ending'] as const;
 
 export function previewClipboardText(clipboard: PreviewClipboard): string {
   return clipboard.items.map(({ bar, timeSignature }) => {
@@ -123,6 +123,19 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
     return { song: { ...song, sections }, targets: destinations };
   }
 
+  if (located.length === 1 && clipboard.items.length > 1 && ['chords', 'rhythm', 'jianpu'].includes(clipboard.kind)) {
+    const first = located[0];
+    const missing = Math.max(0, clipboard.items.length - (first.section.bars.length - first.barIndex));
+    const blanks: Bar[] = Array.from({ length: missing }, () => ({ id: crypto.randomUUID(), chords: [] }));
+    const bars = [...first.section.bars, ...blanks];
+    const prepared = missing ? { ...song, sections: song.sections.map((section, index) => (
+      index === first.sectionIndex ? { ...section, bars } : section
+    )) } : song;
+    const destinations = bars.slice(first.barIndex, first.barIndex + clipboard.items.length)
+      .map((bar) => ({ sectionId: first.target.sectionId, barId: bar.id! }));
+    const result = pastePreviewContent(prepared, destinations, clipboard);
+    return result.error ? failure(result.error) : result;
+  }
   if (clipboard.items.length !== 1 && clipboard.items.length !== located.length) return failure('count-mismatch');
   const patches = new Map<string, Bar>();
   for (const [index, destination] of located.entries()) {
@@ -134,7 +147,7 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
         || destination.bar.rhythmVoices?.length || destination.bar.riffVoices?.length
         || destination.bar.leftMarker || destination.bar.rightMarker || destination.bar.leftText?.trim()
         || destination.bar.rightText?.trim() || destination.bar.repeatStart || destination.bar.repeatEnd
-        || destination.bar.doubleBar || destination.bar.finalBar || destination.bar.ending?.trim())) return failure('unmetered-content');
+        || destination.bar.doubleBar || destination.bar.doubleBarStart || destination.bar.finalBar || destination.bar.ending?.trim())) return failure('unmetered-content');
     if (hasUnmeteredChords(destination.bar) && ['rhythm', 'jianpu', 'marker'].includes(clipboard.kind)) return failure('unmetered-content');
     if (['chords', 'rhythm', 'jianpu'].includes(clipboard.kind)
       && !(clipboard.kind === 'chords' && (hasUnmeteredChords(source.bar) || source.bar.chordTimingUnspecified))
@@ -156,9 +169,13 @@ export function pastePreviewContent(song: Song, targets: SongBarIdentity[], clip
       }
       case 'rhythm':
         bar.rhythm = source.bar.rhythm;
+        bar.rhythmVoices = structuredClone(source.bar.rhythmVoices);
         bar.rhythmMark = structuredClone(source.bar.rhythmMark);
         break;
-      case 'jianpu': bar.riff = source.bar.riff; break;
+      case 'jianpu':
+        bar.riff = source.bar.riff;
+        bar.riffVoices = structuredClone(source.bar.riffVoices);
+        break;
       case 'label':
         bar.label = source.bar.label;
         bar.labelLane = source.bar.labelLane;

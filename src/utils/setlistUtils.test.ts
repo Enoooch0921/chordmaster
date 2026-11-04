@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { JoinedProject, JoinedSetlist, Setlist, SetlistSong, Song } from '../types';
-import { duplicateSection } from '../lib/songEditing';
+import { duplicateSection, getSongTimeSignatureStates } from '../lib/songEditing';
 import {
   getJoinedProjectSetlists,
   dedupeJoinedSetlists,
@@ -201,5 +201,45 @@ describe('setlist section order editing', () => {
       previousSong,
       duplicated.song
     )).toEqual(['chorus', 'verse', duplicated.sectionId, 'bridge']);
+  });
+});
+
+describe('setlist meter context', () => {
+  const source: Song = {
+    title: 'Temporary bridge meter', originalKey: 'C', currentKey: 'C', timeSignature: '4/4',
+    sections: [
+      { id: 'chorus', title: 'Chorus', bars: [{ id: 'c1', chords: ['C', '', '', 'G'] }, { id: 'c2', chords: ['F'] }] },
+      { id: 'tag', title: 'Tag', bars: [{ id: 't1', chords: ['C'] }] },
+      { id: 'bridge', title: 'Bridge', bars: [{ id: 'b1', chords: ['Am'] }, { id: 'b2', chords: ['F'], timeSignature: '2/4' }] }
+    ]
+  };
+  it('restores the original chorus meter after a reordered bridge without changing source or arrangement data', () => {
+    const entry = { ...makeSetlistSong('meter', 0), sectionOrder: ['missing', 'bridge', 'chorus', 'tag'] };
+    const snapshot = structuredClone([source, entry]);
+    const preview = applySetlistSongOverrides(source, makeSetlist('meter'), entry);
+    expect(preview.sections.map(section => section.id)).toEqual(['bridge', 'chorus', 'tag']);
+    expect(preview.sections[0].bars[1].timeSignature).toBe('2/4');
+    expect(preview.sections[1].bars[0].timeSignature).toBe('4/4');
+    expect(preview.sections[1].bars[1].timeSignature).toBeUndefined();
+    expect(getSongTimeSignatureStates(preview).barActiveTimeSignatures).toEqual([['4/4', '2/4'], ['4/4', '4/4'], ['4/4']]);
+    expect([source, entry]).toEqual(snapshot);
+  });
+  it('preserves intentional inherited meter changes and supplies context when preceding sections are omitted', () => {
+    const song: Song = { ...source, sections: [
+      { id: 'verse', title: 'Verse', bars: [{ id: 'v1', chords: ['C'], timeSignature: '3/4' }] },
+      { id: 'chorus', title: 'Chorus', bars: [{ id: 'c1', chords: ['F'] }] }
+    ] };
+    const full = applySetlistSongOverrides(song, makeSetlist('meter'), { ...makeSetlistSong('meter', 0), sectionOrder: [] });
+    expect(full.sections).toEqual(song.sections);
+    const excerpt = applySetlistSongOverrides(song, makeSetlist('meter'), { ...makeSetlistSong('meter', 0), sectionOrder: ['chorus'] });
+    expect(excerpt.sections[0].bars[0].timeSignature).toBe('3/4');
+    expect(song.sections[1].bars[0].timeSignature).toBeUndefined();
+  });
+  it('keeps a pickup complement short and restores the following full measure after a reordered meter', () => {
+    const song = structuredClone(source);
+    song.sections[0].bars[0] = { id: 'partial', chords: ['C'], timeSignature: '3/4', partialMeasure: true };
+    const preview = applySetlistSongOverrides(song, makeSetlist('meter'), { ...makeSetlistSong('meter', 0), sectionOrder: ['bridge', 'chorus'] });
+    expect(preview.sections[1].bars[0]).toMatchObject({ timeSignature: '3/4', partialMeasure: true });
+    expect(getSongTimeSignatureStates(preview).barActiveTimeSignatures[1]).toEqual(['3/4', '4/4']);
   });
 });

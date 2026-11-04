@@ -6,6 +6,29 @@ import { ToastProvider } from './components/Toast';
 import type { Setlist, StoredSong, WorkspaceSnapshot } from './types';
 const sync = vi.hoisted(() => ({ owned: vi.fn(() => false), joined: vi.fn(() => false) }));
 let fixture: WorkspaceSnapshot;
+const restoreFullscreen: Array<() => void> = [];
+const browserFullscreen = (prefixed: boolean) => {
+  let current: Element | null = null;
+  const set = (value: Element | null) => {
+    current = value;
+    document.dispatchEvent(new Event(prefixed ? 'webkitfullscreenchange' : 'fullscreenchange'));
+  };
+  const define = (target: object, key: string, descriptor: PropertyDescriptor) => {
+    const previous = Object.getOwnPropertyDescriptor(target, key);
+    restoreFullscreen.push(() => { if (previous) Object.defineProperty(target, key, previous); else Reflect.deleteProperty(target, key); });
+    Object.defineProperty(target, key, { configurable: true, ...descriptor });
+  };
+  define(document, 'fullscreenElement', { get: () => prefixed ? null : current });
+  define(document, 'webkitFullscreenElement', { get: () => prefixed ? current : null });
+  define(document, 'fullscreenEnabled', { value: !prefixed });
+  define(document, 'webkitFullscreenEnabled', { value: prefixed });
+  define(document.documentElement, prefixed ? 'webkitRequestFullscreen' : 'requestFullscreen', {
+    value: vi.fn(async () => set(document.documentElement))
+  });
+  const exit = vi.fn(async () => set(null));
+  define(document, prefixed ? 'webkitExitFullscreen' : 'exitFullscreen', { value: exit });
+  return { set, exit };
+};
 vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: null, session: null, status: 'signed-out', isConfigured: false, signInWithGoogle: vi.fn(), signOut: vi.fn() }) }));
 vi.mock('./lib/workspace', async original => ({ ...await original<typeof import('./lib/workspace')>(), loadPersistentWorkspaceSnapshot: async () => fixture }));
 vi.mock('./hooks/useLibraryWorkspaceRefresh', () => ({ useLibraryWorkspaceRefresh: sync.owned }));
@@ -16,7 +39,7 @@ beforeAll(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn(); HTMLElement.prototype.scrollTo = vi.fn();
 });
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true); });
-afterEach(() => localStorage.clear());
+afterEach(() => { localStorage.clear(); vi.useRealTimers(); restoreFullscreen.splice(0).reverse().forEach(restore => restore()); });
 const stageSong = (id: string): StoredSong => ({ id, updatedAt: 1, title: `Stage ${id}`, originalKey: 'C', currentKey: 'C', timeSignature: '4/4',
   sections: [{ id: `${id}-verse`, title: 'Verse', bars: Array.from({ length: 96 }, (_, i) => ({ id: `${id}-${i}`, chords: ['C'] })) }] });
 const start = async (shared = false) => {
@@ -34,6 +57,53 @@ const page = () => Number(document.querySelector('[data-performance-page]')!.get
 const pedal = (type: 'keydown' | 'keyup', key = 'PageDown', repeat = false) => fireEvent(window, new KeyboardEvent(type, { key, code: key, repeat, bubbles: true, cancelable: true }));
 
 describe('on-stage offline and page-turner stability', () => {
+  it.each([false, true])('returns to the workspace after browser exit or pressing Exit before click (prefixed: %s)', async prefixed => {
+    const browser = browserFullscreen(prefixed);
+    await start();
+    act(() => browser.set(null));
+    await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).toBeNull());
+    fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
+    await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).not.toBeNull());
+    fireEvent.pointerDown(screen.getByRole('button', { name: '退出' }), { button: 0, isPrimary: true });
+    expect(document.querySelector('[data-performance-overlay]')).toBeNull();
+    expect(browser.exit).toHaveBeenCalledOnce();
+  }, 15000);
+
+  it('exits windowed performance by click when the device has no fullscreen API', async () => {
+    await start();
+    fireEvent.click(screen.getByRole('button', { name: '退出' }));
+    expect(document.querySelector('[data-performance-overlay]')).toBeNull();
+  }, 15000);
+
+  it('turns pages and reveals/hides chrome without re-rendering the score workspace', async () => {
+    await start();
+    const overlay=document.querySelector<HTMLElement>('[data-performance-overlay]')!;
+    const before=sync.owned.mock.calls.length;
+    act(()=>{pedal('keydown');pedal('keyup');});expect(page()).toBe(2);
+    fireEvent.click(screen.getByRole('button',{name:'Previous page'}));expect(page()).toBe(1);
+    expect(sync.owned.mock.calls.length).toBe(before);
+    vi.useFakeTimers();
+    fireEvent.mouseMove(overlay);
+    act(()=>vi.advanceTimersByTime(2100));expect(overlay.dataset.performanceChrome).toBe('hidden');
+    fireEvent.click(screen.getByRole('button',{name:'Next page'}));expect(page()).toBe(2);
+    expect(overlay.dataset.performanceChrome).toBe('visible');
+    expect(sync.owned.mock.calls.length).toBe(before);
+    // An unrelated App update must retain the page selected by direct input.
+    act(()=>window.dispatchEvent(new Event('offline')));expect(page()).toBe(2);
+  },15000);
+
+  it('crosses song boundaries in both directions and returns to the previous song final page', async () => {
+    await start();
+    const total=Number(document.querySelector('[data-performance-pages]')!.getAttribute('data-performance-pages'));
+    for(let i=1;i<total;i++)fireEvent.click(screen.getByRole('button',{name:'Next page'}));
+    expect(page()).toBe(total);
+    fireEvent.click(screen.getByRole('button',{name:'Next page'}));
+    await waitFor(()=>expect(document.querySelector('[data-performance-overlay] h1')).toHaveTextContent('Stage two'));
+    expect(page()).toBe(1);
+    fireEvent.click(screen.getByRole('button',{name:'Previous page'}));
+    await waitFor(()=>expect(document.querySelector('[data-performance-overlay] h1')).toHaveTextContent('Stage one'));
+    expect(page()).toBe(total);
+  },15000);
   it('pauses owned and shared background reads and keeps keyboard/manual turns through disconnect and reconnect', async () => {
     await start();
     expect((sync.owned.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(true);

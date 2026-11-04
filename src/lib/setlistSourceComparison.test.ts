@@ -46,3 +46,29 @@ it('ignores lyrics display settings but shows actual lyrics edits',()=>{
  entry.lyricsDoc.chinese='第二行';
  expect(compare(library,entry,'zh')).toEqual([{label:'歌詞',library:'中文歌詞：第一行',setlist:'中文歌詞：第二行'}]);
 });
+
+it('groups graphical changes into one measure while retaining full meter and key context', () => {
+ const library=song(), entry=song();
+ library.sections[0].bars[0].timeSignature='3/4';
+ entry.sections[0].bars[0].timeSignature='3/4';
+ entry.sections[0].bars[1].repeatEnd=true;
+ entry.sections[0].bars[1].ending='1,2';
+ entry.sections[0].bars[1].riff='1 | 2 | 3';
+ const snapshot=structuredClone([library,entry]);
+ const rows=compare(library,entry,'zh',true);
+ expect(rows).toHaveLength(1);
+ expect(rows[0].score).toMatchObject({ library:{sectionIndex:0,barIndex:1},setlist:{sectionIndex:0,barIndex:1}, fields:expect.arrayContaining(['repeatEnd','ending','riff']) });
+ expect(rows[0].score?.library?.song.sections[0].bars[0].timeSignature).toBe('3/4');
+ expect([library,entry]).toEqual(snapshot);
+});
+it('keeps graphical additions, removals and reorders attached to their actual version', () => {
+ const entry=song();entry.sections[0].bars.splice(1,1);
+ const removed=compare(song(),entry,'zh',true)[0];
+ expect(removed.score?.library?.barIndex).toBe(1);
+ expect(removed.score?.setlist).toBeUndefined();
+ const added=compare(entry,song(),'zh',true)[0];
+ expect(added.score?.setlist?.barIndex).toBe(1);
+ expect(added.score?.library).toBeUndefined();
+ entry.sections[0].bars.reverse();
+ expect(compare(song(),entry,'zh',true).find(row=>row.label.endsWith('小節順序'))?.score?.setlist?.barIndex).toBeUndefined();
+});

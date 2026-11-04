@@ -1,3 +1,4 @@
+import NotationSelectionPointer from './NotationSelectionPointer';
 import React from 'react';
 import { getHeadCenterUnit, getRhythmEventGlyph, parseRhythmNotation, rationalizeRhythmDisplay, rhythmUnitsEqual } from '../utils/rhythmUtils';
 import { buildCompactRhythmGeometry, getCompactRhythmCenterUnit } from '../lib/rhythmGeometry';
@@ -119,7 +120,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
   const { beats, beatUnits, barUnits, overflow } = parsed;
   const baseMinHeight = (compact ? 16 : 58) * scale;
   const hasRhythmError = overflow || parsed.invalidTokens.length > 0;
-  const stroke = hasRhythmError ? '#dc2626' : (color || '#111827');
+  const stroke = hasRhythmError ? '#dc2626' : (color || 'var(--notation-rhythm-ink, #111827)');
   const guide = overflow ? 'rgba(220, 38, 38, 0.16)' : 'rgba(17, 24, 39, 0.08)';
   const crossBarMeasurementVersion = 5;
   const crossBarNoteheadOvershootPx = compact ? 0.6 : 1.4;
@@ -959,7 +960,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
           <span data-preview-edit-ui data-preview-notation-cursor-beat data-notation-beat-index={activeBeatIndex}
             className="notation-beat-frame pointer-events-none absolute z-[1]"
             style={{ left: `${beatStartUnit / barUnits * 100}%`, width: `${beatUnits / barUnits * 100}%`, top: -4 * scale, bottom: -4 * scale }} />
-          <span data-preview-edit-ui data-preview-notation-cursor-caret data-rhythm-cursor-unit={selectedCursorUnit}
+          <NotationSelectionPointer data-preview-edit-ui data-preview-notation-cursor-caret data-rhythm-cursor-unit={selectedCursorUnit}
             className="notation-note-pointer pointer-events-none absolute z-[4]"
             style={{ left: `${pointerPercent}%`, top: minHeight + 6 * scale }} />
         </>
@@ -1052,7 +1053,9 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
       )}
 
       {(onEventSelect || (selectionMode === 'insert' && onInsertSelect)) && parsed.events.filter((event) => !event.isHidden).map((event) => {
-        const isSelected = selectedEventIndex === event.index;
+        const isSelected = selectionMode === 'insert'
+          ? rhythmUnitsEqual(event.startUnit, selectedCursorUnit ?? -1)
+          : selectedEventIndex === event.index;
         const isSixteenth = event.base === 's';
         return (
           <button
@@ -1078,7 +1081,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
             aria-label={`Select rhythm note ${event.index + 1}`}
             aria-pressed={selectionMode === 'insert' ? rhythmUnitsEqual(event.startUnit, selectedCursorUnit ?? -1) : isSelected}
           >
-            {selectionMode === 'event' && isSelected && isSixteenth && (
+            {isSelected && isSixteenth && (
               <span
                 className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-400/18 ring-1 ring-indigo-400/45"
                 style={{

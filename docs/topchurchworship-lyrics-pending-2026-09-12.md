@@ -2,16 +2,21 @@
 
 本清單未另建純歌詞歌曲。未配對是依目前檔名、版本和文字匹配結果，不表示可以斷定所有同名異名樂譜都不存在。
 
+最新狀態（2026-10-28，本輪續補）：再新增15首獨立歌詞，缺獨立歌詞由84首降為69首。〈Washed〉依使用者指定先補現有英文主歌／副歌，Bridge／Refrain與中文配字仍另列待辦；其他14首已補現成基本詞稿。〈You are good（Remix）〉、兩首〈Alive〉與〈High King Of Heaven〉的候選詞版使用者仍無法確認，均未寫入，也不在沒有新證據時重問。詳細來源及NAS驗證見 `docs/topchurchworship-lyrics-source-ready-2026-10-28.md`；最新缺詞佇列見 `tmp/topchurch-conversion/delivery/lyrics-source-ready-20261028/pending-items-after.json`。下方較早批次數字為當時快照。
+
 2026-09-29 第 921 批已把《You Are My Father／祢是我天父》的雙語詞頁與原和弦譜逐句核對並配到 NAS；同曲中文詞頁亦列入來源紀錄，兩份不再屬未配對清單。
 2026-09-29 第 922 批另把《Out Of My Hands》的 CHC 雙語詞頁與同版原譜配對；原譜中文異文保留，該詞頁亦不再屬未配對清單。
 
+2026-10-27 已依使用者指定，將《上帝能夠》與《復興之火》的既有歌詞 PDF 補入 TopChurchWorship 同名歌曲；依基本段落收錄，兩份不再屬未配對清單。NAS 完整回讀與曲庫前後比對證據為 `tmp/topchurch-conversion/delivery/lyrics-add-20261027/verification.json`。
+
+2026-10-28 續補已完成〈Nothing Is Impossible〉、〈為此而活〉手寫 G 調版、〈開啟我的雙眼〉手寫 Ab 調版、〈不停湧出來〉Feast Family 新版、〈In Jesus Name（Re-arrange）〉、〈我美好救主〉CHC 版與〈信靠耶穌真是甜美〉手寫和絃版的基本歌詞。後四首詞版已獲使用者確認；新來源配對與 NAS 驗證見 `docs/topchurchworship-lyrics-missing-continuation-2026-10-28.md`。洛杉磯烈火 29 首歌曲與 39 個有效歌單項目都有獨立歌詞，全庫仍有 84 首待配對；基本詞齊全不代表各次即興、回唱及小節配位均已核完。
+
 ## 人工核對後仍待確認的詞版
 
-- [Alive Gospel Version 原譜](https://drive.google.com/file/d/1YKeBpk9WZKTAnzRFZDg9mpbTRlPHTn13/view?usp=drivesdk) 與 [Alive 中英歌詞候選](https://drive.google.com/file/d/1qz-yCCwbRi9xFYehdfO1Ze9U2g9V09_D/view?usp=drivesdk)：兩頁歌詞已讀取，但原手稿沒有唱詞、作者或版本對照，只有同名尚不足確認。暫未將候選寫入Gospel或Chien編曲，需確認同曲；英文來源存在不代表此版本已配對成功。第二頁主要是重排及三句括號譯意，未來配對後不要全部重複串接。
+- [Alive Gospel Version 原譜](https://drive.google.com/file/d/1YKeBpk9WZKTAnzRFZDg9mpbTRlPHTn13/view?usp=drivesdk) 與 [Alive 中英歌詞候選](https://drive.google.com/file/d/1qz-yCCwbRi9xFYehdfO1Ze9U2g9V09_D/view?usp=drivesdk)：兩頁歌詞已讀取，但原手稿沒有唱詞、作者或版本對照，只有同名尚不足確認。2026-10-28使用者仍無法確認該詞版，兩份編曲保留未寫入；有新的同版詞稿／演出證據或使用者明確確認再開啟，不重問相同候選。英文來源存在不代表此版本已配對成功。第二頁主要是重排及三句括號譯意，未來配對後不要全部重複串接。
 
 - [坐在寶座上聖潔羔羊原譜](https://drive.google.com/file/d/12W0Dat__Tr6A6N0csp1CnuMeGy1Q5h9O/view?usp=drivesdk)：華語歌詞已核對並展開；原譜另有臺語對照，部分原字仍待逐字校讀，尚未建立臺語唱詞版本。這不是缺少英文翻譯，不以自動翻譯代替。
 
-- [聖靈我們真歡迎你烈火版原譜](https://drive.google.com/file/d/1hzVlnMhSj892-Kc1GJd3FDHfUPcn-zc1/view?usp=drivesdk) 與 [普通詩歌詞候選](https://drive.google.com/file/d/14Ush3z0ocREIG_CYBSKLuvXyeZ8BsMdQ/view?usp=drivesdk)：候選完整三節及副歌已讀；烈火手稿只有和聲與段名，沒有作者／正文可確認同編曲配位，因此未直接套入。
 
 ## 尚未配到樂譜
 
@@ -27,7 +32,6 @@
 - [U_《Upside Down_Official Lead Sheet》.pdf](https://drive.google.com/file/d/1e8Hwu2RbCPe0zm7DUV6LORf3K5fxxcRP/view?usp=drivesdk)
 - [8_《讚美耶和華的聖名_lyrics》](https://docs.google.com/document/d/1YbXzJSe9K26KsZe4pviJV0cwGxPDvLtYDf8JB5cPytU/edit?usp=drivesdk)
 - [8_《在祢沒有難成的事(讚美之泉)_lyrics》.pdf](https://drive.google.com/file/d/1jbqw4xhiJmc6fivjuV_-c7P2ftKmUjrf/view?usp=drivesdk)
-- [4_《詩篇30篇_lyrics》.pdf](https://drive.google.com/file/d/1T9ZASmhQHVQQBMX-pAN-ki-qlGlCSYxY/view?usp=drivesdk)
 - [6_《向左向右開展_lyrice》.pdf](https://drive.google.com/file/d/1TAYe1_4a9G6AKgKlQHI7Bjm4SOxR17Tz/view?usp=drivesdk)
 - [6_《君王就在這裡_lyrics》.pdf](https://drive.google.com/file/d/1SBvFwC4RYSy-dNX7DXWJNjiIVW5PULLP/view?usp=drivesdk)
 - [F_《For Unto Us_lyrics》.pdf](https://drive.google.com/file/d/1feqmcwPC8EdA00pCHPZDcrPhWt6jLE8W/view?usp=drivesdk)
@@ -57,7 +61,6 @@
 - [7_《讓聖殿充滿讚美_lyrics》.pdf](https://drive.google.com/file/d/1NWyJneq2nuZLRYWbrLUHy26-wnw6BJ1i/view?usp=drivesdk)
 - [5_《這裡有榮耀_lyrics》.pdf](https://drive.google.com/file/d/1tvLu-2OA6NwT-vryauS9YQmPTYkigJq2/view?usp=drivesdk)
 - [6_《當我來敬拜祢_lyrics》.pdf](https://drive.google.com/file/d/17vR_ZEu4KtPz2KYmHvH8AC8EEln7NSXr/view?usp=drivesdk)
-- [6_《開啟我的雙眼_lyrics》.pdf](https://drive.google.com/file/d/1tZ8dFau_4IWyPmODKxQdIds8z1f1M1Gp/view?usp=drivesdk)
 - [6_《給我穿上能力_lyrics》.pdf](https://drive.google.com/file/d/1RWNMHxldrfLxUpCDxrzH__0W4AsH1tqG/view?usp=drivesdk)
 - [6_《這是聖潔之地_lyrics》.pdf](https://drive.google.com/file/d/11TGkB2zKN9zZG6V3kvnO_XuPlpbVHGqT/view?usp=drivesdk)
 - [6_《這世界非我家_lyrics》.pdf](https://drive.google.com/file/d/1ipGGF7IuWHuZFSVpOrxU-uXaHQFloc3d/view?usp=drivesdk)
@@ -152,7 +155,6 @@
 - [4_《豐富生命_lyrics》.pdf](https://drive.google.com/file/d/1HlfLiDS2PAxlBSHR81zlihECNd1mpgp4/view?usp=drivesdk)
 - [4_《點名時候_lyrics》.pdf](https://drive.google.com/file/d/1aOmsuE1fNyCdgw6Q7Z9Zfap5v8grdJQO/view?usp=drivesdk)
 - [4_《頭戴荊棘_lyrics》.pdf](https://drive.google.com/file/d/1T_Bfz7y4eKvKXytINttuYGj-6lTIUhRl/view?usp=drivesdk)
-- [O_《Our God_lyrics》.pdf](https://drive.google.com/file/d/1IXTDjQ6IOLBVR8aU9i5g-ep5BGlRIpR_/view?usp=drivesdk)
 - [4_《舉目仰望_lyrics》.pdf](https://drive.google.com/file/d/1ndadM38Chc3JWvddLsDWA8YErLrALS_1/view?usp=drivesdk)
 - [4_《靠近十架_lyrics》.pdf](https://drive.google.com/file/d/153kIcVsFZM3U0DFbnGhRKaPtBVC11Fs8/view?usp=drivesdk)
 - [4_《震動天地_lyrics》.pdf](https://drive.google.com/file/d/1uuAvac6IR8ceFXhoY4I9B8RM-fIJFyN9/view?usp=drivesdk)
@@ -165,7 +167,6 @@
 - [4_《愛從此生_lyrics》.pdf](https://drive.google.com/file/d/1hNYTBM2iAPStGxcmo61DDQIi4v6jySf8/view?usp=drivesdk)
 - [4_《無價至寶_lyrics》.pdf](https://drive.google.com/file/d/1bxQOQ5BwMSMahuEaWaiqxR0mULgLQgDE/view?usp=drivesdk)
 - [4_《普世歡騰_lyrics》.pdf](https://drive.google.com/file/d/1CwVIP0nGSboSken_bRThKXQnDnkf-jfS/view?usp=drivesdk)
-- [4_《復興之火_lyrics》.pdf](https://drive.google.com/file/d/1eV-KOO7TjlIFSUW9S-6TwWRJ2XRAf9nL/view?usp=drivesdk)
 - [4_《單單敬拜_lyrics》.pdf](https://drive.google.com/file/d/1kBYigeV9ALbR0nU6PACX5fDT0E5A7u8Q/view?usp=drivesdk)
 - [4_《這一天裡_lyrics》.pdf](https://drive.google.com/file/d/1_Sp53-tVl-Q0_AdmezqpVwxoI0J6edkU/view?usp=drivesdk)
 - [4_《牽我的手_lyrics》.pdf](https://drive.google.com/file/d/1Vrri5SxXiH9FH57CYINzlocdrX2SnoFK/view?usp=drivesdk)
@@ -211,18 +212,15 @@
 - [B_《Breathe_lyrics》.pdf](https://drive.google.com/file/d/1BwJrWrWu5EfhSzFM6UysdEglAcHVOWdJ/view?usp=drivesdk)
 - [4_《永遠看顧_lyrics》.pdf](https://drive.google.com/file/d/1I2LKVwOoXnaEEth3KO14ZqmVNf0H9KDi/view?usp=drivesdk)
 - [4_《永遠不渴_lyrics》.pdf](https://drive.google.com/file/d/13Wdr0Kymwukd-g9_BGx93dJJ7Q0doZIE/view?usp=drivesdk)
-- [4_《古舊十架_lyrics》.pdf](https://drive.google.com/file/d/1l8N0VwX3NyqXm5hHCXYDUHNkG1Zt-KtP/view?usp=drivesdk)
 - [4_《母親的心_lyrics》.pdf](https://drive.google.com/file/d/1_WFvr2NlAmOFUa8AePAxXjUxfrZG1Xzh/view?usp=drivesdk)
 - [4_《以馬內利_lyrics》.pdf](https://drive.google.com/file/d/1QO4Ut6zO90FV2PD0PKQHoFA0BQ7irCC7/view?usp=drivesdk)
 - [4_《主耶和華_lyrics》.pdf](https://drive.google.com/file/d/11_wyCI85sGorCecC-0SE20aFX4RRcwhG/view?usp=drivesdk)
 - [4_《主我今來_lyrics》.pdf](https://drive.google.com/file/d/1euZhmsVGdXXUVDnx14DuCLicMLpfZzfk/view?usp=drivesdk)
 - [4_《主你的疼_lyrics》.pdf](https://drive.google.com/file/d/1TL0GV8fTm_VlS0VaU6itbTSPo5R380rK/view?usp=drivesdk)
-- [4_《上帝能夠_lyrics》.pdf](https://drive.google.com/file/d/12bexcV6ve5sjpvdBllCyy6SlFMBD5BcO/view?usp=drivesdk)
 - [4_《上帝的城_lyrics》.pdf](https://drive.google.com/file/d/1leP9jZN6-TXVU7C2ibA9zteFc_pIN_HH/view?usp=drivesdk)
 - [4_《十架的愛_lyrics》.pdf](https://drive.google.com/file/d/1VFLsHyMsaFExelq9FDCRWg8IRxAE_ItQ/view?usp=drivesdk)
 - [L_《Living For You_lyrics》.pdf](https://drive.google.com/file/d/1h1tX_WstYANO5cMO6M7dj8vVfEMyutjW/view?usp=drivesdk)
 - [T_《Take Us Higher_lyrics》.pdf](https://drive.google.com/file/d/1tfnbiCUwJWtqRGNalSzlcVN9mSRNND3S/view?usp=drivesdk)
-- [N_《Nothing Is Impossible_lyrics》.pdf](https://drive.google.com/file/d/151ZEogFdWQGwTnwD0m2s-6DhtXDdacmL/view?usp=drivesdk)
 - [F_《Friend of God_lyrics》.pdf](https://drive.google.com/file/d/1q1WwbfXrvqz0Ensk207NEQztfrHxokjw/view?usp=drivesdk)
 - [F_《For You Alone_lyrics》.pdf](https://drive.google.com/file/d/18B5yDsIW7wLx0HQebd1ga2x3gUNIQWES/view?usp=drivesdk)
 - [C_《Celebrate Your Love_lyrics》.pdf](https://drive.google.com/file/d/1AEVChHBtUdlcjpsj01UAo6-v91l35EY9/view?usp=drivesdk)
@@ -284,21 +282,17 @@
 - [S_《Shout for joy_lyrics》.pdf](https://drive.google.com/file/d/1525_b1byEvMjpTgVtVttjiDsMEawrfwI/view?usp=drivesdk)
 - [Y_《You Are Good(bethel)_lyrics》.pdf](https://drive.google.com/file/d/1FzunPbSMXMQPTRDlRRGdfdyI-UTgLDjm/view?usp=drivesdk)
 - [L_《Let It Be Jesus_lyrics》.pdf](https://drive.google.com/file/d/1z_iGyMVTCg5LL8gcns9CKYT09zf4aQah/view?usp=drivesdk)
-- [J_《Joy To The World_lyrics》.pdf](https://drive.google.com/file/d/1wSFarEVnrucBMmcf95W35F6j87VQT5hb/view?usp=drivesdk)
 - [H_《How To Worship A King_lyrics》.pdf](https://drive.google.com/file/d/1Zjr63lveATqB60wjOtM_AFFUZLJQvxtN/view?usp=drivesdk)
 - [H_《Higher Than The Sky_lyrics》.pdf](https://drive.google.com/file/d/1d0gKJsR9QIYiAg4Fb5xH3kncgZgH22-U/view?usp=drivesdk)
 - [H_《Have Your Way_lyrics》.pdf](https://drive.google.com/file/d/1Sup61yFyABXX5-XmYYSX7UsAPN07PL3r/view?usp=drivesdk)
-- [H_《Hark The Herald Angels Sing_lyrics》.pdf](https://drive.google.com/file/d/1-rxyUnrZTHCWHiK9YR0MFYkPoEm_SN1A/view?usp=drivesdk)
 - [G_《God is so good_lyrics》.pdf](https://drive.google.com/file/d/1nKrG5YlXn_gjHdztLuq1hTrz-Zc4pSfo/view?usp=drivesdk)
 - [C_《Come To The River_lyrics》.pdf](https://drive.google.com/file/d/1aonQKNrY-e6aVr_J3owfI6_AYTE99Vm_/view?usp=drivesdk)
-- [A_《Away in Manger_lyrics》.pdf](https://drive.google.com/file/d/1gV5D78fA5M2VJ6mThbo7MmHmPi5HaDMM/view?usp=drivesdk)
 - [6_《祢信實何廣大_lyrics》.pdf](https://drive.google.com/file/d/1Q61rmn1WWng0TV0NZ7duKostYHP1-vxT/view?usp=drivesdk)
 - [7_《我在這裡我願意_lyrics》.pdf](https://drive.google.com/file/d/1-Sflkc3lD-GdsfLYCLo3SV8n3yM7c94e/view?usp=drivesdk)
 - [5_《行神蹟的神_lyrics》.pdf](https://drive.google.com/file/d/1ndOgIk7_Ewea6KYE4oJOs8yUx4cEJBbO/view?usp=drivesdk)
 - [5_《在陶匠手中_lyrics》.pdf](https://drive.google.com/file/d/1ee6szIz-bXSwWxq7IRWV_SuTQZUwqaGb/view?usp=drivesdk)
 - [7_《主因祢豐富恩典_lyrics》.pdf](https://drive.google.com/file/d/1i3sRaeM-S9X3aTKxLJ3X4zt3aVrZqp-x/view?usp=drivesdk)
 - [N_《Never let you go_lyrics》.pdf](https://drive.google.com/file/d/1B1gyFq_F9DcblYi_P-mqQ29zgtsz9Y1P/view?usp=drivesdk)
-- [G_《God is Here_lyrics》.pdf](https://drive.google.com/file/d/18BLYNG-JBJGKxUHMI_sbcBw7BAPrGNZZ/view?usp=drivesdk)
 - [8_《在神沒有難成的事_lyrics》.pdf](https://drive.google.com/file/d/1pCyZyyosVgY_cNvyKAIBzJ3RPH0zhMge/view?usp=drivesdk)
 - [4_《我要歡唱_lyrics》.pdf](https://drive.google.com/file/d/1ms1-pazP_FGC5wPRCphMYpzBll04MezC/view?usp=drivesdk)
 - [4_《獻上榮耀_lyrics》.pdf](https://drive.google.com/file/d/1AKCv3AF0CmWcDJD2bNPIosRnkJ6lWGRU/view?usp=drivesdk)

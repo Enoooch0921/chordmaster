@@ -1,3 +1,4 @@
+import NotationSelectionPointer from './NotationSelectionPointer';
 import React from 'react';
 import type { AppLanguage, Key, PickupMeasure } from '../types';
 import { getPickupDisplay, PICKUP_EDITOR_BAR_ID, PICKUP_EDITOR_SECTION_ID } from '../utils/pickupUtils';
@@ -71,7 +72,8 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
         <span data-preview-edit-ui data-preview-notation-cursor-beat
           className="notation-beat-frame pointer-events-none absolute z-[0]"
           style={{ left: `${Math.min(beats - 1, jianpuCursor.beatIndex) / beats * 100}%`, width: `${100 / beats}%`, top: -4, bottom: -4 }} />
-        {jianpuCursor.noteIndex == null && <span data-preview-edit-ui data-preview-notation-cursor-caret
+        {jianpuCursor.noteIndex == null && <NotationSelectionPointer data-preview-edit-ui data-preview-notation-cursor-caret
+          jianpuOnset={cursorUnit! / beatUnits} voiceId={jianpuCursor.voiceId}
           className="notation-note-pointer pointer-events-none absolute z-[2]"
           style={{ left: `${cursorUnit! / barUnits * 100}%`, top: 'calc(100% + 6px)' }} />}
       </>}

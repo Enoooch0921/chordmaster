@@ -61,3 +61,49 @@ export function reconcileChordSubdivisions(bar: Bar, beats: number) {
 export function transposeChordSubdivisions(value: Bar['chordSubdivisions'], offset: number, toKey: Key, fromKey: Key) {
   return value?.map(e => ({...e, chord: isNashville(e.chord) ? e.chord : transposeChord(e.chord,offset,toKey,false,fromKey)}));
 }
+
+/** Read letter roots case-insensitively, consuming quality words and slash basses first.
+ * A lowercase b immediately after a root remains a flat (gbm = Gbm).
+ * Nashville digits are deliberately excluded: their extensions are ambiguous.
+ */
+export function splitDirectChordRun(value: string, includeSingle = false): string[] | null {
+  let rest = value.trim();
+  const chords: string[] = [];
+  const readRoot = () => {
+    const match = rest.match(/^([A-Ga-g])([#b]?)/);
+    if (!match) return null;
+    rest = rest.slice(match[0].length);
+    return match[1].toUpperCase() + match[2];
+  };
+  const readQuality = () => {
+    let quality = '';
+    while (rest) {
+      // Partial words support live typing of add/dim/maj without corrupting roots.
+      const word = rest.match(/^(maj|min|dim|aug|add|sus|ma$|mi$|di$|au$|ad$|su$)/i);
+      const token = word ?? rest.match(/^(?:m|M|[0-9]+|[#b][0-9]+|[()+°øΔ△^~><-])/);
+      if (!token) break;
+      quality += word ? token[0].toLowerCase() : token[0];
+      rest = rest.slice(token[0].length);
+    }
+    return quality;
+  };
+  while (rest) {
+    const root = readRoot();
+    if (!root) return null;
+    let chord = root + readQuality();
+    if (rest.startsWith('/')) {
+      rest = rest.slice(1);
+      const bass = readRoot();
+      if (bass) chord += '/' + bass + readQuality();
+      else {
+        const extension = rest.match(/^\d+/);
+        if (!extension) return null;
+        chord += '/' + extension[0];
+        rest = rest.slice(extension[0].length);
+      }
+    }
+    chords.push(chord);
+    rest = rest.trimStart();
+  }
+  return chords.length > 1 || (includeSingle && chords.length === 1) ? chords : null;
+}

@@ -119,6 +119,7 @@ export type EditableBarFields = Pick<
   | 'repeatStart'
   | 'repeatEnd'
   | 'doubleBar'
+  | 'doubleBarStart'
   | 'finalBar'
   | 'ending'
   | 'chordMarks'
@@ -169,6 +170,7 @@ export const isBarCompletelyEmpty = (bar?: Bar | null) => {
     && !bar.repeatStart
     && !bar.repeatEnd
     && !bar.doubleBar
+    && !bar.doubleBarStart
     && !bar.finalBar
     && !bar.ending?.trim()
     && !hasObjectEntries(bar.chordMarks)
@@ -463,6 +465,22 @@ export const setChordAtBeatSlot = (song: Song, target: SongChordTarget, chord: s
   })
 );
 
+/** Replace one beat's run atomically, retaining harmony in other beats. */
+export const setChordRunAtBeatSlot = (song: Song, target: SongChordTarget, chords: string[]): Song => {
+  const located = findSongBar(song, target);
+  if (!located || !chords.length || chords.length > 4 || located.bar.chordTimingUnspecified || hasUnmeteredChords(located.bar)) return song;
+  const beats = getBeatCount(song, located.bar);
+  if (target.slotIndex < 0 || target.slotIndex >= beats) return song;
+  let next = setChordAtBeatSlot(song, target, chords[0]);
+  next = setChordBeatOffset(next, target, 0);
+  return updateBarById(next, target, bar => ({ ...bar,
+    chordSubdivisions: [
+      ...(bar.chordSubdivisions ?? []).filter(entry => entry.beat !== target.slotIndex),
+      ...chords.slice(1).map((chord, index) => ({ beat: target.slotIndex, offset: ((index + 1) / (chords.length === 2 ? 2 : 4)) as .25 | .5 | .75, chord }))
+    ].sort((a, b) => a.beat + a.offset - b.beat - b.offset)
+  }));
+};
+
 export const setChordBeatOffset = (song: Song, target: SongChordTarget, value: number): Song => (
   updateBarById(song, target, bar => {
     if (bar.chordTimingUnspecified || hasUnmeteredChords(bar)) return bar;
@@ -638,6 +656,10 @@ export const setBarChordText = (song: Song, target: SongBarIdentity, value: stri
 
 export const applyBarFieldPatch = (bar: Bar, patch: Partial<Bar>): Bar => {
   const next = { ...bar, ...patch };
+  // Start and end boundaries are independent; only competing marks on the
+  // same edge exclude each other.
+  if (patch.repeatStart === true) next.doubleBarStart = false;
+  if (patch.doubleBarStart === true) next.repeatStart = false;
   if (patch.repeatEnd === true) {
     next.finalBar = false;
     next.doubleBar = false;
@@ -1346,11 +1368,13 @@ export const convertStoredChordToDisplayedChord = ({
   if (storageMode === 'letters' && outputMode === 'letters' && displayOffset === 0) {
     return normalizeChordTextInput(trimmed, 'letters');
   }
-  const storedLetterChord = storageMode === 'nashville'
-    ? parseNashvilleToChord(trimmed, storedKey)
-    : trimmed;
+  // Degrees already encode their spelling relative to any key. Resolving them
+  // through the storage key first can require double accidentals, whose pitch
+  // fallback loses that intent (3/#5 in B -> D#/G -> E/Ab in C).
+  // Resolve directly in the displayed key so #5, b6 and b7 remain distinct.
+  if (storageMode === 'nashville') return parseNashvilleToChord(trimmed, displayedKey);
   const displayedLetterChord = transposeChord(
-    storedLetterChord,
+    trimmed,
     displayOffset,
     displayedKey,
     false,

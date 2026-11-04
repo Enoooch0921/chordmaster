@@ -1379,6 +1379,34 @@ const setlistSongsSignature = (songs: SetlistSong[]) => JSON.stringify(
   reindexSetlistSongs(songs).map(({ capo: _sharedCapo, personalCapoOverride: _personalCapo, sourceBaseline: _baseline, ...rest }) => rest)
 );
 
+// Compare the complete score JSON, including metadata, independently of key order.
+const entryScoreSignature = (score: Song) => JSON.stringify(normalizeSongBars(score), (_key, value) => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+    : value
+));
+
+const prepareEntryTrashExpected = async (libraryId: string, id: string, expected: Record<string, unknown>) => {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const guarded = { ...expected, overrideKey: expected.overrideKey ?? null, sectionOrder: expected.sectionOrder ?? null, songData: expected.songData ?? null };
+  if (!expected.songData) return guarded;
+
+  // Loading a legacy score fills defaults such as doubleBar:false. Verify that
+  // the displayed score still matches, then let the RPC guard the exact raw JSON.
+  // A change after this read is still rejected atomically by the server.
+  const { data: row, error } = await supabase.from('setlist_songs')
+    .select('song_id, setlist_id, override_json, setlists!inner(library_id)')
+    .eq('id', id).eq('setlists.library_id', libraryId).maybeSingle();
+  if (error) throw error;
+  const score = row?.override_json?.songData;
+  if (!row || row.song_id !== expected.songId
+    || (expected.setlistId !== undefined && row.setlist_id !== expected.setlistId)
+    || !score || entryScoreSignature(score) !== entryScoreSignature(expected.songData as Song)) {
+    throw new Error('History conflict: entry content changed');
+  }
+  return { ...guarded, songData: score };
+};
+
 const persistSetlistSongs = async (setlist: Setlist, previousSetlist?: Setlist, options?: SetlistSaveOptions) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
@@ -2010,8 +2038,9 @@ export const createCloudRepository = (params: {
 
     async trashWorkspaceResource(type, id, expected) {
       if (!supabase) throw new Error('Supabase is not configured.');
+      const libraryId = await ensureLibraryId();
       const { data, error } = await supabase.rpc('trash_workspace_resource', {
-        p_library_id: await ensureLibraryId(), p_type: type, p_id: id, p_expected: type === 'entry' ? { ...expected, overrideKey: expected.overrideKey ?? null, sectionOrder: expected.sectionOrder ?? null, songData: expected.songData ?? null } : expected
+        p_library_id: libraryId, p_type: type, p_id: id, p_expected: type === 'entry' ? await prepareEntryTrashExpected(libraryId, id, expected) : expected
       });
       if (error) throw error;
       if (typeof data !== 'string') throw new Error('Reversible deletion was not confirmed.');
@@ -2031,14 +2060,14 @@ export const createCloudRepository = (params: {
           return entry;
         }
         const side = entry.inverseTrash ? 'after' : 'before';
-        const resources = deletionResources.map(resource => {
+        const resources = await Promise.all(deletionResources.map(async resource => {
           const expected=resource.type==='entry'
             ? entry.changes.filter(change=>change.resource==='setlist').flatMap(change=>(change[side] as Setlist|null)?.songs??[]).find(song=>song.id===resource.id)
               ?? entry.changes.flatMap(change=>change.entries??[]).find(item=>item.id===resource.id)?.[side]
             : entry.changes.find(change=>change.id===resource.id)?.[side];
-          const guarded = resource.type === 'entry' && expected ? { ...expected, overrideKey: (expected as SetlistSong).overrideKey ?? null, sectionOrder: (expected as SetlistSong).sectionOrder ?? null, songData: (expected as SetlistSong).songData ?? null } : expected;
+          const guarded = resource.type === 'entry' && expected ? await prepareEntryTrashExpected(libraryId, resource.id, { ...expected }) : expected;
           return {...resource,expected:resource.type==='project'&&expected?{...expected,setlistIds:entry.changes.filter(change=>change.resource==='setlist'&&(change[side] as Setlist|null)?.projectId===resource.id).map(change=>change.id)}:guarded};
-        });
+        }));
         if (resources.some(resource => !resource.expected)) throw new Error('Deletion backup is unavailable.');
         const { data, error } = await supabase.rpc('trash_workspace_resources', { p_library_id: libraryId, p_resources: resources });
         if (error) throw error;
@@ -2085,7 +2114,11 @@ export const createCloudRepository = (params: {
 
     async trashWorkspaceResources(resources) {
       if (!supabase) throw new Error('Supabase is not configured.');
-      const { data, error } = await supabase.rpc('trash_workspace_resources', { p_library_id: await ensureLibraryId(), p_resources: resources });
+      const libraryId = await ensureLibraryId();
+      const guardedResources = await Promise.all(resources.map(async resource => resource.type === 'entry'
+        ? { ...resource, expected: await prepareEntryTrashExpected(libraryId, resource.id, resource.expected) }
+        : resource));
+      const { data, error } = await supabase.rpc('trash_workspace_resources', { p_library_id: libraryId, p_resources: guardedResources });
       if (error) throw error;
       if (!Array.isArray(data) || data.length !== resources.length) throw new Error('Reversible deletion was not confirmed.');
       return data as HistoryTrashResource[];

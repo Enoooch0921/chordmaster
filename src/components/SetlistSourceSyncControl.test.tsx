@@ -7,7 +7,7 @@ vi.mock('../lib/setlistSourceSync', async original => ({ ...await original<typeo
 import SetlistSourceSyncControl from './SetlistSourceSyncControl';
 const song: Song = { title: 'Song', currentKey: 'C', originalKey: 'C', timeSignature: '4/4', sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'bar', chords: ['C'] }] }] };
 const edited = structuredClone(song); edited.sections[0].bars[0].chords = ['G'];
-beforeAll(() => { HTMLDialogElement.prototype.showModal = function () { this.open = true; }; });
+beforeAll(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); HTMLDialogElement.prototype.showModal = function () { this.open = true; }; });
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.preview.mockResolvedValue({ libraryId: 'team', entryId: 'entry', source: { ...song, id: 'song', updatedAt: 1 }, sourceRevision: '2026-10-26T00:00:00Z', overrideJson: { songData: edited }, setlistName: '聚會一', status: 'setlist-changed', baseline: null });
@@ -152,5 +152,26 @@ it('keeps current versions in named columns and makes the chosen source and affe
  expect(screen.getByRole('columnheader',{name:'歌曲庫版本 將被更新'})).toBeInTheDocument();
  expect(screen.getByRole('columnheader',{name:'歌單 · 聚會一 將採用此版本'})).toBeInTheDocument();
  expect(row.children[0]).toHaveTextContent('C');expect(row.children[1]).toHaveTextContent('G');
+ expect(mocks.sync).not.toHaveBeenCalled();
+});
+
+it('renders actual bar glyphs in fixed versions and highlights all changed musical fields together', async () => {
+ const value=await mocks.preview();
+ const entry=structuredClone(edited);
+ entry.sections[0].bars[0]={...entry.sections[0].bars[0],repeatEnd:true,ending:'1,2',rhythm:'q q q q',riff:'1 | 2 | 3 | 4'};
+ mocks.preview.mockResolvedValue({...value,overrideJson:{songData:entry}});
+ mount();fireEvent.click(screen.getByRole('button',{name:'預覽歌單 → 歌曲庫'}));
+ await screen.findByRole('dialog');
+ const cells=screen.getAllByRole('row').find(row=>row.getAttribute('aria-label')?.startsWith('Verse · 第 1 小節'))!;
+ expect(cells.querySelectorAll('[data-score-excerpt]')).toHaveLength(2);
+ const library=cells.querySelector('[data-diff-side="library"]')!;
+ const setlist=cells.querySelector('[data-diff-side="setlist"]')!;
+ expect(library.querySelector('.sheet-repeat-end')).toBeNull();
+ expect(setlist.querySelector('.sheet-repeat-end')).toBeInTheDocument();
+ expect(setlist.querySelector('[data-sheet-ending-bracket]')).toHaveAttribute('data-sheet-ending-bracket','1,2');
+ expect(setlist.querySelector('[data-rhythm-notation]')).toBeInTheDocument();
+ expect(setlist.querySelector('[data-jianpu-notation]')).toBeInTheDocument();
+ expect(setlist.querySelector('[data-diff-fields]')?.getAttribute('data-diff-fields')).toContain('repeatEnd');
+ expect(cells.querySelector('[data-print-page]')).toBeNull();
  expect(mocks.sync).not.toHaveBeenCalled();
 });

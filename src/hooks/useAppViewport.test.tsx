@@ -9,12 +9,45 @@ const touch = (target: Element, type: string, touches: ReturnType<typeof point>[
 function setup() { const root = document.createElement('div'); document.body.append(root); const hook = renderHook(useAppViewport); act(() => hook.result.current(root)); return { root, hook, frame: () => act(() => vi.advanceTimersByTime(20)) }; }
 describe('contained app viewport', () => {
  it('resyncs keyboard bounds and standalone foreground changes without document scrolling', () => {
-  const { root, frame } = setup(); expect(root.style.height).toBe('700px');
+  const { root, frame } = setup(); expect(root.style.height).toBe('100dvh');
+  const input=document.createElement('textarea');root.append(input);input.focus();
   viewport.height = 380; viewport.offsetTop = 60; act(() => viewport.dispatchEvent(new Event('resize'))); frame();
   expect(root.style.height).toBe('380px'); expect(root.style.top).toBe('60px');
+  input.blur();
   viewport.height = 800; viewport.offsetTop = 0; fireEvent(window, new Event('pageshow')); frame();
-  expect(root.style.height).toBe('800px'); expect(root.style.top).toBe('0px');
-  viewport.scale = 2; viewport.height = 400; act(() => viewport.dispatchEvent(new Event('resize'))); frame(); expect(root.style.height).toBe('800px');
+  expect(root.style.height).toBe('100dvh'); expect(root.style.top).toBe('0px');
+  viewport.scale = 2; viewport.height = 400; act(() => viewport.dispatchEvent(new Event('resize'))); frame(); expect(root.style.height).toBe('100dvh');
+ });
+ it.each(['fullscreenchange','webkitfullscreenchange'])('recovers a stale fullscreen height and offset without a resize (%s)', type => {
+  const { root, frame }=setup();
+  const input=document.createElement('textarea');root.append(input);input.focus();
+  viewport.height=380;viewport.offsetTop=60;act(()=>viewport.dispatchEvent(new Event('resize')));frame();
+  expect(root.style.height).toBe('380px');
+  input.blur();
+  fireEvent(document,new Event(type));frame();
+  // The old visual size may persist indefinitely, but must not pin the app.
+  expect(root.style.height).toBe('100dvh');expect(root.style.top).toBe('0px');
+ });
+ it('resamples delayed keyboard geometry after fullscreen and orientation transitions', () => {
+  const {root,frame}=setup();const input=document.createElement('textarea');root.append(input);input.focus();
+  viewport.height=380;viewport.offsetTop=60;fireEvent(document,new Event('fullscreenchange'));frame();
+  expect(root.style.height).toBe('380px');
+  // Safari updates the metrics later, without a visualViewport resize event.
+  viewport.height=500;viewport.offsetTop=20;act(()=>vi.advanceTimersByTime(350));
+  expect(root.style.height).toBe('500px');expect(root.style.top).toBe('20px');
+  fireEvent(window,new Event('orientationchange'));frame();viewport.height=450;
+  act(()=>vi.advanceTimersByTime(750));expect(root.style.height).toBe('450px');
+ });
+ it('uses measured window height on browsers without dynamic viewport units', () => {
+  vi.stubGlobal('CSS',{supports:vi.fn(()=>false)});
+  const {root,frame}=setup();expect(root.style.height).toBe(`${window.innerHeight}px`);
+  vi.stubGlobal('innerHeight',1000);fireEvent(document,new Event('webkitfullscreenchange'));frame();
+  expect(root.style.height).toBe('1000px');
+ });
+ it('does not mistake the performance hardware keyboard capture for an open software keyboard', () => {
+  const {root,frame}=setup();const capture=document.createElement('input');capture.inputMode='none';root.append(capture);capture.focus();
+  viewport.height=500;viewport.offsetTop=24;fireEvent(document,new Event('webkitfullscreenchange'));frame();
+  expect(root.style.height).toBe('100dvh');expect(root.style.top).toBe('0px');
  });
  it('allows internal scrolling but blocks a pane handing its exhausted edge to the document', () => {
   const { root } = setup(); const scroller = document.createElement('div'), child = document.createElement('p'); scroller.style.overflowY = 'auto';
@@ -36,7 +69,11 @@ describe('contained app viewport', () => {
   }
  });
  it('removes global gesture and viewport work on unmount', () => {
-  const { root, hook, frame } = setup(); hook.unmount(); viewport.height = 300; fireEvent(window, new Event('pageshow')); frame(); expect(root.style.height).toBe('700px');
+  const { root, hook, frame } = setup();
+  fireEvent(document,new Event('fullscreenchange'));hook.unmount();
+  root.style.height='600px';viewport.height = 300;
+  fireEvent(window, new Event('pageshow'));fireEvent(document,new Event('webkitfullscreenchange'));frame();
+  act(()=>vi.advanceTimersByTime(1500));expect(root.style.height).toBe('600px');
   touch(root, 'touchstart', [point(100, 100)]); expect(touch(root, 'touchmove', [point(100, 130)]).defaultPrevented).toBe(false);
  });
 });

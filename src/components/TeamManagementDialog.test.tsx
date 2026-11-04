@@ -91,22 +91,21 @@ describe('TeamManagementDialog', () => {
     expect(screen.queryByRole('combobox', { name: '調整 Team Admin 的權限' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '移除 Team Admin' })).not.toBeInTheDocument();
     const role = screen.getByRole('combobox', { name: '調整 Joseph 的權限' });
-    expect(within(role).queryByRole('option', { name: '總管理員' })).not.toBeInTheDocument();
+    expect(within(role).getByRole('option', { name: '總管理員' })).toBeInTheDocument();
     expect(within(role).queryByRole('option', { name: '團隊擁有者' })).not.toBeInTheDocument();
     await user.selectOptions(role, 'setlist_manager');
     expect(props.onUpdateRole).toHaveBeenCalledWith('member', 'setlist_manager');
+    await user.selectOptions(role, 'admin');
+    expect(props.onUpdateRole).toHaveBeenLastCalledWith('member', 'admin');
   });
 
-  it('removes admin choices if the acting owner loses owner access', async () => {
+  it('removes member controls when the acting admin loses administration access', () => {
     const props = makeProps();
-    const user = userEvent.setup();
-    const { rerender } = render(<TeamManagementDialog {...props} />);
-    rerender(<TeamManagementDialog {...props} currentUserRole="admin" />);
-    const role = screen.getByRole('combobox', { name: '調整 Joseph 的權限' });
-    expect(within(role).queryByRole('option', { name: '總管理員' })).not.toBeInTheDocument();
-    fireEvent.change(role, { target: { value: 'admin' } });
-    expect(props.onUpdateRole).not.toHaveBeenCalled();
-    await user.selectOptions(role, 'viewer');
+    const { rerender } = render(<TeamManagementDialog {...props} currentUserRole="admin" />);
+    expect(screen.getByRole('combobox', { name: '調整 Joseph 的權限' })).toBeInTheDocument();
+    rerender(<TeamManagementDialog {...props} currentUserRole="editor" />);
+    expect(screen.queryByRole('combobox', { name: '調整 Joseph 的權限' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '移除 Joseph' })).not.toBeInTheDocument();
     expect(props.onUpdateRole).not.toHaveBeenCalled();
   });
 

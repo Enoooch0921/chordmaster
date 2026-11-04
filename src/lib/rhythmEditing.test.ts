@@ -244,3 +244,28 @@ describe('cross-bar ties and stable targets', () => {
     expect(result.error).toContain('找不到');
   });
 });
+
+describe('explicit rest tuplet corrections', () => {
+  it('changes the mistaken opening triplet rest into an eighth rest and restores the third-beat pair', () => {
+    const source = makeSong({ chords: ['Gmaj7', '/', 'G', 'G/B'], rhythm: 'e3r e q e e q', chordSubdivisions: [{ beat: 2, offset: .5, chord: 'Am' }] });
+    const corrected = edit(source, 0, { type: 'insert', token: 'er' });
+    expect(corrected.error).toBeNull();
+    expect(rhythmOf(corrected.song)).toBe('er e q e e q');
+    expect(parseRhythmNotation(rhythmOf(corrected.song)!, '4/4').events.map(event => event.startUnit)).toEqual([0, 2, 4, 8, 10, 12]);
+    expect(corrected.song.sections[0].bars[0].chords).toEqual(source.sections[0].bars[0].chords);
+    expect(corrected.song.sections[0].bars[0].chordSubdivisions).toEqual(source.sections[0].bars[0].chordSubdivisions);
+    expect(rhythmOf(source)).toBe('e3r e q e e q');
+  });
+  it('allows changing back to a triplet rest without inserting a hidden timing gap', () => {
+    const changed = edit(makeSong({ rhythm: 'er e q e e q' }), 0, { type: 'insert', token: 'e3r' });
+    expect(changed.error).toBeNull();
+    expect(rhythmOf(changed.song)).toBe('e3r e q e e q');
+  });
+  it('rejects an expansion that would push existing notes beyond the bar', () => {
+    const source = makeSong({ rhythm: 'e3r e3 e3 q q q' });
+    const changed = edit(source, 0, { type: 'insert', token: 'er' });
+    expect(changed.changed).toBe(false);
+    expect(changed.song).toBe(source);
+    expect(changed.error).toContain('沒有足夠');
+  });
+});

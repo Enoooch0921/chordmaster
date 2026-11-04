@@ -4,7 +4,7 @@ export const DEFAULT_TEAM_INVITE_ROLE: Exclude<LibraryRole, 'owner'> = 'viewer';
 
 export const TEAM_ROLES: ReadonlyArray<LibraryRole> = ['owner', 'admin', 'editor', 'setlist_manager', 'viewer'];
 
-// Invitations never grant administrative access. Owners promote existing
+// Invitations never grant administrative access. Owners and admins promote existing
 // members to admin separately after they have joined the team.
 export const EDITABLE_TEAM_ROLES: ReadonlyArray<Exclude<LibraryRole, 'owner'>> = [
   'editor',
@@ -13,8 +13,7 @@ export const EDITABLE_TEAM_ROLES: ReadonlyArray<Exclude<LibraryRole, 'owner'>> =
 ];
 
 export const getAssignableTeamRoles = (currentUserRole: LibraryRole): ReadonlyArray<Exclude<LibraryRole, 'owner'>> => {
-  if (currentUserRole === 'owner') return ['admin', ...EDITABLE_TEAM_ROLES];
-  if (currentUserRole === 'admin') return EDITABLE_TEAM_ROLES;
+  if (currentUserRole === 'owner' || currentUserRole === 'admin') return ['admin', ...EDITABLE_TEAM_ROLES];
   return [];
 };
 
@@ -50,7 +49,7 @@ export const getTeamRoleDescription = (role: LibraryRole, language: AppLanguage)
   if (language === 'zh') {
     switch (role) {
       case 'owner': return '完整權限，可管理歌曲、歌單、專案、成員與邀請，並指派或撤銷總管理員。';
-      case 'admin': return '可管理全部團隊歌曲、歌單、專案及一般成員的權限與邀請；不能變更擁有者或其他總管理員，也不能指派總管理員。';
+      case 'admin': return '可管理全部團隊歌曲、歌單、專案及一般成員的權限與邀請，也可將一般成員升為總管理員；不能變更擁有者或其他總管理員。';
       case 'editor': return '可管理團隊歌曲、建立歌單與專案、管理自己建立的專案，並編輯自己建立或被指派的歌單。';
       case 'setlist_manager': return '不能更改團隊歌曲或歌單內的和弦、段落內容；可建立歌單與專案、管理自己建立的專案，並在自己建立或被指派的歌單中選曲、排序及設定共用調性。';
       case 'viewer': return '可查看團隊歌曲、歌單與專案，並設定自己的 Capo；不能修改共用內容。';
@@ -60,7 +59,7 @@ export const getTeamRoleDescription = (role: LibraryRole, language: AppLanguage)
 
   switch (role) {
     case 'owner': return 'Full access to songs, setlists, projects, members, and invitations, including assigning and removing team admins.';
-    case 'admin': return 'Can manage all team songs, setlists, projects, and regular members and invitations. Cannot change the owner or other admins, or appoint admins.';
+    case 'admin': return 'Can manage all team songs, setlists, projects, regular members, and invitations, including promoting regular members to admin. Cannot change the owner or other admins.';
     case 'editor': return 'Can manage team songs, create setlists and projects, manage their own projects, and edit setlists they create or are assigned.';
     case 'setlist_manager': return 'Cannot edit charts, chords, or sections. Can create setlists and projects, manage their own projects, and select songs, reorder, and set shared keys in setlists they create or are assigned.';
     case 'viewer': return 'Can view team songs, setlists, and projects and choose their own capo without changing shared content.';

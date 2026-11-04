@@ -260,8 +260,8 @@ describe('cloud repository shared setlist updates', () => {
     await syncWorkspaceDiff({ repository, songs: [librarySong], savedSongs: [librarySong],
       setlists: [current], savedSetlists: [previous], projects: [], savedProjects: [],
       ...(teamRole ? { teamRole } : {}) });
-    expect(saveSetlist.mock.calls[0]).toHaveLength(teamRole ? 3 : 2);
-    if (teamRole) expect(saveSetlist.mock.calls[0][2]).toMatchObject({ teamRole,
+    expect(saveSetlist.mock.calls[0]).toHaveLength(3);
+    expect(saveSetlist.mock.calls[0][2]).toEqual({ ...(teamRole ? { teamRole } : {}),
       sourceEditBases: { added: librarySong } });
     for (const row of entries.upsert.mock.calls[0][0]) {
       if (teamRole) expect(row.override_json.expectedTeamRole).toBe(teamRole);
@@ -269,6 +269,26 @@ describe('cloud repository shared setlist updates', () => {
       expect(row.override_json.songData).not.toHaveProperty('expectedTeamRole');
     }
     expect(current).toEqual(localSnapshot);
+  });
+
+  it('sends personal first-edit provenance without claiming a new origin for legacy private copies', async () => {
+    const entries = makeBuilder();
+    mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository();
+    repository.setActiveLibrary('personal-1');
+    const previous = makeSetlist(['first-edit', 'legacy']);
+    previous.songs[0].songData = undefined;
+    const current = makeSetlist(['first-edit', 'legacy']);
+    current.songs[0].songData!.title = 'Edited privately';
+    current.songs[1].songData!.title = 'Edited legacy copy';
+    const librarySong = makeSong();
+    await syncWorkspaceDiff({ repository, songs: [librarySong], savedSongs: [librarySong],
+      setlists: [current], savedSetlists: [previous], projects: [], savedProjects: [] });
+    const rows = entries.upsert.mock.calls[0][0];
+    expect(rows[0].override_json.sourceEditBase).toEqual(librarySong);
+    expect(rows[1].override_json).not.toHaveProperty('sourceEditBase');
+    expect(rows[0].override_json).not.toHaveProperty('expectedTeamRole');
+    expect(rows[0].override_json.songData).not.toHaveProperty('sourceEditBase');
   });
 
   it('rejects sync when the server detects a role change and retains entries that would have been removed', async () => {
@@ -674,6 +694,48 @@ describe('cloud repository project deletion', () => {
 
 describe('guarded global workspace history',()=>{
  beforeEach(()=>{vi.clearAllMocks();mocks.rpc.mockResolvedValue({data:null,error:null});});
+ it('removes a legacy score using its exact server JSON after comparing normalized content',async()=>{
+  const rawScore=makeSong({sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]});
+  const overrides={overrideKey:'C' as const,sectionOrder:[],songData:rawScore};
+  const entries=makeBuilder({maybeSingle:vi.fn().mockResolvedValue({data:{song_id:'song-1',setlist_id:'list',override_json:overrides},error:null})});
+  mocks.from.mockReturnValue(entries);
+  mocks.rpc.mockImplementation(async (_name,args)=>JSON.stringify(args.p_expected.songData)===JSON.stringify(rawScore)
+   ? {data:'receipt',error:null} : {data:null,error:{message:'History conflict: entry content changed'}});
+  const expected=normalizeStoredSetlist({id:'list',songs:[{id:'only',setlistId:'list',songId:'song-1',order:0,...overrides}]},new Map([['song-1',rawScore]]),0).songs[0];
+  const repository=createRepository();repository.setActiveLibrary('library');
+  await expect(repository.trashWorkspaceResource('entry','only',{...expected})).resolves.toBe('receipt');
+  expect(entries.eq).toHaveBeenCalledWith('id','only');
+  expect(entries.eq).toHaveBeenCalledWith('setlists.library_id','library');
+  expect(mocks.rpc).toHaveBeenCalledWith('trash_workspace_resource',expect.objectContaining({p_expected:expect.objectContaining({songData:rawScore})}));
+ });
+ it('rejects a concurrent score edit before requesting deletion',async()=>{
+  const score=makeSong({sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]});
+  mocks.from.mockReturnValue(makeBuilder({maybeSingle:vi.fn().mockResolvedValue({data:{song_id:'song-1',setlist_id:'list',override_json:{songData:{...score,title:'Changed by another editor'}}},error:null})}));
+  const repository=createRepository();repository.setActiveLibrary('library');
+  await expect(repository.trashWorkspaceResource('entry','only',{songId:'song-1',setlistId:'list',songData:score})).rejects.toThrow('History conflict');
+  expect(mocks.rpc).not.toHaveBeenCalled();
+ });
+ it('keeps the atomic server guard when a score changes after the preflight read',async()=>{
+  const score=makeSong({sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]});
+  mocks.from.mockReturnValue(makeBuilder({maybeSingle:vi.fn().mockResolvedValue({data:{song_id:'song-1',setlist_id:'list',override_json:{songData:score}},error:null})}));
+  const conflict={message:'History conflict: entry content changed'};
+  mocks.rpc.mockResolvedValueOnce({data:null,error:conflict});
+  const repository=createRepository();repository.setActiveLibrary('library');
+  await expect(repository.trashWorkspaceResource('entry','only',{songId:'song-1',setlistId:'list',songData:score})).rejects.toEqual(conflict);
+  expect(mocks.rpc).toHaveBeenCalledTimes(1);
+ });
+ it('uses exact legacy score guards again when redoing a removal',async()=>{
+  const {createWorkspaceHistoryEntry}=await import('./workspaceHistory');
+  const score=makeSong({sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]});
+  const overrides={overrideKey:'C' as const,sectionOrder:['verse'],songData:score};
+  const before=normalizeStoredSetlist({id:'list',songs:[{id:'only',setlistId:'list',songId:'song-1',order:0,...overrides}]},new Map([['song-1',score]]),0);
+  const entry={...createWorkspaceHistoryEntry({zh:'移出歌曲',en:'song removal'},[{resource:'setlist',id:'list',before,after:{...before,songs:[]}}])!,trashResource:{type:'entry' as const,id:'only'},trashId:'old-receipt'};
+  mocks.from.mockReturnValue(makeBuilder({maybeSingle:vi.fn().mockResolvedValue({data:{song_id:'song-1',setlist_id:'list',override_json:overrides},error:null})}));
+  mocks.rpc.mockResolvedValueOnce({data:[{type:'entry',id:'only',trashId:'new-receipt'}],error:null});
+  const repository=createRepository();repository.setActiveLibrary('library');
+  await repository.applyWorkspaceHistory(entry,'redo','captured-library');
+  expect(mocks.rpc).toHaveBeenCalledWith('trash_workspace_resources',expect.objectContaining({p_library_id:'captured-library',p_resources:[expect.objectContaining({expected:expect.objectContaining({songData:score})})]}));
+ });
  it('submits sparse metadata and order together against the captured library',async()=>{
   const {createWorkspaceHistoryEntry}=await import('./workspaceHistory');
   const list: Setlist={id:'list',name:'Before',createdAt:1,updatedAt:1,displayMode:'chord-movable-key',songs:[{id:'a',setlistId:'list',songId:'song-1',order:0,sectionOrder:[]},{id:'b',setlistId:'list',songId:'song-1',order:1,sectionOrder:[]}]};

@@ -111,3 +111,11 @@ describe('local workspace snapshots', () => {
     expect(consumeLocalWorkspaceRecoveryNotice()).toBe('corrupt-unrecoverable');
   });
 });
+
+it('preserves a leading double barline through normalization and saved workspace reload', () => {
+  const song = makeSong('front-boundary', 'Front boundary');
+  song.sections[0].bars[0].doubleBarStart = true;
+  expect(normalizeStoredSong(song, 0).sections[0].bars[0].doubleBarStart).toBe(true);
+  persistLocalWorkspaceSnapshot([song], [], []);
+  expect(loadLocalWorkspaceSnapshot().songs[0].sections[0].bars[0].doubleBarStart).toBe(true);
+});

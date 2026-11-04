@@ -33,3 +33,20 @@ it('ignores malformed modes and refreshes only the current account after a stora
   act(() => window.dispatchEvent(new StorageEvent('storage', { key })));
   expect(result.current.modes.valid).toBe('nashville-number-system');
 });
+
+it('keeps row heights per setlist and account, validates storage, and restores them after remount', async () => {
+  const { useSetlistBarRowPreference } = await import('./useSetlistDisplayModePreference');
+  const key = 'chordmaster.personal-setlist-bar-rows.v1:user:alice';
+  localStorage.setItem(key, JSON.stringify({ old: 3, invalid: 4, string: '3' }));
+  const { result, rerender, unmount } = renderHook(({ user }) => useSetlistBarRowPreference(user), { initialProps: { user: 'alice' } });
+  expect(result.current.rowCounts).toEqual({ old: 3 });
+  act(() => result.current.setRowCount('meeting', 3));
+  expect(result.current.rowCounts.other).toBeUndefined();
+  rerender({ user: 'bob' });
+  expect(result.current.rowCounts).toEqual({});
+  act(() => result.current.setRowCount('meeting', 2));
+  rerender({ user: 'alice' });
+  expect(result.current.rowCounts.meeting).toBe(3);
+  unmount();
+  expect(renderHook(() => useSetlistBarRowPreference('bob')).result.current.rowCounts.meeting).toBe(2);
+});

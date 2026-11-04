@@ -96,3 +96,35 @@ export const writeWorkspaceCache = async (key: string, value: string) => {
     });
   } finally { db.close(); }
 };
+
+/** Atomic read/compare/write for an explicit local score reconciliation. */
+export const mutateWorkspaceDatabase = async (
+  mutate: (current: unknown) => { serialized: string; backupKey: string; backup: string }
+): Promise<void> => {
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE, 'readwrite');
+      const store = transaction.objectStore(STORE);
+      let failure: unknown;
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('Local score sync failed.'));
+      const request = store.get('current');
+      request.onsuccess = () => {
+        try {
+          const next = mutate(request.result);
+          store.put(request.result, 'previous');
+          store.put(next.backup, next.backupKey);
+          store.put(next.serialized, 'current');
+          const verify = store.get('current'), backup = store.get(next.backupKey);
+          backup.onsuccess = () => {
+            if (verify.result !== next.serialized || backup.result !== next.backup) {
+              failure = new Error('Local score sync verification failed.');
+              transaction.abort();
+            }
+          };
+        } catch (error) { failure = error; transaction.abort(); }
+      };
+    });
+  } finally { db.close(); }
+};

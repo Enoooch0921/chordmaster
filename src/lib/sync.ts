@@ -141,13 +141,13 @@ export const syncWorkspaceDiff = async (params: {
   if (setlistDiff.changed.length > 0) {
     await Promise.all(setlistDiff.changed.map((setlist) => {
       const previous = savedSetlistById.get(setlist.id);
-      if (!params.teamRole) return params.repository.saveSetlist(setlist, previous);
       const sourceEditBases = Object.fromEntries(setlist.songs.flatMap(entry => {
         const before = previous?.songs.find(item => item.id === entry.id);
         const source = cloudSongs.find(song => song.id === entry.songId);
         return entry.songData && !before?.songData && !entry.copySourceId && source ? [[entry.id, source]] : [];
       }));
-      return params.repository.saveSetlist(setlist, previous, { teamRole: params.teamRole,
+      if (!params.teamRole && !Object.keys(sourceEditBases).length) return params.repository.saveSetlist(setlist, previous);
+      return params.repository.saveSetlist(setlist, previous, { ...(params.teamRole ? { teamRole: params.teamRole } : {}),
         ...(Object.keys(sourceEditBases).length ? { sourceEditBases } : {}) });
     }));
   }
