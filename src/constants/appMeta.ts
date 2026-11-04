@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-04',
+        title: "Context-aware slash input",
+        bullets: [
+          "Use the same / key for held beats and slash basses: an empty beat gets /; an existing chord enters bass input.",
+          "Keep letter chords, Nashville numbers and bass accidentals working on phone and tablet keyboards."
+        ]
+      },
+      {
+        version: '0.12.10',
+        date: '2026-11-04',
         title: "Update without closing every tab",
         bullets: [
           "Get an update notice when a new version is ready, with Update now and Later actions.",
@@ -997,6 +1006,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-04',
+        title: "手機斜線鍵依輸入內容判斷",
+        bullets: [
+          "同一個 / 按鈕：空拍輸入延長拍斜線；已有和弦時接著輸入低音，例如 C/E。",
+          "保留字母和弦、級數及低音升降記號操作，不增加按鈕或選單。"
+        ]
+      },
+      {
+        version: '0.12.10',
         date: '2026-11-04',
         title: "一鍵更新與開屏版本號",
         bullets: [

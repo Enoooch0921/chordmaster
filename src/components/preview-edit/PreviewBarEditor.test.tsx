@@ -96,7 +96,7 @@ it('updates the shared selection indicator immediately across notation and text 
   expect(indicator.style.transform).toBe('translateX(200%)');
 });
 
-it.each(['sus', 'add', 'alt', '加入增和弦', '選擇 Slash Bass'])('previews the held %s modifier without applying it before release', label => {
+it.each(['sus', 'add', 'alt', '加入增和弦', '延長拍或 Slash Bass'])('previews the held %s modifier without applying it before release', label => {
   const { onApplyDraft } = renderEditor({ deviceLayout:'tablet' });
   const button = screen.getByRole('button', { name:label });
   fireEvent(button, new MouseEvent('pointerdown', { bubbles:true, button:0 }));
@@ -110,6 +110,38 @@ it.each([['Cmaj7',false],['Cm7',true],['CmMaj7',true]] as const)('shows the mino
   const source={...song,sections:[{...song.sections[0],bars:[{id:'bar-1',chords:[chord]}]}]};
   renderEditor({session:createPreviewEditSession({song:source,target:{...target,slotIndex:0,rawChordIndex:0},inputMode:'letters'}),deviceLayout:'tablet'});
   expect(screen.getByRole('button',{name:'加入小和弦 m'}).classList.contains('keyboard-key-active')).toBe(selected);
+});
+
+it.each([
+  ['phone', 'letters'], ['tablet', 'letters'],
+  ['phone', 'nashville'], ['tablet', 'nashville']
+] as const)('uses the %s slash key as a held beat in empty %s slots', (deviceLayout, inputMode) => {
+  const chords = inputMode === 'letters' ? ['C', '', '', 'G'] : ['1', '', '', '5'];
+  const source = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords }] }] };
+  const base = createPreviewEditSession({ song: source, target, inputMode });
+  const { onApplyDraft, rerenderSession } = renderEditor({ session: base, deviceLayout, storageMode: inputMode });
+  const slash = screen.getByRole('button', { name: '延長拍或 Slash Bass' });
+  for (let repeat = 0; repeat < 2; repeat++) {
+    fireEvent.click(slash);
+    const next = onApplyDraft.mock.calls.at(-1)![0] as Song;
+    expect(next.sections[0].bars[0].chords).toEqual([chords[0], '/', '', chords[3]]);
+    rerenderSession({ ...base, draftSong: next });
+    expect(slash).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByText('低音輸入')).not.toBeInTheDocument();
+  }
+  // A root after a held beat starts a normal chord, not an invented C/bass.
+  fireEvent.click(screen.getByRole('button', { name: inputMode === 'letters' ? 'F' : '4' }));
+  expect((onApplyDraft.mock.calls.at(-1)![0] as Song).sections[0].bars[0].chords[1]).toBe(inputMode === 'letters' ? 'F' : '4');
+});
+
+it('uses the same slash key for a Nashville bass when the beat already has a chord', () => {
+  const source = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['1'] }] }] };
+  const session = createPreviewEditSession({ song: source, target: { ...target, slotIndex: 0 }, inputMode: 'nashville' });
+  const { onApplyDraft } = renderEditor({ session, deviceLayout: 'phone', storageMode: 'nashville' });
+  fireEvent.click(screen.getByRole('button', { name: '延長拍或 Slash Bass' }));
+  expect(onApplyDraft).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '3' }));
+  expect((onApplyDraft.mock.calls.at(-1)![0] as Song).sections[0].bars[0].chords[0]).toBe('1/3');
 });
 
 describe('PreviewBarEditor', () => {
@@ -1186,11 +1218,11 @@ describe('PreviewBarEditor', () => {
     }
   });
 
-  it('keeps accidentals on the slash bass until bass input is explicitly closed', async () => {
+  it.each(['phone', 'tablet'] as const)('keeps accidentals on the %s slash bass until bass input is explicitly closed', async deviceLayout => {
     const user = userEvent.setup();
     const base = createPreviewEditSession({ song, target: { ...target, slotIndex: 0 }, inputMode: 'letters' });
-    const { onApplyDraft, rerenderSession } = renderEditor({ session: base, deviceLayout: 'tablet' });
-    const bass = screen.getByRole('button', { name: '選擇 Slash Bass' });
+    const { onApplyDraft, rerenderSession } = renderEditor({ session: base, deviceLayout });
+    const bass = screen.getByRole('button', { name: '延長拍或 Slash Bass' });
     await user.click(bass);
     await user.click(screen.getByRole('button', { name: 'F' }));
     rerenderSession({ ...base, draftSong: onApplyDraft.mock.calls.at(-1)![0] as Song });

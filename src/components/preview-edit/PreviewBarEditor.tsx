@@ -1343,7 +1343,11 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" data-key-preview className={`${utilityKeyClass} min-h-0 px-0 ${deviceLayout === 'phone' ? '!text-[10px]' : ''}`} onClick={() => appendQualityFragment('add')}>add</button>
             <button type="button" data-key-preview className={`${utilityKeyClass} min-h-0 px-0 ${deviceLayout === 'phone' ? '!text-[10px]' : ''}`} onClick={() => appendQualityFragment('alt')}>alt</button>
             <button type="button" data-key-preview className={`${utilityKeyClass} min-h-0 px-0 text-lg`} onClick={() => appendQualityFragment('aug')} aria-label={language === 'zh' ? '加入增和弦' : 'Append augmented'}>+</button>
-            <button type="button" data-key-preview className={`${utilityKeyClass} min-h-0 px-0 ${bassMode ? activeButtonClass : ''}`} onClick={() => setBassMode((value) => !value)} aria-pressed={bassMode} aria-label={language === 'zh' ? '選擇 Slash Bass' : 'Choose slash bass'}>/</button>
+            <button type="button" data-key-preview className={`${utilityKeyClass} min-h-0 px-0 ${bassMode ? activeButtonClass : ''}`} onClick={() => {
+              if (bassMode) setBassMode(false);
+              else if (chordParts.root) setBassMode(true);
+              else applyDisplayedChord('/');
+            }} aria-pressed={bassMode} aria-label={language === 'zh' ? '延長拍或 Slash Bass' : 'Beat slash or slash bass'}>/</button>
             <button type="button" className={`${utilityKeyClass} min-h-0 px-0 ${deviceLayout === 'phone' ? '!text-[10px]' : ''}`} disabled={bar.chordKeyUnspecified} onClick={() => onInputModeChange(chordInputMode === 'letters' ? 'nashville' : 'letters')} aria-label={chordInputMode === 'letters' ? (language === 'zh' ? '切換為 Nashville' : 'Switch to Nashville') : (language === 'zh' ? '切換為字母和弦' : 'Switch to letter chords')}>{chordInputMode === 'letters' ? '123' : 'ABC'}</button>
             <button type="button" data-key-emphasis="delete" className={`${destructiveKeyClass} min-h-0 px-0`} onClick={deleteLastChordCharacter} aria-label={language === 'zh' ? '刪除最後一個字元' : 'Delete last character'}><Delete size={23} strokeWidth={2.4} aria-hidden="true" /></button>
           </div>

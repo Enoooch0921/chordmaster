@@ -85,3 +85,7 @@ Desktop drag/arrow movement now survives editor unmount/reopen and page reload. 
 ### Direct beat runs (2026-10-29)
 
 The ordinary keyboard stays open for beats with subdivisions. Desktop direct capture and physical keyboard fallback parse case-insensitive consecutive letter chords into one beat's two/four attacks without opening &+. Preserve quality words, slash basses, flat-root spelling and Nashville numbers. Character deletion edits the full displayed run, and reverting to one chord removes only that beat's extra entries. Continue using atomic draft commands and undo. Explicit advanced positions and numbered passes remain under &+.
+
+## Context-aware slash key (2026-11-04)
+
+Keep one / key in its existing position. A beat without a chord root receives a held-beat slash; an existing chord enters bass input. Pressing again while entering bass exits that mode. Keep the keyboard layout unchanged and support letter/Nashville input. Local WebKit 390×844 verification entered C/E and a separate held beat, then reloaded and confirmed both persisted. Evidence: output/playwright/mobile-slash-held.png. Keyboard regression tests cover phone/tablet, repeat presses, roots after held beats and bass accidentals.
