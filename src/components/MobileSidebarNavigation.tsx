@@ -1,5 +1,6 @@
 import { BookOpen, Info, MoreHorizontal } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import SlidingSelection from './ui/SlidingSelection';
 
 interface Props {
   logoSrc: string;
@@ -19,6 +20,8 @@ interface Props {
 
 export default function MobileSidebarNavigation(props: Props) {
   const menuRef = useRef<HTMLDetailsElement>(null);
+  const lastTab = useRef(props.active ?? 'songs');
+  if (props.active) lastTab.current = props.active;
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
       const menu = menuRef.current;
@@ -27,14 +30,16 @@ export default function MobileSidebarNavigation(props: Props) {
     document.addEventListener('pointerdown', closeOutside);
     return () => document.removeEventListener('pointerdown', closeOutside);
   }, []);
-  const tabClass = (active: boolean) => `flex h-11 min-w-0 flex-1 items-center justify-center rounded-lg px-2 text-sm font-bold transition-colors ${active
-    ? 'bg-indigo-600 text-white shadow-sm'
+  const tabClass = (active: boolean) => `ui-press relative flex h-11 min-w-0 flex-1 items-center justify-center rounded-lg px-2 text-sm font-bold transition-colors ${active
+    ? 'text-white'
     : 'text-gray-600 hover:bg-gray-100 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface-raised)]'}`;
 
   return (
     <div data-mobile-sidebar-navigation className="relative z-20 flex shrink-0 items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-[color:var(--color-border)]">
       <img src={props.logoSrc} alt="ChordMaster" className="h-7 w-7 shrink-0 rounded-lg" />
-      <nav aria-label="ChordMaster" className="flex min-w-0 flex-1 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
+      <nav aria-label="ChordMaster" className="relative flex min-w-0 flex-1 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
+        <SlidingSelection index={lastTab.current === 'setlists' ? 1 : 0} count={2} inset={4} gap={4}
+          visible={props.active !== null} className="bg-indigo-600 shadow-sm" style={{ borderRadius: 8 }}/>
         <button type="button" onClick={props.onSongs} aria-pressed={props.active === 'songs'} className={tabClass(props.active === 'songs')}>
           {props.songsLabel}
         </button>

@@ -305,3 +305,38 @@ it('defers a full song notification throughout a clean editing session and catch
   await tick(250);
   expect(load).toHaveBeenCalledTimes(2);
 });
+
+it('catches same-account personal collection edits within five seconds even without realtime', async () => {
+  let cloud = initial;
+  const load = vi.fn(async () => structuredClone(cloud));
+  const collections = vi.fn(async (_id, knownSongs) => ({ ...structuredClone(cloud), songs: knownSongs }));
+  const repository = { loadLibraryContent: load, loadLibraryCollections: collections,
+    loadLibrarySongVersions: vi.fn(async () => [{ id: 'song', updatedAt: 1 }]),
+    saveSong: vi.fn(), saveSetlist: vi.fn(), saveProject: vi.fn(),
+    deleteSong: vi.fn(), deleteSetlist: vi.fn(), deleteProject: vi.fn()
+  } as unknown as WorkspaceRepository;
+  const device = () => {
+    const [workspace, setWorkspace] = useState(initial);
+    const [baseline, setBaseline] = useState(initial);
+    useLibraryWorkspaceRefresh({ repository, scope: 'same-user:personal', libraryId: 'personal', enabled: true,
+      paused: false, refreshCollections: true, collectionRefreshMs: 5000, workspace, canApply: () => true,
+      onUpdate: remote => { setWorkspace(remote); setBaseline(remote); } });
+    return { workspace, baseline };
+  };
+  const tablet = renderHook(device);
+  await flush();
+  cloud = updated(); // Phone saves a key change and appends another entry.
+  await tick(4999);
+  expect(tablet.result.current.workspace.setlists[0].songs).toHaveLength(1);
+  await tick(1);
+  expect(tablet.result.current.workspace.setlists[0].songs.map(row => [row.id, row.overrideKey]))
+    .toEqual([['entry', 'D'], ['added', 'F#']]);
+  expect(load).toHaveBeenCalledOnce();
+  const { workspace, baseline } = tablet.result.current;
+  await syncWorkspaceDiff({ repository, ...workspace, savedSongs: baseline.songs,
+    savedSetlists: baseline.setlists, savedProjects: baseline.projects });
+  expect(repository.saveSetlist).not.toHaveBeenCalled();
+  cloud = { ...cloud, setlists: [] };
+  await tick(5000);
+  expect(tablet.result.current.workspace.setlists).toEqual([]);
+});

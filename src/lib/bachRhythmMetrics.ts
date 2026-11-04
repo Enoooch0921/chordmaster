@@ -34,6 +34,7 @@ export const getBachGlyphAnchor = (base: RhythmBase, isRest: boolean): BachGlyph
 export const BACH_QUARTER_OUTLINE_METRICS = {
   unitsPerEm: 1000,
   advanceWidth: 294,
+  noteheadLeft: 8,
   stemLeft: 239,
   stemRight: 252
 } as const;
@@ -46,12 +47,44 @@ export const BACH_QUARTER_STEM_RIGHT_INSET_EM = (
 export const BACH_NOTE_VERTICAL_OUTLINE_METRICS: Record<RhythmBase, {
   glyphTop: number;
   noteheadTop: number;
+  noteheadBottom: number;
 }> = {
-  w: { glyphTop: 237, noteheadTop: 237 },
-  h: { glyphTop: 802, noteheadTop: 197 },
-  q: { glyphTop: 802, noteheadTop: 197 },
-  e: { glyphTop: 784, noteheadTop: 197 },
-  s: { glyphTop: 805, noteheadTop: 197 }
+  w: { glyphTop: 237, noteheadTop: 237, noteheadBottom: 17 },
+  h: { glyphTop: 802, noteheadTop: 197, noteheadBottom: 0 },
+  q: { glyphTop: 802, noteheadTop: 197, noteheadBottom: 0 },
+  e: { glyphTop: 784, noteheadTop: 197, noteheadBottom: 0 },
+  s: { glyphTop: 805, noteheadTop: 197, noteheadBottom: 0 }
+};
+
+export const getBachNoteContoursFromBaseline = (baseline: number, fontSize: number, base: RhythmBase) => {
+  const outline = BACH_NOTE_VERTICAL_OUTLINE_METRICS[base];
+  const unit = fontSize / BACH_QUARTER_OUTLINE_METRICS.unitsPerEm;
+  return {
+    top: baseline - outline.glyphTop * unit,
+    noteheadTop: baseline - outline.noteheadTop * unit,
+    noteheadBottom: baseline - outline.noteheadBottom * unit
+  };
+};
+
+/** A flat-ended cross with Bach's notehead bounds and twice its stem weight. */
+export const getBachCrossHeadProfile = (headX: number, centerY: number, fontSize: number) => {
+  const metrics = BACH_QUARTER_OUTLINE_METRICS;
+  const unit = fontSize / metrics.unitsPerEm;
+  const glyphOrigin = headX + BACH_NOTE_ANCHORS.q.xEm * fontSize - metrics.advanceWidth / 2 * unit;
+  const left = glyphOrigin + metrics.noteheadLeft * unit;
+  const right = glyphOrigin + metrics.stemRight * unit;
+  const height = BACH_NOTE_VERTICAL_OUTLINE_METRICS.q.noteheadTop * unit;
+  const top = centerY - height / 2, bottom = centerY + height / 2;
+  const width = right - left;
+  const armWidth = 2 * (metrics.stemRight - metrics.stemLeft) * unit;
+  const diagonal = Math.hypot(width, height);
+  const cutX = height / diagonal * armWidth, cutY = width / diagonal * armWidth;
+  return {
+    left, right, top, bottom, centerX: (left + right) / 2,
+    stemBottom: top + cutY,
+    path: `M ${left + cutX} ${top} L ${right} ${bottom - cutY} L ${right - cutX} ${bottom} L ${left} ${top + cutY} Z `
+      + `M ${left} ${bottom - cutY} L ${right - cutX} ${top} L ${right} ${top + cutY} L ${left + cutX} ${bottom} Z`
+  };
 };
 
 export const getBachNoteheadTopFromGlyphTop = (

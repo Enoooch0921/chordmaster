@@ -1,10 +1,9 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
 
 /** Keep the application in the visual viewport; only its own scroll panes move. */
-export function useAppViewport() {
+export function useAppViewport(overlay?: RefObject<HTMLDivElement | null>, overlayVisible = false) {
   const root = useRef<HTMLDivElement | null>(null);
   const update = useCallback(() => {
-    if (!root.current) return;
     const viewport = window.visualViewport;
     if (viewport && Math.abs(viewport.scale - 1) > 0.01) return;
     const active = document.activeElement;
@@ -18,22 +17,31 @@ export function useAppViewport() {
     const keyboard = editing && viewport && viewport.height + viewport.offsetTop < window.innerHeight - 1;
     const dynamicHeight = typeof CSS === 'undefined' || !CSS.supports || CSS.supports('height', '100dvh');
     const height = keyboard ? viewport.height : window.innerHeight;
-    if (height > 0) root.current.style.height = keyboard || !dynamicHeight ? `${height}px` : '100dvh';
-    root.current.style.top = `${keyboard ? viewport.offsetTop : 0}px`;
-  }, []);
+    for (const element of [root.current, overlay?.current]) {
+      if (!element) continue;
+      if (height > 0) element.style.height = keyboard || !dynamicHeight ? `${height}px` : '100dvh';
+      element.style.top = `${keyboard ? viewport.offsetTop : 0}px`;
+    }
+  }, [overlay]);
   const attach = useCallback((element: HTMLDivElement | null) => { root.current = element; update(); }, [update]);
+  // The performance overlay mounts independently of the persistent app root.
+  useLayoutEffect(update, [update, overlayVisible]);
   useLayoutEffect(() => {
     let frame: number | null = null;
     const schedule = () => { if (frame === null) frame = requestAnimationFrame(() => { frame = null; update(); }); };
-    let settleTimers: number[] = [];
+    const settleTimers = new Set<number>();
     const settle = () => {
-      settleTimers.forEach(window.clearTimeout);
+      settleTimers.forEach(timer => window.clearTimeout(timer));
+      settleTimers.clear();
       schedule();
-      // Fullscreen/toolbar events can precede Safari's final viewport geometry,
-      // with no resize event when that final geometry becomes available.
-      settleTimers = [100, 300, 700, 1200].map(delay => window.setTimeout(schedule, delay));
+      // Fullscreen/rotation events may precede the toolbar animation's final
+      // dimensions. Bounded follow-ups also cover a missing final resize event.
+      for (const delay of [100, 250, 500, 1000]) {
+        const timer = window.setTimeout(() => { settleTimers.delete(timer); schedule(); }, delay);
+        settleTimers.add(timer);
+      }
     };
-    const visible = () => { if (document.visibilityState === 'visible') settle(); };
+    const visible = () => { if (document.visibilityState !== 'hidden') settle(); };
     let touch: { x: number; y: number; startX: number; startY: number; axis: 'x' | 'y' | null; scrollers: HTMLElement[] } | null = null;
     const start = (event: TouchEvent) => {
       touch = null;
@@ -87,7 +95,7 @@ export function useAppViewport() {
     update();
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
-      settleTimers.forEach(window.clearTimeout);
+      settleTimers.forEach(timer => window.clearTimeout(timer));
       document.removeEventListener('touchstart', start, true); document.removeEventListener('touchmove', move, true);
       document.removeEventListener('touchend', end); document.removeEventListener('touchcancel', end);
       window.removeEventListener('resize', schedule); window.removeEventListener('pageshow', settle); window.removeEventListener('focus', settle);

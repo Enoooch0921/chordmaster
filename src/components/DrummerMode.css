@@ -129,7 +129,7 @@
 @media (max-height: 650px) {
   .drummer-beat-stack > span { height: 12px; }
   .drummer-subdivisions button { min-height: 44px; padding-top: 0; padding-bottom: 3px; }
-  .drummer-subdivisions svg { height: 36px; }
+  .drummer-subdivisions button > svg { height: 36px; }
 }
 
 /* The same mounted chart and audio engine continue across live-mode changes. */
@@ -292,7 +292,7 @@
   .drummer-header > button:first-child > span { display: none; }
   .drummer-view-switch button { padding: 8px; }
   .drummer-current { display: flex; flex-direction: column; }
-  .drummer-tempo-meta { order: 1; }
+  .drummer-tempo-meta { order: 1; margin-bottom: 12px; }
   .drummer-beats { order: 2; }
   .drummer-tempo { order: 3; width: 100%; }
   .drummer-transport { order: 4; }
@@ -706,4 +706,101 @@
 }
 @media (orientation: landscape) and (min-width: 800px) and (max-width: 1000px) and (max-height: 500px) {
   .drummer-mode[data-stage] .drummer-list-scroll { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Keep the phone entry in the title row instead of consuming song-list height. */
+.setlist-browser-header .drummer-entry-compact {
+  flex-shrink: 0; width: auto; min-height: 44px; margin: 0;
+  padding: 6px 8px; gap: 5px; font-size: 12px; white-space: nowrap;
+}
+@media (max-width: 639px) {
+  [data-setlist-detail-header] .setlist-browser-title { gap: 6px; }
+}
+/* RhythmNotation owns its SVG height; stretching its inner SVG shifts triplets. */
+.drummer-subdivisions [data-rhythm-geometry-svg] { height: 100%; }
+
+/* Keep the landscape control order across tablets, desktop widths and page zoom. */
+@media (min-width: 600px) and (min-height: 501px) {
+  .drummer-mode[data-stage] .drummer-console-layout {
+    width: min(100%, 600px); margin-inline: auto; padding: 0;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-rows: 64px minmax(116px, auto) 72px 44px;
+    gap: 12px; align-content: start;
+  }
+  .drummer-mode[data-stage] .drummer-current,
+  .drummer-mode[data-stage] .drummer-transport { display: contents; }
+  .drummer-mode[data-stage] .drummer-beats {
+    grid-column: 1 / -1; grid-row: 1; align-self: stretch; margin: 0;
+  }
+  .drummer-mode[data-stage] .drummer-tempo {
+    grid-column: 1 / 4; grid-row: 2; margin: 0; padding: 0;
+    width: 100%; max-width: none; justify-self: stretch;
+    grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 4px;
+  }
+  .drummer-mode[data-stage] .drummer-tempo > button { width: 56px; height: 72px; }
+  .drummer-mode[data-stage] .drummer-tempo label {
+    display: grid; grid-template-columns: minmax(0, 1fr) 28px 44px minmax(0, 1fr);
+    grid-template-rows: auto 44px; align-items: center;
+  }
+  .drummer-mode[data-stage] .drummer-tempo input { grid-column: 1 / -1; grid-row: 1; }
+  .drummer-mode[data-stage] .drummer-tempo label > span:not(.sr-only) { grid-column: 2; grid-row: 2; }
+  .drummer-mode[data-stage] .drummer-reset-tempo {
+    position: static; grid-column: 3; grid-row: 2; width: 44px; height: 44px;
+  }
+  .drummer-mode[data-stage] .drummer-tempo-meta {
+    grid-column: 4; grid-row: 2; justify-content: center; margin: 0;
+  }
+  .drummer-mode[data-stage] .drummer-subdivision-trigger { gap: 2px; padding: 4px; }
+  .drummer-mode[data-stage] .drummer-subdivision-trigger .drummer-subdivision-symbol { width: 32px; }
+  .drummer-mode[data-stage] .drummer-subdivisions { left: auto; right: 0; }
+  .drummer-mode[data-stage] .drummer-play {
+    grid-column: 1; grid-row: 3; width: 100%; max-width: none;
+    height: 72px; min-height: 72px; padding: 8px; font-size: 18px;
+  }
+  .drummer-mode[data-stage] .drummer-tap {
+    grid-column: 2; grid-row: 3; width: 100%; max-width: none;
+    height: 72px; min-height: 72px; padding: 8px; font-size: 26px;
+  }
+  .drummer-mode[data-stage] .drummer-song-navigation {
+    grid-column: 3 / 5; grid-row: 3; width: 100%; min-height: 72px; gap: 12px;
+  }
+  .drummer-mode[data-stage] .drummer-song-navigation button { min-height: 72px; }
+  .drummer-mode[data-stage] .drummer-song-navigation button svg { width: 28px; height: 28px; }
+  .drummer-mode[data-stage] .drummer-settings { grid-column: 1 / -1; grid-row: 4; }
+}
+
+.drummer-sound-loading { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12px; color: var(--color-text-muted); }
+.drummer-sound-loading > span { width: 14px; height: 14px; border: 2px solid var(--color-border); border-top-color: var(--color-indigo-700); border-radius: 50%; animation: drummer-sound-spin .8s linear infinite; }
+@keyframes drummer-sound-spin { to { transform: rotate(360deg); } }
+
+/* Keep native BPM entry above the software keyboard without panning the page. */
+.drummer-mode[data-tempo-editing="true"] { display: flex; flex-direction: column; }
+.drummer-mode[data-tempo-editing="true"] .drummer-left-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.drummer-mode[data-tempo-editing="true"] .drummer-left-body { display: block; min-height: 0; flex: 1; overflow: hidden; }
+.drummer-mode[data-tempo-editing="true"] .drummer-workspace { display: block; min-height: 0; height: 100%; }
+.drummer-mode[data-tempo-editing="true"] .drummer-controls { min-height: 0; max-height: 100%; height: 100%; margin: 0; overflow-y: auto; }
+.drummer-mode[data-tempo-editing="true"] .drummer-console-layout { display: block; height: auto; }
+.drummer-mode[data-tempo-editing="true"] .drummer-current { display: contents; }
+.drummer-mode[data-tempo-editing="true"] .drummer-tempo { display: flex; width: 100%; max-width: 480px; margin: 4px auto; }
+.drummer-mode[data-tempo-editing="true"] .drummer-song-heading,
+.drummer-mode[data-tempo-editing="true"] .drummer-tempo-meta,
+.drummer-mode[data-tempo-editing="true"] .drummer-beats,
+.drummer-mode[data-tempo-editing="true"] .drummer-transport,
+.drummer-mode[data-tempo-editing="true"] .drummer-settings,
+.drummer-mode[data-tempo-editing="true"] .drummer-song-list,
+.drummer-mode[data-tempo-editing="true"] .drummer-score { display: none; }
+.drummer-mode[data-native-keyboard="true"] .drummer-midi-panel { max-height: 100%; }
+@media (prefers-reduced-motion: reduce) { .drummer-sound-loading > span { animation: none; } }
+
+/* Portrait phones reserve the full reset hit area above transport controls. */
+@media (max-width: 599px) and (orientation: portrait) {
+  .drummer-mode .drummer-tempo label {
+    display: grid; grid-template-columns: minmax(0, 1fr) 28px 44px minmax(0, 1fr);
+    grid-template-rows: auto 44px; align-items: center;
+  }
+  .drummer-mode .drummer-tempo input { grid-column: 1 / -1; grid-row: 1; }
+  .drummer-mode .drummer-tempo label > span:not(.sr-only) { grid-column: 2; grid-row: 2; }
+  .drummer-mode .drummer-reset-tempo {
+    position: static; grid-column: 3; grid-row: 2; width: 44px; height: 44px;
+  }
 }

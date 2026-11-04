@@ -1,4 +1,5 @@
-import { useId, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useId, useRef, type ReactNode } from 'react';
+import { useNativeDialogMotion } from '../hooks/useNativeDialogMotion';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
@@ -15,16 +16,7 @@ interface ResponsiveDialogProps {
 export default function ResponsiveDialog({ title, subtitle, closeLabel, busy = false, children, onClose }: ResponsiveDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  useLayoutEffect(() => {
-    const dialog = ref.current!;
-    const overflow = document.body.style.overflow;
-    dialog.showModal();
-    document.body.style.overflow = 'hidden';
-    return () => {
-      dialog.close();
-      document.body.style.overflow = overflow;
-    };
-  }, []);
+  useNativeDialogMotion(ref);
 
   return createPortal(
     <dialog ref={ref} aria-labelledby={titleId} aria-modal="true" aria-busy={busy}

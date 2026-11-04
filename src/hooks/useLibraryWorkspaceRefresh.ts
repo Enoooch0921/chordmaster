@@ -15,9 +15,10 @@ interface Options {
   libraryId: string | null;
   enabled: boolean;
   paused: boolean;
-  // Team setlist copies need frequent reads even when Realtime publication is
+  // Owned setlist copies need frequent reads even when Realtime publication is
   // unavailable, without repeatedly downloading the entire song catalogue.
   refreshCollections?: boolean;
+  collectionRefreshMs?: number;
   refreshVersion?: number;
   songRefreshVersion?: number;
   workspace: Pick<LibraryContent, 'songs' | 'setlists' | 'projects'>;
@@ -33,7 +34,7 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
   const [refreshFailed, setRefreshFailed] = useState(false);
   const requestRefreshRef = useRef<((full?: boolean) => void) | null>(null);
   const triggerRef = useRef({ paused: options.paused, version: options.refreshVersion, songs: options.songRefreshVersion });
-  const { repository, scope, libraryId, enabled, refreshCollections = false } = options;
+  const { repository, scope, libraryId, enabled, refreshCollections = false, collectionRefreshMs = COLLECTION_REFRESH_MS } = options;
 
   useEffect(() => {
     setRefreshFailed(false);
@@ -66,7 +67,7 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
           || Date.now() - lastFullRefreshAt >= SUCCESS_REFRESH_MS;
         fullRefreshRequested = false;
         // Realtime can be interrupted on mobile or self-hosted installations.
-        // Compare only ids/timestamps every 15s; download scores only on change.
+        // Compare only ids/timestamps between full reads; download scores only on change.
         if (!fullRead) {
           const versions = await repository.loadLibrarySongVersions(libraryId, controller.signal);
           const known = new Map(snapshot.workspace.songs.map((song) => [song.id, song.updatedAt ?? 0]));
@@ -103,7 +104,7 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
             ? Math.min(30000, 5000 * 2 ** Math.min(failures, 3))
             : queued && !latest.current.paused && latest.current.canApply()
               ? CHANGE_DEBOUNCE_MS
-              : refreshCollections ? COLLECTION_REFRESH_MS : SUCCESS_REFRESH_MS;
+              : refreshCollections ? collectionRefreshMs : SUCCESS_REFRESH_MS;
           timer = setTimeout(() => void refresh(), delay);
         }
       }
@@ -135,7 +136,7 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
       window.removeEventListener('pageshow', resume);
       document.removeEventListener('visibilitychange', resume);
     };
-  }, [repository, scope, libraryId, enabled, refreshCollections]);
+  }, [repository, scope, libraryId, enabled, refreshCollections, collectionRefreshMs]);
 
   useEffect(() => {
     const previous = triggerRef.current;

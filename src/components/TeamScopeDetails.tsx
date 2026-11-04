@@ -18,7 +18,7 @@ export default function TeamScopeDetails({ language, role, scope, className = ''
     ? { created: '自己建立', assigned: '被指派', administrator: '全團隊' }
     : { created: 'Created', assigned: 'Assigned', administrator: 'Team access' };
   return (
-    <details className={`text-xs leading-5 text-stone-600 ${className}`}>
+    <details className={`ui-details text-xs leading-5 text-stone-600 ${className}`}>
       <summary className="cursor-pointer py-1 marker:text-stone-400 hover:text-stone-700">
         {summaryLabel ?? getTeamScopeSummary(role, scope, language)}
         {!summaryLabel ? <span className="ml-2 text-stone-500">{zh ? '查看範圍' : 'View scope'}</span> : null}

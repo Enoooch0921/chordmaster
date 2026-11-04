@@ -1,7 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { chordBeatGroupLabels, chordBeatTrackWeights, chordRhythmAnchors, chordJianpuAnchors, fitAnchoredChords } from './chordBeatLayout';
+import { chordBeatGroupLabels, chordBeatTrackWeights, chordBeatAnchors, fitAnchoredChords } from './chordBeatLayout';
 
 const dense = [0, .25, .5, .75].map(offset => ({beat: 2, offset, chord: 'A'}));
+
+it('condenses dense harmony horizontally inside the original measure and beat grid', () => {
+  const width = 153;
+  // Includes the raised D-sharp's ink extending beyond the B/D# container.
+  const metrics = [24.3359375,39.2428,23.1484375,45.1875].map((w,index) => ({ width:w, anchor:(index+.5)/4*width, span:1 }));
+  const fits = fitAnchoredChords(metrics, width, { edgePadding:4, balanceSpacing:true });
+  fits.forEach((fit,index) => {
+    expect(fit.scale).toBeCloseTo(.85, 6);
+    expect(fit.anchor).toBe(metrics[index].anchor);
+    if (index) expect(fit.left-fits[index-1].left-metrics[index-1].width*fits[index-1].scale).toBeGreaterThanOrEqual(9.999);
+  });
+});
+
+it.each([120, 153, 200])('separates four full-beat harmonies in a %ipx measure without changing their attacks', width => {
+  // 一道江河（2022 新版）, Verse 14: Bm, B/D#, Em, Gm7(b5).
+  // Natural widths measured with the song's stage-sans font.
+  const metrics = [24.3359375, 34.8046875, 23.1484375, 45.1875].map((naturalWidth, index) => ({
+    anchor: (index + .5) / 4 * width,
+    width: naturalWidth,
+    span: 1,
+    slashBass: index === 1,
+    opticalOffset: index === 1 ? 2 : 0,
+  }));
+  const before = JSON.stringify(metrics);
+  const fits = fitAnchoredChords(metrics, width, { edgePadding: 4, balanceSpacing: true });
+  fits.forEach((fit, index) => {
+    expect(fit.anchor).toBe(metrics[index].anchor);
+    expect(fit.scale).toBeCloseTo(fits[0].scale, 6);
+    expect(fit.left).toBeGreaterThanOrEqual(4 - .0001);
+    const right = fit.left + metrics[index].width * fit.scale;
+    expect(right).toBeLessThanOrEqual(width - 4 + .0001);
+    if (fits[index + 1]) expect(fits[index + 1].left - right).toBeGreaterThanOrEqual(6 - .0001);
+    expect(Math.abs(fit.left + metrics[index].width * fit.scale / 2 - fit.anchor)).toBeLessThanOrEqual(Math.min(10, width / 4 * .22) + .0001);
+  });
+  expect(JSON.stringify(metrics)).toBe(before);
+});
 
 describe('chord beat grouping', () => {
   it('compacts a complete sixteenth run while preserving isolated and partial positions', () => {
@@ -31,32 +67,23 @@ describe('chord beat grouping', () => {
 });
 
 
-describe('notation-aligned chord anchors', () => {
-  const attacks = [0, 1, 2, 2.5, 3].map(position => ({ beat: Math.floor(position), offset: position % 1, chord: 'G' }));
-  it('maps the supplied G / G Am G/B example to the actual rhythm heads', () => {
-    expect(chordRhythmAnchors(attacks, 'er e q e e q', '4/4')).toEqual([.0625, .375, .5625, .6875, .875]);
+describe('fixed chord beat anchors', () => {
+  it('keeps full beats equally spaced regardless of the harmony or notation duration', () => {
+    const attacks = ['G', '/', 'Am', 'G/B'].map((chord, beat) => ({ beat, offset: 0, chord }));
+    expect(chordBeatAnchors(attacks, 4)).toEqual([.125, .375, .625, .875]);
+    expect(chordBeatAnchors([attacks[0]], 4)).toEqual([.125]);
   });
-  it.each(['w', 'h h', 'q. e q q', 'bad', 'q q q q q'])('retains the original placement for long or invalid rhythm %s', notation => {
-    expect(chordRhythmAnchors([attacks[0]], notation, '4/4')).toBeNull();
+  it('shares the third beat between G and Am while preserving surrounding beat centers', () => {
+    const attacks = [0, 1, 2, 2.5, 3].map(position => ({ beat: Math.floor(position), offset: position % 1, chord: 'G' }));
+    expect(chordBeatAnchors(attacks, 4)).toEqual([.125, .375, .5625, .6875, .875]);
   });
-  it('aligns entered notes immediately and keeps missing attacks in their own beat', () => {
-    expect(chordRhythmAnchors(attacks, 'q', '4/4')).toEqual([.125, .375, .5625, .6875, .875]);
-    expect(chordRhythmAnchors(attacks, 'q q q q', '4/4')).toEqual([.125, .375, .625, .6875, .875]);
-    expect(chordJianpuAnchors(attacks, '1 | x | x | x', '4/4')).toEqual([.125, .375, .5625, .6875, .875]);
+  it('preserves sixteenth order and isolated offbeat positions', () => {
+    expect(chordBeatAnchors(dense, 4)).toEqual([.53125, .59375, .65625, .71875]);
+    expect(chordBeatAnchors([{beat: 2, offset: .5, chord: 'C'}], 4)).toEqual([.6875]);
   });
-  it('aligns melody beat subdivisions using automatic duration shorthand', () => {
-    expect(chordJianpuAnchors(attacks, '1 | 2 | 34 | 5', '4/4')).toEqual([.125, .375, .5625, .6875, .875]);
-  });
-  it('retains the first-position chord for a melody sustained across the bar', () => {
-    expect(chordJianpuAnchors([attacks[0]], '1 | - | - | -', '4/4')).toBeNull();
-  });
-  it('does not align a chord to an invisible melody placeholder', () => {
-    expect(chordJianpuAnchors([attacks[0]], 'x | 2 | 3 | 4', '4/4')).toBeNull();
-  });
-  it('uses the eighth-note beat capacity in compound meter', () => {
-    const positions = [0, 1, 2, 3, 4, 5].map(beat => ({beat, offset:0, chord:'C'}));
-    expect(chordRhythmAnchors(positions, 'e e e e e e', '6/8')).toEqual(positions.map(({beat}) => (beat + .5) / 6));
-    chordJianpuAnchors(positions, '123 | 456', '6/8')!.forEach((value, index) => expect(value).toBeCloseTo((index + .5) / 6));
+  it.each([3, 6])('uses all %i beats in other meters', beats => {
+    const attacks = Array.from({length: beats}, (_, beat) => ({beat, offset: 0, chord: 'C'}));
+    expect(chordBeatAnchors(attacks, beats)).toEqual(attacks.map(({beat}) => (beat + .5) / beats));
   });
 });
 
@@ -100,4 +127,90 @@ it('allows a small optical correction for slash chords within the same beat boun
   expect(fit.left + 20).toBe(82);
   expect(fit.anchor).toBe(80);
   expect(fit.scale).toBe(1);
+});
+
+
+it.each([
+  ['Pre-Chorus / Chorus bar 7', 142.08, [28.3, 37.5, 12.86, 11.07]],
+  ['Tag after the repeat start', 128.8, [28.3, 37.5, 12.86, 11.07]],
+  ['Ending after the repeat end', 142.8, [36.42, 15, 11.54, 15]],
+] as const)('balances visible gaps and preserves beat bounds in %s', (_, width, widths) => {
+  const metrics = widths.map((w, index) => ({anchor: width * (index + .5) / 4, width: w, span: 1}));
+  const before = fitAnchoredChords(metrics, width, {edgePadding: 4});
+  const after = fitAnchoredChords(metrics, width, {edgePadding: 4, balanceSpacing: true});
+  const spread = (fits: typeof after) => {
+    const gaps = fits.slice(1).map((fit, index) => fit.left - fits[index].left - metrics[index].width * fits[index].scale);
+    return Math.max(...gaps) - Math.min(...gaps);
+  };
+  expect(spread(after)).toBeLessThan(spread(before) - 3);
+  after.forEach((fit, index) => {
+    expect(fit.left).toBeGreaterThanOrEqual(3.999);
+    expect(fit.left + metrics[index].width * fit.scale).toBeLessThanOrEqual(width - 3.999);
+    expect(Math.abs(fit.left + metrics[index].width * fit.scale / 2 - metrics[index].anchor)).toBeLessThanOrEqual(Math.min(10, width / 4 * .22) + .001);
+    expect(fit.scale).toBeGreaterThanOrEqual(.85);
+  });
+});
+
+it('leaves a clear gap before the final slash chord without over-condensing the subdivisions', () => {
+  const width = 140.3;
+  const metrics = [.125,.375,.5625,.6875,.875].map((anchor, index) => ({
+    anchor: anchor * width, width: [36.54,15,11.54,24.33,37.48][index], span: [1,1,.5,.5,1][index],
+  }));
+  const fits = fitAnchoredChords(metrics, width, {edgePadding: 4});
+  expect(fits[4].left - (fits[3].left + metrics[3].width * fits[3].scale)).toBeGreaterThanOrEqual(5.999);
+  expect(fits[3].scale).toBeGreaterThan(.6);
+  expect(fits[4].scale).toBe(.8);
+});
+
+
+it('balances the second-beat slash between its neighbors without moving their beat positions', () => {
+  const width = 140.3;
+  const metrics = [.125,.375,.5625,.6875,.875].map((anchor, index) => ({
+    anchor: anchor * width, width: [36.54,15,11.54,24.33,37.48][index], span: [1,1,.5,.5,1][index],
+  }));
+  const original = fitAnchoredChords(metrics, width, {edgePadding: 4});
+  const fits = fitAnchoredChords(metrics.map((metric,index) => ({...metric, continuation: index === 1})), width, {edgePadding: 4});
+  const leftGap = fits[1].left - fits[0].left - metrics[0].width * fits[0].scale;
+  const rightGap = fits[2].left - fits[1].left - metrics[1].width * fits[1].scale;
+  expect(leftGap).toBeCloseTo(rightGap, 4);
+  expect(leftGap).toBeGreaterThan(9);
+  expect(Math.abs(fits[1].left + 15 / 2 - metrics[1].anchor)).toBeLessThanOrEqual(140.3 * .1875 * .22);
+  [0,2,3,4].forEach(index => expect(fits[index]).toEqual(original[index]));
+});
+
+it.each([100, 120, 140, 160, 200])('keeps adjacent full-beat slash chords distinct in a %ipx measure', width => {
+  // Chorus bar 3: 2m11, empty, 6m7/5, 3/#5. Widths model long slash spellings.
+  const metrics = [.125, .625, .875].map((anchor, index) => ({
+    anchor: anchor * width, width: [38, 48, 50][index], span: 1, slashBass: index > 0,
+  }));
+  const before = JSON.stringify(metrics);
+  const fits = fitAnchoredChords(metrics, width, { edgePadding: 4 });
+  const thirdBeatRight = fits[1].left + metrics[1].width * fits[1].scale;
+  expect(fits[2].left - thirdBeatRight).toBeGreaterThanOrEqual(7.999);
+  fits.forEach((fit, index) => {
+    expect(fit.anchor).toBe(metrics[index].anchor);
+    expect(fit.left).toBeGreaterThanOrEqual(3.999);
+    expect(fit.left + metrics[index].width * fit.scale).toBeLessThanOrEqual(width - 3.999);
+    expect(Math.abs(fit.left + metrics[index].width * fit.scale / 2 - fit.anchor)).toBeLessThanOrEqual(Math.min(10, width / 4 * .22) + .001);
+  });
+  expect(JSON.stringify(metrics)).toBe(before);
+});
+
+it.each([120, 140])('keeps Washed full-beat chords at one scale in a %ipx measure', width => {
+  // B/D#, E, /, /: a long slash chord followed by a short root.
+  const metrics = [38, 13, 15, 15].map((w, index) => ({
+    anchor: width * (index + .5) / 4, width: w, span: 1,
+    slashBass: index === 0, opticalOffset: index === 0 ? 2 : 0, continuation: index > 1,
+  }));
+  const before = JSON.stringify(metrics);
+  const fits = fitAnchoredChords(metrics, width, { edgePadding: 4, balanceSpacing: true });
+  expect(fits[0].scale).toBeCloseTo(fits[1].scale, 6);
+  expect(Math.max(...fits.map(fit => fit.scale)) - Math.min(...fits.map(fit => fit.scale))).toBeLessThan(.000001);
+  fits.forEach((fit, index) => {
+    expect(fit.anchor).toBe(metrics[index].anchor);
+    expect(fit.left).toBeGreaterThanOrEqual(3.999);
+    expect(fit.left + metrics[index].width * fit.scale).toBeLessThanOrEqual(width - 3.999);
+    if (index) expect(fit.left - fits[index-1].left - metrics[index-1].width * fits[index-1].scale).toBeGreaterThanOrEqual(2.999);
+  });
+  expect(JSON.stringify(metrics)).toBe(before);
 });

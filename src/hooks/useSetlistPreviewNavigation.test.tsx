@@ -182,3 +182,28 @@ describe('setlist preview navigation', () => {
     expect(options.onSelectSong).not.toHaveBeenCalled();
   });
 });
+
+
+it('does not recenter or reselect on a remote append while retaining manual scroll tracking', () => {
+  const { root, options, hook, advance, move } = setup();
+  move(1000); advance();
+  hook.rerender({ ...options, selectedSongId: 'two' }); advance();
+  root.scrollTop = 1120;
+  vi.mocked(root.scrollTo).mockClear(); options.onSelectSong.mockClear();
+  hook.rerender({ ...options, selectedSongId: 'two', songCount: 4 }); advance();
+  expect(root.scrollTo).not.toHaveBeenCalled();
+  expect(root.scrollTop).toBe(1120);
+  expect(options.onSelectSong).not.toHaveBeenCalled();
+  move(2000); advance();
+  expect(options.onSelectSong).toHaveBeenCalledWith('three');
+});
+
+it('keeps an explicit scroll locked across a remote collection change', () => {
+  const { root, options, hook, advance, move } = setup();
+  hook.rerender({ ...options, selectedSongId: 'three' }); advance();
+  move(1000); advance(50);
+  hook.rerender({ ...options, selectedSongId: 'three', songCount: 4 }); advance();
+  move(1200); advance(50);
+  expect(options.onSelectSong).not.toHaveBeenCalled();
+  expect(root.scrollTo).toHaveBeenCalledTimes(1);
+});

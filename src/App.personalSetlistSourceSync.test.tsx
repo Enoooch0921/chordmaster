@@ -14,7 +14,7 @@ vi.mock('./hooks/useLibraryWorkspaceRefresh',()=>({useLibraryWorkspaceRefresh:st
 vi.mock('./hooks/useJoinedWorkspaceRefresh',()=>({useJoinedWorkspaceRefresh:()=>false}));
 vi.mock('./hooks/useSongEditingPresence',()=>({useSongEditingPresence:()=>({editors:[],failed:false})}));
 vi.mock('./hooks/useTeamWorkspaceDraft',()=>({useTeamWorkspaceDraft:()=>({ready:true,pending:null,dismiss:vi.fn(),restored:vi.fn()})}));
-beforeAll(()=>{vi.stubGlobal('ResizeObserver',class{observe(){} unobserve(){} disconnect(){}});window.matchMedia=vi.fn().mockImplementation(()=>({matches:false,addEventListener(){},removeEventListener(){}}));HTMLElement.prototype.scrollIntoView=vi.fn();HTMLElement.prototype.scrollTo=vi.fn();HTMLDialogElement.prototype.showModal=function(){this.open=true;};});
+beforeAll(()=>{vi.stubGlobal('ResizeObserver',class{observe(){} unobserve(){} disconnect(){}});window.matchMedia=vi.fn().mockImplementation(()=>({matches:false,addEventListener(){},removeEventListener(){}}));HTMLElement.prototype.scrollIntoView=vi.fn();HTMLElement.prototype.scrollTo=vi.fn();HTMLDialogElement.prototype.showModal=function(){this.open=true;};HTMLDialogElement.prototype.close=function(){this.open=false;};});
 beforeEach(()=>{
  vi.clearAllMocks();localStorage.clear();vi.stubGlobal('indexedDB',new IDBFactory());state.cloud=false;
  const song={id:'song',title:'個人歌曲',originalKey:'C' as const,currentKey:'C' as const,timeSignature:'4/4',updatedAt:1,sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]};

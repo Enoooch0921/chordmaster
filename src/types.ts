@@ -138,6 +138,8 @@ export interface PickupMeasure {
 }
 
 export interface Song {
+  // The last successfully saved score edit; shared by library and setlist copies.
+  lastEditedAt?: number;
   // Missing/1 = legacy reversed arrows; 2 = < left/earlier, > right/later.
   chordTimingVersion?: 1 | 2;
   title: string;
@@ -165,6 +167,8 @@ export interface Song {
   // performance layout, while 3 reserves a third line of writable space in
   // every bar row and in PDF output.
   barRowCount?: 1 | 2 | 3;
+  /** Explicit height for this setlist score copy; source score synchronization ignores layout. */
+  setlistBarRowCount?: 1 | 2 | 3;
   nashvilleFontPreset?: NashvilleFontPreset;
   chordFontPreset?: ChordFontPreset;
   capo?: number;

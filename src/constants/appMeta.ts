@@ -85,6 +85,242 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-04',
+        title: "Setlist score comparisons and steadier iPad performance",
+        bullets: [
+          "Add source update notices, visual score comparisons and guarded synchronization to personal setlists, including local offline workspaces.",
+          "Choose two or three rows for setlist charts, with two rows by default; preserve temporary meter changes within their sections.",
+          "Delete one or several bars from the context menu with Undo, and remove saved unison marks from the notation keyboard.",
+          "Reduce performance page-turn rendering and restore the full workspace height when leaving iPad Safari fullscreen. Exit now also leaves Performance Mode.",
+          "Allow team administrators to promote existing regular members to administrator while retaining owner and peer-administrator protections."
+        ]
+      },
+      {
+        version: '0.12.6',
+        date: '2026-11-01',
+        title: 'Smoother song changes and phone controls',
+        bullets: [
+          'Hand off Click on the same native audio route when changing songs, starting the new song at beat one.',
+          'Skip hidden chart rendering in phone setlists, phone landscape and portrait Performance mode.',
+          'Keep song starts separate from pending settings updates and show the selected tempo immediately.',
+          'Separate the phone meter and beats, and keep the full tempo-reset button above playback controls.'
+        ]
+      },
+      {
+        version: '0.12.5',
+        date: '2026-11-01',
+        title: 'Reliable drummer controls and clearer chart changes',
+        bullets: [
+          'Recover native Click output after app interruptions; preload sounds and balance their volume against Ableton Live Classic.',
+          'Keep native BPM input with one decimal place and improve mobile keyboard positioning and touch recovery.',
+          'Refresh setlist changes during normal and Performance modes while preserving the active Click timing and chart position.',
+          'Add per-song measure-height shortcuts and show meaningful chart changes with aligned miniature measures.',
+          'Remove Guitarist mode and show a positive Capo beside the chart Key; hide Capo 0.',
+          'Other-app music mixing is excluded; physical iPhone/iPad background and lock-screen verification remains pending.'
+        ]
+      },
+      {
+        version: '0.12.4',
+        date: '2026-10-31',
+        title: 'Toggle Click by tapping a song',
+        bullets: [
+          'Tap the current song to stop Click; tap it again to play. A pending start can also be cancelled.',
+          'Tap another song to switch and play immediately; previous/next controls keep their existing behavior.'
+        ]
+      },
+      {
+        version: '0.12.3',
+        date: '2026-10-31',
+        title: 'Urgent fix: gapless Click measures',
+        bullets: [
+          'Replace the audible HTML media loop with a native AudioBufferSourceNode loop to remove the pause between beat four and beat one.',
+          'Keep beat display on the audio clock and replace tempo/sound buffers at a scheduled audio time.',
+          'Keep silent media-session support separate from audible Click timing; mobile background playback still requires device verification.'
+        ]
+      },
+      {
+        version: '0.12.2',
+        date: '2026-10-31',
+        title: 'Click playback and background audio',
+        bullets: [
+          'Render complete Click measures for media-loop playback, removing the background dependency on page timers.',
+          'Keep playback active when leaving the page and resync beats on return; manual stop stays stopped.',
+          'Use Ableton Live Classic for new preferences while retaining existing sound choices.',
+          'Prepare replacement sounds before switching, show loading progress, retry once, and quietly retain the previous sound on failure.',
+          'Handle song selection on touch release with scroll protection; keep the same controls across tablet and wide-screen layouts.',
+          'Background and lock-screen behavior in iPhone/iPad Home Screen installations still requires physical-device verification.'
+        ]
+      },
+      {
+        version: '0.12.1',
+        date: '2026-10-31',
+        title: 'Mobile and tablet drummer layout fixes',
+        bullets: [
+          'Keep the phone Drummer mode entry beside the setlist title, leaving more room to scroll songs.',
+          'Align subdivision symbols at their original proportions, including triplets in landscape mode.',
+          'Use the phone landscape control order on tablets: beats above tempo, with playback, TAP and song changes together below.',
+          'Enlarge tablet song-change buttons and reserve space for tempo reset so it does not overlap playback.'
+        ]
+      },
+      {
+        version: '0.12.0',
+        date: '2026-10-31',
+        title: "Drummer mode and performance controls",
+        bullets: [
+          "Open Drummer mode from a setlist and tap a song to start its click, with per-song subdivision and accent controls.",
+          "Adjust BPM with TAP, +/- and reset; choose MultiTracks, Drive or Ableton Live Classic click sounds.",
+          "Use a compact phone landscape console, or Performance mode with a complete A4 chart on larger landscape screens.",
+          "Customize MIDI and keyboard mappings for TAP, playback, tempo, song changes and chart pages; MIDI also supports relative encoders.",
+          "Supported browsers request media playback for Click in silent mode; leaving the page still stops playback.",
+          "Move Guitarist mode into the menu and improve mode transitions, fullscreen exit and immediate button feedback."
+        ]
+      },
+      {
+        version: '0.11.20',
+        date: '2026-10-31',
+        title: 'Copy personal songs to teams',
+        bullets: [
+          'Copy one song from its action menu or select multiple songs in Manage songs and copy them together.',
+          'Choose a team where you can edit songs, review the selection, and keep your personal originals.',
+          'Create separate copies for matching team songs without overwriting existing arrangements; copy up to 500 songs at a time.',
+          'Use the shared dialog transitions, mobile layout and keyboard controls; stop stale or unsynced transfers.'
+        ]
+      },
+      {
+        version: '0.11.19',
+        date: '2026-10-31',
+        title: 'Smoother keyboards, mobile navigation and dialogs',
+        bullets: [
+          'Coordinate keyboard opening, collapsing and chart avoidance; respect manual scrolling during transitions.',
+          'Add moving selection highlights and brief content transitions to input modes and mobile song, setlist and settings tabs.',
+          'Smooth invitation, sharing and member dialogs, their internal views, and notification, tempo and action menus.',
+          'Release modal focus and scroll locks correctly on close; keep keyboard actions immediate and respect reduced motion.'
+        ]
+      },
+      {
+        version: '0.11.18',
+        date: '2026-10-30',
+        title: 'Unified keyboards and clearer music notation',
+        bullets: [
+          'Unify chord, rhythm and jianpu keys, color pickers and touch key previews; keep desktop colors visible when keys are collapsed.',
+          'Fit phone landscape keys without scrolling, move advanced rhythm values into the keyboard, and keep feedback outside its layout.',
+          'Prevent repeated chord modifiers and preserve slash-bass accidentals; fix rhythm backspace at the end of a passage.',
+          'Give dense four-chord measures more breathing room while preserving measure widths, beat anchors and type height.',
+          'Refine rhythm beams, crossheads, accents, ties and tuplet brackets, including visible numeral alignment and shared-beam grouping.'
+        ]
+      },
+      {
+        version: '0.11.17',
+        date: '2026-10-30',
+        title: 'Clearer spacing for four-chord measures',
+        bullets: [
+          'Keep a visible gap between four full-beat chord changes without changing their spelling or attacks.',
+          'Avoid applying a second strong compression while balancing a measure that already needed fitting.'
+        ]
+      },
+      {
+        version: '0.11.16',
+        date: '2026-10-30',
+        title: 'Rhythm beams and iPad section dragging',
+        bullets: [
+          'Align Bach rhythm beams to the visible stems at every preview zoom level.',
+          'Hold the sheet still while dragging a section; scroll slowly only at the preview edge.',
+          'Remove repeated song titles from continuation pages.',
+          'Keep original song names when copying team songs to the personal library.'
+        ]
+      },
+      {
+        version: '0.11.15',
+        date: '2026-10-30',
+        title: 'Saved chart context and reliable mobile layouts',
+        bullets: [
+          'Show the last successful chart edit and name changed songs and fields before switching workspaces.',
+          'Keep phone song search usable above the keyboard and remove the phone editor-mode toggle.',
+          'Separate adjacent slash chords and keep full-beat chord sizes consistent within each measure.',
+          'Recalculate app and performance bounds after leaving iPad fullscreen.'
+        ]
+      },
+      {
+        version: '0.11.14',
+        date: '2026-10-30',
+        title: 'Readable performance charts in dark mode',
+        bullets: [
+          'Keep performance charts, lyrics and lyric books on light paper with their original ink colors while the interface remains dark.',
+          'Retain the fullscreen focus fix and cover rapid focus recovery before the entry request completes.'
+        ]
+      },
+      {
+        version: '0.11.13',
+        date: '2026-10-30',
+        title: 'Stable iPad fullscreen and chord keyboard',
+        bullets: [
+          'Keep page-turner focus on a non-editable surface during native fullscreen, including entry and foreground recovery.',
+          'Remember the selected letter or number chord keyboard after closing, Performance Mode and reload.',
+          'Delete on an empty chord beat moves to the previous beat without deleting the measure.'
+        ]
+      },
+      {
+        version: '0.11.12',
+        date: '2026-10-29',
+        title: "Balanced chord spacing and beat labels",
+        bullets: [
+          "Balance visual spacing between chords of different widths with bounded beat-position adjustments and modest condensation, preserving space beside barlines and repeat signs.",
+          "Keep subdivisions separated from the following full-beat chord, center labels such as 3 and 3& above their chords, and balance whitespace around continuation slashes.",
+          "Exclude anticipation arrows from chord-width measurements while retaining accidental overhangs; preserve rhythm notes, melody and stored beat positions."
+        ]
+      },
+      {
+        version: '0.11.11',
+        date: '2026-10-29',
+        title: "Stable chord beat positions",
+        bullets: [
+          "Place chords on a full-measure beat grid so eighth, quarter, dotted and sustained notes no longer shift harmony horizontally.",
+          "Use consistent chord positions and baselines with melody, rhythm or harmony alone, including incomplete, sparse and deleted notation.",
+          "Preserve subdivisions, collision fitting and chord compression, empty-beat selection, editing carets and anticipation markers."
+        ]
+      },
+      {
+        version: '0.11.10',
+        date: '2026-10-29',
+        title: "Preview editing, keyboard controls and notation alignment",
+        bullets: [
+          "Drag and resize the desktop notation keyboard, remember its placement and scale, and dock the keyboard on phones and tablets while keeping the edited measure visible.",
+          "Copy complete measures once, then choose measures, chords, rhythm or jianpu when pasting; support Command/Ctrl selection, Shift ranges and the paste shortcut.",
+          "Recognize consecutive chords without case sensitivity, align chords to rhythm or melody as notes are entered, and preserve readable spacing and consistent slash baselines.",
+          "Cycle normal, leading double, trailing double and final barlines with matching keyboard indicators; keep selection outlines and note pointers clear of musical barlines.",
+          "Fix dark-mode notation contrast, triplet-rest conversion and slash-chord spelling while preserving explicitly written flat scale degrees."
+        ]
+      },
+      {
+        version: '0.11.9',
+        date: '2026-10-29',
+        title: "Independent connection status and print-only continuation labels",
+        bullets: [
+          "Check server reachability at startup, when returning to the App, and periodically without switching songs; separate connection status from cached scores and pending saves.",
+          "Show continuation labels only in PDFs and printed pages, keeping the live score view clear."
+        ]
+      },
+      {
+        version: '0.11.8',
+        date: '2026-10-29',
+        title: "Even chord spacing and independent measure fitting",
+        bullets: [
+          "Balance four-on-the-beat chord spacing using facing glyph outlines, including raised extensions and accidentals.",
+          "Keep the original chord height and notation; fit each measure independently so a long chord cannot condense neighboring measures.",
+          "Preserve subdivision timing, score layout, and PDF fitting."
+        ]
+      },
+      {
+        version: '0.11.7',
+        date: '2026-10-29',
+        title: 'Remove legacy songs from setlists',
+        bullets: [
+          'Fix removal failures caused by defaults added when loading older scores, including the only song in a setlist.',
+          'Preserve the empty setlist, source song, undo and redo, and protection against concurrent score edits.'
+        ]
+      },
+      {
+        version: '0.11.6',
         date: '2026-10-28',
         title: "Invitation journeys, lyric search and clearer editing",
         bullets: [
@@ -728,6 +964,242 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-04',
+        title: "歌單圖示比對與 iPad 演出修正",
+        bullets: [
+          "個人歌單也提供曲庫更新提示、實際譜面圖示差異與版本保護同步，支援未登入的本機工作區。",
+          "歌單可切換兩行／三行，預設兩行；段落臨時拍號不再影響後續頁面。",
+          "右鍵可刪除單一或多個小節並復原，鍵盤新增移除既有齊奏標記的入口。",
+          "減少演出翻頁重繪，修正 iPad Safari 返回全螢幕後底部裁切；退出按鈕同時離開演出模式。",
+          "總管理員可將同團隊的一般成員升為總管理員，保留擁有者與既有總管理員的權限保護。"
+        ]
+      },
+      {
+        version: '0.12.6',
+        date: '2026-11-01',
+        title: '切歌更順暢與手機控制間距修正',
+        bullets: [
+          '切歌直接交接 Click，不先關閉再重啟音訊，新歌曲由第一拍開始。',
+          '手機歌單、手機橫向與直向演出模式不再重算隱藏樂譜，減少切歌卡頓。',
+          '新歌曲啟動期間保留該次啟動，完成後再套用最新設定，選曲與速度立即顯示。',
+          '手機拍號與拍點拉開間距，還原速度按鈕保留完整點按空間，不再壓到播放區。'
+        ]
+      },
+      {
+        version: '0.12.5',
+        date: '2026-11-01',
+        title: '鼓手播放、同步與清楚的小節差異',
+        bullets: [
+          '改善切換 App 後的 Click 原生音訊恢復，開啟時預載音色，並以 Ableton Live Classic 平衡三組音量。',
+          '保留一位小數的原生 BPM 輸入，改善手機鍵盤遮擋與收鍵盤後的觸控定位。',
+          '一般與演出模式持續接收歌單更新，保留選曲、翻頁位置與播放中的 Click 時序。',
+          '歌單加入每首小節高度快捷設定，版本比對忽略等價和弦記法，並以小節顯示真正內容差異。',
+          '移除吉他手模式，Capo 放在樂譜 Key 右側，0 不顯示。',
+          '不包含其他 App 音樂混音共存功能；背景、鎖屏及聲音輸出仍待實體 iPhone／iPad 確認。'
+        ]
+      },
+      {
+        version: '0.12.4',
+        date: '2026-10-31',
+        title: '點歌名切換 Click 播放／停止',
+        bullets: [
+          '點目前歌曲可停止 Click，再點一次播放；載入中也能再次點按取消。',
+          '點其他歌曲立即切歌並播放；上一首／下一首操作維持直接切歌。'
+        ]
+      },
+      {
+        version: '0.12.3',
+        date: '2026-10-31',
+        title: '緊急修復：Click 跨小節停頓',
+        bullets: [
+          'Click 聲音改用原生 AudioBufferSourceNode 無縫循環，修正第 4 拍接回第 1 拍的停頓。',
+          '拍點顯示跟隨音訊時鐘，速度或音色更新在預定音訊時間接替。',
+          '靜音媒體工作階段支援與 Click 聲音分離；行動裝置背景播放仍待實機確認。'
+        ]
+      },
+      {
+        version: '0.12.2',
+        date: '2026-10-31',
+        title: 'Click 播放穩定性與背景播放',
+        bullets: [
+          '改用整小節媒體循環播放，背景節拍不再依賴頁面計時器。',
+          '切換 App 或分頁時保留播放，返回畫面同步拍點；手動停止後保持停止。',
+          '新使用者預設 Ableton Live Classic，既有音色選擇仍保留。',
+          '換音色時先準備新聲音、顯示載入進度，自動重試一次；失敗時靜默保留原音色。',
+          '觸控放開即選曲並防止滑動誤觸，平板與寬螢幕維持一致的底部四鍵排列。',
+          'iPhone／iPad 主畫面版本的背景與鎖屏持續播放，仍需實體裝置確認。'
+        ]
+      },
+      {
+        version: '0.12.1',
+        date: '2026-10-31',
+        title: '手機與平板鼓手排版修正',
+        bullets: [
+          '手機的鼓手模式入口移至歌單標題旁，讓歌曲清單有更多捲動空間。',
+          '節拍細分音符保留正確比例，修正橫向模式三連音等符號的對齊。',
+          '平板沿用手機橫向操作順序：拍點在上、速度在中，播放、TAP 與上下首集中底部。',
+          '加大平板切歌按鈕，並為還原速度保留獨立空間，避免與播放鍵重疊。'
+        ]
+      },
+      {
+        version: '0.12.0',
+        date: '2026-10-31',
+        title: "鼓手模式與演出控制",
+        bullets: [
+          "從歌單開啟鼓手模式，點歌即播放 Click，可逐首調整節拍細分與重音。",
+          "支援 TAP 測速、速度加減與還原，提供 MultiTracks、Drive、Ableton Live Classic 三種 Click 音色。",
+          "手機橫向採精簡節拍器與歌曲卡片；大螢幕橫向演出模式保留整張 A4 樂譜與點按翻頁。",
+          "MIDI 與鍵盤可自訂 TAP、播放、速度、上下首與樂譜翻頁，MIDI 保留相對值速度旋鈕設定。",
+          "支援的瀏覽器以媒體播放類型播放 Click，改善靜音模式無聲；離開頁面仍停止播放。",
+          "吉他手模式移至選單，改善模式切換、全螢幕退出與按鍵即時回饋。"
+        ]
+      },
+      {
+        version: '0.11.20',
+        date: '2026-10-31',
+        title: '個人歌曲複製到團隊',
+        bullets: [
+          '歌曲選單可單首複製，管理歌曲時可勾選多首，一起複製到團隊。',
+          '選擇有歌曲編輯權限的團隊，確認後複製並保留個人原譜。',
+          '團隊已有對應或同名歌曲時另建副本，不覆蓋既有編排；每次最多 500 首。',
+          '沿用視窗過渡與鍵盤操作，改善手機橫向版面；未同步、工作區或權限變更時停止傳送。'
+        ]
+      },
+      {
+        version: '0.11.19',
+        date: '2026-10-31',
+        title: '鍵盤、手機切換與視窗動態',
+        bullets: [
+          '鍵盤呼出、收合與譜面避讓同步過渡，手動捲動時不再繼續拉動譜面。',
+          '輸入模式與手機歌曲／歌單、譜面操作／帳號設定切換加入滑動選取底色與短暫內容過渡。',
+          '邀請、分享、成員管理與內部分頁，以及通知、速度和操作選單加入呼出與退場動畫。',
+          '修正關閉視窗後仍可能卡住焦點與捲動的情況；鍵盤操作維持即時，並支援減少動態效果。'
+        ]
+      },
+      {
+        version: '0.11.18',
+        date: '2026-10-30',
+        title: '統一鍵盤與樂譜符號排版',
+        bullets: [
+          '統一和弦、節奏、簡譜鍵盤與顏色選單；手機和平板支援按住放大預覽，桌面收起字元鍵後保留顏色列。',
+          '改善手機橫式鍵盤，按鍵區不捲動；進階節奏鍵放入鍵盤，提示不再擠動鍵盤高度。',
+          '修正重複 sus、add、alt 與 Slash Bass 升降記號輸入，以及節奏尾端退格後覆寫前音的問題。',
+          '密集四和弦小節增加留白，維持等寬小節、原拍位及字高。',
+          '校正節奏連桿、叉頭、重音、延音線與三連音括線；三連音數字依可見外框置中。'
+        ]
+      },
+      {
+        version: '0.11.17',
+        date: '2026-10-30',
+        title: '四和弦小節間距調整',
+        bullets: [
+          '四拍逐拍換和弦的小節保留清楚間距，維持原和弦名稱與拍位。',
+          '平均間距時避免再次過度壓窄已縮放的和弦。'
+        ]
+      },
+      {
+        version: '0.11.16',
+        date: '2026-10-30',
+        title: '節奏連桿與 iPad 段落拖曳',
+        bullets: [
+          '節奏連桿對齊實際符桿，避免 iPad 放大譜面時偏移。',
+          '長按段落標籤拖曳時固定譜面，只在靠近預覽邊緣時緩慢捲動。',
+          '移除續頁左上角重複歌名。',
+          '團隊歌曲轉存個人曲庫保留原歌名，不再附加團隊轉存字樣。'
+        ]
+      },
+      {
+        version: '0.11.15',
+        date: '2026-10-30',
+        title: '譜面儲存提示與手機、iPad 排版',
+        bullets: [
+          '譜面顯示最後成功編輯時間；切換工作區時列出待儲存歌曲、來源與修改項目。',
+          '手機新增歌曲搜尋保留鍵盤上方的清單空間，並隱藏手機版編輯模式按鈕。',
+          '相鄰斜線和弦保留清楚間距，同一小節的整拍和弦一致縮放。',
+          '退出 iPad 全螢幕後重新校正主畫面與演出畫面的可用高度。'
+        ]
+      },
+      {
+        version: '0.11.14',
+        date: '2026-10-30',
+        title: '深色主題下的演出譜面',
+        bullets: [
+          '演出和弦譜、歌詞與連續歌詞本維持白紙黑字及原本記譜顏色，操作介面仍可使用深色主題。',
+          '保留全螢幕焦點修復，新增進入請求尚未完成時連續恢復焦點的回歸測試。'
+        ]
+      },
+      {
+        version: '0.11.13',
+        date: '2026-10-30',
+        title: 'iPad 全螢幕與和弦鍵盤穩定性',
+        bullets: [
+          '原生全螢幕以非輸入框接收翻頁按鍵，避免 iPad 的輸入焦點造成退出，保留踏板與回到前景的恢復。',
+          '記住選定的字母／級數和弦鍵盤，關閉、進出演出模式與重新載入後不再重設。',
+          '空白和弦拍按刪除或 Backspace 返回上一拍，不刪除空白小節。'
+        ]
+      },
+      {
+        version: '0.11.12',
+        date: '2026-10-29',
+        title: "和弦間距與拍號標籤",
+        bullets: [
+          "改善不同長度和弦的視覺間距，在原拍位附近微調並適度壓縮長和弦，保留小節線與反覆線旁的留白。",
+          "拍內和弦與後方整拍和弦保留清楚間隔，3、3& 等拍號標籤跟隨對應和弦置中；延續斜線平衡左右空隙。",
+          "提前進拍箭頭不再影響和弦寬度計算，升降記號仍納入避讓；節奏音符、旋律及原始拍點維持不變。"
+        ]
+      },
+      {
+        version: '0.11.11',
+        date: '2026-10-29',
+        title: "和弦拍位與譜列一致性",
+        bullets: [
+          "和弦改依完整小節的拍位排列，八分音符、四分音符、附點及延長音不再造成和弦前後偏移。",
+          "有旋律、有節奏與只有和弦的小節共用拍位與高度；旋律尚未輸入完整、留空或刪除時，和弦位置保持穩定。",
+          "保留拍內和弦的細分位置、長和弦避讓與壓縮，以及空拍選取、編輯游標和提前進拍記號。"
+        ]
+      },
+      {
+        version: '0.11.10',
+        date: '2026-10-29',
+        title: "編譜鍵盤、批量貼上與和弦對齊",
+        bullets: [
+          "電腦版鍵盤支援拖曳、縮放並記住位置與大小；手機和平板置底，編輯中的小節保持可見。",
+          "一次複製完整小節，貼上時再選小節、和弦、節奏或簡譜；支援 Command／Ctrl 多選、Shift 連續選取與貼上快捷鍵。",
+          "直接輸入 gam 等連續和弦即可辨識拍內和弦；輸入節奏或旋律時即時對齊，保留和弦間距與一致的斜線高度。",
+          "小節線在後雙、前雙、終止及一般之間循環，鍵盤顯示目前狀態；虛線選取框與音符箭頭避開樂譜小節線。",
+          "修正深色模式記譜對比、三連音休止符轉回一般時值，以及斜線和弦拼寫；保留明確輸入的降六、降七等級數語境。"
+        ]
+      },
+      {
+        version: '0.11.9',
+        date: '2026-10-29',
+        title: "獨立連線判斷與列印專用續頁標記",
+        bullets: [
+          "啟動、返回 App 與前景使用時獨立確認伺服器連線，不必切換歌曲；連線狀態與快取版本、待同步變更分開顯示。",
+          "「續」標記僅在 PDF 與列印頁面顯示，App 現場看譜時隱藏。"
+        ]
+      },
+      {
+        version: '0.11.8',
+        date: '2026-10-29',
+        title: "和弦間距與小節獨立壓縮",
+        bullets: [
+          "調整一拍一個和弦時的視覺間距，將上標與升降記號一起納入計算。",
+          "保留原本字高與和弦寫法，每個小節獨立壓縮，避免長和弦連帶壓扁其他小節。",
+          "維持細分拍位置、原譜面結構與 PDF 排版。"
+        ]
+      },
+      {
+        version: '0.11.7',
+        date: '2026-10-29',
+        title: '修正舊版歌曲移出歌單失敗',
+        bullets: [
+          '修正舊譜載入時補齊預設欄位，導致歌曲無法移出歌單的問題，包含歌單只剩一首歌曲的情況。',
+          '保留空歌單、來源歌曲、復原與重做，以及有人同時修改譜面時的保護。'
+        ]
+      },
+      {
+        version: '0.11.6',
         date: '2026-10-28',
         title: "邀請體驗、歌詞搜尋與介面修正",
         bullets: [

@@ -6,6 +6,13 @@ export interface RhythmPoint {
   y: number;
 }
 
+/** Two bracket arms leave clear space around the centered tuplet number. */
+export function getTupletBracketPath(start: number, end: number, center: number, y: number, drop: number, halfGap: number) {
+  const gapLeft = Math.max(start, Math.min(end, center - halfGap));
+  const gapRight = Math.max(gapLeft, Math.min(end, center + halfGap));
+  return `M ${start} ${y + drop} L ${start} ${y} L ${gapLeft} ${y} M ${gapRight} ${y} L ${end} ${y} L ${end} ${y + drop}`;
+}
+
 export interface CompactRhythmEventGeometry {
   event: RhythmEvent;
   head: RhythmPoint;
@@ -49,6 +56,7 @@ export interface CompactRhythmGeometry {
 }
 
 interface CompactRhythmGeometryOptions {
+  beamGroups?: boolean;
   width: number;
   height: number;
   barUnits: number;
@@ -163,7 +171,7 @@ export const buildCompactRhythmGeometry = (
   const secondaryBeamY = beamY + (2.05 * scale);
   const stemXOffset = headRadiusX * 0.72;
   const stemBottom = headY - (headRadiusY * 0.12);
-  const beamGroups = buildBeamGroups(visibleEvents, beatUnits);
+  const beamGroups = options.beamGroups === false ? [] : buildBeamGroups(visibleEvents, beatUnits);
   const beamedIndices = new Set(beamGroups.flatMap((group) => group.events.map((event) => event.index)));
   const eventByIndex = new Map(visibleEvents.map((event) => [event.index, event]));
 
@@ -188,8 +196,8 @@ export const buildCompactRhythmGeometry = (
       stem,
       flagCount: !isBeamed && !event.isRest && !event.isSlash ? (event.base === 'e' ? 1 : event.base === 's' ? 2 : 0) : 0,
       dot: event.dotted && !event.isSlash ? { x: x + (3.7 * scale), y: headY + headOffsetY } : null,
-      accent: event.accent && stem && !event.isSlash
-        ? { x, y: stem.top - (3.25 * scale) }
+      accent: event.accent && !event.isRest && !event.isSlash
+        ? { x, y: (stem?.top ?? headY - headRadiusY) - (3.25 * scale) }
         : null
     };
   });
@@ -225,7 +233,9 @@ export const buildCompactRhythmGeometry = (
     const first = geometryByIndex.get(run.events[0].index)!;
     const middle = geometryByIndex.get(run.events[1].index)!;
     const last = geometryByIndex.get(run.events[2].index)!;
-    const showBracket = run.base === 'h' || run.base === 'q' || run.events.some((event) => event.isRest);
+    const sharedBeam = beams.some(beam => beam.eventIndices.length === run.events.length
+      && run.events.every(event => beam.eventIndices.includes(event.index)));
+    const showBracket = !sharedBeam || run.base === 'h' || run.base === 'q' || run.events.some((event) => event.isRest);
     const bracketY = showBracket ? beamY - (2.55 * scale) : beamY;
 
     return {
@@ -254,3 +264,27 @@ export const buildCompactRhythmGeometry = (
 };
 
 export const isOpenNoteHead = (base: RhythmBase): boolean => base === 'w' || base === 'h';
+
+/** A musical accent's filled wedge, with its visible lower edge at bottomY. */
+export const getRhythmAccentShape = (centerX: number, bottomY: number, scale: number) => {
+  const width = 4.6 * scale, height = 3.3 * scale, weight = 0.42 * scale;
+  const left = centerX - width / 2, right = centerX + width / 2;
+  const top = bottomY - height, middle = (top + bottomY) / 2;
+  return {
+    top, bottom: bottomY, left, right,
+    path: `M ${left} ${top} L ${right} ${middle} L ${left} ${bottomY} L ${left} ${bottomY - weight} L ${right - 2 * weight} ${middle} L ${left} ${top + weight} Z`
+  };
+};
+
+/** Two cubic outlines give ties tapered tips and a heavier middle. */
+export const getTaperedRhythmTiePath = (
+  start: RhythmPoint, control1: RhythmPoint, control2: RhythmPoint, end: RhythmPoint,
+  thickness: number, openStart = false, openEnd = false
+) => {
+  const startHalf = openStart ? thickness / 2 : 0;
+  const endHalf = openEnd ? thickness / 2 : 0;
+  const controlHalf1 = openStart ? startHalf : thickness * 2 / 3;
+  const controlHalf2 = openEnd ? endHalf : thickness * 2 / 3;
+  return `M ${start.x} ${start.y + startHalf} C ${control1.x} ${control1.y + controlHalf1} ${control2.x} ${control2.y + controlHalf2} ${end.x} ${end.y + endHalf}`
+    + ` L ${end.x} ${end.y - endHalf} C ${control2.x} ${control2.y - controlHalf2} ${control1.x} ${control1.y - controlHalf1} ${start.x} ${start.y - startHalf} Z`;
+};

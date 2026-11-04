@@ -498,6 +498,7 @@ export const applyRhythmEdit = (
   const targetIndex = findEditableEventIndex(context.events, safeCursor.cursorUnit);
   if (action.type === 'delete') {
     let deleteIndex = findEventIndexAtCursor(context.events, safeCursor.cursorUnit);
+    const backspaceFromGap = deleteIndex === -1 && action.mode === 'backspace';
     if (deleteIndex === -1) {
       deleteIndex = [...context.events.keys()]
         .reverse()
@@ -517,7 +518,7 @@ export const applyRhythmEdit = (
       .at(-1);
     const nextSong = writeNotation(song, target, serialized.notation);
     const nextCursor = sanitizeCursor(
-      { cursorUnit: previousEvent?.startUnit ?? 0 },
+      { cursorUnit: backspaceFromGap ? deletedEvent.startUnit : previousEvent?.startUnit ?? 0 },
       getCursorUnitsForNotation(serialized.notation, context.timeSignature)
     );
     return result(nextSong, nextCursor, null, song);

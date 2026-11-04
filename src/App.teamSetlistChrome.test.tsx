@@ -119,3 +119,37 @@ it('marks each differing song in the sidebar and clears the marker when the scor
   await waitFor(() => expect(document.querySelector('[data-setlist-song-id="source"] [data-source-status]')).toBeNull());
   expect(document.querySelector('[data-setlist-song-id="both"] [data-source-status]')).toHaveTextContent('兩邊都有修改');
 }, 15000);
+
+
+it('keeps team content refresh enabled while full-screen performance mode is open', async () => {
+  state.role = 'owner';
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  const latest = () => (state.refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0];
+  await waitFor(() => expect(latest()).toMatchObject({ enabled: true, libraryId: 'team' }));
+  fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
+  const overlay = document.querySelector<HTMLElement>('[data-performance-overlay]')!;
+  expect(overlay).not.toBeNull();
+  expect(latest().paused).toBe(false); expect(latest().canApply()).toBe(true);
+  const remote = { ...fixture, setlists: fixture.setlists.map(list => ({ ...list,
+    songs: list.songs.map(row => ({ ...row, overrideKey: 'D' as const })) })) };
+  act(() => latest().onUpdate(remote));
+  expect(document.querySelector('[data-performance-overlay]')).toBe(overlay);
+  expect(overlay).toHaveTextContent('D');
+});
+
+it('hides notation-only source updates, then shows a real remote chord change without remounting the preview', async () => {
+ state.role='owner';const source=fixture.songs[0];source.originalKey='A';source.currentKey='A';source.sections[0].bars[0].chords=['5','','',''];
+ const entry=fixture.setlists[0].songs[0];entry.songData=structuredClone(source);entry.songData.sections[0].bars[0].chords=['E'];
+ saveNavigationLocation(getNavigationStorageKey('review-user','team'),{version:1,workspaceMode:'setlists',filter:{kind:'all'},parentFilter:{kind:'all'},view:'detail',setlistId:'set',songId:'entry'});
+ render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+ const latest=()=>(state.refresh.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0];
+ await waitFor(()=>expect(latest()).toMatchObject({libraryId:'team',enabled:true}));
+ await waitFor(()=>expect(document.querySelector('[data-setlist-song-id="entry"]')).not.toBeNull());
+ expect(document.querySelector('[data-setlist-song-id="entry"] [data-source-status]')).toBeNull();
+ expect(document.querySelector('[data-source-sync-overlay]')).toBeNull();
+ const preview=document.querySelector('[data-setlist-preview-song-id="entry"]');
+ const current=latest().workspace;const changed={...structuredClone(current),lastSavedAt:2};changed.songs[0].sections[0].bars[0].chords=['4'];
+ await act(async()=>latest().onUpdate(changed));
+ await waitFor(()=>expect(document.querySelector('[data-setlist-song-id="entry"] [data-source-status]')).not.toBeNull());
+ expect(document.querySelector('[data-setlist-preview-song-id="entry"]')).toBe(preview);
+},15000);

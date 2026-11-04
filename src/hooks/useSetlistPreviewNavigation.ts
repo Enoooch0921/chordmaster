@@ -17,9 +17,13 @@ export function useSetlistPreviewNavigation({
   skipNextAutoScrollRef, preserveSelectionUntilRef, gestureActiveRef, onSelectSong
 }: Options) {
   const navigatingRef = useRef(false);
+  const hasSongs = songCount > 0;
+  const lastTracking = useRef<{ enabled: boolean; trackScroll: boolean; selectedSongId: string | null } | null>(null);
 
   useLayoutEffect(() => {
-    if (!enabled || !selectedSongId || songCount === 0) return;
+    // Collection updates are not navigation gestures. Only selection, mode,
+    // or becoming nonempty starts an automatic scroll.
+    if (!enabled || !selectedSongId || !hasSongs) return;
     if (skipNextAutoScrollRef.current) {
       skipNextAutoScrollRef.current = false;
       return;
@@ -90,9 +94,11 @@ export function useSetlistPreviewNavigation({
       window.cancelAnimationFrame(frameId);
       finish();
     };
-  }, [enabled, selectedSongId, songCount, previewRef, skipNextAutoScrollRef, preserveSelectionUntilRef, gestureActiveRef]);
+  }, [enabled, selectedSongId, hasSongs, previewRef, skipNextAutoScrollRef, preserveSelectionUntilRef, gestureActiveRef]);
 
   useEffect(() => {
+    const previous = lastTracking.current;
+    lastTracking.current = { enabled, trackScroll, selectedSongId };
     // Editor reflows must not change the song being edited.
     if (!enabled || !trackScroll || songCount === 0) return;
     const scrollRoot = previewRef.current;
@@ -134,7 +140,8 @@ export function useSetlistPreviewNavigation({
       if (event.type === 'touchstart' && (event as TouchEvent).touches.length !== 1) return;
       if (!gestureActiveRef?.current) preserveSelectionUntilRef.current = 0;
     };
-    requestUpdate();
+    if (!previous || previous.enabled !== enabled || previous.trackScroll !== trackScroll
+        || previous.selectedSongId !== selectedSongId) requestUpdate();
     scrollRoot.addEventListener('touchstart', resumeManualTracking, { passive: true });
     scrollRoot.addEventListener('wheel', resumeManualTracking, { passive: true });
     scrollRoot.addEventListener('scroll', requestUpdate, { passive: true });

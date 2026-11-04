@@ -65,12 +65,13 @@ it.each(['songs', 'setlists'])('deletes bars from the %s preview without crashin
 
   expect(screen.getByText('小節已刪除，可復原或完成這次編輯')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
-  expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument());
   expect(document.querySelector('[data-preview-slot-index="0"]')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
   expect(screen.getByText('小節已刪除，可復原或完成這次編輯')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '完成' }));
-  expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: '預覽快捷編輯' })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText('小節已刪除，可復原或完成這次編輯')).not.toBeInTheDocument());
   expect(song.sections[0].bars).toHaveLength(4);
 }, 15000);
 
@@ -145,6 +146,8 @@ it.each(['songs', 'setlists'] as const)('copies several bars and overwrites the 
   const hover = vi.spyOn(document, 'querySelector').mockImplementation((selector: string) => selector === '[data-preview-hoverable]:hover'
     ? querySelector('[data-preview-clipboard-bar="batch-2"]') : querySelector(selector));
   try { dispatchClipboard('paste'); } finally { hover.mockRestore(); }
+  expect(batchBar(2)).toHaveTextContent('F');
+  fireEvent.click(screen.getByRole('menuitem', { name: '貼上小節' }));
   expect(batchBars()).toHaveLength(4);
   expect(batchBar(2)).toHaveTextContent('C');
   expect(batchBar(3)).toHaveTextContent('Dm');

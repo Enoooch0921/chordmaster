@@ -20,6 +20,16 @@ const song: Song = {
 };
 
 describe('ChordSheet preview input caret', () => {
+  it('shows the saved edit time and leaves undated charts blank instead of using today', () => {
+    const time = new Date('2026-10-28T14:15:00+08:00').getTime();
+    const draft = { ...song, lastEditedAt: time + 86400000 };
+    const { container, rerender } = render(<ChordSheet song={draft} language="zh" currentKey="C" lastEditedAt={time} />);
+    expect(container.querySelector('[data-chart-edited-at]')).toHaveAttribute('data-chart-edited-at', String(time));
+    expect(container.querySelector('[data-chart-edited-at]')).toHaveTextContent(new Date(time).toLocaleString('zh-TW', { year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false }).replace(/\s+/g, ' '));
+    rerender(<ChordSheet song={draft} language="zh" currentKey="C" lastEditedAt={null} />);
+    expect(container.querySelector('[data-chart-edited-at]')).toBeNull();
+    expect(container.querySelector('[title="最後編輯"]')).toHaveTextContent('—');
+  });
   it.each(['G7', 'Cm7', 'Cmaj7', 'G7b9', 'G7(b9)', 'C6/9'])('separates raised extension figures from baseline quality words in %s', chord => {
     const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: [chord] }] }] };
     const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
@@ -86,7 +96,7 @@ describe('ChordSheet preview input caret', () => {
     expect(container.querySelector('.sheet-final-bar .sheet-repeat-preview > span:last-child')).toHaveClass('border-l-[3px]');
   });
 
-  it('uses empty following beats for engraving while keeping chord ownership and exact offset labels', () => {
+  it('retains chord ownership and exact offset labels on the stable beat grid', () => {
     const source: Song = {
       ...song,
       sections: [{ ...song.sections[0], bars: [{
@@ -97,12 +107,10 @@ describe('ChordSheet preview input caret', () => {
     const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
     const chords = Array.from(container.querySelectorAll<HTMLElement>('[data-preview-owner-slot]'));
     expect(chords.map(chord => chord.dataset.previewOwnerSlot)).toEqual(['0', '2', '3']);
-    expect(chords.map(chord => chord.dataset.previewTokenSpan)).toEqual(['1', '1', '1']);
-    expect(chords.map(chord => chord.dataset.chordEngravingSpan)).toEqual(['2', '1', '1']);
-    expect(chords.map(chord => chord.style.gridColumn)).toEqual(['1 / span 2', '3 / span 1', '4 / span 1']);
-    expect(chords[0]).toHaveClass('pointer-events-none');
-    expect(chords[0].querySelector<HTMLElement>('[data-chord-beat-label]')?.style.left).toBe('calc(37.5% + 3px)');
-    expect(chords[0].querySelector('[data-chord-beat-label]')).toHaveTextContent('1a');
+    expect(chords[0]).toHaveAttribute('data-chord-beat-offset', '0.75');
+    expect(chords[0]).toHaveAttribute('data-chord-beat-position', '1a');
+    expect(container.querySelector('[data-chord-beat-labels]')).toHaveTextContent('1a');
+    expect([...container.querySelectorAll('[data-chord-beat-anchor]')].map(node => Number(node.getAttribute('data-chord-beat-anchor')))).toEqual([.21875, .625, .875]);
     expect(JSON.stringify(source)).toBe(before);
   });
 
@@ -834,6 +842,28 @@ describe('ChordSheet preview input caret', () => {
     const { container } = render(<ChordSheet song={{ ...song, barRowCount }} language="zh" currentKey="C" />);
     expect(container.querySelector('[data-sheet-bar-row-count]')).toHaveAttribute('data-sheet-bar-row-count', String(barRowCount ?? 2));
     expect(container.querySelector('[data-preview-section-id="section-1"]')).toHaveStyle({ maxHeight: barRowCount === 1 ? '34px' : '68px' });
+  });
+
+  it.each([
+    { riff: '1 | 2 | 3 | 4' },
+    { rhythm: 'q q q q' },
+    { riff: '1 | 2 | 3 | 4', rhythm: 'q q q q' }
+  ])('keeps three-line melody/rhythm rows at the same flexible height as chord-only rows (%j)', notation => {
+    const source: Song = { ...song, barRowCount: 3, sections: [
+      { id: 'intro', title: 'Intro', bars: [{ id: 'intro-bar', chords: ['C'], ...notation }] },
+      { id: 'verse', title: 'Verse', bars: [{ id: 'verse-bar', chords: ['C'] }] }
+    ] };
+    const before = JSON.stringify(source);
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    for (const id of ['intro', 'verse']) {
+      const row = container.querySelector(`[data-preview-section-id="${id}"]`) as HTMLElement;
+      expect(row).toHaveClass('flex-1');
+      expect(row.style.maxHeight).toBe('');
+      expect(row.style.minHeight).toBe('');
+    }
+    expect(container.querySelector('[data-preview-bottom-lane]')).toHaveStyle({ top: '40px' });
+    expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
+    expect(JSON.stringify(source)).toBe(before);
   });
 
   it('keeps sparse multi-voice notation near its chords while reserving every voice row', () => {
@@ -2750,6 +2780,20 @@ describe('ChordSheet preview notation interactions', () => {
   });
 });
 
+it('omits the song title and continued text from subsequent page headers', () => {
+  const source: Song = { ...song, sections: [{ id: 'long', title: 'Verse', bars: Array.from({ length: 80 }, (_, i) => ({ id: `bar-${i}`, chords: ['C'] })) }] };
+  const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+  const pages = container.querySelectorAll('[data-print-page]');
+  expect(pages.length).toBeGreaterThan(1);
+  expect(pages[0].querySelector('[data-sheet-print-only]')).toBeNull();
+  pages.forEach((page,index)=>{
+    if(!index)return;
+    const header=page.querySelector('[data-sheet-continuation-header]');
+    expect(header).not.toHaveTextContent(source.title);
+    expect(header).not.toHaveTextContent('續');
+  });
+});
+
 it('renders a leading double barline on first, middle and wrapped measures', () => {
   const source: Song = { ...song, sections: [{ id: 's', title: 'Verse', bars: Array.from({ length: 5 }, (_, i) => ({ id: `b${i}`, chords: ['C'], doubleBarStart: i % 2 === 0, ending: i === 0 ? '1' : undefined })) }] };
   const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
@@ -2778,23 +2822,45 @@ it.each(['doubleBar', 'finalBar', 'repeatEnd'] as const)('avoids duplicating the
 
 describe('chord and notation alignment policy', () => {
   it.each([
-    [{ rhythm: 'q q q q' }, 'rhythm'],
-    [{ riff: '1 2 3 4' }, 'jianpu'],
-    [{ rhythm: 'q q q q', riff: '12 34 56 71' }, 'rhythm'],
-    [{ rhythmVoices: [{ id: 'v', label: 'Voice', rhythm: 'q q q q' }] }, 'rhythm'],
-    [{}, null],
-    [{ rhythm: 'w' }, null],
-    [{ rhythm: 'w', riff: '5 2 3 4' }, 'jianpu'],
-    [{ rhythm: 'h h' }, null],
-    [{ riff: '1 - - -' }, null],
-  ] as const)('selects the intended alignment for %j', (notation, mode) => {
-    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['G'], ...notation, rhythmVoices: 'rhythmVoices' in notation ? [...notation.rhythmVoices] : undefined }] }] };
+    { rhythm: 'q q q q' },
+    { rhythm: 'e e q q q' },
+    { rhythm: 'q. e q q' },
+    { riff: '1 2 3 4' },
+    { riff: '12 34 56 71' },
+    { rhythm: 'q q q q', riff: '12 34 56 71' },
+    { rhythmVoices: [{ id: 'v', label: 'Voice', rhythm: 'q q q q' }] },
+    {},
+    { rhythm: 'w' },
+    { rhythm: 'w', riff: '5 2 3 4' },
+    { rhythm: 'h h' },
+    { riff: '1 - - -' },
+    { riff: "2'.) | 5_ | 5'_ 4'_ | 3'_ (2'_" },
+  ])('keeps the same harmony grid for %j', notation => {
+    const source: Song = { ...song, sections: [{ ...song.sections[0], bars: [{ id: 'bar-1', chords: ['G', '/', 'Am', 'G/B'], ...notation }] }] };
     const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
-    const row = container.querySelector('[data-notation-aligned-chords]');
-    if (mode) expect(row).toHaveAttribute('data-notation-aligned-chords', mode);
-    else {
-      expect(row).toBeNull();
-      expect(container.querySelector('[data-preview-owner-slot="0"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-notation-aligned-chords]')).toHaveAttribute('data-notation-aligned-chords', 'beats');
+    expect([...container.querySelectorAll('[data-chord-beat-anchor]')].map(node => Number(node.getAttribute('data-chord-beat-anchor')))).toEqual([.125, .375, .625, .875]);
+  });
+  it.each([
+    ['riff', ['', '1', '1 | 2', '1 | x | 3 | x', 'x | x | 3_4_ | x', '1 | 2 | 3_4_ | 5', '1', '']],
+    ['rhythm', ['', 'q', 'q q', 'q s q s', 's s e e s', 'q q e e q', 'q', '']],
+  ] as const)('keeps the full measure grid while %s is entered, left incomplete, or removed', (field, steps) => {
+    const onClick = vi.fn();
+    const makeSong = (notation: string): Song => ({ ...song, sections: [{ ...song.sections[0], bars: [{
+      id: 'partial', chords: ['G', '', 'G', 'G/B'],
+      chordSubdivisions: [{ beat: 2, offset: .5, chord: 'Am' }], [field]: notation,
+    }] }] });
+    const { container, rerender } = render(<ChordSheet song={makeSong('')} language="zh" currentKey="C" onElementClick={onClick} />);
+    for (const notation of steps) {
+      const source = makeSong(notation);
+      const before = JSON.stringify(source);
+      rerender(<ChordSheet song={source} language="zh" currentKey="C" onElementClick={onClick} />);
+      expect([...container.querySelectorAll('[data-chord-beat-anchor]')].map(node => Number(node.getAttribute('data-chord-beat-anchor')))).toEqual([.125, .5625, .6875, .875]);
+      expect([...container.querySelectorAll('[data-chord-beat-labels]')].map(node => node.textContent)).toEqual(['3', '3&']);
+      expect(container.querySelectorAll('[data-preview-slot-hit]')).toHaveLength(4);
+      fireEvent.click(container.querySelector('[data-preview-slot-index="1"]')!);
+      expect(onClick.mock.calls.at(-1)?.[3].slotIndex).toBe(1);
+      expect(JSON.stringify(source)).toBe(before);
     }
   });
   it('keeps chord clicks on their own beat after alignment and never changes the score', () => {
@@ -2880,4 +2946,104 @@ it('opens the marked measure from its unison badge with a pointer or keyboard, w
   rerender(<ChordSheet song={source} language="zh" currentKey="C" />);
   expect(screen.queryByRole('button', { name: '編輯齊奏標記' })).toBeNull();
   expect(screen.getByText('齊奏')).toBeInTheDocument();
+});
+
+// Real intro examples retain their notation while harmony uses a stable first-beat center.
+it.each([
+  ['Bb', "(5' | - | 5'_) 1'_ | 3'_ (2'_"],
+  ['C/Bb', "2'.) | 5_ | 5'_ 4'_ | 3'_ (2'_"],
+  ['Am7', "2'.) | 1'_ | 2'_. (5'= | 5'_) (7_"],
+  ['Bb/C', '1 | - | - | -'],
+  ['C<', '4) | - | - | -'],
+  ['C', '5 | - | - | -'],
+])('keeps %s on the first beat in the reported intro examples', (chord, riff) => {
+  const source: Song = { ...song, barRowCount: 2, sections: [{ id: 'intro', title: 'Intro', bars: [{ id: 'held', chords: [chord], riff }] }] };
+  const before = JSON.stringify(source);
+  const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+  expect(container.querySelector('[data-notation-aligned-chords]')).toHaveAttribute('data-notation-aligned-chords', 'beats');
+  expect(container.querySelector('[data-chord-beat-anchor]')).toHaveAttribute('data-chord-beat-anchor', '0.125');
+  expect(container.querySelector('[data-jianpu-onset="0"]')).toBeInTheDocument();
+  expect(JSON.stringify(source)).toBe(before);
+});
+
+
+it('balances full beats near repeat bars while retaining the timed subdivision layout', () => {
+  const source: Song = {...song, sections:[{id:'s',title:'Tag',bars:[
+    {id:'repeat',chords:['Bm7','A/C#>','D>','E>'],repeatStart:true},
+    {id:'end-repeat',chords:['E'],repeatEnd:true},
+    {id:'ending',chords:['1sus2','/','1<','/']},
+    {id:'split',chords:['Amaj7<','/','A','A/C#'],chordSubdivisions:[{beat:2,offset:.5,chord:'Bm'}]},
+  ]}]};
+  const before=JSON.stringify(source);
+  const {container}=render(<ChordSheet song={source} currentKey="A" language="zh"/>);
+  for(const id of ['repeat','ending']) expect(container.querySelector(`[data-preview-clipboard-bar="${id}"] [data-chord-balanced-spacing]`)).toBeInTheDocument();
+  expect(container.querySelector('[data-preview-clipboard-bar="split"] [data-chord-balanced-spacing]')).toBeNull();
+  expect(container.querySelectorAll('[data-chord-marker="pull"]')).toHaveLength(3);
+  expect(JSON.stringify(source)).toBe(before);
+});
+
+it.each([false, true])('preserves Chorus bar 3 beat ownership for the adjacent slash chords (numeric=%s)', numeric => {
+  const source: Song = { ...song, title: '即或不然的生命', originalKey: 'D', currentKey: 'D',
+    showNashvilleNumbers: numeric, barRowCount: 2,
+    sections: [{ id: 'chorus', title: 'Chorus', bars: [{ id: 'chorus-3', chords: ['2m11', '', '6m7/5', '3/#5'] }] }]
+  };
+  const before = JSON.stringify(source);
+  const { container } = render(<ChordSheet song={source} currentKey="D" language="zh" />);
+  const nodes = [...container.querySelectorAll<HTMLElement>('[data-preview-owner-slot]')];
+  expect(nodes.map(node => node.dataset.previewOwnerSlot)).toEqual(['0', '2', '3']);
+  expect(nodes.map(node => node.textContent)).toEqual(numeric ? ['2m11','6m7/5','3/#5'] : ['Em11','Bm7/A','F#/A#']);
+  expect(nodes[1].querySelector('[data-chord-bass]')).toBeInTheDocument();
+  expect(nodes[2].querySelector('[data-chord-bass]')).toBeInTheDocument();
+  expect(JSON.stringify(source)).toBe(before);
+});
+
+it('holds the preview still during a touch section drag until the finger reaches an edge', () => {
+  vi.useFakeTimers();
+  try {
+    const {container}=render(<div data-print-preview-container onTouchMove={vi.fn()}>
+      <ChordSheet song={song} currentKey="C" language="zh" onElementClick={vi.fn()} onSectionReorder={vi.fn()} />
+    </div>);
+    const scroller=container.querySelector<HTMLElement>('[data-print-preview-container]')!;
+    scroller.getBoundingClientRect=()=>({left:0,top:100,right:500,bottom:600,width:500,height:500,x:0,y:100,toJSON(){}});
+    scroller.scrollTop=200;
+    const label=screen.getByRole('button',{name:/開啟段落操作 Verse/});
+    fireEvent.pointerDown(label,{pointerId:9,pointerType:'touch',button:0,clientX:20,clientY:115});
+    act(()=>vi.advanceTimersByTime(550));
+    expect(scroller.scrollTop).toBe(200);
+    fireEvent.pointerMove(label,{pointerId:9,pointerType:'touch',clientX:20,clientY:200});
+    const move=createEvent.touchMove(label,{touches:[{identifier:9,clientX:20,clientY:200}],cancelable:true,bubbles:true});
+    fireEvent(label,move);expect(move.defaultPrevented).toBe(true);
+    act(()=>vi.advanceTimersByTime(50));expect(scroller.scrollTop).toBe(200);
+    fireEvent.pointerMove(label,{pointerId:9,pointerType:'touch',clientX:20,clientY:90});
+    act(()=>vi.advanceTimersByTime(32));
+    expect(scroller.scrollTop).toBeLessThan(200);expect(scroller.scrollTop).toBeGreaterThanOrEqual(170);
+    fireEvent.pointerCancel(label,{pointerId:9,pointerType:'touch'});
+    const after=createEvent.touchMove(label,{touches:[{identifier:9,clientX:20,clientY:200}],cancelable:true,bubbles:true});
+    fireEvent(label,after);expect(after.defaultPrevented).toBe(false);
+  } finally {vi.useRealTimers();}
+});
+
+it.each([1, 2])('shows Capo %i immediately after the chart key, before tempo and meter', capo => {
+  const onMetaClick = vi.fn();
+  const { container, rerender } = render(<ChordSheet song={{ ...song, tempo: 120, capo }} language="en" currentKey="C" previewIdentity="capo-check" onMetaClick={onMetaClick}/>);
+  const key = container.querySelector('[data-preview-edit-hit="capo-check|meta|key"]')!;
+  const control = container.querySelector<HTMLElement>('[data-sheet-capo]')!;
+  const tempo = container.querySelector('[data-preview-edit-hit="capo-check|meta|tempo"]')!;
+  const meter = container.querySelector('[data-preview-edit-hit="capo-check|meta|timeSignature"]')!;
+  expect(control).toHaveTextContent(`Capo ${capo}`);
+  expect(key.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(control.compareDocumentPosition(tempo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(tempo.compareDocumentPosition(meter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(control.previousElementSibling?.previousElementSibling).toBe(key);
+  fireEvent.click(control);
+  expect(onMetaClick).toHaveBeenCalledWith('capo', expect.objectContaining({ anchorKey: 'capo-check|meta|capo' }));
+  rerender(<ChordSheet song={{ ...song, tempo: 120, capo: 0 }} language="en" currentKey="C" previewIdentity="capo-check" onMetaClick={onMetaClick}/>);
+  expect(container.querySelector('[data-sheet-capo]')).toBeNull();
+  expect(container.querySelector('[data-preview-edit-hit="capo-check|meta|key"]')).toBe(key);
+});
+
+it.each([0, undefined])('hides the chart Capo label when capo is %s', capo => {
+  const { container } = render(<ChordSheet song={{ ...song, capo }} language="en" currentKey="C"/>);
+  expect(container.querySelector('[data-sheet-capo]')).toBeNull();
+  expect(screen.queryByText(/^Capo /)).toBeNull();
 });

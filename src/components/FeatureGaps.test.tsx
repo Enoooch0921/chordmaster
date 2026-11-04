@@ -55,9 +55,10 @@ it('preserves annotation case in the score and subdivision rows keep timing mark
   const annotation = 'EG G4 F/C 8 beats · rit. pno';
   const { container } = render(<ChordSheet song={{ ...source, sections: [{ ...source.sections[0], bars: [{ id: 'bar', chords: ['E/A<', '', '', ''], chordSubdivisions: [{ beat: 0, offset: .5, chord: 'D/A' }], annotation }] }] }} currentKey="D" language="zh" />);
   expect(screen.getByText(annotation)).toBeInTheDocument();
-  const shrink = container.querySelector('[data-subbeat-chord-row] [data-chord-event-kind="primary"] .overflow-visible');
-  expect(shrink).not.toBeNull();
-  expect(shrink?.querySelector('svg')).not.toBeNull();
+  const row = container.querySelector('[data-notation-aligned-chords="beats"]');
+  expect(row).not.toBeNull();
+  expect(row?.querySelector('[data-chord-event-kind="primary"] [data-chord-marker="push"]')).not.toBeNull();
+  expect(row?.querySelector('[data-aligned-chord-content]')).not.toHaveClass('overflow-hidden');
 });
 
 it('uses Korean labels and preserves all text and pairing when changing translation language and editing a line', () => {
@@ -151,6 +152,8 @@ it('edits bar and section tempo from the subdivision editor without changing the
   render(<PreviewBarEditor session={session} language="zh" deviceLayout="desktop" storedKey="D" displayedKey="D" storageMode="letters"
     onApplyDraft={apply} onInputModeChange={() => {}} onNotationModeChange={() => {}} onNotationCursorChange={() => {}}
     onJianpuInputAbsoluteChange={() => {}} onNavigate={() => {}} onStructure={() => {}} onUndo={() => {}} onRedo={() => {}} onDone={() => {}} onCancel={() => {}} />);
+  expect(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' })).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' }));
   expect(screen.getByRole('button', { name: '拍內和弦與指定遍數和弦' })).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(screen.getByText('速度變化'));
   fireEvent.click(screen.getByRole('button', { name: '設定小節速度' }));

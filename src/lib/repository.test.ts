@@ -694,6 +694,18 @@ describe('cloud repository project deletion', () => {
 
 describe('guarded global workspace history',()=>{
  beforeEach(()=>{vi.clearAllMocks();mocks.rpc.mockResolvedValue({data:null,error:null});});
+ it.each([false,true])('guards the current saved date without permitting concurrent score edits (conflict=%s)',async conflict=>{
+  const {createWorkspaceHistoryEntry}=await import('./workspaceHistory');
+  const before=makeSong({lastEditedAt:100,sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]});const after={...before,title:'Edited'};
+  const entry={id:'entry',setlistId:'list',songId:before.id,order:0,sectionOrder:[],songData:before};
+  const list:Setlist={id:'list',name:'Meeting',displayMode:'chord-movable-key',createdAt:1,updatedAt:1,songs:[entry]};
+  const history=createWorkspaceHistoryEntry({zh:'編輯',en:'edit'},[{resource:'setlist',id:'list',before:list,after:{...list,songs:[{...entry,songData:after}]}}])!;
+  const server={...after,lastEditedAt:500,...(conflict?{tempo:99}:{})};
+  mocks.from.mockReturnValue(makeBuilder({maybeSingle:vi.fn().mockResolvedValue({data:{song_id:before.id,setlist_id:'list',override_json:{songData:server}},error:null})}));
+  const repository=createRepository();repository.setActiveLibrary('library');
+  if(conflict){await expect(repository.applyWorkspaceHistory(history,'undo')).rejects.toThrow('History conflict');expect(mocks.rpc).not.toHaveBeenCalled();}
+  else {await repository.applyWorkspaceHistory(history,'undo');expect(mocks.rpc).toHaveBeenCalledWith('patch_workspace_history',expect.objectContaining({p_patches:[expect.objectContaining({resource:'entry',before:expect.objectContaining({songData:server}),after:expect.objectContaining({songData:expect.objectContaining({title:before.title,lastEditedAt:expect.any(Number)})})})]}));}
+ });
  it('removes a legacy score using its exact server JSON after comparing normalized content',async()=>{
   const rawScore=makeSong({sections:[{id:'verse',title:'Verse',bars:[{id:'bar',chords:['C']}]}]});
   const overrides={overrideKey:'C' as const,sectionOrder:[],songData:rawScore};
@@ -765,4 +777,22 @@ describe('guarded global workspace history',()=>{
   await expect(repository.trashWorkspaceResource('project','project',{name:'Project'})).rejects.toMatchObject({code:'PGRST202'});
   expect(mocks.from).not.toHaveBeenCalled();
  });
+});
+
+it.each([false,true])('copies a team song with its original title and no team link (existing=%s)', async duplicate => {
+  vi.clearAllMocks();installLocalStorageMock();mocks.rpc.mockResolvedValue({data:[],error:null});
+  const source=makeSong({title:'Washed',teamSource:{libraryId:'team-1',songId:'old-source',updatedAt:1,copiedAt:1,libraryName:'Team'}});
+  const before=JSON.stringify(source);const writes:Record<string,unknown>[]=[];
+  mocks.from.mockImplementation((table:string)=>{
+    if(table==='libraries')return makeBuilder({maybeSingle:vi.fn().mockResolvedValue({data:{id:'personal-1',kind:'personal',owner_user_id:'user-1'},error:null})});
+    if(table==='songs')return makeBuilder({
+      returns:vi.fn().mockResolvedValue({data:duplicate?[{id:'existing',library_id:'personal-1',title:'Washed',content_json:makeSong({id:'existing',title:'Washed'}),updated_at:'2026-10-30T00:00:00Z'}]:[],error:null}),
+      upsert:vi.fn(async(payload:Record<string,unknown>)=>{writes.push(payload);return{error:null};})
+    });
+    return makeBuilder();
+  });
+  const copy=await createRepository().copySongToPersonal(source);
+  expect(copy.title).toBe(duplicate?'Washed 2':'Washed');expect(copy.teamSource).toBeUndefined();
+  expect(writes).toHaveLength(1);expect(writes[0].library_id).toBe('personal-1');
+  expect((writes[0].content_json as StoredSong).teamSource).toBeUndefined();expect(JSON.stringify(source)).toBe(before);
 });

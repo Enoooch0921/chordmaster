@@ -291,7 +291,7 @@ it('creates a loose setlist and returns directly to the folder/file root',async(
  fireEvent.change(await screen.findByRole('textbox',{name:'歌單名稱'}),{target:{value:'全新聚會'}});
  expect(screen.getByRole('combobox',{name:'所屬專案'})).toHaveValue('');
  fireEvent.click(screen.getByRole('button',{name:'建立歌單'}));
- await screen.findByDisplayValue('全新聚會');
+ await waitFor(()=>expect(screen.getByRole('textbox',{name:'歌單名稱'})).toHaveValue('全新聚會'));
  fireEvent.click(await screen.findByRole('button',{name:/返回.*歌單/}));
  await screen.findByRole('button',{name:/^洛杉磯烈火/});
  expect(screen.getByRole('button',{name:/^全新聚會(?: |$)/})).toBeInTheDocument();

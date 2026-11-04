@@ -39,6 +39,15 @@ const target = {
 };
 
 describe('preview edit session', () => {
+  it('does not ask to save a copied draft or an edit restored to its original content', () => {
+    const session = createPreviewEditSession({ song, target, inputMode: 'letters' });
+    expect(applyPreviewDraft(session, structuredClone(song)).dirty).toBe(false);
+    const edited = applyPreviewDraft(session, { ...song, title: 'Edited' });
+    const restored = applyPreviewDraft(edited, structuredClone(song));
+    expect(restored.dirty).toBe(false);
+    expect(undoPreviewDraft(restored).dirty).toBe(true);
+    expect(redoPreviewDraft(undoPreviewDraft(restored)).dirty).toBe(false);
+  });
   it('keeps draft changes local until the caller commits', () => {
     const session = createPreviewEditSession({ song, target, inputMode: 'letters' });
     const draft = { ...song, title: 'Draft' };

@@ -1,4 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import SlidingSelection from './ui/SlidingSelection';
+import { useContentSwitchMotion } from '../hooks/useContentSwitchMotion';
+import { useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, Link, Share2, Users } from 'lucide-react';
 import ResponsiveDialog from './ResponsiveDialog';
 import type { AppLanguage } from '../types';
@@ -17,6 +19,8 @@ interface ShareDialogProps {
 export default function ShareDialog({ language, title, url, contacts, sharing, onClose, onCopy, onSystemShare }: ShareDialogProps) {
   const zh = language === 'zh';
   const [view, setView] = useState<'link' | 'contacts'>('link');
+  const contentRef = useRef<HTMLDivElement>(null);
+  useContentSwitchMotion(contentRef, view, true);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const copy = async () => {
@@ -33,10 +37,13 @@ export default function ShareDialog({ language, title, url, contacts, sharing, o
   return (
     <ResponsiveDialog title={title} closeLabel={zh ? '關閉分享' : 'Close sharing'} busy={sharing} onClose={onClose}>
       {contacts ? (
-        <nav aria-label={zh ? '分享方式' : 'Sharing method'} className="flex shrink-0 gap-1 border-b border-gray-100 px-5 py-3">
-          {(['link', 'contacts'] as const).map((tab) => <button key={tab} type="button" aria-pressed={view === tab} onClick={() => setView(tab)} className={`inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold ${view === tab ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}>{tab === 'link' ? <Link size={16} /> : <Users size={16} />}{tab === 'link' ? (zh ? '分享連結' : 'Link') : (zh ? '邀請聯絡人' : 'Contacts')}</button>)}
+        <nav aria-label={zh ? '分享方式' : 'Sharing method'} className="shrink-0 border-b border-gray-100 px-5 py-3">
+          <div className="relative grid w-full grid-cols-2 gap-1 rounded-xl"><SlidingSelection index={view === 'link' ? 0 : 1} count={2} inset={0} gap={4} className="bg-indigo-50 dark:bg-indigo-950" style={{ borderRadius: 12 }}/>
+          {(['link', 'contacts'] as const).map((tab) => <button key={tab} type="button" aria-pressed={view === tab} onClick={() => setView(tab)} className={`ui-press relative inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold ${view === tab ? 'text-indigo-700 dark:text-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}>{tab === 'link' ? <Link size={16} /> : <Users size={16} />}{tab === 'link' ? (zh ? '分享連結' : 'Link') : (zh ? '邀請聯絡人' : 'Contacts')}</button>)}
+          </div>
         </nav>
       ) : null}
+      <div ref={contentRef} data-share-content className="flex min-h-0 flex-1 flex-col">
       <div className={`${view === 'link' ? 'block' : 'hidden'} min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]`}>
         <p className="mb-5 text-sm leading-6 text-gray-500">{zh ? '複製連結，或使用系統分享傳給對方。' : 'Copy the link or share it using another app.'}</p>
         <label className="block text-xs font-semibold text-gray-600">
@@ -51,6 +58,7 @@ export default function ShareDialog({ language, title, url, contacts, sharing, o
         {error ? <p role="alert" className="mt-3 text-sm leading-6 text-rose-700">{error}</p> : null}
       </div>
       {contacts ? <div className={`${view === 'contacts' ? 'flex' : 'hidden'} min-h-0 flex-1 flex-col`}>{contacts}</div> : null}
+      </div>
     </ResponsiveDialog>
   );
 }

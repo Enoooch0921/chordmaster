@@ -104,15 +104,22 @@ describe('on-stage offline and page-turner stability', () => {
     await waitFor(()=>expect(document.querySelector('[data-performance-overlay] h1')).toHaveTextContent('Stage one'));
     expect(page()).toBe(total);
   },15000);
-  it('pauses owned and shared background reads and keeps keyboard/manual turns through disconnect and reconnect', async () => {
+  it('keeps live updates and keyboard/manual turns through disconnect and reconnect', async () => {
     await start();
-    expect((sync.owned.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(true);
-    expect((sync.joined.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(true);
+    expect((sync.owned.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(false);
+    expect((sync.joined.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(false);
     act(() => { pedal('keydown'); pedal('keyup'); }); expect(page()).toBe(2);
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     act(() => window.dispatchEvent(new Event('offline')));
     act(() => { pedal('keydown'); pedal('keydown', 'PageDown', true); pedal('keyup'); }); expect(page()).toBe(3);
     const at = page();
+    const overlay = document.querySelector('[data-performance-overlay]');
+    const remote = structuredClone(fixture);
+    remote.setlists[0].songs[0].overrideKey = 'D';
+    const owned = (sync.owned.mock.calls.at(-1) as unknown as [Parameters<typeof import('./hooks/useLibraryWorkspaceRefresh').useLibraryWorkspaceRefresh>[0]])[0];
+    act(() => owned.onUpdate(remote));
+    expect(page()).toBe(at);
+    expect(document.querySelector('[data-performance-overlay]')).toBe(overlay);
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
     act(() => { window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')); });
     expect(page()).toBe(at);
@@ -130,3 +137,43 @@ describe('on-stage offline and page-turner stability', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next page' })); expect(page()).toBe(3);
   }, 15000);
 });
+
+
+it('keeps all performance chart pages inside a light paper scope while the app is dark', async () => {
+  localStorage.setItem('chordmaster.theme-mode.v1', 'dark');
+  await start();
+  expect(document.documentElement).toHaveClass('dark');
+  const paper = document.querySelector('[data-performance-overlay] .performance-sheet')!;
+  const pages = [...paper.querySelectorAll('[data-print-page]')];
+  expect(pages.length).toBeGreaterThan(1);
+  for (const page of pages) expect(page.closest('[data-print-preview]')).toBe(paper);
+  expect(paper).toHaveStyle({ colorScheme: 'light' });
+});
+
+it('restores app and windowed performance bounds after fullscreen exit with a stale visual viewport', async () => {
+  const oldHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+  const oldViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+  const viewport = Object.assign(new EventTarget(), { height: 1210, offsetTop: 0, scale: 1 });
+  const setHeight = (height: number) => Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+  try {
+    setHeight(1210);
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    await start();
+    const root = document.querySelector<HTMLElement>('[data-app-root]')!;
+    const overlay = document.querySelector<HTMLElement>('[data-performance-overlay]')!;
+    expect(root.style.height).toBe('100dvh');
+    expect(overlay.style.height).toBe('100dvh');
+    // Native fullscreen has ended, but the performance view is still open.
+    setHeight(1078);
+    fireEvent(document, new Event('webkitfullscreenchange'));
+    await waitFor(() => expect(overlay.style.height).toBe('100dvh'));
+    expect(root.style.height).toBe('100dvh');
+    fireEvent.click(screen.getByRole('button', { name: '退出' }));
+    await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).toBeNull());
+    expect(root.style.height).toBe('100dvh');
+  } finally {
+    if (oldHeight) Object.defineProperty(window, 'innerHeight', oldHeight);
+    if (oldViewport) Object.defineProperty(window, 'visualViewport', oldViewport);
+    else Reflect.deleteProperty(window, 'visualViewport');
+  }
+}, 15000);

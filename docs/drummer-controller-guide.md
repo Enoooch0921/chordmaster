@@ -14,7 +14,7 @@
 
 1. 硬體旋鈕選 **7-bit CC Relative**，不要選絕對值、14-bit 或 NRPN。初期每格 1 BPM，關閉或降低旋鈕加速；確認後再試 0.1 BPM。
 2. 六顆按鍵分別給加速、減速、TAP、播放／停止、上一首、下一首；旋鈕另外保留調速。採 **Note 或 CC Momentary**，按下送非零，放開送零／Note Off，避免 Toggle 要按兩次才觸發一次。
-3. 開鼓手模式右上 MIDI → 連接控制器 → 選擇裝置。
+3. 開鼓手模式左側 MIDI → 連接控制器 → 選擇裝置。
 4. 點「設定速度旋鈕」，先向右慢轉數格，再向左慢轉數格；接著逐一學習按鍵。
 5. 命名並儲存配置。設定面板開啟時，只學習，不會換歌或播放；關閉後才開始控制演奏。
 
@@ -24,13 +24,13 @@
 
 USB-C iPad 可用支援資料的 USB 線／轉接 hub；演出時若同時接音效卡與充電，採可供電 hub 較方便。Lightning iPad 使用 Apple USB 相機轉接器，供電不足時需接外部電源。[Ableton 官方 iOS MIDI 接線說明](https://help.ableton.com/hc/en-us/articles/8093729641884-Note-MIDI-Input)
 
-硬體支援 iPad 與網頁能讀到 MIDI 是兩件事：Safari iPad 沒有 Web MIDI；ChordMaster 這版已加入 CoreMIDI 橋接，需安裝含此變更的 **iPad App**。目前完成編譯及軟體測試，尚未接實體控制器驗證。[Web MIDI 瀏覽器相容性](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/requestMIDIAccess#browser_compatibility)
+硬體支援 iPad 與網頁能讀到 MIDI 是兩件事：Safari iPad 沒有 Web MIDI；0.12.0 本次僅發布網頁版，不發布包含 CoreMIDI 橋接的 iPad App。網頁是否可用取決於瀏覽器是否支援 Web MIDI，尚未接實體控制器驗證。[Web MIDI 瀏覽器相容性](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/requestMIDIAccess#browser_compatibility)
 
 ## 先用電腦鍵盤
 
 同一面板切換「電腦鍵盤」，不用購買 MIDI 裝置。可先學習：↑ 加速、↓ 減速、T TAP、Space 播放／停止、← 上一首、→ 下一首，再儲存自己的配置。長按速度鍵可連續調整；TAP、播放、上下首只觸發一次。輸入文字、組字及 Command/Ctrl/Alt 快捷鍵不會觸發這些操作。
 
-## 跟林謙測 TAP
+## 實機驗證 TAP
 
 - 先用鍵盤／觸控確認 70 → 120 BPM：第二下先取得新速度，再點四至八下觀察穩定度；不要用操作工具的回呼間隔代替實際點按間隔。
 - 實機以 70、120、180 BPM 各點至少 20 組；加入持續播放、兩頁譜捲動與換歌場景，記錄顯示 BPM 和異常次數。

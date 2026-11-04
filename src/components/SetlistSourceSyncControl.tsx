@@ -1,10 +1,12 @@
+import { AnimatePresence } from 'motion/react';
+import AnimatedNativeDialog from './ui/AnimatedNativeDialog';
 import { ArrowLeftRight, ArrowRight, Check, X } from 'lucide-react';
-import { compareSetlistSourceScores } from '../lib/setlistSourceComparison';
+import { compareSetlistSourceScores, hasLyricsTextChange } from '../lib/setlistSourceComparison';
 import './SetlistSourceSyncControl.css';
 import SourceScoreComparison, { SourceScoreHistory } from './SourceScoreComparison';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { AppLanguage } from '../types';
-import { describeSetlistSourceChanges, previewSetlistSourceSync, reconcileSetlistSource,
+import { hasSetlistSourceScoreChange, describeSetlistSourceChanges, previewSetlistSourceSync, reconcileSetlistSource,
   type SetlistSourceDirection, type SetlistSourceReconciliation, type SetlistSourceStatus, type SetlistSourceSyncPreview } from '../lib/setlistSourceSync';
 
 export default function SetlistSourceSyncControl({ libraryId, entryId, language, status, prepare, onReconciled, onSaveAs, loadPreview, reconcile, compact = false }: {
@@ -25,7 +27,6 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
   const [invalidated, setInvalidated] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null), mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { if (preview && !dialog.current?.open) dialog.current?.showModal(); }, [preview]);
   const statusLabel = (state: SetlistSourceStatus) => ({
     aligned: zh ? '譜面相同，無須同步。' : 'Scores match. No sync needed.',
     'setlist-changed': zh ? '這份歌單有新的譜面修改，曲庫尚未更新。' : 'This setlist has new score edits. The library source is unchanged.',
@@ -36,8 +37,9 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
   const actionLabel = status === 'source-newer' ? (zh ? '預覽歌曲庫 → 此歌單' : 'Preview library → setlist')
     : status === 'setlist-changed' ? (zh ? '預覽歌單 → 歌曲庫' : 'Preview setlist → library')
     : (zh ? '比對差異與方向' : 'Compare versions and direction');
-  const needsChoice = preview?.status === 'conflict' || preview?.status === 'unknown';
-  const changes = preview ? direction === 'to-setlist'
+  const previewStatus = preview && !hasSetlistSourceScoreChange(preview.source, preview.overrideJson.songData) ? 'aligned' : preview?.status;
+  const needsChoice = previewStatus === 'conflict' || previewStatus === 'unknown';
+  const changes = preview && previewStatus !== 'aligned' ? direction === 'to-setlist'
     ? describeSetlistSourceChanges(preview.overrideJson.songData, preview.source, language)
     : describeSetlistSourceChanges(preview.source, preview.overrideJson.songData, language) : [];
   const showPreview = async () => {
@@ -50,7 +52,7 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
         setPreview(next); setInvalidated(false);
         copyId.current ??= crypto.randomUUID();
         setNewTitle(current => current || `${next.overrideJson.songData.title}${zh ? '（歌單版）' : ' (Setlist version)'}`);
-        setDirection(next.status === 'setlist-changed' ? 'to-library' : next.status === 'source-newer' ? 'to-setlist' : '');
+        setDirection(!hasSetlistSourceScoreChange(next.source, next.overrideJson.songData) ? '' : next.status === 'setlist-changed' ? 'to-library' : next.status === 'source-newer' ? 'to-setlist' : '');
       }
     } catch (error) {
       if (mounted.current) setError(String((error as { message?: string })?.message ?? error));
@@ -89,7 +91,7 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
         })}</time>
       : <span>{zh ? '尚無修改時間紀錄' : 'Modification time not recorded'}</span>;
   };
-  const confirmLabel = direction === 'to-setlist' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library')
+  const confirmLabel = previewStatus === 'aligned' ? (zh ? '無須更新' : 'No update needed') : direction === 'to-setlist' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library')
     : direction === 'to-library' ? (zh ? '用歌單版本更新歌曲庫' : 'Update library from this setlist')
     : direction === 'save-as' ? (zh ? '確認另存新歌曲' : 'Save as a new song')
     : (zh ? '請先選擇更新方向' : 'Choose an update direction');
@@ -109,17 +111,20 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
     </div>
     {message && <p role="status" className="mt-1 text-emerald-800">{message}</p>}
     {!preview && error && <p role="alert" className="mt-1 text-rose-800">{error}</p>}
-    {preview && <dialog ref={dialog} aria-labelledby={titleId} onCancel={event => { if (busy) event.preventDefault(); else close(); }} className="source-sync-dialog">
+    <AnimatePresence initial={false}>{preview && <AnimatedNativeDialog key="comparison" kind="modal" ref={dialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) close(); }} className="source-sync-dialog">
       <div className="source-sync-layout">
         <header className="source-sync-heading"><div>
-          <h2 id={titleId}>{needsChoice ? (zh ? '比對兩份譜面' : 'Compare the two scores') : preview.status === 'source-newer' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library') : (zh ? '用歌單版本更新歌曲庫' : 'Update library from this setlist')}</h2>
+          <h2 id={titleId}>{previewStatus === 'aligned' ? (zh ? '譜面內容相同' : 'Scores match') : needsChoice ? (zh ? '比對兩份譜面' : 'Compare the two scores') : preview.status === 'source-newer' ? (zh ? '從歌曲庫更新此歌單' : 'Update this setlist from library') : (zh ? '用歌單版本更新歌曲庫' : 'Update library from this setlist')}</h2>
           <p>{preview.overrideJson.songData.title} · {preview.setlistName}</p>
         </div><button type="button" disabled={busy} onClick={close} aria-label={zh ? '關閉比對' : 'Close comparison'} className="source-sync-close"><X size={20} /></button></header>
         <div className="source-sync-body">
           <p className="source-sync-state">{needsChoice
             ? (zh ? '先比較目前兩份版本，再決定取用哪一份。系統不會自動合併兩邊的修改。' : 'Compare the current versions, then choose which to use. Changes from both sides are not merged automatically.')
-            : statusLabel(preview.status)}</p>
+            : statusLabel(previewStatus ?? preview.status)}</p>
           {!needsChoice && direction && direction !== 'save-as' && <div className="source-sync-route" aria-label={zh ? '更新方向' : 'Update direction'}><span>{direction === 'to-setlist' ? (zh ? '歌曲庫' : 'Library') : preview.setlistName}</span><ArrowRight size={18} aria-hidden="true" /><span>{direction === 'to-setlist' ? preview.setlistName : (zh ? '歌曲庫' : 'Library')}</span></div>}
+          {preview.source.lyricsDoc || preview.overrideJson.songData.lyricsDoc ? <p className="source-sync-record-note mb-3" data-source-lyrics-summary>{hasLyricsTextChange(preview.source, preview.overrideJson.songData)
+            ? (zh ? '歌詞文字有變更，下方僅列出改動的行。' : 'Lyrics text changed. Only changed lines are listed below.')
+            : (zh ? '歌詞文字相同；語言或段落設定的差異會另行列出。' : 'Lyrics text matches. Language or section settings are listed separately.')}</p> : null}
           <h3 className="source-sync-difference-title">{zh ? '兩份版本的差異' : 'Differences between versions'}<span>{rows.length} {zh ? '項' : 'changes'}</span></h3>
           <div className="source-comparison-legend" aria-label={zh ? '差異標記' : 'Difference colors'}><span data-diff-side="library">{zh ? '歌曲庫差異' : 'Library differences'}</span><span data-diff-side="setlist">{zh ? '歌單差異' : 'Setlist differences'}</span></div>
           <div className="source-comparison" role="table" aria-label={zh ? '歌曲庫與歌單目前的譜面差異' : 'Current library and setlist differences'}>
@@ -151,6 +156,6 @@ export default function SetlistSourceSyncControl({ libraryId, entryId, language,
         </div>
         <footer className="source-sync-footer">{direction && <p className="source-sync-scope" aria-live="polite"><Check size={17} aria-hidden="true" /><span>{scope}</span></p>}<button type="button" disabled={busy} onClick={() => void showPreview()} className="source-sync-button">{zh ? '重新比對' : 'Refresh comparison'}</button><div><button type="button" disabled={busy} onClick={close} className="source-sync-button">{zh ? '取消' : 'Cancel'}</button><button type="button" disabled={busy || invalidated || !direction || (direction === 'save-as' ? !newTitle.trim() : !changes.length)} onClick={() => void confirm()} className="source-sync-button primary">{busy ? (zh ? '正在更新…' : 'Updating…') : confirmLabel}</button></div></footer>
       </div>
-    </dialog>}
+    </AnimatedNativeDialog>}</AnimatePresence>
   </div>;
 }

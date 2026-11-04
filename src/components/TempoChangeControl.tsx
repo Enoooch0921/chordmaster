@@ -1,3 +1,5 @@
+import { AnimatedPopover } from './ui/InteractionMotion';
+import { useIsPresent } from 'motion/react';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
@@ -9,6 +11,7 @@ import { useAnchoredPortalPanel } from './useAnchoredPortalPanel';
 interface Props { value: TempoEvent; language: AppLanguage; label: string; onChange: (value: TempoEvent) => void }
 
 export default function TempoChangeControl({ value, language, label, onChange }: Props) {
+  const present = useIsPresent();
   const zh = language === 'zh';
   const mode = value.resetTempo ? 'reset' : value.tempo !== undefined ? 'custom' : 'inherit';
   const [open, setOpen] = React.useState(false);
@@ -39,22 +42,22 @@ export default function TempoChangeControl({ value, language, label, onChange }:
     setDraft(formatTempoBpm(value.tempo)); setError(false); setOpen(false);
     triggerRef.current?.focus();
   };
-  const { panelStyle, placement } = useAnchoredPortalPanel({ isOpen: open, align: 'right', triggerRef, panelRef, onRequestClose: close, zIndex: 5100 });
+  const { panelStyle, placement, transformOrigin, isPositioned } = useAnchoredPortalPanel({ isOpen: open && present, align: 'right', triggerRef, panelRef, onRequestClose: close, zIndex: 5100 });
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open || !present) return;
     const handleOutside = (event: MouseEvent) => {
       if (event.target instanceof Node && !triggerRef.current?.contains(event.target) && !panelRef.current?.contains(event.target)) close();
     };
     document.addEventListener('mousedown', handleOutside);
     return () => document.removeEventListener('mousedown', handleOutside);
-  }, [open, close]);
+  }, [open, close, present]);
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open || !present) return;
     const frame = requestAnimationFrame(() => selectRef.current?.focus());
     return () => cancelAnimationFrame(frame);
-  }, [open]);
+  }, [open, present]);
 
   const display = mode === 'reset' ? (zh ? '原速' : 'Original') : formatTempoBpm(value.tempo) || '—';
   return <div className="inline-flex shrink-0" data-tempo-change-control onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); cancel(); } }}>
@@ -64,7 +67,7 @@ export default function TempoChangeControl({ value, language, label, onChange }:
       <span>♩ {display}</span><ChevronDown size={14} className="text-gray-500" />
     </button>
     {open && typeof document !== 'undefined' && createPortal(
-      <div ref={panelRef} role="dialog" aria-label={`${label}${zh ? '設定' : ' settings'}`} data-preview-edit-ui data-preview-picker-popover data-placement={placement} style={panelStyle}
+      <AnimatedPopover open={open && present} instantExit={!present} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} role="dialog" aria-label={`${label}${zh ? '設定' : ' settings'}`} data-preview-edit-ui data-preview-picker-popover data-placement={placement} style={panelStyle}
         className="w-64 max-w-[calc(100vw-24px)] rounded-2xl border border-gray-200 bg-white p-3 text-xs shadow-xl">
         <fieldset className="space-y-3">
           <legend className="mb-2 font-semibold text-slate-500">{label}</legend>
@@ -82,7 +85,7 @@ export default function TempoChangeControl({ value, language, label, onChange }:
           {error && <span role="alert" className="block text-rose-700">{zh ? '請輸入 20–400 的單一速度，最多兩位小數' : 'Enter one BPM from 20–400, up to two decimals'}</span>}
           <button type="button" className="w-full rounded-lg bg-indigo-600 py-2 font-semibold text-white" onClick={() => { if (close()) triggerRef.current?.focus(); }}>{zh ? '完成' : 'Done'}</button>
         </fieldset>
-      </div>, document.body
+      </AnimatedPopover>, document.body
     )}
   </div>;
 }

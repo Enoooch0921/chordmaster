@@ -408,3 +408,34 @@ it('finds a song by remembered lyrics in the add-songs view', async () => {
   expect(screen.queryByRole('button', { name: /^第一首歌曲.*已加入/ })).toBeNull();
   expect(currentSong()).toBe('entry-first');
 });
+
+it('changes bar height from another song’s menu, preserving the source and other copies', async () => {
+  fixture.setlists[0].songs.push({ ...structuredClone(fixture.setlists[0].songs[1]), id: 'entry-second-copy', order: 2 });
+  await mount();
+  const originalSongs = structuredClone(liveWorkspace().songs);
+  const untouchedCopy = structuredClone(liveWorkspace().setlists[0].songs.find(item => item.id === 'entry-second-copy'));
+  fireEvent.click(within(row('entry-second')).getByRole('button', { name: '歌曲操作：第二首歌曲' }));
+  expect(await screen.findByRole('menuitemradio', { name: '2 行' })).toHaveAttribute('aria-checked', 'true');
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '3 行' }));
+  await waitFor(() => expect(screen.getByRole('menuitemradio', { name: '3 行' })).toHaveAttribute('aria-checked', 'true'));
+  expect(currentSong()).toBe('entry-first');
+  expect(liveWorkspace().setlists[0].songs.find(item => item.id === 'entry-second')?.songData?.barRowCount).toBe(3);
+  expect(liveWorkspace().setlists[0].songs.find(item => item.id === 'entry-second-copy')).toEqual(untouchedCopy);
+  expect(liveWorkspace().songs).toEqual(originalSongs);
+  fireEvent.keyDown(screen.getByRole('menuitemradio', { name: '3 行' }), { key: 'Escape' });
+  fireEvent.click(within(row('entry-second')).getByRole('button', { name: /第二首歌曲.*4\/4/ }));
+  await waitFor(() => expect(document.querySelector('[data-setlist-preview-song-id="entry-second"] [data-print-page]')).toHaveAttribute('data-sheet-bar-row-count', '3'));
+  fireEvent.click(within(row('entry-second')).getByRole('button', { name: '歌曲操作：第二首歌曲' }));
+  fireEvent.click(await screen.findByRole('menuitemradio', { name: '2 行' }));
+  await waitFor(() => expect(document.querySelector('[data-setlist-preview-song-id="entry-second"] [data-print-page]')).toHaveAttribute('data-sheet-bar-row-count', '2'));
+  expect(liveWorkspace().songs).toEqual(originalSongs);
+});
+
+it('does not expose score height editing to setlist managers without score permission', async () => {
+  state.cloud = true; state.role = 'setlist_manager';
+  fixture.setlists[0].createdBy = 'controls-user';
+  await mount();
+  fireEvent.click(within(row('entry-first')).getByRole('button', { name: '歌曲操作：第一首歌曲' }));
+  expect(await screen.findByRole('menuitem', { name: '移出歌單' })).toBeEnabled();
+  expect(screen.queryByRole('menuitemradio')).toBeNull();
+});

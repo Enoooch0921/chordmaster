@@ -1,6 +1,7 @@
 /** Shared interaction timings, in seconds. No motion is applied to score content. */
 export const UI_EASE_OUT = [0.23, 1, 0.32, 1] as const;
 export const UI_DRAWER_EASE = [0.32, 0.72, 0, 1] as const;
+export const UI_CONTENT_FADE_DURATION = 0.125;
 export type UiMotionPreference = { reduced: boolean; instant: boolean };
 const duration = (preference: UiMotionPreference, normal: number) => preference.instant ? 0 : preference.reduced ? 0.125 : normal;
 const surfaceTransition = (preference: UiMotionPreference, normal: number, ease: typeof UI_EASE_OUT | typeof UI_DRAWER_EASE = UI_EASE_OUT) => ({

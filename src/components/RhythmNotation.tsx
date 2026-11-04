@@ -1,7 +1,7 @@
 import NotationSelectionPointer from './NotationSelectionPointer';
 import React from 'react';
 import { getHeadCenterUnit, getRhythmEventGlyph, parseRhythmNotation, rationalizeRhythmDisplay, rhythmUnitsEqual } from '../utils/rhythmUtils';
-import { buildCompactRhythmGeometry, getCompactRhythmCenterUnit } from '../lib/rhythmGeometry';
+import { buildCompactRhythmGeometry, getCompactRhythmCenterUnit, getTaperedRhythmTiePath } from '../lib/rhythmGeometry';
 import CompactRhythmRenderer, { type CompactRhythmGlyphAnchor } from './CompactRhythmRenderer';
 import BeatSlashGlyph from './BeatSlashGlyph';
 
@@ -204,10 +204,11 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
           height: minHeight,
           barUnits,
           beatUnits,
+          beamGroups,
           scale: geometryScale
         })
       : null
-  ), [barUnits, beatUnits, useGeometryRenderer, layoutWidth, minHeight, geometryScale, visibleEvents]);
+  ), [barUnits, beatUnits, beamGroups, useGeometryRenderer, layoutWidth, minHeight, geometryScale, visibleEvents]);
   const cursorUnits = React.useMemo(() => {
     if (visibleEvents.length === 0) {
       return [0];
@@ -395,7 +396,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     };
   }, [crossBarMeasurementVersion, crossBarNoteheadOvershootPx, glyphs.length, nextNotationForCrossBar, nextTimeSignatureForCrossBar, notation, renderMode, timeSignature]);
   const editorBeamGroups = React.useMemo(() => {
-    if (!useEditorStyleRenderer) return [];
+    if (!useEditorStyleRenderer || !beamGroups) return [];
 
     const groups: Array<{
       eventIndices: number[];
@@ -499,7 +500,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
     });
 
     return groups;
-  }, [beatUnits, useEditorStyleRenderer, visibleEvents]);
+  }, [beatUnits, beamGroups, useEditorStyleRenderer, visibleEvents]);
   const editorBeamedEventIndices = React.useMemo(
     () => new Set(editorBeamGroups.flatMap((group) => group.eventIndices)),
     [editorBeamGroups]
@@ -786,7 +787,7 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
                     compact ? 4.2 : 8.6,
                     Math.max(compact ? 2.3 : 4.8, span * (compact ? 0.34 : 0.24))
                   )
-            ) * Math.max(0.92, Math.min(1.18, tieFontScale));
+            ) * Math.max(0.92, Math.min(1.18, tieFontScale)) * (compact ? scale : 1);
             const crossBarVerticalShift = isCrossBarTie && renderMode === 'preview'
               ? (compact ? 0 : 1.25)
               : 0;
@@ -833,15 +834,26 @@ const RhythmNotation: React.FC<RhythmNotationProps> = ({
               : isOutgoingCrossBar
                 ? dipY
                 : endBaseY + curveDepth;
+            const path = compact
+              ? getTaperedRhythmTiePath(
+                { x: startX, y: startY }, { x: startX + controlOffset, y: controlY1 },
+                { x: endX - controlOffset, y: controlY2 }, { x: endX, y: endY },
+                tieStrokeWidth * scale, isIncomingCrossBar, isOutgoingCrossBar && !projectsToNextBar
+              )
+              : `M ${startX} ${startY} C ${startX + controlOffset} ${controlY1} ${endX - controlOffset} ${controlY2} ${endX} ${endY}`;
 
             return (
               <path
                 data-rhythm-tie
+                data-rhythm-tie-start-x={startX}
+                data-rhythm-tie-start-y={startY}
+                data-rhythm-tie-end-x={endX}
+                data-rhythm-tie-end-y={endY}
                 key={`tie-${tie.eventIndex}-${tieIndex}`}
-                d={`M ${startX} ${startY} C ${startX + controlOffset} ${controlY1} ${endX - controlOffset} ${controlY2} ${endX} ${endY}`}
-                fill="none"
-                stroke={stroke}
-                strokeWidth={tieStrokeWidth}
+                d={path}
+                fill={compact ? stroke : 'none'}
+                stroke={compact ? 'none' : stroke}
+                strokeWidth={compact ? undefined : tieStrokeWidth}
                 strokeLinecap="round"
                 vectorEffect="non-scaling-stroke"
               />
