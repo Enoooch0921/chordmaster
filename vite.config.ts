@@ -17,6 +17,9 @@ export default defineConfig(({mode}) => {
     base: isCapacitorBuild ? './' : isDevelopment ? '/' : '/chordmaster/',
     plugins: [react(), tailwindcss(), {
       name: 'offline-build-assets',
+      transformIndexHtml(html) {
+        return html.replaceAll('__CHORDMASTER_VERSION__', packageJson.version);
+      },
       writeBundle(options, bundle) {
         const assets = Object.keys(bundle).filter((file) => /\.(js|css|wav)$/.test(file)).sort();
         const version = createHash('sha256').update(JSON.stringify(assets)).digest('hex').slice(0, 12);

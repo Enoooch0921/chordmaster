@@ -103,3 +103,5 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.9; }
 }
+
+.app-loading__version{font-size:12px;line-height:18px;font-weight:500;color:var(--color-text-muted,#4b5563);font-variant-numeric:tabular-nums;margin-top:4px}

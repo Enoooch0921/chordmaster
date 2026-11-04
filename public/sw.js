@@ -70,20 +70,29 @@ const cacheAppShell = async () => {
 self.addEventListener('install', (event) => {
   // Keep the current worker and its complete asset cache while any page is
   // open. A waiting update activates naturally after the last page closes;
-  // it must never replace an on-stage session or remove its offline chunks.
+  // or after an explicit update request. Never reload on-stage sessions.
   event.waitUntil(cacheAppShell());
 });
 
+self.addEventListener('message', (event) => {
+  // Only a same-scope window may explicitly activate a fully installed update.
+  if (event.data?.type !== 'CHORDMASTER_ACTIVATE_UPDATE' || !event.source?.url
+    || !isCacheableSameOriginUrl(event.source.url)) return;
+  event.waitUntil(self.skipWaiting());
+});
+
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys()
-      .then((cacheNames) => Promise.all(
-        cacheNames
-          .filter((cacheName) => cacheName.startsWith('chordmaster-pwa-') && cacheName !== CACHE_NAME)
-          .map((cacheName) => caches.delete(cacheName))
-      ))
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const openPages = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // An explicit update must retain older tabs' lazy chunks, including offline
+    // performance sessions. Prune old builds on a later activation with no pages.
+    if (openPages.length === 0) {
+      const names = await caches.keys();
+      await Promise.all(names.filter(name => name.startsWith('chordmaster-pwa-') && name !== CACHE_NAME)
+        .map(name => caches.delete(name)));
+    }
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('fetch', (event) => {
@@ -101,7 +110,7 @@ self.addEventListener('fetch', (event) => {
         // This HTML belongs to the worker's fully installed asset set. Serve it
         // immediately even when a weak connection never rejects its fetch.
         // Registration still checks for updates; a complete new worker takes
-        // over once the old pages close, without mixing two releases' assets.
+        // over on request or when old pages close, without mixing release assets.
         if (cached) return cached;
         return fetch(request);
       })()

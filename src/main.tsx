@@ -1,6 +1,7 @@
 import { StrictMode, lazy, Suspense } from 'react';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import AppLoadingScreen from './components/AppLoadingScreen';
+import { appUpdates } from './lib/appUpdates';
 import { InvitationTransitionProvider } from './components/InvitationTransition';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
@@ -61,7 +62,8 @@ const registerServiceWorker = () => {
 
   window.addEventListener('load', () => {
     void navigator.serviceWorker
-      .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+      .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL, updateViaCache: 'none' })
+      .then(registration => appUpdates.watch(registration))
       .catch((error) => {
         console.warn('ChordMaster service worker registration failed', error);
       });

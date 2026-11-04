@@ -86,6 +86,17 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-04',
+        title: "Update without closing every tab",
+        bullets: [
+          "Get an update notice when a new version is ready, with Update now and Later actions.",
+          "Save current edits before reloading this tab; keep the page open if saving fails.",
+          "Keep other tabs running and avoid interrupting Performance Mode.",
+          "Show the current version on the startup screen."
+        ]
+      },
+      {
+        version: '0.12.9',
+        date: '2026-11-04',
         title: "Compact chart menus and insert-before actions",
         bullets: [
           "Shorter bar context menus keep paste options and ending marks in a second level.",
@@ -986,6 +997,17 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-04',
+        title: "一鍵更新與開屏版本號",
+        bullets: [
+          "新版準備完成後顯示「立即更新／稍後」，不用關閉所有分頁。",
+          "更新前先儲存目前修改；儲存失敗時保留原畫面。",
+          "僅重新載入目前分頁，其他分頁及演出模式不會被自動重載打斷。",
+          "開屏動畫顯示目前載入的版本號。"
+        ]
+      },
+      {
+        version: '0.12.9',
         date: '2026-11-04',
         title: "精簡右鍵選單與前插操作",
         bullets: [

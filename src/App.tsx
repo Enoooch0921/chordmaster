@@ -55,6 +55,7 @@ import MobileSidebarNavigation from './components/MobileSidebarNavigation';
 import SetlistContextMenu from './components/SetlistContextMenu';
 import RecoveryBoundary from './components/RecoveryBoundary';
 import AppLoadingScreen from './components/AppLoadingScreen';
+import AppUpdateNotice from './components/AppUpdateNotice';
 import { useInvitationTransition } from './components/InvitationTransition';
 import { invitationTarget } from './lib/invitationJourney';
 import TeamDraftRecovery from './components/TeamDraftRecovery';
@@ -1737,6 +1738,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       : false
   ));
   const [isPerformanceMode, setIsPerformanceMode] = useState(false);
+  const [isApplyingAppUpdate, setIsApplyingAppUpdate] = useState(false);
   const isPerformanceModeRef = useRef(isPerformanceMode);
   isPerformanceModeRef.current = isPerformanceMode;
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
@@ -8202,7 +8204,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [usingStartupCache, authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, language, toast]);
 
   useEffect(() => {
-    if (usingStartupCache || historyForwardBusy || pendingWorkspaceSwitch || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
+    if (isApplyingAppUpdate || usingStartupCache || historyForwardBusy || pendingWorkspaceSwitch || !isAutoSaveEnabled || !workspaceIsDirty || (isTeamWorkspace && (!teamDraft.ready || teamDraft.pending))) {
       return;
     }
 
@@ -8223,7 +8225,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         autoSaveTimeoutRef.current = null;
       }
     };
-  }, [usingStartupCache, historyForwardBusy, pendingWorkspaceSwitch, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
+  }, [isApplyingAppUpdate, usingStartupCache, historyForwardBusy, pendingWorkspaceSwitch, isAutoSaveEnabled, projects, setlists, songs, workspaceIsDirty, isTeamWorkspace, teamDraft.ready, teamDraft.pending]);
 
   // Latest-snapshot ref read by the exit flush below. Updated every render so
   // the (once-registered) listeners always see the current workspace.
@@ -12555,17 +12557,64 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     isRestoringWorkspace, isLoadingCloudWorkspace, isSwitchingLibrary, usingStartupCache, navigationMemoryReady,
     workspaceMode, selectedSetlistId, setlistPanelView, setlistProjectFilter, language]);
 
+  const appUpdateBlockedReason = isSwitchingLibrary || isLoadingCloudWorkspace || globalHistory.busy || historyForwardBusy || activeCloudMutationCount > 0 || pendingWorkspaceSwitch
+    ? (language === 'zh' ? '請等目前的操作完成後再更新。' : 'Wait for the current operation to finish.')
+    : isEditing || previewMetaEditTarget || teamDraft.pending
+      ? (language === 'zh' ? '請先完成目前的編輯或草稿處理，再更新。' : 'Finish the current editor or draft recovery before updating.')
+      : undefined;
+
+  const prepareForAppUpdate = async () => {
+    if (appUpdateBlockedReason) throw new Error(appUpdateBlockedReason);
+    // A dialog may own text that has not reached workspace state yet.
+    if (document.querySelector('dialog[open], [role="dialog"]:not([data-preview-bar-editor])')) {
+      throw new Error(language === 'zh' ? '請先完成或關閉目前的編輯視窗，再更新。' : 'Finish or close the open dialog before updating.');
+    }
+    const scope = historyScope;
+    const assertCurrent = () => {
+      if (historyLive.current.scope !== scope || libraryTransitionOwnerRef.current) {
+        throw new Error(language === 'zh' ? '曲庫已切換，請重新按更新。' : 'The library changed. Please try updating again.');
+      }
+    };
+    await waitForWorkspaceStateCommit();
+    assertCurrent();
+    const draft = previewEditSessionRef.current;
+    if (draft?.dirty) {
+      commitPreviewEditSession(draft);
+      await waitForWorkspaceStateCommit();
+    }
+    if (joinedHistoryWork.current.pending) await joinedHistoryWork.current.queue;
+    if (workspacePersistenceInFlightRef.current) await workspacePersistenceInFlightRef.current;
+    assertCurrent();
+    const latest = exitFlushRef.current;
+    if (latest.isDirty) {
+      await persistHistoryBaseline.current(latest.songs, latest.setlists, latest.projects);
+    }
+    assertCurrent();
+  };
+
+  useEffect(() => {
+    if (!isApplyingAppUpdate) return;
+    const stopEditingKeys = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener('keydown', stopEditingKeys, true);
+    return () => window.removeEventListener('keydown', stopEditingKeys, true);
+  }, [isApplyingAppUpdate]);
+
   return (
     <>
+    <AppUpdateNotice language={language} hidden={isRestoringWorkspace || isPerformanceMode || Boolean(drummerSession)}
+      blockedReason={appUpdateBlockedReason} prepare={prepareForAppUpdate} onUpdatingChange={setIsApplyingAppUpdate} />
     {isRestoringWorkspace && <AppLoadingScreen message={startupMessage}
       error={startupError}
       onRetry={() => { retryAuthentication?.(); setWorkspaceBootstrapAttempt(attempt => attempt + 1); }} retryLabel={language === 'zh' ? '重試' : 'Retry'} />}
     <div
       data-app-root
       ref={appViewportRef}
-      inert={isRestoringWorkspace || isSwitchingLibrary || globalHistory.busy || historyForwardBusy ? true : undefined}
+      inert={isApplyingAppUpdate || isRestoringWorkspace || isSwitchingLibrary || globalHistory.busy || historyForwardBusy ? true : undefined}
       aria-hidden={isRestoringWorkspace || undefined}
-      aria-busy={isRestoringWorkspace || isSwitchingLibrary || globalHistory.busy || historyForwardBusy}
+      aria-busy={isApplyingAppUpdate || isRestoringWorkspace || isSwitchingLibrary || globalHistory.busy || historyForwardBusy}
       className="fixed inset-x-0 top-0 flex h-[100dvh] min-h-0 min-w-0 overflow-hidden bg-[#F5F5F4] font-sans text-[#1C1917] selection:bg-indigo-100 selection:text-indigo-900 dark:bg-[color:var(--color-surface-muted)] dark:text-[color:var(--color-text)] dark:selection:bg-[color:var(--color-indigo-800)] dark:selection:text-[color:var(--color-indigo-100)]"
       style={{
         // Preserve preview measurement geometry behind the opaque startup screen.

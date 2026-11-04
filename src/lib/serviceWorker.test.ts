@@ -6,13 +6,38 @@ const setup = () => {
   const listeners: Record<string, (event: any) => void> = {};
   const cache = { put: vi.fn(), match: vi.fn() };
   const caches = { open: vi.fn(async () => cache), keys: vi.fn(async () => ['chordmaster-pwa-old', 'unrelated']), delete: vi.fn(async () => true), match: vi.fn() };
-  const self = { registration: { scope: 'https://example.test/chordmaster/' }, location: { href: 'https://example.test/chordmaster/sw.js', origin: 'https://example.test' }, skipWaiting: vi.fn(), clients: { claim: vi.fn() }, addEventListener: (type: string, callback: any) => { listeners[type] = callback; } };
+  const self = { registration: { scope: 'https://example.test/chordmaster/' }, location: { href: 'https://example.test/chordmaster/sw.js', origin: 'https://example.test' }, skipWaiting: vi.fn(), clients: { claim: vi.fn(), matchAll: vi.fn(async () => [] as Array<{ id: string }>) }, addEventListener: (type: string, callback: any) => { listeners[type] = callback; } };
   const response = { ok: true, clone() { return this; }, text: async () => '<script src="./assets/main.js"></script>' };
   const fetch = vi.fn(async (_url: string) => response);
   runInNewContext(source.replace('const BUILD_ASSETS = [];', "const BUILD_ASSETS = ['./assets/main.js'];"), { self, caches, fetch, URL, Set, Promise });
   return { listeners, cache, caches, self, fetch, response };
 };
 describe('safe offline app updates', () => {
+  it('only activates on an explicit update request from this app', async () => {
+    const { listeners, self } = setup();
+    const waitUntil = vi.fn();
+    listeners.message({ data: { type: 'other' }, source: { url: 'https://example.test/chordmaster/' }, waitUntil });
+    listeners.message({ data: { type: 'CHORDMASTER_ACTIVATE_UPDATE' }, source: { url: 'https://other.test/' }, waitUntil });
+    expect(self.skipWaiting).not.toHaveBeenCalled();
+    listeners.message({ data: { type: 'CHORDMASTER_ACTIVATE_UPDATE' }, source: { url: 'https://example.test/chordmaster/' }, waitUntil });
+    expect(self.skipWaiting).toHaveBeenCalledOnce();
+  });
+  it('retains old caches while another page can still need its lazy chunks', async () => {
+    const { listeners, self, caches } = setup();
+    self.clients.matchAll.mockResolvedValue([{ id: 'performance-page' }]);
+    let pending!: Promise<void>;
+    listeners.activate({ waitUntil: (promise: Promise<void>) => { pending = promise; } });
+    await pending;
+    expect(caches.delete).not.toHaveBeenCalled();
+    expect(self.clients.claim).toHaveBeenCalledOnce();
+  });
+  it('prunes old app caches when activation has no open pages', async () => {
+    const { listeners, caches } = setup();
+    let pending!: Promise<void>;
+    listeners.activate({ waitUntil: (promise: Promise<void>) => { pending = promise; } });
+    await pending;
+    expect(caches.delete).toHaveBeenCalledExactlyOnceWith('chordmaster-pwa-old');
+  });
   it('warms bundled assets without replacing the worker or deleting an open session’s cache', async () => {
     const { listeners, self, cache, caches } = setup();
     let pending!: Promise<void>;

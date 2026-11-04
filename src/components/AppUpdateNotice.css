@@ -1,0 +1,16 @@
+.app-update-notice{position:fixed;z-index:8000;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));width:352px;max-width:calc(100vw - 24px);padding:16px;background:var(--color-surface);color:var(--color-text);border-radius:12px;box-shadow:0 12px 40px #0f172a30;font-size:14px;line-height:1.5;max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior:contain}
+.app-update-title{font-weight:650;margin:0}
+.app-update-description{color:var(--color-text-muted);margin:6px 0 0;overflow-wrap:anywhere}
+.app-update-error{color:var(--color-danger);margin:12px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.app-update-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.app-update-notice button{min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer}
+.app-update-notice button:hover{background:var(--color-surface-sunken)}
+.app-update-notice button:focus-visible{outline:2px solid var(--color-indigo-500);outline-offset:2px}
+.app-update-notice button:disabled{opacity:.5;cursor:default}
+.app-update-notice .app-update-primary{background:var(--color-indigo-700);color:#fff}
+.app-update-notice .app-update-primary:hover{background:var(--color-indigo-800)}
+.app-update-notice--collapsed{width:auto;padding:0}
+.app-update-spinner{animation:app-update-spin 1s linear infinite}
+@keyframes app-update-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.app-update-spinner{animation:none}}
+@media print{.app-update-notice{display:none}}
