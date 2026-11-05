@@ -14,17 +14,23 @@ beforeEach(() => {
   });
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
-function setup(zoom = 1, shapeEnabled = true, tool: NoteTool = 'pen') {
+function setup(zoom = 1, shapeEnabled = true, tool: NoteTool = 'pen', barAnchor = false) {
   const page = document.createElement('div');
   Object.defineProperties(page, { offsetWidth: { value: 800 }, offsetHeight: { value: 1000 } });
   page.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 800 * zoom, bottom: 1000 * zoom, width: 800 * zoom, height: 1000 * zoom, toJSON() {} });
+  if (barAnchor) {
+    const bar = document.createElement('div');
+    bar.dataset.previewClipboardSection = 'verse'; bar.dataset.previewClipboardBar = 'bar-one';
+    bar.getBoundingClientRect = () => ({ x: 100, y: 200, left: 100, top: 200, right: 300, bottom: 260, width: 200, height: 60, toJSON() {} });
+    page.append(bar);
+  }
   const onEdit = vi.fn(), onShape = vi.fn(), navigate = vi.fn();
   const view = render(<div onTouchStart={navigate}><PersonalNotesPage page={page} pageIndex={0} strokes={[]} drawing visible
     performance tool={tool} color="#2563eb" width={2.5} shapeEnabled={shapeEnabled} onShape={onShape} onEdit={onEdit} /></div>);
   const layer = view.getByLabelText('Personal handwritten notes');
   Object.defineProperty(layer, 'setPointerCapture', { value: vi.fn() });
   const point = (x: number, y: number) => ({ pointerId: 1, pointerType: 'pen', clientX: x, clientY: y, button: 0 });
-  return { layer, onEdit, onShape, navigate, point };
+  return { view, page, layer, onEdit, onShape, navigate, point };
 }
 it.each(['pen', 'highlighter'] as const)('paints %s samples immediately without waiting for a frame or changing geometry on lift', tool => {
   const { layer, onEdit, point } = setup(1, false, tool);
@@ -162,4 +168,24 @@ it('keeps ordinary handwriting freehand and never draws with a finger', () => {
   expect(onEdit.mock.calls[0][0].add[0].shape).toBeUndefined();
   expect(onEdit.mock.calls[0][0].add[0].points.length).toBeGreaterThan(2);
   expect(onShape).not.toHaveBeenCalledWith('line');
+});
+
+it.each(['mouse', 'pen'])('keeps upward %s ink visible after a JSON storage round trip reorders anchor keys', pointerType => {
+  const { view, page, layer, onEdit, onShape, point } = setup(1, false, 'pen', true);
+  const sample = (x: number, y: number) => ({ ...point(x, y), pointerType });
+  fireEvent.pointerDown(layer, sample(150, 240));
+  fireEvent.pointerMove(layer, sample(155, 205));
+  fireEvent.pointerMove(layer, sample(160, 170));
+  fireEvent.pointerUp(layer, sample(160, 170));
+  const saved = onEdit.mock.calls[0][0].add[0];
+  expect(saved.anchor).toEqual({kind: 'bar', sectionId: 'verse', barId: 'bar-one'});
+  const rerender = (stroke: typeof saved) => view.rerender(<div><PersonalNotesPage page={page} pageIndex={0} strokes={[stroke]} drawing visible
+    performance={false} tool="pen" color="#2563eb" width={2.5} shapeEnabled={false} onShape={onShape} onEdit={onEdit}/></div>);
+  rerender(saved);
+  const before = view.container.querySelector('[data-personal-note-stroke]')?.getAttribute('d');
+  expect(before).toBeTruthy();
+  // JSON objects have no semantic key order; a backend may return this order.
+  const restored = JSON.parse(JSON.stringify({...saved, anchor: {kind:'bar', barId:'bar-one', sectionId:'verse'}}));
+  rerender(restored);
+  expect(view.container.querySelector('[data-personal-note-stroke]')?.getAttribute('d')).toBe(before);
 });

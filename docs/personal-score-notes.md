@@ -81,3 +81,12 @@ IndexedDB 資料庫 `chordmaster-personal-notes` 的 `operations` store，以 `[
 此功能納入 [0.12.12 發布](release-0.12.12.md)。該版本整版回歸為 208 個測試檔、2342 個測試通過，型別檢查、正式與 iPad 建置皆通過；實體裝置限制仍如上述。
 
 本機 LAN 試用位址已隨電腦 IP 改為 `http://192.168.0.168:3000/?test=8`，建置位於 `tmp/personal-notes-1105/lan-build`。此試用使用模擬登入與歌曲 repository、停用 NAS，筆記僅存本機，不需要登入，也不寫入正式譜面。試用帳號及歌曲識別碼不變；不同 IP 屬於不同瀏覽器來源，本機試寫資料不會自動跨來源搬移。
+
+
+## 2026-11-05：同步後筆跡消失修正（0.12.14）
+
+原本以 `JSON.stringify(anchor)` 比對筆跡與小節錨點，誤把物件欄位順序當成識別的一部分。後端 JSONB 不保留欄位順序（[PostgreSQL 文件](https://www.postgresql.org/docs/current/datatype-json.html)）；同步拉回同一筆操作時，原本的 `{kind, sectionId, barId}` 可能變成 `{kind, barId, sectionId}`，導致已保存的筆記找不到小節而不顯示。頁面錨點也必須與欄位排列無關。
+
+現在以固定順序的識別 tuple 比對，僅使用錨點類型、段落 ID、小節 ID 或頁碼。沒有改寫任何既有筆記、錨點或共享譜面；電腦滑鼠與 iPad Pencil 共用此修正。兩個回歸案例先在舊程式重現消失，再確認修正後向上筆畫在欄位重排後保留相同 SVG 幾何。4 個相關測試檔共 28 項及型別檢查通過。
+
+Chrome 與 WebKit 的隔離 App fixture 各保留 5 筆實際滑鼠輸入。將本機測試筆記的 bar/page 錨點欄位重排後重新載入，筆跡數及顯示保持一致。這輪不存取正式筆記後端，也不代表已完成實體 iPad／Pencil 測試。

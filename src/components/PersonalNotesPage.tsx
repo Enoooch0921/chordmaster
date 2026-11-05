@@ -10,7 +10,11 @@ interface Props {
   onEdit: (edit: { add: NoteStroke[]; remove: string[] }) => void;
 }
 type Frame = NoteFrame & { anchor: NoteAnchor };
-const anchorKey = (anchor: NoteAnchor) => JSON.stringify(anchor);
+// Storage (including JSONB) may reorder object keys. Match semantic identity so
+// synced and restored ink still finds the same bar/page as a freshly drawn mark.
+const anchorKey = (anchor: NoteAnchor) => JSON.stringify(anchor.kind === 'bar'
+  ? ['bar', anchor.sectionId, anchor.barId]
+  : ['page', anchor.page]);
 export default function PersonalNotesPage(props: Props) {
   const { page, pageIndex, strokes, drawing, visible, performance, tool, color, width, onEdit } = props;
   const latest = useRef(props); latest.current = props;
