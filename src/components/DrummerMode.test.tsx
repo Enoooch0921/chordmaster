@@ -9,7 +9,7 @@ const audio = vi.hoisted(() => ({ start: vi.fn(), prepare: vi.fn(async () => {})
 const fullscreen = vi.hoisted(() => ({ requestFullscreen: vi.fn(), exitFullscreen: vi.fn(), canRequestFullscreen: false, isFullscreen: false }));
 vi.mock('../hooks/useMetronome', () => ({ useMetronome: () => audio }));
 vi.mock('../hooks/usePerformanceFullscreen', () => ({ usePerformanceFullscreen: () => fullscreen }));
-vi.mock('./ChordSheet', () => ({ default: ({ song }: { song: Song }) => <div data-testid="chart">{song.title}{song.title === "雙頁" && <><div data-print-page>第一頁內容</div><div data-print-page>第二頁內容</div></>}</div> }));
+vi.mock('./ChordSheet', () => ({ default: ({ song, setlistSongNumber }: { song: Song; setlistSongNumber?: number }) => <div data-testid="chart" data-song-number={setlistSongNumber}>{song.title}{song.title === "雙頁" && <><div data-print-page>第一頁內容</div><div data-print-page>第二頁內容</div></>}</div> }));
 const song = (title: string, tempo?: number, timeSignature = '4/4'): Song => ({ title, tempo, timeSignature, originalKey: 'C', currentKey: 'C', sections: [] });
 const session: DrummerSession = { name: '測試歌單', initialId: 'a', entries: [{ id: 'a', song: song('第一首', 72) }, { id: 'b', song: song('第二首', 110) }, { id: 'c', song: song('未定速度') }, { id: 'd', song: song('第一首', 72) }] };
 const tempo = () => screen.getByRole('textbox', { name: '節拍器速度 BPM' });
@@ -21,6 +21,17 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe('drummer session controls', () => {
+  it('numbers list, active title and chart by entry position even for repeated songs', () => {
+    const mounted = mount({ ...session, initialId: 'd' });
+    expect(screen.getByRole('heading', { name: '4. 第一首' })).toBeInTheDocument();
+    expect(songs().getByRole('button', { name: /^4 第一首/ })).toHaveTextContent('4. 第一首');
+    expect(screen.getByTestId('chart')).toHaveAttribute('data-song-number', '4');
+    mounted.rerender(<DrummerMode {...session} entries={[session.entries[3], ...session.entries.slice(0, 3)]} language="zh" onClose={vi.fn()}/>);
+    expect(screen.getByRole('heading', { name: '1. 第一首' })).toBeInTheDocument();
+    expect(screen.getByTestId('chart')).toHaveAttribute('data-song-number', '1');
+    expect(session.entries[3].song.title).toBe('第一首');
+  });
+
   const touch = (element: HTMLElement, kind: 'pointerDown' | 'pointerUp' | 'pointerCancel', x: number, y: number) => {
     const event = createEvent[kind](element, { bubbles: true, cancelable: true });
     Object.defineProperties(event, { pointerType: { value: 'touch' }, pointerId: { value: 4 }, isPrimary: { value: true }, clientX: { value: x }, clientY: { value: y } });
@@ -247,8 +258,11 @@ describe('drummer session controls', () => {
     audio.playing = true; audio.start.mockResolvedValue(false);
     mount();
     fireEvent.change(screen.getByLabelText('音色'), { target: { value: 'drive' } });
-    await waitFor(() => expect(screen.getByLabelText('音色')).toHaveValue('ableton-classic'));
-    expect(JSON.parse(localStorage.getItem('chordmaster.drummer-preferences.v1')!).sound).toBe('ableton-classic');
+    await waitFor(() => {
+      expect(screen.getByLabelText('音色')).toHaveValue('ableton-classic');
+      // The selection commits before the persistence effect runs.
+      expect(JSON.parse(localStorage.getItem('chordmaster.drummer-preferences.v1')!).sound).toBe('ableton-classic');
+    });
   });
   it('changes sound silently while stopped and marks selection without status words', () => {
     mount();

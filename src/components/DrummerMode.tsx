@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Cable, ChevronDown, ChevronLeft, Maximize, Minimize, Minus, Plus, Play, RotateCcw, Settings2, SkipBack, SkipForward, Square, VolumeX, X } from 'lucide-react';
 import type { AppLanguage, Song } from '../types';
 import ChordSheet from './ChordSheet';
+import SongTitle from './SongTitle';
 import RecoveryBoundary from './RecoveryBoundary';
 import { useMetronome } from '../hooks/useMetronome';
 import { usePerformanceFullscreen } from '../hooks/usePerformanceFullscreen';
@@ -81,7 +82,7 @@ const SubdivisionSymbol = React.memo(function SubdivisionSymbol({ division, deno
 type DrummerScoreControls = { turnPage: (delta: number) => void };
 
 // Beat updates must not re-render or re-measure a multi-page chart.
-const DrummerScore = React.memo(function DrummerScore({ song, language, live, controlsRef }: { song: Song; language: AppLanguage; live: boolean; controlsRef: React.Ref<DrummerScoreControls> }) {
+const DrummerScore = React.memo(function DrummerScore({ song, songNumber, language, live, controlsRef }: { song: Song; songNumber?: number; language: AppLanguage; live: boolean; controlsRef: React.Ref<DrummerScoreControls> }) {
   const viewport = useRef<HTMLDivElement>(null), paper = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(794), [height, setHeight] = useState(1123), [zoom, setZoom] = useState(1);
   const [viewportHeight, setViewportHeight] = useState(1123);
@@ -156,7 +157,7 @@ const DrummerScore = React.memo(function DrummerScore({ song, language, live, co
 
       <div style={{ width: 794 * scale, height: height * scale }} className="drummer-scaled-paper">
         <div ref={paper} style={{ width: 794, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
-          <RecoveryBoundary label="樂譜"><ChordSheet song={song} currentKey={song.currentKey} language={language}/></RecoveryBoundary>
+          <RecoveryBoundary label="樂譜"><ChordSheet song={song} setlistSongNumber={songNumber} currentKey={song.currentKey} language={language}/></RecoveryBoundary>
         </div>
       </div>
     </div>
@@ -523,7 +524,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
       <section className="drummer-controls" aria-label={t('節拍器控制', 'Metronome controls')}>
         <div className="drummer-console-layout">
         <div className="drummer-current">
-          <div className="drummer-song-heading"><h2>{active.song.title || t('未命名歌曲', 'Untitled song')}</h2></div>
+          <div className="drummer-song-heading"><h2><SongTitle title={active.song.title || t('未命名歌曲', 'Untitled song')} number={activeIndex >= 0 ? activeIndex + 1 : undefined}/></h2></div>
           <div className="drummer-tempo-meta">
             <div ref={subdivisionPicker} className="drummer-subdivision-picker">
               <button ref={subdivisionTrigger} className="drummer-subdivision-trigger" aria-label={t(`本曲節拍細分：${divisionLabel(subdivision)}`, `Song subdivision: ${divisionLabel(subdivision)}`)} aria-haspopup="menu" aria-expanded={subdivisionOpen} aria-controls={subdivisionOpen ? 'drummer-subdivision-menu' : undefined}
@@ -603,9 +604,8 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
               if (event.detail > 0 && handled?.id === entry.id && performance.now() - handled.time < 1000) return;
               activateSong(entry.id);
             }}>
-            <span className="drummer-song-order" aria-hidden="true">{index + 1}.</span>
             <span className="drummer-song-tempo">{tempos[entry.id] ?? (isPlayableTempo(entry.song.tempo) ? entry.song.tempo : '—')}<small>BPM</small></span>
-            <span className="drummer-song-name"><small>{meters[entry.id] ?? (entry.song.timeSignatureUnspecified ? t('拍號待設定', 'Meter needed') : entry.song.timeSignature)}</small><span className="drummer-song-title" title={entry.song.title}>{entry.song.title || t('未命名歌曲', 'Untitled song')}</span></span>
+            <span className="drummer-song-name"><small>{meters[entry.id] ?? (entry.song.timeSignatureUnspecified ? t('拍號待設定', 'Meter needed') : entry.song.timeSignature)}</small><span className="drummer-song-title" title={entry.song.title}><span className="drummer-song-order" aria-hidden="true">{index + 1}. </span><SongTitle title={entry.song.title || t('未命名歌曲', 'Untitled song')}/></span></span>
           </button>
           <button className="drummer-song-subdivision" aria-label={`${entry.song.title} · ${t('節拍細分', 'Subdivision')}`} aria-haspopup="menu" aria-expanded={rowPicker?.id === entry.id} onClick={event => {
             const bounds = event.currentTarget.getBoundingClientRect(); rowTrigger.current = event.currentTarget;
@@ -621,7 +621,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     </div>
     </div>
       <section className="drummer-score" inert={midiOpen || soundOpen} aria-hidden={midiOpen || soundOpen || undefined} aria-label={t('鼓手樂譜', 'Drummer chart')}>
-        {chartVisible && <DrummerScore key={active.id} song={active.song} language={language} live={stage} controlsRef={scoreControls}/>}
+        {chartVisible && <DrummerScore key={active.id} song={active.song} songNumber={activeIndex >= 0 ? activeIndex + 1 : undefined} language={language} live={stage} controlsRef={scoreControls}/>}
       </section>
     {rowPicker && <div ref={rowMenu} className="drummer-subdivisions drummer-row-subdivisions" role="menu" aria-label={t('選擇歌曲節拍細分', 'Choose song subdivision')} style={{left:rowPicker.left,top:rowPicker.top}} onKeyDown={event => {
       const options = Array.from(rowMenu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);

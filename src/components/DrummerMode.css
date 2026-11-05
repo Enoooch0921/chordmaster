@@ -270,7 +270,7 @@
 }
 
 .drummer-song-row[aria-current="true"] .drummer-song-tempo, .drummer-song-row[aria-current="true"] small { color: inherit; }
-.drummer-song-order { display: none; }
+.drummer-song-order { display: inline; font-variant-numeric: tabular-nums; }
 
 .drummer-settings-toggle { width: 100%; text-align: left; padding: 0 !important; }
 .drummer-midi-backdrop[hidden] { display: none; }

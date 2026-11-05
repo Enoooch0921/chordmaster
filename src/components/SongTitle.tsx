@@ -7,8 +7,8 @@ export default function SongTitle({ title, number, bookBrackets = false, stackSu
   const parts = title.split(/(\([^()]*\)|（[^（）]*）|\[[^\[\]]*\]|【[^【】]*】)/g);
   const prefix = number !== undefined && number > 0 ? `${number}. ` : '';
   if (stackSubtitle && parts.length > 1 && parts.slice(2).every((part, index) => index % 2 === 1 || !part.trim())) {
-    return <>{prefix}{bookBrackets && '《'}{parts[0].trimEnd()}{bookBrackets && '》'}<br/>
-      <span className="song-title-subtitle">{parts.filter((_, index) => index % 2 === 1).join(' ')}</span></>;
+    return <><span className="song-title-main">{prefix}{bookBrackets && '《'}{parts[0].trimEnd()}{bookBrackets && '》'}</span>{' '}
+      <span className="song-title-subtitle song-title-wrap-subtitle">{parts.filter((_, index) => index % 2 === 1).join(' ')}</span></>;
   }
   return <>{prefix}{bookBrackets && '《'}{parts.map((part, index) =>
     index % 2 === 1

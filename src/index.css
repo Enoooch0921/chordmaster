@@ -647,3 +647,4 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 
 /* Keep parenthetical song subtitles secondary without changing the title row. */
 .song-title-subtitle { font-size: 0.72em; font-weight: 600; }
+.song-title-main, .song-title-wrap-subtitle { display:inline-block; max-width:100%; }

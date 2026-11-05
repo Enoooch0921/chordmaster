@@ -33,6 +33,30 @@ describe('song map', () => {
     expect(getSongMap({...song,sections:[song.sections[1], {...song.sections[1], id:'b2'}]})).toEqual([{label:'Bridge', repeats:2}]);
   });
 
+  it('uses a readable section code while preserving performance cues and numbered variants', () => {
+    const labels = ['1st Chorus Drop', '正常Chorus', 'Chorus 2 Drop', 'Pre-Chorus Down', '回主歌Inter', 'Solo cue'];
+    expect(labels.map(label => songMapLabel(label).code)).toEqual(['C', 'C', 'C2', 'Pc', 'It', 'Solo cue']);
+    expect(labels.map(label => songMapLabel(label).name)).toEqual(labels);
+    expect(normalizeSongMap(labels.slice(0, 2).map(label => ({ label, repeats: 1 })))).toHaveLength(2);
+  });
+
+  it('splits a shared intro/outro and places the inferred outro at the end without changing score sections', () => {
+    const sections = [
+      { id: 'i', title: 'Intro 2/ Outro', bars: [{ chords: ['C'] }] },
+      ...song.sections,
+    ];
+    const before = structuredClone(sections);
+    expect(getSongMap({ sections })).toEqual([
+      { label: 'Intro 2', repeats: 1 }, { label: 'Verse 1', repeats: 1 },
+      { label: 'Bridge', repeats: 1 }, { label: 'Outro', repeats: 1 },
+    ]);
+    expect(sections).toEqual(before);
+    expect(normalizeSongMap([{ label: 'Intro 2／Outro', repeats: 2 }, { label: 'C', repeats: 1 }]))
+      .toEqual([{ label: 'Intro 2', repeats: 2 }, { label: 'Chorus', repeats: 1 }, { label: 'Outro', repeats: 2 }]);
+    const explicit = [{ label: 'Outro', repeats: 1 }, { label: 'Chorus', repeats: 1 }];
+    expect(getSongMap({ sections, songMap: explicit })).toEqual(explicit);
+  });
+
   it('combines adjacent unnumbered steps, sums repeats and preserves numbered or separated bridges', () => {
     expect(normalizeSongMap([
       {label:'B', repeats:2}, {label:'Bridge', repeats:3},

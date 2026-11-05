@@ -68,13 +68,13 @@ describe('continuous lyrics book', () => {
     expect(onReadingChange).toHaveBeenCalledWith(false);
   });
 
-  it('keeps whole sections and labels the continuing song at the top of the next column', () => {
+  it('keeps whole sections without repeating the song title above a continuing column', () => {
     const longSong = { ...song, lyricsDoc: { chinese: `[Verse]\n${Array(18).fill('主歌一行').join('\n')}\n\n[Chorus]\n${Array(10).fill('副歌一行').join('\n')}` } };
     const { container } = render(<LyricsBook title="" entries={[{ id: 'long', song: longSong }]} language="zh" settings={DEFAULT_LYRICS_BOOK_SETTINGS} exportMode />);
     const page = container.querySelector('[data-print-page]')!;
     expect(container.querySelectorAll('[data-print-page]')).toHaveLength(1);
     expect(page.querySelectorAll('[data-book-block]')).toHaveLength(2);
-    expect(page.querySelector('[data-book-continuation]')).toHaveTextContent('《第一首》（續）');
+    expect(page.querySelector('[data-book-continuation]')).toBeNull();
     expect(page).not.toHaveTextContent('(cont.)');
     expect(page.querySelectorAll('[data-book-song-title]')).toHaveLength(1);
   });
