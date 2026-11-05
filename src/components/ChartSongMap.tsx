@@ -1,4 +1,4 @@
-import { type CSSProperties, useState } from 'react';
+import { type CSSProperties, useLayoutEffect, useRef, useState } from 'react';
 import { Pencil, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import type { AppLanguage, SongMapStep } from '../types';
 import SongMapToken from './SongMapToken';
@@ -10,6 +10,36 @@ export default function ChartSongMap({ steps, editor, language, title, inline, f
   onInfo?: (element: HTMLElement) => void; infoAnchor?: string; visible?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
+  const stepsRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const container = stepsRef.current;
+    if (!container) return;
+    let disposed = false, frame = 0;
+    const fitLabels = () => {
+      // Read natural, untransformed widths together before applying the fits.
+      // This also handles custom labels and Safari's fractional font metrics.
+      const fits = Array.from(container.querySelectorAll<HTMLElement>('.chart-map-token > span')).map(label => ({
+        label, scale: Math.min(1, Math.max(0, label.parentElement!.clientWidth - 2) / Math.max(1, label.scrollWidth)),
+      }));
+      fits.forEach(({ label, scale }) => label.style.setProperty('--map-label-scale', String(scale)));
+    };
+    const scheduleFit = () => {
+      if (disposed) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fitLabels);
+    };
+    fitLabels();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleFit) : null;
+    observer?.observe(container);
+    void document.fonts?.ready.then(scheduleFit);
+    document.fonts?.addEventListener('loadingdone', scheduleFit);
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      document.fonts?.removeEventListener('loadingdone', scheduleFit);
+    };
+  }, [steps, visible]);
   const zh = language === 'zh';
   if ((!visible || !steps.length) && !editor && !onInfo) return null;
   const dense = steps.length > 20;
@@ -18,7 +48,7 @@ export default function ChartSongMap({ steps, editor, language, title, inline, f
     data-heading-map={firstPage || undefined}
     style={{ '--map-columns': Math.max(1, columns) } as CSSProperties}
     data-chart-song-map={visible || undefined} aria-label={zh ? '曲序' : 'Song map'}>
-    {visible && <div className="chart-map-steps">{steps.map((step, index) => <SongMapToken key={index} step={step} zh={zh}/>)}</div>}
+    {visible && <div ref={stepsRef} className="chart-map-steps">{steps.map((step, index) => <SongMapToken key={index} step={step} zh={zh}/>)}</div>}
     {editor && onInfo ? (
       <label className="chart-map-settings" data-preview-only-control data-preview-edit-ui onClick={e => e.stopPropagation()}>
         <SlidersHorizontal size={13} aria-hidden="true"/>{zh ? '歌曲設定' : 'Song settings'}<ChevronDown size={11} aria-hidden="true"/>

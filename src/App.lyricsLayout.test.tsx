@@ -72,7 +72,7 @@ it('exports the selected layout through the real PDF action, including from read
     fireEvent.click(screen.getAllByRole('button', { name: '更多' })[0]);
     fireEvent.click(await screen.findByRole('button', { name: '匯出歌單 PDF' }));
     await waitFor(() => expect(exports).toHaveBeenCalledTimes(layout === 'readable' ? 1 : 2));
-    expect(await exports.mock.results.at(-1)!.value).toEqual({ layout, titles: ['《歌曲 one》', '《歌曲 two》'], controls: 0 });
+    expect(await exports.mock.results.at(-1)!.value).toEqual({ layout, titles: ['1. 《歌曲 one》', '2. 《歌曲 two》'], controls: 0 });
     await waitFor(() => expect(document.querySelector('[data-pdf-capture-root]')).toBeNull());
   }
 });

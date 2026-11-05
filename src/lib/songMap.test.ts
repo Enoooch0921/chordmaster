@@ -20,11 +20,29 @@ describe('song map', () => {
       .toEqual([{ label: 'Bridge', repeats: 4 }, { label: 'Chorus 2', repeats: 1 }]);
   });
 
-  it('infers repeated references from a legacy setlist and keeps different sections with the same name separate', () => {
+  it('abbreviates combined section numbers without losing which verses or bridges are included', () => {
+    expect(['Verse 1／2', 'Verse 3／4', 'Bridge 1 & 2', 'Bridge3&4', 'Pc2'].map(label => songMapLabel(label).code))
+      .toEqual(['V1/2', 'V3/4', 'B1&2', 'B3&4', 'Pc2']);
+    expect(songMapLabel('Intro / Outro').code).toBe('Intro / Outro');
+  });
+
+  it('infers repeated references and combines adjacent unnumbered sections', () => {
     expect(getSongMap(applySetlistSongOverrides(song, meeting, entry))).toEqual([
       {label:'Verse 1', repeats:1}, {label:'Bridge', repeats:2}
     ]);
-    expect(getSongMap({...song,sections:[song.sections[1], {...song.sections[1], id:'b2'}]})).toHaveLength(2);
+    expect(getSongMap({...song,sections:[song.sections[1], {...song.sections[1], id:'b2'}]})).toEqual([{label:'Bridge', repeats:2}]);
+  });
+
+  it('combines adjacent unnumbered steps, sums repeats and preserves numbered or separated bridges', () => {
+    expect(normalizeSongMap([
+      {label:'B', repeats:2}, {label:'Bridge', repeats:3},
+      {label:'B1', repeats:1}, {label:'B2', repeats:1}, {label:'B2', repeats:1},
+      {label:'B', repeats:1}, {label:'Chorus', repeats:1}, {label:'B', repeats:1},
+    ])).toEqual([
+      {label:'Bridge', repeats:5}, {label:'Bridge 1', repeats:1}, {label:'Bridge 2', repeats:1}, {label:'Bridge 2', repeats:1},
+      {label:'Bridge', repeats:1}, {label:'Chorus', repeats:1}, {label:'Bridge', repeats:1},
+    ]);
+    expect(song.sections).toHaveLength(2);
   });
 
   it('inherits the current library default, isolates a meeting change across reload/sync, and restores inheritance', () => {

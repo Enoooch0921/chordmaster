@@ -37,7 +37,7 @@ const selection = () => [...document.querySelectorAll<HTMLElement>('[data-previe
 async function start(mode = 'songs') {
   localStorage.setItem('chordmaster.workspace-mode.v1', mode);
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
-  await screen.findAllByText('手勢測試');
+  await screen.findAllByRole('heading', { name: /^(?:1\. )?手勢測試$/ });
   await waitFor(() => expect(bar(0)).not.toBeNull());
 }
 

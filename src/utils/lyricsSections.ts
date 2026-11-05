@@ -33,3 +33,21 @@ export function readLyricsHeading(line: string): { marker: string; rest: string 
 export const DEFAULT_LYRICS_FONT_SIZE = 14 * 4 / 3; // 14 pt on an A4 export
 export const DEFAULT_LYRICS_LINE_HEIGHT = 22 / 14; // 22 pt baseline spacing
 export const LYRICS_SECTION_HEADING_HEIGHT = 22; // 18 px heading + 4 px gap
+
+// Presentation order only; chart sections, the song map and stored blocks keep
+// their original identity/order. Unlabelled/custom sections keep their slots.
+const READING_ORDER = ['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Refrain', 'Bridge', 'Interlude', 'Tag', 'Outro', 'Ending'];
+function readingKey(marker: string): [number, number] | null {
+  const match = lyricsSectionLabel(marker).match(/^(.*?)(?:\s+(\d+))?$/);
+  const rank = READING_ORDER.indexOf(match?.[1] ?? '');
+  return rank < 0 ? null : [rank, Number(match?.[2] ?? 0)];
+}
+export function compareLyricsSections(a: { marker: string }, b: { marker: string }): number {
+  const left = readingKey(a.marker), right = readingKey(b.marker);
+  return left && right ? left[0] - right[0] || left[1] - right[1] : left ? -1 : right ? 1 : 0;
+}
+export function sortLyricsSections<T extends { marker: string }>(blocks: readonly T[]): T[] {
+  const sorted = blocks.filter(block => readingKey(block.marker)).sort(compareLyricsSections);
+  let index = 0;
+  return blocks.map(block => readingKey(block.marker) ? sorted[index++] : block);
+}

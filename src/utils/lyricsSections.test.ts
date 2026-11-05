@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lyricsSectionLabel } from './lyricsSections';
+import { lyricsSectionLabel, sortLyricsSections } from './lyricsSections';
 import { parseLyricsBody } from './lyricsFormat';
 import { importLyrics, paginateLyrics } from './lyricsDocument';
 
@@ -30,5 +30,21 @@ describe('English lyrics section headings', () => {
     const pages = paginateLyrics([{ id: 'a', heights: [60] }, { id: 'b', heights: [30], headingHeight: 26 }], 130, 1);
     expect(pages).toHaveLength(2);
     expect(pages[1].columns[0][0].blockId).toBe('b');
+  });
+});
+
+
+describe('lyrics reading order', () => {
+  it('groups numbered sections naturally without mutating paired blocks or source order', () => {
+    const labels = ['Verse 1', 'Chorus', 'Verse 10', 'Tag', 'Verse 2', 'Bridge', 'Pre chorus', 'Verse 3'];
+    const source = labels.map((marker, id) => ({ marker, id, chinese: String(id), english: `pair ${id}` }));
+    const sorted = sortLyricsSections(source);
+    expect(sorted.map(block => block.marker)).toEqual(['Verse 1', 'Verse 2', 'Verse 3', 'Verse 10', 'Pre chorus', 'Chorus', 'Bridge', 'Tag']);
+    expect(source.map(block => block.marker)).toEqual(labels);
+    sorted.forEach(block => expect(block).toBe(source[block.id]));
+  });
+  it('recognizes legacy markers, keeps custom positions and preserves equal-section order', () => {
+    const source = ['※', '2、', 'Prayer', '○', '1.', '', '※'].map((marker, id) => ({ marker, id }));
+    expect(sortLyricsSections(source).map(block => block.id)).toEqual([4, 1, 2, 3, 0, 5, 6]);
   });
 });

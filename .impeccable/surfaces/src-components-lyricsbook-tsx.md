@@ -44,3 +44,11 @@ bounds, page numbering, editing the correct repeated entry, and explicit breaks.
 
 Mechanical scan exception: Arial is the incumbent printable sans-serif font,
 not a new application theme font.
+
+### Numbered titles and grouped lyrics (2026-11-05)
+
+Song titles show the current setlist entry's one-based number in reading, A4 and export, including continuation headings. Preserve the existing book font, gray highlight and main-title brackets. Parenthetical and bracketed subtitle text uses the shared 0.72em, weight-600 treatment. A trailing subtitle starts intact on its own line below the bracketed main title, as verified with Joy; the measuring copy uses the same rendering so pagination includes its height. Saved song titles remain unchanged.
+
+LyricsSheet and LyricsBook group recognized sections in reading order: Intro, numeric Verse, Pre-Chorus, Chorus, Refrain, Bridge, Interlude, Tag, Outro, Ending, with numbers ascending within each type. Equal headings retain their order; unlabelled/custom blocks retain their slots. Keep each block's identity, paired language content and explicit page break together. This is presentation order, not a reorder of stored blocks, chart sections or the song map. In LyricsSheet, move controls only exchange adjacent blocks with the same sorting rank and number.
+
+Review screenshots are in `.impeccable/review/reading-1105/`, including `lyrics.png`, `book.png` and `mobile-joy.png`. The independent review accepted the refinement; focused tests and the final 208-file / 2348-test suite passed, as did TypeScript and web/iPad builds. Existing Arial and 10px detector advisories remain specialized lyrics typography, not additions to the global type ramp. No global design-system files changed.

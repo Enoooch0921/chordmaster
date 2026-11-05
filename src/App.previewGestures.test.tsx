@@ -54,7 +54,7 @@ async function expectPinchToWork() {
 it.each(['songs', 'setlists'])('keeps pinch zoom working after About and Help in %s', async mode => {
   localStorage.setItem('chordmaster.workspace-mode.v1', mode);
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
-  await screen.findAllByText('手勢測試');
+  await screen.findAllByRole('heading', { name: /^(?:1\. )?手勢測試$/ });
   let previousRoot = await expectPinchToWork();
   for (const page of ['關於', '說明']) {
     fireEvent.click(screen.getByRole('button', { name: page }));

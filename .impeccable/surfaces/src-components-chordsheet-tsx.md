@@ -56,3 +56,11 @@ Before geometry is available, notation-aligned chord contents center on their pr
 An existing unison badge is a keyboard-focusable score editing target when editing is permitted. It opens the marked bar's symbol editor. The preview keyboard shows an explicit 44px Remove unison mark action in every notation mode, including bars without jianpu. Removing it uses the existing draft/history flow and changes only unisonMark. Reading/export keeps the badge noninteractive.
 
 Verified the actual NAS source in an isolated local copy; pointer and keyboard badge entry, desktop/phone removal, unchanged other bar fields, source immutability, and a disappearing badge after removal. Source score correction separately removed the user's unwanted mark from TopChurchWorship Same God, Bridge 4 bar 3, with full private backup, updated_at guard and full JSON re-read verification.
+
+### Reading hierarchy and complete map labels (2026-11-05)
+
+Parenthetical and bracketed song-title text uses the shared display-only subtitle treatment (0.72em, weight 600). Setlist chart titles prefix the current entry's one-based position, including performance mode and export; reordering changes that number without changing the saved title. The existing chart title, page geometry and musical rows retain their layout.
+
+Map circles retain their established dimensions. Fit each complete measured label inside its ring, including combined section codes such as V1/2 and B1&2, without ellipsis. Refit after container resize and font loading. Adjacent identical unnumbered steps compact into one token with the summed repeat count; distinct numbered steps and nonadjacent repeats keep their positions. This does not reorder the chart.
+
+The independent review accepted the scoped refinement. Desktop, tablet, phone, Joy, app and performance screenshots are in `.impeccable/review/reading-1105/`; WebKit measurements found unchanged score-body row geometry and no map-label overflow. Final validation passed 208 test files / 2348 tests, TypeScript and web/iPad builds. These are local reading rules; `DESIGN.md` and `.impeccable/design.json` remain unchanged.

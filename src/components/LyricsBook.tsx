@@ -1,10 +1,11 @@
+import SongTitle from './SongTitle';
 import { lyricsLanguageName } from '../utils/lyricsLanguages';
 import { formatLyricsForDisplay } from '../utils/lyricsDisplay';
 import React from 'react';
 import type { AppLanguage, LyricsBlock, Song } from '../types';
 import { getLyricsBlocks, newLyricsBlock, updateLyricsBlocks, type LyricsFragment, type LyricsPage } from '../utils/lyricsDocument';
 import { measureLyricsText, type LyricsTextRow } from '../utils/lyricsMeasurement';
-import { lyricsSectionLabel } from '../utils/lyricsSections';
+import { lyricsSectionLabel, sortLyricsSections } from '../utils/lyricsSections';
 import { getSectionColor } from '../utils/musicUtils';
 import { getSectionBadgeStyle } from '../utils/sectionBadgeStyle';
 import { LYRICS_BOOK_FONT, paginateLyricsBook, type LyricsBookSettings } from '../utils/lyricsBook';
@@ -16,6 +17,7 @@ export interface LyricsBookEntry { id: string; song: Song }
 interface BookBlock {
   id: string;
   entry: LyricsBookEntry;
+  songNumber: number;
   block: LyricsBlock;
   first: boolean;
   bookStart: boolean;
@@ -59,10 +61,10 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
   const fields: ('chinese' | 'english')[] = paired ? ['english', 'chinese'] : [settings.language as 'chinese' | 'english'];
   const editable = Boolean(onSongChange) && !exportMode;
   const blocks = React.useMemo<BookBlock[]>(() => entries.flatMap((entry, entryIndex) => {
-    const source = getLyricsBlocks(entry.song.lyricsDoc);
+    const source = sortLyricsSections(getLyricsBlocks(entry.song.lyricsDoc));
     const visible = source.filter(block => fields.some(field => block[field].trim()));
     const content = visible.length ? visible : [{ ...newLyricsBlock(), id: 'missing' }];
-    return content.map((block, index) => ({ id: JSON.stringify([entry.id, block.id]), entry, block, first: index === 0, bookStart: entryIndex === 0 && index === 0, missing: !visible.length, formatted: { chinese: formatLyricsForDisplay(block.chinese), english: formatLyricsForDisplay(block.english) } }));
+    return content.map((block, index) => ({ id: JSON.stringify([entry.id, block.id]), entry, songNumber: entryIndex + 1, block, first: index === 0, bookStart: entryIndex === 0 && index === 0, missing: !visible.length, formatted: { chinese: formatLyricsForDisplay(block.chinese), english: formatLyricsForDisplay(block.english) } }));
   }), [entries, settings.language]);
   const blockMap = React.useMemo(() => new Map(blocks.map(block => [block.id, block])), [blocks]);
   const pairedBlocks = React.useMemo(() => new Map(blocks.map(item => [item.id, pairLyricsLines({
@@ -114,7 +116,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
   const titleHighlight: React.CSSProperties = { background: '#d9d9d9', padding: '0 4px', boxDecorationBreak: 'clone', printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' };
   const gatheringTitle = () => title ? <div data-book-title style={{ fontWeight: 700, fontSize: 24, lineHeight: '32px', paddingBottom: 8 }}><span style={{ background: '#e7e7e7', border: '1px solid #333', boxDecorationBreak: 'clone', printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}>{title}</span></div> : null;
   const songTitle = (item: BookBlock, measuring = false) => <div data-book-song-title style={{ fontWeight: 700, lineHeight: `${lineHeight}px` }}>
-    {editable && !measuring ? <button type="button" title={zh ? '編輯這首歌的段落' : 'Edit this song’s sections'} onClick={() => onEditSong?.(item.entry.id)} className="text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500" style={{ ...titleHighlight, font: 'inherit' }}>《{item.entry.song.title}》</button> : <span style={titleHighlight}>《{item.entry.song.title}》</span>}
+    {editable && !measuring ? <button type="button" title={zh ? '編輯這首歌的段落' : 'Edit this song’s sections'} onClick={() => onEditSong?.(item.entry.id)} className="text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500" style={{ ...titleHighlight, font: 'inherit' }}><SongTitle title={item.entry.song.title} number={item.songNumber} bookBrackets stackSubtitle/></button> : <span style={titleHighlight}><SongTitle title={item.entry.song.title} number={item.songNumber} bookBrackets stackSubtitle/></span>}
   </div>;
   const renderFragment = (fragment: LyricsFragment, columnPosition: number) => {
     const item = blockMap.get(fragment.blockId);
@@ -125,7 +127,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
       {item.bookStart && !fragment.continued && gatheringTitle()}
       {item.first && !fragment.continued && <div data-setlist-preview-song-id={entry.id}>{songTitle(item)}</div>}
       {readable && !isReading && columnPosition === 0 && (!item.first || fragment.continued) && <div data-book-continuation className="absolute -top-7 left-0 flex max-w-full text-sm font-bold leading-5" style={titleHighlight}>
-        <span className="shrink-0">《</span><span className="truncate" title={entry.song.title}>{entry.song.title}</span><span className="shrink-0">》{zh ? '（續）' : '(continued)'}</span>
+        <span className="shrink-0">{item.songNumber}. 《</span><span className="truncate" title={entry.song.title}><SongTitle title={entry.song.title}/></span><span className="shrink-0">》{zh ? '（續）' : '(continued)'}</span>
       </div>}
       {label && <h3 style={{ height: BOOK_SECTION_HEADING_HEIGHT, font: 'bold 14px/18px Arial, sans-serif', margin: 0, paddingTop: 12 }}><span className="inline-flex h-[18px] items-center rounded-sm border px-1.5" style={getSectionBadgeStyle(getSectionColor(label).accent)}>{label}{fragment.continued ? ' (cont.)' : ''}</span></h3>}
       {item.missing ? <div style={{ height: lineHeight, fontFamily: 'Arial, sans-serif', fontSize: 14 }} className="text-stone-500">{zh ? '尚無此語言歌詞' : 'No lyrics in this language'}{editable && <button type="button" data-preview-only-control className="ml-2 underline" onClick={() => onEditSong?.(entry.id)}>{zh ? '添加歌詞' : 'Add lyrics'}</button>}</div> : <div className="lyrics-book-languages grid" style={{ gridTemplateColumns: fields.length === 2 ? '1fr 1fr' : '1fr', gap: GAP }}>

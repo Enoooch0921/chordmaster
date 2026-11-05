@@ -79,6 +79,9 @@ afterEach(() => {
 
 it('drags the numbered handle directly while keeping inline controls and the current song', async () => {
   await mount();
+  const sheetTitle = (id: string) => document.querySelector(`[data-setlist-preview-song-id="${id}"] h1`)?.textContent;
+  expect(sheetTitle('entry-first')).toBe('1. 第一首歌曲');
+  expect(sheetTitle('entry-second')).toBe('2. 第二首歌曲');
   const handle = within(row('entry-second')).getByRole('button', { name: '拖動排序：第二首歌曲' });
   expect(handle).toHaveTextContent('2');
   expect(screen.getAllByRole('button', { name: /^拖動排序：/ })).toHaveLength(2);
@@ -92,6 +95,9 @@ it('drags the numbered handle directly while keeping inline controls and the cur
   expect(row('entry-second')).toHaveClass('is-dragging');
   fireEvent.pointerMove(handle, pointer);
   expect(rowOrder()).toEqual(['entry-second', 'entry-first']);
+  expect(sheetTitle('entry-second')).toBe('1. 第二首歌曲');
+  expect(sheetTitle('entry-first')).toBe('2. 第一首歌曲');
+  expect(fixture.songs.map(song => song.title)).toEqual(['第一首歌曲', '第二首歌曲']);
   fireEvent.pointerUp(handle, pointer);
   fireEvent.click(handle);
 

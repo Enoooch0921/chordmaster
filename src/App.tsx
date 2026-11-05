@@ -1,3 +1,4 @@
+import SongTitle from './components/SongTitle';
 import PersonalChordSheet from './components/PersonalChordSheet';
 import { useHandwritingSelectionGuard } from './hooks/useHandwritingSelectionGuard';
 import { getSongMap, sectionSongMap } from './lib/songMap';
@@ -7487,8 +7488,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     data-export-total-songs={setlistSongsWithSource.length}
                     data-export-song-title={derivedSong.title}
                   >
-                    {isLyricsMode ? <LyricsSheet song={derivedSong} language={language} exportMode /> : <ChordSheet
+                    {isLyricsMode ? <LyricsSheet song={derivedSong} setlistSongNumber={songIndex + 1} language={language} exportMode /> : <ChordSheet
                       song={derivedSong}
+                      setlistSongNumber={songIndex + 1}
                       lastEditedAt={savedChartEditedAt(item.songId, effectiveSelectedSetlist.id, item.id)}
                       language={language}
                       currentKey={derivedSong.currentKey}
@@ -10466,7 +10468,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           onSongChange={canOpenEditor ? handleBookLyricsChange : undefined}
           onSelectSong={id => { skipNextSetlistPreviewAutoScrollRef.current = true; setSelectedSetlistSongId(id); }}
           onEditSong={id => { setSelectedSetlistSongId(id); setIsLyricsContinuous(false); }}
-          reading={isLyricsReading} onReadingChange={setIsLyricsReading} /> : <LyricsSheet key={selected.item.id} song={activeSetlistEditableSong ?? selected.song} language={language}
+          reading={isLyricsReading} onReadingChange={setIsLyricsReading} /> : <LyricsSheet key={selected.item.id} song={activeSetlistEditableSong ?? selected.song} setlistSongNumber={setlistPreviewSongs.indexOf(selected) + 1} language={language}
           onChange={canOpenEditor ? handleSetlistSongContentChange : undefined}
           reading={isLyricsReading} onReadingChange={setIsLyricsReading} />}
       </div>;
@@ -10474,7 +10476,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
     return (
       <div className="flex flex-col gap-8">
-        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong, libraryMap }) => (
+        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong, libraryMap }, songIndex) => (
           <div
             key={item.id}
             data-setlist-preview-song-id={item.id}
@@ -10490,6 +10492,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
         noteOwner={authenticatedUser?.id} noteSongId={item.songId} notesActive={isSelected && !isPerformanceMode && !isEditing && !activePreviewEditSession}
               song={previewSong}
+              setlistSongNumber={songIndex + 1}
               songMapEditor={isSelected && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession && !isEditing ? {
                 scope: 'setlist', setlistName: selectedSetlist?.name, fallback: getSongMap({ songMap: libraryMap, sections: previewSong.sections }), sections: sectionSongMap(previewSong.sections),
                 onSave: setlistSongMap => handleUpdateSetlistSong(item.id, current => ({
@@ -12292,7 +12295,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   </div>
                     <button type="button" onClick={() => handleSelectSetlistSong(item.id)} aria-current={isActive ? 'true' : undefined} className="setlist-song-select">
                       <span className="setlist-song-title-line">
-                        <span className="setlist-song-title">{displaySong.title || sourceSong.title || copy.untitledSong}</span>
+                        <span className="setlist-song-title"><SongTitle title={displaySong.title || sourceSong.title || copy.untitledSong}/></span>
                         {isActive && <Check size={16} aria-label={language === 'zh' ? '目前顯示' : 'Current song'} className="setlist-song-current" />}
                         {sourceSong.archivedAt || item.sourceArchivedAt ? <span className="setlist-song-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
                       </span>
@@ -13146,7 +13149,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                               className="song-library-select"
                             >
                               <span className="song-library-title">
-                                {title}
+                                <SongTitle title={title}/>
                                 {item.archivedAt ? <span className="song-library-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
                               </span>
                               {metadata}
@@ -15979,13 +15982,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     <LyricsBook title={selectedSetlist?.name ?? ''} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode />
                   ) : isLyricsMode ? (
                     <LyricsSheet key={isSetlistMode ? selectedSetlistSong?.id : song.id}
-                      song={isSetlistMode ? (activeSetlistPreviewSong ?? song) : song} language={language} exportMode />
+                      song={isSetlistMode ? (activeSetlistPreviewSong ?? song) : song} setlistSongNumber={isSetlistMode ? setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSong?.id) + 1 : undefined} language={language} exportMode />
                   ) : isSetlistMode ? (
 	                  activeSetlistPreviewSong && (
 	                    <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
                           notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
         noteOwner={authenticatedUser?.id} noteSongId={selectedSetlistSong?.songId} notesPerformance
 	                      song={activeSetlistPreviewSong}
+                          setlistSongNumber={setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSong?.id) + 1}
 	                      lastEditedAt={savedChartEditedAt(selectedSetlistSong?.songId ?? '', selectedSetlist?.id, selectedSetlistSong?.id)}
 	                      language={language}
 	                      currentKey={activeSetlistPreviewSong.currentKey}

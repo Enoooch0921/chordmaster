@@ -9,6 +9,15 @@ const song: Song = { title: '第一首', originalKey: 'C', currentKey: 'C', time
 const entries = [{ id: 'one', song }, { id: 'two', song: { ...song, title: '第二首' } }];
 
 describe('continuous lyrics book', () => {
+  it('sorts lyrics within each song and renumbers titles when the setlist order changes', () => {
+    const first = { id: 'one', song: { ...song, lyricsDoc: { chinese: '[Verse 1]\n一\n\n[Chorus]\n副\n\n[Verse 2]\n二' } } };
+    const { container, rerender } = render(<LyricsBook title="聚會" entries={[first, entries[1]]} language="zh" settings={DEFAULT_LYRICS_BOOK_SETTINGS} exportMode />);
+    const page = () => container.querySelector('[data-print-page]')!;
+    expect(Array.from(page().querySelectorAll('h3')).map(node => node.textContent)).toEqual(['Verse 1', 'Verse 2', 'Chorus', 'Verse 1']);
+    expect(Array.from(page().querySelectorAll('[data-book-song-title]')).map(node => node.textContent)).toEqual(['1. 《第一首》', '2. 《第二首》']);
+    rerender(<LyricsBook title="聚會" entries={[entries[1], first]} language="zh" settings={DEFAULT_LYRICS_BOOK_SETTINGS} exportMode />);
+    expect(Array.from(page().querySelectorAll('[data-book-song-title]')).map(node => node.textContent)).toEqual(['1. 《第二首》', '2. 《第一首》']);
+  });
   it('exports consecutive songs together with one gathering title and no controls', () => {
     const { container } = render(<LyricsBook title="聚會一" entries={entries} language="zh" settings={DEFAULT_LYRICS_BOOK_SETTINGS} exportMode />);
     const pages = container.querySelectorAll('[data-print-page]');

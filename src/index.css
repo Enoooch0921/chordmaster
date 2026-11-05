@@ -628,10 +628,9 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 .chart-map[data-dense] .chart-map-token { width:min(20px,100%); height:20px; font-size:10px; }
 .chart-map[data-dense] .chart-map-token sup { right:-2px; top:-1px; }
 .chart-map-token { position:relative; display:inline-flex; align-items:center; justify-content:center; justify-self:start; width:25px; height:25px; border:1.5px solid; border-radius:50%; font:700 11px/1 var(--font-sans); }
-.chart-map-token > span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* Numbered section codes carry meaning: fit Pc2 / Pc12 in the existing ring. */
-.chart-map-token[data-code-length="3"] > span { font-size:.82em; overflow:visible; text-overflow:clip; }
-.chart-map-token[data-code-length="4"] > span { font-size:.68em; overflow:visible; text-overflow:clip; }
+/* Preserve every label character; ChartSongMap fits measured text inside each
+   ring without changing the roadmap height or the score's page geometry. */
+.chart-map-token > span { flex:none; white-space:nowrap; transform:scale(var(--map-label-scale,1)); transform-origin:center; }
 .chart-map-token sup { position:absolute; right:-5px; top:-3px; padding:0 2px; border-radius:3px; font:800 9px/1 var(--font-sans); background:white; }
 .chart-map-edit { display:inline-flex; align-items:center; gap:3px; min-height:30px; font-size:11px; color:var(--color-indigo-700); }
 .chart-map-settings {
@@ -645,3 +644,6 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 .song-info-map-visibility > button { display:flex; flex-direction:row-reverse; justify-content:space-between; width:100%; min-height:44px; padding:6px 0; border:0; border-radius:0; background:transparent; }
 .song-info-map-visibility > button > span:last-child { font-size:14px; font-weight:600; }
 @media print { .chart-map-edit, .chart-map-settings { display:none; } }
+
+/* Keep parenthetical song subtitles secondary without changing the title row. */
+.song-title-subtitle { font-size: 0.72em; font-weight: 600; }

@@ -11,6 +11,20 @@ function Editable() {
 }
 
 describe('lyrics in-place editing', () => {
+  it('shows grouped verses while an edit still targets the original block and keeps chart order', () => {
+    const sections = [{ title: 'Verse 1', bars: [] }, { title: 'Chorus', bars: [] }, { title: 'Verse 2', bars: [] }];
+    const original = { ...song, sections, lyricsDoc: { chinese: '[Verse 1]\n一\n\n[Chorus]\n副\n\n[Verse 2]\n二' } };
+    const onChange = vi.fn();
+    const { container } = render(<LyricsSheet song={original} language="zh" onChange={onChange} reading />);
+    expect(Array.from(container.querySelectorAll('h2')).map(node => node.textContent)).toEqual(['Verse 1', 'Verse 2', 'Chorus']);
+    fireEvent.click(screen.getByRole('button', { name: '中文歌詞 Verse 2' }));
+    const input = screen.getByRole('textbox', { name: '中文歌詞 Verse 2' });
+    fireEvent.change(input, { target: { value: '修改第二段' } });
+    fireEvent.blur(input);
+    expect(onChange.mock.calls[0][0].lyricsDoc.blocks.map((b: { marker: string }) => b.marker)).toEqual(['Verse 1', 'Chorus', 'Verse 2']);
+    expect(onChange.mock.calls[0][0].lyricsDoc.blocks[2].chinese).toBe('修改第二段');
+    expect(onChange.mock.calls[0][0].sections).toBe(sections);
+  });
   it('edits directly inside the printable page and commits once on blur', () => {
     const onChange = vi.fn();
     render(<LyricsSheet song={song} language="zh" onChange={onChange} />);
@@ -45,11 +59,11 @@ describe('lyrics in-place editing', () => {
     expect(screen.getByRole('button', { name: '中文歌詞 Bridge' })).toHaveTextContent('原本歌詞');
     expect(screen.queryByRole('button', { name: '中文歌詞 Verse 1' })).toBeNull();
   });
-  it('moves both languages together when reordering a section', () => {
-    const bilingual = { ...song, lyricsDoc: { chinese: '1. 甲\n\n※ 乙', english: '1. A\n\n※ B' } };
+  it('moves both languages together within equal-ranked sections', () => {
+    const bilingual = { ...song, lyricsDoc: { blocks: [{id: 'a', marker: 'Verse 1', chinese: '甲', english: 'A'}, {id: 'b', marker: 'Verse 1', chinese: '乙', english: 'B'}], chinese: '' } };
     const onChange = vi.fn();
     render(<LyricsSheet song={bilingual} language="zh" onChange={onChange} />);
-    fireEvent.click(screen.getByRole('button', { name: '中文歌詞 Verse 1' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '中文歌詞 Verse 1' })[0]);
     fireEvent.blur(screen.getByRole('textbox', { name: '中文歌詞 Verse 1' }));
     fireEvent.click(screen.getByRole('button', { name: '下移' }));
     expect(onChange.mock.calls[0][0].lyricsDoc.blocks.map((block: { english: string }) => block.english)).toEqual(['B', 'A']);

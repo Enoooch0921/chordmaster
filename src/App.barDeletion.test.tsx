@@ -50,7 +50,7 @@ it.each(['songs', 'setlists'])('deletes bars from the %s preview without crashin
   localStorage.setItem('chordmaster.workspace-mode.v1', mode);
   localStorage.setItem('chordmaster.selected-setlist-id.v1', 'setlist-1');
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
-  await screen.findAllByText('新歌 1');
+  await screen.findAllByRole('heading', { name: /^(?:1\. )?新歌 1$/ });
 
   for (let i = 0; i < 4; i++) {
     const bar = document.querySelector('[data-preview-slot-index="0"]');
@@ -89,7 +89,7 @@ async function renderBatchPreview(mode: 'songs' | 'setlists') {
   localStorage.setItem('chordmaster.workspace-mode.v1', mode);
   localStorage.setItem('chordmaster.selected-setlist-id.v1', 'batch-list');
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
-  await screen.findAllByText('批次編輯測試');
+  await screen.findAllByRole('heading', { name: /^(?:1\. )?批次編輯測試$/ });
   return song;
 }
 

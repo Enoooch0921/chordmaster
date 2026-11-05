@@ -25,7 +25,8 @@ export const songMapSuggestions = sectionNames.map(([name]) => name);
 
 export function songMapLabel(label: string) {
   const text = label.trim();
-  const [, base, number] = /^(.*?)(\d+)?$/.exec(text) ?? [];
+  const [, base, suffix] = /^(.*?)(\d+(?:\s*[/／&＆,、]\s*\d+)*)?$/.exec(text) ?? [];
+  const number = suffix?.replace(/\s+/g, '').replace(/／/g, '/').replace(/＆/g, '&');
   const match = names.get(key(base || text));
   if (!match) return { name: text, code: text };
   return { name: match.name + (number ? ' ' + number : ''), code: match.code + (number ?? '') };
@@ -38,7 +39,7 @@ export function sectionSongMap(sections: Section[]): SongMapStep[] {
     const label = songMapLabel(section.title || '').name;
     if (!label) continue;
     const previous = steps.at(-1);
-    if (section.id && section.id === previousId && previous?.label === label) previous.repeats++;
+    if (previous?.label === label && ((section.id && section.id === previousId) || !/\d/.test(label))) previous.repeats++;
     else steps.push({ label, repeats: 1 });
     previousId = section.id;
   }
@@ -52,7 +53,13 @@ export function normalizeSongMap(value: unknown): SongMapStep[] | undefined {
     const repeats = Number.isSafeInteger(step.repeats) && step.repeats > 0 ? step.repeats : 1;
     return [{ label: songMapLabel(step.label).name, repeats }];
   });
-  return steps.length ? steps : undefined;
+  const compact: SongMapStep[] = [];
+  for (const step of steps) {
+    const previous = compact.at(-1);
+    if (previous?.label === step.label && !/\d/.test(step.label)) previous.repeats += step.repeats;
+    else compact.push(step);
+  }
+  return compact.length ? compact : undefined;
 }
 
 export const getSongMap = (song: Pick<Song, 'songMap' | 'sections'>) =>

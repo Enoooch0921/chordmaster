@@ -33,7 +33,7 @@ afterEach(() => localStorage.clear());
 async function start(mode: string) {
   localStorage.setItem('chordmaster.workspace-mode.v1', mode);
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
-  await screen.findAllByText('更新前草稿');
+  await screen.findAllByRole('heading', { name: /^(?:1\. )?更新前草稿$/ });
   await waitFor(() => expect(document.querySelector('[data-preview-slot-index="0"]')).not.toBeNull());
   fireEvent.click(document.querySelector('[data-preview-slot-index="0"]')!);
   fireEvent.change(await screen.findByRole('textbox', { name: '和弦直接輸入' }), { target: { value: 'Em7' } });

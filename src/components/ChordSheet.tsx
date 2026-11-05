@@ -27,6 +27,7 @@ import { getSectionBadgeStyle } from '../utils/sectionBadgeStyle';
  */
 
 import React from 'react';
+import SongTitle from './SongTitle';
 import { getChartEditedAt } from '../lib/chartRevision';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
@@ -802,6 +803,7 @@ const getPreviewAnchorRect = (element: HTMLElement): PreviewAnchorRect => {
 const VALUE_ANCHORED_META_FIELDS = new Set<ChordSheetMetaField>(['key', 'performanceKey', 'tempo', 'timeSignature']);
 
 interface ChordSheetProps {
+  setlistSongNumber?: number;
   songMapEditor?: SongMapEditorOptions;
   song: Song;
   lastEditedAt?: number | null;
@@ -1375,7 +1377,7 @@ const ChordBeatGroup: React.FC<{
   </div>
 );
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, songMapEditor, lastEditedAt, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, excerpt, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, lastEditedAt, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, excerpt, onSectionReorder }) => {
   const editedAt = lastEditedAt === undefined ? getChartEditedAt(song) : lastEditedAt;
   const phraseCarries = React.useMemo(() => song.sections.map(section => {
     let primary = 0;
@@ -2287,7 +2289,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, songMapEditor, lastEdited
                 <div className="col-span-full row-start-1 flex items-start gap-3">
                   <AutoShrink className="mb-0 min-w-0 flex-1">
                     <div {...getMetaAnchorProps('title')} className={onMetaClick ? 'cursor-text' : undefined}>
-                      <h1 className="text-3xl font-bold tracking-tight">{song.title}</h1>
+                      <h1 className="text-3xl font-bold tracking-tight"><SongTitle title={song.title} number={setlistSongNumber}/></h1>
                     </div>
                   </AutoShrink>
                   {pageBadge}

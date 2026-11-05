@@ -88,7 +88,7 @@ it.each(['meeting', 'project'])('falls back one level when the remembered %s was
 it('acknowledges a tap before opening and remembers the resulting detail view', async () => {
   saveNavigationLocation(getNavigationStorageKey(null, null), { ...remembered, view: 'list' });
   mount();
-  await screen.findAllByText('測試歌曲');
+  await screen.findAllByRole('heading', { name: /^(?:1\. )?測試歌曲$/ });
   fireEvent.click(await within(document.querySelector('[data-sidebar]')!).findByText('聚會一'));
   expect(within(document.querySelector('[data-setlist-preview-pane]')!).getByRole('status')).toHaveTextContent('正在開啟「聚會一」…');
   expect(within(document.querySelector('[data-sidebar]')!).queryByText('正在開啟「聚會一」…')).toBeNull();

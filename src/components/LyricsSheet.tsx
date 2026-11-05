@@ -1,3 +1,4 @@
+import SongTitle from './SongTitle';
 import LyricsLanguagePicker from './LyricsLanguagePicker';
 import { lyricsLanguageName } from '../utils/lyricsLanguages';
 import { LYRICS_BOOK_FONT } from '../utils/lyricsBook';
@@ -11,9 +12,10 @@ import LyricsDocEditor from './LyricsDocEditor';
 import { measureLyricsText, type LyricsTextRow } from '../utils/lyricsMeasurement';
 import { pairLyricsLines, replaceLyricsLine } from '../utils/lyricsPairing';
 import PairedLyrics from './PairedLyrics';
-import { lyricsSectionLabel, LYRICS_SECTION_NAMES, DEFAULT_LYRICS_FONT_SIZE, DEFAULT_LYRICS_LINE_HEIGHT, LYRICS_SECTION_HEADING_HEIGHT } from '../utils/lyricsSections';
+import { lyricsSectionLabel, sortLyricsSections, compareLyricsSections, LYRICS_SECTION_NAMES, DEFAULT_LYRICS_FONT_SIZE, DEFAULT_LYRICS_LINE_HEIGHT, LYRICS_SECTION_HEADING_HEIGHT } from '../utils/lyricsSections';
 
 interface LyricsSheetProps {
+  setlistSongNumber?: number;
   song: Song;
   language: AppLanguage;
   onChange?: (song: Song) => void;
@@ -82,7 +84,7 @@ export function InlineLyrics({ value, label, editable, onFocus, onFinish }: {
   </div>;
 }
 
-export default function LyricsSheet({ song, language, onChange, reading: controlledReading, onReadingChange, exportMode = false }: LyricsSheetProps) {
+export default function LyricsSheet({ song, setlistSongNumber, language, onChange, reading: controlledReading, onReadingChange, exportMode = false }: LyricsSheetProps) {
   const zh = language === 'zh';
   const doc = song.lyricsDoc;
   const translationName = lyricsLanguageName(doc?.translationLanguage, language);
@@ -118,7 +120,8 @@ export default function LyricsSheet({ song, language, onChange, reading: control
   const nextVerse = Math.max(0, ...blocks.map(block => Number(lyricsSectionLabel(block.marker).match(/^Verse (\d+)$/)?.[1]) || 0)) + 1;
   const columnCount = display === 'bilingual' ? 1 : 2;
   const textWidth = (728 - 32) / 2;
-  const visibleBlocks = blocks.filter(block => onChange || fields.some(field => block[field].trim()));
+  const orderedBlocks = React.useMemo(() => sortLyricsSections(blocks), [blocks]);
+  const visibleBlocks = orderedBlocks.filter(block => onChange || fields.some(field => block[field].trim()));
   const source = Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ');
 
   const save = (next: LyricsBlock[]) => onChange?.({ ...song, lyricsDoc: updateLyricsBlocks(doc, next) });
@@ -164,10 +167,10 @@ export default function LyricsSheet({ song, language, onChange, reading: control
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
     if (measureRef.current) observer?.observe(measureRef.current);
     return () => { disposed = true; observer?.disconnect(); };
-  }, [blocks, display, fontSize, lineHeight, reading, editing, song.title, source, song.translator, Boolean(onChange)]);
+  }, [blocks, display, fontSize, lineHeight, reading, editing, song.title, setlistSongNumber, source, song.translator, Boolean(onChange)]);
 
   const header = (measure = false) => <div ref={measure ? headerRef : undefined} className="mb-5 border-b-2 border-stone-800 pb-3">
-    <h1 className="break-words text-3xl font-bold tracking-tight">《{song.title}》</h1>
+    <h1 className="break-words text-3xl font-bold tracking-tight">{setlistSongNumber ? `${setlistSongNumber}. ` : ''}《<SongTitle title={song.title}/>》</h1>
     {(source || song.translator) && <div className="mt-2 text-sm leading-5 text-stone-500">
       {source && <div>{zh ? '出處' : 'Source'}：{source}</div>}
       {song.translator && <div>{zh ? '翻譯' : 'Translation'}：{song.translator}</div>}
@@ -251,7 +254,7 @@ export default function LyricsSheet({ song, language, onChange, reading: control
         <button type="button" className={buttonClass} onClick={() => { const block = { ...newLyricsBlock(), marker: `Verse ${nextVerse}` }; save([...blocks, block]); selectBlock(block.id); }}>{zh ? '＋ 新增段落' : '+ Add section'}</button>
         <button type="button" className={buttonClass} onClick={() => setDisplay('bilingual')}>{zh ? `添加${translationName}對照` : `Add ${translationName} translation`}</button>
         <button type="button" className={buttonClass} aria-expanded={showImport} onClick={() => setShowImport(!showImport)}>{zh ? '整首貼上' : 'Paste whole song'}</button>
-        <p className="text-xs text-stone-500">{zh ? '點選歌詞直接編輯 · 點外面完成 · Esc 取消' : 'Click lyrics to edit · Click outside to finish · Esc to cancel'}</p>
+        <p className="text-xs text-stone-500">{zh ? '依段落類型與編號排序 · 點選歌詞編輯 · Esc 取消' : 'Sorted by section and number · Click lyrics to edit · Esc to cancel'}</p>
       </div>}
       {showImport && onChange && <LyricsDocEditor key={`${song.title}-${showImport}`} song={song} language={language} onChange={next => { onChange(next); setShowImport(false); }} />}
       {onChange && selected && <div className="flex flex-wrap items-center gap-2 border-t border-stone-100 pt-3" role="toolbar" aria-label={zh ? '段落操作' : 'Section actions'}>
@@ -264,9 +267,16 @@ export default function LyricsSheet({ song, language, onChange, reading: control
           {selectedType && !LYRICS_SECTION_NAMES.some(name => name === selectedType) && <option value={selectedType}>{selectedType}</option>}
         </select>
         <input aria-label={zh ? '段落名稱' : 'Section heading'} value={selectedLabel} onChange={e => patchSelected({ marker: e.target.value })} className="w-40 rounded-lg border border-stone-200 px-2 py-2 text-sm" />
-        {([-1, 1] as const).map(direction => <button key={direction} type="button" className={buttonClass} disabled={blocks.indexOf(selected) + direction < 0 || blocks.indexOf(selected) + direction >= blocks.length} onClick={() => {
-          const next = [...blocks]; const index = next.indexOf(selected); [next[index], next[index + direction]] = [next[index + direction], next[index]]; save(next);
-        }}>{direction < 0 ? (zh ? '上移' : 'Move up') : (zh ? '下移' : 'Move down')}</button>)}
+        {([-1, 1] as const).map(direction => {
+          const neighbor = orderedBlocks[orderedBlocks.indexOf(selected) + direction];
+          const canMove = neighbor && compareLyricsSections(selected, neighbor) === 0;
+          return <button key={direction} type="button" className={buttonClass} disabled={!canMove} onClick={() => {
+            if (!canMove) return;
+            const next = [...blocks], index = next.indexOf(selected), target = next.indexOf(neighbor);
+            [next[index], next[target]] = [next[target], next[index]];
+            save(next);
+          }}>{direction < 0 ? (zh ? '上移' : 'Move up') : (zh ? '下移' : 'Move down')}</button>;
+        })}
         <button type="button" className={buttonClass} onClick={() => { const copy = { ...selected, id: crypto.randomUUID(), pageBreakBefore: false }; const next = [...blocks]; next.splice(next.indexOf(selected) + 1, 0, copy); save(next); selectBlock(copy.id); }}>{zh ? '複製段落' : 'Duplicate'}</button>
         <button type="button" className={buttonClass} aria-pressed={Boolean(selected.pageBreakBefore)} onClick={() => patchSelected({ pageBreakBefore: !selected.pageBreakBefore })}>{selected.pageBreakBefore ? (zh ? '取消分頁' : 'Remove page break') : (zh ? '段前分頁' : 'Page break before')}</button>
         <button type="button" className={buttonClass} onClick={() => { save(blocks.filter(block => block.id !== selected.id)); setSelectedId(null); }}>{zh ? '刪除段落' : 'Delete section'}</button>
