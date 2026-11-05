@@ -304,6 +304,16 @@ describe('bar commands', () => {
     expect(edited.sections[0].bars[0]).toMatchObject({ repeatStart: true, repeatEnd: true, finalBar: false });
   });
 
+  it.each(['doubleBar', 'repeatEnd', 'finalBar'] as const)('remembers manual removal of %s, without treating unrelated edits as a single-line choice', field => {
+    const song = makeSong({ chords: ['C'], [field]: true });
+    const target = { sectionId: 'section-1', barId: 'bar-1' };
+    const single = updateEditableBarFields(song, target, { [field]: false });
+    expect(single.sections[0].bars[0].singleBar).toBe(true);
+    expect(updateEditableBarFields(single, target, { annotation: 'Quiet' }).sections[0].bars[0].singleBar).toBe(true);
+    expect(updateEditableBarFields(single, target, { [field]: true }).sections[0].bars[0].singleBar).toBeUndefined();
+    expect(updateEditableBarFields(makeSong({ chords: ['C'], doubleBar: false }), target, { annotation: 'Quiet' }).sections[0].bars[0].singleBar).toBeUndefined();
+  });
+
   it('toggles shortcut ending numbers in sorted comma order', () => {
     expect(toggleEndingNumber(undefined, '1')).toBe('1');
     expect(toggleEndingNumber('1', '2')).toBe('1,2');

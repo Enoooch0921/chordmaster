@@ -119,6 +119,7 @@ export type EditableBarFields = Pick<
   | 'repeatStart'
   | 'repeatEnd'
   | 'doubleBar'
+  | 'singleBar'
   | 'doubleBarStart'
   | 'finalBar'
   | 'ending'
@@ -170,6 +171,7 @@ export const isBarCompletelyEmpty = (bar?: Bar | null) => {
     && !bar.repeatStart
     && !bar.repeatEnd
     && !bar.doubleBar
+    && !bar.singleBar
     && !bar.doubleBarStart
     && !bar.finalBar
     && !bar.ending?.trim()
@@ -660,6 +662,11 @@ export const applyBarFieldPatch = (bar: Bar, patch: Partial<Bar>): Bar => {
   // same edge exclude each other.
   if (patch.repeatStart === true) next.doubleBarStart = false;
   if (patch.doubleBarStart === true) next.repeatStart = false;
+  if (patch.singleBar === true) {
+    next.repeatEnd = false;
+    next.finalBar = false;
+    next.doubleBar = false;
+  }
   if (patch.repeatEnd === true) {
     next.finalBar = false;
     next.doubleBar = false;
@@ -671,6 +678,13 @@ export const applyBarFieldPatch = (bar: Bar, patch: Partial<Bar>): Bar => {
   if (patch.doubleBar === true) {
     next.repeatEnd = false;
     next.finalBar = false;
+  }
+  if (next.repeatEnd || next.finalBar || next.doubleBar) {
+    next.singleBar = undefined;
+  } else if (patch.singleBar === true || patch.doubleBar === false || patch.finalBar === false || patch.repeatEnd === false) {
+    // Legacy scores normalize absent flags to false. Record this separate
+    // override only when an editor explicitly removes the right boundary.
+    next.singleBar = true;
   }
   return next;
 };

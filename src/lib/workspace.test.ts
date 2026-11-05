@@ -58,6 +58,17 @@ describe('local workspace snapshots', () => {
     expect(loadLocalWorkspaceSnapshot().songs[0].sections[0].bars[0]).toMatchObject({ doubleBar: true, finalBar: false });
   });
 
+  it('keeps a manual single boundary distinct from legacy false flags after reloading', () => {
+    const manual = makeSong('manual-single', 'Manual single');
+    manual.sections[0].bars[0].singleBar = true;
+    const legacy = makeSong('legacy-single', 'Legacy');
+    legacy.sections[0].bars[0].doubleBar = false;
+    persistLocalWorkspaceSnapshot([manual, legacy], [], []);
+    const restored = loadLocalWorkspaceSnapshot().songs;
+    expect(restored[0].sections[0].bars[0].singleBar).toBe(true);
+    expect(restored[1].sections[0].bars[0].singleBar).toBeUndefined();
+  });
+
   it('keeps the previous verified snapshot and restores it when the primary is corrupt', () => {
     persistLocalWorkspaceSnapshot([makeSong('song-1', 'Previous')], [], []);
     persistLocalWorkspaceSnapshot([makeSong('song-1', 'Current')], [], []);

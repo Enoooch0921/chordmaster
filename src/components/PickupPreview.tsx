@@ -45,7 +45,7 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
   const { beatUnits, barUnits, beats } = parseTimeSignature(display.timeSignature);
   const jianpuCursor = active && cursor?.kind === 'jianpu' ? cursor : null;
   const cursorUnit = jianpuCursor ? Math.min(barUnits, jianpuCursor.beatIndex * beatUnits + jianpuCursor.unitIndex) : null;
-  const laneClass = `relative block w-full rounded-sm bg-gray-300/70 px-1 text-left mix-blend-multiply ${active ? 'ring-1 ring-emerald-300' : ''}`;
+  const laneClass = `relative block w-full rounded-sm bg-gray-300/70 px-1 text-left ${active ? 'ring-1 ring-emerald-300' : ''}`;
   const selectLane = (event: React.MouseEvent<HTMLElement>, field: 'riff' | 'rhythm', nextCursor?: PreviewNotationCursor) => {
     event.stopPropagation();
     onSelect?.(event, field, nextCursor);

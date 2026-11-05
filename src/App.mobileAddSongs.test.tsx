@@ -86,5 +86,6 @@ it.each([390, 820, 1280])('shows the edit-mode toggle only beyond phone width (%
   vi.stubGlobal('innerWidth', width);
   mount();
   await screen.findByDisplayValue('主日敬拜');
-  expect(screen.queryByRole('button', { name: '打開編輯器' }) !== null).toBe(width >= 640);
+  expect(screen.getByRole('button', { name: '手寫筆記' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '打開編輯器' })).toBeNull();
 });

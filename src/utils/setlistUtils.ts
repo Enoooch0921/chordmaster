@@ -205,7 +205,8 @@ export const applySetlistSongOverrides = (
   song: Song,
   setlist: Setlist & { barRowCount?: 1 | 2 | 3 },
   setlistSong: SetlistSong,
-  capoOptions: SetlistCapoResolutionOptions = {}
+  capoOptions: SetlistCapoResolutionOptions = {},
+  librarySong: Song = song
 ): Song => {
   const sectionMap = new Map<string, Section>();
   song.sections.forEach((section, index) => {
@@ -247,6 +248,7 @@ export const applySetlistSongOverrides = (
     showNashvilleNumbers: setlist.displayMode === 'nashville-number-system',
     showAbsoluteJianpu: setlist.displayMode === 'chord-fixed-key',
     barRowCount: song.setlistBarRowCount ?? setlist.barRowCount ?? 2,
+    songMap: song.setlistSongMap ?? librarySong.songMap,
     sections: orderedSections
   };
 };

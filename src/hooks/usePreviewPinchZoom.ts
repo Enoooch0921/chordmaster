@@ -66,6 +66,8 @@ export function usePreviewPinchZoom(options: Options) {
       latest.current.onFinish();
     };
     const start = (event: TouchEvent) => {
+      if ((event.target as Element).closest?.('[data-personal-notes-layer]')
+        && Array.from(event.touches).some(t => (t as Touch & { touchType?: string }).touchType === 'stylus')) return;
       if (event.touches.length >= 3) {
         multiFingerHistory = true;
         if (owned) { finish(false); owned = false; latest.current.onSuppressClick(); }

@@ -54,6 +54,13 @@ const renderEditor = (song: Song, jianpuPitchContext?: JianpuPitchContext) => {
 };
 
 describe('SongEditor shared notation commands', () => {
+  it('turns off the automatic section boundary from the legacy editor', () => {
+    const onChange = renderEditor(makeSong({ annotation: 'Quiet' }));
+    const button = screen.getAllByRole('button', { name: '後雙小節線 ||' })[0];
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(button);
+    expect((onChange.mock.calls.at(-1)![0] as Song).sections[0].bars[0]).toMatchObject({ singleBar: true, doubleBar: false });
+  });
   it('switches from a final barline to a double barline in the song editor', () => {
     const onChange = renderEditor(makeSong({ finalBar: true }));
     fireEvent.click(screen.getAllByRole('button', { name: '後雙小節線 ||' })[0]);

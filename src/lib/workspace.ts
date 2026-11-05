@@ -1,3 +1,4 @@
+import { normalizeSongMap } from './songMap';
 import { normalizePickupTimeSignature } from '../utils/pickupUtils';
 import { normalizeKeyMode } from '../utils/keyMode';
 import { normalizeUnmeteredChordLines } from '../utils/unmeteredChords';
@@ -239,6 +240,7 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
           repeatStart: Boolean(safeBar.repeatStart),
           repeatEnd: Boolean(safeBar.repeatEnd),
           doubleBar: Boolean(safeBar.doubleBar),
+          singleBar: safeBar.singleBar === true ? true : undefined,
           doubleBarStart: safeBar.doubleBarStart === true ? true : undefined,
           finalBar: Boolean(safeBar.finalBar),
           ending: normalizeOptionalText(safeBar.ending)
@@ -263,6 +265,9 @@ export const normalizeSongBars = <T extends Song>(song: T): T => {
   return migrateChordTimingArrows(repairSongStructure({
     ...song,
     title: normalizeText(song.title),
+    songMap: normalizeSongMap(song.songMap),
+    showSongMap: typeof song.showSongMap === 'boolean' ? song.showSongMap : undefined,
+    setlistSongMap: normalizeSongMap(song.setlistSongMap),
     lyricist: normalizeOptionalText(song.lyricist),
     composer: normalizeOptionalText(song.composer),
     translator: normalizeOptionalText(song.translator),

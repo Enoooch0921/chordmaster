@@ -115,6 +115,7 @@ export interface Bar {
   repeatStart?: boolean; // |:
   repeatEnd?: boolean;   // :|
   doubleBar?: boolean;  // two thin lines ||
+  singleBar?: boolean; // Explicit normal right boundary, overriding the automatic section-end double line.
   doubleBarStart?: boolean; // two thin lines before this measure
   finalBar?: boolean;    // final thin + thick barline
   ending?: string; // e.g. "1", "2", or "1,2"
@@ -137,7 +138,16 @@ export interface PickupMeasure {
   rhythm?: string;
 }
 
+export interface SongMapStep {
+  label: string;
+  repeats: number;
+}
+
 export interface Song {
+  songMap?: SongMapStep[];
+  showSongMap?: boolean;
+  /** A service-specific roadmap, stored only on its setlist score copy. */
+  setlistSongMap?: SongMapStep[];
   // The last successfully saved score edit; shared by library and setlist copies.
   lastEditedAt?: number;
   // Missing/1 = legacy reversed arrows; 2 = < left/earlier, > right/later.

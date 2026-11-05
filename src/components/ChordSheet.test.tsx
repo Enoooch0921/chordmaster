@@ -96,6 +96,79 @@ describe('ChordSheet preview input caret', () => {
     expect(container.querySelector('.sheet-final-bar .sheet-repeat-preview > span:last-child')).toHaveClass('border-l-[3px]');
   });
 
+  it('closes each section with a double bar only at its actual end across rows and pages', () => {
+    const source: Song = { ...song, sections: [
+      { id: 'long', title: 'Verse', bars: Array.from({ length: 41 }, (_, index) => ({ id: `long-${index}`, chords: ['C'] })) },
+      { id: 'short', title: 'Chorus', bars: [{ id: 'short-end', chords: ['F'] }] }
+    ] };
+    const saved = JSON.stringify(source);
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    const ends = [...container.querySelectorAll('.sheet-double-bar')].map(marker => marker.parentElement?.getAttribute('data-preview-clipboard-bar'));
+    expect(ends).toEqual(['long-40', 'short-end']);
+    expect(container.querySelector('[data-preview-clipboard-bar="short-end"]')?.nextElementSibling).toHaveClass('border-l-0');
+    expect(JSON.stringify(source)).toBe(saved);
+  });
+
+  it('preserves repeat and final endings while filling in ordinary section endings', () => {
+    const source: Song = { ...song, sections: [
+      { id: 'a', title: 'Verse', bars: [{ id: 'repeat', chords: ['C'], repeatEnd: true, doubleBar: true }] },
+      { id: 'b', title: 'Chorus', bars: [{ id: 'final', chords: ['G'], finalBar: true }] },
+      { id: 'c', title: 'Bridge', bars: [{ id: 'ordinary', chords: ['F'], doubleBar: false }] }
+    ] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    expect(container.querySelectorAll('.sheet-repeat-end')).toHaveLength(1);
+    expect(container.querySelectorAll('.sheet-final-bar')).toHaveLength(1);
+    expect(container.querySelectorAll('.sheet-double-bar')).toHaveLength(1);
+    expect(container.querySelector('[data-preview-clipboard-bar="ordinary"] .sheet-double-bar')).not.toBeNull();
+  });
+
+  it('moves the automatic boundary when a section grows and restores it after deletion', () => {
+    const { container, rerender } = render(<ChordSheet song={song} language="zh" currentKey="C" />);
+    expect(container.querySelector('[data-preview-clipboard-bar="bar-1"] .sheet-double-bar')).not.toBeNull();
+    const extended: Song = { ...song, sections: [{ ...song.sections[0], bars: [...song.sections[0].bars, { id: 'new-end', chords: [] }] }] };
+    rerender(<ChordSheet song={extended} language="zh" currentKey="C" />);
+    expect(container.querySelector('[data-preview-clipboard-bar="bar-1"] .sheet-double-bar')).toBeNull();
+    expect(container.querySelector('[data-preview-clipboard-bar="new-end"] .sheet-double-bar')).not.toBeNull();
+    rerender(<ChordSheet song={song} language="zh" currentKey="C" />);
+    expect(container.querySelector('[data-preview-clipboard-bar="bar-1"] .sheet-double-bar')).not.toBeNull();
+  });
+
+  it('honors a saved manual single-line choice and resumes automatic endings when it is undone', () => {
+    const single = normalizeSongBars({ ...song, sections: [{ ...song.sections[0], bars: [{ ...song.sections[0].bars[0], singleBar: true }] }] });
+    const { container, rerender } = render(<ChordSheet song={single} language="zh" currentKey="C" />);
+    expect(container.querySelector('.sheet-double-bar')).toBeNull();
+    const extended = { ...single, sections: [{ ...single.sections[0], bars: [...single.sections[0].bars, { id: 'added', chords: ['G'] }] }] };
+    rerender(<ChordSheet song={extended} language="zh" currentKey="C" />);
+    expect(container.querySelector('[data-preview-clipboard-bar="added"] .sheet-double-bar')).not.toBeNull();
+    rerender(<ChordSheet song={single} language="zh" currentKey="C" />);
+    expect(container.querySelector('.sheet-double-bar')).toBeNull();
+    rerender(<ChordSheet song={song} language="zh" currentKey="C" />);
+    expect(container.querySelector('.sheet-double-bar')).not.toBeNull();
+  });
+
+  it('closes before closed padding without putting boundaries on empty or unmetered sections', () => {
+    const source: Song = { ...song, sections: [
+      { id: 'padded', title: 'Verse', bars: [{ id: 'music-end', chords: ['C'] }, { id: 'padding', chords: [], closed: true }] },
+      { id: 'empty', title: 'Chorus', bars: [] },
+      { id: 'unmetered', title: 'Bridge', bars: [{ id: 'free', chords: [], unmeteredChordLines: [['C', 'F']] }] }
+    ] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    expect(container.querySelectorAll('.sheet-double-bar')).toHaveLength(1);
+    expect(container.querySelector('[data-preview-clipboard-bar="music-end"] .sheet-double-bar')).not.toBeNull();
+    expect(container.querySelector('[data-preview-clipboard-bar="padding"]')).toHaveAttribute('data-preview-closed-cell', 'true');
+  });
+
+  it.each([{}, { repeatEnd: true }, { finalBar: true }])('keeps the closing boundary visible on a merged rest: %j', ending => {
+    const source: Song = { ...song, sections: [{ id: 'rest', title: 'Intro', bars: [
+      { id: 'rest-start', chords: ['|4|'] }, { id: 'rest-2', chords: [] },
+      { id: 'rest-3', chords: [] }, { id: 'rest-end', chords: [], ...ending }
+    ] }] };
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
+    const marker = 'repeatEnd' in ending ? '.sheet-repeat-end' : 'finalBar' in ending ? '.sheet-final-bar' : '.sheet-double-bar';
+    expect(container.querySelector(`[data-preview-clipboard-bar="rest-start"] ${marker}`)).not.toBeNull();
+    expect(container.querySelector('[data-preview-clipboard-bar="rest-start"]')).toHaveClass('border-r-0');
+  });
+
   it('retains chord ownership and exact offset labels on the stable beat grid', () => {
     const source: Song = {
       ...song,
@@ -605,7 +678,7 @@ describe('ChordSheet preview input caret', () => {
     const brackets = container.querySelectorAll('[data-sheet-ending-bracket="1"]');
     expect(brackets).toHaveLength(2);
     expect(brackets[0]).toHaveClass('-top-[16px]', 'h-[12px]', '-left-[2px]', '-right-[1px]', 'border-l-[2px]');
-    expect(brackets[1]).toHaveClass('-left-[1px]', '-right-[1px]', 'border-r-[2px]');
+    expect(brackets[1]).toHaveClass('-left-[1px]', 'right-0', 'border-r-[2px]');
     expect(container.querySelector('[data-sheet-ending-number="1"]')).toHaveClass('left-[2px]', '-top-[1px]', 'text-[13px]', 'font-semibold', 'text-gray-950');
     expect(screen.getByText('1.')).toBeInTheDocument();
 
@@ -2816,7 +2889,9 @@ it.each(['doubleBar', 'finalBar', 'repeatEnd'] as const)('avoids duplicating the
   const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" />);
   expect(container.querySelector('[data-preview-clipboard-bar="next"]')).toHaveClass('border-l-0');
   expect(container.querySelectorAll('.sheet-double-bar-start')).toHaveLength(0);
-  expect(container.querySelectorAll('.sheet-repeat-marker')).toHaveLength(1);
+  expect(container.querySelector('[data-preview-clipboard-bar="previous"]')?.querySelectorAll('.sheet-repeat-marker')).toHaveLength(1);
+  expect(container.querySelector('[data-preview-clipboard-bar="next"]')?.querySelectorAll('.sheet-repeat-marker')).toHaveLength(1);
+  expect(container.querySelector('[data-preview-clipboard-bar="next"] .sheet-double-bar')).not.toBeNull();
 });
 
 

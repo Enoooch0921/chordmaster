@@ -42,6 +42,7 @@ interface SongMetadataPanelProps {
   initialFocusField?: PreviewMetadataFocusField;
   initialAdvancedOpen?: boolean;
   canEditKey?: boolean;
+  canChangeMapVisibility?: boolean;
 }
 
 const DISPLAY_MODE_OPTIONS: SetlistDisplayMode[] = [
@@ -277,6 +278,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
   deviceLayout = 'desktop',
   initialFocusField,
   initialAdvancedOpen = false,
+  canChangeMapVisibility = true,
   canEditKey = true
 }) => {
   const copy = getUiCopy(language);
@@ -923,6 +925,11 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     </div>
   );
 
+  const mapVisibilityField = canChangeMapVisibility && (
+    <CompactToggleSwitch label={language === 'zh' ? '顯示曲序' : 'Show song map'}
+      checked={song.showSongMap !== false} onChange={value => updateField('showSongMap', value)} size="sm" />
+  );
+
   const barHeightField = (
     <div>
       <label className={controlLabelClassName}>{language === 'zh' ? '小節高度' : 'Bar Height'}</label>
@@ -1003,6 +1010,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     ];
     return (
       <section ref={panelRef} data-song-metadata-panel data-device-layout={deviceLayout} className={`song-info-form ${isPhoneLayout ? 'song-info-mobile' : 'song-info-popover'}`}>
+        {canChangeMapVisibility && <div className="song-info-map-visibility">{mapVisibilityField}</div>}
         {tabs.length > 1 ? <div role="tablist" aria-label={language === 'zh' ? '歌曲資訊分類' : 'Song information sections'} className="song-info-tabs">
           {tabs.map((tab, index) => <button key={tab.id} type="button" role="tab" id={`${metadataInputId}-${tab.id}-tab`}
             aria-selected={activeSection === tab.id} aria-controls={`${metadataInputId}-${tab.id}-panel`}
@@ -1031,7 +1039,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
               {isPhoneLayout && !isLibraryInputMode && capoField}
             </div>
           </> : activeSection === 'layout' ? <div className="song-info-layout">
-            {displayOrInputField}{barNumbersField}{barHeightField}
+            {!isPreviewHeader && <>{displayOrInputField}{barNumbersField}{barHeightField}</>}
           </div> : <div className="song-info-references">
             {renderReferenceEditor('band')}{renderReferenceEditor('vocal')}
           </div>}
@@ -1048,6 +1056,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         data-device-layout={deviceLayout}
         className="grid grid-cols-2 gap-x-3 gap-y-3"
       >
+        <div className="col-span-2">{mapVisibilityField}</div>
         <div className="col-span-2">{titleField}</div>
         {versionField}
         {translatorField}
@@ -1075,6 +1084,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           {copy.editor.originalKey}: {song.originalKey}
         </div>
       </div>
+
+      {canChangeMapVisibility && <div className="song-info-map-visibility">{mapVisibilityField}</div>}
 
       {isWideLayout ? (
         <div className={isPhoneLayout ? 'mt-3 space-y-5' : 'mt-1.5 space-y-1.5'}>

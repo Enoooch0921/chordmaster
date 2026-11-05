@@ -1,5 +1,6 @@
 import { getPickupTimeSignature, pickupTimeSignatureForUnits, resizePickup } from '../utils/pickupUtils';
 import BarlineGlyph from './BarlineGlyph';
+import { hasDoubleBarline } from '../utils/barlines';
 import TempoChangeControl from './TempoChangeControl';
 import UnmeteredChordsEditor from './UnmeteredChordsEditor';
 import { hasUnmeteredChords, transposeUnmeteredChordLines } from '../utils/unmeteredChords';
@@ -5774,6 +5775,7 @@ const SongEditor: React.FC<Props> = ({
   ) => {
     const bar = section.bars[bIdx];
     if (!bar) return null;
+    const showsDoubleBar = hasDoubleBarline(section, bIdx);
 
     if (hasUnmeteredChords(bar)) return <UnmeteredChordsEditor lines={bar.unmeteredChordLines!} language={language} onChange={unmeteredChordLines => updateBar(sIdx,bIdx,{unmeteredChordLines})}/>;
 
@@ -6439,10 +6441,10 @@ const SongEditor: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => updateBar(sIdx, bIdx, { doubleBar: !bar.doubleBar })}
-                      className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.doubleBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                      onClick={() => updateBar(sIdx, bIdx, { doubleBar: !showsDoubleBar })}
+                      className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${showsDoubleBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
                       title={copy.editor.doubleBar}
-                      aria-pressed={Boolean(bar.doubleBar)}
+                      aria-pressed={showsDoubleBar}
                     >
                       <BarlineGlyph />
                     </button>
@@ -7229,6 +7231,7 @@ const SongEditor: React.FC<Props> = ({
             >
               {section.bars.map((bar, bIdx) => (
                 (() => {
+                  const showsDoubleBar = hasDoubleBarline(section, bIdx);
                   if (hasUnmeteredChords(bar)) return <div key={bar.id || bIdx} className="col-span-full rounded-xl border border-slate-200 bg-white p-3"><UnmeteredChordsEditor lines={bar.unmeteredChordLines!} language={language} onChange={unmeteredChordLines => updateBar(sIdx,bIdx,{unmeteredChordLines})}/></div>;
                   const isActiveBar = activeBar?.sIdx === sIdx && activeBar?.bIdx === bIdx;
                   const isCopiedHighlight = copiedBarHighlight?.sIdx === sIdx && copiedBarHighlight?.bIdx === bIdx;
@@ -8224,10 +8227,10 @@ const SongEditor: React.FC<Props> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => updateBar(sIdx, bIdx, { doubleBar: !bar.doubleBar })}
-                          className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${bar.doubleBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
+                          onClick={() => updateBar(sIdx, bIdx, { doubleBar: !showsDoubleBar })}
+                          className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${showsDoubleBar ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-indigo-300'}`}
                           title={copy.editor.doubleBar}
-                          aria-pressed={Boolean(bar.doubleBar)}
+                          aria-pressed={showsDoubleBar}
                         >
                           <BarlineGlyph />
                         </button>

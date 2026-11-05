@@ -6,6 +6,7 @@ import { useIsPresent } from 'motion/react';
 import { applyPickupEditorSong, toPickupEditorSong } from '../../lib/pickupEditing';
 import { PICKUP_EDITOR_SECTION_ID, pickupTimeSignatureForUnits, resizePickup } from '../../utils/pickupUtils';
 import BarlineGlyph from '../BarlineGlyph';
+import { hasDoubleBarline } from '../../utils/barlines';
 import TempoChangeControl from '../TempoChangeControl';
 import UnmeteredChordsEditor from '../UnmeteredChordsEditor';
 import { hasUnmeteredChords } from '../../utils/unmeteredChords';
@@ -356,9 +357,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
   const located = findSongBar(session.draftSong, session.target);
   const bar = located?.bar;
-  const barlineState = bar?.finalBar ? 'final' : bar?.doubleBarStart ? 'double-start' : bar?.doubleBar ? 'double' : 'off';
   const section = located?.section
     ?? session.draftSong.sections.find((candidate) => candidate.id === session.target.sectionId);
+  const showsDoubleBar = !isPickup && Boolean(located && hasDoubleBarline(located.section, located.barIndex));
+  const barlineState = bar?.finalBar ? 'final' : bar?.doubleBarStart ? 'double-start' : showsDoubleBar ? 'double' : 'off';
   const beatCount = bar ? getBeatCount(session.draftSong, bar) : 4;
   const notationMode = session.notationMode;
   const chordInputMode = bar?.chordKeyUnspecified ? 'nashville' : session.chordInputMode;
@@ -1403,7 +1405,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
                   <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.repeatStart ? activeButtonClass : ''}`} onClick={() => { updateFields({ repeatStart: !bar.repeatStart }); setActivePicker(null); }} aria-label="|: Repeat Start">|:</button>
                   <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.repeatEnd ? activeButtonClass : ''}`} onClick={() => { updateFields({ repeatEnd: !bar.repeatEnd }); setActivePicker(null); }} aria-label=":| Repeat End">:|</button>
                   <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.doubleBarStart ? activeButtonClass : ''}`} onClick={() => { updateFields({ doubleBarStart: !bar.doubleBarStart }); setActivePicker(null); }} aria-label={language === 'zh' ? '前雙小節線 ||' : 'Double barline before ||'} aria-pressed={Boolean(bar.doubleBarStart)}><BarlineGlyph /><span className="text-[10px]">{language === 'zh' ? '前' : 'L'}</span></button>
-                  <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.doubleBar ? activeButtonClass : ''}`} onClick={() => { updateFields({ doubleBar: !bar.doubleBar }); setActivePicker(null); }} aria-label={language === 'zh' ? '雙小節線 ||' : 'Double barline ||'} aria-pressed={Boolean(bar.doubleBar)}><BarlineGlyph /></button>
+                  <button type="button" className={`${buttonClass} min-h-0 text-xl ${showsDoubleBar ? activeButtonClass : ''}`} onClick={() => { updateFields({ doubleBar: !showsDoubleBar }); setActivePicker(null); }} aria-label={language === 'zh' ? '雙小節線 ||' : 'Double barline ||'} aria-pressed={showsDoubleBar}><BarlineGlyph /></button>
                   <button type="button" className={`${buttonClass} min-h-0 text-xl ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => { updateFields({ finalBar: !bar.finalBar }); setActivePicker(null); }} aria-label="|| Final"><BarlineGlyph final /></button>
                 </div>
               )}
@@ -1564,7 +1566,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.repeatStart ? activeButtonClass : ''}`} onClick={() => updateFields({ repeatStart: !bar.repeatStart })} aria-label="|: Repeat Start">|:</button>
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.repeatEnd ? activeButtonClass : ''}`} onClick={() => updateFields({ repeatEnd: !bar.repeatEnd })} aria-label=":| Repeat End">:|</button>
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.doubleBarStart ? activeButtonClass : ''}`} onClick={() => updateFields({ doubleBarStart: !bar.doubleBarStart })} aria-label={language === 'zh' ? '前雙小節線 ||' : 'Double barline before ||'} aria-pressed={Boolean(bar.doubleBarStart)}><BarlineGlyph /><span className="text-[10px]">{language === 'zh' ? '前' : 'L'}</span></button>
-            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.doubleBar ? activeButtonClass : ''}`} onClick={() => updateFields({ doubleBar: !bar.doubleBar })} aria-label={language === 'zh' ? '雙小節線 ||' : 'Double barline ||'} aria-pressed={Boolean(bar.doubleBar)}><BarlineGlyph /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${showsDoubleBar ? activeButtonClass : ''}`} onClick={() => updateFields({ doubleBar: !showsDoubleBar })} aria-label={language === 'zh' ? '雙小節線 ||' : 'Double barline ||'} aria-pressed={showsDoubleBar}><BarlineGlyph /></button>
             <button type="button" className={`${buttonClass} !min-h-7 px-0 text-base ${bar.finalBar ? activeButtonClass : ''}`} onClick={() => updateFields({ finalBar: !bar.finalBar })} aria-label="|| Final"><BarlineGlyph final /></button>
             {ENDINGS.map((ending) => <button key={ending} type="button" className={`${buttonClass} !min-h-7 overflow-hidden px-1 ${bar.ending === ending ? activeButtonClass : ''}`} onClick={() => updateFields({ ending: bar.ending === ending ? undefined : ending })} aria-label={`Ending ${ending}`}><EndingGlyph value={ending} /></button>)}
           </div>

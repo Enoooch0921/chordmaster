@@ -25,7 +25,7 @@ export function copyPreviewContent(song: Song, targets: SongBarIdentity[], kind:
   return items.length ? { kind, items } : null;
 }
 
-const markerFields = ['leftMarker', 'rightMarker', 'leftText', 'rightText', 'repeatStart', 'repeatEnd', 'doubleBar', 'doubleBarStart', 'finalBar', 'ending'] as const;
+const markerFields = ['leftMarker', 'rightMarker', 'leftText', 'rightText', 'repeatStart', 'repeatEnd', 'doubleBar', 'singleBar', 'doubleBarStart', 'finalBar', 'ending'] as const;
 
 export function previewClipboardText(clipboard: PreviewClipboard): string {
   return clipboard.items.map(({ bar, timeSignature }) => {

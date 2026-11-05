@@ -5,6 +5,7 @@ const isDialog = (target: EventTarget | null) => target instanceof Element
   && Boolean(target.closest('[role="dialog"], [aria-modal="true"]') && !target.closest('[data-preview-bar-editor]'));
 const isNativeText = (target: EventTarget | null) => target instanceof Element && (
   isDialog(target)
+  || Boolean(target.closest('[data-personal-notes-layer], [data-personal-notes-tools]'))
   || Boolean(target.closest('input, textarea, select, [contenteditable]') && !target.closest('[data-song-history-input], [data-preview-chord-capture]'))
 );
 type Point = { x: number; y: number };

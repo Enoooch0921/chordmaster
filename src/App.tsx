@@ -1,3 +1,6 @@
+import PersonalChordSheet from './components/PersonalChordSheet';
+import { useHandwritingSelectionGuard } from './hooks/useHandwritingSelectionGuard';
+import { getSongMap, sectionSongMap } from './lib/songMap';
 import SlidingSelection from './components/ui/SlidingSelection';
 import { useContentSwitchMotion } from './hooks/useContentSwitchMotion';
 import { loadChordInputPreference, saveChordInputPreference } from './lib/chordInputPreference';
@@ -867,6 +870,7 @@ const normalizeSongBars = <T extends Song>(song: T): T => {
           repeatStart: Boolean(safeBar.repeatStart),
           repeatEnd: Boolean(safeBar.repeatEnd),
           doubleBar: Boolean(safeBar.doubleBar),
+          singleBar: safeBar.singleBar === true ? true : undefined,
           doubleBarStart: safeBar.doubleBarStart === true ? true : undefined,
           finalBar: Boolean(safeBar.finalBar),
           ending: normalizeOptionalText(safeBar.ending)
@@ -1738,6 +1742,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       : false
   ));
   const [isPerformanceMode, setIsPerformanceMode] = useState(false);
+  const [isHandwriting, setIsHandwriting] = useState(false);
+  useHandwritingSelectionGuard(isHandwriting && Boolean(authenticatedUser));
   const [isApplyingAppUpdate, setIsApplyingAppUpdate] = useState(false);
   const isPerformanceModeRef = useRef(isPerformanceMode);
   isPerformanceModeRef.current = isPerformanceMode;
@@ -2495,7 +2501,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           activeSetlistEditableSong ?? selectedSetlistSourceSong,
           effectiveSelectedSetlist,
           selectedSetlistSong,
-          setlistCapoResolutionOptions
+          setlistCapoResolutionOptions,
+          selectedSetlistSourceSong
         ),
         references: selectedSetlistSourceSong.references,
         ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
@@ -2555,7 +2562,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               activeDraftEditorSong,
               effectiveSelectedSetlist,
               selectedSetlistSong,
-              setlistCapoResolutionOptions
+              setlistCapoResolutionOptions,
+              selectedSetlistSourceSong
             ),
             references: selectedSetlistSourceSong.references,
             ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
@@ -2654,7 +2662,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         }`
   );
   const denseToolbarMenuButtonClassName = `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
-  const compactEditorToggleLabel = language === 'zh' ? '編輯' : 'Editor';
+  const handwritingLabel = language === 'zh' ? '手寫筆記' : 'Handwritten notes';
   const compactLyricsToggleLabel = language === 'zh' ? '歌詞' : 'Lyrics';
   const compactSaveLabel = language === 'zh' ? '儲存' : 'Save';
   const compactPdfLabel = language === 'zh' ? 'PDF' : 'PDF';
@@ -4016,43 +4024,26 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setActiveAppView((currentView) => currentView === nextView ? 'sheet' : nextView);
   };
 
-  const handleToggleEditor = () => {
-    if (!isEditing && !canOpenEditor) {
-      toast.error(language === 'zh' ? '你目前只有查看權限，不能編輯內容。' : 'Your current role can view this workspace but cannot edit it.');
+  const handleToggleHandwriting = () => {
+    if (!authenticatedUser) return;
+    const open = !isHandwriting;
+    const change = () => {
+      setPreviewEditSession(null);
+      setIsEditing(false);
+      setIsLyricsMode(false);
+      setIsSidebarPinned(false); setIsSidebarHovered(false); setIsMobileNavOpen(false);
+      setIsHandwriting(open);
+    };
+    if (previewEditSession?.dirty) {
+      pendingPreviewTransitionRef.current = change;
+      setIsPreviewEditExitPromptOpen(true);
       return;
     }
-
-    // When opening the editor in setlist mode, snap selection to the setlist
-    // song the user is currently looking at by picking the card whose center
-    // is closest to the viewport center. Using a 28%-from-top activation line
-    // (the auto-track scroll observer's heuristic) often picked the song
-    // above the one the user was actually reading.
-    if (!isEditing && isSetlistMode && previewRef.current) {
-      const scrollRoot = previewRef.current;
-      const songCards = Array.from(scrollRoot.querySelectorAll('[data-setlist-preview-song-id]')) as HTMLElement[];
-      if (songCards.length > 0) {
-        const rootRect = scrollRoot.getBoundingClientRect();
-        const viewportCenterY = rootRect.top + rootRect.height / 2;
-        let nextId: string | null = null;
-        let smallestDistance = Number.POSITIVE_INFINITY;
-        for (const card of songCards) {
-          const cardRect = card.getBoundingClientRect();
-          const cardCenter = (cardRect.top + cardRect.bottom) / 2;
-          const distance = Math.abs(cardCenter - viewportCenterY);
-          if (distance < smallestDistance) {
-            smallestDistance = distance;
-            nextId = card.dataset.setlistPreviewSongId ?? null;
-          }
-        }
-        if (nextId && nextId !== selectedSetlistSongId) {
-          skipNextSetlistPreviewAutoScrollRef.current = true;
-          setSelectedSetlistSongId(nextId);
-        }
-      }
-    }
-
-    setIsEditing((current) => !current);
+    change();
   };
+  useEffect(() => {
+    if (isEditing || activePreviewEditSession || isLyricsMode || !authenticatedUser) setIsHandwriting(false);
+  }, [isEditing, activePreviewEditSession, isLyricsMode, authenticatedUser?.id]);
 
   const handleToggleLibraryEditing = () => {
     if (!isLibraryEditing && !canEditTeamSongs) {
@@ -7479,7 +7470,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   item.songData ?? sourceSong,
                   effectiveSelectedSetlist,
                   item,
-                  setlistCapoResolutionOptions
+                  setlistCapoResolutionOptions,
+                  sourceSong
                 );
                 const derivedSong = {
                   ...baseDerivedSong,
@@ -7609,7 +7601,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   });
 
   const focusPerformanceKeyboardCapture = usePerformanceKeyboardFocus(
-    isPerformanceMode, performanceKeyboardCaptureRef, performanceOverlayRef,
+    isPerformanceMode && !isHandwriting, performanceKeyboardCaptureRef, performanceOverlayRef,
     performanceFullscreen.canRequestFullscreen
   );
 
@@ -7768,7 +7760,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     };
     const observer = new ResizeObserver(scheduleSync);
     if (performanceSheetRef.current) observer.observe(performanceSheetRef.current);
-    const mutations = new MutationObserver(scheduleSync);
+    const mutations = new MutationObserver(records => {
+      if (records.some(record => !(record.target as Element).closest?.('[data-personal-notes-layer]'))) scheduleSync();
+    });
     if (performanceSheetRef.current) mutations.observe(performanceSheetRef.current, { childList: true, subtree: true });
     return () => { observer.disconnect(); mutations.disconnect(); window.cancelAnimationFrame(rAF); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -10349,8 +10343,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       : activeNavigationPreviewSong ?? song) as StoredSong;
 
     return (
-      <RecoveryBoundary label="譜面預覽"><ChordSheet
+      <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
+        notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
+        noteOwner={authenticatedUser?.id} noteSongId={song.id} notesActive={!isPerformanceMode && !isEditing && !activePreviewEditSession}
         song={renderedSong}
+        songMapEditor={canEditTeamSongs && !activePreviewEditSession && !isEditing ? {
+          scope: 'library', fallback: sectionSongMap(song.sections), sections: sectionSongMap(song.sections),
+          onSave: songMap => handleSongChange({ ...song, songMap }),
+        } : undefined}
         lastEditedAt={savedChartEditedAt(song.id)}
         language={language}
         currentKey={renderedSong.currentKey}
@@ -10371,7 +10371,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       /></RecoveryBoundary>
     );
-  }, [savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
+  }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
 
   const setlistPreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
@@ -10387,7 +10387,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               item.songData ?? sourceSong,
               effectiveSelectedSetlist,
               item,
-              setlistCapoResolutionOptions
+              setlistCapoResolutionOptions,
+              sourceSong
             ),
             references: sourceSong.references,
             ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
@@ -10398,7 +10399,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return {
         item,
         isSelected,
-        song: previewSong
+        song: previewSong, libraryMap: sourceSong.songMap
       };
     });
   }, [
@@ -10473,7 +10474,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
     return (
       <div className="flex flex-col gap-8">
-        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong }) => (
+        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong, libraryMap }) => (
           <div
             key={item.id}
             data-setlist-preview-song-id={item.id}
@@ -10485,8 +10486,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               isSelected ? 'ring-2 ring-indigo-300 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'ring-2 ring-transparent'
             }`}
           >
-            <RecoveryBoundary label="譜面預覽"><ChordSheet
+            <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
+              notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
+        noteOwner={authenticatedUser?.id} noteSongId={item.songId} notesActive={isSelected && !isPerformanceMode && !isEditing && !activePreviewEditSession}
               song={previewSong}
+              songMapEditor={isSelected && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession && !isEditing ? {
+                scope: 'setlist', setlistName: selectedSetlist?.name, fallback: getSongMap({ songMap: libraryMap, sections: previewSong.sections }), sections: sectionSongMap(previewSong.sections),
+                onSave: setlistSongMap => handleUpdateSetlistSong(item.id, current => ({
+                  ...current, songData: { ...(current.songData ?? activeSetlistEditableSong), setlistSongMap },
+                })),
+              } : undefined}
               lastEditedAt={savedChartEditedAt(item.songId, selectedSetlistId ?? undefined, item.id)}
               language={language}
               currentKey={previewSong.currentKey}
@@ -10509,7 +10518,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         ))}
       </div>
     );
-  }, [savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
+  }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -11392,6 +11401,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const metadataPanelContent = isSetlistMode
     ? (selectedSetlist && effectiveSelectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
         <SongMetadataPanel
+          canChangeMapVisibility={canEditSelectedSetlistContent}
           song={isJoinedSetlist
             ? {
                 ...(activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong),
@@ -13322,6 +13332,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
               {isSheetView ? (
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  <button type="button" onClick={handleToggleHandwriting} disabled={!authenticatedUser}
+                    title={handwritingLabel} aria-label={handwritingLabel} aria-pressed={isHandwriting}
+                    className={`${getMobileTopbarActionClassName(isHandwriting ? 'primary' : 'default')} shrink-0 disabled:opacity-40`}>
+                    <Edit3 size={16} />
+                  </button>
                   <button
                     type="button"
                     onClick={handleToggleLyricsMode}
@@ -13445,14 +13460,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                   <button
                     type="button"
-                    onClick={handleToggleEditor}
-                    disabled={!canOpenEditor}
-                    title={isEditing ? copy.closeEditor : copy.openEditor}
-                    aria-label={isEditing ? copy.closeEditor : copy.openEditor}
-                    className={`${isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
+                    onClick={handleToggleHandwriting}
+                    disabled={!authenticatedUser}
+                    title={authenticatedUser ? handwritingLabel : (language === 'zh' ? '登入後使用個人筆記' : 'Sign in to use personal notes')}
+                    aria-label={handwritingLabel}
+                    aria-pressed={isHandwriting}
+                    className={`${isHandwriting ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
                   >
                     <Edit3 size={14} />
-                    {denseToolbarShowsLabels ? <span>{compactEditorToggleLabel}</span> : null}
+                    {denseToolbarShowsLabels ? <span>{language === 'zh' ? '手寫' : 'Write'}</span> : null}
                   </button>
 
                   <button
@@ -13712,11 +13728,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                   <button
                     type="button"
-                    onClick={handleToggleEditor}
-                    disabled={!canOpenEditor}
-                    title={isEditing ? copy.closeEditor : copy.openEditor}
-                    aria-label={isEditing ? copy.closeEditor : copy.openEditor}
-                    className={`${isEditing ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
+                    onClick={handleToggleHandwriting}
+                    disabled={!authenticatedUser}
+                    title={authenticatedUser ? handwritingLabel : (language === 'zh' ? '登入後使用個人筆記' : 'Sign in to use personal notes')}
+                    aria-label={handwritingLabel}
+                    aria-pressed={isHandwriting}
+                    className={`${isHandwriting ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
                   >
                     <Edit3 size={14} />
                   </button>
@@ -14077,12 +14094,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   <div className={`grid min-w-0 gap-2 ${toolbarPrimaryGridClassName}`}>
                     <button
                       type="button"
-                      onClick={handleToggleEditor}
-                      disabled={!canOpenEditor}
-                      className={`${isEditing ? toolbarPrimaryEmphasisActionClassName : toolbarPrimaryActionClassName} disabled:cursor-default disabled:opacity-40`}
+                      onClick={handleToggleHandwriting}
+                      disabled={!authenticatedUser}
+                      aria-pressed={isHandwriting}
+                      className={`${isHandwriting ? toolbarPrimaryEmphasisActionClassName : toolbarPrimaryActionClassName} disabled:cursor-default disabled:opacity-40`}
                     >
                       <Edit3 size={16} />
-                      <span>{isEditing ? copy.closeEditor : copy.openEditor}</span>
+                      <span>{handwritingLabel}</span>
                     </button>
 
                     <button
@@ -15901,6 +15919,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         <div
           ref={performanceOverlayRef}
           data-performance-overlay
+          data-handwriting={isHandwriting || undefined}
           tabIndex={-1}
           className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-950 select-none"
           style={{
@@ -15908,11 +15927,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             padding: 'env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px)',
           }}
           onPointerDownCapture={(event) => {
+            if (isHandwriting || (event.target as Element).closest('[data-personal-notes-layer], [data-personal-notes-tools]')) return;
             if (event.pointerType === 'mouse') performanceSuppressClickRef.current = false;
             focusPerformanceKeyboardCapture();
           }}
-          onMouseDownCapture={focusPerformanceKeyboardCapture}
-          onTouchStartCapture={focusPerformanceKeyboardCapture}
+          onMouseDownCapture={event => { if (!isHandwriting && !(event.target as Element).closest('[data-personal-notes-layer], [data-personal-notes-tools]')) focusPerformanceKeyboardCapture(); }}
+          onTouchStartCapture={event => { if (!isHandwriting && !(event.target as Element).closest('[data-personal-notes-layer], [data-personal-notes-tools]')) focusPerformanceKeyboardCapture(); }}
           onTouchStart={handlePerformanceTouchStart}
           onTouchEnd={handlePerformanceTouchEnd}
           onTouchCancel={() => { performanceTouchRef.current = null; performanceSuppressClickRef.current = false; }}
@@ -15962,7 +15982,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       song={isSetlistMode ? (activeSetlistPreviewSong ?? song) : song} language={language} exportMode />
                   ) : isSetlistMode ? (
 	                  activeSetlistPreviewSong && (
-	                    <RecoveryBoundary label="譜面預覽"><ChordSheet
+	                    <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
+                          notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
+        noteOwner={authenticatedUser?.id} noteSongId={selectedSetlistSong?.songId} notesPerformance
 	                      song={activeSetlistPreviewSong}
 	                      lastEditedAt={savedChartEditedAt(selectedSetlistSong?.songId ?? '', selectedSetlist?.id, selectedSetlistSong?.id)}
 	                      language={language}
@@ -15971,7 +15993,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 	                    /></RecoveryBoundary>
 	                  )
 	                ) : (
-	                  <RecoveryBoundary label="譜面預覽"><ChordSheet
+	                  <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
+                        notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
+        noteOwner={authenticatedUser?.id} noteSongId={song.id} notesPerformance
 	                    song={song}
 	                    lastEditedAt={savedChartEditedAt(song.id)}
 	                    language={language}
@@ -16053,7 +16077,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               if (performanceSuppressClickRef.current) { performanceSuppressClickRef.current = false; return; }
               handlePerformancePrevPage();
             }}
-            className="absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3"
+            className={isHandwriting ? "absolute left-3 top-1/2 z-10 -translate-y-1/2 touch-manipulation" : "absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3"}
             aria-label="Previous page"
             aria-keyshortcuts="ArrowLeft ArrowUp PageUp Shift+Space"
           >
@@ -16069,7 +16093,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               if (performanceSuppressClickRef.current) { performanceSuppressClickRef.current = false; return; }
               handlePerformanceNextPage();
             }}
-            className="absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3"
+            className={isHandwriting ? "absolute right-3 top-1/2 z-10 -translate-y-1/2 touch-manipulation" : "absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3"}
             aria-label="Next page"
             aria-keyshortcuts="ArrowRight ArrowDown PageDown Space Enter"
           >

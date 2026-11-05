@@ -1,3 +1,5 @@
+import ChartSongMap, { type SongMapEditorOptions } from './ChartSongMap';
+import { getSongMap } from '../lib/songMap';
 import NotationSelectionPointer from './NotationSelectionPointer';
 import { projectNotationVoice } from '../lib/notationVoiceEditing';
 import PickupPreview from './PickupPreview';
@@ -8,6 +10,7 @@ import { currentKeyMode } from '../utils/keyMode';
 import type { TonalMode } from '../types';
 import { hasUnmeteredChords } from '../utils/unmeteredChords';
 import { isClosedBar } from '../utils/closedBar';
+import { hasDoubleBarline, lastOpenBarIndex } from '../utils/barlines';
 import { getChordPassEvents } from '../utils/chordPassVariants';
 import { getChordEvents, chordEventLabel } from '../utils/chordSubdivisions';
 import NotationAlignedChordRow from './NotationAlignedChordRow';
@@ -40,7 +43,7 @@ import {
 import { getNashvilleFontFamily } from '../constants/nashvilleFonts';
 import { getUiCopy, localizeSectionTitle } from '../constants/i18n';
 import { formatInitialCaps } from '../utils/textUtils';
-import { Repeat, ArrowUpRight, ArrowDownRight, SlidersHorizontal } from 'lucide-react';
+import { Repeat, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import BeatSlashGlyph from './BeatSlashGlyph';
@@ -799,6 +802,7 @@ const getPreviewAnchorRect = (element: HTMLElement): PreviewAnchorRect => {
 const VALUE_ANCHORED_META_FIELDS = new Set<ChordSheetMetaField>(['key', 'performanceKey', 'tempo', 'timeSignature']);
 
 interface ChordSheetProps {
+  songMapEditor?: SongMapEditorOptions;
   song: Song;
   lastEditedAt?: number | null;
   language: AppLanguage;
@@ -1371,7 +1375,7 @@ const ChordBeatGroup: React.FC<{
   </div>
 );
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, excerpt, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, songMapEditor, lastEditedAt, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, showPageBadges = true, excerpt, onSectionReorder }) => {
   const editedAt = lastEditedAt === undefined ? getChartEditedAt(song) : lastEditedAt;
   const phraseCarries = React.useMemo(() => song.sections.map(section => {
     let primary = 0;
@@ -1958,6 +1962,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
   // Three-line mode deliberately fits fewer rows on each A4 page. The extra
   // vertical room is printable writable space, not an editor-only zoom.
   const barRowCount = song.barRowCount === 1 ? 1 : song.barRowCount === 3 ? 3 : 2;
+  const mapSteps = React.useMemo(() => getSongMap(song), [song.songMap, song.sections]);
+  const inlineMap = mapSteps.length <= 6;
+  const showSongMap = song.showSongMap !== false;
   const ROWS_PER_PAGE_FIRST = barRowCount === 3 ? 8 : barRowCount === 1 ? 18 : 10;
   const ROWS_PER_PAGE_OTHER = barRowCount === 3 ? 9 : barRowCount === 1 ? 21 : 10;
   const allowAddBar = Boolean(onAddBarClick);
@@ -2024,7 +2031,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
   // entering chords. Never trim them from the preview or the newly-added bar
   // disappears immediately after clicking "+". Failed *sections* are filtered
   // above, while every bar in a retained section remains visible.
-  const visibleSectionBars = song.sections.map((section) => section.bars);
+  const visibleSectionBars = song.sections.map((section) => {
+    // Section boundaries follow the current arrangement without saving inferred
+    // markers into the score. Closed padding and unmetered blocks are not bars.
+    const lastBarIndex = lastOpenBarIndex(section);
+    const lastBar = section.bars[lastBarIndex];
+    if (!lastBar || !hasDoubleBarline(section, lastBarIndex) || lastBar.doubleBar) {
+      return section.bars;
+    }
+    return section.bars.map((bar, index) => index === lastBarIndex ? { ...bar, doubleBar: true } : bar);
+  });
   song.sections.forEach((section, sIdx) => {
     if (!previewSectionIndexSet.has(sIdx)) return;
     const sectionBars = visibleSectionBars[sIdx] ?? section.bars;
@@ -2223,6 +2239,17 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
         const currentSectionTitle = currentSectionRow?.sectionTitle ?? song.sections[currentSectionRow?.sIdx ?? 0]?.title ?? '';
         const pageRowGap = getPageRowGap(pageRows, pIdx);
 
+        const credits = (hasCredits || onMetaClick) && (
+          <span {...getMetaAnchorProps('credits')} title={creditLine || undefined}
+            aria-label={hasCredits ? undefined : (language === 'zh' ? '編輯版本與翻譯' : 'Edit version and translation')}
+            className={`text-xs font-semibold leading-tight whitespace-nowrap text-gray-800 ${showSongMap ? (hasCredits ? 'ml-3 border-l border-gray-300 pl-5' : 'w-4 h-4') : 'absolute left-0 top-[38px] max-w-[48%] overflow-hidden text-ellipsis'} ${onMetaClick ? 'cursor-text' : ''}`}>
+            {creditLine}
+          </span>
+        );
+        const mapHeader = !excerpt && <ChartSongMap key={previewIdentity ?? song.title}
+          infoAnchor={pIdx === 0 ? getMetaEditAnchorKey('metadata') : getMetaEditAnchorKey('metadata') + '|page-' + pIdx}
+          onInfo={onMetaClick ? element => emitMetaClickFromElement(element, 'metadata') : undefined}
+          visible={showSongMap} steps={mapSteps} firstPage={pIdx === 0} inline={inlineMap} editor={songMapEditor} language={language} title={song.title} />;
         // Obvious top-of-page "page x of n" marker, only when the song spans more
         // than one page — a clear performance cue so it's hard to lose your place.
         const isMultiPage = showPageBadges && pages.length > 1;
@@ -2255,43 +2282,20 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
         >
           {/* Header - Only on first page */}
           {!excerpt && (pIdx === 0 ? (
-            <div className="shrink-0 mb-4 border-b-2 border-gray-900 pb-2">
-              <div className="min-w-0 relative">
-                <div className="flex items-start gap-3">
+            <div className={`shrink-0 mb-4 border-b-2 border-gray-900 pb-2 ${showSongMap ? 'score-heading' : ''}`} data-map-lines={mapSteps.length > 20 ? 2 : 1}>
+              <div className={showSongMap ? 'sheet-first-heading relative grid min-w-0 items-center' : 'min-w-0 relative'}>
+                <div className="col-span-full row-start-1 flex items-start gap-3">
                   <AutoShrink className="mb-0 min-w-0 flex-1">
-                    <div
-                      {...getMetaAnchorProps('title')}
-                      className={onMetaClick ? 'cursor-text rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : undefined}
-                    >
+                    <div {...getMetaAnchorProps('title')} className={onMetaClick ? 'cursor-text' : undefined}>
                       <h1 className="text-3xl font-bold tracking-tight">{song.title}</h1>
                     </div>
                   </AutoShrink>
                   {pageBadge}
                 </div>
-                {onMetaClick ? (
-                  <button
-                    type="button"
-                    {...getMetaAnchorProps('metadata')}
-                    data-preview-only-control
-                    aria-label={language === 'zh' ? '編輯歌曲資訊' : 'Edit song information'}
-                    title={language === 'zh' ? '歌曲資訊' : 'Song information'}
-                    className="absolute right-0 top-[42px] z-10 inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white/95 px-2.5 text-[10px] font-bold tracking-normal text-indigo-700 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-                  >
-                    <SlidersHorizontal size={13} aria-hidden="true" />
-                    <span>{language === 'zh' ? '歌曲資訊' : 'Song info'}</span>
-                  </button>
-                ) : null}
-                {(hasCredits || onMetaClick) && (
-                  <div
-                    {...getMetaAnchorProps('credits')}
-                    aria-label={hasCredits ? undefined : (language === 'zh' ? '編輯版本與翻譯' : 'Edit version and translation')}
-                    className={`absolute left-0 top-[38px] ${hasCredits ? 'max-w-[48%] text-xs font-semibold text-gray-900 tracking-tight leading-tight whitespace-nowrap overflow-hidden text-ellipsis' : 'h-4 w-36'} ${onMetaClick ? 'cursor-text rounded-sm transition-shadow hover:shadow-[0_0_0_2px_rgba(99,102,241,0.28)]' : ''}`}
-                  >
-                    {hasCredits ? creditLine : null}
-                  </div>
-                )}
-                <AutoShrink className="min-w-0 overflow-visible mt-4.5">
-                  <div className="flex items-center gap-3 text-xs font-medium text-gray-500 tracking-widest" style={{ fontFamily: chordFontFamily }}>
+                {mapHeader}
+                {!showSongMap && credits}
+                <AutoShrink className={`sheet-first-meta col-span-full row-start-2 min-w-0 overflow-visible ${showSongMap ? '' : 'mt-4.5'}`}>
+                  <div className={`flex items-center gap-3 text-xs ${showSongMap ? 'font-semibold text-gray-700 tracking-wide' : 'font-medium text-gray-500 tracking-widest'}`} style={{ fontFamily: chordFontFamily }}>
                     {metadataPlayKeySequence ? (
                       <div
                         {...getMetaHitProps('performanceKey')}
@@ -2396,13 +2400,14 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
                         </>
                       )}
                     </div>
-
+                    {showSongMap && credits}
                   </div>
                 </AutoShrink>
               </div>
             </div>
           ) : (
-            <div data-sheet-continuation-header className="shrink-0 flex justify-end items-center gap-3 mb-4 border-b border-gray-200 pb-2">
+            <div data-sheet-continuation-header className={`shrink-0 flex ${showSongMap ? 'justify-between' : 'justify-end'} items-center gap-3 mb-4 border-b border-gray-200 pb-2`}>
+              {showSongMap && mapHeader}
               {pageBadge}
             </div>
           ))}
@@ -2851,7 +2856,16 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
                     if (restPlan[bIdx].covered && !excerpt) return null;
                     const restSpan = restPlan[bIdx].span;
                     const lastBIdx = bIdx + restSpan - 1;
-                    const bar = row.bars[bIdx];
+                    const sourceBar = row.bars[bIdx];
+                    // A multi-measure rest hides its covered cells, so carry
+                    // their closing boundary onto the visible rest span.
+                    const restBars = restSpan > 1 ? row.bars.slice(bIdx, bIdx + restSpan).reverse() : [];
+                    const restBoundary = sourceBar?.repeatEnd || sourceBar?.finalBar
+                      ? sourceBar
+                      : restBars.find(bar => bar.repeatEnd || bar.finalBar) ?? restBars.find(bar => bar.doubleBar);
+                    const bar = sourceBar && restBoundary && restBoundary !== sourceBar
+                      ? { ...sourceBar, repeatEnd: restBoundary.repeatEnd, finalBar: restBoundary.finalBar, doubleBar: restBoundary.doubleBar }
+                      : sourceBar;
                     const isClosedCell = isClosedBar(bar);
                     const previousBar = row.bars[bIdx - 1];
                     const globalBarIndex = row.startBIdx + bIdx;
@@ -3830,7 +3844,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|rhythm|all`}
 	                                          data-preview-hover-field={onElementClick ? 'rhythm' : undefined}
-	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm px-1 py-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass} flex-1`}
+	                                          className={`relative z-[30] bg-gray-300/70 rounded-sm px-1 py-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass} flex-1`}
                                           style={{ height: 18 + extraRhythmHeight }}
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -3869,7 +3883,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
 	                                        <div
 	                                          data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|jianpu|all`}
 	                                          data-preview-hover-field={onElementClick ? 'jianpu' : undefined}
-	                                          className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
+	                                          className={`relative z-[30] bg-gray-300/70 rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
 	                                          style={{ minHeight: 18 + extraJianpuHeight }}
 	                                          onClick={(e) => {
                                             e.stopPropagation();
@@ -3917,7 +3931,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, lastEditedAt, language, c
                                       <div
                                         data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${bar.id || row.startBIdx + bIdx}|${showBottomRhythmLane ? 'rhythm' : 'jianpu'}|all`}
                                         data-preview-hover-field={onElementClick ? (showBottomRhythmLane ? 'rhythm' : 'jianpu') : undefined}
-                                        className={`relative z-[30] bg-gray-300/70 mix-blend-multiply rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
+                                        className={`relative z-[30] bg-gray-300/70 rounded-sm ${riffLanePaddingXClass} py-0 flex-1 min-w-0 cursor-pointer transition-colors ${sharedLaneClass} ${notationLaneHitClass}`}
                                         style={showBottomRhythmLane
                                           ? { height: 18 + extraRhythmHeight }
                                           : { minHeight: 18 + extraJianpuHeight }}

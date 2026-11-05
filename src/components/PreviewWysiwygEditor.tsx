@@ -97,7 +97,7 @@ const getDesktopPosition = (anchorRect: PreviewAnchorRect, field: ChordSheetMeta
   const margin = 12;
   if (field === 'metadata') {
     const width = Math.min(480, window.innerWidth - margin * 2);
-    const maxHeight = Math.min(520, window.innerHeight * 0.7);
+    const maxHeight = Math.min(640, window.innerHeight - margin * 2);
     const below = window.innerHeight - anchorRect.bottom - margin - 8;
     const above = anchorRect.top - margin - 8;
     const preferredTop = below >= maxHeight || below >= above
@@ -980,7 +980,7 @@ export default function PreviewWysiwygEditor({
   if (usesMetadataPanel && isTouchLayout) {
     const maxHeight = deviceLayout === 'phone'
       ? Math.min(760, visualViewportState.height * 0.9)
-      : Math.min(480, visualViewportState.height * 0.75);
+      : Math.min(640, visualViewportState.height * 0.9);
     return (
       <div
         data-preview-metadata-backdrop
