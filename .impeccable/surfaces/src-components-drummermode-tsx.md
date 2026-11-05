@@ -76,3 +76,9 @@ Phone landscape finish review: **pass**, no material findings, based on source a
 Phone song-card refinement: compact 88px cards with order at top left, meter at top right, centered tempo and one-line title below. Hide per-card subdivision controls only in the phone-landscape query; retain the console note picker. Directional selection reveals the previous or next visual row while retaining the selected card, including single-column 3→2 revealing song 1. Desktop scrolling remains selected-row-only.
 
 手機橫向還原速度鍵改為速度區內獨立 44px 欄位，取消向下溢出的絕對定位；數字依剩餘寬度縮放，保持下排按鍵不重疊。TAP 按下立即變色並下壓 1px，取消縮放及透明度變化，放開立即解除按壓並以既有 100ms / ease-ui-out 回彈。鍵盤及 MIDI 的 TAP 脈衝縮為 50ms，減少連點黏滯感；減少動態效果時只保留即時顏色回饋。取樣仍使用 pointerdown／原始事件時間，pointerup 與 click 不重複計拍。
+
+### Setlist entry numbers (2026-11-05; supersedes earlier hidden row numbers)
+
+Show each entry's one-based setlist position in its row, the current-song heading and the embedded score title. Repeated songs retain their own entry positions. Use the shared title rendering for secondary parenthetical text and keep saved song names unchanged. Existing phone-landscape card placement, transport, chart fit and score geometry remain intact.
+
+Independent fresh finish review: **ship**, no material fixes. Chrome desktop/tablet/mobile and WebKit captures are in `.impeccable/review/refinements-1105/`; validation passed 208 test files / 2353 tests, lint and both builds. The detector found 50 inherited findings and zero on edited lines. This is a surface refinement without a shared design-system or musical data change.

@@ -64,3 +64,11 @@ Parenthetical and bracketed song-title text uses the shared display-only subtitl
 Map circles retain their established dimensions. Fit each complete measured label inside its ring, including combined section codes such as V1/2 and B1&2, without ellipsis. Refit after container resize and font loading. Adjacent identical unnumbered steps compact into one token with the summed repeat count; distinct numbered steps and nonadjacent repeats keep their positions. This does not reorder the chart.
 
 The independent review accepted the scoped refinement. Desktop, tablet, phone, Joy, app and performance screenshots are in `.impeccable/review/reading-1105/`; WebKit measurements found unchanged score-body row geometry and no map-label overflow. Final validation passed 208 test files / 2348 tests, TypeScript and web/iPad builds. These are local reading rules; `DESIGN.md` and `.impeccable/design.json` remain unchanged.
+
+### Reading refinement follow-up (2026-11-05; supersedes earlier title/map details)
+
+The drummer score now receives the current setlist entry's one-based number, matching its row and current-song heading. Shared title rendering preserves saved names; in the lyrics book, a short trailing subtitle stays beside the main title and moves intact to the next line only when it does not fit. No musical source data or score geometry changes.
+
+Map tokens recognize section names embedded in performance cues and display the compact base code, retaining any section number after that name. An ordinal before the name does not become a section number. Full cue names remain available unchanged in the arrangement, editor, tooltip and score. Shared `Intro 2/Outro` expands into separate Intro 2 and Outro steps; generated defaults put Outros last. Explicitly arranged standalone Outros retain their chosen position.
+
+Independent fresh finish review: **ship**, no material fixes. Chrome desktop/tablet/mobile and WebKit evidence is in `.impeccable/review/refinements-1105/`. Validation passed 208 test files / 2353 tests, lint and both web/iPad builds. The detector reported 50 inherited findings and zero on edited lines; they are not new design rules. Global design files remain unchanged.

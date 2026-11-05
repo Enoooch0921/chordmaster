@@ -52,3 +52,11 @@ Song titles show the current setlist entry's one-based number in reading, A4 and
 LyricsSheet and LyricsBook group recognized sections in reading order: Intro, numeric Verse, Pre-Chorus, Chorus, Refrain, Bridge, Interlude, Tag, Outro, Ending, with numbers ascending within each type. Equal headings retain their order; unlabelled/custom blocks retain their slots. Keep each block's identity, paired language content and explicit page break together. This is presentation order, not a reorder of stored blocks, chart sections or the song map. In LyricsSheet, move controls only exchange adjacent blocks with the same sorting rank and number.
 
 Review screenshots are in `.impeccable/review/reading-1105/`, including `lyrics.png`, `book.png` and `mobile-joy.png`. The independent review accepted the refinement; focused tests and the final 208-file / 2348-test suite passed, as did TypeScript and web/iPad builds. Existing Arial and 10px detector advisories remain specialized lyrics typography, not additions to the global type ramp. No global design-system files changed.
+
+### Title wrapping and continuation follow-up (2026-11-05; supersedes earlier rules)
+
+A short trailing parenthetical or bracketed subtitle stays inline after the numbered, bracketed main title. Keep the subtitle intact and wrap it onto the next line only when it does not fit; retain the existing secondary size/weight, book font and gray highlight. Measurement uses the same rendering. This replaces the earlier mandatory separate subtitle line.
+
+Remove repeated song-name-plus-（續） continuation headers from A4 columns and pages. The song's opening title remains numbered; existing section continuation labels, pagination, explicit breaks and source content retain their behavior. No score geometry or stored song data changes.
+
+Independent fresh finish review: **ship**, no material fixes. Chrome desktop/tablet/mobile and WebKit captures are in `.impeccable/review/refinements-1105/`; validation passed 208 test files / 2353 tests, lint and both builds. The 50 detector findings are inherited, with zero on edited lines; no global design-system update is needed.
