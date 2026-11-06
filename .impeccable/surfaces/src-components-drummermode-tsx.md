@@ -75,10 +75,16 @@ Phone landscape finish review: **pass**, no material findings, based on source a
 
 Phone song-card refinement: compact 88px cards with order at top left, meter at top right, centered tempo and one-line title below. Hide per-card subdivision controls only in the phone-landscape query; retain the console note picker. Directional selection reveals the previous or next visual row while retaining the selected card, including single-column 3→2 revealing song 1. Desktop scrolling remains selected-row-only.
 
-手機橫向還原速度鍵改為速度區內獨立 44px 欄位，取消向下溢出的絕對定位；數字依剩餘寬度縮放，保持下排按鍵不重疊。TAP 按下立即變色並下壓 1px，取消縮放及透明度變化，放開立即解除按壓並以既有 100ms / ease-ui-out 回彈。鍵盤及 MIDI 的 TAP 脈衝縮為 50ms，減少連點黏滯感；減少動態效果時只保留即時顏色回饋。取樣仍使用 pointerdown／原始事件時間，pointerup 與 click 不重複計拍。
+手機橫向還原速度鍵改為速度區內獨立 44px 欄位，取消向下溢出的絕對定位；數字依剩餘寬度縮放，保持下排按鍵不重疊。TAP 與播放的最新按壓規範見下方 2026-11-06 修正，取代原先下壓 1px 與 100ms 回彈。
 
 ### Setlist entry numbers (2026-11-05; supersedes earlier hidden row numbers)
 
 Show each entry's one-based setlist position in its row, the current-song heading and the embedded score title. Repeated songs retain their own entry positions. Use the shared title rendering for secondary parenthetical text and keep saved song names unchanged. Existing phone-landscape card placement, transport, chart fit and score geometry remain intact.
 
 Independent fresh finish review: **ship**, no material fixes. Chrome desktop/tablet/mobile and WebKit captures are in `.impeccable/review/refinements-1105/`; validation passed 208 test files / 2353 tests, lint and both builds. The detector found 50 inherited findings and zero on edited lines. This is a surface refinement without a shared design-system or musical data change.
+
+### TAP / transport touch feedback (2026-11-06)
+
+TAP and Play/Stop commit on primary pointer-down and focused Enter/Space key-down. Set the pressed color synchronously, hold it until release/cancellation/blur, and consume the subsequent compatibility click. Assistive click-only activation remains available. These frequent musical controls use no scale, translation, opacity fade or release transition, including reduced motion. MIDI and shortcut pulses remain 50ms for TAP and 100ms for transport; a pulse must not clear a physically held control. Disable text selection and touch callouts on these two buttons and their descendants; cancel their context menus. Preserve text/input selection elsewhere. Gate hover styles to hover-capable fine pointers. Audio scheduling and original TAP timestamps remain unchanged.
+
+Scoped finish review: **ship locally**, no material findings in the edited behavior. 140 focused tests passed; after correcting test-query typing, the 60 component tests and TypeScript check passed again. Production build passed. Chrome trusted-touch and WebKit mouse-hold plus trusted-touch-tap checks cover 390×844, 844×390 and 834×1194, long hold/release, compatibility click, text selection, keyboard and reduced motion. Source detector: 30 inherited findings, none on edited lines. Captures use the real component with synthetic local songs, under `output/playwright/tap-response-20261106/`; they are verification evidence, not shipping raster assets. Physical iOS callouts and audible device latency remain unmeasured. See `docs/tap-touch-feedback-2026-11-06.md`. No deployment or backend changes.

@@ -85,6 +85,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-06',
+        title: 'Faster navigation and clearer library controls',
+        bullets: [
+          'Faster library search, setlist changes and Performance Mode navigation, with responsive drawers, menus and touch feedback.',
+          'See matching lyric snippets and stable author, version and language details; filter by key, BPM and meter.',
+          'Sync favorites and recently used songs across signed-in devices; review and clear selections across searches.',
+          'TAP and Play/Stop respond on press, keep held feedback and avoid long-press text selection.',
+          'Improve lyric reading and editing controls, and prevent first-use paging hints from overlapping personal notes.'
+        ]
+      },
+      {
+        version: '0.12.11',
         date: '2026-11-04',
         title: "Context-aware slash input",
         bullets: [
@@ -1006,6 +1018,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-06',
+        title: '操作加速與歌曲庫體驗更新',
+        bullets: [
+          '改善歌曲庫搜尋、歌單切歌與演出模式翻頁，統一側欄、選單及按鈕的操作回饋。',
+          '搜尋顯示命中的歌詞片段，固定呈現作者、版本與語言；支援 Key、BPM、拍號篩選。',
+          '登入後跨裝置同步收藏與最近使用；跨搜尋的已選歌曲可統一查看、操作或全部清除。',
+          'TAP 與播放／停止按下即回饋，按住保持亮色，避免長按選字與重複觸發。',
+          '改善歌詞閱讀與編輯操作，修正首次翻頁提示被個人筆記按鈕遮住。'
+        ]
+      },
+      {
+        version: '0.12.11',
         date: '2026-11-04',
         title: "手機斜線鍵依輸入內容判斷",
         bullets: [

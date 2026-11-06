@@ -248,18 +248,23 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   const songList = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const controlFeedback = useRef(new Map<HTMLButtonElement, ReturnType<typeof setTimeout>>());
+  const heldFeedback = useRef(new Set<KeyboardAction>());
+  const controlPointers = useRef(new Map<KeyboardAction, { id: number; releasedAt?: number }>());
   const releaseControl = (action: KeyboardAction) => {
+    heldFeedback.current.delete(action);
     const button = dialog.current?.querySelector<HTMLButtonElement>(`[data-drummer-action="${action}"]`);
     if (!button) return;
     clearTimeout(controlFeedback.current.get(button));
     delete button.dataset.controlPressed;
     controlFeedback.current.delete(button);
   };
-  const pressControl = (action: KeyboardAction) => {
+  const pressControl = (action: KeyboardAction, held = false) => {
     const button = dialog.current?.querySelector<HTMLButtonElement>(`[data-drummer-action="${action}"]`);
     if (!button || button.disabled) return;
     clearTimeout(controlFeedback.current.get(button));
     button.dataset.controlPressed = 'true';
+    if (held) heldFeedback.current.add(action);
+    if (heldFeedback.current.has(action)) { controlFeedback.current.delete(button); return; }
     controlFeedback.current.set(button, setTimeout(() => {
       delete button.dataset.controlPressed;
       controlFeedback.current.delete(button);
@@ -267,7 +272,12 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   };
   useEffect(() => {
     const feedback = controlFeedback.current;
-    const clear = () => { feedback.forEach((timer, button) => { clearTimeout(timer); delete button.dataset.controlPressed; }); feedback.clear(); };
+    const root = dialog.current;
+    const clear = () => {
+      feedback.forEach((timer, button) => { clearTimeout(timer); delete button.dataset.controlPressed; }); feedback.clear();
+      root?.querySelectorAll<HTMLElement>('[data-control-pressed]').forEach(button => { delete button.dataset.controlPressed; });
+      heldFeedback.current.clear(); controlPointers.current.clear();
+    };
     window.addEventListener('blur', clear);
     document.addEventListener('visibilitychange', clear);
     return () => { clear(); window.removeEventListener('blur', clear); document.removeEventListener('visibilitychange', clear); };
@@ -463,6 +473,55 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     if (busyRef.current) { busyRef.current = false; click.stop(); }
     else if (canPlay) { setPlaybackEntry(active ?? null); busyRef.current = true; void click.start(config); }
   };
+  // Musical controls commit on the physical press, independently of native :active
+  // (which touch browsers may omit). A trailing compatibility click is not a second beat.
+  const pressHandlers = (action: 'tap' | 'playPause') => {
+    const perform = (timestamp: number) => action === 'tap' ? tap(timestamp) : togglePlayback();
+    const releasePointer = (event: React.PointerEvent<HTMLButtonElement>) => {
+      const pointer = controlPointers.current.get(action);
+      if (pointer && pointer.id !== event.pointerId) return;
+      if (pointer) pointer.releasedAt = performance.now();
+      releaseControl(action);
+    };
+    return {
+      onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (event.button !== 0 || event.isPrimary === false || event.currentTarget.disabled) return;
+        const previous = controlPointers.current.get(action);
+        if (previous && previous.releasedAt === undefined) return;
+        controlPointers.current.set(action, { id: event.pointerId });
+        try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch { /* Synthetic or ended pointer. */ }
+        pressControl(action, true);
+        perform(event.timeStamp);
+      },
+      onPointerUp: releasePointer,
+      onLostPointerCapture: releasePointer,
+      onPointerCancel: (event: React.PointerEvent<HTMLButtonElement>) => {
+        releasePointer(event);
+        if (controlPointers.current.get(action)?.id === event.pointerId) controlPointers.current.delete(action);
+      },
+      onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+        const pointer = controlPointers.current.get(action);
+        controlPointers.current.delete(action);
+        if (pointer && (pointer.releasedAt === undefined || performance.now() - pointer.releasedAt < 750)) return;
+        if (event.button !== 0) return;
+        pressControl(action);
+        perform(event.timeStamp); // Keyboard/assistive click without a preceding pointer press.
+      },
+      onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (!['Enter', ' '].includes(event.key) || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        if (event.repeat) return;
+        controlPointers.current.delete(action);
+        pressControl(action, true);
+        perform(event.timeStamp);
+      },
+      onKeyUp: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); releaseControl(action); }
+      },
+      onBlur: () => releaseControl(action),
+      onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault(),
+    };
+  };
   const midi = useDrummerMidi({ settingsOpen: midiOpen || soundOpen || subdivisionOpen || Boolean(rowPicker), connector: midiConnector, onAction: (action, delta, timestamp) => {
     if (action === 'tempo') adjustTempo(delta ?? 0);
     else if (action === 'tempoUp') adjustTempo(1);
@@ -562,10 +621,10 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
             </button>)}
           </div>
           <div className="drummer-transport">
-            <button data-drummer-action="playPause" className="drummer-play" disabled={!busy && !canPlay} onClick={togglePlayback}>
+            <button data-drummer-action="playPause" className="drummer-play" disabled={!busy && !canPlay} {...pressHandlers('playPause')}>
               {busy ? <Square size={21}/> : <Play size={23}/>}<span>{busy ? t('停止', 'Stop') : t('播放', 'Play')}</span>
             </button>
-            <button data-drummer-action="tap" className="drummer-tap" onPointerDown={event => { if (event.isPrimary !== false && event.button === 0) { pressControl('tap'); tap(event.timeStamp); } }} onPointerUp={() => releaseControl('tap')} onPointerCancel={() => releaseControl('tap')} onClick={event => { if (event.detail === 0) { pressControl('tap'); tap(event.timeStamp); } }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!event.repeat) tap(event.timeStamp); } }} onKeyUp={event => { if (event.key === 'Enter' || event.key === ' ') releaseControl('tap'); }} aria-label={t('TAP 點按測速', 'Tap tempo')}>TAP<span>{tapCount > 0 ? t(`${tapCount} 次`, `${tapCount} taps`) : t('點按測速', 'Tap tempo')}</span></button>
+            <button data-drummer-action="tap" className="drummer-tap" {...pressHandlers('tap')} aria-label={t('TAP 點按測速', 'Tap tempo')}>TAP<span>{tapCount > 0 ? t(`${tapCount} 次`, `${tapCount} taps`) : t('點按測速', 'Tap tempo')}</span></button>
             <div className="drummer-song-navigation"><button data-drummer-action="previous" aria-label={t('上一首', 'Previous song')} title={t('上一首', 'Previous song')} disabled={activeIndex <= 0} onClick={() => adjacentSong(-1)}><SkipBack size={23}/></button><button data-drummer-action="next" aria-label={t('下一首', 'Next song')} title={t('下一首', 'Next song')} disabled={activeIndex >= entries.length - 1} onClick={() => adjacentSong(1)}><SkipForward size={23}/></button></div>
           </div>
           <p className="drummer-notice" role="status">{notice || (invalidTempo ? t('請輸入 20–400 BPM。', 'Enter 20–400 BPM.') : !canPlay ? (bpm === undefined ? '' : t('請在設定中選擇拍號。', 'Choose a meter in settings.')) : '')}</p>

@@ -7,10 +7,10 @@ import { ToastProvider } from './components/Toast';
 import { getNavigationStorageKey, loadNavigationLocation, saveNavigationLocation, type SetlistNavigationLocation } from './lib/setlistNavigationMemory';
 import type { LibraryRole, WorkspaceSnapshot } from './types';
 
-const state = vi.hoisted(() => ({ cloud: false, role: 'viewer' as LibraryRole, saveCapo: vi.fn(), adoptTempo: vi.fn(), refresh: vi.fn(() => false) }));
+const state = vi.hoisted(() => ({ cloud: false, email: 'controls@example.invalid', role: 'viewer' as LibraryRole, saveCapo: vi.fn(), adoptTempo: vi.fn(), refresh: vi.fn(() => false) }));
 let fixture: WorkspaceSnapshot;
 vi.mock('./components/useAnchoredPortalPanel', () => ({ useAnchoredPortalPanel: () => ({ panelStyle: { position: 'fixed', top: 0, left: 0 }, placement: 'bottom', isPositioned: true, transformOrigin: 'top right' }) }));
-vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: state.cloud ? { id: 'controls-user', email: 'controls@example.invalid', name: 'Controls' } : null,
+vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: state.cloud ? { id: 'controls-user', email: state.email, name: 'Controls' } : null,
   session: state.cloud ? { access_token: 'test' } : null, status: state.cloud ? 'authenticated' : 'unconfigured', isConfigured: state.cloud, signInWithGoogle: vi.fn(), signOut: vi.fn() }) }));
 vi.mock('./lib/workspace', async original => ({ ...await original<typeof import('./lib/workspace')>(), loadPersistentWorkspaceSnapshot: async () => fixture }));
 vi.mock('./lib/repository', () => ({ createCloudRepository: () => ({
@@ -61,7 +61,15 @@ beforeAll(() => {
   HTMLElement.prototype.scrollTo = vi.fn();
 });
 beforeEach(() => {
-  localStorage.clear(); state.cloud = false; state.role = 'viewer'; state.saveCapo.mockReset().mockResolvedValue(undefined);
+  const realRect = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+    if (this.hasAttribute('data-setlist-detail-scroll')) return {top:0,bottom:800,left:0,right:340,height:800,width:340,x:0,y:0,toJSON(){}};
+    if (!this.dataset.setlistSongId) return realRect.call(this);
+    const index=Array.from(this.parentElement!.children).indexOf(this), top=100+index*156;
+    return {top,bottom:top+156,left:0,right:340,height:156,width:340,x:0,y:top,toJSON(){}};
+  });
+
+  localStorage.clear(); state.cloud = false; state.email = 'controls@example.invalid'; state.role = 'viewer'; state.saveCapo.mockReset().mockResolvedValue(undefined);
   state.adoptTempo.mockReset(); state.refresh.mockClear();
   elementFromPoint.mockReset();
   const songs = [
@@ -93,12 +101,15 @@ it('drags the numbered handle directly while keeping inline controls and the cur
   targetRow('entry-first');
   fireEvent.pointerDown(handle, pointer);
   expect(row('entry-second')).toHaveClass('is-dragging');
-  fireEvent.pointerMove(handle, pointer);
+  fireEvent.pointerMove(handle, {...pointer,clientY:pointer.clientY-200});
+  expect(rowOrder()).toEqual(['entry-first', 'entry-second']);
+  expect(sheetTitle('entry-second')).toBe('2. 第二首歌曲');
+  expect(sheetTitle('entry-first')).toBe('1. 第一首歌曲');
+  expect(fixture.songs.map(song => song.title)).toEqual(['第一首歌曲', '第二首歌曲']);
+  fireEvent.pointerUp(handle, pointer);
   expect(rowOrder()).toEqual(['entry-second', 'entry-first']);
   expect(sheetTitle('entry-second')).toBe('1. 第二首歌曲');
   expect(sheetTitle('entry-first')).toBe('2. 第一首歌曲');
-  expect(fixture.songs.map(song => song.title)).toEqual(['第一首歌曲', '第二首歌曲']);
-  fireEvent.pointerUp(handle, pointer);
   fireEvent.click(handle);
 
   expect(row('entry-second')).not.toHaveClass('is-dragging');
@@ -123,40 +134,37 @@ it('waits for a touch hold before allowing a direct drag', async () => {
 
   act(() => vi.advanceTimersByTime(1));
   expect(row('entry-second')).toHaveClass('is-dragging');
-  fireEvent.pointerMove(handle, touch);
-  expect(rowOrder()).toEqual(['entry-second', 'entry-first']);
+  fireEvent.pointerMove(handle, {...touch,clientY:touch.clientY-200});
+  expect(rowOrder()).toEqual(['entry-first', 'entry-second']);
   fireEvent.pointerUp(handle, touch);
+  expect(rowOrder()).toEqual(['entry-second', 'entry-first']);
   expect(row('entry-second')).not.toHaveClass('is-dragging');
   expect(document.body.style.userSelect).toBe('');
   expect(currentSong()).toBe('entry-first');
 });
 
-it('keeps one held drag alive across several reordered rows and lost handle capture until release', async () => {
-  for (const [id, title] of [['third', '第三首歌曲'], ['fourth', '第四首歌曲']]) {
-    const song = { ...fixture.songs[0], id, title };
-    fixture.songs.push(song);
-    fixture.setlists[0].songs.push({ ...fixture.setlists[0].songs[0], id: `entry-${id}`, songId: id, songData: song, order: fixture.setlists[0].songs.length });
+it('previews several slots, commits one order on release and undoes it in one step', async () => {
+  for (const [id,title] of [['third','第三首歌曲'],['fourth','第四首歌曲']]) {
+    const song={...fixture.songs[0],id,title};fixture.songs.push(song);
+    fixture.setlists[0].songs.push({...fixture.setlists[0].songs[0],id:`entry-${id}`,songId:id,songData:song,order:fixture.setlists[0].songs.length});
   }
   await mount();
-  const handle = within(row('entry-first')).getByRole('button', { name: '拖動排序：第一首歌曲' });
-  fireEvent.pointerDown(handle, pointer);
-  targetRow('entry-second'); fireEvent.pointerMove(handle, pointer);
-  expect(rowOrder()).toEqual(['entry-second', 'entry-first', 'entry-third', 'entry-fourth']);
-
-  // Moving a keyed row in the DOM can release capture on its original handle.
-  fireEvent.lostPointerCapture(handle, pointer);
-  expect(row('entry-first')).toHaveClass('is-dragging');
-  targetRow('entry-third'); fireEvent.pointerMove(document, pointer);
-  targetRow('entry-fourth'); fireEvent.pointerMove(document, pointer);
-  expect(rowOrder()).toEqual(['entry-second', 'entry-third', 'entry-fourth', 'entry-first']);
-  expect(currentSong()).toBe('entry-first');
-  targetRow('entry-second'); fireEvent.pointerMove(document, pointer);
-  expect(rowOrder()).toEqual(['entry-first', 'entry-second', 'entry-third', 'entry-fourth']);
-  fireEvent.pointerUp(document, { ...pointer, buttons: 0 });
+  const handle=within(row('entry-first')).getByRole('button',{name:'拖動排序：第一首歌曲'});
+  const original=['entry-first','entry-second','entry-third','entry-fourth'];
+  fireEvent.pointerDown(handle,pointer);
+  fireEvent.pointerMove(document,{...pointer,clientY:pointer.clientY+200});
+  fireEvent.lostPointerCapture(handle,pointer);
+  fireEvent.pointerMove(document,{...pointer,clientY:pointer.clientY+400});
+  fireEvent.pointerMove(document,{...pointer,clientY:pointer.clientY+600});
+  expect(rowOrder()).toEqual(original);expect(currentSong()).toBe('entry-first');
+  fireEvent.pointerUp(document,{...pointer,buttons:0});
+  expect(rowOrder()).toEqual(['entry-second','entry-third','entry-fourth','entry-first']);
   expect(row('entry-first')).not.toHaveClass('is-dragging');
   expect(document.body.style.userSelect).toBe('');
-  targetRow('entry-fourth'); fireEvent.pointerMove(document, pointer);
-  expect(rowOrder()).toEqual(['entry-first', 'entry-second', 'entry-third', 'entry-fourth']);
+  const undo=screen.getByRole('button',{name:'復原 (Cmd/Ctrl+Z)'});
+  await waitFor(()=>expect(undo).toBeEnabled());fireEvent.click(undo);
+  await waitFor(()=>expect(rowOrder()).toEqual(original));
+  expect(currentSong()).toBe('entry-first');
 });
 
 it('cancels a pending touch hold without later starting a drag', async () => {
@@ -445,3 +453,31 @@ it('does not expose score height editing to setlist managers without score permi
   expect(await screen.findByRole('menuitem', { name: '移出歌單' })).toBeEnabled();
   expect(screen.queryByRole('menuitemradio')).toBeNull();
 });
+
+
+it.each(['peienlee0609@gmail.com', 'controls@example.invalid'])('limits the working guitarist toggle to the invited account: %s', async email => {
+  state.cloud = true;
+  state.email = email;
+  fixture.setlists[0].songs[0].overrideKey = 'Eb';
+  const original = structuredClone(fixture);
+  await mount();
+  const topbar = within(document.querySelector<HTMLElement>('[data-topbar]')!);
+  expect(topbar.getByRole('button', { name: '0' })).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole('button', { name: /^更多$/ })[0]);
+  if (email === 'peienlee0609@gmail.com') {
+    const toggle = await screen.findByRole('menuitemcheckbox', { name: '吉他手模式' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    expect(topbar.getByRole('button', { name: '1' })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: /^更多$/ })[0]);
+    const enabled = await screen.findByRole('menuitemcheckbox', { name: '吉他手模式' });
+    expect(enabled).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(enabled);
+    expect(topbar.getByRole('button', { name: '0' })).toBeInTheDocument();
+  } else {
+    expect(screen.queryByRole('menuitemcheckbox', { name: '吉他手模式' })).toBeNull();
+    expect(document.querySelector('[data-guitarist-mode-toggle]')).toBeNull();
+  }
+  expect(fixture).toEqual(original);
+  expect(state.saveCapo).not.toHaveBeenCalled();
+}, 15000);

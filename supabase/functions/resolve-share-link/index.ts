@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { createClient } from 'npm:@supabase/supabase-js@2.49.8';
 import { consumeRequestLimit } from '../_shared/rateLimit.ts';
+import { conditionalPayload } from '../_shared/conditionalResponse.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -26,10 +27,16 @@ Deno.serve(async (request) => {
   }
 
   try {
-    const { token } = await request.json();
+    const { token, conditional, knownVersion } = await request.json();
     if (!token) {
       return jsonResponse({ error: 'Missing token.' }, 400);
     }
+
+    // Old clients keep their existing response shape. New clients still resolve
+    // permissions and the complete resource before an unchanged acknowledgement.
+    const resourceResponse = async (payload: unknown) => jsonResponse(
+      conditional === true ? await conditionalPayload(payload, knownVersion) : payload
+    );
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
@@ -70,7 +77,7 @@ Deno.serve(async (request) => {
         return jsonResponse({ error: 'Song not found.' }, 404);
       }
 
-      return jsonResponse({
+      return await resourceResponse({
         resourceType: 'song',
         song: {
           id: song.id,
@@ -123,7 +130,7 @@ Deno.serve(async (request) => {
           archivedAt: song.archived_at ?? null
         }));
 
-      return jsonResponse({
+      return await resourceResponse({
         resourceType: 'song_bundle',
         songBundle: {
           id: bundle.id,
@@ -212,7 +219,7 @@ Deno.serve(async (request) => {
         };
       });
 
-      return jsonResponse({
+      return await resourceResponse({
         resourceType: 'project',
         project: {
           id: project.id,
@@ -273,7 +280,7 @@ Deno.serve(async (request) => {
       })
       .filter(Boolean);
 
-    return jsonResponse({
+    return await resourceResponse({
       resourceType: 'setlist',
       setlist: {
         id: setlist.id,

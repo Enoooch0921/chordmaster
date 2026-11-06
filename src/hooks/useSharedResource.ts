@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SharedResourcePayload } from '../types';
-import { resolveShareLink, ShareLinkResolutionError } from '../lib/sharing';
+import { resolveShareLinkUpdate, ShareLinkResolutionError } from '../lib/sharing';
 import { normalizeSharedSongs } from '../lib/sharedSongNormalization';
 
 export const SHARED_RESOURCE_REFRESH_MS = 5000;
@@ -31,6 +31,7 @@ export const useSharedResource = (token: string) => {
     let inFlight = false;
     let hasPayload = false;
     let signature: string | null = null;
+    let version: string | null = null;
     let failures = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
@@ -43,14 +44,23 @@ export const useSharedResource = (token: string) => {
       inFlight = true;
       controller = new AbortController();
       try {
-        const response = await resolveShareLink(token, controller.signal);
+        const update = await resolveShareLinkUpdate(token, controller.signal, version);
         if (cancelled) return;
+        if (update.payload === null) {
+          if (!hasPayload) throw new Error('Missing shared chart baseline.');
+          failures = 0;
+          setState(current => current.refreshFailed || current.errorMessage
+            ? { ...current, refreshFailed: false, errorMessage: null } : current);
+          return;
+        }
+        const response = update.payload;
         // Compare server data before normalization, which can generate legacy IDs.
         // Identical responses retain the same chart objects and mounted UI.
         const nextSignature = JSON.stringify(response);
         const nextPayload = nextSignature === signature ? null : normalizeSharedSongs(response);
         signature = nextSignature;
         hasPayload = true;
+        version = update.version;
         failures = 0;
         setState((current) => !nextPayload && !current.refreshFailed && !current.errorMessage
           ? current

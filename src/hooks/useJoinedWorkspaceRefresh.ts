@@ -25,6 +25,8 @@ export const useJoinedWorkspaceRefresh = (options: Options) => {
     let cancelled = false;
     let inFlight = false;
     let failures = 0;
+    let version: string | null = null;
+    let accepted: JoinedWorkspace | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const canRefresh = () => document.visibilityState !== 'hidden' && navigator.onLine !== false;
     const clearTimer = () => { clearTimeout(timer); timer = undefined; };
@@ -35,7 +37,13 @@ export const useJoinedWorkspaceRefresh = (options: Options) => {
       const snapshot = latest.current;
       try {
         if (snapshot.paused) return;
-        const remote = await repository.loadJoinedWorkspace();
+        // Local changes (including leaving a shared collection) invalidate the
+        // baseline. An unchanged response is safe only for the accepted view.
+        if (!accepted || snapshot.joinedSetlists !== accepted.joinedSetlists
+            || snapshot.joinedProjects !== accepted.joinedProjects) version = null;
+        const update = repository.loadJoinedWorkspaceUpdate
+          ? await repository.loadJoinedWorkspaceUpdate(version)
+          : { version: null, payload: await repository.loadJoinedWorkspace() };
         if (cancelled) return;
         failures = 0;
         setRefreshFailed(false);
@@ -43,8 +51,17 @@ export const useJoinedWorkspaceRefresh = (options: Options) => {
         // Ignore a read that raced an optimistic Key/Capo/order edit or leaving
         // a shared collection. The next pass reloads after the mutation settles.
         if (current.paused || current.joinedSetlists !== snapshot.joinedSetlists
-            || current.joinedProjects !== snapshot.joinedProjects) return;
-        current.onUpdate(reconcileJoinedWorkspace(current, remote));
+            || current.joinedProjects !== snapshot.joinedProjects) {
+          version = null;
+          accepted = null;
+          return;
+        }
+        if (update.payload) {
+          const next = reconcileJoinedWorkspace(current, update.payload);
+          current.onUpdate(next);
+          accepted = next;
+        }
+        version = update.version;
       } catch {
         if (!cancelled) { failures += 1; setRefreshFailed(true); }
       } finally {

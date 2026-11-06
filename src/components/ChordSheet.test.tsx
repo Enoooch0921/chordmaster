@@ -227,6 +227,11 @@ describe('ChordSheet preview input caret', () => {
     const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey={currentKey} />);
     const arrowheads = () => Array.from(container.querySelectorAll('[data-chord-marker] svg path:last-child')).map((path) => path.getAttribute('d'));
     expect(arrowheads()).toEqual(['M7 7l-3 3 3 3', 'M25 7l3 3-3 3']);
+    // Notation must be fully visible on its first paint, even on a busy score.
+    for (const marker of container.querySelectorAll<HTMLElement>('[data-chord-marker]')) {
+      expect(marker.style.opacity).not.toBe('0');
+      expect(marker.style.transform).toBe('');
+    }
 
     // Old C< was drawn right, old G> left. Migration must preserve that picture.
     const migrated = normalizeSongBars({ ...source, chordTimingVersion: undefined });
@@ -3121,4 +3126,22 @@ it.each([0, undefined])('hides the chart Capo label when capo is %s', capo => {
   const { container } = render(<ChordSheet song={{ ...song, capo }} language="en" currentKey="C"/>);
   expect(container.querySelector('[data-sheet-capo]')).toBeNull();
   expect(screen.queryByText(/^Capo /)).toBeNull();
+});
+
+it.each([null, 0])('renders one notation arrow in only the selected repeated section (note=%s)', noteIndex => {
+  const section = { id: 'repeat-section', title: 'Verse', bars: [{ id: 'repeat-bar', chords: ['C'], riff: '1 | 2 | 3 | 4' }] };
+  const source: Song = { ...song, sections: [section, structuredClone(section)] };
+  const click = vi.fn();
+  const { container, rerender } = render(<ChordSheet song={source} language="zh" currentKey="C" onElementClick={click}
+    activePreviewNotationTarget={{ sectionId: section.id, sectionOccurrence: 1, barId: 'repeat-bar', notationMode: 'jianpu', cursor: {kind:'jianpu',beatIndex:0,unitIndex:0,noteIndex} }}/>);
+  const bars = [...container.querySelectorAll('[data-preview-clipboard-bar="repeat-bar"]')];
+  expect(container.querySelectorAll('.notation-note-pointer')).toHaveLength(1);
+  expect(bars[0].querySelector('.notation-note-pointer')).toBeNull();
+  expect(bars[1].querySelector('.notation-note-pointer')).toBeInTheDocument();
+  fireEvent.click(bars[1].querySelector('[data-preview-hover-field="jianpu"]')!);
+  expect(click.mock.calls.at(-1)?.[3]).toMatchObject({ sectionId: section.id, sectionOccurrence: 1 });
+  rerender(<ChordSheet song={source} language="zh" currentKey="C" onElementClick={click}
+    activePreviewNotationTarget={{ sectionId: section.id, barId: 'repeat-bar', notationMode: 'jianpu', cursor: {kind:'jianpu',beatIndex:0,unitIndex:0,noteIndex} }}/>);
+  expect(bars[0].querySelector('.notation-note-pointer')).toBeInTheDocument();
+  expect(bars[1].querySelector('.notation-note-pointer')).toBeNull();
 });

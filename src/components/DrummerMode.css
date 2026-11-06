@@ -16,7 +16,7 @@
 .drummer-mode button:not(:where(.drummer-scaled-paper *)), .drummer-mode input, .drummer-mode select, .drummer-mode summary { touch-action: manipulation; }
 /* Score content keeps its own button geometry, colors and disabled appearance. */
 .drummer-mode button:not(:where(.drummer-scaled-paper *)) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 12px; border-radius: 10px; cursor: pointer; color: inherit; }
-.drummer-mode button:not(:where(.drummer-scaled-paper *)):hover { background: var(--color-surface-sunken); }
+@media (hover: hover) and (pointer: fine) { .drummer-mode button:not(:where(.drummer-scaled-paper *)):hover { background: var(--color-surface-sunken); } }
 .drummer-mode button:not(:where(.drummer-scaled-paper *)):disabled { opacity: .45; cursor: default; }
 .drummer-mode :focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 3px; }
 .drummer-mode input { caret-color: var(--color-indigo-600); }
@@ -47,7 +47,7 @@
 .drummer-transport { display: grid; grid-template-columns: 1fr 1fr 104px; gap: 8px; }
 .drummer-transport button { min-height: 62px; background: var(--color-surface-sunken); font-weight: 650; }
 .drummer-transport .drummer-play { background: var(--color-indigo-700); color: white; font-size: 17px; }
-.drummer-transport .drummer-play:hover { background: var(--color-indigo-800); }
+@media (hover: hover) and (pointer: fine) { .drummer-transport .drummer-play:hover { background: var(--color-indigo-800); } }
 .drummer-tap { flex-direction: column; gap: 1px !important; font-size: 18px; }
 .drummer-tap > span { font-size: 11px; font-weight: 400; color: var(--color-text-muted); }
 .drummer-song-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -300,27 +300,41 @@
 }
 
 /* Performance feedback shares the editor's motion tokens. Sound and beat timing stay immediate. */
-.drummer-mode button:not(:where(.drummer-scaled-paper *)) {
+:where([data-ui-input="pointer"]) .drummer-mode button:not(:where(.drummer-scaled-paper *)),
+.drummer-mode button:where([data-drummer-action]) {
   transition: transform var(--ui-release-duration) var(--ease-ui-out), opacity var(--ui-release-duration) var(--ease-ui-out);
 }
-.drummer-mode button:not(:where(.drummer-scaled-paper *)):active:not(:disabled),
-.drummer-mode button:not(:where(.drummer-scaled-paper *))[data-control-pressed="true"] {
+:where([data-ui-input="pointer"]) .drummer-mode button:not(:where(.drummer-scaled-paper *)):active:not(:disabled),
+.drummer-mode button:where([data-drummer-action]):active:not(:disabled),
+.drummer-mode button:where([data-drummer-action])[data-control-pressed="true"] {
   transform: scale(0.97);
   opacity: .8;
   transition-duration: 0ms;
 }
-.drummer-mode button.drummer-tap {
+.drummer-mode button:is(.drummer-tap, .drummer-play) {
   touch-action: manipulation;
-  transition: transform var(--ui-press-duration) var(--ease-ui-out);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  /* Frequent musical input acknowledges instantly; no shrink/rebound to lag behind a beat. */
+  transition: none;
+  transform: none;
 }
-.drummer-mode button.drummer-tap:active:not(:disabled),
-.drummer-mode button.drummer-tap[data-control-pressed="true"] {
-  transform: translateY(1px);
+.drummer-mode button:is(.drummer-tap, .drummer-play) * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.drummer-mode button:is(.drummer-tap, .drummer-play):is(:active, [data-control-pressed="true"]):not(:disabled) {
+  transform: none;
   opacity: 1;
-  transition-duration: 0ms;
+  transition: none;
+}
+.drummer-mode button.drummer-tap:is(:active, [data-control-pressed="true"]):not(:disabled) {
   background: var(--color-indigo-700);
   color: white;
 }
+.drummer-mode button.drummer-play:is(:active, [data-control-pressed="true"]):not(:disabled) { background: var(--color-indigo-900); color: white; }
 .drummer-mode button.drummer-tap:active > span,
 .drummer-mode button.drummer-tap[data-control-pressed="true"] > span { color: inherit; }
 .drummer-subdivision-trigger > svg:last-child,

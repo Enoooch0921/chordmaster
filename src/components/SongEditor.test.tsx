@@ -6,6 +6,7 @@ import SongEditor from './SongEditor';
 import PreviewBarEditor from './preview-edit/PreviewBarEditor';
 import { createPreviewEditSession } from '../lib/previewEditSession';
 import { useSongHistoryShortcuts } from '../hooks/useSongHistoryShortcuts';
+import { useUiMotion } from '../hooks/useUiMotion';
 
 beforeAll(() => {
   vi.stubGlobal('ResizeObserver', class {
@@ -54,6 +55,37 @@ const renderEditor = (song: Song, jianpuPitchContext?: JianpuPitchContext) => {
 };
 
 describe('SongEditor shared notation commands', () => {
+  it('reveals an editing target immediately even when the caller does not request an instant jump', async () => {
+    const scrollIntoView = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+    render(<SongEditor song={makeSong({})} language="zh" history={{ past: [], future: [] }}
+      onUndo={vi.fn()} onRedo={vi.fn()} onChange={vi.fn()}
+      focusRequest={{ sIdx: 0, bIdx: 0, field: 'chords', requestId: 1 }} />);
+    await waitFor(() => expect(document.getElementById('editor-s0-b0-chords')).toHaveFocus());
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'instant', block: 'center', inline: 'nearest' });
+    expect(scrollIntoView.mock.calls.some(([options]) => typeof options === 'object' && options.behavior === 'smooth')).toBe(false);
+  });
+
+  it('only smooth-scrolls short pointer section jumps and immediately handles keyboard and distant targets', () => {
+    renderHook(useUiMotion);
+    renderEditor(makeSong({}));
+    const section = document.getElementById('section-0')!;
+    section.getBoundingClientRect = () => ({ top: 240 }) as DOMRect;
+    const navigation = screen.getByTitle('Verse');
+    const scrollIntoView = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+    fireEvent.pointerDown(navigation);
+    fireEvent.click(navigation);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'smooth', block: 'start' });
+    fireEvent.keyDown(navigation, { key: 'Enter' });
+    fireEvent.click(navigation);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'instant', block: 'start' });
+    section.getBoundingClientRect = () => ({ top: 2400 }) as DOMRect;
+    fireEvent.pointerDown(navigation);
+    fireEvent.click(navigation);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'instant', block: 'start' });
+  });
+
   it('turns off the automatic section boundary from the legacy editor', () => {
     const onChange = renderEditor(makeSong({ annotation: 'Quiet' }));
     const button = screen.getAllByRole('button', { name: '後雙小節線 ||' })[0];

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AnimatePresence } from 'motion/react';
 import type { AppLanguage } from '../types';
 import ResponsiveDialog from './ResponsiveDialog';
 
@@ -33,7 +34,8 @@ export default function PerformanceFullscreenControl({ language, isFullscreen, i
         ? (zh ? '全螢幕' : 'Full screen')
         : (zh ? '無網址列使用方式' : 'Use without browser bars')}
     </button>
-    {guideOpen && <ResponsiveDialog
+    <AnimatePresence>{guideOpen && <ResponsiveDialog
+      key="fullscreen-guide"
       title={zh ? '不顯示瀏覽器網址列' : 'Use ChordMaster without browser bars'}
       closeLabel={zh ? '關閉使用說明' : 'Close instructions'}
       onClose={() => setGuideOpen(false)}
@@ -51,6 +53,6 @@ export default function PerformanceFullscreenControl({ language, isFullscreen, i
         </ol>
         <p className="mt-5 text-gray-500">{zh ? '時間、電量與底部手勢區域仍由系統管理。' : 'The system still controls the clock, battery indicators, and home gesture area.'}</p>
       </div>
-    </ResponsiveDialog>}
+    </ResponsiveDialog>}</AnimatePresence>
   </>;
 }

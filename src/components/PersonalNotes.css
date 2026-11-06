@@ -10,14 +10,14 @@ body[data-handwriting-active] input, body[data-handwriting-active] textarea,
 body[data-handwriting-active] [contenteditable="true"], body[data-handwriting-active] [contenteditable="true"] * {
   -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
 }
-.personal-notes-tools { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 350; max-width: calc(100vw - 32px); color: #1e293b; font-size: 12px; }
+.personal-notes-tools { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: calc(var(--personal-notes-bottom-offset, 80px) + env(safe-area-inset-bottom)); z-index: 350; max-width: calc(100vw - 32px); color: #1e293b; font-size: 12px; }
 .personal-notes-tools[data-notes-open] { padding: 10px; border: 1px solid #d1d5db; border-radius: 14px; background: #fff; }
 .personal-notes-tools button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 36px; height: 40px; padding: 0 8px; border-radius: 7px; cursor: pointer; }
 .personal-notes-tools button:hover { background: #f0faf5; }
 .personal-notes-tools button:focus-visible { outline: 2px solid #238454; outline-offset: 2px; }
 .personal-notes-tools button[aria-pressed=true] { background: #daf1e5; color: #1a5234; }
 .personal-notes-tools button:disabled { opacity: .35; cursor: default; }
-.personal-notes-tools .personal-notes-launch { gap: 8px; height: 42px; padding: 0 14px; border: 1px solid #d1d5db; background: #fff; border-radius: 10px; font-weight: 650; }
+.personal-notes-tools .personal-notes-launch { gap: 8px; height: var(--personal-notes-launch-height, 44px); padding: 0 14px; border: 1px solid #d1d5db; background: #fff; border-radius: 10px; font-weight: 650; }
 .personal-notes-dot { height: 5px; width: 5px; border-radius: 50%; background: #238454; }
 .personal-notes-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 3px 7px; color: #475569; }
 .personal-notes-caption > span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }

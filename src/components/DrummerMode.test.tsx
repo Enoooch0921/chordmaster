@@ -13,6 +13,11 @@ vi.mock('./ChordSheet', () => ({ default: ({ song, setlistSongNumber }: { song: 
 const song = (title: string, tempo?: number, timeSignature = '4/4'): Song => ({ title, tempo, timeSignature, originalKey: 'C', currentKey: 'C', sections: [] });
 const session: DrummerSession = { name: '測試歌單', initialId: 'a', entries: [{ id: 'a', song: song('第一首', 72) }, { id: 'b', song: song('第二首', 110) }, { id: 'c', song: song('未定速度') }, { id: 'd', song: song('第一首', 72) }] };
 const tempo = () => screen.getByRole('textbox', { name: '節拍器速度 BPM' });
+function controlPointer(button: HTMLElement, type: 'pointerDown' | 'pointerUp' | 'pointerCancel' | 'lostPointerCapture', overrides: Record<string, unknown> = {}) {
+  const event = createEvent[type](button, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, Object.fromEntries(Object.entries({ pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0, ...overrides }).map(([key, value]) => [key, { value }])));
+  fireEvent(button, event);
+}
 const songs = () => within(screen.getByRole('region', { name: '鼓手歌單' }));
 function mount(value = session) { return render(<DrummerMode {...value} language="zh" onClose={vi.fn()}/>); }
 beforeEach(() => {
@@ -428,6 +433,54 @@ it('captures TAP on press without a duplicate on release/click', () => {
   expect(tempo()).toHaveValue('120'); expect(tap).toHaveTextContent('3 次');
   expect(audio.start).not.toHaveBeenCalled();
   expect(audio.prepare).not.toHaveBeenCalled();
+});
+
+it('starts and stops on touch-down, keeps held feedback and consumes compatibility clicks', () => {
+  vi.useFakeTimers();
+  try {
+    const view = mount(), play = screen.getByRole('button', { name: '播放' });
+    controlPointer(play, 'pointerDown');
+    expect(audio.start).toHaveBeenCalledOnce(); expect(play).toHaveAttribute('data-control-pressed', 'true');
+    audio.starting = true; view.rerender(<DrummerMode {...session} language="zh" onClose={vi.fn()}/>);
+    act(() => vi.advanceTimersByTime(700)); expect(play).toHaveAttribute('data-control-pressed', 'true');
+    controlPointer(play, 'pointerUp'); controlPointer(play, 'lostPointerCapture');
+    expect(play).not.toHaveAttribute('data-control-pressed');
+    fireEvent.click(play, { detail: 1 }); expect(audio.start).toHaveBeenCalledOnce(); expect(audio.stop).not.toHaveBeenCalled();
+    controlPointer(play, 'pointerDown'); expect(audio.stop).toHaveBeenCalledOnce();
+    controlPointer(play, 'pointerUp'); fireEvent.click(play, { detail: 0 });
+    expect(audio.start).toHaveBeenCalledOnce(); expect(audio.stop).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); }
+});
+
+it('keeps one TAP throughout a long hold and suppresses its context menu without starting audio', () => {
+  vi.useFakeTimers();
+  try {
+    mount(); const tap = screen.getByRole('button', { name: 'TAP 點按測速' });
+    controlPointer(tap, 'pointerDown'); act(() => vi.advanceTimersByTime(800));
+    expect(tap).toHaveAttribute('data-control-pressed', 'true'); expect(tap).toHaveTextContent('1 次');
+    expect(fireEvent.contextMenu(tap)).toBe(false);
+    controlPointer(tap, 'pointerUp'); fireEvent.click(tap, { detail: 1 });
+    expect(tap).not.toHaveAttribute('data-control-pressed'); expect(tap).toHaveTextContent('1 次');
+    expect(audio.start).not.toHaveBeenCalled(); expect(audio.prepare).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
+
+it('ignores secondary pointers and disabled play, and releases cancelled or blurred holds', () => {
+  mount({ ...session, initialId: 'c' });
+  const play = screen.getByRole('button', { name: '播放' }), tap = screen.getByRole('button', { name: 'TAP 點按測速' });
+  controlPointer(play, 'pointerDown'); expect(audio.start).not.toHaveBeenCalled(); expect(play).not.toHaveAttribute('data-control-pressed');
+  controlPointer(tap, 'pointerDown', { isPrimary: false }); controlPointer(tap, 'pointerDown', { button: 2 }); expect(tap).not.toHaveAttribute('data-control-pressed');
+  controlPointer(tap, 'pointerDown'); controlPointer(tap, 'pointerUp', { pointerId: 2 }); expect(tap).toHaveAttribute('data-control-pressed', 'true');
+  controlPointer(tap, 'pointerCancel'); expect(tap).not.toHaveAttribute('data-control-pressed');
+  controlPointer(tap, 'pointerDown'); fireEvent.blur(window); expect(tap).not.toHaveAttribute('data-control-pressed');
+  fireEvent.click(tap); expect(tap).toHaveAttribute('data-control-pressed', 'true'); // Assistive activation still works after cancellation/blur.
+});
+
+it('handles focused transport keys on keydown, ignores repeats and releases on keyup', () => {
+  mount(); const play = screen.getByRole('button', { name: '播放' });
+  fireEvent.keyDown(play, { key: ' ', code: 'Space' }); expect(audio.start).toHaveBeenCalledOnce(); expect(play).toHaveAttribute('data-control-pressed', 'true');
+  fireEvent.keyDown(play, { key: ' ', code: 'Space', repeat: true }); expect(audio.start).toHaveBeenCalledOnce();
+  fireEvent.keyUp(play, { key: ' ', code: 'Space' }); expect(play).not.toHaveAttribute('data-control-pressed');
 });
 
 it('applies rapid MIDI tempo ticks cumulatively and routes song presses through direct playback', async () => {

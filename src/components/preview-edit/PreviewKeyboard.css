@@ -9,6 +9,14 @@
   --keyboard-muted: #516353;
   --keyboard-active: #285e41;
   --keyboard-pressed: #d3dfd4;
+  --keyboard-character-size: 20px;
+  --keyboard-jianpu-size: 22px;
+  --keyboard-symbol-size: 24px;
+  --keyboard-operator-size: 22px;
+  --keyboard-rhythm-size: 30px;
+  --keyboard-label-size: 12px;
+  --keyboard-icon-size: 20px;
+  --keyboard-danger-text: #be123c;
 }
 .dark [data-keyboard-refined] {
   --keyboard-surface: var(--color-surface-muted);
@@ -20,6 +28,7 @@
   --keyboard-muted: var(--color-text-muted);
   --keyboard-active: #2f7951;
   --keyboard-pressed: #294536;
+  --keyboard-danger-text: #fecdd3;
 }
 [data-keyboard-motion][data-keyboard-refined] {
   background: var(--keyboard-surface) !important;
@@ -46,12 +55,17 @@
   font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", sans-serif;
   font-weight: 550 !important;
   transition: background-color 90ms;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 [data-keyboard-refined] [data-keyboard-surface] button {
   background: var(--keyboard-key) !important;
   border-color: var(--keyboard-border) !important;
   color: var(--keyboard-text) !important;
+  transition: none !important;
 }
+[data-keyboard-refined] [data-keyboard-surface] button:active:not(:disabled) { transform: none !important; }
 [data-keyboard-refined] [data-key-surface="utility"] > button {
   background: var(--keyboard-utility) !important;
   border-color: var(--keyboard-border) !important;
@@ -91,7 +105,8 @@
 [data-keyboard-refined] [data-notation-mode-segments] button[aria-pressed="true"] {
   color: var(--keyboard-text) !important;
 }
-[data-keyboard-refined] [data-notation-mode-segments] button:active:not(:disabled) { transform: scale(0.97) !important; }
+[data-ui-input="pointer"] [data-keyboard-refined] [data-notation-mode-segments] button:active:not(:disabled) { transform: scale(0.97) !important; }
+[data-ui-input="keyboard"] [data-keyboard-refined] button:active:not(:disabled) { transform: none !important; }
 [data-notation-mode-indicator] {
   border-radius: 6px;
   background: var(--keyboard-key);
@@ -102,12 +117,13 @@
 @media (prefers-reduced-motion: reduce) {
   [data-notation-mode-indicator] { transition: none; }
   [data-keyboard-refined] [data-notation-mode-segments] button { transition-property: color; }
-  [data-keyboard-refined] [data-notation-mode-segments] button:active:not(:disabled) { transform: none !important; }
+  [data-ui-input="pointer"] [data-keyboard-refined] [data-notation-mode-segments] button:active:not(:disabled),
+  [data-keyboard-refined] button:active:not(:disabled) { transform: none !important; }
 }
-[data-keyboard-refined] [data-rhythm-symbol] { font-size: 32px !important; }
+[data-keyboard-refined] [data-rhythm-symbol] { font-size: var(--keyboard-rhythm-size) !important; }
 [data-keyboard-refined] [data-jianpu-input-glyph] { position: relative; }
-[data-keyboard-refined] [data-jianpu-pitch-symbol] { font-size: 26px !important; font-weight: 550 !important; font-variant-numeric: lining-nums tabular-nums; }
-[data-keyboard-refined] [data-jianpu-duration-line] { width: 19px !important; height: 1.3px !important; border-radius: 0 !important; }
+[data-keyboard-refined] [data-jianpu-pitch-symbol] { font-size: var(--keyboard-jianpu-size) !important; font-weight: 550 !important; font-variant-numeric: lining-nums tabular-nums; }
+[data-keyboard-refined] [data-jianpu-duration-line] { width: 17px !important; height: 1.3px !important; border-radius: 0 !important; }
 [data-keyboard-refined] [data-jianpu-octave-dot] { width: 3px !important; height: 3px !important; }
 [data-keyboard-refined] [data-jianpu-triplet-key-notes],
 [data-keyboard-refined] [data-jianpu-triplet-key-number],
@@ -159,4 +175,42 @@
 [data-keyboard-motion][data-keyboard-refined] { color: var(--keyboard-text); }
 [data-keyboard-refined] [data-keyboard-status] > div:last-child { color: var(--keyboard-text) !important; }
 [data-keyboard-refined] [data-keyboard-status] [role="status"] { color: var(--keyboard-muted) !important; }
+
+/* Match optical weight across input modes; key geometry stays independent of ink size. */
+[data-keyboard-refined] [data-chord-symbol="accidental"],
+[data-keyboard-refined] [data-chord-symbol="quality"] { font-size: var(--keyboard-symbol-size) !important; line-height: 1; }
+[data-keyboard-refined] [data-chord-symbol="operator"] { font-size: var(--keyboard-operator-size) !important; line-height: 1; }
+[data-keyboard-refined][data-device-layout="tablet"] [data-key-caption] { font-size: 11px !important; }
+[data-keyboard-refined] [data-chord-key-row="roots"] > button:not([data-chord-symbol]),
+[data-keyboard-refined] [data-chord-key-row="suffixes"] > button:not([data-chord-symbol]) { font-size: var(--keyboard-character-size) !important; }
+[data-keyboard-refined] [data-key-surface="utility"] > button:not([data-chord-symbol]) { font-size: var(--keyboard-label-size) !important; }
+[data-keyboard-refined] [data-keyboard-surface] button > svg.lucide { width: var(--keyboard-icon-size); height: var(--keyboard-icon-size); flex-shrink: 0; }
+[data-keyboard-refined] [data-jianpu-key-row="format"] > button > span[aria-hidden="true"] { font-size: var(--keyboard-jianpu-size) !important; }
+[data-keyboard-refined] [data-jianpu-key-row="modifiers"] > button > span[aria-hidden="true"]:only-child { font-size: var(--keyboard-symbol-size) !important; }
+[data-keyboard-refined] [data-jianpu-accidental-mark] { font-size: 18px !important; }
+[data-keyboard-refined] [data-key-emphasis="delete"] {
+  gap: 8px;
+  background: var(--color-danger-soft) !important;
+  color: var(--color-danger) !important;
+}
+[data-keyboard-refined] [data-keyboard-common-actions] > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  min-height: 44px;
+  min-width: 0;
+  padding-inline: 8px;
+  border: 1px solid var(--keyboard-border);
+  font-size: var(--keyboard-label-size) !important;
+  line-height: 1;
+  white-space: nowrap;
+}
+[data-keyboard-refined] [data-keyboard-common-actions] > button[data-key-emphasis="delete"] {
+  background: var(--color-danger-soft) !important;
+  color: var(--keyboard-danger-text) !important;
+}
+/* Keep the action/navigation rows reachable when the viewport is short. */
+[data-keyboard-refined] > [data-keyboard-disclosure] { flex-shrink: 1 !important; overflow-y: auto; }
 }

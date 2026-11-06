@@ -1,8 +1,9 @@
 import { act, fireEvent, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSetlistPreviewNavigation } from './useSetlistPreviewNavigation';
+import { useUiMotion } from './useUiMotion';
 
-function setup() {
+function setup(initial: Partial<{ selectedSongId: string | null; enabled: boolean }> = {}) {
   const root = document.createElement('div');
   document.body.append(root);
   Object.defineProperties(root, {
@@ -29,9 +30,13 @@ function setup() {
     skipNextAutoScrollRef: { current: false },
     preserveSelectionUntilRef: { current: 0 },
     gestureActiveRef: { current: false },
-    onSelectSong: vi.fn()
+    onSelectSong: vi.fn(),
+    ...initial
   };
-  const hook = renderHook(useSetlistPreviewNavigation, { initialProps: options });
+  const hook = renderHook((props: typeof options) => {
+    useUiMotion();
+    useSetlistPreviewNavigation(props);
+  }, { initialProps: options });
   const advance = (ms = 40) => act(() => vi.advanceTimersByTime(ms));
   const move = (top: number) => {
     root.scrollTop = top;
@@ -44,19 +49,20 @@ function setup() {
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   document.body.replaceChildren();
 });
 
 describe('setlist preview navigation', () => {
-  it('keeps the third song selected while a long smooth scroll crosses the second song', () => {
+  it('keeps the third song selected throughout a short pointer scroll from the second song', () => {
     const { root, options, hook, advance, move } = setup();
     hook.rerender({ ...options, selectedSongId: 'three' });
     // Even a delayed render must not let the old scroll position select a song.
-    move(1000);
+    move(1500);
     advance();
     expect(root.scrollTo).toHaveBeenLastCalledWith({ top: 1904, behavior: 'smooth' });
     for (let step = 0; step < 20; step++) {
-      move(1000 + step * 20);
+      move(1500 + step * 20);
       advance(100);
     }
     expect(options.onSelectSong).not.toHaveBeenCalled();
@@ -93,7 +99,7 @@ describe('setlist preview navigation', () => {
     hook.rerender({ ...options, selectedSongId: 'two' });
     hook.rerender({ ...options, selectedSongId: 'three' });
     advance();
-    expect(root.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 1904, behavior: 'smooth' });
+    expect(root.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 1904, behavior: 'instant' });
     move(1000);
     advance();
     expect(options.onSelectSong).not.toHaveBeenCalled();
@@ -180,6 +186,58 @@ describe('setlist preview navigation', () => {
     advance(2000);
     expect(root.scrollTo).not.toHaveBeenCalled();
     expect(options.onSelectSong).not.toHaveBeenCalled();
+  });
+
+  it('restores the initially selected song immediately instead of scrolling through the setlist', () => {
+    const { root, options } = setup({ selectedSongId: 'three' });
+    expect(root.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 1904, behavior: 'instant' });
+    expect(options.onSelectSong).not.toHaveBeenCalled();
+  });
+
+  it('reopens the preview at its current song immediately even for a short jump', () => {
+    const { root, options, hook, advance } = setup();
+    hook.rerender({ ...options, enabled: false });
+    root.scrollTop = 500;
+    hook.rerender(options); advance();
+    expect(root.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, behavior: 'instant' });
+  });
+
+  it('positions the first asynchronously restored selection immediately', () => {
+    const { root, options, hook, advance } = setup({ selectedSongId: null });
+    root.scrollTop = 500;
+    options.skipNextAutoScrollRef.current = false;
+    hook.rerender({ ...options, selectedSongId: 'two' }); advance();
+    expect(root.scrollTo).toHaveBeenLastCalledWith({ top: 904, behavior: 'instant' });
+  });
+
+  it('jumps across long charts immediately without selecting an intermediate song', () => {
+    const { root, options, hook, advance, move } = setup();
+    hook.rerender({ ...options, selectedSongId: 'three' }); advance();
+    expect(root.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 1904, behavior: 'instant' });
+    move(1904); fireEvent(root, new Event('scrollend')); advance();
+    expect(options.onSelectSong).not.toHaveBeenCalled();
+  });
+
+  it('makes keyboard navigation immediate and restores short pointer scrolling on the next pointer action', () => {
+    const { root, options, hook, advance } = setup();
+    root.scrollTop = 500;
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    hook.rerender({ ...options, selectedSongId: 'two' }); advance();
+    expect(root.scrollTo).toHaveBeenLastCalledWith({ top: 904, behavior: 'instant' });
+    fireEvent(root, new Event('scrollend'));
+    root.scrollTop = 1500;
+    fireEvent.pointerDown(document);
+    hook.rerender({ ...options, selectedSongId: 'three' }); advance();
+    expect(root.scrollTo).toHaveBeenLastCalledWith({ top: 1904, behavior: 'smooth' });
+  });
+
+  it('honors reduced motion for a short pointer jump using the preference at navigation time', () => {
+    const { root, options, hook, advance } = setup();
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
+    root.scrollTop = 500;
+    fireEvent.pointerDown(document);
+    hook.rerender({ ...options, selectedSongId: 'two' }); advance();
+    expect(root.scrollTo).toHaveBeenLastCalledWith({ top: 904, behavior: 'instant' });
   });
 });
 

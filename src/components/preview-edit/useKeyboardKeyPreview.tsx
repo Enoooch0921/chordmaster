@@ -67,3 +67,14 @@ export function useKeyboardKeyPreview(enabled: boolean) {
   }
   return { onPointerDownCapture, preview };
 }
+
+export type KeyboardKeyPreviewHandle = Pick<ReturnType<typeof useKeyboardKeyPreview>, 'onPointerDownCapture'>;
+
+/** Press previews update only this tiny portal, never the entire notation keyboard. */
+export const KeyboardKeyPreview = React.forwardRef<KeyboardKeyPreviewHandle, { enabled: boolean }>(
+  function KeyboardKeyPreview({ enabled }, ref) {
+    const preview = useKeyboardKeyPreview(enabled);
+    React.useImperativeHandle(ref, () => ({ onPointerDownCapture: preview.onPointerDownCapture }), [preview.onPointerDownCapture]);
+    return preview.preview;
+  }
+);

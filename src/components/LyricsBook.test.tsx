@@ -9,6 +9,18 @@ const song: Song = { title: '第一首', originalKey: 'C', currentKey: 'C', time
 const entries = [{ id: 'one', song }, { id: 'two', song: { ...song, title: '第二首' } }];
 
 describe('continuous lyrics book', () => {
+  it('keeps reading text locked and gives each whole song one navigation anchor', () => {
+    const onSongChange = vi.fn();
+    const { container } = render(<LyricsBook title="聚會" entries={entries} language="zh" settings={DEFAULT_LYRICS_BOOK_SETTINGS} onSongChange={onSongChange} reading hideControls />);
+    const anchors = container.querySelectorAll('[data-setlist-preview-song-id]');
+    expect(anchors).toHaveLength(2);
+    expect(anchors[1].tagName).toBe('SECTION');
+    expect(anchors[1]).toHaveTextContent('第二行');
+    fireEvent.click(anchors[1].querySelector('.lyrics-text')!);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(onSongChange).not.toHaveBeenCalled();
+  });
   it('sorts lyrics within each song and renumbers titles when the setlist order changes', () => {
     const first = { id: 'one', song: { ...song, lyricsDoc: { chinese: '[Verse 1]\n一\n\n[Chorus]\n副\n\n[Verse 2]\n二' } } };
     const { container, rerender } = render(<LyricsBook title="聚會" entries={[first, entries[1]]} language="zh" settings={DEFAULT_LYRICS_BOOK_SETTINGS} exportMode />);

@@ -63,6 +63,8 @@ export type PreviewEditField = PreviewBarEditField | 'sectionName';
 interface PreviewEditTargetBase {
   previewIdentity: string;
   sectionId: string;
+  /** UI occurrence only; repeated setlist sections still edit the same source score. */
+  sectionOccurrence?: number;
   anchorKey: string;
   anchorRect: PreviewEditAnchorRect;
 }

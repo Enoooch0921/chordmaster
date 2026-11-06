@@ -1,6 +1,7 @@
 import {fireEvent,render,screen} from '@testing-library/react';
 import {expect,it,vi} from 'vitest';
-import {useKeyboardKeyPreview} from './useKeyboardKeyPreview';
+import {useKeyboardKeyPreview,KeyboardKeyPreview,type KeyboardKeyPreviewHandle} from './useKeyboardKeyPreview';
+import {useRef} from 'react';
 import {JianpuInputGlyph,RhythmStaffKeyGlyph} from './NotationKeyGlyphs';
 
 function Harness({enabled=true}:{enabled?:boolean}){
@@ -31,4 +32,11 @@ it('keeps tools and disabled keys quiet and disables previews for desktop mode',
 it('clears the preview when the finger leaves the key or the gesture is cancelled',()=>{
  render(<Harness/>);press(screen.getByRole('button',{name:'C'}));fireEvent(document,new MouseEvent('pointermove',{bubbles:true,clientX:100,clientY:100}));expect(document.querySelector('[data-keyboard-key-preview]')).toBeNull();
  press(screen.getByRole('button',{name:'C'}));fireEvent(document,new MouseEvent('pointercancel',{bubbles:true}));expect(document.querySelector('[data-keyboard-key-preview]')).toBeNull();
+});
+
+it('updates held-key feedback without rerendering its keyboard parent',()=>{
+ const renders=vi.fn();
+ function Keyboard(){renders();const preview=useRef<KeyboardKeyPreviewHandle>(null);return <section onPointerDownCapture={e=>preview.current?.onPointerDownCapture(e)}><div data-key-surface="character"><button>C</button></div><KeyboardKeyPreview enabled ref={preview}/></section>}
+ render(<Keyboard/>);press(screen.getByRole('button',{name:'C'}));expect(document.querySelector('[data-keyboard-key-preview]')).toBeInTheDocument();
+ fireEvent(document,new MouseEvent('pointerup',{bubbles:true}));expect(document.querySelector('[data-keyboard-key-preview]')).toBeNull();expect(renders).toHaveBeenCalledTimes(1);
 });

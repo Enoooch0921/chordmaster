@@ -93,6 +93,14 @@ describe('preview keyboard motion coordination', () => {
   });
 });
 describe('resting keyboard bounds', () => {
+  it('uses the visible body height when short-window keys scroll beneath pinned actions', () => {
+    const panel = document.createElement('div'), disclosure = document.createElement('div'), content = document.createElement('div');
+    panel.dataset.keyboardDocked = ''; disclosure.dataset.keyboardDisclosure = ''; disclosure.dataset.keyboardScrollBody = ''; disclosure.dataset.collapsed = 'false'; content.dataset.keyboardContent = '';
+    panel.append(disclosure); disclosure.append(content); panel.getBoundingClientRect = () => rect(100, 240);
+    Object.defineProperty(panel, 'offsetHeight', { value: 240 }); Object.defineProperty(disclosure, 'offsetHeight', { value: 50 }); Object.defineProperty(content, 'offsetHeight', { value: 250 });
+    expect(getKeyboardRestingRect(panel)).toMatchObject({ top: 100, bottom: 340, height: 240 });
+    disclosure.dataset.collapsed = 'true'; expect(getKeyboardRestingRect(panel)).toMatchObject({ top: 150, bottom: 340, height: 190 });
+  });
   it('predicts expanded height without measuring the sliding visual surface', () => {
     const panel = document.createElement('div'), disclosure = document.createElement('div'), content = document.createElement('div');
     panel.dataset.keyboardDocked = ''; disclosure.dataset.keyboardDisclosure = ''; disclosure.dataset.collapsed = 'false'; content.dataset.keyboardContent = '';

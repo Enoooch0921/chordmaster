@@ -7,6 +7,10 @@ related_targets: ["src/utils/lyricsBook.ts"]
 
 # Setlist lyrics on A4
 
+### Reading workspace follow-up (2026-11-06)
+
+The integrated setlist reader now uses `SetlistLyricsWorkspace` outside the chart canvas. Its fixed controls replace the embedded Book controls via `hideControls`; the default entry is locked reading, with explicit print and edit destinations. `LyricsBook` reading uses a whole-song section as each setlist entry's navigation anchor and never enables inline editing. A4 rendering, titles, pagination and export retain the contracts below. Detailed interaction rules and verification are in `src-components-setlistlyricsworkspace-tsx.md`.
+
 Mode: Read. Preserve ChordMaster's green controls and printable white paper.
 
 The reader moves between Verse, Chorus and Bridge while singing, often returning

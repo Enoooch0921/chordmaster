@@ -63,6 +63,48 @@ describe('joined setlist updates', () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
+  it('reuses only an accepted version, clears it after local changes and receives revocation', async () => {
+    const v1 = 'a'.repeat(64), v2 = 'b'.repeat(64);
+    const update = vi.fn().mockResolvedValue({ version: v1, payload: remote });
+    const repository = { loadJoinedWorkspaceUpdate: update } as unknown as WorkspaceRepository;
+    const onUpdate = vi.fn();
+    const options = { ...initial, repository, onUpdate, scope: 'account:library', enabled: true, paused: false };
+    const { rerender } = renderHook(props => useJoinedWorkspaceRefresh(props), { initialProps: options });
+    await flush();
+    const accepted = onUpdate.mock.calls[0][0];
+    rerender({ ...options, ...accepted });
+    update.mockResolvedValue({ version: v1, payload: null });
+    await tick();
+    expect(update).toHaveBeenLastCalledWith(v1);
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    const local = { ...accepted, joinedSetlists: [...accepted.joinedSetlists] };
+    rerender({ ...options, ...local });
+    update.mockResolvedValue({ version: v2, payload: { joinedSetlists: [], joinedProjects: [] } });
+    await tick();
+    expect(update).toHaveBeenLastCalledWith(null);
+    expect(onUpdate.mock.calls.at(-1)?.[0]).toEqual({ joinedSetlists: [], joinedProjects: [] });
+  });
+
+  it('does not advance a conditional version for a reply that raced an edit or account switch', async () => {
+    const v1 = 'a'.repeat(64), v2 = 'b'.repeat(64);
+    let finish!: (value: { version: string; payload: JoinedWorkspace }) => void;
+    const update = vi.fn().mockReturnValueOnce(new Promise(done => { finish = done; }))
+      .mockResolvedValue({ version: v2, payload: remote });
+    const repository = { loadJoinedWorkspaceUpdate: update } as unknown as WorkspaceRepository;
+    const onUpdate = vi.fn();
+    const options = { ...initial, repository, onUpdate, scope: 'account:library', enabled: true, paused: false };
+    const { rerender } = renderHook(props => useJoinedWorkspaceRefresh(props), { initialProps: options });
+    rerender({ ...options, paused: true });
+    await act(async () => finish({ version: v1, payload: remote }));
+    expect(onUpdate).not.toHaveBeenCalled();
+    rerender(options);
+    await tick();
+    expect(update).toHaveBeenLastCalledWith(null);
+    rerender({ ...options, ...onUpdate.mock.calls[0][0], scope: 'new-account:library' });
+    await flush();
+    expect(update).toHaveBeenLastCalledWith(null);
+  });
+
   it('does not overwrite optimistic edits while a mutation is being saved', async () => {
     let resolve!: (value: JoinedWorkspace) => void;
     const load = vi.fn().mockReturnValueOnce(new Promise((done) => { resolve = done; })).mockResolvedValue(remote);

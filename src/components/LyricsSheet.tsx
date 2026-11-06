@@ -22,6 +22,7 @@ interface LyricsSheetProps {
   reading?: boolean;
   onReadingChange?: (reading: boolean) => void;
   exportMode?: boolean;
+  hideViewToggle?: boolean;
 }
 const buttonClass = 'rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-indigo-50 disabled:opacity-35';
 const fieldsFor = (display: LyricsLanguage): ('chinese' | 'english')[] => display === 'bilingual' || display === 'mixed' ? ['english', 'chinese'] : [display];
@@ -84,7 +85,7 @@ export function InlineLyrics({ value, label, editable, onFocus, onFinish }: {
   </div>;
 }
 
-export default function LyricsSheet({ song, setlistSongNumber, language, onChange, reading: controlledReading, onReadingChange, exportMode = false }: LyricsSheetProps) {
+export default function LyricsSheet({ song, setlistSongNumber, language, onChange, reading: controlledReading, onReadingChange, exportMode = false, hideViewToggle = false }: LyricsSheetProps) {
   const zh = language === 'zh';
   const doc = song.lyricsDoc;
   const translationName = lyricsLanguageName(doc?.translationLanguage, language);
@@ -235,10 +236,10 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
     {!exportMode && <div data-preview-only-control className="z-20 space-y-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="mr-auto text-sm font-semibold">{zh ? '歌詞' : 'Lyrics'}</span>
-        <button type="button" className={buttonClass} aria-pressed={reading} onClick={() => {
+        {!hideViewToggle && <button type="button" className={buttonClass} aria-pressed={reading} onClick={() => {
           const next = !reading;
           if (onReadingChange) onReadingChange(next); else setLocalReading(next);
-        }}>{reading ? (zh ? '切換 A4 排版' : 'A4 layout') : (zh ? '大字閱讀' : 'Reading view')}</button>
+        }}>{reading ? (zh ? '切換 A4 排版' : 'A4 layout') : (zh ? '大字閱讀' : 'Reading view')}</button>}
         <select aria-label={zh ? '歌詞語言' : 'Lyrics language'} value={display} onChange={e => setDisplay(e.target.value as LyricsLanguage)} className={buttonClass}>
           <option value="chinese">{zh ? '中文' : 'Chinese'}</option><option value="english">{translationName}</option><option value="bilingual">{zh ? `中文／${translationName}對照` : 'Bilingual'}</option><option value="mixed">{zh ? `中文／${translationName}混合（逐行）` : `Chinese / ${translationName} (alternating lines)`}</option>
         </select>

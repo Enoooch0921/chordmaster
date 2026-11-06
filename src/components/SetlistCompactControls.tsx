@@ -1,4 +1,5 @@
 import React from 'react';
+import MeasuredSlidingSelection from './ui/MeasuredSlidingSelection';
 
 interface CompactSegmentedControlOption<T extends string> {
   value: T;
@@ -28,15 +29,17 @@ export const CompactSegmentedControl = <T extends string,>({
 }: CompactSegmentedControlProps<T>) => {
   const isExtraSmall = size === 'xs';
   const isSmall = size === 'sm';
+  const layoutKey = JSON.stringify([options, size, stretch, className, buttonClassName]);
 
   return (
     <div
-      className={`items-center border border-gray-200 bg-gray-50 ${
+      className={`ui-segmented-control relative items-center border border-gray-200 bg-gray-50 ${
         isExtraSmall ? 'h-7 rounded-xl p-[3px]' : 'h-8 rounded-2xl p-0.5'
       } ${
         stretch ? 'flex w-full' : 'inline-flex'
       } ${wrap ? 'flex-wrap' : ''} ${isSmall ? 'gap-1' : 'gap-1'} ${className}`}
     >
+      {!wrap && <MeasuredSlidingSelection value={value} layoutKey={layoutKey} />}
       {options.map((option) => {
         const isActive = option.value === value;
         return (
@@ -45,7 +48,7 @@ export const CompactSegmentedControl = <T extends string,>({
             type="button"
             aria-pressed={isActive}
             onClick={() => onChange(option.value)}
-            className={`rounded-full font-bold transition-colors ${
+            className={`relative rounded-full font-bold transition-colors ${
               isExtraSmall
                 ? 'whitespace-nowrap px-2 py-1 text-[9px] leading-none'
                 : isSmall
@@ -103,7 +106,7 @@ export const CompactToggleSwitch: React.FC<CompactToggleSwitchProps> = ({
       }`}
     >
       <span
-        className={`absolute rounded-full bg-white shadow-sm transition-transform ${
+        className={`ui-switch-thumb absolute rounded-full bg-white shadow-sm ${
           size === 'xs' ? 'left-0.5 top-0.5 h-3 w-3' : 'left-0.5 top-0.5 h-4 w-4'
         } ${
           checked

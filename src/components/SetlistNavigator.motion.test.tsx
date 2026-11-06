@@ -14,11 +14,11 @@ it('pushes the next level from the right and reverses that path when returning',
 
 it('replaces sliding with a gentle fade for reduced motion and switches instantly for keyboards', () => {
   const reduced = { direction: 1, instant: false, reduced: true };
-  expect(setlistPanelVariants.enter(reduced)).toEqual({ transform: 'none', opacity: 0 });
-  expect(setlistPanelVariants.exit(reduced).transform).toBe('none');
+  expect(setlistPanelVariants.enter(reduced)).toEqual({ transform: 'translate3d(0%, 0, 0)', opacity: 0 });
+  expect(setlistPanelVariants.exit(reduced).transform).toBe('translate3d(0%, 0, 0)');
   expect(setlistPanelVariants.visible(reduced).transition.duration).toBe(0.125);
   const keyboard = { ...reduced, reduced: false, instant: true };
-  expect(setlistPanelVariants.enter(keyboard)).toEqual({ transform: 'none', opacity: 1 });
+  expect(setlistPanelVariants.enter(keyboard)).toEqual({ transform: 'translate3d(0%, 0, 0)', opacity: 1 });
   expect(setlistPanelVariants.exit(keyboard).transition.duration).toBe(0);
 });
 

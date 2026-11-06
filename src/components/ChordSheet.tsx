@@ -48,6 +48,7 @@ import { Repeat, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import Jianpu from './Jianpu';
 import RhythmNotation from './RhythmNotation';
 import BeatSlashGlyph from './BeatSlashGlyph';
+import BarRepeatGlyph from './BarRepeatGlyph';
 import ChordTimingArrow from './ChordTimingArrow';
 import { ChordFitScope, ChordFitGrid, FittedBeatChord } from './ChordFitGrid';
 import { convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getJianpuOpenPhraseCount, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
@@ -284,11 +285,7 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
   if (chordString === '%') {
     return withChordMark(
       <div className="flex items-center justify-center w-full h-full">
-        <svg viewBox="0 0 24 24" className="w-7 h-7 text-gray-400" fill="currentColor">
-          <circle cx="9" cy="9" r="1.2" />
-          <circle cx="15" cy="15" r="1.2" />
-          <path d="M7 17L17 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
+        <BarRepeatGlyph className="w-7 h-7 text-gray-400" />
       </div>
     );
   }
@@ -360,26 +357,22 @@ const FormattedChord: React.FC<FormattedChordProps> = ({
         </div>
       )}
       {marker === 'push' && (
-        <motion.div
-          initial={{ scale: 0, opacity: 0, x: 5, y: 5 }}
-          animate={{ scale: 1, opacity: 1, x: 0, y: 0 }}
+        <div
           className={markerWrapperClass}
           data-chord-marker="push"
           data-ending-collision-offset={avoidEndingCollision ? true : undefined}
         >
           <ChordTimingArrow marker="<" className="w-full h-full text-gray-900 overflow-visible" strokeWidth={compactModifier ? 1.75 : 1.5} />
-        </motion.div>
+        </div>
       )}
       {marker === 'pull' && (
-        <motion.div
-          initial={{ scale: 0, opacity: 0, x: -5, y: 5 }}
-          animate={{ scale: 1, opacity: 1, x: 0, y: 0 }}
+        <div
           className={markerWrapperClass}
           data-chord-marker="pull"
           data-ending-collision-offset={avoidEndingCollision ? true : undefined}
         >
           <ChordTimingArrow marker=">" className="w-full h-full text-gray-900 overflow-visible" strokeWidth={compactModifier ? 1.75 : 1.5} />
-        </motion.div>
+        </div>
       )}
     </>
   );
@@ -769,6 +762,7 @@ export interface ChordSheetElementTarget extends ChordSheetElementClickMeta {
   notationMode: PreviewNotationMode | null;
   cursor: PreviewNotationCursor | null;
   sectionTitleIntent?: 'actions' | 'rename';
+  sectionOccurrence?: number;
 }
 
 export interface ChordSheetPreviewBarTarget extends ChordSheetElementClickMeta {
@@ -821,6 +815,7 @@ interface ChordSheetProps {
   activeBar?: { sIdx: number; bIdx: number } | null;
   activePreviewNotationTarget?: {
     sectionId: string;
+    sectionOccurrence?: number;
     barId: string;
     notationMode: PreviewNotationMode;
     cursor: PreviewNotationCursor;
@@ -1784,6 +1779,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
     onElementClick(sIdx, bIdx, field, {
       previewIdentity,
       sectionId: section?.id ?? null,
+      sectionOccurrence: song.sections.slice(0, sIdx).filter(candidate => candidate.id === section?.id).length,
       barId: bar?.id ?? null,
       field,
       slotIndex,
@@ -2427,7 +2423,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                 const writtenKey = songKeyStates.barActiveKeys[row.sIdx]?.[row.startBIdx] ?? songKeyStates.sectionActiveKeys[row.sIdx] ?? song.originalKey;
                 const playKey = getPlayKey(displayKeyStates.barActiveKeys[row.sIdx]?.[row.startBIdx] ?? displayKeyStates.sectionActiveKeys[row.sIdx] ?? currentKey, capo);
                 const offset = getTransposeOffset(writtenKey, playKey);
-                return <div key={`unmetered-${block.id || `${row.sIdx}-${row.startBIdx}`}`} data-unmetered-chord-block={block.id} data-preview-layout-weight={row.layoutWeight} className="flex w-full min-w-0 gap-2 py-1" style={{ flexGrow: row.layoutWeight }}>
+                return <div key={`unmetered-${row.sIdx}-${block.id || row.startBIdx}`} data-unmetered-chord-block={block.id} data-preview-layout-weight={row.layoutWeight} className="flex w-full min-w-0 gap-2 py-1" style={{ flexGrow: row.layoutWeight }}>
                   <div className="w-16 shrink-0 pt-1 text-xs font-bold sm:w-20">
                     {row.sectionTitle && (onElementClick ? <button type="button" aria-label={language==='zh'?`開啟段落操作 ${row.sectionTitle}`:`Section actions ${row.sectionTitle}`} data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|section|sectionName|title`} className="rounded px-1 py-0.5 text-left hover:bg-slate-100" onClick={event=>emitElementClick(event,row.sIdx,-1,'sectionName')}>{row.sectionTitle}</button> : row.sectionTitle)}
                   </div>
@@ -2570,7 +2566,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
 
               return (
                 <motion.div
-                  key={`${section?.id || row.sIdx}-${row.kind}-${row.startBIdx}`}
+                  key={`${row.sIdx}-${section?.id || 'section'}-${row.kind}-${row.startBIdx}`}
                   data-preview-section-id={section?.id || ''}
                   data-preview-add-choice-row={row.kind === 'add-choice' ? 'true' : undefined}
                   data-preview-only-control={row.kind === 'add-choice' ? 'true' : undefined}
@@ -2646,7 +2642,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                         ) : null;
                       }
                       return (
-                        <div className={`w-full flex justify-center transition-all ${isActiveSection ? 'scale-[1.02]' : ''}`}>
+                        <div className="w-full flex justify-center">
                           <div className="relative flex w-full justify-center">
                             <button
                               type="button"
@@ -2654,7 +2650,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                               data-preview-section-title={isSectionStartRow ? section?.id : undefined}
                               data-preview-section-split={isSectionStartRow ? undefined : row.bars[0]?.id}
                               data-preview-only-control={isSectionStartRow ? undefined : 'true'}
-                              className={`group/section-title flex w-full select-none items-center justify-center rounded-sm px-1 py-1 min-h-[24px] overflow-visible ${isSectionStartRow && title ? 'border' : 'border border-dashed border-transparent'} ${onElementClick ? `${isSectionStartRow ? 'cursor-pointer' : 'cursor-text'} transition-all hover:border-indigo-300 hover:bg-indigo-50/55 hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)]` : ''} ${isSectionStartRow && onSectionReorder ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
+                              className={`group/section-title flex w-full select-none items-center justify-center rounded-sm px-1 py-1 min-h-[24px] overflow-visible ${isSectionStartRow && title ? 'border' : 'border border-dashed border-transparent'} ${onElementClick ? `${isSectionStartRow ? 'cursor-pointer' : 'cursor-text'} transition-colors hover:border-indigo-300 hover:bg-indigo-50/55 hover:shadow-[0_0_0_2px_rgba(99,102,241,0.22)]` : ''} ${isSectionStartRow && onSectionReorder ? 'active:cursor-grabbing sm:cursor-grab' : ''}`}
                               style={{
                                 ...(isSectionStartRow && title ? getSectionBadgeStyle(colors.accent) : undefined),
                                 ...(isSectionStartRow && onSectionReorder ? { touchAction: 'none', WebkitUserSelect: 'none' } : undefined)
@@ -2963,6 +2959,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                       resolvedActiveNotationTarget
                       && resolvedActiveNotationTarget.sectionId === section?.id
                       && resolvedActiveNotationTarget.barId === bar?.id
+                      && song.sections.slice(0, row.sIdx).filter(candidate => candidate.id === section?.id).length
+                        === Math.min(resolvedActiveNotationTarget.sectionOccurrence ?? 0,
+                          song.sections.filter(candidate => candidate.id === section?.id).length - 1)
                     );
                     const activeRhythmCursor = isActiveNotationBar
                       && resolvedActiveNotationTarget?.notationMode === 'rhythm'
@@ -2975,9 +2974,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                       ? resolvedActiveNotationTarget.cursor
                       : null;
                     const isActiveChordEditBar = Boolean(
-                      resolvedActiveChordSlot
-                      && resolvedActiveChordSlot.sectionId === section?.id
-                      && resolvedActiveChordSlot.barId === bar?.id
+                      resolvedActiveChordSlot && isActiveNotationBar
                     );
                     const isActivePreviewEditBar = isActiveNotationBar || isActiveChordEditBar;
                     const notationMeter = parseTimeSignature(effectiveTimeSignature);
@@ -3199,7 +3196,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                       : bar?.repeatStart
                         ? '-top-[8px]'
                         : '-top-[2px]';
-                    const isActiveBar = activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
+                    const isActiveBar = resolvedActiveNotationTarget ? isActiveNotationBar
+                      : activeBar?.sIdx === row.sIdx && activeBar?.bIdx === row.startBIdx + bIdx;
                     const suppressLeftBarline = Boolean(bar?.repeatStart || bar?.doubleBarStart) || Boolean(previousBar?.repeatEnd || previousBar?.finalBar || previousBar?.doubleBar);
                     const suppressRightBarline = lastBIdx === 3 && Boolean(bar?.repeatEnd || bar?.finalBar || bar?.doubleBar);
                     const leftBorderClass = suppressLeftBarline

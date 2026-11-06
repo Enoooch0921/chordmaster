@@ -52,7 +52,7 @@ describe.each(['sheet', 'book'] as const)('%s mixed Chinese/English lyrics', kin
 
   it('preserves the raw languages and mixed view when editing one English sentence', () => {
     const onChange = vi.fn();
-    show({ reading: true, onChange });
+    show({ reading: kind === 'sheet', onChange });
     const label = kind === 'sheet' ? '英文歌詞 Verse 1 · 第2行' : '中英混合測試 · Verse 1 · 英文 · 第2行';
     fireEvent.click(screen.getByRole('button', { name: label }));
     const input = screen.getByRole('textbox', { name: label });

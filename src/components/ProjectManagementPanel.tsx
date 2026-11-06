@@ -9,6 +9,9 @@ import './ProjectManagementPanel.css';
 type Action = { label: string; icon: ReactNode; run: () => void; danger?: boolean; disabled?: boolean };
 export function ManagementActions({ label, actions, disabled = false, triggerContent }: { label: string; actions: Action[]; disabled?: boolean; triggerContent?: ReactNode }) {
   const [open, setOpen] = useState(false);
+  // A large library has hundreds of unused menus. Mount their motion/presence
+  // subscribers only on first use, then retain them for the closing animation.
+  const [hasOpened, setHasOpened] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null);
   const id = useId();
   const close = useCallback(() => setOpen(false), []);
@@ -21,8 +24,8 @@ export function ManagementActions({ label, actions, disabled = false, triggerCon
   }, [open, close]);
   useEffect(() => { if (open && isPositioned) panel.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true }); }, [open, isPositioned]);
   return <>
-    <button ref={trigger} type='button' className={triggerContent ? 'pm-new-button ui-press' : 'pm-icon-button ui-press'} disabled={disabled} aria-label={label} aria-haspopup='menu' aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>{triggerContent ?? <MoreHorizontal size={19} />}</button>
-    {createPortal(<AnimatedPopover open={open} ready={isPositioned} origin={transformOrigin} panelRef={panel} id={id} role='menu' aria-label={label} data-placement={placement} style={panelStyle} className='pm-actions-menu'
+    <button ref={trigger} type='button' className={triggerContent ? 'pm-new-button ui-press' : 'pm-icon-button ui-press'} disabled={disabled} aria-label={label} aria-haspopup='menu' aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => { setHasOpened(true); setOpen(value => !value); }}>{triggerContent ?? <MoreHorizontal size={19} />}</button>
+    {hasOpened && createPortal(<AnimatedPopover animateOnMount open={open} ready={isPositioned} origin={transformOrigin} panelRef={panel} id={id} role='menu' aria-label={label} data-placement={placement} style={panelStyle} className='pm-actions-menu'
       onKeyDown={event => {
         const buttons = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);

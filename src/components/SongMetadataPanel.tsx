@@ -787,7 +787,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
           className={isPhoneLayout ? 'peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0' : `${isTouchOptimized ? 'h-5 w-5' : 'h-3.5 w-3.5'} shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500`}
         />
         {isPhoneLayout ? <span aria-hidden="true" data-checked={shuffleEnabled} className="song-info-switch-track relative h-6 w-10 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-300 peer-focus-visible:ring-offset-2">
-          <span className={`song-info-switch-thumb absolute left-0.5 top-0.5 size-5 rounded-full shadow-sm transition-transform ${shuffleEnabled ? 'translate-x-4' : ''}`} />
+          <span className={`song-info-switch-thumb ui-switch-thumb absolute left-0.5 top-0.5 size-5 rounded-full shadow-sm ${shuffleEnabled ? 'translate-x-4' : ''}`} />
         </span> : null}
       </label>
     </div>

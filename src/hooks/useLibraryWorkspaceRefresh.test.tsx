@@ -36,6 +36,99 @@ const setup = (load = vi.fn().mockResolvedValue(updated())) => {
   return { ...renderHook((props) => useLibraryWorkspaceRefresh(props), { initialProps: options }), options, load, onUpdate };
 };
 
+describe('conditional library updates', () => {
+  const deltaSetup = (delta = vi.fn().mockResolvedValue(initial), interval = 5000) => {
+    const legacy = vi.fn();
+    const repository = { loadLibraryDelta: delta, loadLibraryContent: legacy } as unknown as WorkspaceRepository;
+    const options = { repository, scope: 'same-user:personal', libraryId: 'personal', enabled: true,
+      paused: false, refreshCollections: true, collectionRefreshMs: interval, refreshVersion: 0,
+      workspace: initial, canApply: () => true, onUpdate: vi.fn() };
+    return { ...renderHook(props => useLibraryWorkspaceRefresh(props), { initialProps: options }), options, delta, legacy };
+  };
+
+  it.each([5000, 15000])('preserves the %i ms interval and catches edits, additions and removals', async interval => {
+    let cloud = initial;
+    const delta = vi.fn(async () => structuredClone(cloud));
+    const { options, legacy } = deltaSetup(delta, interval);
+    await flush();
+    options.onUpdate.mockClear();
+    cloud = updated(); // Another device changes Key/Capo and adds an entry.
+    await tick(interval - 1);
+    expect(options.onUpdate).not.toHaveBeenCalled();
+    await tick(1);
+    expect(options.onUpdate).toHaveBeenLastCalledWith(cloud);
+    cloud = { ...cloud, songs: [], setlists: [] };
+    await tick(interval);
+    expect(options.onUpdate).toHaveBeenLastCalledWith(cloud);
+    expect(legacy).not.toHaveBeenCalled();
+  });
+
+  it('applies the cached snapshot on a later unchanged response after an editing race', async () => {
+    let resolve!: (value: LibraryContent) => void;
+    const cached = updated();
+    const delta = vi.fn().mockImplementationOnce(() => new Promise(done => { resolve = done; }))
+      .mockResolvedValue(cached); // Repository retains a complete snapshot for unchanged responses.
+    const { rerender, options } = deltaSetup(delta);
+    rerender({ ...options, paused: true });
+    await act(async () => resolve(cached));
+    expect(options.onUpdate).not.toHaveBeenCalled();
+    await tick(15000);
+    expect(delta).toHaveBeenCalledOnce();
+    rerender(options);
+    await tick(250);
+    expect(options.onUpdate).toHaveBeenCalledExactlyOnceWith(cached);
+  });
+
+  it('defers to synchronous mutation guards and catches up after reconnect', async () => {
+    let allowed = true;
+    const { rerender, options, delta } = deltaSetup(vi.fn().mockResolvedValue(updated()));
+    rerender({ ...options, canApply: () => allowed });
+    allowed = false;
+    await flush();
+    expect(options.onUpdate).not.toHaveBeenCalled();
+    await tick(5000);
+    expect(delta).toHaveBeenCalledOnce();
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    act(() => window.dispatchEvent(new Event('offline')));
+    allowed = true;
+    await tick(15000);
+    expect(delta).toHaveBeenCalledOnce();
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    act(() => window.dispatchEvent(new Event('online')));
+    await flush();
+    expect(options.onUpdate).toHaveBeenCalledExactlyOnceWith(updated());
+  });
+
+  it('rejects old-account responses and aborts the previous request', async () => {
+    let resolve!: (value: LibraryContent) => void;
+    const delta = vi.fn().mockImplementationOnce(() => new Promise(done => { resolve = done; }))
+      .mockResolvedValue(updated());
+    const { rerender, options } = deltaSetup(delta);
+    const signal = delta.mock.calls[0][1] as AbortSignal;
+    rerender({ ...options, scope: 'other-user:other-library', libraryId: 'other-library' });
+    expect(signal.aborted).toBe(true);
+    await flush();
+    await act(async () => resolve(initial));
+    expect(options.onUpdate).toHaveBeenCalledExactlyOnceWith(updated());
+  });
+
+  it('retains data on delta errors and uses legacy reads only when the RPC is unavailable', async () => {
+    const delta = vi.fn().mockRejectedValueOnce(new Error('Network')).mockResolvedValueOnce(updated()).mockResolvedValue(null);
+    const { result, options, legacy } = deltaSetup(delta);
+    legacy.mockResolvedValue(initial);
+    await flush();
+    expect(result.current).toBe(true);
+    expect(options.onUpdate).not.toHaveBeenCalled();
+    expect(legacy).not.toHaveBeenCalled();
+    await tick(10000);
+    expect(result.current).toBe(false);
+    expect(options.onUpdate).toHaveBeenLastCalledWith(updated());
+    await tick(5000);
+    expect(legacy).toHaveBeenCalledExactlyOnceWith('personal', expect.any(AbortSignal));
+    expect(options.onUpdate).toHaveBeenLastCalledWith(initial);
+  });
+});
+
 describe('owned library cross-device updates', () => {
   it.each(['personal', 'team'])('updates another device in the same account’s %s library without writing the response back', async (libraryId) => {
     let cloud = initial;

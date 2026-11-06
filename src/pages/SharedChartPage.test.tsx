@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../lib/sharing', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/sharing')>(),
   resolveShareLink: mocks.resolveShareLink,
+  resolveShareLinkUpdate: async (...args: unknown[]) => ({ version: null, payload: await mocks.resolveShareLink(...args) }),
   inspectSharedSongImport: mocks.inspectSharedSongImport,
   importSharedSongs: mocks.importSharedSongs
 }));

@@ -110,10 +110,15 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   const clearButtonRef = React.useRef<HTMLButtonElement>(null);
   const [isOpen, setIsOpen] = React.useState(false);
   const instantExit = React.useRef(false);
+  const focusFrame = React.useRef<number | null>(null);
+  const panelId = React.useId();
 
-  const closePanel = React.useCallback((immediate = false) => {
+  const closePanel = React.useCallback((immediate = false, restoreFocus = false) => {
+    if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+    focusFrame.current = null;
     instantExit.current = immediate;
     setIsOpen(false);
+    if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
   }, []);
 
   React.useEffect(() => {
@@ -143,8 +148,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
       }
 
       event.preventDefault();
-      closePanel();
-      triggerRef.current?.focus();
+      closePanel(false, true);
     };
 
     window.addEventListener('mousedown', handlePointerDown);
@@ -162,15 +166,20 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
     }
 
     const focusTarget = value ? optionRefs.current[value] : clearButtonRef.current;
-    window.requestAnimationFrame(() => {
-      (focusTarget ?? optionRefs.current[originalKey || 'C' as Key] ?? triggerRef.current)?.focus();
+    focusFrame.current = window.requestAnimationFrame(() => {
+      focusFrame.current = null;
+      (focusTarget ?? optionRefs.current[originalKey || 'C' as Key] ?? triggerRef.current)?.focus({ preventScroll: true });
     });
+    return () => {
+      if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+      focusFrame.current = null;
+    };
   }, [isOpen, originalKey, value]);
 
   const handleSelect = React.useCallback((nextValue: Key | null) => {
     if (onModeChange) onChange(nextValue, mode);
     else onChange(nextValue);
-    closePanel(true);
+    closePanel(true, true);
   }, [closePanel, onChange, onModeChange, mode]);
 
   const handleOptionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, key: Key) => {
@@ -182,8 +191,8 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
 
     if (event.key === 'Escape') {
       event.preventDefault();
-      closePanel();
-      triggerRef.current?.focus();
+      event.stopPropagation();
+      closePanel(false, true);
       return;
     }
 
@@ -242,6 +251,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
         title={title}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
+        aria-controls={isOpen ? panelId : undefined}
       >
         <span className="flex min-w-0 flex-1 items-center justify-between gap-1.5">
           <span
@@ -261,6 +271,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
 
       {typeof document !== 'undefined' && createPortal(
         <AnimatedPopover open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
+          id={panelId} role="dialog" aria-label={label}
           panelRef={panelRef}
           className={`${touchOptimized ? 'w-[216px] p-3' : 'w-[184px] p-2.5'} rounded-[20px] border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
@@ -280,7 +291,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                 {language === 'zh' ? (nextMode === 'major' ? '大調' : '小調') : (nextMode === 'major' ? 'Major' : 'Minor')}
               </button>)}
             </div>
-            {originalKey && <button type="button" className="w-full rounded-lg border border-gray-200 py-1 text-xs" onClick={() => { onChange(originalKey, originalMode); closePanel(true); }}>
+            {originalKey && <button type="button" className="w-full rounded-lg border border-gray-200 py-1 text-xs" onClick={() => { onChange(originalKey, originalMode); closePanel(true, true); }}>
               {language === 'zh' ? '還原原調' : 'Original'} {formatKeyName(originalKey, originalMode)}
             </button>}
           </div>}
@@ -296,8 +307,8 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
                     (value ? optionRefs.current[value] : optionRefs.current['C'])?.focus();
                   } else if (event.key === 'Escape') {
                     event.preventDefault();
-                    closePanel();
-                    triggerRef.current?.focus();
+                    event.stopPropagation();
+                    closePanel(false, true);
                   } else if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     handleSelect(null);

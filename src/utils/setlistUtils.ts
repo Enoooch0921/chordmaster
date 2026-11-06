@@ -1,6 +1,7 @@
 import { JoinedProject, JoinedSetlist, Key, Section, Setlist, SetlistSong, Song } from '../types';
 import { getSongTimeSignatureStates } from '../lib/songEditing';
 import { getEffectiveTimeSignature } from './rhythmUtils';
+import { getSuggestedGuitarCapo } from './musicUtils';
 
 export const getSectionReferenceId = (section: Section, index: number) => section.id || `section-${index}`;
 
@@ -177,6 +178,7 @@ export const getSectionShortLabel = (title: string, fallbackIndex: number) => {
 
 export type SetlistCapoResolutionOptions = {
   includeSharedCapo?: boolean;
+  guitaristMode?: boolean;
 };
 
 export const getEffectiveSetlistSongCapo = (
@@ -191,14 +193,17 @@ export const getEffectiveSetlistSongCapo = (
       : fallbackCapo
 );
 
-/** Resolve only explicit personal/shared/source capo settings. */
+/** Guitarist mode fills unset/zero capo in the derived view without changing the song. */
 export const resolveSetlistSongCapo = (
   setlistSong: SetlistSong,
   sourceSong: Pick<Song, 'capo' | 'currentKey'>,
   options: SetlistCapoResolutionOptions = {}
 ): number => {
   const fallbackCapo = options.includeSharedCapo === false ? 0 : sourceSong.capo ?? 0;
-  return getEffectiveSetlistSongCapo(setlistSong, fallbackCapo, options) ?? 0;
+  const base = getEffectiveSetlistSongCapo(setlistSong, fallbackCapo, options) ?? 0;
+  return options.guitaristMode && base === 0
+    ? getSuggestedGuitarCapo(setlistSong.overrideKey ?? sourceSong.currentKey)
+    : base;
 };
 
 export const applySetlistSongOverrides = (

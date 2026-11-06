@@ -36,6 +36,8 @@ interface Props {
   reading?: boolean;
   onReadingChange?: (value: boolean) => void;
   exportMode?: boolean;
+  /** The surrounding reading workspace supplies controls outside the scaled paper. */
+  hideControls?: boolean;
 }
 
 const PAGE_WIDTH = 794;
@@ -48,7 +50,7 @@ const CAPACITY = PAGE_HEIGHT - 2 * PAGE_PADDING - 24;
 const settingClass = 'min-h-10 min-w-0 rounded-md border border-stone-200 bg-white px-2 text-sm text-stone-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500';
 const indentFor = (block: LyricsBlock, fontSize: number) => block.marker && !/^Verse(?:\s|$)/i.test(lyricsSectionLabel(block.marker)) ? fontSize : 0;
 
-export default function LyricsBook({ title, entries, language, settings, onSettingsChange, onSongChange, onSelectSong, onEditSong, reading = false, onReadingChange, exportMode = false }: Props) {
+export default function LyricsBook({ title, entries, language, settings, onSettingsChange, onSongChange, onSelectSong, onEditSong, reading = false, onReadingChange, exportMode = false, hideControls = false }: Props) {
   const zh = language === 'zh';
   const isReading = reading && !exportMode;
   const layout = settings.layout ?? 'readable';
@@ -59,7 +61,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
   const paired = settings.language === 'bilingual' || settings.language === 'mixed';
   const pairLayout = settings.language === 'mixed' ? 'mixed' : 'columns';
   const fields: ('chinese' | 'english')[] = paired ? ['english', 'chinese'] : [settings.language as 'chinese' | 'english'];
-  const editable = Boolean(onSongChange) && !exportMode;
+  const editable = Boolean(onSongChange) && !exportMode && !isReading;
   const blocks = React.useMemo<BookBlock[]>(() => entries.flatMap((entry, entryIndex) => {
     const source = sortLyricsSections(getLyricsBlocks(entry.song.lyricsDoc));
     const visible = source.filter(block => fields.some(field => block[field].trim()));
@@ -123,9 +125,9 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
     if (!item) return null;
     const { block, entry } = item;
     const label = lyricsSectionLabel(block.marker);
-    return <div key={`${item.id}-${fragment.start}`} data-book-block={item.id} className="relative">
+    return <div key={`${item.id}-${fragment.start}`} data-book-block={item.id} data-lyrics-section-id={block.id} className="relative">
       {item.bookStart && !fragment.continued && gatheringTitle()}
-      {item.first && !fragment.continued && <div data-setlist-preview-song-id={entry.id}>{songTitle(item)}</div>}
+      {item.first && !fragment.continued && <div data-setlist-preview-song-id={isReading ? undefined : entry.id}>{songTitle(item)}</div>}
       {label && <h3 style={{ height: BOOK_SECTION_HEADING_HEIGHT, font: 'bold 14px/18px Arial, sans-serif', margin: 0, paddingTop: 12 }}><span className="inline-flex h-[18px] items-center rounded-sm border px-1.5" style={getSectionBadgeStyle(getSectionColor(label).accent)}>{label}{fragment.continued ? ' (cont.)' : ''}</span></h3>}
       {item.missing ? <div style={{ height: lineHeight, fontFamily: 'Arial, sans-serif', fontSize: 14 }} className="text-stone-500">{zh ? '尚無此語言歌詞' : 'No lyrics in this language'}{editable && <button type="button" data-preview-only-control className="ml-2 underline" onClick={() => onEditSong?.(entry.id)}>{zh ? '添加歌詞' : 'Add lyrics'}</button>}</div> : <div className="lyrics-book-languages grid" style={{ gridTemplateColumns: fields.length === 2 ? '1fr 1fr' : '1fr', gap: GAP }}>
         {paired ? <PairedLyrics pairs={pairedBlocks.get(item.id)!} start={isReading ? 0 : fragment.start} end={isReading ? pairedBlocks.get(item.id)!.length : fragment.end} layout={pairLayout}
@@ -169,7 +171,7 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
   const displayedPages = isReading ? readingPages : pages;
 
   return <div className="lyrics-sheet lyrics-book flex flex-col gap-6 text-stone-900" data-book-layout={isReading ? 'reading' : layout} data-preview-suppress-pan="true" style={{ fontFamily }}>
-    {!exportMode && <div data-preview-only-control className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-white p-4 text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
+    {!exportMode && !hideControls && <div data-preview-only-control className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200 bg-white p-4 text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
       <div className="flex w-full flex-wrap items-center gap-3">
         <span className="mr-auto font-bold">{zh ? '歌單歌詞' : 'Setlist lyrics'}</span>
         <div role="group" aria-label={zh ? '歌詞版面' : 'Lyrics layout'} className="flex flex-wrap gap-1 rounded-lg bg-stone-100 p-1">
@@ -196,7 +198,11 @@ export default function LyricsBook({ title, entries, language, settings, onSetti
     </div>}
     {displayedPages.map((page, index) => <div key={index} data-print-page={isReading ? undefined : true} data-lyrics-reading={isReading || undefined} data-export-page-index={index + 1} data-export-page-total={displayedPages.length} data-export-song-title={title}
       className="lyrics-page relative mx-auto bg-white shadow-sm" style={{ width: isReading ? '100%' : PAGE_WIDTH, maxWidth: '100%', minHeight: isReading ? undefined : PAGE_HEIGHT, padding: isReading ? 24 : PAGE_PADDING, fontSize, lineHeight: `${lineHeight}px` }}>
-      <div className="grid content-start" style={{ gridTemplateColumns: `repeat(${isReading || settings.language === 'bilingual' ? 1 : 2}, minmax(0, 1fr))`, columnGap: GAP }}>{page.columns.map((column, columnIndex) => <div key={columnIndex}>{column.map(renderFragment)}</div>)}</div>
+      {isReading ? <div className="lyrics-book-reading-songs">
+        {entries.map(entry => <section key={entry.id} data-setlist-preview-song-id={entry.id} aria-label={entry.song.title} className="lyrics-book-reading-song">
+          {blocks.filter(item => item.entry.id === entry.id).map(item => renderFragment({ blockId: item.id, start: 0, end: 0, continued: false }))}
+        </section>)}
+      </div> : <div className="grid content-start" style={{ gridTemplateColumns: `repeat(${settings.language === 'bilingual' ? 1 : 2}, minmax(0, 1fr))`, columnGap: GAP }}>{page.columns.map((column, columnIndex) => <div key={columnIndex}>{column.map(renderFragment)}</div>)}</div>}
       {!isReading && <div className="absolute bottom-6 right-12 text-xs text-stone-400" style={{ fontFamily: 'Arial, sans-serif' }}>{index + 1} / {displayedPages.length}</div>}
     </div>)}
   </div>;

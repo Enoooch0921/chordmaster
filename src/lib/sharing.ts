@@ -6,6 +6,7 @@ import {
   SongImportResolution
 } from '../types';
 import { supabase } from './supabase';
+import { parseConditionalSnapshot, type ConditionalSnapshot } from './conditionalSnapshot';
 
 const SHARE_AUTH_REQUIRED_MESSAGE = 'Please sign in again to create a share link.';
 const SHARE_CREATE_FAILED_MESSAGE = 'Unable to create share link.';
@@ -181,16 +182,17 @@ export class ShareLinkResolutionError extends Error {
   }
 }
 
-export const resolveShareLink = async (token: string, signal?: AbortSignal) => {
+const requestShareLink = async (token: string, signal?: AbortSignal, knownVersion?: string | null) => {
   if (!supabase) {
     throw new Error('Supabase is not configured.');
   }
 
-  const { data, error } = await supabase.functions.invoke<SharedResourcePayload>('resolve-share-link', {
+  const { data, error } = await supabase.functions.invoke<unknown>('resolve-share-link', {
     signal,
     timeout: 15000,
     body: {
-      token
+      token,
+      ...(knownVersion !== undefined ? { conditional: true, knownVersion } : {})
     }
   });
 
@@ -205,6 +207,22 @@ export const resolveShareLink = async (token: string, signal?: AbortSignal) => {
   }
 
   return data;
+};
+
+export const resolveShareLink = async (token: string, signal?: AbortSignal): Promise<SharedResourcePayload> => (
+  await requestShareLink(token, signal) as SharedResourcePayload
+);
+
+const isSharedPayload = (data: unknown): data is SharedResourcePayload => isRecord(data)
+  && ['song', 'song_bundle', 'setlist', 'project'].includes(String(data.resourceType));
+
+export const resolveShareLinkUpdate = async (
+  token: string, signal?: AbortSignal, knownVersion: string | null = null
+): Promise<ConditionalSnapshot<SharedResourcePayload>> => {
+  const data = await requestShareLink(token, signal, knownVersion);
+  // Rolling deployment: an older NAS function returns its usual full payload.
+  if (isSharedPayload(data)) return { version: null, payload: data };
+  return parseConditionalSnapshot(data, knownVersion, isSharedPayload);
 };
 
 export const inspectSharedSongImport = async (token: string) => {

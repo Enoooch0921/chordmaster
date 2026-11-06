@@ -1,6 +1,26 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createSearchQuery, loadSearchDictionary, normalizeSearchText, searchItems } from './songSearch';
 
+it('shows original lyrics around literal hits across punctuation/lines, never stale legacy bodies', () => {
+  const doc = { chinese: 'obsolete lyrics', blocks: [{ id: 'v', marker: 'Verse', chinese: '星光照亮前路，\n我們一起前行', english: 'Hope will light\nour way' }] };
+  expect(createSearchQuery('我们一起前行').lyricsSnippet(doc)).toContain('我們一起前行');
+  expect(createSearchQuery('前路我們').lyricsSnippet(doc)).toContain('前路， 我們');
+  expect(createSearchQuery('hope will light our way').lyricsSnippet(doc)).toContain('Hope will light our way');
+  expect(createSearchQuery('obsolete').lyricsSnippet(doc)).toBeNull();
+  expect(createSearchQuery('').lyricsSnippet(doc)).toBeNull();
+  expect(createSearchQuery('星光 D').lyricsSnippet(doc)).toContain('星光照亮前路');
+});
+it('crops long lyric bodies around the matching phrase instead of only showing the beginning', () => {
+  const doc = { chinese: '開頭'.repeat(100) + '唯獨祢是盼望' + '結尾'.repeat(100) };
+  const excerpt = createSearchQuery('唯独你是盼望').lyricsSnippet(doc)!;
+  expect(excerpt).toContain('唯獨祢是盼望'); expect(excerpt.startsWith('…')).toBe(true); expect(excerpt.length).toBeLessThan(150);
+});
+it('maps NFKC graphemes and fullwidth characters back to the original matching excerpt', () => {
+  const doc = { chinese: '', english: 'e\u0301'.repeat(100) + ' Amazing Grace Ｈａｌｌｅｌｕｊａｈ' };
+  expect(createSearchQuery('amazing grace').lyricsSnippet(doc)).toContain('Amazing Grace');
+  expect(createSearchQuery('hallelujah').lyricsSnippet(doc)).toContain('Ｈａｌｌｅｌｕｊａｈ');
+});
+
 beforeAll(() => loadSearchDictionary());
 
 const match = (query: string, ...fields: string[]) => createSearchQuery(query).match(fields);

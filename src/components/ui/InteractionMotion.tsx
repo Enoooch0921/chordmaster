@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useIsPresent, type HTMLMotionProps } from 'motion/react';
-import { useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref } from 'react';
+import { type HTMLAttributes, type ReactNode, type Ref } from 'react';
 import { useUiMotion } from '../../hooks/useUiMotion';
 import { popoverVariants, UI_EASE_OUT, type UiMotionPreference } from '../../lib/uiMotion';
 
@@ -31,14 +31,12 @@ function PopoverBody({ panelRef, shellClassName, className, children, style, ori
 }
 
 const disclosureVariants = {
-  hidden: { height: 0, opacity: 0 },
-  visible: (preference: UiMotionPreference) => ({ height: 'auto', opacity: 1, transition: {
-    height: { duration: preference.instant || preference.reduced ? 0 : 0.2, ease: UI_EASE_OUT },
-    opacity: { duration: preference.instant ? 0 : 0.125, ease: UI_EASE_OUT }
+  hidden: { opacity: 0 },
+  visible: (preference: UiMotionPreference) => ({ opacity: 1, transition: {
+    duration: preference.instant ? 0 : 0.125, ease: UI_EASE_OUT
   } }),
-  exit: (preference: UiMotionPreference) => ({ height: 0, opacity: 0, transition: {
-    height: { duration: preference.instant || preference.reduced ? 0 : 0.16, ease: UI_EASE_OUT },
-    opacity: { duration: preference.instant ? 0 : 0.125, ease: UI_EASE_OUT }
+  exit: (preference: UiMotionPreference) => ({ opacity: 0, transition: {
+    duration: preference.instant ? 0 : 0.125, ease: UI_EASE_OUT
   } })
 };
 export function AnimatedDisclosure({ open, children, className, id, resize = false }: { open: boolean; children: ReactNode; className?: string; id?: string; resize?: boolean }) {
@@ -47,23 +45,13 @@ export function AnimatedDisclosure({ open, children, className, id, resize = fal
     {open && <DisclosureBody key="disclosure" preference={preference} className={className} id={id} resize={resize}>{children}</DisclosureBody>}
   </AnimatePresence>;
 }
+/** Keep final geometry during a short fade, then remove it in one layout change. */
 function DisclosureBody({ preference, children, className, id, resize }: { preference: UiMotionPreference; children: ReactNode; className?: string; id?: string; resize: boolean }) {
   const present = useIsPresent();
-  const body = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState<number>();
-  useLayoutEffect(() => {
-    if (!resize || !body.current) return;
-    const node = body.current;
-    const measure = () => setHeight(node.offsetHeight);
-    measure();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-    observer?.observe(node);
-    return () => observer?.disconnect();
-  }, [resize]);
   return <motion.div id={id} data-ui-disclosure inert={!present ? true : undefined} aria-hidden={!present ? true : undefined}
     custom={preference} variants={disclosureVariants} initial={resize ? false : 'hidden'}
-    animate={resize ? { ...disclosureVariants.visible(preference), height: height ?? 'auto' } : 'visible'} exit="exit" style={{ overflow: 'hidden' } as CSSProperties}>
-    <div ref={body} className={className}>{children}</div>
+    animate="visible" exit="exit" style={{ overflow: 'hidden' }}>
+    <div className={className}>{children}</div>
   </motion.div>;
 }
 

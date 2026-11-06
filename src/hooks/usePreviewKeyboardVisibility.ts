@@ -4,15 +4,17 @@ import { getKeyboardAvoidanceScroll } from '../lib/previewKeyboardVisibility';
 import { PREVIEW_KEYBOARD_LAYOUT_EVENT } from './usePreviewKeyboardPosition';
 import { useUiMotion } from './useUiMotion';
 import { UI_DRAWER_EASE } from '../lib/uiMotion';
+import { findPreviewAnchor } from '../lib/previewAnchor';
 
-/** Use the final accordion height, not each in-flight frame, when making room. */
+/** Keep pinned controls in bounds; scrollable keys never reserve their full scroll height. */
 export function getKeyboardRestingRect(panel: HTMLElement) {
   const rect = panel.getBoundingClientRect();
   const disclosure = panel.querySelector<HTMLElement>('[data-keyboard-disclosure]');
   const content = disclosure?.querySelector<HTMLElement>('[data-keyboard-content]');
   if (!disclosure || !content) return rect;
   const scale = panel.offsetHeight ? rect.height / panel.offsetHeight : 1;
-  const height = rect.height + ((disclosure.dataset.collapsed === 'true' ? 0 : content.offsetHeight) - disclosure.offsetHeight) * scale;
+  const expandedHeight = disclosure.hasAttribute('data-keyboard-scroll-body') ? disclosure.offsetHeight : content.offsetHeight;
+  const height = rect.height + ((disclosure.dataset.collapsed === 'true' ? 0 : expandedHeight) - disclosure.offsetHeight) * scale;
   return panel.hasAttribute('data-keyboard-docked')
     ? { left: rect.left, right: rect.right, top: rect.bottom - height, bottom: rect.bottom, height }
     : { left: rect.left, right: rect.right, top: rect.top, bottom: rect.top + height, height };
@@ -24,7 +26,8 @@ export function usePreviewKeyboardVisibility(
   previewRef: RefObject<HTMLDivElement | null>,
   canvasRef: RefObject<HTMLDivElement | null>,
   sheetRef: RefObject<HTMLDivElement | null>,
-  onReveal: () => void
+  onReveal: () => void,
+  occurrence = 0
 ) {
   const preference = useUiMotion();
   const scrolling = useRef<AnimationPlaybackControls | null>(null);
@@ -97,8 +100,7 @@ export function usePreviewKeyboardVisibility(
         const canvas = canvasRef.current;
         const panel = document.querySelector<HTMLElement>('[data-keyboard-position-shell]')
           ?? document.querySelector<HTMLElement>('[data-preview-bar-editor]');
-        const anchor = Array.from(sheetRef.current?.querySelectorAll<HTMLElement>('[data-preview-edit-anchor]') ?? [])
-          .find(node => node.dataset.previewEditAnchor === anchorKey);
+        const anchor = findPreviewAnchor(sheetRef.current, anchorKey, occurrence);
         if (!preview || !canvas || !panel || !anchor) return;
         const bar = anchor.closest<HTMLElement>('.sheet-bar') ?? anchor;
         const viewport = window.visualViewport;
@@ -171,7 +173,7 @@ export function usePreviewKeyboardVisibility(
       window.removeEventListener(PREVIEW_KEYBOARD_LAYOUT_EVENT, reveal);
       window.visualViewport?.removeEventListener('resize', reveal);
     };
-  }, [anchorKey, previewRef, canvasRef, sheetRef, onReveal, preference.instant, preference.reduced]);
+  }, [anchorKey, occurrence, previewRef, canvasRef, sheetRef, onReveal, preference.instant, preference.reduced]);
 
   useLayoutEffect(() => {
     return () => { stop(); release(true); };

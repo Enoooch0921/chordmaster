@@ -60,7 +60,7 @@ it('passes the bulk selection rather than just the currently open song', async (
  await mount();fireEvent.click(screen.getByRole('button', { name: '歌曲庫操作' }));fireEvent.click(await screen.findByRole('menuitem', { name: '管理歌曲' }));
  const rows = ['song-0', 'song-1'].map(id => document.querySelector(`[data-library-song-id="${id}"]`)!);
  for (const row of rows) fireEvent.click(within(row as HTMLElement).getByRole('checkbox'));
- fireEvent.click(screen.getByRole('button', { name: '複製到團隊…' }));
+ fireEvent.click(screen.getByRole('button', { name: '複製到團隊 (2)…' }));
  const dialog = await screen.findByRole('dialog', { name: '複製到團隊' });await waitFor(() => expect(within(dialog).getByRole('button', { name: '下一步' })).toBeEnabled());
  expect(within(dialog).getByText('已選 2 首')).toBeInTheDocument();fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
  await waitFor(() => expect(state.inspect).toHaveBeenCalledWith('團隊甲', ['song-0', 'song-1']));

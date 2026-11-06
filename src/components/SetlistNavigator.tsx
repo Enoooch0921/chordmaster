@@ -118,15 +118,15 @@ const panelDepth: Record<SetlistPanelView, number> = { list: 0, manageProjects: 
 
 export const setlistPanelVariants = {
   enter: ({ direction, reduced, instant }: PanelMotion) => ({
-    transform: reduced || instant ? 'none' : `translate3d(${direction > 0 ? '100%' : '-25%'}, 0, 0)`,
+    transform: reduced || instant ? 'translate3d(0%, 0, 0)' : `translate3d(${direction > 0 ? '100%' : '-25%'}, 0, 0)`,
     opacity: reduced && !instant ? 0 : 1
   }),
   visible: ({ reduced, instant }: PanelMotion) => ({
-    transform: reduced || instant ? 'none' : 'translate3d(0%, 0, 0)', opacity: 1,
+    transform: 'translate3d(0%, 0, 0)', opacity: 1,
     transition: { duration: instant ? 0 : reduced ? 0.125 : 0.24, ease: UI_DRAWER_EASE }
   }),
   exit: ({ direction, reduced, instant }: PanelMotion) => ({
-    transform: reduced || instant ? 'none' : `translate3d(${direction > 0 ? '-25%' : '100%'}, 0, 0)`,
+    transform: reduced || instant ? 'translate3d(0%, 0, 0)' : `translate3d(${direction > 0 ? '-25%' : '100%'}, 0, 0)`,
     opacity: reduced && !instant ? 0 : 1,
     transition: { duration: instant ? 0 : reduced ? 0.125 : 0.24, ease: UI_DRAWER_EASE }
   })

@@ -7,7 +7,10 @@ import { SHARED_RESOURCE_REFRESH_MS, useSharedResource } from './useSharedResour
 const mocks = vi.hoisted(() => ({ resolve: vi.fn() }));
 vi.mock('../lib/sharing', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/sharing')>(),
-  resolveShareLink: mocks.resolve
+  resolveShareLinkUpdate: async (...args: unknown[]) => {
+    const value = await mocks.resolve(...args);
+    return value && 'version' in value ? value : { version: null, payload: value };
+  }
 }));
 
 const payload = (key: 'C' | 'D' = 'C', titles = ['Alpha']): SharedResourcePayload => ({
@@ -38,6 +41,37 @@ afterEach(() => {
 });
 
 describe('public share background updates', () => {
+  it('checks accepted versions every five seconds and retains the chart on unchanged replies', async () => {
+    const v1 = 'a'.repeat(64), v2 = 'b'.repeat(64);
+    mocks.resolve.mockResolvedValueOnce({ version: v1, payload: payload() })
+      .mockResolvedValue({ version: v1, payload: null });
+    const { result } = renderHook(() => useSharedResource('token'));
+    await flush();
+    const before = result.current;
+    await tick();
+    expect(mocks.resolve.mock.calls[1][2]).toBe(v1);
+    expect(result.current).toBe(before);
+    mocks.resolve.mockRejectedValueOnce(new Error('Offline'));
+    await tick();
+    expect(result.current.refreshFailed).toBe(true);
+    await tick(10000);
+    expect(result.current.refreshFailed).toBe(false);
+    expect(result.current.payload).toBe(before.payload);
+    mocks.resolve.mockResolvedValue({ version: v2, payload: payload('D', ['Beta', 'Alpha']) });
+    await tick();
+    expect(result.current.payload?.setlist?.songs.map(s => s.title)).toEqual(['Beta', 'Alpha']);
+    await tick();
+    expect(mocks.resolve.mock.calls.at(-1)?.[2]).toBe(v2);
+  });
+
+  it('does not reuse a version across share tokens', async () => {
+    mocks.resolve.mockResolvedValue({ version: 'a'.repeat(64), payload: payload() });
+    const { rerender } = renderHook(({ token }) => useSharedResource(token), { initialProps: { token: 'one' } });
+    await flush();
+    rerender({ token: 'two' });
+    await flush();
+    expect(mocks.resolve.mock.calls.at(-1)?.[2]).toBeNull();
+  });
   it('updates keys, additions, removals and ordering without returning to a loading screen', async () => {
     const { result } = renderHook(() => useSharedResource('token'));
     await flush();

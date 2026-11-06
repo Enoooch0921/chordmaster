@@ -15,6 +15,9 @@ export default function TempoChangeControl({ value, language, label, onChange }:
   const zh = language === 'zh';
   const mode = value.resetTempo ? 'reset' : value.tempo !== undefined ? 'custom' : 'inherit';
   const [open, setOpen] = React.useState(false);
+  const [hasOpened, setHasOpened] = React.useState(false);
+  const instantExit = React.useRef(false);
+  const closing = React.useRef(true);
   const [draft, setDraft] = React.useState(formatTempoBpm(value.tempo));
   const [error, setError] = React.useState(false);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -33,14 +36,18 @@ export default function TempoChangeControl({ value, language, label, onChange }:
     return true;
   }, [draft, onChange, value.tempo, value.resetTempo]);
 
-  const close = React.useCallback(() => {
+  const close = React.useCallback((immediate = false) => {
     if (mode === 'custom' && !commit()) return false;
+    closing.current = true;
+    instantExit.current = immediate;
     setOpen(false);
     return true;
   }, [mode, commit]);
   const cancel = () => {
+    closing.current = true;
+    instantExit.current = false;
     setDraft(formatTempoBpm(value.tempo)); setError(false); setOpen(false);
-    triggerRef.current?.focus();
+    triggerRef.current?.focus({ preventScroll: true });
   };
   const { panelStyle, placement, transformOrigin, isPositioned } = useAnchoredPortalPanel({ isOpen: open && present, align: 'right', triggerRef, panelRef, onRequestClose: close, zIndex: 5100 });
 
@@ -62,28 +69,29 @@ export default function TempoChangeControl({ value, language, label, onChange }:
   const display = mode === 'reset' ? (zh ? '原速' : 'Original') : formatTempoBpm(value.tempo) || '—';
   return <div className="inline-flex shrink-0" data-tempo-change-control onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); cancel(); } }}>
     <button ref={triggerRef} type="button" aria-label={zh ? `設定${label}` : `Set ${label.toLowerCase()}`} title={label} aria-haspopup="dialog" aria-expanded={open}
-      onClick={() => { if (open) close(); else { setDraft(formatTempoBpm(value.tempo)); setError(false); setOpen(true); } }}
+      onClick={() => { if (open) close(); else { closing.current = false; instantExit.current = false; setHasOpened(true); setDraft(formatTempoBpm(value.tempo)); setError(false); setOpen(true); } }}
       className={`flex h-9 min-w-[92px] items-center justify-between gap-2 rounded-xl border bg-white px-2.5 text-sm font-semibold ${open ? 'border-indigo-500 ring-2 ring-indigo-500' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}>
       <span>♩ {display}</span><ChevronDown size={14} className="text-gray-500" />
     </button>
-    {open && typeof document !== 'undefined' && createPortal(
-      <AnimatedPopover open={open && present} instantExit={!present} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} role="dialog" aria-label={`${label}${zh ? '設定' : ' settings'}`} data-preview-edit-ui data-preview-picker-popover data-placement={placement} style={panelStyle}
+    {hasOpened && typeof document !== 'undefined' && createPortal(
+      <AnimatedPopover animateOnMount open={open && present} instantExit={!present || instantExit.current} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} role="dialog" aria-label={`${label}${zh ? '設定' : ' settings'}`} data-preview-edit-ui data-preview-picker-popover data-placement={placement} style={panelStyle}
         className="w-64 max-w-[calc(100vw-24px)] rounded-2xl border border-gray-200 bg-white p-3 text-xs shadow-xl">
         <fieldset className="space-y-3">
           <legend className="mb-2 font-semibold text-slate-500">{label}</legend>
           <select ref={selectRef} aria-label={label} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2" value={mode} onChange={event => {
             setError(false);
             const nextMode = event.target.value;
+            closing.current = nextMode !== 'custom';
             onChange(nextMode === 'reset' ? { tempo: undefined, resetTempo: true } : nextMode === 'custom' ? { tempo: 120, resetTempo: undefined } : { tempo: undefined, resetTempo: undefined });
-            if (nextMode !== 'custom') setOpen(false);
+            if (nextMode !== 'custom') { instantExit.current = true; setOpen(false); triggerRef.current?.focus({ preventScroll: true }); }
           }}>
             <option value="inherit">{zh ? '延續前一速度' : 'Inherit previous tempo'}</option>
             <option value="custom">{zh ? '指定 BPM' : 'Set BPM'}</option>
             <option value="reset">{zh ? '回到全曲速度' : 'Restore song tempo'}</option>
           </select>
-          {mode === 'custom' && <label className="flex items-center gap-2"><input aria-label={`${label} BPM`} aria-invalid={error} inputMode="decimal" className="w-24 rounded-lg border border-slate-300 px-2 py-2" value={draft} onChange={event => { setDraft(event.target.value); setError(false); }} onBlur={commit} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); if (close()) triggerRef.current?.focus(); } }} /><span>BPM</span></label>}
+          {mode === 'custom' && <label className="flex items-center gap-2"><input aria-label={`${label} BPM`} aria-invalid={error} inputMode="decimal" className="w-24 rounded-lg border border-slate-300 px-2 py-2" value={draft} onChange={event => { setDraft(event.target.value); setError(false); }} onBlur={() => { if (!closing.current) commit(); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); if (close(true)) triggerRef.current?.focus({ preventScroll: true }); } }} /><span>BPM</span></label>}
           {error && <span role="alert" className="block text-rose-700">{zh ? '請輸入 20–400 的單一速度，最多兩位小數' : 'Enter one BPM from 20–400, up to two decimals'}</span>}
-          <button type="button" className="w-full rounded-lg bg-indigo-600 py-2 font-semibold text-white" onClick={() => { if (close()) triggerRef.current?.focus(); }}>{zh ? '完成' : 'Done'}</button>
+          <button type="button" className="w-full rounded-lg bg-indigo-600 py-2 font-semibold text-white" onClick={() => { if (close(true)) triggerRef.current?.focus({ preventScroll: true }); }}>{zh ? '完成' : 'Done'}</button>
         </fieldset>
       </AnimatedPopover>, document.body
     )}

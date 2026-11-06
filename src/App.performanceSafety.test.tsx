@@ -129,9 +129,16 @@ describe('on-stage offline and page-turner stability', () => {
   it('does not count a synthesized click after a swipe as a second page turn', async () => {
     await start(); const overlay = document.querySelector('[data-performance-overlay]')!;
     fireEvent.touchStart(overlay, { touches: [{ clientX: 700, clientY: 300 }] });
+    const before = sync.owned.mock.calls.length;
+    fireEvent.touchMove(overlay, { touches: [{ clientX: 580, clientY: 300 }] });
+    await act(() => new Promise(resolve => setTimeout(resolve, 25)));
+    expect(document.querySelector<HTMLElement>('[data-performance-swipe-surface]')!.style.transform).toBe('translate3d(-26.4px, 0, 0)');
+    expect(page()).toBe(1);
     fireEvent.touchEnd(overlay, { changedTouches: [{ clientX: 400, clientY: 300 }] });
     expect(page()).toBe(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' })); expect(page()).toBe(2);
+    expect(sync.owned.mock.calls.length).toBe(before);
+    expect(document.querySelector<HTMLElement>('[data-performance-navigation-hint]')!.hidden).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }), { detail: 1 }); expect(page()).toBe(2);
     fireEvent.touchStart(overlay, { touches: [{ clientX: 700, clientY: 300 }] });
     fireEvent.touchEnd(overlay, { changedTouches: [{ clientX: 700, clientY: 300 }] });
     fireEvent.click(screen.getByRole('button', { name: 'Next page' })); expect(page()).toBe(3);
@@ -176,4 +183,50 @@ it('restores app and windowed performance bounds after fullscreen exit with a st
     if (oldViewport) Object.defineProperty(window, 'visualViewport', oldViewport);
     else Reflect.deleteProperty(window, 'visualViewport');
   }
+}, 15000);
+
+
+it('keeps first-use navigation help visible through idle and remembers acknowledgement on reentry', async () => {
+  await start();
+  const hint = () => document.querySelector<HTMLElement>('[data-performance-navigation-hint]')!;
+  expect(hint().hidden).toBe(false);
+  expect(hint()).toHaveTextContent('左右滑動翻頁，也可輕點畫面左右兩側');
+  vi.useFakeTimers();
+  fireEvent.mouseMove(document.querySelector('[data-performance-overlay]')!);
+  act(() => vi.advanceTimersByTime(2100));
+  expect(document.querySelector<HTMLElement>('[data-performance-overlay]')!.dataset.performanceChrome).toBe('hidden');
+  expect(hint().hidden).toBe(false);
+  const before = sync.owned.mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: '知道了' }));
+  expect(hint().hidden).toBe(true);
+  expect(sync.owned.mock.calls.length).toBe(before);
+  vi.useRealTimers();
+  fireEvent.click(screen.getByRole('button', { name: '退出' }));
+  fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
+  await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).not.toBeNull());
+  expect(hint().hidden).toBe(true);
+}, 15000);
+
+it('snaps a short or cancelled swipe back and lets hardware input interrupt without a workspace render', async () => {
+  await start();
+  const overlay = document.querySelector('[data-performance-overlay]')!;
+  const surface = document.querySelector<HTMLElement>('[data-performance-swipe-surface]')!;
+  const before = sync.owned.mock.calls.length;
+  fireEvent.touchStart(overlay, { touches: [{ clientX: 700, clientY: 300 }] });
+  fireEvent.touchMove(overlay, { touches: [{ clientX: 680, clientY: 300 }] });
+  await act(() => new Promise(resolve => setTimeout(resolve, 25)));
+  expect(surface.style.transform).toBe('translate3d(-4.4px, 0, 0)');
+  fireEvent.touchEnd(overlay, { changedTouches: [{ clientX: 680, clientY: 300 }] });
+  expect(page()).toBe(1); expect(surface.style.transform).toBe('');
+  fireEvent.touchStart(overlay, { touches: [{ clientX: 700, clientY: 300 }] });
+  fireEvent.touchMove(overlay, { touches: [{ clientX: 600, clientY: 300 }] });
+  fireEvent.touchCancel(overlay);
+  expect(page()).toBe(1); expect(surface.style.transform).toBe('');
+  fireEvent.touchStart(overlay, { touches: [{ clientX: 700, clientY: 300 }] });
+  fireEvent.touchMove(overlay, { touches: [{ clientX: 600, clientY: 300 }] });
+  act(() => { pedal('keydown'); pedal('keyup'); });
+  expect(page()).toBe(2); expect(surface.style.transform).toBe('');
+  fireEvent.touchEnd(overlay, { changedTouches: [{ clientX: 500, clientY: 300 }] });
+  expect(page()).toBe(2);
+  expect(sync.owned.mock.calls.length).toBe(before);
 }, 15000);

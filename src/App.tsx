@@ -1,5 +1,14 @@
+import SongLibraryRow, { type SongLibraryAction } from './components/SongLibraryRow';
+import SongLibraryFilters from './components/SongLibraryFilters';
+import LibrarySelectionSummary from './components/LibrarySelectionSummary';
+import { useSongLibraryPreferences } from './hooks/useSongLibraryPreferences';
+import { EMPTY_LIBRARY_FILTERS, libraryFilterCount, libraryKey, matchesLibraryFilters, type LibraryFilters, type LibraryScope } from './lib/songLibraryFilters';
+import { searchItemsWithMatches } from './lib/songSearch';
+import { getSongLibraryMeta } from './lib/songLibraryPresentation';
 import SongTitle from './components/SongTitle';
 import PersonalChordSheet from './components/PersonalChordSheet';
+import SetlistPreviewSong from './components/SetlistPreviewSong';
+import { findPreviewAnchor, samePreviewAnchorRect } from './lib/previewAnchor';
 import { useHandwritingSelectionGuard } from './hooks/useHandwritingSelectionGuard';
 import { getSongMap, sectionSongMap } from './lib/songMap';
 import SlidingSelection from './components/ui/SlidingSelection';
@@ -21,6 +30,7 @@ import { useThreeFingerHistory } from './hooks/useThreeFingerHistory';
 import { applyWorkspaceHistory as applyHistoryToWorkspace, createWorkspaceHistoryEntry, historySignature, type WorkspaceHistoryEntry, type WorkspaceHistoryChange, type HistoryWorkspace } from './lib/workspaceHistory';
 import { useAppViewport } from './hooks/useAppViewport';
 import { usePerformanceChrome } from './hooks/usePerformanceChrome';
+import { usePerformanceNavigationHint, usePerformanceSwipe } from './hooks/usePerformanceSwipe';
 import { useWorkspaceSwitcherDismiss } from './hooks/useWorkspaceSwitcherDismiss';
 import { useBottomSheetMotion } from './hooks/useBottomSheetMotion';
 import { useModalFocus } from './hooks/useModalFocus';
@@ -67,6 +77,8 @@ import { useTeamWorkspaceDraft } from './hooks/useTeamWorkspaceDraft';
 import { useJoinedWorkspaceRefresh } from './hooks/useJoinedWorkspaceRefresh';
 import { useBackendConnection } from './hooks/useBackendConnection';
 import { useLibraryWorkspaceRefresh } from './hooks/useLibraryWorkspaceRefresh';
+import { useStableEvent } from './hooks/useStableEvent';
+import { useGuitaristMode } from './hooks/useGuitaristMode';
 import { useSetlistBarRowPreference, useSetlistDisplayModePreference } from './hooks/useSetlistDisplayModePreference';
 import { useSongEditingPresence } from './hooks/useSongEditingPresence';
 import { SongEditingNotice } from './components/SongEditingNotice';
@@ -138,6 +150,7 @@ import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSh
 import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
 import LyricsBook from './components/LyricsBook';
+import SetlistLyricsWorkspace from './components/SetlistLyricsWorkspace';
 import { DEFAULT_LYRICS_BOOK_SETTINGS } from './utils/lyricsBook';
 import type { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
 const PreviewWysiwygEditor = React.lazy(() => import('./components/PreviewWysiwygEditor'));
@@ -190,8 +203,8 @@ import {
   resolveSetlistSongCapo
 } from './utils/setlistUtils';
 import { formatInitialCaps } from './utils/textUtils';
-import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Check, Minus, Keyboard, Pin, PinOff } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { ArrowLeftRight, Edit3, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Save, Hash, Music2, Mic2, Plus, FileText, Trash2, Undo2, Redo2, Search, Copy, ClipboardPaste, LogIn, LogOut, Upload, Download, Info, BookOpen, ExternalLink, ListMusic, GripVertical, MoreHorizontal, SlidersHorizontal, Share2, Cloud, CloudOff, CloudCheck, CloudAlert, LoaderCircle, HardDrive, RefreshCw, Play, Users, UserPlus, Sun, Moon, MonitorSmartphone, Archive, ArchiveRestore, FolderTree, Folder, Guitar, Check, Minus, Keyboard, Pin, PinOff } from 'lucide-react';
+import { motion, AnimatePresence, useAnimationControls } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
 import { loadActiveLibraryPreference, resolveInitialLibrary, saveActiveLibraryPreference } from './lib/activeLibraryPreference';
@@ -283,6 +296,8 @@ import {
   type PreviewNonChordMode
 } from './lib/previewNotationPreference';
 
+const EMPTY_PREVIEW_IDS: string[] = [];
+const EMPTY_PREVIEW_BARS: Array<{ sectionId: string; barId: string }> = [];
 const SELECTED_PROJECT_STORAGE_KEY = 'chordmaster.selected-project-id.v1';
 const SELECTED_SONG_STORAGE_KEY = 'chordmaster.selected-song-id.v1';
 const SELECTED_SONG_BY_LIBRARY_STORAGE_KEY = 'chordmaster.selected-song-id-by-library.v1';
@@ -707,43 +722,6 @@ const normalizeChordTokens = (value: unknown) => {
   }
 
   return [];
-};
-
-const formatSongLibraryCredits = (song: Song) => {
-  const lyricist = song.lyricist?.trim();
-  const composer = song.composer?.trim();
-  const translator = song.translator?.trim();
-  const versionNames = Array.from(new Set([lyricist, composer].filter(Boolean)));
-  const parts: string[] = [];
-
-  if (versionNames.length > 0) parts.push(versionNames.join(' / '));
-  if (translator) parts.push(translator);
-
-  return parts;
-};
-
-const getSongLibraryMeta = (song: Song, shuffleLabel: string) => {
-  const creditParts = formatSongLibraryCredits(song);
-  const primary = [
-    formatKeyName(song.currentKey, currentKeyMode(song)),
-    typeof song.tempo === 'number' ? `${song.tempo} BPM` : '',
-    song.timeSignature
-  ].filter(Boolean).join(' · ');
-  const isShuffle = song.shuffle ?? song.groove?.trim().toLowerCase() === 'shuffle';
-
-  if (creditParts.length > 0 || isShuffle) {
-    return {
-      primary,
-      secondary: [isShuffle ? shuffleLabel : '', ...creditParts].filter(Boolean).join(' · '),
-      tooltip: [primary, isShuffle ? shuffleLabel : '', ...creditParts].filter(Boolean).join('\n'),
-    };
-  }
-
-  return {
-    primary,
-    secondary: '',
-    tooltip: primary,
-  };
 };
 
 const EMPTY_LIBRARY_PREVIEW_SONG: StoredSong = {
@@ -1671,7 +1649,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     });
   }, [language, toast]);
   const [songs, setSongs] = useState<StoredSong[]>(initialLibrary.songs);
-  const [savedSongs, setSavedSongs] = useState<StoredSong[]>(cloneSong(initialLibrary.songs));
+  const [savedSongs, setSavedSongs] = useState<StoredSong[]>(() => cloneSong(initialLibrary.songs));
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(loadWorkspaceMode);
   const [drummerSession, setDrummerSession] = useState<DrummerSession | null>(null);
   const drummerWorkspaceActive = useRef(false);
@@ -1690,9 +1668,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }), []);
   const [selectedSongId, setSelectedSongId] = useState(initialLibrary.selectedSongId);
   const [setlists, setSetlists] = useState<Setlist[]>(initialSetlists.setlists);
-  const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(cloneSong(initialSetlists.setlists));
+  const [savedSetlists, setSavedSetlists] = useState<Setlist[]>(() => cloneSong(initialSetlists.setlists));
   const [projects, setProjects] = useState<Project[]>(initialProjects.projects);
-  const [savedProjects, setSavedProjects] = useState<Project[]>(cloneSong(initialProjects.projects));
+  const [savedProjects, setSavedProjects] = useState<Project[]>(() => cloneSong(initialProjects.projects));
   const [setlistProjectFilter, setSetlistProjectFilter] = useState<SetlistProjectFilter>(() => (
     loadSetlistProjectFilter(initialProjects.projects)
   ));
@@ -1710,7 +1688,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   startupSelectionRef.current = { songId: selectedSongId, setlistId: selectedSetlistId, entryId: selectedSetlistSongId };
 
 
-  const [selectedLibrarySongIds, setSelectedLibrarySongIds] = useState<string[]>([]);
+  const [librarySelectionIds, setSelectedLibrarySongIds] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [isLyricsMode, setIsLyricsMode] = useState(false);
   const [isLyricsReading, setIsLyricsReading] = useState(false);
@@ -1755,6 +1733,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [isHomeScreenGuideOpen, setIsHomeScreenGuideOpen] = useState(false);
   const [activeReferenceKind, setActiveReferenceKind] = useState<SongReferenceKind | null>(null);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const sidebarLastTouchAtRef = useRef(-Infinity);
+  const sidebarHandledTouchRef = useRef<EventTarget | null>(null);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
@@ -1762,6 +1742,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [isEditorResizing, setIsEditorResizing] = useState(false);
   const editorPaneLeftRef = useRef(0);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
+  const [libraryScope, setLibraryScope] = useState<LibraryScope>('all');
+  const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(EMPTY_LIBRARY_FILTERS);
   const [setlistSearchQuery, setSetlistSearchQuery] = useState('');
   const [isMobileSetlistToolsOpen, setIsMobileSetlistToolsOpen] = useState(false);
   const [setlistSongSearchQuery, setSetlistSongSearchQuery] = useState('');
@@ -1975,8 +1957,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const performancePageRangeRef = useRef<HTMLSpanElement>(null);
   const performancePageIndexRef = useRef(0);
   const performancePageOffsetsRef = useRef<number[]>([]);
-  const performanceTouchRef = useRef<{ x: number; y: number } | null>(null);
-  const performanceSuppressClickRef = useRef(false);
+  const performanceSwipeSurfaceRef = useRef<HTMLDivElement>(null);
+  const performanceNavigationHintRef = useRef<HTMLDivElement>(null);
+  const dismissPerformanceNavigationHint = usePerformanceNavigationHint(isPerformanceMode && !isHandwriting, performanceNavigationHintRef);
   const performanceKeyGateRef = useRef(createPerformanceKeyGate());
   const revealPerformanceChrome = usePerformanceChrome(isPerformanceMode, performanceOverlayRef);
   const autoSaveTimeoutRef = useRef<number | null>(null);
@@ -1997,9 +1980,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const showGoogleAuth = false;
   const isAuthenticated = Boolean(authenticatedUser && (session || usingStartupCache));
   const isCloudMode = isAuthenticated && Boolean(cloudRepositoryRef.current || authenticatedUser);
+  const guitaristMode = useGuitaristMode(isAuthenticated ? effectiveUser : null);
   const setlistCapoResolutionOptions = React.useMemo(
-    () => ({ includeSharedCapo: !isCloudMode }),
-    [isCloudMode]
+    () => ({ includeSharedCapo: !isCloudMode, guitaristMode: guitaristMode.enabled }),
+    [isCloudMode, guitaristMode.enabled]
   );
   const activeCloudLibrary = cloudLibraries.find((library) => library.id === activeLibraryId)
     ?? cloudLibraries.find((library) => library.kind === 'personal')
@@ -2059,7 +2043,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     ?? userLibrarySongs.find((item) => !item.archivedAt)
     ?? (isShowingArchivedSongs ? userLibrarySongs[0] : null)
     ?? EMPTY_LIBRARY_PREVIEW_SONG;
-  const libraryIsDirty = serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs);
+  const libraryIsDirty = React.useMemo(() => serializeSongLibrary(songs) !== serializeSongLibrary(savedSongs), [songs, savedSongs]);
   const workspaceIsDirty = React.useMemo(() => hasUnsavedWorkspaceChanges(
     { songs, setlists, projects }, { songs: savedSongs, setlists: savedSetlists, projects: savedProjects }
   ), [songs, setlists, projects, savedSongs, savedSetlists, savedProjects]);
@@ -2276,8 +2260,32 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   );
   const currentSidebarWidth = isSidebarExpanded ? resolvedSidebarWidth : collapsedSidebarWidth;
   const sidebarShellWidth = usesOverlaySidebar ? collapsedSidebarWidth : currentSidebarWidth;
-  const sidebarMotionDuration = !isPhoneViewport || isSidebarResizing || uiMotion.instant || reducedPreferenceChanged || (!isMobileNavOpen && sidebarInstantCloseRef.current)
-    ? 0 : uiMotion.reduced ? 0.125 : isMobileNavOpen ? 0.24 : 0.2;
+  const sidebarMotionDuration = isSidebarResizing || uiMotion.instant || reducedPreferenceChanged || (isPhoneViewport && !isMobileNavOpen && sidebarInstantCloseRef.current)
+    ? 0 : uiMotion.reduced ? 0.125 : isPhoneViewport
+      ? (isSidebarExpanded ? 0.24 : 0.2)
+      : (isSidebarExpanded ? 0.2 : 0.16);
+  const sidebarShellTarget = !isPhoneViewport || uiMotion.reduced || isMobileNavOpen
+    ? 'translate3d(calc(0% - 0px), 0, 0)' : 'translate3d(calc(-100% - 24px), 0, 0)';
+  const sidebarContentTarget = isPhoneViewport || uiMotion.reduced || isSidebarExpanded
+    ? 'translate3d(0%, 0, 0)' : 'translate3d(-100%, 0, 0)';
+  const sidebarShellOpacity = !isPhoneViewport || isMobileNavOpen || !uiMotion.reduced ? 1 : 0;
+  const sidebarContentOpacity = isPhoneViewport || isSidebarExpanded ? 1 : 0;
+  const sidebarShellMotion = useAnimationControls();
+  const sidebarContentMotion = useAnimationControls();
+  React.useLayoutEffect(() => {
+    const shell = { transform: sidebarShellTarget, opacity: sidebarShellOpacity };
+    const content = { transform: sidebarContentTarget, opacity: sidebarContentOpacity };
+    if (sidebarMotionDuration === 0) {
+      // Duration alone cannot interrupt an unchanged target. Keep Motion's owned
+      // values (and native animations), but explicitly stop before snapping.
+      sidebarShellMotion.stop(); sidebarContentMotion.stop();
+      sidebarShellMotion.set(shell); sidebarContentMotion.set(content);
+      return;
+    }
+    const transition = { duration: sidebarMotionDuration, ease: UI_DRAWER_EASE, transform: { duration: uiMotion.reduced ? 0 : sidebarMotionDuration, ease: UI_DRAWER_EASE } };
+    void sidebarShellMotion.start({ ...shell, transition });
+    void sidebarContentMotion.start({ ...content, transition: isPhoneViewport ? { duration: 0 } : transition });
+  }, [sidebarShellMotion, sidebarContentMotion, sidebarShellTarget, sidebarContentTarget, sidebarShellOpacity, sidebarContentOpacity, sidebarMotionDuration, uiMotion.reduced, isPhoneViewport]);
   const isPhoneSetlistDrawer = isPhoneViewport && isSetlistMode;
   const mainViewportWidth = Math.max(0, viewportWidth - sidebarShellWidth);
   // Desktop laptops (fine pointer) keep the side-by-side split far below the
@@ -2448,6 +2456,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     && canManageProject(project)
   );
   const canOpenEditor = isSetlistMode ? canEditSelectedSetlistContent : canEditTeamSongs && hasSongs;
+  const isSetlistLyricsWorkspace = isLyricsMode && isSetlistMode && Boolean(selectedSetlist);
   const canChangeCurrentKey = isSetlistMode ? canEditSelectedSetlistKey : canEditTeamSongs;
   // Cloud setlist capo is a per-account preference, so read-only setlist
   // viewers may still adjust it without mutating the shared setlist.
@@ -2487,11 +2496,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     : null
   ), [selectedSetlistSong, songs]);
 
-  const activeSetlistEditableSong = React.useMemo(() => (
-    selectedSetlistSong
-      ? ensureSongEditingIds(normalizeSongBars(cloneSong(selectedSetlistSong.songData ?? selectedSetlistSourceSong ?? EMPTY_LIBRARY_PREVIEW_SONG)))
-      : null
-  ), [selectedSetlistSong, selectedSetlistSourceSong]);
+  const setlistEditableSongs = React.useMemo(() => {
+    const sources = new Map(songs.map(source => [source.id, source]));
+    return new Map((selectedSetlist?.songs ?? []).map(entry => [
+      entry.id,
+      ensureSongEditingIds(normalizeSongBars(cloneSong(entry.songData ?? sources.get(entry.songId) ?? EMPTY_LIBRARY_PREVIEW_SONG))),
+    ]));
+  }, [selectedSetlist?.songs, songs]);
+  const activeSetlistEditableSong = selectedSetlistSong
+    ? setlistEditableSongs.get(selectedSetlistSong.id) ?? null
+    : null;
   const activeLibraryEditableSong = React.useMemo(() => (
     song ? ensureSongEditingIds(song) : null
   ), [song]);
@@ -2527,14 +2541,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       ? previewSelectedBars.filter((target) => target.previewIdentity === activePreviewIdentity)
       : []
   ), [activePreviewIdentity, previewSelectedBars]);
-  const activePreviewNotationTarget = activePreviewEditSession?.target.kind === 'bar'
+  const activePreviewNotationTarget = React.useMemo(() => activePreviewEditSession?.target.kind === 'bar'
     ? {
         sectionId: activePreviewEditSession.target.sectionId,
+        sectionOccurrence: activePreviewEditSession.target.sectionOccurrence,
         barId: activePreviewEditSession.target.barId,
         notationMode: activePreviewEditSession.notationMode,
         cursor: activePreviewEditSession.cursorByMode[activePreviewEditSession.notationMode]
       }
-    : null;
+    : null, [activePreviewEditSession?.target.kind, activePreviewEditSession?.target.sectionId, activePreviewEditSession?.target.sectionOccurrence, activePreviewEditSession?.target.barId, activePreviewEditSession?.notationMode, activePreviewEditSession?.cursorByMode]);
   const activeDraftEditorSong = activePreviewEditSession?.draftSong ?? activeEditorSong;
   const selectedSetlistSourceStatus = React.useMemo(() => (
     isSetlistMode && selectedSetlistSourceSong && activeDraftEditorSong
@@ -2627,9 +2642,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const toolbarEmphasisDark = 'dark:bg-[color:var(--color-indigo-700)] dark:text-[color:var(--color-text-inverse)] dark:hover:bg-[color:var(--color-indigo-600)]';
   const toolbarToggleActiveAccentDark = 'dark:border-amber-700/50 dark:bg-amber-900/30 dark:text-amber-200';
   const toolbarToggleActiveAccentDarkLight = 'dark:border-[color:var(--color-indigo-700)] dark:bg-[color:var(--color-indigo-900)] dark:text-[color:var(--color-indigo-100)]';
-  const toolbarPrimaryActionClassName = `flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
-  const toolbarPrimaryEmphasisActionClassName = `flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
-  const toolbarSecondaryToggleClassName = (active: boolean) => `inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-bold transition-all ${
+  const toolbarPrimaryActionClassName = `ui-press flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-bold text-gray-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50 ${toolbarSurfaceDark}`;
+  const toolbarPrimaryEmphasisActionClassName = `ui-press flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-gray-800 ${toolbarEmphasisDark}`;
+  const toolbarSecondaryToggleClassName = (active: boolean) => `ui-press inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-bold transition-colors ${
     active
       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 dark:shadow-indigo-950/40'
       : `border border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:text-indigo-600 ${toolbarSurfaceDark}`
@@ -2737,6 +2752,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       </div>
     ) : null
   );
+  const renderGuitaristModeToggle = (inMenu = false) => isSetlistMode && guitaristMode.available ? (
+    <button type="button" data-guitarist-mode-toggle
+      role={inMenu ? 'menuitemcheckbox' : undefined}
+      aria-label={language === 'zh' ? '吉他手模式' : 'Guitarist mode'}
+      aria-checked={inMenu ? guitaristMode.enabled : undefined}
+      aria-pressed={inMenu ? undefined : guitaristMode.enabled}
+      onClick={() => { guitaristMode.toggle(); if (inMenu) setIsToolbarOverflowMenuOpen(false); }}
+      className={`mt-1 flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${guitaristMode.enabled ? 'bg-indigo-50 text-indigo-700 dark:bg-[color:var(--color-indigo-900)] dark:text-[color:var(--color-indigo-100)]' : 'text-gray-600 hover:bg-gray-50 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)]'}`}>
+      <span className="flex items-center gap-2"><Guitar size={14}/><span>{language === 'zh' ? '吉他手模式' : 'Guitarist mode'}</span></span>
+      <span className="text-[11px] font-bold">{guitaristMode.enabled ? copy.on : copy.off}</span>
+    </button>
+  ) : null;
   const toolbarOverflowPanel = (
     <AnimatedPopover open={isToolbarOverflowMenuOpen} role="menu" shellClassName="absolute right-0 top-full z-30 mt-2" className="w-60 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface-raised)]">
       {homeScreenInstallMenuItem}
@@ -2860,6 +2887,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       ) : null}
 
 
+      {renderGuitaristModeToggle(true)}
       <div className="mt-1 grid grid-cols-3 gap-1 rounded-xl bg-gray-50 p-1 dark:bg-[color:var(--color-surface-sunken)]">
         {([
           { value: 'light', icon: Sun, label: language === 'zh' ? '淺色' : 'Light' },
@@ -3038,13 +3066,58 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       setShowArchivedSongs(false);
     }
   }, [activeLibraryId, canEditTeamSongs, showArchivedSongs]);
-  const activeLibrarySongs = userLibrarySongs.filter((item) => !item.archivedAt);
+  const activeLibrarySongs = React.useMemo(() => userLibrarySongs.filter((item) => !item.archivedAt), [userLibrarySongs]);
   const archivedSongCount = userLibrarySongs.length - activeLibrarySongs.length;
   const visibleLibrarySongs = isShowingArchivedSongs ? userLibrarySongs : activeLibrarySongs;
-  const filteredSongs = searchItems<StoredSong>(
-    sortSongsForDisplay(visibleLibrarySongs, librarySortMode), librarySearch, getSongSearchFields, item => item.lyricsDoc
-  );
-  const getSetlistSongSource = (item: SetlistSong): StoredSong | null => {
+  const libraryPreferences = useSongLibraryPreferences(authenticatedUser?.id, activeLibraryId);
+  const observedPreferenceSongs = useRef<{ scope: string; ids: Set<string> } | null>(null);
+  useEffect(() => { libraryPreferences.retryPending(); }, [savedSongs, libraryPreferences.retryPending]);
+  useEffect(() => {
+    if (workspaceBootstrap?.ready && workspaceOwnerId === authenticatedUser?.id && !usingStartupCache && !isLoadingCloudWorkspace && !isSwitchingLibrary) {
+      const scope = JSON.stringify([authenticatedUser?.id, activeLibraryId]), ids = new Set(userLibrarySongs.map(item => item.id));
+      const previous = observedPreferenceSongs.current;
+      // Absence alone cannot prove deletion: another tab may have a new unsaved song.
+      if (previous?.scope === scope) libraryPreferences.forgetSongs(new Set([...previous.ids].filter(id => !ids.has(id))));
+      observedPreferenceSongs.current = { scope, ids };
+    }
+  }, [userLibrarySongs, workspaceBootstrap?.ready, workspaceOwnerId, authenticatedUser?.id, activeLibraryId, usingStartupCache, isLoadingCloudWorkspace, isSwitchingLibrary, libraryPreferences.forgetSongs]);
+  const libraryFilterOptions = React.useMemo(() => ({
+    keys: [...new Set(userLibrarySongs.filter(item => !item.originalKeyUnspecified).map(libraryKey))].sort(),
+    meters: [...new Set(userLibrarySongs.filter(item => !item.timeSignatureUnspecified).map(item => item.timeSignature).filter(Boolean))].sort(),
+  }), [userLibrarySongs]);
+  useEffect(() => { setLibraryScope('all'); setLibraryFilters(EMPTY_LIBRARY_FILTERS); }, [authenticatedUser?.id, activeLibraryId]);
+  const recentSourceId = isSetlistMode ? selectedSetlistSong?.songId : song.id;
+  const lastLibraryUse = useRef({ scope: '', id: '' });
+  useEffect(() => {
+    const scope = JSON.stringify([authenticatedUser?.id ?? 'local', activeLibraryId ?? 'local']);
+    const previous = lastLibraryUse.current;
+    lastLibraryUse.current = { scope, id: recentSourceId ?? '' };
+    // Restoration is not a new use; record only a subsequent real song change.
+    if (previous.scope === scope && previous.id && recentSourceId && previous.id !== recentSourceId && userLibrarySongs.some(item => item.id === recentSourceId)) libraryPreferences.recordUsed(recentSourceId);
+  }, [recentSourceId, authenticatedUser?.id, activeLibraryId, libraryPreferences.recordUsed, userLibrarySongs]);
+  const sortedLibrarySongs = React.useMemo(() => sortSongsForDisplay(visibleLibrarySongs, librarySortMode), [visibleLibrarySongs, librarySortMode]);
+  const libraryResults = React.useMemo(() => {
+    const scoped = sortedLibrarySongs.filter(item => matchesLibraryFilters(item, libraryFilters)
+      && (libraryScope === 'all' || libraryScope === 'favorites' && libraryPreferences.favoriteIds.has(item.id) || libraryScope === 'recent' && libraryPreferences.recentOrder.has(item.id)));
+    if (libraryScope === 'recent') scoped.sort((a, b) => libraryPreferences.recentOrder.get(a.id)! - libraryPreferences.recentOrder.get(b.id)!);
+    return searchItemsWithMatches<StoredSong>(scoped, librarySearch, getSongSearchFields, item => item.lyricsDoc)
+      .map(result => ({ ...result, snippet: result.match === 'lyrics' ? librarySearch.lyricsSnippet(result.item.lyricsDoc) : null }));
+  }, [sortedLibrarySongs, librarySearch, searchDictionaryState, libraryScope, libraryFilters,
+    libraryScope === 'favorites' ? libraryPreferences.favoriteIds : null,
+    libraryScope === 'recent' ? libraryPreferences.recentOrder : null]);
+  const filteredSongs = React.useMemo(() => libraryResults.map(result => result.item), [libraryResults]);
+  const librarySnippets = React.useMemo(() => new Map(libraryResults.map(result => [result.item.id, result.snippet])), [libraryResults]);
+  const selectedLibrarySongs = React.useMemo(() => {
+    const byId = new Map(userLibrarySongs.map(item => [item.id, item]));
+    return librarySelectionIds.flatMap(id => byId.has(id) ? [byId.get(id)!] : []);
+  }, [userLibrarySongs, librarySelectionIds]);
+  const selectedLibrarySongIds = React.useMemo(() => selectedLibrarySongs.map(item => item.id), [selectedLibrarySongs]);
+  const hasLibraryFilters = libraryScope !== 'all' || libraryFilterCount(libraryFilters) > 0;
+  useEffect(() => {
+    const available = new Set(userLibrarySongs.map(item => item.id));
+    setSelectedLibrarySongIds(current => current.every(id => available.has(id)) ? current : current.filter(id => available.has(id)));
+  }, [userLibrarySongs]);
+  const getSetlistSongSource = React.useCallback((item: SetlistSong): StoredSong | null => {
     const libSong = songs.find((songItem) => songItem.id === item.songId);
     return libSong ?? (item.songData ? {
       ...item.songData,
@@ -3052,7 +3125,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       archivedAt: item.sourceArchivedAt ?? null,
       updatedAt: 0
     } as StoredSong : null);
-  };
+  }, [songs]);
   const getSetlistSongInfoSummary = (item: SetlistSong, sourceSong: Song) => {
     const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
     const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, setlistCapoResolutionOptions);
@@ -3086,10 +3159,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       .filter((item): item is { id: string; title: string; summary: string } => Boolean(item))
       .slice(0, 3)
   );
-  const setlistSongsWithSource = (selectedSetlist?.songs ?? []).map((item) => {
+  const setlistSongsWithSource = React.useMemo(() => (selectedSetlist?.songs ?? []).map((item) => {
     const sourceSong = getSetlistSongSource(item);
     return { item, sourceSong };
-  }).filter((entry): entry is { item: SetlistSong; sourceSong: StoredSong } => entry.sourceSong !== null);
+  }).filter((entry): entry is { item: SetlistSong; sourceSong: StoredSong } => entry.sourceSong !== null), [selectedSetlist?.songs, getSetlistSongSource]);
   const getSetlistSearchFields = (item: Setlist | JoinedSetlist): string[] => [
     item.name,
     projects.find(project => project.id === item.projectId)?.name
@@ -3186,7 +3259,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
   // Filter from the full library (not filteredSongs) so the song-library search
   // query never leaks into the setlist "add songs" list.
-  const filteredSongsForSetlist = searchItems<StoredSong>(activeLibrarySongs, setlistSongSearch, getSongSearchFields, item => item.lyricsDoc);
+  const filteredSongsForSetlist = React.useMemo(() => searchItems<StoredSong>(
+    activeLibrarySongs, setlistSongSearch, getSongSearchFields, item => item.lyricsDoc
+  ), [activeLibrarySongs, setlistSongSearch, searchDictionaryState]);
 
   useEffect(() => {
     if (!navigationMemoryReady || !isPhoneSetlistDrawer) return;
@@ -3844,7 +3919,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     );
   };
 
-  const handleSetlistSongContentChange = (nextSong: Song, insertion?: { sectionId: string; beforeSectionId: string }) => {
+  const handleSetlistSongContentChange = useStableEvent((nextSong: Song, insertion?: { sectionId: string; beforeSectionId: string }) => {
     if (!selectedSetlist || !selectedSetlistSong || !activeSetlistEditableSong) {
       return;
     }
@@ -3875,7 +3950,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       })(),
       songData: cloneSong(normalizeSongBars(nextSong))
     }));
-  };
+  });
 
   const handleSetlistSongTempoChange = (itemId: string, tempo: number | undefined) => {
     if (!canEditSelectedSetlistContent) return;
@@ -3950,14 +4025,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     } finally { release(); setHistoryForwardBusy(false); }
   };
 
-  const handleBookLyricsChange = (itemId: string, lyricsDoc: Song['lyricsDoc']) => {
+  const handleBookLyricsChange = useStableEvent((itemId: string, lyricsDoc: Song['lyricsDoc']) => {
     if (!canEditSelectedSetlistContent) return;
     const entry = setlistSongsWithSource.find(({ item }) => item.id === itemId);
     if (!entry) return;
     const previous = ensureSongEditingIds(normalizeSongBars(cloneSong(entry.item.songData ?? entry.sourceSong)));
 
     handleUpdateSetlistSong(itemId, current => ({ ...current, songData: { ...previous, lyricsDoc } }));
-  };
+  });
 
   const restoreSavedWorkspace = () => {
     const restoredSongs = cloneSong(savedSongs);
@@ -4404,16 +4479,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   const handleSelectSong = (nextSongId: string) => {
     if (nextSongId === selectedSongId && workspaceMode === 'songs') {
+      libraryPreferences.recordUsed(nextSongId);
       return;
     }
 
     void runSelectionChange(() => {
+      libraryPreferences.recordUsed(nextSongId);
+      lastLibraryUse.current = { scope: JSON.stringify([authenticatedUser?.id ?? 'local', activeLibraryId ?? 'local']), id: nextSongId };
       setWorkspaceMode('songs');
       setSelectedSongId(nextSongId);
     });
   };
 
-  const handleSongChange = (newSong: Song) => {
+  const handleSongChange = useStableEvent((newSong: Song) => {
     if (!song) {
       return;
     }
@@ -4455,7 +4533,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
 
     replaceSongInLibrary(song.id, nextSong);
-  };
+  });
 
   const syncPreviewChordKeyboardWithDisplayMode = React.useCallback((showNashvilleNumbers: boolean) => {
     rememberChordInputMode(showNashvilleNumbers ? 'nashville' : 'letters');
@@ -4474,6 +4552,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   const handleToggleLyricsMode = () => {
+    if (!isLyricsMode && isSetlistMode) {
+      setIsLyricsReading(true);
+      setIsLyricsContinuous(true);
+    }
     if (previewEditSession?.dirty) {
       pendingPreviewTransitionRef.current = () => {
         setPreviewEditSession(null);
@@ -4535,7 +4617,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [isEditing, isSheetView]);
+  }, [isEditing, isSheetView, isSetlistLyricsWorkspace]);
 
   React.useLayoutEffect(() => {
     if (!isSheetView) return;
@@ -4573,7 +4655,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [isSheetView]);
+  }, [isSheetView, isSetlistLyricsWorkspace]);
 
   React.useEffect(() => () => {
     if (previewSuppressClickTimeoutRef.current !== null) {
@@ -5945,7 +6027,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     event: React.TouchEvent<HTMLElement>
   ) => {
     const touch = event.touches[0];
-    if (!touch) {
+    if (!touch || event.touches.length !== 1) {
+      clearMobileLongPressTimer();
+      mobileLongPressRef.current = null;
       return;
     }
 
@@ -5957,8 +6041,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       x: touch.clientX,
       y: touch.clientY
     };
+    const target = event.currentTarget;
     mobileLongPressTimerRef.current = window.setTimeout(() => {
+      mobileLongPressTimerRef.current = null;
       mobileLongPressTriggeredRef.current = true;
+      const selection = window.getSelection();
+      if (selection?.anchorNode && target.contains(selection.anchorNode)) selection.removeAllRanges();
       if (kind === 'song') {
         handleMobileSongLongPress(id);
       } else {
@@ -6050,7 +6138,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setSetlistPanelView('detail');
   };
 
-  const handleSelectSetlistSong = (setlistSongId: string) => {
+  const handleSelectSetlistSong = useStableEvent((setlistSongId: string) => {
     if (!selectedSetlist) {
       return;
     }
@@ -6087,7 +6175,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         }
       }
     });
-  };
+  });
 
   // Archive identical source copies without rewriting existing setlist references.
   const handleRemoveLibrarySongDuplicates = async () => {
@@ -6097,7 +6185,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
     const kept = new Set<string>();
     const duplicateIds: string[] = [];
-    for (const item of songs.filter(item => !item.archivedAt)) {
+    for (const item of selectedLibrarySongs.filter(item => !item.archivedAt)) {
       const { id, updatedAt: _updated, createdAt: _created, createdBy: _creator, teamSource: _source, archivedAt: _archived, ...content } = item;
       const key = historySignature(content);
       if (kept.has(key)) duplicateIds.push(id); else kept.add(key);
@@ -6107,13 +6195,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
     if (!window.confirm(language === 'zh'
-      ? `要封存 ${duplicateIds.length} 首內容相同的歌曲副本嗎？既有歌單保留原本引用，可用撤銷恢復。`
-      : `Archive ${duplicateIds.length} identical song copies? Existing setlist references are preserved. You can undo this.`)) return;
+      ? `要封存已選 ${selectedLibrarySongs.length} 首中的 ${duplicateIds.length} 首相同副本嗎？既有歌單保留原本引用，可用撤銷恢復。`
+      : `Archive ${duplicateIds.length} identical copies among ${selectedLibrarySongs.length} selected songs? Existing setlist references are preserved. You can undo this.`)) return;
     try { await updateTeamSongArchiveState(duplicateIds, true); }
     catch (error) { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }
   };
 
-  const handleUpdateSetlistSong = (setlistSongId: string, updater: (currentSong: SetlistSong) => SetlistSong) => {
+  const handleUpdateSetlistSong = useStableEvent((setlistSongId: string, updater: (currentSong: SetlistSong) => SetlistSong) => {
     if (!selectedSetlist) {
       return;
     }
@@ -6132,7 +6220,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       ...currentSetlist,
       songs: currentSetlist.songs.map((item) => item.id === setlistSongId ? next : item)
     }));
-  };
+  });
 
   const handleRemoveSetlistSong = async (setlistSongId: string) => {
     if (!selectedSetlist) {
@@ -6256,6 +6344,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     enabled: canReorderSelectedSetlist && isSetlistMode && isSheetView && setlistPanelView === 'detail'
       && !isPerformanceMode && !isSwitchingLibrary && !isLoadingCloudWorkspace,
     scopeKey: JSON.stringify([authenticatedUser?.id, activeLibraryId, selectedSetlist?.id, isSetlistSongSortMode]),
+    items: selectedSetlist?.songs,
     onMove: moveSetlistSong,
     onDraggingChange: id => {
       const previousGroup=historyDragGroup.current;
@@ -7466,7 +7555,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         flushSync(() => {
           exportRoot?.render(
             <div data-print-preview style={{ width: '794px', minWidth: '794px', maxWidth: '794px' }}>
-              {isLyricsMode && isLyricsContinuous ? <LyricsBook title={effectiveSelectedSetlist.name} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode /> : setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
+              {isLyricsMode ? <LyricsBook title={effectiveSelectedSetlist.name} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode /> : setlistSongsWithSource.map(({ item, sourceSong }, songIndex) => {
                 const baseDerivedSong = applySetlistSongOverrides(
                   item.songData ?? sourceSong,
                   effectiveSelectedSetlist,
@@ -7669,27 +7758,17 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
   };
 
-  const handlePerformanceTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    revealPerformanceChrome();
-    const t = e.touches[0];
-    if (!t) return;
-    performanceSuppressClickRef.current = false;
-    performanceTouchRef.current = { x: t.clientX, y: t.clientY };
-  };
-
-  const handlePerformanceTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    const start = performanceTouchRef.current;
-    performanceTouchRef.current = null;
-    if (!start) return;
-    const t = e.changedTouches[0];
-    if (!t) return;
-    const dx = t.clientX - start.x;
-    const dy = t.clientY - start.y;
-    if (Math.abs(dx) < 44 || Math.abs(dy) >= Math.abs(dx)) return;
-    performanceSuppressClickRef.current = true;
-    if (dx < 0) handlePerformanceNextPage();
-    else handlePerformancePrevPage();
-  };
+  const performanceSwipe = usePerformanceSwipe({
+    enabled: isPerformanceMode && !isHandwriting,
+    scope: `${isSetlistMode ? selectedSetlistSongId : song.id}:${isLyricsMode}:${isLyricsContinuous}:${performanceColumns}:${performanceScale}:${performanceTotalPages}`,
+    reduced: uiMotion.reduced,
+    overlay: performanceOverlayRef,
+    surface: performanceSwipeSurfaceRef,
+    onNext: handlePerformanceNextPage,
+    onPrevious: handlePerformancePrevPage,
+    onInteract: revealPerformanceChrome,
+    onLearned: dismissPerformanceNavigationHint,
+  });
 
   useEffect(() => {
     if (songs.length > 0 && song.id !== selectedSongId) {
@@ -7773,8 +7852,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // Keep refs to latest handlers so the keyboard effect never has stale closures.
   const handlePerformanceNextPageRef = useRef(handlePerformanceNextPage);
   const handlePerformancePrevPageRef = useRef(handlePerformancePrevPage);
-  handlePerformanceNextPageRef.current = handlePerformanceNextPage;
-  handlePerformancePrevPageRef.current = handlePerformancePrevPage;
+  handlePerformanceNextPageRef.current = () => { performanceSwipe.cancel(); handlePerformanceNextPage(); };
+  handlePerformancePrevPageRef.current = () => { performanceSwipe.cancel(); handlePerformancePrevPage(); };
 
   // Keyboard navigation in performance mode
   useEffect(() => {
@@ -8643,12 +8722,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     });
   }, []);
 
-  const findPreviewAnchorRect = React.useCallback((anchorKey: string): PreviewAnchorRect | null => {
+  const findPreviewAnchorRect = React.useCallback((anchorKey: string, occurrence?: number): PreviewAnchorRect | null => {
     const root = sheetRef.current;
     if (!root) return null;
-    const anchors = Array.from(root.querySelectorAll('[data-preview-edit-anchor]')) as HTMLElement[];
-    const node = anchors
-      .find((candidate) => candidate.dataset.previewEditAnchor === anchorKey);
+    const current = previewEditSessionRef.current?.target;
+    const currentOccurrence = current && anchorKey.startsWith(`${current.previewIdentity}|${current.sectionId}|`) ? current.sectionOccurrence ?? 0 : 0;
+    const node = findPreviewAnchor(root, anchorKey, occurrence ?? currentOccurrence);
     if (!node) return null;
     const rect = node.getBoundingClientRect();
     return {
@@ -8666,19 +8745,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       if (!current) return current;
       const anchorRect = findPreviewAnchorRect(current.anchorKey);
       if (!anchorRect) return null;
-      return { ...current, anchorRect };
+      return samePreviewAnchorRect(current.anchorRect, anchorRect) ? current : { ...current, anchorRect };
     });
     setPreviewEditSession((current) => {
       if (!current) return current;
-      const anchorRect = findPreviewAnchorRect(current.target.anchorKey);
-      return anchorRect
+      const anchorRect = findPreviewAnchorRect(current.target.anchorKey, current.target.sectionOccurrence);
+      return anchorRect && !samePreviewAnchorRect(current.target.anchorRect, anchorRect)
         ? { ...current, target: { ...current.target, anchorRect } }
         : current;
     });
     setPreviewSectionActionTarget((current) => {
       if (!current) return current;
       const anchorRect = findPreviewAnchorRect(current.anchorKey);
-      return anchorRect ? { ...current, anchorRect } : null;
+      return anchorRect ? samePreviewAnchorRect(current.anchorRect, anchorRect) ? current : { ...current, anchorRect } : null;
     });
   }, [findPreviewAnchorRect]);
 
@@ -9967,13 +10046,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             kind: 'bar' as const,
             previewIdentity,
             sectionId: actualSection.id,
+            sectionOccurrence: target?.sectionOccurrence ?? 0,
             barId: editableBar.id,
             field: previewField,
             slotIndex,
             rawChordIndex,
             cursor,
             anchorKey,
-            anchorRect: findPreviewAnchorRect(anchorKey) ?? target?.anchorRect ?? {
+            anchorRect: findPreviewAnchorRect(anchorKey, target?.sectionOccurrence ?? 0) ?? target?.anchorRect ?? {
               left: 16, top: 16, right: 32, bottom: 32, width: 16, height: 16
             }
           };
@@ -10079,7 +10159,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // setlist song and (2) jump the editor to that exact section/bar — mirroring
   // the same-song behaviour of handleElementClick. The song switch is async, so
   // we stash the target and let the effect below apply the focus once it lands.
-  const handleSetlistElementClick = React.useCallback((
+  const handleSetlistElementClick = useStableEvent((
     itemId: string,
     previewSong: Song,
     sIdx: number,
@@ -10105,7 +10185,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       setIsEditing(true);
     }
     handleSelectSetlistSong(itemId);
-  }, [canOpenEditor, handleElementClick, handleSelectSetlistSong, isPreviewQuickEditEnabled, selectedSetlistSong?.id]);
+  });
 
   const handleScrollPreviewToTop = React.useCallback(() => {
     const scrollRoot = previewRef.current;
@@ -10375,45 +10455,92 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     );
   }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
 
-  const setlistPreviewSongs = React.useMemo(() => {
+  // Stable dispatchers read the latest committed permissions, selection and handlers.
+  const handleLibraryRowAction = useStableEvent((action: SongLibraryAction, id: string) => {
+    switch (action) {
+      case 'select':
+        if (mobileLongPressTriggeredRef.current) {
+          mobileLongPressTriggeredRef.current = false;
+          return;
+        }
+        handleSelectSong(id);
+        break;
+      case 'edit': handleSelectSong(id); setIsEditing(true); break;
+      case 'duplicate': handleDuplicateSong(id); break;
+      case 'delete': void handleDeleteSong(id); break;
+      case 'restore':
+        void updateTeamSongArchiveState([id], false).catch(error => {
+          toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
+        });
+        break;
+      case 'sync-team': void handleSyncPersonalSongFromTeam(id); break;
+      case 'copy-to-team': void handleOpenTeamSongImport([id]); break;
+      case 'copy-to-personal': void handleCopyTeamSongToPersonal(id); break;
+      case 'toggle-selection': handleToggleSongBulkSelection(id); break;
+      case 'toggle-favorite': libraryPreferences.toggleFavorite(id); break;
+    }
+  });
+  const handleLibraryRowTitleChange = useStableEvent(handleSongListTitleChange);
+  const handleLibraryRowTitleCommit = useStableEvent((id: string, title: string) => {
+    setLibraryTitleEditingSongId(null);
+    handleSongListTitleCommit(id, title);
+  });
+  const handleLibraryRowTouchStart = useStableEvent((id: string, event: React.TouchEvent<HTMLElement>) => {
+    handleMobileLongPressStart('song', id, event);
+  });
+  const handleLibraryRowTouchMove = useStableEvent(handleMobileLongPressMove);
+  const handleLibraryRowTouchEnd = useStableEvent((event: React.TouchEvent<HTMLElement>) => {
+    if (mobileLongPressTriggeredRef.current) event.preventDefault();
+    handleMobileLongPressEnd();
+  });
+  const handleLibraryRowTouchCancel = useStableEvent(handleMobileLongPressEnd);
+
+  const setlistBasePreviewSongs = React.useMemo(() => {
     if (!effectiveSelectedSetlist || setlistSongsWithSource.length === 0) {
       return [];
     }
 
     return setlistSongsWithSource.map(({ item, sourceSong }) => {
-      const isSelected = item.id === selectedSetlistSong?.id;
-      const previewSong = isSelected && activeDraftNavigationPreviewSong
-        ? activeDraftNavigationPreviewSong
-        : {
-            ...applySetlistSongOverrides(
-              item.songData ?? sourceSong,
-              effectiveSelectedSetlist,
-              item,
-              setlistCapoResolutionOptions,
-              sourceSong
-            ),
-            references: sourceSong.references,
-            ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
-              ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
-              : {}),
-          };
+      const previewSong = {
+        ...applySetlistSongOverrides(
+          setlistEditableSongs.get(item.id) ?? item.songData ?? sourceSong,
+          effectiveSelectedSetlist,
+          item,
+          setlistCapoResolutionOptions,
+          sourceSong
+        ),
+        references: sourceSong.references,
+        ...(isJoinedSetlist && joinedSetlistDisplayPreference.barNumberMode
+          ? { barNumberMode: joinedSetlistDisplayPreference.barNumberMode }
+          : {}),
+      };
 
       return {
         item,
-        isSelected,
         song: previewSong, libraryMap: sourceSong.songMap
       };
     });
   }, [
-    activeDraftNavigationPreviewSong,
     effectiveSelectedSetlist,
     isJoinedSetlist,
     joinedSetlistDisplayPreference.barNumberMode,
     joinedSetlistDisplayPreference.barRowCount,
-    selectedSetlistSong?.id,
     setlistCapoResolutionOptions,
+    setlistEditableSongs,
     setlistSongsWithSource
   ]);
+
+  // Selection changes only interaction state. Reuse the prepared charts until
+  // song content or display settings change; only an active draft overrides one.
+  const setlistPreviewSongs = React.useMemo(() => setlistBasePreviewSongs.map(entry => {
+    const isSelected = entry.item.id === selectedSetlistSong?.id;
+    return {
+      ...entry,
+      isSelected,
+      song: isSelected && activePreviewEditSession && activeDraftNavigationPreviewSong
+        ? activeDraftNavigationPreviewSong : entry.song,
+    };
+  }), [setlistBasePreviewSongs, selectedSetlistSong?.id, activePreviewEditSession, activeDraftNavigationPreviewSong]);
 
   const liveDrummerSession = React.useMemo(() => {
     if (!drummerSession) return null;
@@ -10454,29 +10581,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return null;
     }
 
-    if (isLyricsMode) {
-      const selected = setlistPreviewSongs.find((entry) => entry.isSelected) ?? setlistPreviewSongs[0];
-      if (!selected) {
-        return null;
-      }
-      return <div className="flex flex-col gap-4">
-        <div data-preview-only-control className="flex gap-2 rounded-xl border border-stone-200 bg-white p-2 text-sm">
-          <button type="button" aria-pressed={isLyricsContinuous} onClick={() => setIsLyricsContinuous(true)} className={`rounded-lg px-4 py-2 ${isLyricsContinuous ? 'bg-indigo-100 font-bold text-indigo-800' : 'text-stone-600'}`}>{language === 'zh' ? '歌單排版' : 'Setlist layout'}</button>
-          <button type="button" aria-pressed={!isLyricsContinuous} onClick={() => setIsLyricsContinuous(false)} className={`rounded-lg px-4 py-2 ${!isLyricsContinuous ? 'bg-indigo-100 font-bold text-indigo-800' : 'text-stone-600'}`}>{language === 'zh' ? '單曲編輯' : 'Single song'}</button>
-        </div>
-        {isLyricsContinuous ? <LyricsBook title={selectedSetlist?.name ?? ''} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} onSettingsChange={setLyricsBookSettings}
-          onSongChange={canOpenEditor ? handleBookLyricsChange : undefined}
-          onSelectSong={id => { skipNextSetlistPreviewAutoScrollRef.current = true; setSelectedSetlistSongId(id); }}
-          onEditSong={id => { setSelectedSetlistSongId(id); setIsLyricsContinuous(false); }}
-          reading={isLyricsReading} onReadingChange={setIsLyricsReading} /> : <LyricsSheet key={selected.item.id} song={activeSetlistEditableSong ?? selected.song} setlistSongNumber={setlistPreviewSongs.indexOf(selected) + 1} language={language}
-          onChange={canOpenEditor ? handleSetlistSongContentChange : undefined}
-          reading={isLyricsReading} onReadingChange={setIsLyricsReading} />}
-      </div>;
-    }
+    // Setlist lyrics use their own reading viewport, outside the chart canvas.
+    if (isLyricsMode) return null;
 
     return (
       <div className="flex flex-col gap-8">
-        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong, libraryMap }, songIndex) => (
+        {setlistPreviewSongs.map(({ item, isSelected, song: previewSong, libraryMap }, songIndex) => {
+          const isInteractive = isSelected && !isPerformanceMode;
+          return (
           <div
             key={item.id}
             data-setlist-preview-song-id={item.id}
@@ -10488,12 +10600,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               isSelected ? 'ring-2 ring-indigo-300 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'ring-2 ring-transparent'
             }`}
           >
-            <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
+            <RecoveryBoundary label="譜面預覽"><SetlistPreviewSong
               notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
-        noteOwner={authenticatedUser?.id} noteSongId={item.songId} notesActive={isSelected && !isPerformanceMode && !isEditing && !activePreviewEditSession}
+        noteOwner={authenticatedUser?.id} noteSongId={item.songId} notesActive={isInteractive && !isEditing && !activePreviewEditSession}
+              entryId={item.id}
               song={previewSong}
               setlistSongNumber={songIndex + 1}
-              songMapEditor={isSelected && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession && !isEditing ? {
+              songMapEditor={isInteractive && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession && !isEditing ? {
                 scope: 'setlist', setlistName: selectedSetlist?.name, fallback: getSongMap({ songMap: libraryMap, sections: previewSong.sections }), sections: sectionSongMap(previewSong.sections),
                 onSave: setlistSongMap => handleUpdateSetlistSong(item.id, current => ({
                   ...current, songData: { ...(current.songData ?? activeSetlistEditableSong), setlistSongMap },
@@ -10502,23 +10615,24 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               lastEditedAt={savedChartEditedAt(item.songId, selectedSetlistId ?? undefined, item.id)}
               language={language}
               currentKey={previewSong.currentKey}
-              onElementClick={canOpenEditor ? (sIdx, bIdx, field, target) => handleSetlistElementClick(item.id, previewSong, sIdx, bIdx, field, target) : undefined}
-              onMetaClick={isSelected && canOpenEditor ? handleMetaClick : undefined}
-              onAddBarClick={isSelected && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddBarToSection : undefined}
-              onAddSectionAfterClick={isSelected && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
-              onBarLabelLaneChange={isSelected && canEditSelectedSetlistContent ? handleBarLabelLaneChange : undefined}
-              highlightedSectionIds={isSelected ? highlightedSectionIds : []}
-              activeSectionId={isSelected && (isEditing || activePreviewEditSession) ? activeSectionId : null}
-              activeBar={isSelected && (isEditing || activePreviewEditSession) ? activeBar : null}
-              activePreviewNotationTarget={isSelected ? activePreviewNotationTarget : null}
-              selectedPreviewBars={isSelected ? activePreviewSelectedBars : []}
-              onPreviewBarMetaClick={isSelected && canOpenEditor ? handlePreviewBarMetaClick : undefined}
-              onPreviewBarContextMenu={isSelected && canOpenEditor ? handlePreviewBarContextMenu : undefined}
+              onSetlistElementClick={canOpenEditor ? handleSetlistElementClick : undefined}
+              onMetaClick={isInteractive && canOpenEditor ? handleMetaClick : undefined}
+              onAddBarClick={isInteractive && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddBarToSection : undefined}
+              onAddSectionAfterClick={isInteractive && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
+              onBarLabelLaneChange={isInteractive && canEditSelectedSetlistContent ? handleBarLabelLaneChange : undefined}
+              highlightedSectionIds={isInteractive ? highlightedSectionIds : EMPTY_PREVIEW_IDS}
+              activeSectionId={isInteractive && (isEditing || activePreviewEditSession) ? activeSectionId : null}
+              activeBar={isInteractive && (isEditing || activePreviewEditSession) ? activeBar : null}
+              activePreviewNotationTarget={isInteractive ? activePreviewNotationTarget : null}
+              selectedPreviewBars={isInteractive ? activePreviewSelectedBars : EMPTY_PREVIEW_BARS}
+              onPreviewBarMetaClick={isInteractive && canOpenEditor ? handlePreviewBarMetaClick : undefined}
+              onPreviewBarContextMenu={isInteractive && canOpenEditor ? handlePreviewBarContextMenu : undefined}
               previewIdentity={item.id}
-              onSectionReorder={isSelected && canEditSelectedSetlistContent ? handlePreviewSectionReorder : undefined}
+              onSectionReorder={isInteractive && canEditSelectedSetlistContent ? handlePreviewSectionReorder : undefined}
             /></RecoveryBoundary>
           </div>
-        ))}
+          );
+        })}
       </div>
     );
   }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
@@ -10581,7 +10695,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   usePreviewKeyboardVisibility(
     activePreviewEditSession?.target.kind === 'bar' && canOpenEditor && !isLyricsMode ? activePreviewEditSession.target.anchorKey : null,
-    previewRef, previewCanvasRef, sheetRef, refreshPreviewEditAnchorRect
+    previewRef, previewCanvasRef, sheetRef, refreshPreviewEditAnchorRect, activePreviewEditSession?.target.sectionOccurrence ?? 0
   );
 
   useEffect(() => {
@@ -10595,9 +10709,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     if (isLyricsMode) {
       setPreviewMetaEditTarget(null);
       setIsEditing(false);
-      if (isPhoneViewport) setIsLyricsReading(true);
+      if (isSetlistMode || isPhoneViewport) setIsLyricsReading(true);
+      if (isSetlistMode) setIsLyricsContinuous(true);
     }
-  }, [isLyricsMode]);
+  }, [isLyricsMode, isSetlistMode]);
 
   // Resolve a pending cross-song setlist click once the freshly selected song
   // becomes the active editor song. We schedule the focus on a timeout so it
@@ -10635,7 +10750,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             barId: bar.id!,
             slotIndex,
             anchorKey,
-            anchorRect: findPreviewAnchorRect(anchorKey) ?? pending.target!.anchorRect
+            anchorRect: findPreviewAnchorRect(anchorKey, pending.target!.sectionOccurrence) ?? pending.target!.anchorRect
           });
         });
         return;
@@ -10658,7 +10773,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   useSetlistPreviewNavigation({
     previewRef,
-    enabled: !isPerformanceMode && isSetlistMode,
+    enabled: !isPerformanceMode && isSetlistMode && !isSetlistLyricsWorkspace,
     trackScroll: !isLyricsMode && !isEditing && !previewEditSession,
     selectedSongId: selectedSetlistSongId,
     songCount: setlistPreviewSongs.length,
@@ -10792,7 +10907,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     rootRef: previewRef, sheetRef, activeRef: previewPinchActiveRef, labelRef: previewZoomLabelRef,
     // Info pages unmount the preview; release its native listeners and bind
     // the newly mounted pane when returning to the chart.
-    enabled: isSheetView && !(isLyricsMode && isLyricsReading),
+    enabled: isSheetView && !isSetlistLyricsWorkspace && !(isLyricsMode && isLyricsReading),
     identity: isSetlistMode ? selectedSetlist?.id ?? null : song?.id ?? null,
     minScale: PREVIEW_MIN_SCALE, maxScale: PREVIEW_MAX_SCALE, fitHeightScale: previewFitHeightScale,
     onStart: () => {
@@ -10887,8 +11002,41 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     return null;
   }
 
+  const setSidebarOpen = (open: boolean) => {
+    setIsSidebarPinned(open);
+    setIsSidebarHovered(false);
+    if (!open) suppressSidebarHoverUntilMove.current = true;
+  };
+  const toggleSidebar = () => setSidebarOpen(!isSidebarExpanded);
+  const openSidebarWorkspace = (mode: WorkspaceMode) => {
+    const closeCurrent = workspaceMode === mode && isSidebarExpanded;
+    setWorkspaceMode(mode);
+    setActiveAppView('sheet');
+    setSidebarOpen(!closeCurrent);
+  };
+  const rememberSidebarPointer = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.pointerType === 'touch' || event.pointerType === 'pen') sidebarLastTouchAtRef.current = Date.now();
+    else if (event.pointerType === 'mouse') sidebarLastTouchAtRef.current = -Infinity;
+  };
+  // Safari may consume the first click after a synthesized hover. Commit touch
+  // intent on press, and ignore only its matching compatibility click.
+  const pressSidebarControl = (event: React.PointerEvent<HTMLButtonElement>, run: () => void) => {
+    if (event.pointerType !== 'touch' && event.pointerType !== 'pen') { sidebarHandledTouchRef.current = null; return; }
+    if (event.button !== 0 || event.isPrimary === false) return;
+    event.preventDefault(); event.stopPropagation();
+    sidebarLastTouchAtRef.current = Date.now();
+    sidebarHandledTouchRef.current = event.currentTarget;
+    run();
+  };
+  const clickSidebarControl = (event: React.MouseEvent<HTMLButtonElement>, run: () => void) => {
+    const handled = sidebarHandledTouchRef.current === event.currentTarget && event.detail !== 0;
+    sidebarHandledTouchRef.current = null;
+    if (!handled) run();
+  };
   const handleSidebarHoverTrigger = (event: React.MouseEvent<HTMLElement>) => {
     if (drummerWorkspaceActive.current) return;
+    if ((!hasFinePointer && previewEditorTouchPoints > 0) || Date.now() - sidebarLastTouchAtRef.current < 800
+      || (event.nativeEvent as MouseEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } }).sourceCapabilities?.firesTouchEvents) return;
     // Removing an overlay can synthesize mouseenter at a stationary pointer.
     if (suppressSidebarHoverUntilMove.current) {
       if (event.type !== 'mousemove') return;
@@ -11224,7 +11372,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
 
     const selectedIds = new Set(selectedLibrarySongIds);
-    const selectedSongs = filteredSongs.filter((item) => selectedIds.has(item.id));
+    const selectedSongs = selectedLibrarySongs.filter((item) => selectedIds.has(item.id));
     const orderedSongs = selectedSongs.filter((item) => !isLocalOnlySymbolTestSong(item));
     if (orderedSongs.length !== selectedSongs.length) {
       toast.info(language === 'zh'
@@ -11882,7 +12030,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     </div>
   );
 
-  const desktopSetlistProjectsPanel = (
+  const desktopSetlistProjectsPanel = isSetlistMode && setlistPanelView === 'manageProjects' ? (
     <ProjectManagementPanel language={language} projects={showArchivedProjects && !selectedProject ? projects.filter(project => project.archived) : visibleProjects} archivedOnly={showArchivedProjects && !selectedProject} joinedProjects={joinedProjects}
       setlists={setlists} project={managedProject} showArchived={showArchivedProjects} archivedCount={archivedProjectsCount}
       canCreate={canCreateProject} canManage={canManageProject} canShare={canShareProject}
@@ -11905,7 +12053,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       onRemoveMember={(project, member) => { void handleRemoveSharedMember('project', project.id, member); }}
       pinnedProjectIds={pinnedProjectIds} onTogglePin={toggleProjectPin}
     />
-  );
+  ) : null;
 
   const projectPinAction = (projectId: string) => ({
     label: pinnedProjectIds.has(projectId) ? (language === 'zh' ? '取消置頂' : 'Unpin project') : (language === 'zh' ? '置頂專案' : 'Pin project'),
@@ -11950,7 +12098,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         </button>
       : null;
 
-  const desktopSetlistListPanel = (
+  const desktopSetlistListPanel = isSetlistMode && (setlistPanelView === 'list' || !selectedSetlist) ? (
     <>
       <SetlistBrowserHeader key={serializeSetlistProjectFilter(setlistProjectFilter)}
         isRoot={isSetlistRoot} title={isSetlistRoot ? (language === 'zh' ? '歌單' : 'Setlists') : selectedProjectFilterLabel}
@@ -12189,9 +12337,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       {isSetlistRoot && archivedProjectsCount > 0 && <div className="px-4"><button type="button" className="pm-archive-toggle" onClick={()=>{setShowArchivedProjects(true);setSetlistSearchQuery('');handleOpenProjectManagement();}}><Archive size={15}/>{language==='zh'?'已歸檔專案':'Archived projects'}{' ('+archivedProjectsCount+')'}</button></div>}
       {desktopSetlistSavedFooter}
     </>
-  );
+  ) : null;
 
-  const desktopSetlistDetailPanel = selectedSetlist ? (
+  const desktopSetlistDetailPanel = selectedSetlist && isSetlistMode && setlistPanelView === 'detail' ? (
     <>
       <div className="setlist-browser-header" data-setlist-detail-header>
         <button type="button" className="pm-back" aria-label={copy.backToSetlists} onClick={()=>{setIsSetlistActionsMenuOpen(false);setSetlistSongSearchQuery('');setSetlistPanelView('list');}}><ChevronLeft size={17}/>{selectedProject?.name ?? selectedJoinedProject?.name ?? (language==='zh'?'歌單':'Setlists')}</button>
@@ -12384,7 +12532,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }}
   />;
 
-  const desktopSetlistAddSongsPanel = selectedSetlist ? (
+  const desktopSetlistAddSongsPanel = selectedSetlist && isSetlistMode && setlistPanelView === 'addSongs' ? (
     <>
       <div className="setlist-add-scroll" data-setlist-add-scroll>
       <div className="setlist-browser-header setlist-add-header">
@@ -12674,8 +12822,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         />
       )}
 
-      {usesOverlaySidebar && isSidebarExpanded && (
-        <button
+      {usesOverlaySidebar && (
+        <motion.button
+          initial={false}
+          animate={{ opacity: isSidebarExpanded ? 1 : 0 }}
+          transition={{ duration: sidebarMotionDuration, ease: UI_DRAWER_EASE }}
+          data-sidebar-backdrop
+          inert={!isSidebarExpanded ? true : undefined}
+          aria-hidden={!isSidebarExpanded ? true : undefined}
+          tabIndex={isSidebarExpanded ? 0 : -1}
+          style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           type="button"
           onClick={() => {
             if (isPhoneViewport) {
@@ -12685,7 +12841,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               setIsSidebarHovered(false);
             }
           }}
-          className="absolute inset-0 z-40 bg-stone-950/10 backdrop-blur-[1px]"
+          className="absolute inset-0 z-40 bg-stone-950/10"
           aria-label={copy.collapseSongList}
         />
       )}
@@ -12698,15 +12854,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         aria-hidden={isPhoneViewport && !isMobileNavOpen ? true : undefined}
         className={isPhoneViewport
           ? 'absolute inset-y-0 left-0 z-50 overflow-hidden'
-          : `relative z-50 flex-shrink-0 ${usesOverlaySidebar && !isSidebarExpanded ? 'overflow-hidden' : 'overflow-visible'}`}
+          : 'pointer-events-none relative z-50 flex-shrink-0 overflow-visible'}
         style={{ width: isPhoneViewport ? resolvedSidebarWidth : sidebarShellWidth, ...(isPhoneViewport ? { pointerEvents: isMobileNavOpen ? 'auto' : 'none' } : {}) }}
       >
         <motion.div
-          initial={false}
-          animate={isPhoneViewport
-            ? { transform: uiMotion.reduced ? 'none' : isMobileNavOpen ? 'translate3d(0, 0, 0)' : 'translate3d(calc(-100% - 24px), 0, 0)', opacity: isMobileNavOpen || !uiMotion.reduced ? 1 : 0 }
-            : { transform: 'none', opacity: 1 }}
-          transition={{ duration: sidebarMotionDuration, ease: UI_DRAWER_EASE, transform: { duration: uiMotion.reduced ? 0 : sidebarMotionDuration, ease: UI_DRAWER_EASE } }}
+          data-sidebar-shell
+          initial={{ transform: sidebarShellTarget, opacity: sidebarShellOpacity }}
+          animate={sidebarShellMotion}
+          onPointerOverCapture={rememberSidebarPointer}
+          onPointerDownCapture={rememberSidebarPointer}
           onMouseEnter={handleSidebarHoverTrigger}
           onMouseMove={handleSidebarHoverTrigger}
           onMouseLeave={() => {
@@ -12714,20 +12870,20 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             suppressSidebarHoverUntilMove.current = false;
             if (!isSidebarPinned) setIsSidebarHovered(false);
           }}
-          className={`absolute inset-y-0 left-0 flex overflow-hidden border-r border-gray-200 bg-white dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)] ${
+          className={`absolute inset-y-0 left-0 flex ${
             isPhoneViewport
-              ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
-              : usesOverlaySidebar && isSidebarExpanded
-              ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
-              : ''
+              ? 'overflow-hidden rounded-r-[28px] border-r border-gray-200 bg-white shadow-[0_24px_60px_rgba(15,23,42,0.18)] dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]'
+              : 'pointer-events-none'
           }`}
-          style={{ width: `${isPhoneViewport ? resolvedSidebarWidth : currentSidebarWidth}px` }}
+          // Keep the list's geometry stable; only its presentation moves. The
+          // desktop workspace adopts its final width once, never on each frame.
+          style={{ width: `${resolvedSidebarWidth}px` }}
         >
           {isSidebarExpanded && !usesOverlaySidebar && !isPhoneViewport && (
             <button
               type="button"
               onMouseDown={handleSidebarResizeStart}
-              className="absolute right-0 top-1/2 z-50 h-14 w-5 -translate-y-1/2 cursor-col-resize bg-transparent"
+              className="pointer-events-auto absolute right-0 top-1/2 z-50 h-14 w-5 -translate-y-1/2 cursor-col-resize bg-transparent"
               title={copy.resizeSongList}
               aria-label={copy.resizeSongList}
             >
@@ -12736,7 +12892,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           )}
           {!isPhoneViewport && (
             <div
-              className="flex h-full shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white py-4 sm:py-5 dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
+              data-sidebar-rail
+              className="pointer-events-auto relative z-10 flex h-full shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white py-4 sm:py-5 dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]"
               style={{ width: `${collapsedSidebarWidth}px` }}
             >
               <div className="w-11 h-11 rounded-2xl overflow-hidden shadow-lg shadow-emerald-900/10 ring-1 ring-gray-200">
@@ -12745,23 +12902,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
               <button
                 type="button"
-                onClick={() => {
-                  if (isSidebarPinned) {
-                    setIsSidebarPinned(false);
-                    setIsSidebarHovered(false);
-                  } else {
-                    setIsSidebarPinned(true);
-                    setIsSidebarHovered(true);
-                  }
-                }}
+                data-sidebar-toggle
+                aria-expanded={isSidebarExpanded}
+                onPointerDown={event => pressSidebarControl(event, toggleSidebar)}
+                onClick={event => clickSidebarControl(event, toggleSidebar)}
                 className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
-                  isSidebarPinned
+                  isSidebarExpanded
                     ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200'
-                    : isSidebarExpanded
-                      ? 'bg-gray-900 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
-                title={isSidebarPinned ? copy.collapseSongList : copy.pinSongList}
+                title={isSidebarExpanded ? copy.collapseSongList : copy.pinSongList}
               >
                 {isSidebarExpanded ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
               </button>
@@ -12769,7 +12919,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               <div className="flex w-full flex-col items-center gap-2 px-2">
                 <button
                   type="button"
-                  onClick={() => setWorkspaceMode('songs')}
+                  data-sidebar-workspace="songs"
+                  aria-expanded={isSidebarExpanded && !isSetlistMode}
+                  onPointerDown={event => pressSidebarControl(event, () => openSidebarWorkspace('songs'))}
+                  onClick={event => clickSidebarControl(event, () => openSidebarWorkspace('songs'))}
                   className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
                     !isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
@@ -12779,13 +12932,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setWorkspaceMode('setlists');
-                    if (usesOverlaySidebar && !hasFinePointer) {
-                      setIsSidebarPinned(true);
-                      setIsSidebarHovered(true);
-                    }
-                  }}
+                  data-sidebar-workspace="setlists"
+                  aria-expanded={isSidebarExpanded && isSetlistMode}
+                  onPointerDown={event => pressSidebarControl(event, () => openSidebarWorkspace('setlists'))}
+                  onClick={event => clickSidebarControl(event, () => openSidebarWorkspace('setlists'))}
                   className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${
                     isSetlistMode ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
@@ -12900,11 +13050,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           )}
 
           <motion.div
-            initial={false}
-            animate={{ opacity: isPhoneViewport || isSidebarExpanded ? 1 : 0 }}
-            transition={{ duration: isPhoneViewport || uiMotion.instant || !isSidebarExpanded ? 0 : 0.125, ease: UI_EASE_OUT }}
-            className="min-w-0 min-h-0 flex-1 flex flex-col"
-            style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
+            initial={{ transform: sidebarContentTarget, opacity: sidebarContentOpacity }}
+            animate={sidebarContentMotion}
+            data-sidebar-content
+            inert={!isSidebarExpanded ? true : undefined}
+            className={`min-w-0 min-h-0 shrink-0 flex flex-col ${isPhoneViewport ? '' : 'overflow-hidden border-r border-gray-200 bg-white dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]'} ${!isPhoneViewport && usesOverlaySidebar ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]' : ''}`}
+            style={{ width: resolvedSidebarWidth - collapsedSidebarWidth, pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           >
             {isPhoneViewport && !(isSetlistMode && setlistPanelView === 'addSongs') && (
               <MobileSidebarNavigation
@@ -12976,14 +13127,16 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     )}
                   </div>
                   <input ref={importLibraryInputRef} type="file" accept="application/json,.json" onChange={handleImportSongLibrary} className="hidden" />
+                  <SongLibraryFilters language={language} scope={libraryScope} onScopeChange={scope => { setLibraryScope(scope); if (scope !== 'all') libraryPreferences.refresh(); }} filters={libraryFilters} onChange={setLibraryFilters} keys={libraryFilterOptions.keys} meters={libraryFilterOptions.meters} />
+                  {libraryPreferences.syncStatus === 'error' && <div className="song-library-preference-status" role="status"><span>{language === 'zh' ? '收藏與最近使用尚未同步，歌曲儲存或連線恢復後會重試。' : 'Favorites and recent songs have not synced. They will retry after songs save or the connection returns.'}</span><button type="button" className="song-library-button" onClick={libraryPreferences.refresh}>{language === 'zh' ? '重試' : 'Retry'}</button></div>}
                   <div className="song-library-options">
                     <span className="song-library-count">
-                      {normalizedLibrarySearchQuery
+                      {normalizedLibrarySearchQuery || hasLibraryFilters
                         ? (language === 'zh' ? `${filteredSongs.length} / ${visibleLibrarySongs.length} 首` : `${filteredSongs.length} / ${visibleLibrarySongs.length} songs`)
                         : (language === 'zh' ? `${visibleLibrarySongs.length} 首歌曲` : `${visibleLibrarySongs.length} songs`)}
                       {showArchivedSongs && <span className="song-library-archive-state">{language === 'zh' ? '含封存' : 'incl. archived'}</span>}
                     </span>
-                    <select
+                    {libraryScope === 'recent' ? <span>{language === 'zh' ? '依最近開啟排序' : 'Last opened first'}</span> : <select
                       value={librarySortMode}
                       onChange={(event) => setLibrarySortMode(event.target.value as LibrarySortMode)}
                       aria-label={language === 'zh' ? '歌曲排序' : 'Sort songs'}
@@ -12991,17 +13144,17 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       <option value="updated-desc">{language === 'zh' ? '最近更新' : 'Recently updated'}</option>
                       <option value="created-desc">{language === 'zh' ? '最近添加' : 'Recently added'}</option>
                       <option value="name-asc">{language === 'zh' ? '名稱 A→Z' : 'Name A→Z'}</option>
-                    </select>
+                    </select>}
                   </div>
                   {isLibraryEditing && (() => {
-                    const selectedSongs = songs.filter((item) => selectedLibrarySongIds.includes(item.id));
+                    const selectedSongs = selectedLibrarySongs;
                     const allArchived = selectedSongs.length > 0 && selectedSongs.every((item) => Boolean(item.archivedAt));
                     const visibleSelectedCount = filteredSongs.filter((item) => selectedLibrarySongIds.includes(item.id)).length;
                     const hiddenSelectedCount = selectedLibrarySongIds.length - visibleSelectedCount;
                     return (
                       <div className="song-library-bulk" data-library-bulk>
+                        <LibrarySelectionSummary songs={selectedSongs} language={language} onRemove={handleToggleSongBulkSelection} onClear={() => setSelectedLibrarySongIds([])} />
                         <div className="song-library-bulk-heading">
-                          <span>{language === 'zh' ? `已選 ${selectedLibrarySongIds.length} 首` : `${selectedLibrarySongIds.length} selected`}</span>
                           <div>
                             <button type="button" onClick={handleToggleSelectAllFilteredSongs} className="song-library-button">
                               {filteredSongs.length > 0 && filteredSongs.every((item) => selectedLibrarySongIds.includes(item.id))
@@ -13015,22 +13168,22 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         </div>
                         {hiddenSelectedCount > 0 && <p className="song-library-bulk-note">{language === 'zh' ? `另有 ${hiddenSelectedCount} 首在其他搜尋結果中` : `${hiddenSelectedCount} selected songs are outside these results`}</p>}
                         <div className="song-library-bulk-actions">
-                          {canCopyPersonalSongsToTeam && <button type="button" className="song-library-button ui-press" disabled={isImportingPersonalSongs || !songs.some(item => selectedLibrarySongIds.includes(item.id) && !item.archivedAt)} onClick={() => void handleOpenTeamSongImport(selectedLibrarySongIds)}><Upload size={15}/><span>{language === 'zh' ? '複製到團隊…' : 'Copy to team…'}</span></button>}
+                          {canCopyPersonalSongsToTeam && <button type="button" className="song-library-button ui-press" disabled={isImportingPersonalSongs || !selectedSongs.length || selectedSongs.some(item => item.archivedAt)} title={selectedSongs.some(item => item.archivedAt) ? (language === 'zh' ? '請先還原選取的封存歌曲，再複製全部所選歌曲。' : 'Restore selected archived songs before copying the whole selection.') : undefined} onClick={() => void handleOpenTeamSongImport(selectedSongs.map(item => item.id))}><Upload size={15}/><span>{language === 'zh' ? `複製到團隊 (${selectedSongs.length})…` : `Copy to team (${selectedSongs.length})…`}</span></button>}
                           <button
                             type="button"
                             onClick={() => void handleShareSelectedSongs()}
-                            disabled={visibleSelectedCount === 0 || isCreatingSongShare}
+                            disabled={selectedSongs.length === 0 || isCreatingSongShare}
                             className="song-library-button"
-                            title={language === 'zh' ? '僅分享目前結果中的所選歌曲' : 'Share only selected songs in the current results'}
+                            title={language === 'zh' ? '分享全部已選歌曲，包含其他搜尋結果中的選取' : 'Share the entire selection, including songs outside these results'}
                           >
                             {isCreatingSongShare ? <LoaderCircle size={15} className="animate-spin" /> : <Share2 size={15} />}
-                            <span>{language === 'zh' ? `分享 (${visibleSelectedCount})` : `Share (${visibleSelectedCount})`}</span>
+                            <span>{language === 'zh' ? `分享 (${selectedSongs.length})` : `Share (${selectedSongs.length})`}</span>
                           </button>
                           {isTeamWorkspace ? (
                             <>
-                              <button type="button" onClick={() => void handleArchiveSelectedSongs(!allArchived)} disabled={selectedLibrarySongIds.length === 0} className="song-library-button is-warning">
-                                {allArchived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
-                                <span>{language === 'zh' ? `${allArchived ? '還原所選' : '封存所選'} (${selectedLibrarySongIds.length})` : `${allArchived ? 'Restore selected' : 'Archive selected'} (${selectedLibrarySongIds.length})`}</span>
+                              <button type="button" onClick={() => void (allArchived ? handleArchiveSelectedSongs(false) : handleDeleteSelectedSongs())} disabled={selectedLibrarySongIds.length === 0} className={`song-library-button ${allArchived ? 'is-warning' : 'is-danger'}`}>
+                                {allArchived ? <ArchiveRestore size={15} /> : <Trash2 size={15} />}
+                                <span>{language === 'zh' ? `${allArchived ? '還原所選' : '刪除所選（可還原）'} (${selectedLibrarySongIds.length})` : `${allArchived ? 'Restore selected' : 'Delete selected (recoverable)'} (${selectedLibrarySongIds.length})`}</span>
                               </button>
                               {allArchived && (
                                 <button type="button" onClick={() => void handleDeleteSelectedSongs()} className="song-library-button is-danger">
@@ -13040,12 +13193,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                             </>
                           ) : (
                             <>
-                              <button type="button" onClick={() => void handleArchiveSelectedSongs(!allArchived)} disabled={selectedLibrarySongIds.length === 0} className="song-library-button is-warning">
-                                {allArchived?<ArchiveRestore size={15}/>:<Archive size={15}/>}<span>{language==='zh'?`${allArchived?'取消封存':'封存所選'} (${selectedLibrarySongIds.length})`:`${allArchived?'Restore':'Archive selected'} (${selectedLibrarySongIds.length})`}</span>
+                              <button type="button" onClick={() => void (allArchived ? handleArchiveSelectedSongs(false) : handleDeleteSelectedSongs())} disabled={selectedLibrarySongIds.length === 0} className={`song-library-button ${allArchived ? 'is-warning' : 'is-danger'}`}>
+                                {allArchived?<ArchiveRestore size={15}/>:<Trash2 size={15}/>}<span>{language==='zh'?`${allArchived?'取消封存':'刪除所選（可還原）'} (${selectedLibrarySongIds.length})`:`${allArchived?'Restore':'Delete selected (recoverable)'} (${selectedLibrarySongIds.length})`}</span>
                               </button>
                               {allArchived&&<button type="button" onClick={()=>void handleDeleteSelectedSongs()} className="song-library-button is-danger"><Trash2 size={15}/><span>{language==='zh'?`永久刪除所選 (${selectedLibrarySongIds.length})`:`Permanently delete selected (${selectedLibrarySongIds.length})`}</span></button>}
-                              <button type="button" onClick={() => void handleRemoveLibrarySongDuplicates()} className="song-library-button is-muted">
-                                <Copy size={15} /><span>{language === 'zh' ? '封存重複歌曲' : 'Archive duplicates'}</span>
+                              <button type="button" disabled={selectedSongs.length < 2} onClick={() => void handleRemoveLibrarySongDuplicates()} className="song-library-button is-muted">
+                                <Copy size={15} /><span>{language === 'zh' ? '封存所選重複歌曲' : 'Archive selected duplicates'}</span>
                               </button>
                             </>
                           )}
@@ -13057,126 +13210,43 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 <div className="song-library-scroll" data-library-scroll>
                   {filteredSongs.length === 0 && (
                     <div className="song-library-empty">
-                      <p>{normalizedLibrarySearchQuery ? searchEmptyMessage(librarySearchQuery) : (language === 'zh' ? '歌曲庫還沒有歌曲。' : 'Your song library is empty.')}</p>
+                      <p>{normalizedLibrarySearchQuery ? searchEmptyMessage(librarySearchQuery) : hasLibraryFilters ? (language === 'zh' ? '此範圍沒有符合條件的歌曲。' : 'No songs match this scope and filters.') : (language === 'zh' ? '歌曲庫還沒有歌曲。' : 'Your song library is empty.')}</p>
+                      {libraryScope === 'favorites' && <p>{language === 'zh' ? '點歌曲旁的星號，就能加入收藏。' : 'Use the star beside a song to add it to Favorites.'}</p>}
+                      {libraryScope === 'recent' && <p>{language === 'zh' ? '開啟過的歌曲會列在這裡。' : 'Songs you open appear here.'}</p>}
+                      {hasLibraryFilters && <button type="button" className="song-library-button" onClick={() => { setLibraryScope('all'); setLibraryFilters(EMPTY_LIBRARY_FILTERS); }}>{language === 'zh' ? '顯示全部歌曲' : 'Show all songs'}</button>}
                       {normalizedLibrarySearchQuery ? (
                         <button type="button" className="song-library-button" onClick={() => setLibrarySearchQuery('')}>{language === 'zh' ? '清除搜尋' : 'Clear search'}</button>
-                      ) : canEditTeamSongs ? (
+                      ) : canEditTeamSongs && !hasLibraryFilters ? (
                         <button type="button" className="song-library-button" onClick={handleCreateSong}><Plus size={16} />{copy.newSong}</button>
                       ) : null}
                     </div>
                   )}
-                  {filteredSongs.map((item) => {
-                    const isActive = item.id === song.id;
-                    const title = item.title || copy.untitledSong;
-                    const libraryMeta = getSongLibraryMeta(item, copy.editor.shuffle);
-                    const editors = isTeamWorkspace ? songEditorsById.get(item.id) ?? [] : [];
-                    const teamSourceStatus = teamSourceStatuses[item.id];
-                    const hasLinkedTeamUpdate = !isTeamWorkspace
-                      && Boolean(item.teamSource)
-                      && typeof teamSourceStatus?.latestUpdatedAt === 'number'
-                      && teamSourceStatus.latestUpdatedAt > (item.teamSource?.updatedAt ?? 0);
-                    const teamSourceLabel = item.teamSource
-                      ? hasLinkedTeamUpdate
-                        ? (language === 'zh' ? '團隊版有更新' : 'Team version updated')
-                        : teamSourceStatus?.missing
-                          ? (language === 'zh' ? '團隊來源找不到' : 'Team source missing')
-                          : teamSourceStatus?.error
-                            ? (language === 'zh' ? '無法檢查團隊來源' : 'Unable to check team source')
-                            : `${language === 'zh' ? '連結' : 'Linked'}: ${item.teamSource.libraryName ?? (language === 'zh' ? '團隊歌曲' : 'Team song')}`
-                      : null;
-                    const metadata = (
-                      <div className="song-library-meta" title={libraryMeta.tooltip}>
-                        <div className="song-library-credit-slot" data-song-editing-status={isTeamWorkspace ? item.id : undefined}>
-                          {editors.length > 0 ? <SongEditingNotice editors={editors} language={language} compact /> : libraryMeta.secondary}
-                        </div>
-                        <div className="song-library-facts">
-                          <span className="song-library-key" aria-label={`Key ${formatKeyName(item.currentKey, currentKeyMode(item))}`}>{formatKeyName(item.currentKey, currentKeyMode(item))}</span>
-                          {typeof item.tempo === 'number' && <span className="song-library-tempo">{item.tempo}<span className="song-library-unit">BPM</span></span>}
-                          {item.timeSignature && <span className="song-library-meter">{item.timeSignature}</span>}
-                        </div>
-                      </div>
-                    );
-                    return (
-                      <div key={item.id} data-library-song-id={item.id} className={`song-library-row${isActive ? ' is-current' : ''}${canEditTeamSongs && !isLibraryEditing ? ' has-actions' : ''}`}>
-                        <div className="song-library-main">
-                          {isLibraryEditing ? (
-                            <div className="song-library-edit-row">
-                              <label className="song-library-checkbox">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedLibrarySongIds.includes(item.id)}
-                                  onChange={() => handleToggleSongBulkSelection(item.id)}
-                                  aria-label={language === 'zh' ? `選取：${title}` : `Select: ${title}`}
-                                />
-                              </label>
-                              <input
-                                value={item.title}
-                                onChange={(event) => handleSongListTitleChange(item.id, event.target.value)}
-                                onFocus={() => setLibraryTitleEditingSongId(item.id)}
-                                onBlur={(event) => {
-                                  setLibraryTitleEditingSongId(null);
-                                  handleSongListTitleCommit(item.id, event.target.value);
-                                }}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
-                                }}
-                                className="song-library-title-input"
-                                placeholder={copy.untitledSong}
-                                aria-label={language === 'zh' ? `歌曲名稱：${title}` : `Song title: ${title}`}
-                              />
-                              {item.archivedAt ? <span className="song-library-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
-                              {metadata}
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              aria-label={language === 'zh' ? `開啟歌曲：${title}` : `Open song: ${title}`}
-                              aria-current={isActive ? 'true' : undefined}
-                              onClick={() => {
-                                if (mobileLongPressTriggeredRef.current) {
-                                  mobileLongPressTriggeredRef.current = false;
-                                  return;
-                                }
-                                handleSelectSong(item.id);
-                              }}
-                              onTouchStart={(event) => handleMobileLongPressStart('song', item.id, event)}
-                              onTouchMove={(event) => handleMobileLongPressMove(event)}
-                              onTouchEnd={(event) => {
-                                if (mobileLongPressTriggeredRef.current) event.preventDefault();
-                                handleMobileLongPressEnd();
-                              }}
-                              onTouchCancel={() => handleMobileLongPressEnd()}
-                              className="song-library-select"
-                            >
-                              <span className="song-library-title">
-                                <SongTitle title={title}/>
-                                {item.archivedAt ? <span className="song-library-archived">{language === 'zh' ? '已封存' : 'Archived'}</span> : null}
-                              </span>
-                              {metadata}
-                            </button>
-                          )}
-                          {!isLibraryEditing && canEditTeamSongs && (
-                            <div className="song-library-row-actions">
-                              <ManagementActions label={language === 'zh' ? `歌曲操作：${title}` : `Song actions: ${title}`} actions={[
-                                ...(hasLinkedTeamUpdate ? [{ label: language === 'zh' ? '同步團隊最新版' : 'Sync latest team version', icon: <Download size={16} />, run: () => void handleSyncPersonalSongFromTeam(item.id) }] : []),
-                                ...(canCopyPersonalSongsToTeam && !item.archivedAt ? [{ label: language === 'zh' ? '複製到團隊…' : 'Copy to team…', icon: <Upload size={16} />, run: () => void handleOpenTeamSongImport([item.id]), disabled: isImportingPersonalSongs }] : []),
-                                ...(isTeamWorkspace ? [{ label: language === 'zh' ? '轉存到個人區' : 'Copy to personal', icon: <Download size={16} />, run: () => void handleCopyTeamSongToPersonal(item.id) }] : []),
-                                ...(item.archivedAt ? [
-                                  { label: language === 'zh' ? '取消封存' : 'Restore', icon: <ArchiveRestore size={16} />, run: () => void updateTeamSongArchiveState([item.id], false).catch((error) => { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }) },
-                                  { label: language === 'zh' ? '永久刪除歌曲' : 'Permanently delete song', icon: <Trash2 size={16} />, run: () => void handleDeleteSong(item.id), danger: true }
-                                ] : [
-                                  { label: language === 'zh' ? '複製歌曲' : 'Duplicate song', icon: <Copy size={16} />, run: () => handleDuplicateSong(item.id) },
-                                  { label: language === 'zh' ? '編輯歌曲' : 'Edit song', icon: <Edit3 size={16} />, run: () => { handleSelectSong(item.id); setIsEditing(true); } },
-                                  { label: language === 'zh' ? '封存歌曲' : 'Archive song', icon: <Archive size={16} />, run: () => void handleDeleteSong(item.id) }
-                                ])
-                              ]} />
-                            </div>
-                          )}
-                        </div>
-                        {teamSourceLabel ? <div className={`song-library-source${hasLinkedTeamUpdate ? ' is-warning' : teamSourceStatus?.missing || teamSourceStatus?.error ? ' is-error' : ''}`} title={teamSourceLabel}>{teamSourceLabel}</div> : null}
-                      </div>
-                    );
-                  })}
+                  {filteredSongs.map(item => (
+                    <SongLibraryRow
+                      key={item.id}
+                      item={item}
+                      language={language}
+                      isActive={item.id === song.id}
+                      isSelected={selectedLibrarySongIds.includes(item.id)}
+                      isFavorite={libraryPreferences.favoriteIds.has(item.id)}
+                      lyricsSnippet={librarySnippets.get(item.id)}
+                      isLibraryEditing={isLibraryEditing}
+                      isTeamWorkspace={isTeamWorkspace}
+                      canEditTeamSongs={canEditTeamSongs}
+                      canCopyPersonalSongsToTeam={canCopyPersonalSongsToTeam}
+                      isImportingPersonalSongs={isImportingPersonalSongs}
+                      editors={isTeamWorkspace ? songEditorsById.get(item.id) : undefined}
+                      teamSourceStatus={teamSourceStatuses[item.id]}
+                      onAction={handleLibraryRowAction}
+                      onTitleChange={handleLibraryRowTitleChange}
+                      onTitleFocus={setLibraryTitleEditingSongId}
+                      onTitleCommit={handleLibraryRowTitleCommit}
+                      onTouchStart={handleLibraryRowTouchStart}
+                      onTouchMove={handleLibraryRowTouchMove}
+                      onTouchEnd={handleLibraryRowTouchEnd}
+                      onTouchCancel={handleLibraryRowTouchCancel}
+                    />
+                  ))}
                 </div>
                 {desktopSetlistSavedFooter}
               </div>
@@ -14109,7 +14179,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     <button
                       type="button"
                       onClick={handleToggleLyricsMode}
-                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold shadow-sm transition-all ${
+                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold shadow-sm transition-colors ${
                         isLyricsMode
                           ? 'bg-amber-500 text-white shadow-amber-100'
                           : 'border border-gray-200 bg-white text-gray-700 hover:border-amber-200 hover:bg-amber-50'
@@ -14165,7 +14235,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     <button
                       type="button"
                       onClick={handleSaveLibrary}
-                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-all ${
+                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold shadow-sm transition-colors ${
                         workspaceIsDirty
                           ? 'border-amber-500 bg-amber-500 text-white hover:bg-amber-400'
                           : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
@@ -14179,7 +14249,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       type="button"
                       onClick={handleExportPdf}
                       disabled={isExportingPdf}
-                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold shadow-sm transition-all ${
+                      className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold shadow-sm transition-colors ${
                         isExportingPdf
                           ? 'cursor-wait bg-gray-400 text-white'
                           : 'bg-gray-900 text-white hover:bg-gray-800'
@@ -14446,7 +14516,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-gray-200 bg-white/95 px-2 py-2 shadow-lg backdrop-blur-sm">
                     <button
                       onClick={handleScrollEditorToTop}
-                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
+                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm"
                       title={copy.backToTop}
                     >
                       <ChevronUp size={18} />
@@ -14454,7 +14524,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     <button
                       onClick={handleActiveUndo}
                       disabled={activePreviewEditSession ? activePreviewEditSession.past.length === 0 : !globalHistory.canUndo}
-                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
+                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-colors shadow-sm"
                       title={copy.undo}
                     >
                       <Undo2 size={18} />
@@ -14462,7 +14532,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     <button
                       onClick={handleActiveRedo}
                       disabled={activePreviewEditSession ? activePreviewEditSession.future.length === 0 : !globalHistory.canRedo}
-                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-all shadow-sm"
+                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-colors shadow-sm"
                       title={copy.redo}
                     >
                       <Redo2 size={18} />
@@ -14476,8 +14546,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           {/* Sheet Preview Pane */}
           <div data-setlist-preview-pane role={isSetlistMode && selectedSetlist ? 'region' : undefined}
             aria-label={isSetlistMode && selectedSetlist ? selectedSetlist.name || copy.untitledSetlist : undefined}
-            aria-busy={Boolean(setlistOpening.opening)} className="relative flex-1 min-w-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
-            {isSheetView && isSetlistMode && !isJoinedSetlist
+            aria-busy={Boolean(setlistOpening.opening)} className="relative flex-1 min-w-0 min-h-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
+            {isSheetView && isSetlistMode && !isJoinedSetlist && (!isSetlistLyricsWorkspace || !isLyricsContinuous)
               && (!isCloudMode || activeLibraryId && (isTeamWorkspace ? isTeamAdministrator(activeLibraryRole) : activeCloudLibrary?.kind === 'personal' && activeCloudLibrary.ownerUserId === authenticatedUser?.id))
               && selectedSetlistSong && selectedSetlistSourceStatus !== 'aligned'
               && canEditSelectedSetlistContent && (
@@ -14568,7 +14638,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </div>
               </div>
             )}
-            <div
+            {isSetlistLyricsWorkspace ? <div className="h-full" inert={setlistOpening.opening ? true : undefined}><SetlistLyricsWorkspace
+              key={selectedSetlist!.id}
+              title={selectedSetlist!.name}
+              preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}
+              entries={setlistLyricsEntries}
+              language={language}
+              selectedId={selectedSetlistSongId}
+              onSelectSong={setSelectedSetlistSongId}
+              mode={!isLyricsContinuous ? 'edit' : isLyricsReading ? 'reading' : 'print'}
+              onModeChange={mode => { setIsLyricsContinuous(mode !== 'edit'); setIsLyricsReading(mode !== 'print'); }}
+              printSettings={lyricsBookSettings}
+              onPrintSettingsChange={setLyricsBookSettings}
+              onSongChange={canOpenEditor ? handleBookLyricsChange : undefined}
+              onExport={isExportingPdf ? undefined : handleExportPdf}
+            /></div> : <div
               ref={previewRef}
               inert={setlistOpening.opening ? true : undefined}
               data-print-preview-container
@@ -14602,7 +14686,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   {activePreviewSheet}
                 </div>
               </div>
-            </div>
+            </div>}
             <input
               ref={mobileWysiwygKeyboardProxyInputRef}
               type="text"
@@ -14820,7 +14904,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 onClose={() => setPreviewMetaEditTarget(null)}
               /></React.Suspense></RecoveryBoundary>
             )}
-            {isSetlistMode && showPreviewBackToTop && (
+            {isSetlistMode && !isSetlistLyricsWorkspace && showPreviewBackToTop && (
               <div className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 left-3' : 'bottom-2 left-2 sm:bottom-4 sm:left-4 lg:bottom-6 lg:left-6'
               }`}>
@@ -14835,7 +14919,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </button>
               </div>
             )}
-            {!(isPhoneViewport && isEditing) && (
+            {(!isSetlistLyricsWorkspace || !isLyricsContinuous) && !(isPhoneViewport && isEditing) && (
               <div className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
@@ -14864,10 +14948,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       >
                         <Redo2 size={16} />
                       </button>
-                      <span className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden="true" />
+                      {!isSetlistLyricsWorkspace && <span className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden="true" />}
                     </>
                   )}
-                  <button
+                  {!isSetlistLyricsWorkspace && <><button
                     type="button"
                     onClick={handleZoomOutPreview}
                     disabled={(isLyricsMode && isLyricsReading) || previewScale <= PREVIEW_MIN_SCALE + 0.001}
@@ -14894,7 +14978,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     title={copy.zoomInPreview}
                   >
                     +
-                  </button>
+                  </button></>}
                 </div>
               </div>
             )}
@@ -15272,7 +15356,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                         ) : null}
                       </div>
                     ) : null}
-
+                    {renderGuitaristModeToggle()}
                     </div>
                   </div>
                 </PresenceSurface>
@@ -15922,6 +16006,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         <div
           ref={performanceOverlayRef}
           data-performance-overlay
+          data-performance-notes-available={Boolean(authenticatedUser && !isLyricsMode) || undefined}
           data-handwriting={isHandwriting || undefined}
           tabIndex={-1}
           className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-950 select-none"
@@ -15931,14 +16016,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           }}
           onPointerDownCapture={(event) => {
             if (isHandwriting || (event.target as Element).closest('[data-personal-notes-layer], [data-personal-notes-tools]')) return;
-            if (event.pointerType === 'mouse') performanceSuppressClickRef.current = false;
             focusPerformanceKeyboardCapture();
           }}
           onMouseDownCapture={event => { if (!isHandwriting && !(event.target as Element).closest('[data-personal-notes-layer], [data-personal-notes-tools]')) focusPerformanceKeyboardCapture(); }}
           onTouchStartCapture={event => { if (!isHandwriting && !(event.target as Element).closest('[data-personal-notes-layer], [data-personal-notes-tools]')) focusPerformanceKeyboardCapture(); }}
-          onTouchStart={handlePerformanceTouchStart}
-          onTouchEnd={handlePerformanceTouchEnd}
-          onTouchCancel={() => { performanceTouchRef.current = null; performanceSuppressClickRef.current = false; }}
           onMouseMove={revealPerformanceChrome}
         >
           <input
@@ -15959,6 +16040,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0"
           />
 
+          {/* Horizontal feedback wraps, and never replaces, the vertical page translator. */}
+          <div ref={performanceSwipeSurfaceRef} data-performance-swipe-surface>
           {/* One full A4 page, or a pair on wide screens. */}
           <div data-performance-spread={performanceColumns} data-performance-page={performanceSpreadStart + 1} data-performance-pages={performanceTotalPages} style={{
             width: performanceLayout.width,
@@ -16009,6 +16092,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 	                )}
               </div>
             </div>
+          </div>
+
+          </div>
+
+          <div ref={performanceNavigationHintRef} data-performance-navigation-hint hidden className="performance-navigation-hint" role="note">
+            <span>{language === 'zh' ? '左右滑動翻頁，也可輕點畫面左右兩側' : 'Swipe to turn pages, or tap the left or right half of the screen.'}</span>
+            <button type="button" onClick={dismissPerformanceNavigationHint}>{language === 'zh' ? '知道了' : 'Got it'}</button>
           </div>
 
           {/* Reference buttons — top left. Dark pills so they stay legible over the
@@ -16078,10 +16168,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           <button
             type="button"
             onClick={() => {
-              if (performanceSuppressClickRef.current) { performanceSuppressClickRef.current = false; return; }
+              performanceSwipe.cancel();
+              dismissPerformanceNavigationHint();
               handlePerformancePrevPage();
             }}
             className={isHandwriting ? "absolute left-3 top-1/2 z-10 -translate-y-1/2 touch-manipulation" : "absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3"}
+            data-performance-turn-area="previous"
+            title={language === 'zh' ? '上一頁：輕點左半邊，或向右滑動' : 'Previous page: tap the left half, or swipe right'}
             aria-label="Previous page"
             aria-keyshortcuts="ArrowLeft ArrowUp PageUp Shift+Space"
           >
@@ -16094,10 +16187,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           <button
             type="button"
             onClick={() => {
-              if (performanceSuppressClickRef.current) { performanceSuppressClickRef.current = false; return; }
+              performanceSwipe.cancel();
+              dismissPerformanceNavigationHint();
               handlePerformanceNextPage();
             }}
             className={isHandwriting ? "absolute right-3 top-1/2 z-10 -translate-y-1/2 touch-manipulation" : "absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3"}
+            data-performance-turn-area="next"
+            title={language === 'zh' ? '下一頁：輕點右半邊，或向左滑動' : 'Next page: tap the right half, or swipe left'}
             aria-label="Next page"
             aria-keyshortcuts="ArrowRight ArrowDown PageDown Space Enter"
           >

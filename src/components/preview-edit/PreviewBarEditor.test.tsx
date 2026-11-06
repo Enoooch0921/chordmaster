@@ -724,7 +724,7 @@ describe('PreviewBarEditor', () => {
       hasCopiedRhythm: true
     });
 
-    expect(document.querySelector('[data-rhythm-key-row="copy-paste"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-keyboard-common-actions]')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '複製小節' }));
     expect(onCopyRhythm).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: '選擇貼上內容' }));
@@ -774,7 +774,7 @@ describe('PreviewBarEditor', () => {
       hasCopiedJianpu: true
     });
 
-    expect(document.querySelector('[data-jianpu-key-row="bar-actions"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-keyboard-common-actions]')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '複製小節' }));
     expect(onCopyJianpu).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: '選擇貼上內容' }));
@@ -2004,4 +2004,21 @@ it.each(['phone', 'tablet', 'desktop'] as const)('moves to the previous beat whe
   expect(onNavigate).toHaveBeenCalledExactlyOnceWith('previous');
   expect(onStructure).not.toHaveBeenCalled();
   expect(onApplyDraft).not.toHaveBeenCalled();
+});
+
+it.each(['phone','tablet','desktop'] as const)('keeps one shared copy/paste/delete row when switching all three %s keyboards', deviceLayout => {
+  const makeSession=(mode:'chords'|'rhythm'|'jianpu')=>createPreviewEditSession({song,target:{...target,field:mode,cursor:mode==='chords'
+    ?{kind:'chord',slotIndex:1,rawChordIndex:null}:mode==='rhythm'?{kind:'rhythm',cursorUnit:0}:{kind:'jianpu',beatIndex:0,unitIndex:0,noteIndex:null}},inputMode:'letters'});
+  const {rerenderSession}=renderEditor({session:makeSession('chords'),deviceLayout});
+  const row=screen.getByRole('group',{name:'編輯操作'});
+  for(const mode of ['chords','rhythm','jianpu'] as const){
+    rerenderSession(makeSession(mode));
+    expect(screen.getByRole('group',{name:'編輯操作'})).toBe(row);
+    expect(row.previousElementSibling?.tagName).toBe('HEADER');
+    expect([...row.querySelectorAll('button')].map(button=>button.dataset.keyboardEditAction)).toEqual(['copy','paste','delete']);
+    expect([...row.querySelectorAll('button')].map(button=>button.textContent)).toEqual(['複製','貼上','刪除']);
+    expect(row.querySelectorAll('button svg')).toHaveLength(3);
+    expect(row.querySelector('[data-keyboard-edit-action="paste"]')).toBeDisabled();
+    expect(document.querySelectorAll('[data-keyboard-edit-action="delete"]')).toHaveLength(1);
+  }
 });

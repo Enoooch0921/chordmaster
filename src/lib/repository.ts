@@ -52,6 +52,10 @@ import {
   resolveShareLink as resolveEdgeShareLink
 } from './sharing';
 import { checkSupabaseConnection, supabase } from './supabase';
+import { parseConditionalSnapshot, type ConditionalSnapshot } from './conditionalSnapshot';
+import type { JoinedWorkspace } from './joinedWorkspaceRefresh';
+import { applyLibraryDelta, type LibraryDeltaCache } from './libraryDelta';
+import { stableJson } from './chartRevision';
 import { compactHistoryChange, historyFieldPatch, historySignature, type WorkspaceHistoryEntry, type HistoryRpcPatch, type HistoryTrashResource } from './workspaceHistory';
 import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
 import { normalizeTeamManagementScope } from './teamScope';
@@ -282,11 +286,14 @@ export interface WorkspaceRepository {
   loadWorkspace(): Promise<WorkspaceSnapshot>;
   loadLibraryWorkspace(libraryId: string): Promise<WorkspaceSnapshot>;
   loadLibraryContent(libraryId: string, signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>>;
+  /** null means an older server; callers retain the legacy refresh path. */
+  loadLibraryDelta?(libraryId: string, signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'> | null>;
   loadLibraryCollections(libraryId: string, knownSongs: StoredSong[], signal?: AbortSignal): Promise<Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects' | 'lastSavedAt'>>;
   loadLibrarySongs(libraryId: string): Promise<StoredSong[]>;
   loadLibrarySongVersions(libraryId: string, signal?: AbortSignal): Promise<{ id: string; updatedAt: number }[]>;
   loadPersonalWorkspace(): Promise<WorkspaceSnapshot>;
   loadJoinedWorkspace(): Promise<Pick<WorkspaceSnapshot, 'joinedSetlists' | 'joinedProjects'>>;
+  loadJoinedWorkspaceUpdate?(knownVersion: string | null): Promise<ConditionalSnapshot<JoinedWorkspace>>;
   listLibraries(): Promise<CloudLibrarySummary[]>;
   setActiveLibrary(libraryId: string | null): void;
   getPersonalLibraryId(): Promise<string>;
@@ -1213,62 +1220,103 @@ const getLibraryWorkspace = async (
   };
 };
 
+const mapLibraryDeltaSnapshot = (cache: LibraryDeltaCache): WorkspaceSnapshot => {
+  const songs = (cache.rows.songs as SongRow[]).map(mapSongRow);
+  const setlists = mapSetlistRows(cache.rows.setlists as SetlistRow[], cache.rows.entries as SetlistSongRow[],
+    new Map(songs.map(song => [song.id, song])),
+    new Map(cache.rows.capos.map(row => [row.setlist_song_id, row.capo])),
+    new Set(cache.rows.assignments.map(row => row.setlist_id)));
+  const projects = mapProjectRows(cache.rows.projects as ProjectRow[]);
+  return { songs, setlists, projects, joinedSetlists: [], joinedProjects: [],
+    lastSavedAt: Math.max(0, ...songs.map(song => song.updatedAt), ...setlists.map(list => list.updatedAt),
+      ...projects.map(project => project.updatedAt), ...cache.rows.capos.map(row => Date.parse(row.updated_at) || 0)) || null };
+};
+
+const normalizeJoinedProjects = (data: unknown): JoinedProject[] => {
+  if (!Array.isArray(data)) return [];
+
+  return (data as Array<Record<string, unknown>>)
+    .map((row, index): JoinedProject | null => {
+      const id = typeof row.id === 'string' ? row.id : '';
+      if (!id) return null;
+      const rawSetlists = Array.isArray(row.setlists)
+        ? row.setlists as Array<Partial<Setlist> & Record<string, unknown>>
+        : [];
+      // Build an embedded songsById from each setlist's songs so the joined
+      // setlists normalize cleanly without needing a separate songs fetch.
+      const embeddedSongsById = new Map<string, StoredSong>();
+      for (const sl of rawSetlists) {
+        const songsArr = Array.isArray(sl.songs) ? sl.songs : [];
+        for (const ss of songsArr as unknown as Array<Record<string, unknown>>) {
+          const songId = typeof ss.songId === 'string' ? ss.songId : '';
+          if (!songId || embeddedSongsById.has(songId)) continue;
+          const songData = ss.songData && typeof ss.songData === 'object' ? ss.songData as Song : null;
+          if (!songData) continue;
+          embeddedSongsById.set(songId, {
+            ...cloneValue(normalizeSongBars(songData)),
+            id: songId,
+            archivedAt: parseNullableRemoteTimestamp(ss.sourceArchivedAt),
+            updatedAt: Date.now()
+          });
+        }
+      }
+      const setlists = rawSetlists.map((sl, slIndex) =>
+        normalizeStoredSetlist({
+          ...sl,
+          createdAt: parseRemoteTimestamp(sl.createdAt),
+          updatedAt: parseRemoteTimestamp(sl.updatedAt)
+        }, embeddedSongsById, slIndex)
+      );
+      return {
+        id,
+        name: typeof row.name === 'string' && row.name.trim() ? row.name : `Shared Project ${index + 1}`,
+        archived: Boolean(row.archived),
+        role: row.role === 'manager' ? 'manager' : 'viewer',
+        createdAt: parseRemoteTimestamp(row.createdAt),
+        updatedAt: parseRemoteTimestamp(row.updatedAt),
+        isJoined: true,
+        setlists
+      };
+    })
+    .filter((project): project is JoinedProject => Boolean(project));
+};
+
 const getJoinedProjects = async (throwOnError = false): Promise<JoinedProject[]> => {
   if (!supabase) return [];
   try {
     const { data, error } = await supabase.rpc('get_joined_projects');
     if (error) throw error;
-    if (!Array.isArray(data)) return [];
-
-    return (data as Array<Record<string, unknown>>)
-      .map((row, index): JoinedProject | null => {
-        const id = typeof row.id === 'string' ? row.id : '';
-        if (!id) return null;
-        const rawSetlists = Array.isArray(row.setlists)
-          ? row.setlists as Array<Partial<Setlist> & Record<string, unknown>>
-          : [];
-        // Build an embedded songsById from each setlist's songs so the joined
-        // setlists normalize cleanly without needing a separate songs fetch.
-        const embeddedSongsById = new Map<string, StoredSong>();
-        for (const sl of rawSetlists) {
-          const songsArr = Array.isArray(sl.songs) ? sl.songs : [];
-          for (const ss of songsArr as unknown as Array<Record<string, unknown>>) {
-            const songId = typeof ss.songId === 'string' ? ss.songId : '';
-            if (!songId || embeddedSongsById.has(songId)) continue;
-            const songData = ss.songData && typeof ss.songData === 'object' ? ss.songData as Song : null;
-            if (!songData) continue;
-            embeddedSongsById.set(songId, {
-              ...cloneValue(normalizeSongBars(songData)),
-              id: songId,
-              archivedAt: parseNullableRemoteTimestamp(ss.sourceArchivedAt),
-              updatedAt: Date.now()
-            });
-          }
-        }
-        const setlists = rawSetlists.map((sl, slIndex) =>
-          normalizeStoredSetlist({
-            ...sl,
-            createdAt: parseRemoteTimestamp(sl.createdAt),
-            updatedAt: parseRemoteTimestamp(sl.updatedAt)
-          }, embeddedSongsById, slIndex)
-        );
-        return {
-          id,
-          name: typeof row.name === 'string' && row.name.trim() ? row.name : `Shared Project ${index + 1}`,
-          archived: Boolean(row.archived),
-          role: row.role === 'manager' ? 'manager' : 'viewer',
-          createdAt: parseRemoteTimestamp(row.createdAt),
-          updatedAt: parseRemoteTimestamp(row.updatedAt),
-          isJoined: true,
-          setlists
-        };
-      })
-      .filter((project): project is JoinedProject => Boolean(project));
+    return normalizeJoinedProjects(data);
   } catch (error) {
     if (throwOnError) throw error;
     console.warn('Unable to load joined projects.', error);
     return [];
   }
+};
+
+interface JoinedSnapshotPayload {
+  setlists: unknown[];
+  projects: unknown[];
+  personalCapos: { setlist_song_id: string; capo: number }[];
+}
+
+const isJoinedSnapshotPayload = (data: unknown): data is JoinedSnapshotPayload => {
+  if (!data || typeof data !== 'object') return false;
+  const value = data as JoinedSnapshotPayload;
+  return Array.isArray(value.setlists) && Array.isArray(value.projects) && Array.isArray(value.personalCapos);
+};
+
+const normalizeJoinedSnapshot = (data: JoinedSnapshotPayload): JoinedWorkspace => {
+  const capoById = new Map(data.personalCapos.map(row => [row.setlist_song_id, row.capo]));
+  const withCapo = <T extends Setlist>(setlist: T): T => ({
+    ...setlist, songs: setlist.songs.map(song => ({ ...song, personalCapoOverride: capoById.get(song.id) }))
+  });
+  return {
+    joinedSetlists: normalizeJoinedSetlistRpcPayload(data.setlists).map(withCapo),
+    joinedProjects: normalizeJoinedProjects(data.projects).map(project => ({
+      ...project, setlists: project.setlists.map(withCapo)
+    }))
+  };
 };
 
 const getJoinedSetlists = async (userId: string): Promise<JoinedSetlist[]> => {
@@ -1440,14 +1488,37 @@ const persistSetlistSongs = async (setlist: Setlist, previousSetlist?: Setlist, 
     }
   }));
 
-  if (rows.length > 0) {
-    const { error } = await supabase.from('setlist_songs').upsert(rows, { onConflict: 'id' });
+  const comparable = (song: SetlistSong, index: number) => stableJson({
+    song_id: song.songId, order_index: index, override_json: {
+      overrideKey: song.overrideKey, sectionOrder: song.sectionOrder, songData: song.songData
+    }
+  });
+  const previousRows = new Map(reindexSetlistSongs(previousSetlist?.songs ?? [])
+    .map((song, index) => [song.id, comparable(song, index)]));
+  const normalized = reindexSetlistSongs(setlist.songs);
+  const changedRows = rows.filter((row, index) => previousRows.get(row.id) !== comparable(normalized[index], index));
+
+  if (changedRows.length > 0) {
+    const { error } = await supabase.from('setlist_songs').upsert(changedRows, { onConflict: 'id' });
     if (error) throw error;
   }
 
   const retainedIds = new Set(rows.map((row) => row.id));
   const removedIds = previousIds.filter((id) => !retainedIds.has(id));
   if (removedIds.length > 0) {
+    if (options?.teamRole) {
+      const { error } = await supabase.rpc('delete_setlist_entries_checked', {
+        p_setlist_id: setlist.id, p_entry_ids: removedIds, p_expected_role: options.teamRole
+      });
+      if (!error) return;
+      if (error.code !== 'PGRST202' && error.code !== '42883') throw error;
+      // An older NAS has only the original trigger preflight. Preserve that
+      // behavior until its migration is deployed, including removal-only saves.
+      if (rows.length) {
+        const { error: guardError } = await supabase.from('setlist_songs').upsert(rows, { onConflict: 'id' });
+        if (guardError) throw guardError;
+      }
+    }
     const { error } = await supabase.from('setlist_songs')
       .delete().eq('setlist_id', setlist.id).in('id', removedIds);
     if (error) throw error;
@@ -1601,29 +1672,81 @@ export const createCloudRepository = (params: {
     await persistLibraryRow('projects', payload, existingProject);
   };
 
+  const loadJoinedWorkspace = async (): Promise<JoinedWorkspace> => {
+    // Background reads must not reload or persist the user's own workspace.
+    // A failed project read must not look like revoked membership.
+    const [joinedSetlists, joinedProjects] = await Promise.all([
+      getJoinedSetlists(params.userId),
+      getJoinedProjects(true)
+    ]);
+    const songIds = [...new Set([
+      ...joinedSetlists.flatMap((setlist) => setlist.songs.map((song) => song.id)),
+      ...joinedProjects.flatMap((project) => project.setlists.flatMap((setlist) => setlist.songs.map((song) => song.id)))
+    ])];
+    if (!supabase || songIds.length === 0) return { joinedSetlists, joinedProjects };
+    const data = await getUserSetlistCapoOverrides(songIds, params.userId);
+    const capoById = new Map(data.map((row) => [row.setlist_song_id, row.capo]));
+    const withPersonalCapo = <T extends Setlist>(setlist: T): T => ({
+      ...setlist, songs: setlist.songs.map((song) => ({ ...song, personalCapoOverride: capoById.get(song.id) }))
+    });
+    return {
+      joinedSetlists: joinedSetlists.map(withPersonalCapo),
+      joinedProjects: joinedProjects.map((project) => ({ ...project, setlists: project.setlists.map(withPersonalCapo) }))
+    };
+  };
+  // Transport cache is separate from accepted React state. A response ignored
+  // during editing remains available for the next poll, even if the server then
+  // answers "unchanged". It never becomes a write baseline until the hook accepts it.
+  const librarySnapshots = new Map<string, { cache: LibraryDeltaCache; workspace: WorkspaceSnapshot }>();
+  let deltaAvailable = true;
+  let libraryReads: Promise<unknown> = Promise.resolve();
+  const loadLibraryDelta = (libraryId: string, signal?: AbortSignal) => {
+    const read = libraryReads.then(async () => {
+      signal?.throwIfAborted();
+      if (!deltaAvailable) return null;
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const previous = librarySnapshots.get(libraryId);
+      const request = supabase.rpc('get_library_workspace_delta', {
+        p_library_id: libraryId, p_known_versions: previous?.cache.versions ?? null
+      });
+      const { data, error } = await (signal ? request.abortSignal(signal) : request);
+      signal?.throwIfAborted();
+      if (error) {
+        if (error.code === 'PGRST202' || error.code === '42883') { deltaAvailable = false; return null; }
+        throw error;
+      }
+      const cache = applyLibraryDelta(previous?.cache, data, `${params.userId}:${libraryId}`);
+      if (previous?.cache === cache) return previous.workspace;
+      const workspace = mapLibraryDeltaSnapshot(cache);
+      librarySnapshots.delete(libraryId);
+      librarySnapshots.set(libraryId, { cache, workspace });
+      if (librarySnapshots.size > 3) librarySnapshots.delete(librarySnapshots.keys().next().value!);
+      return workspace;
+    });
+    libraryReads = read.then(() => undefined, () => undefined);
+    return read;
+  };
+  let conditionalJoinedAvailable = true;
+
   return {
     checkConnection(signal) { return checkSupabaseConnection(signal); },
-    async loadJoinedWorkspace() {
-      // Background reads must not reload or persist the user's own workspace.
-      // A failed project read must not look like revoked membership.
-      const [joinedSetlists, joinedProjects] = await Promise.all([
-        getJoinedSetlists(params.userId),
-        getJoinedProjects(true)
-      ]);
-      const songIds = [...new Set([
-        ...joinedSetlists.flatMap((setlist) => setlist.songs.map((song) => song.id)),
-        ...joinedProjects.flatMap((project) => project.setlists.flatMap((setlist) => setlist.songs.map((song) => song.id)))
-      ])];
-      if (!supabase || songIds.length === 0) return { joinedSetlists, joinedProjects };
-      const data = await getUserSetlistCapoOverrides(songIds, params.userId);
-      const capoById = new Map(data.map((row) => [row.setlist_song_id, row.capo]));
-      const withPersonalCapo = <T extends Setlist>(setlist: T): T => ({
-        ...setlist, songs: setlist.songs.map((song) => ({ ...song, personalCapoOverride: capoById.get(song.id) }))
-      });
-      return {
-        joinedSetlists: joinedSetlists.map(withPersonalCapo),
-        joinedProjects: joinedProjects.map((project) => ({ ...project, setlists: project.setlists.map(withPersonalCapo) }))
-      };
+    loadLibraryDelta,
+    loadJoinedWorkspace,
+    async loadJoinedWorkspaceUpdate(knownVersion) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      if (!conditionalJoinedAvailable) return { version: null, payload: await loadJoinedWorkspace() };
+      const { data, error } = await supabase.rpc('get_joined_workspace_snapshot', { p_known_version: knownVersion });
+      if (error) {
+        // Only a missing RPC permits legacy fallback; a failed read must never
+        // look like membership revocation or an unchanged snapshot.
+        if (error.code === 'PGRST202' || error.code === '42883') {
+          conditionalJoinedAvailable = false;
+          return { version: null, payload: await loadJoinedWorkspace() };
+        }
+        throw error;
+      }
+      const update = parseConditionalSnapshot(data, knownVersion, isJoinedSnapshotPayload);
+      return { version: update.version, payload: update.payload ? normalizeJoinedSnapshot(update.payload) : null };
     },
     async loadWorkspace() {
       const libraryId = await ensureLibraryId();

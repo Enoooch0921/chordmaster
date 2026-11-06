@@ -44,6 +44,8 @@ export default defineConfig(({mode}) => {
     },
     test: {
       environment: 'jsdom',
+      // Exercise the NAS Edge handler with the local SDK mocked in tests.
+      alias: { 'npm:@supabase/supabase-js@2.49.8': '@supabase/supabase-js' },
       // App integration tests render full multi-page scores; bound worker memory.
       maxWorkers: 2,
       include: ['src/**/*.test.{ts,tsx}'],

@@ -157,25 +157,71 @@ export const needsSearchDictionary = (raw: string): boolean => {
 // Lyrics stay literal-only: transliterating full song bodies would swamp short
 // title initials and spend dictionary work on every verse. Weak keys release
 // old documents after edits or workspace changes.
-const lyricsCache = new WeakMap<LyricsDoc, readonly string[]>();
+type SnippetBody = { raw: string; normalized: string; offsets?: number[] };
+const lyricsCache = new WeakMap<LyricsDoc, { fields: string[]; bodies: SnippetBody[] }>();
 const normalizeLyricsText = (value: string) => normalizeSearchText(value).replace(/[\s\p{P}\u200B-\u200D\uFEFF]+/gu, '');
-const getLyricsIndex = (doc?: LyricsDoc): readonly string[] => {
-  if (!doc) return [];
+const getLyricsData = (doc: LyricsDoc) => {
   const cached = lyricsCache.get(doc);
   if (cached) return cached;
   const blocks = getLyricsBlocks(doc);
-  const fields = (['chinese', 'english'] as const).map(language => (
-    normalizeLyricsText(blocks.map(block => block[language]).join('\n'))
-  )).filter(Boolean);
-  lyricsCache.set(doc, fields);
-  return fields;
+  const bodies = (['chinese', 'english'] as const).map(language => {
+    const raw = blocks.map(block => block[language]).join('\n');
+    return { raw, normalized: normalizeLyricsText(raw) };
+  });
+  const value = { bodies, fields: bodies.map(body => body.normalized).filter(Boolean) };
+  lyricsCache.set(doc, value);
+  return value;
 };
+const getLyricsIndex = (doc?: LyricsDoc): readonly string[] => doc ? getLyricsData(doc).fields : [];
 
 export type SearchMatch = 'text' | 'phonetic' | 'keyboard' | 'lyrics';
 export type SearchQuery = {
   isEmpty: boolean;
   match: (fields: readonly (string | undefined | null)[], lyrics?: LyricsDoc) => SearchMatch | null;
   isExactTitleMatch: (title: string | undefined | null) => boolean;
+  lyricsSnippet: (lyrics?: LyricsDoc) => string | null;
+};
+
+const visibleLyricCharacters = /[^\s\p{P}\u200B-\u200D\uFEFF]/gu;
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+function snippetOffsets(body: SnippetBody): number[] {
+  if (body.offsets) return body.offsets;
+  const offsets: number[] = [];
+  if (body.raw.normalize('NFKC') === body.raw && body.raw.toLowerCase().length === body.raw.length) {
+    // Common CJK/Latin lyrics preserve character width. Avoid an OpenCC call
+    // for every character, and reuse this map across all subsequent queries.
+    for (const match of body.raw.matchAll(visibleLyricCharacters)) {
+      for (let i = 0; i < match[0].length; i++) offsets.push(match.index + i);
+    }
+  }
+  if (offsets.length !== body.normalized.length) {
+    offsets.length = 0;
+    for (const { segment, index } of graphemes.segment(body.raw)) {
+      for (let i = 0, length = normalizeLyricsText(segment).length; i < length; i++) offsets.push(index);
+    }
+  }
+  offsets.push(body.raw.length);
+  body.offsets = offsets;
+  return offsets;
+}
+/** Reuse the literal lyrics index; only build a short display excerpt for a hit. */
+const lyricsSnippet = (doc: LyricsDoc | undefined, needles: string[]): string | null => {
+  if (!doc || !needles.length) return null;
+  const { bodies } = getLyricsData(doc);
+  for (const needle of needles) {
+    if (!needle) continue;
+    for (const indexed of bodies) {
+      const { raw: body, normalized } = indexed;
+      const at = normalized.indexOf(needle);
+      if (at < 0) continue;
+      const offsets = snippetOffsets(indexed);
+      const start = offsets[at], end = offsets[at + needle.length] ?? body.length;
+      // Keep the match near the start so a single mobile line does not clip it away.
+      const from = Math.max(0, start - 8), to = Math.min(body.length, Math.max(end + 24, start + 64), from + 140);
+      return `${from > 0 ? '…' : ''}${body.slice(from, to).replace(/\s+/gu, ' ').trim()}${to < body.length ? '…' : ''}`;
+    }
+  }
+  return null;
 };
 
 /** Prepare once per query; field pronunciation keys are cached across keystrokes and renders. */
@@ -204,6 +250,7 @@ export const createSearchQuery = (raw: string): SearchQuery => {
   const terms = text.split(/\s+/u).filter(Boolean).map(term => ({ text: term, lyricText: normalizeLyricsText(term), latin: pinyinQuery(term), symbols: ZHUYIN_ONLY.test(term) ? term.replace(/[^ㄅ-ㄩ]/gu, '') : '', keyboard: keyboardQuery(term) }));
   return {
     isEmpty: !text,
+    lyricsSnippet: lyrics => lyricsSnippet(lyrics, text ? [lyricText, ...terms.map(term => term.lyricText)] : []),
     isExactTitleMatch(title) {
       if (!title || !text) return false;
       // A library version suffix does not change the underlying song name.
@@ -235,12 +282,15 @@ export const createSearchQuery = (raw: string): SearchQuery => {
 };
 
 /** Metadata results lead lyrics; exact song names lead partial matches within each tier. */
-export const searchItems = <T,>(items: readonly T[], query: SearchQuery, fields: (item: T) => readonly (string | undefined | null)[], lyrics?: (item: T) => LyricsDoc | undefined): T[] => {
-  if (query.isEmpty) return [...items];
+export const searchItemsWithMatches = <T,>(items: readonly T[], query: SearchQuery, fields: (item: T) => readonly (string | undefined | null)[], lyrics?: (item: T) => LyricsDoc | undefined): Array<{ item: T; match: SearchMatch }> => {
+  if (query.isEmpty) return items.map(item => ({ item, match: 'text' }));
   const ranks = { text: 0, phonetic: 1, keyboard: 2, lyrics: 3 };
   return items.flatMap(item => {
     const values = fields(item);
     const match = query.match(values, lyrics?.(item));
-    return match ? [{ item, rank: ranks[match] * 2 + (query.isExactTitleMatch(values[0]) ? 0 : 1) }] : [];
-  }).sort((left, right) => left.rank - right.rank).map(entry => entry.item);
+    return match ? [{ item, match, rank: ranks[match] * 2 + (query.isExactTitleMatch(values[0]) ? 0 : 1) }] : [];
+  }).sort((left, right) => left.rank - right.rank);
 };
+
+export const searchItems = <T,>(items: readonly T[], query: SearchQuery, fields: (item: T) => readonly (string | undefined | null)[], lyrics?: (item: T) => LyricsDoc | undefined): T[] =>
+  query.isEmpty ? [...items] : searchItemsWithMatches(items, query, fields, lyrics).map(entry => entry.item);

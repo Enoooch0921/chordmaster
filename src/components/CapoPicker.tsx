@@ -45,11 +45,16 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   const [isOpen, setIsOpen] = React.useState(false);
   const instantExit = React.useRef(false);
+  const focusFrame = React.useRef<number | null>(null);
+  const panelId = React.useId();
   const playKey = getPlayKey(currentKey, value);
 
-  const closePanel = React.useCallback((immediate = false) => {
+  const closePanel = React.useCallback((immediate = false, restoreFocus = false) => {
+    if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+    focusFrame.current = null;
     instantExit.current = immediate;
     setIsOpen(false);
+    if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
   }, []);
 
   React.useEffect(() => {
@@ -79,8 +84,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
       }
 
       event.preventDefault();
-      closePanel();
-      triggerRef.current?.focus();
+      closePanel(false, true);
     };
 
     window.addEventListener('mousedown', handlePointerDown);
@@ -97,23 +101,28 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
       return;
     }
 
-    window.requestAnimationFrame(() => {
-      optionRefs.current[value]?.focus();
+    focusFrame.current = window.requestAnimationFrame(() => {
+      focusFrame.current = null;
+      optionRefs.current[value]?.focus({ preventScroll: true });
     });
+    return () => {
+      if (focusFrame.current !== null) cancelAnimationFrame(focusFrame.current);
+      focusFrame.current = null;
+    };
   }, [isOpen, value]);
 
   const handleOptionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, capo: number) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onChange(capo);
-      closePanel();
+      closePanel(true, true);
       return;
     }
 
     if (event.key === 'Escape') {
       event.preventDefault();
-      closePanel();
-      triggerRef.current?.focus();
+      event.stopPropagation();
+      closePanel(false, true);
       return;
     }
 
@@ -158,6 +167,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         } ${buttonClassName}`}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
+        aria-controls={isOpen ? panelId : undefined}
       >
         <span className={`min-w-0 truncate ${isCompactTrigger ? 'text-[13px]' : 'text-sm'} font-semibold text-gray-800 ${valueTextClassName}`}>
           {triggerLabel ?? value}{showPlayKey ? <> <span className="text-gray-400">({playKey})</span></> : null}
@@ -167,6 +177,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
 
       {typeof document !== 'undefined' && createPortal(
         <AnimatedPopover open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
+          id={panelId} role="dialog" aria-label={label}
           panelRef={panelRef}
           className={`${touchOptimized ? 'w-[248px] p-3' : 'w-[132px] p-2'} overflow-hidden rounded-[20px] border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
@@ -190,7 +201,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
                   type="button"
                   onClick={() => {
                     onChange(capo);
-                    closePanel(true);
+                    closePanel(true, true);
                   }}
                   onKeyDown={(event) => handleOptionKeyDown(event, capo)}
                   className={`flex w-full items-center rounded-xl px-2 text-left transition-colors ${touchOptimized ? 'min-h-11 py-2' : 'py-1.5'} ${

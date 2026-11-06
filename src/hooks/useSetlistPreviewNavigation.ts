@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
+import { getNavigationScrollBehavior } from '../lib/navigationScroll';
 
 interface Options {
   previewRef: RefObject<HTMLDivElement | null>;
@@ -18,9 +19,13 @@ export function useSetlistPreviewNavigation({
 }: Options) {
   const navigatingRef = useRef(false);
   const hasSongs = songCount > 0;
+  const lastNavigation = useRef<{ enabled: boolean; hasSongs: boolean; selectedSongId: string | null } | null>(null);
   const lastTracking = useRef<{ enabled: boolean; trackScroll: boolean; selectedSongId: string | null } | null>(null);
 
   useLayoutEffect(() => {
+    const previous = lastNavigation.current;
+    lastNavigation.current = { enabled, hasSongs, selectedSongId };
+    const restoringPosition = !previous?.enabled || !previous.hasSongs || !previous.selectedSongId || previous.selectedSongId === selectedSongId;
     // Collection updates are not navigation gestures. Only selection, mode,
     // or becoming nonempty starts an automatic scroll.
     if (!enabled || !selectedSongId || !hasSongs) return;
@@ -86,7 +91,10 @@ export function useSetlistPreviewNavigation({
         scrollRoot.addEventListener('scrollend', finish);
         // Some WebKit scroll requests do not emit a movement or scrollend.
         onScroll();
-        scrollRoot.scrollTo({ top: desiredTop, behavior: 'smooth' });
+        scrollRoot.scrollTo({
+          top: desiredTop,
+          behavior: getNavigationScrollBehavior(desiredTop - scrollRoot.scrollTop, rootRect.height, restoringPosition)
+        });
       });
     });
 

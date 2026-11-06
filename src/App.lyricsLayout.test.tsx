@@ -48,18 +48,26 @@ const mountLyrics = async () => {
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
   await screen.findByDisplayValue('歌詞排版聚會');
   fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
-  await screen.findByRole('button', { name: 'A4 易讀版' });
+  await screen.findByRole('button', { name: '閱讀' });
 };
 
-it('opens the real lyrics mode in readable A4 and keeps both layouts without changing song data', async () => {
+it('opens locked reading, navigates songs, and retains both A4 layouts independently of reading size', async () => {
   const original = JSON.stringify(fixture);
   await mountLyrics();
-  expect(screen.getByRole('button', { name: 'A4 易讀版' })).toHaveAttribute('aria-pressed', 'true');
-  expect(document.querySelector('.lyrics-book')).toHaveAttribute('data-book-layout', 'readable');
+  expect(screen.getByRole('button', { name: '閱讀' })).toHaveAttribute('aria-pressed', 'true');
+  expect(document.querySelector('.lyrics-book')).toHaveAttribute('data-book-layout', 'reading');
+  expect(document.querySelector('.lyrics-book button')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '下一首' }));
+  expect(screen.getByRole('combobox', { name: '目前歌曲' })).toHaveValue('entry-two');
+  fireEvent.click(screen.getByRole('button', { name: '放大歌詞' }));
+  expect(document.querySelector('[data-lyrics-reading]')).toHaveStyle({ fontSize: '26px' });
+  fireEvent.click(screen.getByRole('button', { name: '列印排版' }));
   expect(document.querySelector('[data-print-page]')).toHaveTextContent('《歌曲 one》');
-  fireEvent.click(screen.getByRole('button', { name: 'A4 省紙版' }));
+  expect(parseFloat((document.querySelector('[data-print-page]') as HTMLElement).style.fontSize)).toBeCloseTo(16 * 4 / 3);
+  expect(screen.getByRole('combobox', { name: 'A4 版面' }).closest('.slw-paper')).toBeNull();
+  fireEvent.change(screen.getByRole('combobox', { name: 'A4 版面' }), { target: { value: 'compact' } });
   expect(document.querySelector('.lyrics-book')).toHaveAttribute('data-book-layout', 'compact');
-  fireEvent.click(screen.getByRole('button', { name: 'A4 易讀版' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'A4 版面' }), { target: { value: 'readable' } });
   expect(document.querySelector('.lyrics-book')).toHaveAttribute('data-book-layout', 'readable');
   expect(JSON.stringify(fixture)).toBe(original);
 });
@@ -67,8 +75,9 @@ it('opens the real lyrics mode in readable A4 and keeps both layouts without cha
 it('exports the selected layout through the real PDF action, including from reading view', async () => {
   await mountLyrics();
   for (const layout of ['readable', 'compact'] as const) {
-    fireEvent.click(screen.getByRole('button', { name: layout === 'compact' ? 'A4 省紙版' : 'A4 易讀版' }));
-    if (layout === 'compact') fireEvent.click(screen.getByRole('button', { name: '大字閱讀' }));
+    fireEvent.click(screen.getByRole('button', { name: '列印排版' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'A4 版面' }), { target: { value: layout } });
+    if (layout === 'compact') fireEvent.click(screen.getByRole('button', { name: '閱讀' }));
     fireEvent.click(screen.getAllByRole('button', { name: '更多' })[0]);
     fireEvent.click(await screen.findByRole('button', { name: '匯出歌單 PDF' }));
     await waitFor(() => expect(exports).toHaveBeenCalledTimes(layout === 'readable' ? 1 : 2));
@@ -79,10 +88,29 @@ it('exports the selected layout through the real PDF action, including from read
 
 it('uses the chosen A4 layout in the real performance view', async () => {
   await mountLyrics();
-  fireEvent.click(screen.getByRole('button', { name: 'A4 省紙版' }));
+  fireEvent.click(screen.getByRole('button', { name: '列印排版' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'A4 版面' }), { target: { value: 'compact' } });
   fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
   await waitFor(() => expect(document.querySelector('[data-performance-overlay] .lyrics-book')).toHaveAttribute('data-book-layout', 'compact'));
   expect(document.querySelector('[data-performance-overlay] [data-print-page]')).toHaveTextContent('《歌曲 one》');
+});
+
+it('edits only the chosen entry after explicit Edit, returns to locked reading, and restores the chart viewport', async () => {
+  await mountLyrics();
+  fireEvent.change(screen.getByRole('combobox', { name: '目前歌曲' }), { target: { value: 'entry-two' } });
+  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  expect(screen.queryByRole('button', { name: '切換 A4 排版' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /^中文歌詞 Verse/ }));
+  const input = screen.getByRole('textbox', { name: /^中文歌詞 Verse/ });
+  fireEvent.change(input, { target: { value: '修改第二首主歌' } });
+  fireEvent.blur(input);
+  fireEvent.click(screen.getByRole('button', { name: '完成編輯' }));
+  expect(document.querySelector('[data-setlist-preview-song-id="entry-two"]')).toHaveTextContent('修改第二首主歌');
+  expect(document.querySelector('[data-setlist-preview-song-id="entry-one"]')).toHaveTextContent('主歌第一行');
+  expect(document.querySelector('.lyrics-book textarea')).toBeNull();
+  fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
+  await waitFor(() => expect(document.querySelector('[data-print-preview-container]')).not.toBeNull());
+  expect(document.querySelector('[data-lyrics-workspace-mode]')).toBeNull();
 });
 
 it('updates continuous lyrics page numbers immediately without losing the selected page on an App refresh', async () => {

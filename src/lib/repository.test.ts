@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LibraryRole, Project, Setlist, StoredSong, WorkspaceSnapshot } from '../types';
+import type { LibraryRole, Project, Setlist, Song, StoredSong, WorkspaceSnapshot } from '../types';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -84,6 +84,36 @@ describe('cloud repository personal workspace imports', () => {
     expect(mocks.rpc).toHaveBeenCalledWith('get_joined_projects');
     expect(mocks.from).not.toHaveBeenCalled();
     expect(window.localStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('reads a conditional workspace in one RPC and preserves the current viewer’s Capo', async () => {
+    const version = 'a'.repeat(64);
+    const setlist = { id: 'sl', name: 'Sunday', songs: [{ id: 'entry', songId: 'song', songData: makeSong() }] };
+    mocks.rpc.mockResolvedValue({ error: null, data: { version, unchanged: false, payload: {
+      setlists: [setlist], projects: [{ id: 'p', role: 'manager', setlists: [setlist] }],
+      personalCapos: [{ setlist_song_id: 'entry', capo: 0 }]
+    } } });
+    const repository = createRepository();
+    const result = await repository.loadJoinedWorkspaceUpdate!(null);
+    expect(result.version).toBe(version);
+    expect(result.payload?.joinedSetlists[0].songs[0].personalCapoOverride).toBe(0);
+    expect(result.payload?.joinedProjects?.[0].setlists[0].songs[0].personalCapoOverride).toBe(0);
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('get_joined_workspace_snapshot', { p_known_version: null });
+    expect(mocks.from).not.toHaveBeenCalled();
+    mocks.rpc.mockResolvedValue({ error: null, data: { version, unchanged: true } });
+    expect(await repository.loadJoinedWorkspaceUpdate!(version)).toEqual({ version, payload: null });
+    await expect(repository.loadJoinedWorkspaceUpdate!(null)).rejects.toThrow('baseline');
+    mocks.rpc.mockResolvedValue({ error: { code: '42501', message: 'Denied' }, data: null });
+    await expect(repository.loadJoinedWorkspaceUpdate!(version)).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('falls back only for a missing conditional RPC on older deployments', async () => {
+    mocks.rpc.mockImplementation((name: string) => Promise.resolve(name === 'get_joined_workspace_snapshot'
+      ? { error: { code: 'PGRST202' }, data: null } : { data: [], error: null }));
+    const repository = createRepository();
+    expect(await repository.loadJoinedWorkspaceUpdate!(null)).toEqual({ version: null, payload: { joinedSetlists: [], joinedProjects: [] } });
+    expect(await repository.loadJoinedWorkspaceUpdate!(null)).toEqual({ version: null, payload: { joinedSetlists: [], joinedProjects: [] } });
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'get_joined_workspace_snapshot')).toHaveLength(1);
   });
 
   it('rejects background refresh when shared projects fail instead of reporting an empty collection', async () => {
@@ -245,7 +275,7 @@ describe('cloud repository shared setlist updates', () => {
       overrideKey: 'D', sectionOrder: [], songData: makeSong() }))
   });
 
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.rpc.mockResolvedValue({ data: null, error: null }); });
 
   it.each(['setlist_manager', 'editor', undefined] as Array<LibraryRole | undefined>)('passes the preflight role %s through sync without storing it in the local score', async (teamRole) => {
     const entries = makeBuilder();
@@ -293,6 +323,7 @@ describe('cloud repository shared setlist updates', () => {
 
   it('rejects sync when the server detects a role change and retains entries that would have been removed', async () => {
     const entries = makeBuilder({ upsert: vi.fn().mockResolvedValue({ error: new Error('Team role changed; reload permissions') }) });
+    mocks.rpc.mockResolvedValue({ error: new Error('Team role changed; reload permissions') });
     mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
     const repository = createRepository();
     repository.setActiveLibrary('team-1');
@@ -300,7 +331,10 @@ describe('cloud repository shared setlist updates', () => {
     await expect(syncWorkspaceDiff({ repository, teamRole: 'editor', songs: [librarySong], savedSongs: [librarySong],
       setlists: [makeSetlist(['kept'])], savedSetlists: [makeSetlist(['kept', 'removed'])], projects: [], savedProjects: [] }))
       .rejects.toThrow('Team role changed');
-    expect(entries.upsert.mock.calls[0][0][0].override_json.expectedTeamRole).toBe('editor');
+    expect(entries.upsert).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledWith('delete_setlist_entries_checked', {
+      p_setlist_id: 'setlist-1', p_entry_ids: ['removed'], p_expected_role: 'editor'
+    });
     expect(entries.delete).not.toHaveBeenCalled();
   });
 
@@ -325,9 +359,10 @@ describe('cloud repository shared setlist updates', () => {
     mocks.from.mockImplementation((table: string) => table === 'setlist_songs' ? entries : makeBuilder());
     const repository = createRepository();
     repository.setActiveLibrary('personal-1');
-    await repository.saveSetlist(makeSetlist(['kept', 'added']), makeSetlist(['kept', 'removed']));
+    const next = makeSetlist(['kept', 'added']); next.songs[0].overrideKey = 'E';
+    await repository.saveSetlist(next, makeSetlist(['kept', 'removed']));
     expect(entries.upsert).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'kept', override_json: expect.objectContaining({ overrideKey: 'D' }) }),
+      expect.objectContaining({ id: 'kept', override_json: expect.objectContaining({ overrideKey: 'E' }) }),
       expect.objectContaining({ id: 'added' })
     ], { onConflict: 'id' });
     expect(entries.delete).toHaveBeenCalledTimes(1);
@@ -343,6 +378,49 @@ describe('cloud repository shared setlist updates', () => {
     repository.setActiveLibrary('personal-1');
     await expect(repository.saveSetlist(makeSetlist(['added']), makeSetlist(['kept'])))
       .rejects.toThrow('Write failed');
+    expect(entries.delete).not.toHaveBeenCalled();
+  });
+
+  it('writes only the edited song, preserving another collaborator’s untouched entry', async () => {
+    const entries = makeBuilder();
+    mocks.from.mockImplementation(table => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository(); repository.setActiveLibrary('personal-1');
+    const previous = makeSetlist(['mine', 'someone-else']);
+    const next = structuredClone(previous); next.songs[0].songData!.title = 'My edit';
+    await repository.saveSetlist(next, previous);
+    expect(entries.upsert.mock.calls[0][0].map(row => row.id)).toEqual(['mine']);
+    expect(entries.delete).not.toHaveBeenCalled();
+  });
+
+  it('writes only positions that moved and ignores personal Capo and provenance bookkeeping', async () => {
+    const entries = makeBuilder();
+    mocks.from.mockImplementation(table => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository(); repository.setActiveLibrary('personal-1');
+    const previous = makeSetlist(['a', 'b', 'c']);
+    const next = { ...previous, songs: [previous.songs[1], previous.songs[0], { ...previous.songs[2], personalCapoOverride: 4 }] };
+    await repository.saveSetlist(next, previous);
+    expect(entries.upsert.mock.calls[0][0].map(row => [row.id, row.order_index])).toEqual([['b', 0], ['a', 1]]);
+  });
+
+  it('does not rewrite scores whose JSON object fields merely changed order', async () => {
+    const entries = makeBuilder();
+    mocks.from.mockImplementation(table => table === 'setlist_songs' ? entries : makeBuilder());
+    const repository = createRepository(); repository.setActiveLibrary('personal-1');
+    const previous = makeSetlist(['kept']);
+    const next = structuredClone(previous);
+    next.songs[0].songData = Object.fromEntries(Object.entries(next.songs[0].songData!).reverse()) as Song;
+    await repository.saveSetlist(next, previous);
+    expect(entries.upsert).not.toHaveBeenCalled();
+    expect(entries.delete).not.toHaveBeenCalled();
+  });
+
+  it('preserves the old-server role guard when checked deletion is not deployed yet', async () => {
+    const entries = makeBuilder({ upsert: vi.fn().mockResolvedValue({ error: new Error('Role changed') }) });
+    mocks.from.mockImplementation(table => table === 'setlist_songs' ? entries : makeBuilder());
+    mocks.rpc.mockResolvedValue({ error: { code: 'PGRST202' } });
+    const repository = createRepository(); repository.setActiveLibrary('team-1');
+    await expect(repository.saveSetlist(makeSetlist(['kept']), makeSetlist(['kept', 'removed']), { teamRole: 'editor' }))
+      .rejects.toThrow('Role changed');
     expect(entries.delete).not.toHaveBeenCalled();
   });
 

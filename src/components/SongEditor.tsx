@@ -46,6 +46,7 @@ import {
   toggleEndingNumber
 } from '../lib/songEditing';
 import { applyRhythmEdit, type RhythmEditAction } from '../lib/rhythmEditing';
+import { getNavigationScrollBehavior } from '../lib/navigationScroll';
 import {
   applyJianpuCommand,
   buildJianpuPitchContext,
@@ -65,9 +66,7 @@ interface FocusRequest {
   bIdx: number;
   field: FocusField;
   requestId: number;
-  // Jump straight to the bar with an instant (non-animated) scroll. Set when the
-  // editor is opening / switching songs so the still-settling layout doesn't make
-  // a smooth scroll bounce up and down repeatedly.
+  // Retained for existing preview callers; editor focus now always scrolls immediately.
   instant?: boolean;
 }
 
@@ -580,7 +579,7 @@ const SectionNavigationChip: React.FC<SectionNavigationChipProps> = ({
       className="relative flex-shrink-0 group/nav pt-3 pb-1"
     >
       {!hideSectionStructureActions && (
-        <div className="absolute -top-1 left-1/2 z-30 flex items-center gap-1 opacity-0 transition-all pointer-events-none group-hover/nav:pointer-events-auto group-hover/nav:opacity-100 -translate-x-1/2">
+        <div className="absolute -top-1 left-1/2 z-30 flex items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover/nav:pointer-events-auto group-hover/nav:opacity-100 group-focus-within/nav:pointer-events-auto group-focus-within/nav:opacity-100 -translate-x-1/2">
           <button
             onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
             className="rounded-full border border-gray-200 bg-white p-1 text-indigo-600 shadow-md transition-colors hover:bg-indigo-50"
@@ -609,11 +608,9 @@ const SectionNavigationChip: React.FC<SectionNavigationChipProps> = ({
           onNavigate();
         }}
         title={section.title || `Section ${idx + 1}`}
-        className={`relative inline-flex items-center justify-center rounded-[1.4rem] border-2 text-center font-black leading-none transition-all ${
+        className={`relative inline-flex items-center justify-center rounded-[1.4rem] border-2 text-center font-black leading-none transition-colors ${
           isWideLabel ? 'h-[2.375rem] min-w-[2.8rem] px-2.25 text-[14px]' : 'h-[2.375rem] min-w-[2.45rem] px-2 text-[15px]'
-        } ${isPhoneViewport ? '' : 'cursor-grab active:cursor-grabbing'} ${isActiveSection ? 'scale-[1.02]' : 'hover:-translate-y-[1px] hover:shadow-sm'} ${
-          isLongPressDragging ? 'scale-[1.04]' : ''
-        }`}
+        } ${isPhoneViewport ? '' : 'cursor-grab active:cursor-grabbing'}`}
         style={{
           backgroundColor: isActiveSection ? accentTone.activeBg : accentTone.bg,
           color: accentTone.text,
@@ -700,11 +697,6 @@ const SongEditor: React.FC<Props> = ({
   const skipSelectionScrollKeyRef = useRef<string | null>(null);
   const jianpuDurationBlockedHintTimerRef = useRef<number | null>(null);
   const inlineCompactEditorRef = useRef<HTMLDivElement | null>(null);
-  // True for a short window right after the editor opens (this component mounts
-  // when edit mode is entered). While true, auto-scrolls jump instantly instead
-  // of smooth-scrolling, so the still-settling panel doesn't visibly bounce
-  // up/down several times before landing on the clicked bar.
-  const editorJustOpenedRef = useRef(true);
   const isCompactBarLayout = barLayoutMode === 'compact4';
   const isSpaceConstrainedBarLayout = barLayoutMode !== 'full4';
   const shouldUseManualCompactInspector = isPhoneViewport && isSpaceConstrainedBarLayout;
@@ -720,13 +712,6 @@ const SongEditor: React.FC<Props> = ({
   const notifyChange = (newSong: Song) => {
     onChange(newSong);
   };
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      editorJustOpenedRef.current = false;
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   const {
     sectionBaseKeys,
@@ -833,12 +818,12 @@ const SongEditor: React.FC<Props> = ({
 
   const getSelectionScrollKey = (type: SelectionInfo['type'], sIdx: number, bIdx: number) => `${type}:${sIdx}:${bIdx}`;
 
-  const scrollBarElementToCenter = (barElement: HTMLElement, behavior: ScrollBehavior = 'auto') => {
+  const scrollBarElementToCenter = (barElement: HTMLElement) => {
     const rootNode = rootRef.current;
     const scrollRoot = rootNode?.closest('[data-editor-scroll-root]') as HTMLElement | null;
 
     if (!scrollRoot) {
-      barElement.scrollIntoView({ behavior, block: 'center', inline: 'nearest' });
+      barElement.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
       return;
     }
 
@@ -849,7 +834,7 @@ const SongEditor: React.FC<Props> = ({
 
     scrollRoot.scrollTo({
       top: Math.max(0, Math.min(maxTop, nextTop)),
-      behavior
+      behavior: 'instant'
     });
   };
 
@@ -961,7 +946,7 @@ const SongEditor: React.FC<Props> = ({
       if (!node.isConnected) return;
 
       if (!scrollRoot) {
-        node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        node.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'nearest' });
         return;
       }
 
@@ -971,7 +956,7 @@ const SongEditor: React.FC<Props> = ({
 
       if (!isFullyVisible) {
         node.scrollIntoView({
-          behavior: editorJustOpenedRef.current ? 'auto' : 'smooth',
+          behavior: 'instant',
           block: 'nearest',
           inline: 'nearest'
         });
@@ -1793,7 +1778,7 @@ const SongEditor: React.FC<Props> = ({
     }
 
     if (barElement) {
-      scrollBarElementToCenter(barElement, attempt === 0 ? 'smooth' : 'auto');
+      scrollBarElementToCenter(barElement);
     }
 
     try {
@@ -1818,7 +1803,7 @@ const SongEditor: React.FC<Props> = ({
     }
 
     if (sectionElement) {
-      sectionElement.scrollIntoView({ behavior: attempt === 0 ? 'smooth' : 'auto', block: 'start' });
+      sectionElement.scrollIntoView({ behavior: 'instant', block: 'start' });
     }
 
     try {
@@ -4964,8 +4949,7 @@ const SongEditor: React.FC<Props> = ({
   useEffect(() => {
     if (!focusRequest) return;
 
-    const { sIdx, bIdx, field, requestId, instant } = focusRequest;
-    const focusScrollBehavior: ScrollBehavior = instant ? 'auto' : 'smooth';
+    const { sIdx, bIdx, field, requestId } = focusRequest;
     // Preview-to-editor navigation must reveal the requested bar before focusing it.
     if (field !== 'sectionName' && bIdx >= 0) {
       expandSection(sIdx);
@@ -4981,7 +4965,7 @@ const SongEditor: React.FC<Props> = ({
           sectionRetryTimer = window.setTimeout(focusSectionTitle, 80);
           return;
         }
-        node.scrollIntoView({ behavior: focusScrollBehavior, block: 'center' });
+        node.scrollIntoView({ behavior: 'instant', block: 'center' });
         window.requestAnimationFrame(() => {
           try {
             node.focus({ preventScroll: true });
@@ -5047,7 +5031,7 @@ const SongEditor: React.FC<Props> = ({
         skipSelectionScrollKeyRef.current = getSelectionScrollKey(selectionType, sIdx, bIdx);
       }
 
-      scrollBarElementToCenter(barElement, focusScrollBehavior);
+      scrollBarElementToCenter(barElement);
 
       window.requestAnimationFrame(() => {
         try {
@@ -5058,11 +5042,11 @@ const SongEditor: React.FC<Props> = ({
 
         const len = fieldElement.value.length;
         fieldElement.setSelectionRange(len, len);
-        scrollBarElementToCenter(barElement, focusScrollBehavior);
+        scrollBarElementToCenter(barElement);
       });
 
       correctionTimer = window.setTimeout(() => {
-        scrollBarElementToCenter(barElement, focusScrollBehavior);
+        scrollBarElementToCenter(barElement);
       }, 160);
 
       onFocusRequestHandled?.(requestId);
@@ -5091,7 +5075,7 @@ const SongEditor: React.FC<Props> = ({
       const input = document.querySelector<HTMLInputElement>(selector);
       if (input) {
         if (!shouldSkipScroll) {
-          input.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          input.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'nearest' });
         }
         if (document.activeElement !== input) {
           input.focus();
@@ -6100,7 +6084,7 @@ const SongEditor: React.FC<Props> = ({
 
                   return (
                     <div
-                      className={`relative rounded border bg-white transition-all ${riffSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                      className={`relative rounded border bg-white transition-colors ${riffSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => {
                         const nextCaret = beatRanges[activeBeatIndex]?.start ?? riffValue.length;
@@ -6270,7 +6254,7 @@ const SongEditor: React.FC<Props> = ({
 
                   return (
                     <div
-                      className={`relative mb-2 rounded border bg-white transition-all ${rhythmSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                      className={`relative mb-2 rounded border bg-white transition-colors ${rhythmSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => focusRhythmEditor(sIdx, bIdx)}
                     >
@@ -6506,13 +6490,9 @@ const SongEditor: React.FC<Props> = ({
       : (language === 'zh' ? '單一小節編輯' : 'Single bar editor');
 
     return (
-      <motion.div
+      <div
         ref={inlineCompactEditorRef}
         key={`compact-inline-editor-${section.id || sIdx}-${compactEditorState.primaryBIdx}`}
-        layout
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.18, ease: 'easeOut' }}
         className={`${isCompactBarLayout ? 'col-span-4' : 'col-span-1'} rounded-2xl border border-indigo-200 bg-white/95 p-3 shadow-[0_18px_36px_rgba(99,102,241,0.10)] backdrop-blur-sm`}
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -6547,7 +6527,7 @@ const SongEditor: React.FC<Props> = ({
             </React.Fragment>
           ))}
         </div>
-      </motion.div>
+      </div>
     );
   };
 
@@ -6634,7 +6614,14 @@ const SongEditor: React.FC<Props> = ({
                 onNavigate={() => {
                   markActiveSection(sectionId);
                   const el = document.getElementById(`section-${idx}`);
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  if (el) {
+                    const scrollRoot = rootRef.current?.closest<HTMLElement>('[data-editor-scroll-root]');
+                    const rootRect = scrollRoot?.getBoundingClientRect();
+                    el.scrollIntoView({
+                      behavior: getNavigationScrollBehavior(el.getBoundingClientRect().top - (rootRect?.top ?? 0), rootRect?.height ?? window.innerHeight),
+                      block: 'start'
+                    });
+                  }
                 }}
                 onDuplicate={() => duplicateSection(idx)}
                 onRemove={() => removeSection(idx)}
@@ -6657,9 +6644,7 @@ const SongEditor: React.FC<Props> = ({
 
       <div className="mb-6">
         {pickupBar ? (
-          <motion.div
-            layout
-            transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
+          <div
             className="max-w-[22rem]"
           >
             <div
@@ -6673,9 +6658,9 @@ const SongEditor: React.FC<Props> = ({
                 markActiveSection(song.sections[0]?.id ?? null);
                 markActiveBar(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX);
               }}
-              className={`rounded-lg border p-3 shadow-sm transition-all ${
+              className={`rounded-lg border p-3 shadow-sm transition-colors ${
                 isPickupActive
-                  ? 'bg-white border-emerald-300 scale-[1.01]'
+                  ? 'bg-white border-emerald-300'
                   : 'bg-emerald-50/35 border-emerald-200 hover:border-emerald-300'
               }`}
               style={isPickupActive ? { boxShadow: '0 0 0 2px rgba(16,185,129,0.18), 0 14px 26px rgba(16,185,129,0.14)' } : undefined}
@@ -6772,7 +6757,7 @@ const SongEditor: React.FC<Props> = ({
                         </div>
                       </div>
                       <div
-                        className={`relative rounded border bg-white transition-all ${riffSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                        className={`relative rounded border bg-white transition-colors ${riffSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
                         onMouseDown={e => e.preventDefault()}
                         onClick={() => {
                           const nextCaret = beatRanges[activeBeatIndex]?.start ?? riffValue.length;
@@ -6857,7 +6842,7 @@ const SongEditor: React.FC<Props> = ({
                     </div>
                   </div>
                   <div
-                    className={`relative mb-2 rounded border bg-white transition-all ${selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                    className={`relative mb-2 rounded border bg-white transition-colors ${selection?.type === 'rhythm' && selection.sIdx === PICKUP_SECTION_INDEX && selection.bIdx === PICKUP_BAR_INDEX ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => focusRhythmEditor(PICKUP_SECTION_INDEX, PICKUP_BAR_INDEX)}
                   >
@@ -6902,7 +6887,7 @@ const SongEditor: React.FC<Props> = ({
                 </div>
               </div>
             </div>
-          </motion.div>
+          </div>
         ) : (
           <button
             type="button"
@@ -6965,17 +6950,13 @@ const SongEditor: React.FC<Props> = ({
             : -1;
           const compactEditorState = getCompactEditorState(section, sIdx);
           return (
-            <motion.div
+            <div
               key={section.id || sIdx}
               id={`section-${sIdx}`}
               ref={node => setSectionRef(sectionId, node)}
               onMouseDownCapture={() => markActiveSection(sectionId)}
               onFocusCapture={() => markActiveSection(sectionId)}
-              layout
-              transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
-              className={`${colors.bg} border ${colors.border} rounded-xl p-3.5 shadow-sm scroll-mt-20 transition-all ${
-                isActiveSection ? 'scale-[1.002]' : ''
-              }`}
+              className={`${colors.bg} border ${colors.border} rounded-xl p-3.5 shadow-sm scroll-mt-20`}
               style={isActiveSection ? { boxShadow: `0 0 0 2px ${accentHighlight.ring}, 0 16px 32px ${accentHighlight.glow}` } : undefined}
             >
               <div className={`${isSectionCollapsed ? '' : 'mb-4'} flex flex-col justify-between gap-3 sm:flex-row sm:items-start`}>
@@ -7223,10 +7204,8 @@ const SongEditor: React.FC<Props> = ({
 
             {/* Bars Grid */}
             {!isSectionCollapsed && (
-            <motion.div
+            <div
               id={sectionContentId}
-              layout
-              transition={{ layout: { type: 'spring', stiffness: 360, damping: 30 } }}
               className={isChordOnly ? 'grid grid-cols-2 gap-2.5 sm:grid-cols-4' : barGridClassName}
             >
               {section.bars.map((bar, bIdx) => (
@@ -7283,11 +7262,11 @@ const SongEditor: React.FC<Props> = ({
                             ) ? null : current);
                           }}
                           onDrop={e => handleBarDrop(e, sIdx, bIdx)}
-                          className={`group relative min-w-0 rounded-2xl border bg-white p-2 shadow-sm transition-all ${
+                          className={`group relative min-w-0 rounded-2xl border bg-white p-2 shadow-sm transition-colors ${
                             isCopiedHighlight
-                              ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-200 shadow-amber-100/80 scale-[1.01]'
+                              ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-200 shadow-amber-100/80'
                               : isActiveBar
-                                  ? `${colors.border} scale-[1.01]`
+                                  ? colors.border
                                   : isDragTarget
                                     ? 'border-indigo-300 shadow-[0_0_0_2px_rgba(99,102,241,0.12)]'
                                     : 'border-gray-200 hover:border-indigo-300'
@@ -7496,11 +7475,11 @@ const SongEditor: React.FC<Props> = ({
                     ) ? null : current);
                   }}
                   onDrop={e => handleBarDrop(e, sIdx, bIdx)}
-                  className={`group relative min-w-0 rounded-xl border bg-white p-2.5 shadow-sm transition-all ${
+                  className={`group relative min-w-0 rounded-xl border bg-white p-2.5 shadow-sm transition-colors ${
                     isCopiedHighlight
-                      ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-200 shadow-amber-100/80 scale-[1.01]'
+                      ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-200 shadow-amber-100/80'
                       : isActiveBar
-                          ? `${colors.border} scale-[1.01]`
+                          ? colors.border
                           : 'border-gray-200 hover:border-indigo-300'
                   }`}
                   style={isActiveBar && !isCopiedHighlight ? { boxShadow: `0 0 0 2px ${accentHighlight.barRing}, 0 14px 26px ${accentHighlight.barGlow}` } : undefined}
@@ -7880,7 +7859,7 @@ const SongEditor: React.FC<Props> = ({
 
                         return (
                           <div
-                            className={`relative rounded border bg-white transition-all ${riffSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                            className={`relative rounded border bg-white transition-colors ${riffSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
                             onMouseDown={e => e.preventDefault()}
                             onClick={() => {
                               const nextCaret = beatRanges[activeBeatIndex]?.start ?? riffValue.length;
@@ -8051,7 +8030,7 @@ const SongEditor: React.FC<Props> = ({
 
                         return (
                           <div
-                            className={`relative mb-2 rounded border bg-white transition-all ${rhythmSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
+                            className={`relative mb-2 rounded border bg-white transition-colors ${rhythmSelected ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-gray-200 hover:border-indigo-200'}`}
                             onMouseDown={e => e.preventDefault()}
                             onClick={() => focusRhythmEditor(sIdx, bIdx)}
                           >
@@ -8298,7 +8277,7 @@ const SongEditor: React.FC<Props> = ({
                   setDragOverTarget(current => current === `append-${sIdx}` ? null : current);
                 }}
                 onDrop={e => handleAppendBarDrop(e, sIdx)}
-                className={`border-2 border-dashed rounded transition-all ${
+                className={`border-2 border-dashed rounded transition-colors ${
                   dragOverTarget === `append-${sIdx}`
                     ? 'bg-amber-50 border-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.16),0_18px_40px_rgba(251,191,36,0.20)]'
                     : isBarDragging
@@ -8329,9 +8308,9 @@ const SongEditor: React.FC<Props> = ({
                   </span>
                 </button>
               </div>
-            </motion.div>
+            </div>
             )}
-          </motion.div>
+          </div>
         );
       })}
     </div>
@@ -8341,7 +8320,7 @@ const SongEditor: React.FC<Props> = ({
         <div className="flex justify-center mt-12 pb-12">
           <button
             onClick={addSection}
-            className="px-8 py-4 bg-white border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center gap-3 text-gray-500 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-all font-bold uppercase tracking-widest text-sm shadow-sm hover:shadow-md"
+            className="px-8 py-4 bg-white border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center gap-3 text-gray-500 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-colors font-bold uppercase tracking-widest text-sm shadow-sm hover:shadow-md"
           >
             <Plus size={24} />
             {copy.editor.addNewSection}

@@ -63,19 +63,25 @@ export const useLibraryWorkspaceRefresh = (options: Options) => {
         controller = new AbortController();
         const requestController = controller;
         timeout = setTimeout(() => requestController.abort(), 15000);
-        let fullRead = fullRefreshRequested || !refreshCollections || lastFullRefreshAt === null
-          || Date.now() - lastFullRefreshAt >= SUCCESS_REFRESH_MS;
-        fullRefreshRequested = false;
-        // Realtime can be interrupted on mobile or self-hosted installations.
-        // Compare only ids/timestamps between full reads; download scores only on change.
-        if (!fullRead) {
-          const versions = await repository.loadLibrarySongVersions(libraryId, controller.signal);
-          const known = new Map(snapshot.workspace.songs.map((song) => [song.id, song.updatedAt ?? 0]));
-          fullRead = versions.length !== known.size || versions.some((song) => known.get(song.id) !== song.updatedAt);
+        let fullRead = false;
+        let remote = repository.loadLibraryDelta ? await repository.loadLibraryDelta(libraryId, controller.signal) : null;
+        if (remote) {
+          fullRefreshRequested = false;
+        } else {
+          fullRead = fullRefreshRequested || !refreshCollections || lastFullRefreshAt === null
+            || Date.now() - lastFullRefreshAt >= SUCCESS_REFRESH_MS;
+          fullRefreshRequested = false;
+          // Realtime can be interrupted on mobile or self-hosted installations.
+          // Compare only ids/timestamps between full reads; download scores only on change.
+          if (!fullRead) {
+            const versions = await repository.loadLibrarySongVersions(libraryId, controller.signal);
+            const known = new Map(snapshot.workspace.songs.map((song) => [song.id, song.updatedAt ?? 0]));
+            fullRead = versions.length !== known.size || versions.some((song) => known.get(song.id) !== song.updatedAt);
+          }
+          remote = fullRead
+            ? await repository.loadLibraryContent(libraryId, controller.signal)
+            : await repository.loadLibraryCollections(libraryId, snapshot.workspace.songs, controller.signal);
         }
-        const remote = fullRead
-          ? await repository.loadLibraryContent(libraryId, controller.signal)
-          : await repository.loadLibraryCollections(libraryId, snapshot.workspace.songs, controller.signal);
         if (cancelled) return;
         failures = 0;
         setRefreshFailed(false);

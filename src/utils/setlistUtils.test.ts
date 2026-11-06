@@ -162,6 +162,16 @@ describe('setlist capo resolution', () => {
       { includeSharedCapo: false }
     ).capo).toBe(0);
   });
+
+  it('applies the optional guitarist overlay while preserving explicit positive capo and source data', () => {
+    const entry = { ...makeSetlistSong('guitar', 0), overrideKey: 'Eb' as const, capo: 5 };
+    const options = { includeSharedCapo: false, guitaristMode: true };
+    expect(applySetlistSongOverrides(sourceSong, setlist, entry, options).capo).toBe(1);
+    expect(resolveSetlistSongCapo({ ...entry, personalCapoOverride: 2 }, sourceSong, options)).toBe(2);
+    expect(resolveSetlistSongCapo({ ...entry, overrideKey: 'C' }, sourceSong, options)).toBe(0);
+    expect(entry.capo).toBe(5);
+    expect(sourceSong.capo).toBe(3);
+  });
 });
 
 describe('setlist section order editing', () => {
