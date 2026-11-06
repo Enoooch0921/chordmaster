@@ -10,9 +10,9 @@ beforeAll(() => {
     }
   });
 });
-function Keys({ remove, grace }: { remove: () => void; grace: () => void }) {
-  const press = useKeyboardTouchPress(true);
-  return <div onPointerDownCapture={press} data-keyboard-surface><button onClick={remove}>刪除</button><button onClick={grace}>裝飾音</button></div>;
+function Keys({ remove, grace, enabled = true, inert = false }: { remove: () => void; grace: () => void; enabled?: boolean; inert?: boolean }) {
+  const press = useKeyboardTouchPress(enabled);
+  return <div onPointerDownCapture={press} data-keyboard-surface inert={inert || undefined}><button onClick={remove}>刪除</button><button onClick={grace}>裝飾音</button></div>;
 }
 const touch = { pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0, clientX: 100, clientY: 100 };
 it('keeps the originally pressed key when another key moves under the release point, consuming only the compatibility click', () => {
@@ -49,4 +49,18 @@ it('leaves mouse activation native and cleans up a cancelled or unmounted press'
   expect(remove).toHaveBeenCalledTimes(1);
   fireEvent.pointerDown(screen.getByText('刪除'), touch); view.unmount(); fireEvent.pointerUp(window, touch);
   expect(remove).toHaveBeenCalledTimes(1);
+});
+
+it.each(['disabled', 'inert'] as const)('cancels a held key when the surface becomes %s and consumes its compatibility click', mode => {
+  const remove = vi.fn(), grace = vi.fn();
+  const view = render(<Keys remove={remove} grace={grace}/>);
+  fireEvent.pointerDown(screen.getByText('刪除'), touch);
+  view.rerender(<Keys remove={remove} grace={grace} enabled={mode !== 'disabled'} inert={mode === 'inert'}/>);
+  fireEvent.pointerUp(window, touch);
+  fireEvent.click(screen.getByText('裝飾音'), { detail: 1 });
+  expect(remove).not.toHaveBeenCalled(); expect(grace).not.toHaveBeenCalled();
+  view.rerender(<Keys remove={remove} grace={grace}/>);
+  fireEvent.pointerDown(screen.getByText('裝飾音'), touch); fireEvent.pointerUp(window, touch);
+  fireEvent.click(screen.getByText('裝飾音'), { detail: 1 });
+  expect(grace).toHaveBeenCalledOnce();
 });

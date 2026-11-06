@@ -61,3 +61,13 @@ Chromium 最終開啟首 frame gap 為手機 99.4ms、平板 97.6ms、桌機 86.
 `output/playwright/library-ux-20261106/` 的 Chromium／WebKit 各涵蓋 390×844、834×1194、1440×900、320×740：摘要、收藏、組合篩選／收合保留、跨搜尋選取／清空通過，無水平溢出。同步 smoke 使用真實 App／hook 與合成 API，離線操作、重試及 focus 拉取另一裝置資料後均為 3 首收藏（各 4 次呼叫）；不是 NAS 整合測試。已開圖檢查 Chromium 手機摘要／篩選、WebKit 平板選取、同步失敗／恢復與深色手機。深色該畫面 title／authors-version／snippet 對比為 14.64／6.64／9.64，非全 app 對比審計。
 
 最終 focused 9 files／111 tests、lint、build、diff whitespace check 通過；獨立 reviewer **SHIP**，另獨立跑過 18 項同步測試。Disposable PGlite 套用全部 36 migrations 與 38 項 SQL statements 通過。Detector 為 0 warning／15 advisory，含既有及局部小字、圓角、筆記語意色，未宣稱全 app 無問題。500 首本機 Node 搜尋＋全部摘要冷快取 100.496ms，兩次後續輸入暖快取 1.622／1.114ms；不包含 React／browser layout，非 INP 或實體裝置效能。完整證據、首次翻頁提示與筆記間距修復、部署順序及限制見 `docs/library-ux-improvements-2026-11-06.md`。
+
+# Phone workspace switching — 2026-11-06 follow-up
+
+The phone drawer's Songs/Setlists tabs retain the existing 160ms shared selection and 125ms content fade. Keep the covered preview mounted while switching categories so hidden score layout does not compete with that feedback. The preview is inert while covered, resumes current props/callbacks on close, and cannot retain content across account/library/selected-resource changes. Desktop/tablet preview behavior and explicit song-selection drawer dismissal remain unchanged. Pause preview scroll tracking while the phone drawer covers it. See `docs/mobile-workspace-tabs-2026-11-06.md` for verification and limits.
+
+## Setlist row hit area — 2026-11-06 follow-up
+
+The native song-selection button now covers the entire left reading area, including bottom padding and blank space. Keep drag and overflow buttons above its hit area; Key/BPM remain independent. The keyboard focus outline follows the full selectable area. Native touch, scrolling, reordering and responsive checks are recorded in `docs/setlist-song-hit-area-2026-11-06.md`; not yet deployed.
+
+The follow-up audit also extends library song selection over its source/presence notes and setlist-card selection over card padding. Independent actions and multi-selection remain separate targets. Popover exit, rapid toggles, reduced motion and swipe-close checks passed without altering motion timings. See `docs/interaction-hit-area-audit-2026-11-06.md` for confirmed issues, rejected hypotheses and validation scope; not yet deployed.

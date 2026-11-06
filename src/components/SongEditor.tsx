@@ -29,7 +29,7 @@ import { hasVisibleChordTokens, normalizeBarChords } from '../utils/barUtils';
 import { JianpuAccidental, JianpuDuration, JianpuInputMode, JianpuNoteRange, JianpuOctave, MAX_RELATIVE_OCTAVE_SHIFT, absoluteJianpuPartsToRelative, buildJianpuNoteFromMode, buildJianpuPlaceholder, buildJianpuPlaceholderFromUnits, clampRelativeOctave, convertRelativeJianpuToAbsoluteNotation, findJianpuNoteRanges, findJianpuPlaceholderRanges, getCanonicalJianpuBeatTokens, getCanonicalJianpuNotation, getJianpuDurationUnits as getJianpuDurationUnitsFromUtils, rebuildJianpuNote, replaceJianpuRange, serializeJianpuBeatTokens } from '../utils/jianpuUtils';
 import { getEffectiveTimeSignature, getRestGlyph, normalizeRhythmInput, normalizeRhythmToken, parseRhythmNotation, parseTimeSignature, rhythmEndsWithTieToNext } from '../utils/rhythmUtils';
 import { formatInitialCaps } from '../utils/textUtils';
-import { formatTempoBpm, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
+import { formatTempoBpm, isValidTempoDraft, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import { ANNOTATION_COLOR_OPTIONS, DEFAULT_RHYTHM_MARK_COLOR, DEFAULT_SPECIAL_CHORD_COLOR, DEFAULT_UNISON_MARK_COLOR, getAnnotationColorOption } from '../constants/annotationColors';
 import {
   applyBarFieldPatch,
@@ -47,6 +47,7 @@ import {
 } from '../lib/songEditing';
 import { applyRhythmEdit, type RhythmEditAction } from '../lib/rhythmEditing';
 import { getNavigationScrollBehavior } from '../lib/navigationScroll';
+import { songMapLabel } from '../lib/songMap';
 import {
   applyJianpuCommand,
   buildJianpuPitchContext,
@@ -283,7 +284,7 @@ const getSectionNavigationLabel = (title: string, fallbackIndex: number): Sectio
   const firstLine = title.split('\n')[0]?.trim() || '';
   if (!firstLine) return { main: String(fallbackIndex + 1) };
 
-  const normalized = firstLine
+  const normalized = songMapLabel(firstLine).name
     .toLowerCase()
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -304,14 +305,14 @@ const getSectionNavigationLabel = (title: string, fallbackIndex: number): Sectio
   if (normalized.includes('pre chorus')) return sharedLabel('Pc');
   if (normalized.includes('post chorus')) return sharedLabel('Po');
   if (normalized.includes('chorus')) return sharedLabel('C');
-  if (normalized.includes('refrain')) return sharedLabel('Rf');
+  if (normalized.includes('refrain')) return sharedLabel('Ref');
   if (normalized.includes('bridge')) return sharedLabel('B');
-  if (normalized.includes('breakdown')) return sharedLabel('Bd');
-  if (normalized.includes('turnaround')) return sharedLabel('Ta');
+  if (normalized.includes('breakdown')) return sharedLabel('Break');
+  if (normalized.includes('turnaround') || normalized.includes('turn around')) return sharedLabel('Turn');
   if (normalized.includes('interlude')) return sharedLabel('It');
   if (normalized.includes('instrumental')) return sharedLabel('Is');
   if (normalized.includes('solo')) return sharedLabel('S');
-  if (normalized.includes('tag')) return sharedLabel('Tg');
+  if (normalized.includes('tag')) return sharedLabel('Tag');
   if (normalized.includes('vamp')) return sharedLabel('Vp');
   if (normalized.includes('rap')) return sharedLabel('Rp');
   if (normalized.includes('outro')) return sharedLabel('O');
@@ -997,6 +998,7 @@ const SongEditor: React.FC<Props> = ({
   };
 
   const commitTempoDraft = () => {
+    if (!isValidTempoDraft(tempoDraft)) return;
     const nextTempo = normalizeTempoBpm(tempoDraft);
     if (nextTempo === undefined) {
       setTempoDraft('');
@@ -5527,6 +5529,8 @@ const SongEditor: React.FC<Props> = ({
         max={400}
         step={0.01}
         value={tempoDraft}
+        aria-invalid={!isValidTempoDraft(tempoDraft) || undefined}
+        title={language === 'zh' ? '請輸入單一速度，20–400 BPM' : 'Enter one tempo, 20–400 BPM'}
         onChange={e => setTempoDraft(sanitizeTempoInput(e.target.value))}
         onFocus={e => {
           const input = e.currentTarget;
@@ -5542,6 +5546,7 @@ const SongEditor: React.FC<Props> = ({
         }}
         className="h-9 w-full rounded-lg border border-gray-300 px-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
       />
+      {!isValidTempoDraft(tempoDraft) && <p role="status" className="mt-1 text-xs text-rose-600">{language === 'zh' ? '請輸入單一速度，20–400 BPM' : 'Enter one tempo, 20–400 BPM'}</p>}
     </div>
   );
 

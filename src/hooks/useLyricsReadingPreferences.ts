@@ -4,7 +4,7 @@ import type { LyricsBookSettings } from '../utils/lyricsBook';
 export const DEFAULT_LYRICS_READING_SETTINGS: LyricsBookSettings = {
   font: 'sans',
   fontSize: 24,
-  lineHeight: 1.7,
+  lineHeight: 1.42,
   language: 'chinese',
 };
 const STORAGE_PREFIX = 'chordmaster.lyrics-reading.v1';
@@ -15,9 +15,11 @@ function validateSettings(value: unknown): LyricsBookSettings | null {
   const { font, fontSize, lineHeight, language } = value as Record<string, unknown>;
   if (font !== 'sans' && font !== 'kaiti') return null;
   if (typeof fontSize !== 'number' || !Number.isFinite(fontSize) || fontSize < 18 || fontSize > 40 || fontSize % 2 !== 0) return null;
-  if (lineHeight !== 1.5 && lineHeight !== 1.7 && lineHeight !== 2) return null;
+  if (lineHeight !== 1.42 && lineHeight !== 1.5 && lineHeight !== 1.7 && lineHeight !== 2) return null;
   if (language !== 'chinese' && language !== 'english' && language !== 'bilingual' && language !== 'mixed') return null;
-  return { font, fontSize, lineHeight, language };
+  // Legacy 18px preferences were previously fitted above a 20px floor. Keep
+  // that floor once the stored value becomes the exact, fixed reading size.
+  return { font, fontSize: Math.max(20, fontSize), lineHeight, language };
 }
 
 function readSettings(key: string): LyricsBookSettings {

@@ -328,14 +328,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     onApplyDraft(updateBarById(session.draftSong, session.target, bar => ({ ...bar, rhythm: resized.rhythm })));
   } : onSourcePasteRhythm;
   const keyPreview = React.useRef<KeyboardKeyPreviewHandle>(null);
-  const touchPress = useKeyboardTouchPress(deviceLayout !== 'desktop');
+  const present = useIsPresent();
+  const touchPress = useKeyboardTouchPress(present && deviceLayout !== 'desktop');
   const [mode, setMode] = React.useState<KeyboardMode>(() => modeForField(session.target.field));
   const [activePicker, setActivePicker] = React.useState<KeyboardPicker>(null);
   const [pickerAnchor, setPickerAnchor] = React.useState<PickerAnchor | null>(null);
   const [bassMode, setBassMode] = React.useState(false);
   const [landscapeChordPage, setLandscapeChordPage] = React.useState<'input'|'tools'>('input');
   const [collapsed, setCollapsed] = React.useState(false);
-  const present = useIsPresent();
   const [subdivisionsExpanded, setSubdivisionsExpanded] = React.useState(false);
   const [graceDraft, setGraceDraft] = React.useState<JianpuGraceNote[] | null>(null);
   const [desktopKeysVisible, setDesktopKeysVisible] = React.useState(() => (
@@ -1960,7 +1960,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         />
       )}
 
-      <KeyboardKeyPreview ref={keyPreview} enabled={deviceLayout !== 'desktop'}/>
+      <KeyboardKeyPreview ref={keyPreview} enabled={present && deviceLayout !== 'desktop'}/>
       <KeyboardNotice message={notationActionError} anchorRef={panelRef}/>
       <div data-keyboard-disclosure data-keyboard-scroll-body data-collapsed={collapsed ? "true" : "false"} className="min-h-0 shrink-0">
         <AnimatedDisclosure open={!collapsed} resize><div data-keyboard-content>{keyboardContent}</div></AnimatedDisclosure>

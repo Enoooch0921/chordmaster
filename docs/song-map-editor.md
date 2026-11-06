@@ -16,7 +16,15 @@
 
 沿用 Inter 與繁體中文備用字型。主歌、副歌、橋段分別使用柔和藍、綠、紫底，其他段落使用中性底色；深色模式有對應色彩。綠色外框標示選取，遍數置於右上角。自訂名稱採較小字體並可換行。主要操作與儲存至少 44px 高，粗略指標裝置的圖示操作亦至少 44px 寬。
 
-矩形方塊只用於編輯器。譜面及列印曲序繼續使用既有圓形符號，譜面幾何不受影響。局部縮寫字級、輔助小字、6px 操作圓角及 2px 插入標記圓角不提升為全域設計規則。
+編輯器保留上述矩形積木。2026-11-06 使用者選定後，譜面及列印曲序另採低矮淡色色塊，顯示 Intro／Inter／Outro／End，保留頁首高度；詳見 [曲序閱讀設計](../.impeccable/surfaces/chart-song-map.md)。局部縮寫字級、輔助小字、6px 操作圓角及 2px 插入標記圓角不提升為全域設計規則。
+
+2026-11-07，長段名在譜面曲序中分成段落縮寫與演奏提示：`1st Chorus Drop` 顯示 `C · 1st Drop`、`正常Chorus` 顯示 `C · 正常`。提示略小但保留所有字詞；原始段名、譜內標題及儲存資料不變。多段落混合名稱與無法識別的自訂名稱仍完整顯示，避免誤解提示或吞掉演奏指令。
+
+同日依可辨識性調整：Turnaround 顯示 `Turn`、Refrain 顯示 `Ref`、Breakdown 顯示 `Break`，Tag 保留完整 `Tag`。編輯器與譜面共用顯示規則，舊 `Ta`／`Tr`／`R`／`Rf`／`Bd` 仍可識別；`Break` 僅為顯示縮寫，不把原本自訂的 Break 段落改名。
+
+Keep It Burning 的曲序維持一行：先把色塊內距縮為 4px、間距縮為 2px，保留原有 13px 字級及全部提示；不因段落數或一般間距超寬就直接分兩行。頁首高度依實際是否換行決定。
+
+曲序色塊配色改為低彩度的霧藍（主歌）、灰綠（副歌相關段落／Refrain）、暖灰（Bridge／Breakdown）及中性灰（銜接段等）。同色系以文字辨別具體段落，降低一行多種亮色的干擾；字級、單行排版與音樂資料不變。
 
 ## 操作與資料邊界
 
@@ -32,14 +40,14 @@
 | 歌曲庫「預設曲序」 | `song.songMap` | 實際譜面段落 |
 | 歌單「本場曲序」 | 該歌單項目的 `songData.setlistSongMap` | 歌曲庫預設曲序，未設定時依譜面段落 |
 
-「顯示曲序」仍位於歌曲資訊的第一個設定位置。`showSongMap` 只有明確為 `false` 才隱藏曲序，隱藏後仍可開啟歌曲設定。
+「顯示曲序」仍位於歌曲資訊的第一個設定位置。2026-11-06 使用者修正預設：明確的 `showSongMap` 開／關優先；未設定時，單純 Intro／Verse／Chorus 等段落清單預設隱藏，不從譜內段落自動開啟。已儲存的曲序含回到同一段或明確重複遍數，才自動顯示；歌單先採其 `setlistSongMap`。已核對來源的完整曲序（包含 MultiTracks 同版本）可明確設為 `true`，不憑段落數量或編號宣稱已核實。隱藏後仍可開啟歌曲設定，手動開啟時沿用原有曲序／段落推導，不改寫音樂內容。
 
 ## 實作位置
 
 - [SongMapEditor.tsx](../src/components/SongMapEditor.tsx) 與 [SongMapEditor.css](../src/components/SongMapEditor.css)：局部版面、草稿、復原、插入、排序、觸控、驗證與儲存。
 - [ResponsiveDialog.tsx](../src/components/ResponsiveDialog.tsx)：選用的 `wide` 與 `subtitleBelow`；目前只有曲序編輯器使用寬版。
 - [App.tsx](../src/App.tsx)：歌曲庫／歌單範圍、實際段落與繼承來源、儲存回呼。
-- [SongMapToken.tsx](../src/components/SongMapToken.tsx)、[ChartSongMap.tsx](../src/components/ChartSongMap.tsx) 與 [index.css](../src/index.css)：譜面圓形符號、可見性及設定入口；編輯器樣式已獨立。
+- [SongMapToken.tsx](../src/components/SongMapToken.tsx)、[ChartSongMap.tsx](../src/components/ChartSongMap.tsx) 與 [index.css](../src/index.css)：譜面曲序色塊、可見性及設定入口；編輯器樣式已獨立。
 
 ## 驗證與限制
 

@@ -121,3 +121,39 @@ it('leaves vertical touch scrolling native, reveals archive to the right, and ca
   fireEvent.touchStart(row, { touches: [touch(170), touch(200, 20, 43)] });
   expect(screen.queryByRole('button', { name: 'Archive meeting' })).toBeNull();
 });
+
+it('keeps a focused revealed action available past four seconds and restores focus on dismissal', () => {
+  fixture();
+  const trigger = screen.getByRole('button', { name: 'Meeting' });
+  fireEvent.keyDown(trigger, { key: 'ArrowLeft' });
+  act(() => vi.advanceTimersByTime(16));
+  const action = screen.getByRole('button', { name: 'Delete meeting' });
+  expect(action).toHaveFocus();
+  act(() => vi.advanceTimersByTime(10000));
+  expect(action).toHaveFocus();
+  expect(action.closest('[data-swipe-action]')).not.toHaveAttribute('inert');
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(trigger).toHaveFocus();
+  expect(action.closest('[data-swipe-action]')).toHaveAttribute('inert');
+});
+
+it('finishes a pointer settle when keyboard navigation takes over', () => {
+  const { row } = fixture();
+  pointer(row, 'Down', 200); pointer(row, 'Move', 180); pointer(row, 'Up', 180);
+  expect((row as HTMLElement).style.transition).toContain('160ms');
+  fireEvent.keyDown(document, { key: 'Shift' });
+  expect(row).toHaveStyle({ transition: 'none', transform: 'translate3d(-80px, 0, 0)' });
+});
+
+it('finishes a settle when reduced motion is enabled without hiding the action', () => {
+  let reduced = false; const listeners = new Set<() => void>();
+  vi.stubGlobal('matchMedia', () => ({ get matches() { return reduced; }, addEventListener: (_: string, cb: () => void) => listeners.add(cb), removeEventListener: (_: string, cb: () => void) => listeners.delete(cb) }));
+  try {
+    const { row, unmount } = fixture();
+    pointer(row, 'Down', 200); pointer(row, 'Move', 180); pointer(row, 'Up', 180);
+    act(() => { reduced = true; listeners.forEach(cb => cb()); });
+    expect(row).toHaveStyle({ transition: 'none', transform: 'translate3d(-80px, 0, 0)' });
+    expect(screen.getByRole('button', { name: 'Delete meeting' })).toBeInTheDocument();
+    unmount();
+  } finally { vi.unstubAllGlobals(); }
+});

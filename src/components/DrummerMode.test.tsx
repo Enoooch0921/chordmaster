@@ -13,6 +13,8 @@ vi.mock('./ChordSheet', () => ({ default: ({ song, setlistSongNumber }: { song: 
 const song = (title: string, tempo?: number, timeSignature = '4/4'): Song => ({ title, tempo, timeSignature, originalKey: 'C', currentKey: 'C', sections: [] });
 const session: DrummerSession = { name: '測試歌單', initialId: 'a', entries: [{ id: 'a', song: song('第一首', 72) }, { id: 'b', song: song('第二首', 110) }, { id: 'c', song: song('未定速度') }, { id: 'd', song: song('第一首', 72) }] };
 const tempo = () => screen.getByRole('textbox', { name: '節拍器速度 BPM' });
+function openSoundSettings() { fireEvent.click(screen.getByRole('button', { name: /聲音與拍號 ·/ })); }
+function closeSoundSettings() { fireEvent.click(screen.getByRole('button', { name: '關閉聲音設定' })); }
 function controlPointer(button: HTMLElement, type: 'pointerDown' | 'pointerUp' | 'pointerCancel' | 'lostPointerCapture', overrides: Record<string, unknown> = {}) {
   const event = createEvent[type](button, { bubbles: true, cancelable: true });
   Object.defineProperties(event, Object.fromEntries(Object.entries({ pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0, ...overrides }).map(([key, value]) => [key, { value }])));
@@ -137,16 +139,20 @@ describe('drummer session controls', () => {
   });
   it.each(['multitracks', 'drive'])('defaults to Ableton Live Classic and remembers %s across songs and reopening', soundId => {
     const first = mount();
+    fireEvent.click(screen.getByRole('button', { name: '播放' }));
+    openSoundSettings();
     const sound = screen.getByLabelText('音色');
     expect(sound).toHaveValue('ableton-classic');
-    fireEvent.click(screen.getByRole('button', { name: '播放' }));
     expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: 'ableton-classic' }));
     fireEvent.change(sound, { target: { value: soundId } });
+    closeSoundSettings();
     fireEvent.click(songs().getByRole('button', { name: /2 第二首/ }));
     expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: soundId, bpm: 110 }));
     first.unmount();
     mount();
+    openSoundSettings();
     expect(screen.getByLabelText('音色')).toHaveValue(soundId);
+    closeSoundSettings();
     fireEvent.click(screen.getByRole('button', { name: '播放' }));
     expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sound: soundId }));
   });
@@ -239,6 +245,7 @@ describe('drummer session controls', () => {
   it('resumes the new sound after a native picker interrupts playback', () => {
     audio.playing = true;
     const mounted = mount();
+    openSoundSettings();
     const sound = screen.getByLabelText('音色');
     fireEvent.focus(sound);
     audio.playing = false;
@@ -262,6 +269,7 @@ describe('drummer session controls', () => {
   it('restores the previous sound selection after a failed live switch', async () => {
     audio.playing = true; audio.start.mockResolvedValue(false);
     mount();
+    openSoundSettings();
     fireEvent.change(screen.getByLabelText('音色'), { target: { value: 'drive' } });
     await waitFor(() => {
       expect(screen.getByLabelText('音色')).toHaveValue('ableton-classic');
@@ -369,7 +377,9 @@ describe('drummer session controls', () => {
   it('keeps 6/8 beat units explicit and changes grouping only while stopped', () => {
     mount({ name: '6/8', initialId: 'six', entries: [{ id: 'six', song: song('六八拍', 80, '6/8') }] });
     expect(tempo()).toHaveAccessibleDescription('BPM 計拍單位：八分音符');
+    openSoundSettings();
     fireEvent.change(screen.getByLabelText('BPM 計拍單位'), { target: { value: 'group' } });
+    closeSoundSettings();
     fireEvent.click(screen.getByRole('button', { name: '播放' }));
     expect(audio.start).toHaveBeenCalledWith(expect.objectContaining({ bpm: 80, beats: 2 }));
   });
@@ -380,6 +390,7 @@ describe('drummer session controls', () => {
     expect(audio.stop).not.toHaveBeenCalled();
     expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ muted: false, volume: .7, accent: 1, regular: .6, subdivision: 1, sound: 'ableton-classic' }));
     expect(audio.update.mock.lastCall?.[0]).not.toHaveProperty('tone');
+    openSoundSettings();
     expect(screen.getByLabelText('音色')).toHaveValue('ableton-classic');
   });
   it('does not pass editor shortcuts through the overlay, but supports Enter in the tempo field', () => {
@@ -391,13 +402,13 @@ describe('drummer session controls', () => {
     expect(keydown).not.toHaveBeenCalled();
     window.removeEventListener('keydown', keydown);
   });
-  it('retains native decimal entry with one decimal place and no custom keypad', () => {
+  it('retains native decimal precision without truncating pasted values or showing a custom keypad', () => {
     mount();
     fireEvent.focus(tempo());
     fireEvent.change(tempo(), { target: { value: '128.56' } });
-    expect(tempo()).toHaveValue('128.5');
+    expect(tempo()).toHaveValue('128.56');
     fireEvent.blur(tempo());
-    expect(audio.update.mock.lastCall?.[0]).toEqual(expect.objectContaining({ bpm: 128.5 }));
+    expect(audio.update.mock.lastCall?.[0]).toEqual(expect.objectContaining({ bpm: 128.56 }));
     expect(screen.queryByRole('dialog', { name: '設定速度' })).not.toBeInTheDocument();
   });
 });
@@ -435,7 +446,7 @@ it('captures TAP on press without a duplicate on release/click', () => {
   expect(audio.prepare).not.toHaveBeenCalled();
 });
 
-it('starts and stops on touch-down, keeps held feedback and consumes compatibility clicks', () => {
+it('starts, stops and immediately restarts on touch-down while consuming compatibility clicks', () => {
   vi.useFakeTimers();
   try {
     const view = mount(), play = screen.getByRole('button', { name: '播放' });
@@ -449,6 +460,11 @@ it('starts and stops on touch-down, keeps held feedback and consumes compatibili
     controlPointer(play, 'pointerDown'); expect(audio.stop).toHaveBeenCalledOnce();
     controlPointer(play, 'pointerUp'); fireEvent.click(play, { detail: 0 });
     expect(audio.start).toHaveBeenCalledOnce(); expect(audio.stop).toHaveBeenCalledOnce();
+    audio.starting = false; view.rerender(<DrummerMode {...session} language="zh" onClose={vi.fn()}/>);
+    controlPointer(play, 'pointerDown');
+    expect(audio.start).toHaveBeenCalledTimes(2);
+    controlPointer(play, 'pointerUp'); fireEvent.click(play, { detail: 1 });
+    expect(audio.start).toHaveBeenCalledTimes(2); expect(audio.stop).toHaveBeenCalledOnce();
   } finally { vi.useRealTimers(); }
 });
 
@@ -807,4 +823,33 @@ it('keeps config effects from replacing a pending song start and applies the lat
   audio.starting = false;
   result.rerender(<DrummerMode {...session} language="zh" onClose={vi.fn()}/>);
   expect(audio.update).toHaveBeenCalledWith(expect.objectContaining({ bpm: 111 }));
+});
+it('rejects a pasted BPM range without modifying the current tempo or truncating the draft', () => {
+  mount(); audio.update.mockClear();
+  fireEvent.change(tempo(), { target: { value: '100–120' } });
+  fireEvent.blur(tempo());
+  expect(tempo()).toHaveValue('100–120'); expect(tempo()).toHaveAttribute('aria-invalid', 'true');
+  expect(audio.update).not.toHaveBeenCalled();
+  expect(songs().getByRole('button', { name: /^1 第一首/ })).toHaveAccessibleName(/72 BPM/);
+});
+
+it('keeps duplicate songs distinguished by order without extra author lines in drummer mode', () => {
+  mount({ ...session, entries: [
+    { id: 'a', song: { ...song('Same God', 72), composer: 'Writer One' } },
+    { id: 'b', song: { ...song('Same God', 72), composer: 'Writer Two' } },
+    { id: 'c', song: { ...song('Unique', 72), composer: 'Writer Three' } },
+  ] });
+  expect(songs().getByRole('button', { name: /^1 Same God/ })).not.toHaveTextContent('Writer One');
+  expect(songs().getByRole('button', { name: /^2 Same God/ })).not.toHaveTextContent('Writer Two');
+  expect(songs().getByRole('button', { name: /^3 Unique/ })).not.toHaveTextContent('Writer Three');
+});
+
+it('keeps version and bilingual labels out of setlist rows while preserving the chart title', () => {
+  const title = 'Same God（中英雙語／現場版本）';
+  mount({ ...session, entries: [{ id: 'a', song: { ...song(title, 72), composer: 'Writer' } }] });
+  const row = songs().getByRole('button', { name: /^1 Same God/ });
+  expect(row).toHaveTextContent('Same God');
+  expect(row).not.toHaveTextContent('中英雙語');
+  expect(row).not.toHaveTextContent('Writer');
+  expect(screen.getByTestId('chart')).toHaveTextContent(title);
 });

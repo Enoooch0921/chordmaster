@@ -33,32 +33,44 @@ export function usePreviewKeyboardVisibility(
   const scrolling = useRef<AnimationPlaybackControls | null>(null);
   const destination = useRef<number | null>(null);
   const finishScroll = useRef<(() => void) | null>(null);
+  const generation = useRef(0);
+  const manualPosition = useRef({ anchorKey, occurrence, active: false });
   const reservation = useRef<{ preview: HTMLDivElement; canvas: HTMLDivElement; padding: string; scrollPadding: string; leading: HTMLDivElement | null; basePadding: number } | null>(null);
 
   const stop = () => {
+    generation.current++;
     scrolling.current?.stop(); scrolling.current = null;
     destination.current = null; finishScroll.current = null;
   };
-  const release = (immediate = false) => {
+  const release = (immediate = false, preservePosition = false) => {
     const saved = reservation.current;
     if (!saved) return;
+    stop();
+    const token = generation.current;
+    const height = parseFloat(saved.leading?.style.height ?? '') || 0;
+    const scrollTop = saved.preview.scrollTop;
     saved.preview.style.paddingBottom = saved.padding;
     saved.preview.style.scrollPaddingBottom = saved.scrollPadding;
-    const finish = () => { saved.leading?.remove(); reservation.current = null; scrolling.current = null; };
-    const height = parseFloat(saved.leading?.style.height ?? '') || 0;
+    const finish = () => {
+      if (generation.current !== token || reservation.current !== saved) return;
+      saved.leading?.remove(); reservation.current = null; scrolling.current = null;
+      if (preservePosition) saved.preview.scrollTop = Math.max(0, scrollTop - height);
+    };
     if (height && !immediate && !preference.instant && !preference.reduced) {
       // The temporary leading space is an accordion: collapse its height,
       // rather than removing a margin and snapping the first row upward.
       scrolling.current = animate(height, 0, { duration: 0.2, ease: UI_DRAWER_EASE,
-        onUpdate: value => { if (saved.leading) saved.leading.style.height = `${value}px`; }, onComplete: finish });
+        onUpdate: value => { if (generation.current === token && saved.leading) saved.leading.style.height = `${value}px`; }, onComplete: finish });
     } else finish();
   };
   const scroll = (preview: HTMLElement, top: number, complete: () => void) => {
+    if (destination.current !== null && Math.abs(destination.current - top) < 1) { finishScroll.current = complete; return; }
+    stop();
+    const token = generation.current;
     finishScroll.current = complete;
-    if (destination.current !== null && Math.abs(destination.current - top) < 1) return;
-    scrolling.current?.stop();
     destination.current = top;
     const done = () => {
+      if (generation.current !== token) return;
       scrolling.current = null; destination.current = null;
       const finish = finishScroll.current; finishScroll.current = null; finish?.();
     };
@@ -67,20 +79,46 @@ export function usePreviewKeyboardVisibility(
     }
     scrolling.current = animate(preview.scrollTop, top, {
       duration: 0.24, ease: UI_DRAWER_EASE,
-      onUpdate: value => { preview.scrollTop = value; }, onComplete: done
+      onUpdate: value => { if (generation.current === token) preview.scrollTop = value; }, onComplete: done
     });
   };
 
   useLayoutEffect(() => {
+    if (manualPosition.current.anchorKey !== anchorKey || manualPosition.current.occurrence !== occurrence) {
+      manualPosition.current = { anchorKey, occurrence, active: false };
+    }
     if (!anchorKey) {
       const saved = reservation.current;
       if (!saved) return;
+      let interrupted = manualPosition.current.active;
+      const releaseWhenSafe = () => {
+        if (!interrupted || reservation.current !== saved) return;
+        const leading = parseFloat(saved.leading?.style.height ?? '') || 0;
+        const padding = parseFloat(getComputedStyle(saved.preview).paddingBottom) || 0;
+        const top = saved.preview.scrollTop - leading;
+        const max = Math.max(0, saved.preview.scrollHeight - saved.preview.clientHeight - padding + saved.basePadding - leading);
+        // Keep only the temporary space still needed to avoid a clamp or a jump.
+        // Once the user pans back into the original range, remove it in-place.
+        if (top >= 0 && top <= max) release(true, true);
+      };
+      const interrupt = () => { interrupted = true; manualPosition.current.active = true; stop(); releaseWhenSafe(); };
+      saved.preview.addEventListener('pointerdown', interrupt, { passive: true });
+      saved.preview.addEventListener('touchstart', interrupt, { passive: true });
+      saved.preview.addEventListener('wheel', interrupt, { passive: true });
+      saved.preview.addEventListener('scroll', releaseWhenSafe, { passive: true });
       const padding = parseFloat(getComputedStyle(saved.preview).paddingBottom) || 0;
       const max = Math.max(0, saved.preview.scrollHeight - saved.preview.clientHeight - padding + saved.basePadding);
       // Keep the old space until the scroll finishes: removing it first makes
       // the browser clamp scrollTop and teleport the last rows on dismissal.
-      scroll(saved.preview, Math.min(saved.preview.scrollTop, max), release);
-      return stop;
+      if (interrupted) releaseWhenSafe();
+      else scroll(saved.preview, Math.min(saved.preview.scrollTop, max), release);
+      return () => {
+        stop();
+        saved.preview.removeEventListener('pointerdown', interrupt);
+        saved.preview.removeEventListener('touchstart', interrupt);
+        saved.preview.removeEventListener('wheel', interrupt);
+        saved.preview.removeEventListener('scroll', releaseWhenSafe);
+      };
     }
     stop();
     const preview = previewRef.current, canvas = canvasRef.current;
@@ -90,12 +128,11 @@ export function usePreviewKeyboardVisibility(
       leading: null, basePadding: parseFloat(getComputedStyle(preview).paddingBottom) || 0
     };
     let frame = 0;
-    let manuallyPositioned = false;
     const reveal = () => {
-      if (manuallyPositioned) return;
+      if (manualPosition.current.active) return;
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        if (manuallyPositioned) return;
+        if (manualPosition.current.active) return;
         const preview = previewRef.current;
         const canvas = canvasRef.current;
         const panel = document.querySelector<HTMLElement>('[data-keyboard-position-shell]')
@@ -146,13 +183,13 @@ export function usePreviewKeyboardVisibility(
     // User panning wins immediately, at its current position, without jumping
     // to the animation's destination or repeatedly revealing the selected bar.
     const interrupt = () => {
-      manuallyPositioned = true;
+      manualPosition.current.active = true;
       window.cancelAnimationFrame(frame);
       stop();
     };
     const resumeEditing = (event: PointerEvent) => {
       if (!(event.target instanceof Element) || !event.target.closest('[data-preview-bar-editor]')) return;
-      manuallyPositioned = false;
+      manualPosition.current.active = false;
       reveal();
     };
     preview.addEventListener('pointerdown', interrupt, { passive: true });

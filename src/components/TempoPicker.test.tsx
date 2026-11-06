@@ -100,3 +100,14 @@ it('does not offer adoption without library-edit permission and keeps an unchang
   rerender(<TempoPicker language="en" value={92} originalTempo={92} showOriginalTempo onChange={vi.fn()}/>);
   expect(screen.getByRole('button', { name: 'Restore library tempo · 92 BPM' })).toBeDisabled();
 });
+it('keeps an ambiguous pasted range visible and prevents committing it', () => {
+  const change = vi.fn();
+  render(<TempoPicker value={92} onChange={change} language="zh" />);
+  fireEvent.click(screen.getByRole('button', { name: '速度 92 BPM' }));
+  const input = screen.getByRole('textbox', { name: '速度 BPM' });
+  fireEvent.change(input, { target: { value: '100–120' } });
+  expect(input).toHaveValue('100–120'); expect(input).toHaveAttribute('aria-invalid', 'true');
+  expect(screen.getByRole('button', { name: '套用' })).toBeDisabled();
+  fireEvent.submit(input.closest('form')!);
+  expect(change).not.toHaveBeenCalled();
+});

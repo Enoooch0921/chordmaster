@@ -1,9 +1,9 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, fireEvent, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useNativeDialogMotion } from './useNativeDialogMotion';
 const state=vi.hoisted(()=>({present:true,instant:false,reduced:false,safe:vi.fn()}));
 vi.mock('motion/react',()=>({usePresence:()=>[state.present,state.safe]}));
-vi.mock('./useUiMotion',()=>({useUiMotion:()=>state,isKeyboardInteraction:()=>state.instant}));
+vi.mock('./useUiMotion',async original=>({...await original<typeof import('./useUiMotion')>(),useUiMotion:()=>state,isKeyboardInteraction:()=>state.instant}));
 beforeEach(()=>{state.present=true;state.instant=false;state.reduced=false;vi.clearAllMocks();vi.stubGlobal('innerWidth',390);const original=window.getComputedStyle;vi.spyOn(window,'getComputedStyle').mockImplementation(node=>original(node));});
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();document.body.replaceChildren();document.body.style.overflow='';});
 function setup(){
@@ -39,4 +39,16 @@ it('retains the scroll lock until the last stacked native dialog unmounts',()=>{
  document.body.style.overflow='auto';const first=setup(),second=setup();
  first.hook.unmount();expect(document.body.style.overflow).toBe('hidden');
  second.hook.unmount();expect(document.body.style.overflow).toBe('auto');
+});
+
+it('settles an entering native dialog when keyboard input takes over without rerendering it',()=>{
+ const t=setup();fireEvent.keyDown(document,{key:'Tab'});
+ expect(t.runs[0].cancel).toHaveBeenCalled();expect(t.node).toHaveAttribute('data-native-dialog-instant');
+ expect(t.node.open).toBe(true);expect(state.safe).not.toHaveBeenCalled();
+});
+it('finishes an in-flight exit on keyboard takeover and ignores the old completion',async()=>{
+ const t=setup();await t.finish();t.hook.rerender({present:false});const old=t.runs.at(-1)!;
+ await act(async()=>{fireEvent.keyDown(document,{key:'Tab'});await Promise.resolve();});
+ expect(old.cancel).toHaveBeenCalled();expect(state.safe).toHaveBeenCalledOnce();
+ await act(async()=>{old.resolve();await Promise.resolve();});expect(state.safe).toHaveBeenCalledOnce();
 });

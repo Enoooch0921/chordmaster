@@ -61,7 +61,9 @@ export function transitionDrummerWorkspace(update: () => void, instant = false, 
     });
   };
   let current = true;
+  let stopKeyboardListener = () => {};
   const restore = () => {
+    stopKeyboardListener();
     current = false; restoreNames();
     properties.forEach((name, index) => {
       if (originalProperties[index]) root.style.setProperty(name, originalProperties[index]);
@@ -79,6 +81,15 @@ export function transitionDrummerWorkspace(update: () => void, instant = false, 
       restoreNames(); commit(); captureLeft();
     });
     active = transition; commitActive = commit; restoreActive = restore;
+    const interrupt = () => {
+      if (active !== transition) return;
+      commit();
+      transition.skipTransition();
+      restore();
+      active = undefined; commitActive = undefined; restoreActive = undefined;
+    };
+    document.addEventListener('keydown', interrupt, true);
+    stopKeyboardListener = () => document.removeEventListener('keydown', interrupt, true);
     return transition.finished.catch(() => {}).finally(() => {
       if (active === transition) {
         restore(); active = undefined; commitActive = undefined; restoreActive = undefined;

@@ -77,3 +77,32 @@ it('cancels spatial animation when Reduce Motion is enabled during a pending App
   expect(animation.mock.calls.every(([frames]) => !(frames as Keyframe[]).some(frame => frame.transform || frame.clipPath))).toBe(true);
   delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
 });
+
+it('finishes a pointer cover on keyboard takeover without cancelling navigation or the destination-ready guard', async () => {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate');
+  const runs: { cancel: ReturnType<typeof vi.fn> }[] = [];
+  const animate = vi.fn(() => {
+    let reject!: (reason: Error) => void;
+    const finished = new Promise<void>((_resolve, fail) => { reject = fail; });
+    const run = { finished, cancel: vi.fn(() => reject(new Error('cancelled'))) };
+    runs.push(run); return run;
+  });
+  Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: animate });
+  try {
+    const rendered = render(view());
+    fireEvent.pointerDown(document); fireEvent.click(screen.getByText('Open invitation'), { detail: 1 });
+    expect(runs).toHaveLength(2);
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(runs.every(run => run.cancel.mock.calls.length === 1)).toBe(true);
+    await waitFor(() => expect(document.querySelector('h1')).toHaveTextContent('Real destination'));
+    expect(document.querySelector('.invitation-gate')).toHaveClass('invitation-gate--quiet');
+    expect(document.querySelector('.invitation-route-content')).toHaveAttribute('inert');
+    ready = true; rendered.rerender(view());
+    await waitFor(() => expect(document.querySelector('.invitation-gate')).toBeNull());
+    expect(document.querySelector('.invitation-route-content')).not.toHaveAttribute('inert');
+    expect(animate).toHaveBeenCalledTimes(2);
+  } finally {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'animate', original);
+    else delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+  }
+});

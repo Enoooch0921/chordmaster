@@ -47,6 +47,10 @@
 .drummer-transport { display: grid; grid-template-columns: 1fr 1fr 104px; gap: 8px; }
 .drummer-transport button { min-height: 62px; background: var(--color-surface-sunken); font-weight: 650; }
 .drummer-transport .drummer-play { background: var(--color-indigo-700); color: white; font-size: 17px; }
+.drummer-play > span { white-space: nowrap; }
+@container drummer-click (max-width: 340px) {
+  .drummer-mode .drummer-transport .drummer-play { flex-direction: column; gap: 2px; padding-inline: 4px; }
+}
 @media (hover: hover) and (pointer: fine) { .drummer-transport .drummer-play:hover { background: var(--color-indigo-800); } }
 .drummer-tap { flex-direction: column; gap: 1px !important; font-size: 18px; }
 .drummer-tap > span { font-size: 11px; font-weight: 400; color: var(--color-text-muted); }
@@ -343,21 +347,6 @@
 }
 .drummer-subdivision-trigger[aria-expanded="true"] > svg:last-child,
 .drummer-settings-toggle[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
-[data-ui-input="pointer"] .drummer-mode .drummer-subdivisions {
-  transform-origin: left top;
-  transition: opacity 200ms var(--ease-ui-out), transform 200ms var(--ease-ui-out);
-}
-[data-ui-input="pointer"] .drummer-mode .drummer-midi-backdrop {
-  transition: opacity 200ms var(--ease-ui-out);
-}
-[data-ui-input="pointer"] .drummer-mode .drummer-midi-panel {
-  transition: transform 250ms var(--ease-ui-out), opacity 200ms var(--ease-ui-out);
-}
-@starting-style {
-  [data-ui-input="pointer"] .drummer-mode .drummer-subdivisions { opacity: 0; transform: scale(.95); }
-  [data-ui-input="pointer"] .drummer-mode .drummer-midi-backdrop { opacity: 0; }
-  [data-ui-input="pointer"] .drummer-mode .drummer-midi-panel { opacity: 0; transform: translateX(8%); }
-}
 [data-ui-input="keyboard"] .drummer-mode .drummer-subdivisions,
 [data-ui-input="keyboard"] .drummer-mode .drummer-midi-panel,
 [data-ui-input="keyboard"] .drummer-mode .drummer-midi-backdrop,
@@ -374,10 +363,6 @@
   [data-ui-input="pointer"] .drummer-mode .drummer-midi-panel { transition-property: opacity; }
   .drummer-mode .drummer-subdivision-trigger > svg:last-child,
   .drummer-mode .drummer-settings-toggle > svg:last-child { transition: none; }
-  @starting-style {
-    [data-ui-input="pointer"] .drummer-mode .drummer-subdivisions,
-    [data-ui-input="pointer"] .drummer-mode .drummer-midi-panel { transform: none; }
-  }
 }
 
 .drummer-score-view[data-paged="true"] [data-print-page][data-drummer-page-active="false"] { display: none !important; }

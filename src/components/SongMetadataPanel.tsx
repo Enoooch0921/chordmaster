@@ -1,4 +1,5 @@
 import { applySongVersionText, getSongVersionText as getVersionValue } from '../lib/songCredits';
+import { shouldShowSongMap } from '../lib/songMap';
 import { AnimatedDisclosure } from './ui/InteractionMotion';
 import React from 'react';
 import './SongMetadataPanel.css';
@@ -10,7 +11,7 @@ import { CompactSegmentedControl, CompactToggleSwitch } from './SetlistCompactCo
 import { parseYouTubeVideoId } from '../utils/referenceUtils';
 import { formatInitialCaps } from '../utils/textUtils';
 import { estimateTapTempo, getRecentTapTimes, resolveTapTempoDisplayBpm, type TapTempoLockState } from '../utils/tapTempoUtils';
-import { formatTempoBpm, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
+import { formatTempoBpm, isValidTempoDraft, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import type { PreviewEditorDeviceLayout } from '../lib/previewEditorLayout';
 
 type PreviewMetadataFocusField = 'title' | 'credits' | 'key' | 'tempo' | 'timeSignature' | 'capo' | 'groove';
@@ -94,6 +95,7 @@ interface TapTempoButtonProps {
 
 interface TapTempoButtonHandle {
   tap: (eventTimeStamp?: number) => void;
+  release: () => void;
 }
 
 const TAP_RESET_AFTER_MS = 2500;
@@ -170,25 +172,7 @@ const TapTempoButton = React.forwardRef<TapTempoButtonHandle, TapTempoButtonProp
 
   const handleTap = React.useCallback((eventTimeStamp?: number) => {
     const now = getTapTimestamp(eventTimeStamp);
-    buttonRef.current?.animate([
-      {
-        transform: 'scale(0.94)',
-        backgroundColor: '#ecfdf5',
-        borderColor: '#6ee7b7',
-        color: '#047857',
-        boxShadow: '0 0 0 3px rgba(167, 243, 208, 0.9)'
-      },
-      {
-        transform: 'scale(1)',
-        backgroundColor: '#ffffff',
-        borderColor: '#d1d5db',
-        color: '#4b5563',
-        boxShadow: '0 0 0 0 rgba(167, 243, 208, 0)'
-      }
-    ], {
-      duration: 150,
-      easing: 'ease-out'
-    });
+    buttonRef.current?.setAttribute('data-control-pressed', 'true');
 
     const nextTaps = getRecentTapTimes(tapTimesRef.current, now, {
       resetAfterMs: TAP_RESET_AFTER_MS,
@@ -225,21 +209,28 @@ const TapTempoButton = React.forwardRef<TapTempoButtonHandle, TapTempoButtonProp
     }, TAP_APPLY_IDLE_MS);
   }, [updateDisplayedBpm]);
 
-  React.useImperativeHandle(ref, () => ({
-    tap: handleTap
-  }), [handleTap]);
+  const release = React.useCallback(() => {
+    buttonRef.current?.removeAttribute('data-control-pressed');
+  }, []);
+  React.useEffect(() => {
+    window.addEventListener('blur', release);
+    return () => window.removeEventListener('blur', release);
+  }, [release]);
+  React.useImperativeHandle(ref, () => ({ tap: handleTap, release }), [handleTap, release]);
 
   return (
     <button
       ref={buttonRef}
       type="button"
       onPointerDown={(event) => {
+        if (event.button !== 0 || event.isPrimary === false) return;
         event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
         onActivate?.();
         handleTap(event.timeStamp);
       }}
       onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') {
+        if (event.repeat || (event.key !== 'Enter' && event.key !== ' ')) {
           return;
         }
 
@@ -247,8 +238,14 @@ const TapTempoButton = React.forwardRef<TapTempoButtonHandle, TapTempoButtonProp
         onActivate?.();
         handleTap(event.timeStamp);
       }}
+      onKeyUp={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); release(); } }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onLostPointerCapture={release}
+      onBlur={release}
+      onContextMenu={event => event.preventDefault()}
       onFocus={onActivate}
-      className="inline-flex h-7 w-full min-w-[4.5rem] items-center justify-center rounded-lg border border-gray-300 bg-white px-2 text-[11px] font-bold tabular-nums text-gray-600 transition-colors duration-75 hover:border-indigo-200 hover:text-indigo-700 active:scale-95 active:border-emerald-300 active:bg-emerald-50 active:text-emerald-700 active:ring-2 active:ring-emerald-100"
+      className="reference-tap inline-flex h-7 w-full min-w-[4.5rem] items-center justify-center rounded-lg border border-gray-300 bg-white px-2 text-[11px] font-bold tabular-nums text-gray-600"
       title={language === 'zh' ? '跟著音樂按下節拍，自動套用 BPM' : 'Press with the music to apply BPM'}
     >
       {displayedBpm ?? 'TAP'}
@@ -400,6 +397,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
     const handleReferenceTapKeyDown = (event: KeyboardEvent) => {
       if (
         event.key.toLowerCase() !== 't'
+        || event.repeat
         || event.metaKey
         || event.ctrlKey
         || event.altKey
@@ -423,11 +421,21 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       tapButton.tap(event.timeStamp);
     };
 
+    const releaseReferenceTap = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 't') return;
+      bandTapButtonRef.current?.release();
+      vocalTapButtonRef.current?.release();
+    };
     window.addEventListener('keydown', handleReferenceTapKeyDown);
-    return () => window.removeEventListener('keydown', handleReferenceTapKeyDown);
+    window.addEventListener('keyup', releaseReferenceTap);
+    return () => {
+      window.removeEventListener('keydown', handleReferenceTapKeyDown);
+      window.removeEventListener('keyup', releaseReferenceTap);
+    };
   }, [activeReferenceTapKind, showReferenceFields]);
 
   const commitTempoDraft = React.useCallback(() => {
+    if (!isValidTempoDraft(tempoDraft)) return;
     const parsedTempo = normalizeTempoBpm(tempoDraft);
     setTempoDraft(formatTempoBpm(parsedTempo));
     onChange({
@@ -478,6 +486,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
       referenceBpmCommitTimeoutsRef.current[kind] = null;
     }
 
+    if (!isValidTempoDraft(draft)) return;
     const nextBpm = normalizeTempoBpm(draft);
     const nextDraft = formatTempoBpm(nextBpm);
     setReferenceBpmDrafts((current) => (
@@ -564,6 +573,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
             max={400}
             step={0.01}
             value={bpmDraft}
+            aria-invalid={!isValidTempoDraft(bpmDraft) || undefined}
+            title={language === 'zh' ? '請輸入單一速度，20–400 BPM' : 'Enter one tempo, 20–400 BPM'}
             onChange={(event) => {
               updateReferenceBpmDraft(kind, event.target.value, REFERENCE_BPM_INPUT_COMMIT_DELAY_MS);
             }}
@@ -729,6 +740,8 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         max={400}
         step={0.01}
         value={tempoDraft}
+        aria-invalid={!isValidTempoDraft(tempoDraft) || undefined}
+        title={language === 'zh' ? '請輸入單一速度，20–400 BPM' : 'Enter one tempo, 20–400 BPM'}
         onChange={(event) => setTempoDraft(sanitizeTempoInput(event.target.value))}
         onBlur={commitTempoDraft}
         onKeyDown={(event) => {
@@ -739,6 +752,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
         }}
         className={fieldClassName}
       />
+      {!isValidTempoDraft(tempoDraft) && <p role="status" className="mt-1 text-xs text-rose-600">{language === 'zh' ? '請輸入單一速度，20–400 BPM' : 'Enter one tempo, 20–400 BPM'}</p>}
     </div>
   );
 
@@ -927,7 +941,7 @@ const SongMetadataPanel: React.FC<SongMetadataPanelProps> = ({
 
   const mapVisibilityField = canChangeMapVisibility && (
     <CompactToggleSwitch label={language === 'zh' ? '顯示曲序' : 'Show song map'}
-      checked={song.showSongMap !== false} onChange={value => updateField('showSongMap', value)} size="sm" />
+      checked={shouldShowSongMap(song)} onChange={value => updateField('showSongMap', value)} size="sm" />
   );
 
   const barHeightField = (

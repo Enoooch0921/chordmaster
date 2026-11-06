@@ -63,6 +63,8 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
     }
   }, [autoOpen, disabled]);
 
+  React.useEffect(() => { if (disabled) closePanel(true); }, [disabled, closePanel]);
+
   React.useEffect(() => {
     if (!isOpen) {
       return;
@@ -112,6 +114,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
   }, [isOpen, value]);
 
   const handleOptionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, capo: number) => {
+    if (disabled) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onChange(capo);
@@ -179,7 +182,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
         <AnimatedPopover open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
           id={panelId} role="dialog" aria-label={label}
           panelRef={panelRef}
-          className={`${touchOptimized ? 'w-[248px] p-3' : 'w-[132px] p-2'} overflow-hidden rounded-[20px] border border-gray-200 bg-white shadow-xl`}
+          className={`ui-anchored-panel ${touchOptimized ? 'w-[248px] p-3' : 'w-[132px] p-2'} rounded-[20px] border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
           data-placement={placement}
         >
@@ -200,6 +203,7 @@ const CapoPicker: React.FC<CapoPickerProps> = ({
                   }}
                   type="button"
                   onClick={() => {
+                    if (disabled) return;
                     onChange(capo);
                     closePanel(true, true);
                   }}

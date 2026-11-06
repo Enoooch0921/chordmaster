@@ -1,12 +1,24 @@
 import { fireEvent, render, renderHook } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { isKeyboardInteraction, useUiMotion } from './useUiMotion';
+import { isKeyboardInteraction, useKeyboardMotionInterrupt, useUiMotion } from './useUiMotion';
 const media = vi.hoisted(() => ({ reduced: false }));
 vi.mock('./useReducedMotionPreference', () => ({ useReducedMotionPreference: () => media.reduced }));
 beforeEach(() => { media.reduced = false; });
 
 describe('interaction motion input gate', () => {
+  it('interrupts active surfaces once per keyboard takeover, with fresh callbacks and no renders', () => {
+    const first = vi.fn(), next = vi.fn(), renders = vi.fn();
+    const hook = renderHook(({ interrupt }) => { renders(); useKeyboardMotionInterrupt(interrupt); }, { initialProps: { interrupt: first } });
+    fireEvent.keyDown(document, { key: 'Tab' }); fireEvent.keyDown(document, { key: 'a' });
+    expect(first).toHaveBeenCalledOnce(); expect(renders).toHaveBeenCalledOnce();
+    hook.rerender({ interrupt: next });
+    fireEvent.pointerDown(document); fireEvent.keyDown(document, { key: 'Tab' });
+    expect(next).toHaveBeenCalledOnce(); expect(renders).toHaveBeenCalledTimes(2);
+    hook.unmount(); fireEvent.pointerDown(document); fireEvent.keyDown(document, { key: 'Tab' });
+    expect(next).toHaveBeenCalledOnce();
+    expect(document.documentElement.dataset.uiInput).toBeUndefined();
+  });
   it('tracks keyboard and pointer input without rerendering the score on each event', () => {
     const renders = vi.fn();
     function Probe() {

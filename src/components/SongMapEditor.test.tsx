@@ -114,3 +114,61 @@ it('offers keyboard reordering and leaves edits local until Save', () => {
   fireEvent.click(button('取消'));
   expect(close).toHaveBeenCalled(); expect(onSave).not.toHaveBeenCalled();
 });
+it('continues edge scrolling while the pointer is stationary and stops on cancellation', () => {
+  vi.useFakeTimers(); setup();
+  const body = document.querySelector<HTMLElement>('.map-editor-body')!;
+  Object.defineProperties(body, { scrollHeight: { value: 1200 }, clientHeight: { value: 400 } });
+  body.getBoundingClientRect = () => ({ top: 0, bottom: 400, left: 0, right: 400 }) as DOMRect;
+  const source = sequence()[0];
+  fireEvent.pointerDown(source, { pointerId: 7, pointerType: 'mouse', button: 0, clientX: 80, clientY: 50 });
+  fireEvent.pointerMove(source, { pointerId: 7, pointerType: 'mouse', clientX: 80, clientY: 390 });
+  act(() => vi.advanceTimersByTime(160)); const first = body.scrollTop;
+  act(() => vi.advanceTimersByTime(160)); expect(body.scrollTop).toBeGreaterThan(first);
+  fireEvent.pointerCancel(source, { pointerId: 7, pointerType: 'mouse' }); const stopped = body.scrollTop;
+  act(() => vi.advanceTimersByTime(500)); expect(body.scrollTop).toBe(stopped);
+});
+
+it('scrolls the same distance at 60 and 120 Hz and caps a long frame', () => {
+  setup();
+  const body = document.querySelector<HTMLElement>('.map-editor-body')!;
+  Object.defineProperties(body, { scrollHeight: { value: 2000 }, clientHeight: { value: 400 } });
+  body.getBoundingClientRect = () => ({ top: 0, bottom: 400, left: 0, right: 400 }) as DOMRect;
+  let scroll = 0;
+  Object.defineProperty(body, 'scrollTop', { configurable: true, get: () => scroll, set: value => { scroll = Math.floor(value); } });
+  let callback: FrameRequestCallback | undefined;
+  vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => { callback = fn; return 1; });
+  vi.stubGlobal('cancelAnimationFrame', () => { callback = undefined; });
+  const now = vi.spyOn(performance, 'now').mockReturnValue(0);
+  const source = sequence()[0]; const distances: number[] = [];
+  for (const hz of [60, 120]) {
+    body.scrollTop = 0;
+    fireEvent.pointerDown(source, { pointerId: 7, button: 0, clientX: 80, clientY: 50 });
+    fireEvent.pointerMove(source, { pointerId: 7, clientX: 80, clientY: 399 });
+    for (let frame = 1; frame <= hz / 2; frame++) act(() => callback?.(frame * 1000 / hz));
+    distances.push(body.scrollTop);
+    act(() => callback?.(5000));
+    expect(body.scrollTop - distances.at(-1)!).toBeLessThanOrEqual(600 * .032 + .001);
+    fireEvent.pointerCancel(source, { pointerId: 7 });
+    expect(callback).toBeUndefined();
+  }
+  expect(distances[0]).toBe(Math.floor(600 * (31 / 32) ** 2 * .5));
+  expect(distances[1]).toBeCloseTo(distances[0]);
+  now.mockRestore();
+});
+
+it('shows a non-interactive drag preview only after activation and removes it on keyboard cancellation', () => {
+  vi.useFakeTimers(); setup();
+  const source = sequence()[0];
+  const finger = { identifier: 9, clientX: 90, clientY: 100 };
+  fireEvent.touchStart(source, { touches: [finger] });
+  expect(document.querySelector('.map-drag-preview')).toBeNull();
+  act(() => vi.advanceTimersByTime(350));
+  const preview = document.querySelector('.map-drag-preview');
+  expect(preview).toHaveAttribute('aria-hidden', 'true');
+  expect(preview).toHaveAttribute('inert');
+  expect(preview).not.toHaveAttribute('data-map-step-id');
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(document.querySelector('.map-drag-preview')).toBeNull();
+  expect(source).not.toHaveAttribute('data-dragging');
+  expect(sequence()[0]).toBe(source);
+});

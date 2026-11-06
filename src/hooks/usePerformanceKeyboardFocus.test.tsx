@@ -72,3 +72,30 @@ it('never focuses the input on rapid restore calls before the fullscreen request
   expect(focus).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(overlay.current);
 });
+
+it('leaves the reader section picker focused through heartbeats and resumes after leaving it', () => {
+  const { overlay, capture, focus } = setup();
+  const picker = document.createElement('select');
+  picker.append(document.createElement('option'));
+  overlay.current!.append(picker);
+  picker.focus(); focus.mockClear();
+  act(() => vi.advanceTimersByTime(3000));
+  expect(picker).toHaveFocus();
+  expect(focus).not.toHaveBeenCalled();
+  picker.blur();
+  act(() => vi.advanceTimersByTime(1500));
+  expect(document.activeElement).toBe(capture.current);
+});
+
+it.each(['button', 'input', 'a'])('preserves deliberate %s focus during heartbeat and foreground recovery', tag => {
+  const { overlay, capture, focus } = setup();
+  const control = document.createElement(tag);
+  if (tag === 'a') control.setAttribute('href', '#');
+  overlay.current!.append(control);
+  control.focus(); focus.mockClear();
+  act(() => { vi.advanceTimersByTime(4500); window.dispatchEvent(new Event('focus')); });
+  expect(control).toHaveFocus(); expect(focus).not.toHaveBeenCalled();
+  control.blur();
+  act(() => vi.advanceTimersByTime(1500));
+  expect(capture.current).toHaveFocus();
+});

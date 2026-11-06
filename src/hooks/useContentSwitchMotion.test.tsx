@@ -1,8 +1,8 @@
-import { renderHook } from '@testing-library/react';
+import { fireEvent, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useContentSwitchMotion } from './useContentSwitchMotion';
 const preference = vi.hoisted(() => ({ instant: false, reduced: false }));
-vi.mock('./useUiMotion', () => ({ useUiMotion: () => preference }));
+vi.mock('./useUiMotion', async original => ({ ...await original<typeof import('./useUiMotion')>(), useUiMotion: () => preference }));
 beforeEach(() => { preference.instant = false; preference.reduced = false; });
 afterEach(() => { vi.restoreAllMocks(); document.body.replaceChildren(); });
 function setup() {
@@ -33,4 +33,11 @@ it('does not animate a hidden panel or replay its first opening', () => {
 });
 it('cancels the visual animation when its owner unmounts', () => {
   const t = setup(); t.hook.rerender({ value: 'setlists', enabled: true }); t.hook.unmount(); expect(t.cancel).toHaveBeenCalled();
+});
+it('finishes the current fade when typing starts without waiting for another render', () => {
+  const t = setup(); t.hook.rerender({ value: 'setlists', enabled: true });
+  fireEvent.keyDown(document, { key: 'a' });
+  expect(t.cancel).toHaveBeenCalledOnce();
+  fireEvent.keyDown(document, { key: 'b' });
+  expect(t.cancel).toHaveBeenCalledOnce();
 });

@@ -1,77 +1,88 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
-import { UI_EASE_OUT } from '../lib/uiMotion';
 
 const INTENT_DISTANCE = 8;
 const TURN_DISTANCE = 44;
-const MAX_FEEDBACK_DISTANCE = 48;
+const FEEDBACK_SIZE = 40;
+const FEEDBACK_GAP = 16;
+const TAP_HOLD_MS = 100;
 const CLICK_GUARD_MS = 700;
 const GUIDE_KEY = 'chordmaster.performance-navigation-learned.v1';
-const easing = `cubic-bezier(${UI_EASE_OUT.join(',')})`;
+type Direction = 'next' | 'previous';
+type TapPoint = Pick<MouseEvent, 'detail' | 'clientX' | 'clientY'>;
 
 type Options = {
   enabled: boolean;
   scope: string;
   reduced: boolean;
   overlay: RefObject<HTMLElement | null>;
-  surface: RefObject<HTMLElement | null>;
+  feedback: RefObject<HTMLElement | null>;
   onNext: () => void;
   onPrevious: () => void;
   onInteract: () => void;
   onLearned: () => void;
 };
 
-/** Gesture feedback is presentation-only; page offsets and React state stay independent. */
+/** Only the small touch indicator moves; score content and React state stay independent. */
 export function usePerformanceSwipe(options: Options) {
   const latest = useRef(options);
   latest.current = options;
   const reset = useRef<() => void>(() => {});
   const suppressClickUntil = useRef(0);
+  const flash = useRef<(event: TapPoint, direction: Direction) => void>(() => {});
+  const tap = useCallback((event: TapPoint, direction: Direction) => flash.current(event, direction), []);
   const cancel = useCallback(() => reset.current(), []);
 
   useLayoutEffect(() => {
     const overlay = options.overlay.current;
-    const surface = options.surface.current;
-    if (!options.enabled || !overlay || !surface) { suppressClickUntil.current = 0; return; }
-    let touch: { id: number; x: number; y: number; base: number; axis: 'pending' | 'horizontal'; dx: number } | null = null;
+    const feedback = options.feedback.current;
+    if (!options.enabled || !overlay || !feedback) { suppressClickUntil.current = 0; return; }
+    let touch: { id: number; x: number; y: number; currentX: number; currentY: number; bounds: DOMRect; axis: 'pending' | 'horizontal'; dx: number } | null = null;
     let frame: number | null = null;
-    let motion: Animation | null = null;
-    let offset = 0;
+    let flashTimer: ReturnType<typeof setTimeout> | null = null;
     const clearFrame = () => { if (frame !== null) cancelAnimationFrame(frame); frame = null; };
-    const neutral = () => { surface.style.transform = ''; surface.style.opacity = ''; surface.style.willChange = ''; offset = 0; };
-    const stop = () => { motion?.cancel(); motion = null; };
-    const resetSurface = () => {
+    const clearFlash = () => { if (flashTimer !== null) clearTimeout(flashTimer); flashTimer = null; };
+    const hide = (immediate = false) => {
+      feedback.style.transition = immediate ? 'none' : '';
+      delete feedback.dataset.active;
+    };
+    const show = (x: number, y: number, direction: Direction, ready: boolean, bounds: DOMRect) => {
+      const maxX = Math.max(8, bounds.width - FEEDBACK_SIZE - 8);
+      const maxY = Math.max(8, bounds.height - FEEDBACK_SIZE - 8);
+      const left = Math.max(8, Math.min(maxX, x - bounds.left - FEEDBACK_SIZE / 2));
+      const top = Math.max(8, Math.min(maxY, y - bounds.top - FEEDBACK_SIZE - FEEDBACK_GAP));
+      feedback.style.transition = 'none';
+      feedback.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+      feedback.dataset.direction = direction;
+      feedback.dataset.ready = String(ready);
+      feedback.dataset.active = 'true';
+    };
+    const resetGesture = () => {
       if (touch && (touch.axis === 'horizontal' || Math.abs(touch.dx) >= INTENT_DISTANCE)) {
         suppressClickUntil.current = performance.now() + CLICK_GUARD_MS;
       }
-      touch = null; clearFrame(); stop(); neutral();
+      touch = null; clearFrame(); clearFlash(); hide(true);
     };
-    reset.current = resetSurface;
+    reset.current = resetGesture;
+    const flashTap = (event: TapPoint, direction: Direction) => {
+      resetGesture();
+      // Keyboard/pedal/assistive activation stays immediate and has no touch animation.
+      if (event.detail === 0) return;
+      show(event.clientX, event.clientY, direction, true, overlay.getBoundingClientRect());
+      flashTimer = setTimeout(() => { flashTimer = null; hide(); }, TAP_HOLD_MS);
+    };
+    flash.current = flashTap;
     const paint = () => {
       frame = null;
       if (!touch || touch.axis !== 'horizontal') return;
-      offset = Math.max(-MAX_FEEDBACK_DISTANCE, Math.min(MAX_FEEDBACK_DISTANCE, touch.base + touch.dx * 0.22));
-      surface.style.willChange = latest.current.reduced ? 'opacity' : 'transform';
-      if (latest.current.reduced) surface.style.opacity = '0.96';
-      else surface.style.transform = `translate3d(${offset}px, 0, 0)`;
-    };
-    const settle = () => {
-      if (offset === 0 && !surface.style.opacity) { stop(); neutral(); return; }
-      const reduced = latest.current.reduced;
-      const from = reduced ? { opacity: surface.style.opacity || '1' } : { transform: `translate3d(${offset}px, 0, 0)` };
-      stop();
-      neutral();
-      if (typeof surface.animate !== 'function') return;
-      const animation = surface.animate([from, reduced ? { opacity: '1' } : { transform: 'translate3d(0px, 0, 0)' }], {
-        duration: reduced ? 125 : 160, easing,
-      });
-      motion = animation;
-      void animation.finished.then(() => { if (motion === animation) motion = null; }).catch(() => {});
+      show(latest.current.reduced ? touch.x : touch.currentX,
+        latest.current.reduced ? touch.y : touch.currentY,
+        touch.dx < 0 ? 'next' : 'previous', Math.abs(touch.dx) >= TURN_DISTANCE, touch.bounds);
     };
     const guardClick = () => { suppressClickUntil.current = performance.now() + CLICK_GUARD_MS; };
     const abort = () => {
       if (!touch) return;
       if (touch.axis === 'horizontal' || Math.abs(touch.dx) >= INTENT_DISTANCE) guardClick();
-      touch = null; clearFrame(); settle();
+      touch = null; clearFrame(); clearFlash(); hide();
     };
     const start = (event: TouchEvent) => {
       if (event.touches.length !== 1) { guardClick(); abort(); return; }
@@ -80,16 +91,13 @@ export function usePerformanceSwipe(options: Options) {
       if (!target || target.closest('[data-personal-notes-layer], [data-personal-notes-tools]')
         || (target.closest('button, a, input, textarea, select, [role="button"]') && !target.closest('[data-performance-turn-area]'))) return;
       latest.current.onInteract();
-      let base = 0;
-      if (motion) {
-        const transform = getComputedStyle(surface).transform;
-        if (typeof DOMMatrixReadOnly !== 'undefined' && transform && transform !== 'none') base = new DOMMatrixReadOnly(transform).m41;
-      }
-      stop();
-      offset = base;
-      if (!latest.current.reduced) surface.style.transform = base ? `translate3d(${base}px, 0, 0)` : '';
+      clearFrame(); clearFlash();
       const point = event.touches[0];
-      touch = { id: point.identifier, x: point.clientX, y: point.clientY, base, axis: 'pending', dx: 0 };
+      const bounds = overlay.getBoundingClientRect();
+      touch = { id: point.identifier, x: point.clientX, y: point.clientY, currentX: point.clientX, currentY: point.clientY, bounds, axis: 'pending', dx: 0 };
+      const area = target.closest<HTMLElement>('[data-performance-turn-area]')?.dataset.performanceTurnArea;
+      const direction = area === 'previous' || area === 'next' ? area : point.clientX < bounds.left + bounds.width / 2 ? 'previous' : 'next';
+      show(point.clientX, point.clientY, direction, false, bounds);
     };
     const move = (event: TouchEvent) => {
       if (!touch) return;
@@ -97,7 +105,7 @@ export function usePerformanceSwipe(options: Options) {
       const point = Array.from(event.touches).find(point => point.identifier === touch!.id);
       if (!point) { abort(); return; }
       const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
-      touch.dx = dx;
+      touch.dx = dx; touch.currentX = point.clientX; touch.currentY = point.clientY;
       if (touch.axis === 'pending') {
         if (Math.max(Math.abs(dx), Math.abs(dy)) < INTENT_DISTANCE) return;
         if (Math.abs(dy) >= Math.abs(dx)) { guardClick(); abort(); return; }
@@ -113,7 +121,7 @@ export function usePerformanceSwipe(options: Options) {
       if (!point) { abort(); return; }
       const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
       const horizontal = touch.axis === 'horizontal' || (Math.abs(dx) >= INTENT_DISTANCE && Math.abs(dx) > Math.abs(dy));
-      touch.dx = dx;
+      touch.dx = dx; touch.currentX = point.clientX; touch.currentY = point.clientY;
       if (horizontal) { touch.axis = 'horizontal'; clearFrame(); paint(); }
       touch = null; clearFrame();
       if (horizontal || Math.max(Math.abs(dx), Math.abs(dy)) >= INTENT_DISTANCE) guardClick();
@@ -121,7 +129,7 @@ export function usePerformanceSwipe(options: Options) {
         latest.current.onLearned();
         if (dx < 0) latest.current.onNext(); else latest.current.onPrevious();
       }
-      settle();
+      hide();
     };
     const click = (event: MouseEvent) => {
       // Keyboard and assistive activation are intentional, never a touch compatibility click.
@@ -131,7 +139,7 @@ export function usePerformanceSwipe(options: Options) {
       event.preventDefault(); event.stopPropagation();
     };
     const pointer = (event: PointerEvent) => {
-      if (event.pointerType === 'mouse') { suppressClickUntil.current = 0; resetSurface(); }
+      if (event.pointerType === 'mouse') { suppressClickUntil.current = 0; resetGesture(); }
     };
     overlay.addEventListener('touchstart', start, { passive: true });
     overlay.addEventListener('touchmove', move, { passive: false });
@@ -140,17 +148,18 @@ export function usePerformanceSwipe(options: Options) {
     overlay.addEventListener('click', click, true);
     overlay.addEventListener('pointerdown', pointer, true);
     return () => {
-      resetSurface();
+      resetGesture(); hide();
       overlay.removeEventListener('touchstart', start);
       overlay.removeEventListener('touchmove', move);
       overlay.removeEventListener('touchend', end);
       overlay.removeEventListener('touchcancel', abort);
       overlay.removeEventListener('click', click, true);
       overlay.removeEventListener('pointerdown', pointer, true);
-      if (reset.current === resetSurface) reset.current = () => {};
+      if (reset.current === resetGesture) reset.current = () => {};
+      if (flash.current === flashTap) flash.current = () => {};
     };
-  }, [options.enabled, options.scope, options.reduced, options.overlay, options.surface]);
-  return { cancel };
+  }, [options.enabled, options.scope, options.reduced, options.overlay, options.feedback]);
+  return { cancel, tap };
 }
 
 /** Stay visible through chrome idle, without rendering the score when learned. */

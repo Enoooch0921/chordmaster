@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { UI_EASE_OUT } from '../lib/uiMotion';
-import { isKeyboardInteraction, useUiMotion } from '../hooks/useUiMotion';
+import { isKeyboardInteraction, useKeyboardMotionInterrupt, useUiMotion } from '../hooks/useUiMotion';
+import './SwipeActionRow.css';
 
 type ActiveRow = { node: HTMLElement; close: () => void };
 const SwipeGroupContext = createContext<React.MutableRefObject<ActiveRow | null> | null>(null);
@@ -56,13 +57,12 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
   const gesture = useRef<Gesture | null>(null);
   const target = useRef(0);
   const suppressClick = useRef(false);
-  const frame = useRef<number | null>(null), cleanupTimer = useRef<number | null>(null), idleTimer = useRef<number | null>(null);
+  const frame = useRef<number | null>(null), cleanupTimer = useRef<number | null>(null);
   const [open, setOpen] = useState<'left' | 'right' | null>(null);
   const clearTimers = () => {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     if (cleanupTimer.current !== null) window.clearTimeout(cleanupTimer.current);
-    if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
-    frame.current = cleanupTimer.current = idleTimer.current = null;
+    frame.current = cleanupTimer.current = null;
   };
   const showSide = (offset: number) => {
     if (left.current) left.current.style.visibility = offset > 0 ? 'visible' : 'hidden';
@@ -77,6 +77,9 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
     clearTimers();
     gesture.current = null;
     target.current = offset;
+    if (!offset && (left.current?.contains(document.activeElement) || right.current?.contains(document.activeElement))) {
+      foreground.current?.querySelector<HTMLElement>('button, [tabindex="0"]')?.focus({ preventScroll: true });
+    }
     setOpen(offset > 0 ? 'left' : offset < 0 ? 'right' : null);
     if (foreground.current) {
       foreground.current.style.transition = `transform ${isKeyboardInteraction() || preference.reduced ? 0 : 160}ms cubic-bezier(${UI_EASE_OUT.join(',')})`;
@@ -88,9 +91,19 @@ export function SwipeActionRow({ leftAction, rightAction, children, className = 
       if (!offset) showSide(0);
       if (foreground.current) foreground.current.style.willChange = '';
     }, isKeyboardInteraction() || preference.reduced ? 0 : 160);
-    if (offset) idleTimer.current = window.setTimeout(() => settle(0), 4000);
-    else if (group?.current?.node === root.current) group.current = null;
+    // Keep actions available until the user leaves, dismisses or chooses one.
+    if (!offset && group?.current?.node === root.current) group.current = null;
   };
+  const finishMotion = () => {
+    if (gesture.current || !foreground.current) return;
+    if (cleanupTimer.current !== null) window.clearTimeout(cleanupTimer.current);
+    cleanupTimer.current = null;
+    foreground.current.style.transition = 'none';
+    foreground.current.style.willChange = '';
+    paint(target.current);
+  };
+  useKeyboardMotionInterrupt(finishMotion);
+  useLayoutEffect(() => { if (preference.reduced) finishMotion(); }, [preference.reduced]);
   const close = () => settle(0);
   useLayoutEffect(() => { close(); }, [Boolean(leftAction), Boolean(rightAction)]);
   useEffect(() => {

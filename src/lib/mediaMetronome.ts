@@ -41,13 +41,17 @@ function deadline<T>(promise: Promise<T>, milliseconds = 8000) {
   });
 }
 
+const STOPPED_AUDIO_GRACE_MS = 1500;
+
 /** Native AudioBufferSourceNode looping is gapless; HTML media loops are not. */
 export class MediaMetronome {
   private audio: HTMLAudioElement | null = null;
   private context: AudioContext | null = null;
   private loads = new Map<ClickSound, Promise<ClickSamples>>();
   private sampleCache = new Map<ClickSound, ClickSamples>();
+  private loopCache: { key: string; buffer: AudioBuffer } | null = null;
   private config: MetronomeConfig | null = null;
+  private idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   private silentUrl: string | null = null;
   private generation = 0;
   private active = false;
@@ -72,12 +76,18 @@ export class MediaMetronome {
     try { if (this.session && this.previousSession !== null && this.session.type === 'playback') this.session.type = this.previousSession; } catch { /* Session may no longer be available. */ }
     this.session = null; this.previousSession = null;
   }
+  private cancelIdleRelease() {
+    if (this.idleReleaseTimer !== null) clearTimeout(this.idleReleaseTimer);
+    this.idleReleaseTimer = null;
+  }
   private releaseIdleAudio() {
+    this.cancelIdleRelease();
     this.audio?.pause();
     if (this.context && this.context.state !== 'closed') void this.context.suspend().catch(() => {});
     this.releaseSession();
   }
   private retireContext() {
+    this.cancelIdleRelease();
     this.cancelProbe?.();
     if (this.context) {
       this.context.onstatechange = null;
@@ -91,7 +101,7 @@ export class MediaMetronome {
     if (this.disposed) throw new Error('audio-disposed');
     try {
       const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
-      if (playback && session) { if (!this.session) { this.session = session; this.previousSession = session.type; } session.type = 'playback'; }
+      if (playback && session) { if (!this.session) { this.session = session; this.previousSession = session.type; } if (session.type !== 'playback') session.type = 'playback'; }
     } catch { /* Older browsers still support ordinary audio playback. */ }
     if (!this.audio) {
       this.audio = this.createAudio(); this.audio.loop = true; this.audio.preload = 'auto';
@@ -181,27 +191,40 @@ export class MediaMetronome {
     if (!isPlayableTempo(config.bpm) || this.disposed) return false;
     const generation = ++this.generation;
     const wasPlaying = this.playing;
+    const audioReady = this.idleReleaseTimer !== null && this.context?.state === 'running' && this.audio?.paused === false;
+    this.cancelIdleRelease();
     try {
       this.ensure();
-      const unlock = wasPlaying ? Promise.resolve() : this.unlock();
-      let loading = this.loads.get(config.sound);
-      if (!loading) {
-        const cached = this.sampleCache.get(config.sound);
-        loading = (cached ? Promise.resolve(cached) : deadline(this.load(this.context!, config.sound))).then(samples => {
-          if (!this.disposed) this.sampleCache.set(config.sound, samples);
-          return samples;
-        }).catch(error => {
-          if (this.loads.get(config.sound) === loading) this.loads.delete(config.sound);
-          throw error;
-        });
-        this.loads.set(config.sound, loading);
-      }
-      const [samples] = await Promise.all([loading, unlock]);
+      const unlock = wasPlaying || audioReady ? null : this.unlock();
+      // The source is single-use, but its rendered measure can be reused for
+      // stop/start. Keep only the latest configuration to bound retained memory.
+      const key = JSON.stringify(config);
+      let buffer = this.loopCache?.key === key ? this.loopCache.buffer : null;
+      let samples = this.sampleCache.get(config.sound);
+      if (!buffer && !samples) {
+        let loading = this.loads.get(config.sound);
+        if (!loading) {
+          loading = deadline(this.load(this.context!, config.sound)).then(samples => {
+            if (!this.disposed) this.sampleCache.set(config.sound, samples);
+            return samples;
+          }).catch(error => {
+            if (this.loads.get(config.sound) === loading) this.loads.delete(config.sound);
+            throw error;
+          });
+          this.loads.set(config.sound, loading);
+        }
+        [samples] = await Promise.all([loading, unlock]);
+      } else if (unlock) await unlock;
+      // A ready restart schedules in the press handler, before a React render
+      // or another task can delay the first beat.
       if (generation !== this.generation || this.disposed) return false;
       if (this.context!.state !== 'running') throw new Error('audio-interrupted');
-      const pcm = renderClickPcm(config, samples);
-      const buffer = this.context!.createBuffer(1, pcm.length, 48000);
-      buffer.copyToChannel(pcm, 0);
+      if (!buffer) {
+        const pcm = renderClickPcm(config, samples!);
+        buffer = this.context!.createBuffer(1, pcm.length, 48000);
+        buffer.copyToChannel(pcm, 0);
+        this.loopCache = { key, buffer };
+      }
       const source = this.context!.createBufferSource();
       source.buffer = buffer; source.loop = true; source.loopStart = 0; source.loopEnd = buffer.duration;
       source.connect(this.context!.destination);
@@ -252,13 +275,20 @@ export class MediaMetronome {
     this.generation++; this.active = false;
     this.cancelProbe?.();
     for (const source of this.sources) { try { source.stop(); } catch { /* Already stopped. */ } }
-    this.sources.clear(); this.source = null; this.releaseIdleAudio();
+    this.sources.clear(); this.source = null;
+    this.cancelIdleRelease();
+    // Silence the click immediately, but avoid a native suspend/resume and
+    // audio-session handoff when the next press follows right after this one.
+    if (!this.disposed && this.config && this.context?.state === 'running' && this.audio?.paused === false
+        && !this.needsRebuild && !this.repairing && !this.recovering) {
+      this.idleReleaseTimer = setTimeout(() => this.releaseIdleAudio(), STOPPED_AUDIO_GRACE_MS);
+    } else this.releaseIdleAudio();
   }
   dispose() {
-    this.stop(); this.disposed = true;
+    this.disposed = true; this.stop();
     if (this.audio) { this.audio.removeAttribute('src'); this.audio.load(); this.audio.remove?.(); }
     if (this.silentUrl) URL.revokeObjectURL(this.silentUrl);
     if (this.context) { this.context.onstatechange = null; void this.context.close().catch(() => {}); }
-    this.loads.clear(); this.sampleCache.clear();
+    this.loads.clear(); this.sampleCache.clear(); this.loopCache = null;
   }
 }

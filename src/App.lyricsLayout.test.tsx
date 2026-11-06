@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
+import { mockLyricsReadingGeometry } from './test/lyricsReadingGeometry';
 import { ToastProvider } from './components/Toast';
 import { getNavigationStorageKey, saveNavigationLocation } from './lib/setlistNavigationMemory';
 import type { WorkspaceSnapshot } from './types';
@@ -22,6 +23,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  mockLyricsReadingGeometry();
   localStorage.clear();
   exports.mockReset().mockImplementation(async (host: HTMLElement) => ({
     layout: host.querySelector<HTMLElement>('[data-book-layout]')?.dataset.bookLayout,
@@ -42,7 +44,7 @@ beforeEach(() => {
   localStorage.setItem('chordmaster.selected-setlist-song-id.v1', 'entry-one');
   saveNavigationLocation(getNavigationStorageKey(null, null), { version: 1, workspaceMode: 'setlists', filter: { kind: 'all' }, parentFilter: { kind: 'all' }, view: 'detail', setlistId: 'meeting', songId: 'entry-one' });
 });
-afterEach(() => localStorage.clear());
+afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 
 const mountLyrics = async () => {
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
@@ -55,12 +57,13 @@ it('opens locked reading, navigates songs, and retains both A4 layouts independe
   const original = JSON.stringify(fixture);
   await mountLyrics();
   expect(screen.getByRole('button', { name: '閱讀' })).toHaveAttribute('aria-pressed', 'true');
-  expect(document.querySelector('.lyrics-book')).toHaveAttribute('data-book-layout', 'reading');
-  expect(document.querySelector('.lyrics-book button')).toBeNull();
+  expect(document.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-song', 'entry-one');
+  expect(document.querySelector('.alr-canvas button')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '下一首' }));
   expect(screen.getByRole('combobox', { name: '目前歌曲' })).toHaveValue('entry-two');
+  fireEvent.click(screen.getByRole('button', { name: '閱讀設定' }));
   fireEvent.click(screen.getByRole('button', { name: '放大歌詞' }));
-  expect(document.querySelector('[data-lyrics-reading]')).toHaveStyle({ fontSize: '26px' });
+  expect(document.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-font-size', '26');
   fireEvent.click(screen.getByRole('button', { name: '列印排版' }));
   expect(document.querySelector('[data-print-page]')).toHaveTextContent('《歌曲 one》');
   expect(parseFloat((document.querySelector('[data-print-page]') as HTMLElement).style.fontSize)).toBeCloseTo(16 * 4 / 3);
@@ -86,13 +89,13 @@ it('exports the selected layout through the real PDF action, including from read
   }
 });
 
-it('uses the chosen A4 layout in the real performance view', async () => {
+it('uses screen reading in performance independently of the chosen A4 layout', async () => {
   await mountLyrics();
   fireEvent.click(screen.getByRole('button', { name: '列印排版' }));
   fireEvent.change(screen.getByRole('combobox', { name: 'A4 版面' }), { target: { value: 'compact' } });
   fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
-  await waitFor(() => expect(document.querySelector('[data-performance-overlay] .lyrics-book')).toHaveAttribute('data-book-layout', 'compact'));
-  expect(document.querySelector('[data-performance-overlay] [data-print-page]')).toHaveTextContent('《歌曲 one》');
+  await waitFor(() => expect(document.querySelector('[data-performance-overlay] .adaptive-lyrics-reader')).toHaveAttribute('data-reading-song', 'entry-one'));
+  expect(document.querySelector('[data-performance-overlay] [data-print-page]')).toBeNull();
 });
 
 it('edits only the chosen entry after explicit Edit, returns to locked reading, and restores the chart viewport', async () => {
@@ -105,24 +108,57 @@ it('edits only the chosen entry after explicit Edit, returns to locked reading, 
   fireEvent.change(input, { target: { value: '修改第二首主歌' } });
   fireEvent.blur(input);
   fireEvent.click(screen.getByRole('button', { name: '完成編輯' }));
-  expect(document.querySelector('[data-setlist-preview-song-id="entry-two"]')).toHaveTextContent('修改第二首主歌');
-  expect(document.querySelector('[data-setlist-preview-song-id="entry-one"]')).toHaveTextContent('主歌第一行');
+  expect(document.querySelector('[data-reading-song="entry-two"]')).toHaveTextContent('修改第二首主歌');
+  fireEvent.change(screen.getByRole('combobox', { name: '目前歌曲' }), { target: { value: 'entry-one' } });
+  expect(document.querySelector('[data-reading-song="entry-one"]')).toHaveTextContent('主歌第一行');
   expect(document.querySelector('.lyrics-book textarea')).toBeNull();
   fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
   await waitFor(() => expect(document.querySelector('[data-print-preview-container]')).not.toBeNull());
   expect(document.querySelector('[data-lyrics-workspace-mode]')).toBeNull();
 });
 
-it('updates continuous lyrics page numbers immediately without losing the selected page on an App refresh', async () => {
-  const lyrics=Array.from({length:150},(_,i)=>`主歌歌詞第 ${i+1} 行`).join('\n');
-  for(const song of fixture.songs)song.lyricsDoc={chinese:lyrics};
-  for(const entry of fixture.setlists[0].songs)entry.songData=fixture.songs.find(song=>song.id===entry.songId);
+it('turns lyrics once per pedal press and retains the page on an App refresh', async () => {
+  const lyrics = Array.from({ length: 150 }, (_, i) => `主歌歌詞第 ${i + 1} 行`).join('\n');
+  for (const song of fixture.songs) song.lyricsDoc = { chinese: lyrics };
+  for (const entry of fixture.setlists[0].songs) entry.songData = fixture.songs.find(song => song.id === entry.songId);
   await mountLyrics();
-  fireEvent.click(screen.getAllByRole('button',{name:/^演出模式$/})[0]);
-  await waitFor(()=>expect(Number(document.querySelector('[data-performance-pages]')?.getAttribute('data-performance-pages'))).toBeGreaterThan(2));
-  fireEvent.click(screen.getByRole('button',{name:'Next page'}));
-  expect(document.querySelector('[data-performance-page]')).toHaveAttribute('data-performance-page','2');
-  expect(document.querySelector('[data-performance-page-range]')).toHaveTextContent('2');
-  act(()=>window.dispatchEvent(new Event('offline')));
-  expect(document.querySelector('[data-performance-page]')).toHaveAttribute('data-performance-page','2');
+  fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
+  const reader = () => document.querySelector('[data-performance-overlay] .adaptive-lyrics-reader');
+  await waitFor(() => expect(Number(reader()?.getAttribute('data-page-count'))).toBeGreaterThan(2));
+  fireEvent.keyDown(window, { key: 'ArrowRight', code: 'ArrowRight' });
+  fireEvent.keyUp(window, { key: 'ArrowRight', code: 'ArrowRight' });
+  expect(reader()).toHaveAttribute('data-reading-page', '2');
+  act(() => window.dispatchEvent(new Event('offline')));
+  expect(reader()).toHaveAttribute('data-reading-page', '2');
+});
+
+it('preserves native section-picker keys in performance', async () => {
+  await mountLyrics();
+  fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
+  const overlay = document.querySelector('[data-performance-overlay]')!;
+  const select = overlay.querySelector('select')!;
+  select.focus();
+  const event = new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true, cancelable: true });
+  act(() => select.dispatchEvent(event));
+  expect(event.defaultPrevented).toBe(false);
+  expect(overlay.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-song', 'entry-one');
+  expect(select).toHaveFocus();
+});
+
+it('retains the single-song reading anchor across its original A4 print view', async () => {
+  localStorage.removeItem('chordmaster.workspace-mode.v1');
+  localStorage.removeItem('chordmaster.selected-setlist-id.v1');
+  localStorage.removeItem('chordmaster.selected-setlist-song-id.v1');
+  localStorage.removeItem(getNavigationStorageKey(null, null));
+  fixture.songs[0].lyricsDoc = { chinese: Array.from({ length: 80 }, (_, i) => `單首歌第 ${i + 1} 行`).join('\n') };
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  await screen.findAllByRole('button', { name: '歌詞模式' });
+  fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
+  await screen.findByRole('button', { name: '閱讀' });
+  fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+  const firstLine = document.querySelector('.alr-columns [data-source-line]')!.getAttribute('data-source-line');
+  fireEvent.click(screen.getByRole('button', { name: '列印排版' }));
+  expect(document.querySelector('.adaptive-lyrics-reader')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '大字閱讀' }));
+  expect(document.querySelector(`.alr-columns [data-source-line="${firstLine}"]`)).not.toBeNull();
 });

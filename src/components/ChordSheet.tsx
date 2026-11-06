@@ -1,5 +1,5 @@
 import ChartSongMap, { type SongMapEditorOptions } from './ChartSongMap';
-import { getSongMap } from '../lib/songMap';
+import { getSongMap, shouldShowSongMap } from '../lib/songMap';
 import NotationSelectionPointer from './NotationSelectionPointer';
 import { projectNotationVoice } from '../lib/notationVoiceEditing';
 import PickupPreview from './PickupPreview';
@@ -1962,7 +1962,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
   const barRowCount = song.barRowCount === 1 ? 1 : song.barRowCount === 3 ? 3 : 2;
   const mapSteps = React.useMemo(() => getSongMap(song), [song.songMap, song.sections]);
   const inlineMap = mapSteps.length <= 6;
-  const showSongMap = song.showSongMap !== false;
+  const showSongMap = shouldShowSongMap(song);
   const ROWS_PER_PAGE_FIRST = barRowCount === 3 ? 8 : barRowCount === 1 ? 18 : 10;
   const ROWS_PER_PAGE_OTHER = barRowCount === 3 ? 9 : barRowCount === 1 ? 21 : 10;
   const allowAddBar = Boolean(onAddBarClick);
@@ -2280,7 +2280,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
         >
           {/* Header - Only on first page */}
           {!excerpt && (pIdx === 0 ? (
-            <div className={`shrink-0 mb-4 border-b-2 border-gray-900 pb-2 ${showSongMap ? 'score-heading' : ''}`} data-map-lines={mapSteps.length > 20 ? 2 : 1}>
+            <div className={`shrink-0 mb-4 border-b-2 border-gray-900 pb-2 ${showSongMap ? 'score-heading' : ''}`}>
               <div className={showSongMap ? 'sheet-first-heading relative grid min-w-0 items-center' : 'min-w-0 relative'}>
                 <div className="col-span-full row-start-1 flex items-start gap-3">
                   <AutoShrink className="mb-0 min-w-0 flex-1">

@@ -57,6 +57,24 @@ it('commits normally without browser transition support', () => {
   transitionDrummerWorkspace(update);
   expect(update).toHaveBeenCalledOnce();
 });
+
+it('settles a pending transition when a keyboard takes over and commits only once', async () => {
+  let delayedCommit!: () => void;
+  let finish!: () => void;
+  const skip = vi.fn(() => finish());
+  Object.defineProperty(document, 'startViewTransition', { configurable: true, value: (commit: () => void) => {
+    delayedCommit = commit;
+    return { finished: new Promise<void>(resolve => { finish = resolve; }), skipTransition: skip };
+  } });
+  const update = vi.fn();
+  const pending = transitionDrummerWorkspace(update);
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
+  delayedCommit();
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
+  await pending;
+  expect(skip).toHaveBeenCalledOnce(); expect(update).toHaveBeenCalledOnce();
+  expect(document.documentElement.dataset.drummerTransition).toBeUndefined();
+});
 it('finishes a pending update before reversing, without applying it twice', async () => {
   const commits: (() => void)[] = [];
   const skip = vi.fn();

@@ -24,6 +24,11 @@
 .pm-list-row{display:flex;align-items:center;gap:16px;width:100%;min-height:72px;padding:14px 0;text-align:left}
 .pm-list-row:hover{background:var(--color-surface-muted)}
 .pm-list-row>svg{flex-shrink:0;color:var(--color-text-muted)}
+.setlist-card{position:relative;isolation:isolate}
+.setlist-card-open::after{content:'';position:absolute;inset:0;z-index:0;cursor:pointer}
+.setlist-card>input,.setlist-card>[data-swipe-ignore],.setlist-card-actions>button{position:relative;z-index:1}
+.setlist-card-open:focus-visible{outline:none}
+.setlist-card-open:focus-visible::after{outline:2px solid var(--color-indigo-600);outline-offset:-2px}
 .pm-row-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px}
 .pm-row-copy strong{font-size:14px;line-height:1.65;font-weight:600;overflow-wrap:anywhere}
 .pm-row-copy small{font-size:12px;line-height:1.5;color:var(--color-text-muted)}
@@ -119,7 +124,7 @@
 .setlist-song-list{margin:0}
 .setlist-song-row{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 88px;min-height:156px;border-bottom:1px solid var(--color-border);color:var(--color-text);background:var(--color-surface);user-select:none}
 .setlist-song-row:last-child{border-bottom:0}
-.setlist-song-reading{min-width:0;padding:8px 12px 18px;transition:background-color 150ms ease-out}
+.setlist-song-reading{position:relative;isolation:isolate;min-width:0;padding:8px 12px 18px}
 .setlist-song-row:not(.is-current) .setlist-song-reading:hover{background:var(--color-surface-muted)}
 .setlist-song-row.is-current .setlist-song-reading{background:var(--color-indigo-700);color:var(--color-indigo-50)}
 .setlist-song-row.is-drop-target::after{content:'';position:absolute;top:-1px;left:0;right:0;height:2px;background:var(--color-indigo-600);pointer-events:none}
@@ -127,7 +132,11 @@
 .setlist-song-row[data-setlist-drag-neighbor]{transition:transform 160ms var(--ease-ui-out)}
 @media(prefers-reduced-motion:reduce){.setlist-song-row[data-setlist-drag-neighbor]{transition:none}}
 .setlist-song-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;margin-bottom:4px}
-.setlist-song-select{display:block;width:100%;min-width:0;min-height:44px;text-align:left;padding:0;border-radius:4px}
+.setlist-song-select{display:block;width:100%;min-width:0;min-height:44px;text-align:left;padding:0;border-radius:4px;cursor:pointer;touch-action:manipulation}
+/* Extend the native song button across the reading area, including its padding.
+   Keep independent actions above it; Key/BPM remain outside this boundary. */
+.setlist-song-select::after{content:'';position:absolute;inset:0;z-index:0}
+.setlist-song-heading>button{position:relative;z-index:1}
 .setlist-song-number-handle,.setlist-song-static-number{display:inline-flex;align-items:center;justify-content:flex-start;flex-shrink:0;gap:7px;min-width:44px;height:44px;padding:0 4px;border-radius:8px;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--color-text-muted)}
 .setlist-song-number-handle{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .setlist-song-number-grip{flex-shrink:0}
@@ -160,8 +169,9 @@
 .setlist-song-row.is-sort-mode{grid-template-columns:minmax(0,1fr)}
 .setlist-song-drag{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:44px;height:44px;border-radius:8px;color:var(--color-text-muted)}
 .setlist-song-drag:hover{background:var(--color-indigo-100);color:var(--color-indigo-800)}
-.setlist-song-number-handle:focus-visible,.setlist-song-select:focus-visible,.setlist-song-drag:focus-visible,.setlist-song-sort-actions>button:focus-visible{outline:2px solid var(--color-indigo-600);outline-offset:-2px}
-.setlist-song-row.is-current .setlist-song-number-handle:focus-visible,.setlist-song-row.is-current .setlist-song-select:focus-visible{outline-color:var(--color-indigo-50)}
+.setlist-song-select:focus-visible{outline:none}
+.setlist-song-number-handle:focus-visible,.setlist-song-select:focus-visible::after,.setlist-song-drag:focus-visible,.setlist-song-sort-actions>button:focus-visible{outline:2px solid var(--color-indigo-600);outline-offset:-2px}
+.setlist-song-row.is-current .setlist-song-number-handle:focus-visible,.setlist-song-row.is-current .setlist-song-select:focus-visible::after{outline-color:var(--color-indigo-50)}
 @media(prefers-reduced-motion:reduce){.setlist-song-reading{transition:none}}
 .setlist-sharing-summary{border-bottom:1px solid var(--color-border);padding-bottom:12px;margin-bottom:12px}
 

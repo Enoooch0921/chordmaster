@@ -1,325 +1,98 @@
-# ChordMaster
+<p align="center">
+  <img src="public/logo.svg" alt="ChordMaster" width="88" height="88">
+</p>
 
-ChordMaster 是一個面向敬拜團與流行音樂編排場景的 Web 編輯器，聚焦在和弦譜、節奏譜與簡譜的整合編輯。專案使用 Vite + React 建構；本機工作區與個人曲庫備份預設儲存在瀏覽器 IndexedDB，保留上一版快照及舊版 `localStorage` 的讀取與備援路徑，登入後可切換到 Supabase 雲端同步。
+<h1 align="center">ChordMaster</h1>
 
-目前版本：`0.12.16`
+<p align="center">從排歌、練習到現場演出，讓敬拜團在同一份歌單裡協作。</p>
 
-團隊共用譜面與權限分配請參閱 [團隊看譜與權限管理](docs/team-permissions.md)。
+<p align="center">
+  <a href="https://enoooch0921.github.io/chordmaster/">開啟 ChordMaster</a> ·
+  <a href="docs/README.md">使用與開發文件</a> ·
+  <a href="https://github.com/Enoooch0921/chordmaster/releases/latest">版本更新</a> ·
+  <a href="https://github.com/Enoooch0921/chordmaster/issues">回報問題</a>
+</p>
 
-本次更新：改善搜尋、切歌與演出操作速度，統一動畫及觸控回饋；歌曲庫新增歌詞命中摘要、版本資訊、篩選與跨裝置收藏／最近使用，並修正跨搜尋批次選取及底部提示重疊。詳見 [0.12.16 發布說明](docs/release-0.12.16.md)。
+<p align="center">
+  <a href="https://github.com/Enoooch0921/chordmaster/actions/workflows/deploy.yml"><img src="https://github.com/Enoooch0921/chordmaster/actions/workflows/deploy.yml/badge.svg" alt="GitHub Pages 發佈狀態"></a>
+</p>
 
-## 特色
+## 一份歌單，照顧不同的演出角色
 
-- Song Library 側欄：建立、搜尋、複製、刪除歌譜
-- Service Setlist：以 Song Library 為來源建立服事歌單，並保留每次服事專屬的臨時設定
-- 歌曲層級 Reference 參考音源：每首歌可保存樂團版本與歌手版本 YouTube 連結、原調與 BPM
-- Reference mini player：看譜、歌單預覽與 Performance Mode 可直接開啟內嵌播放器，支援播放 / 暫停、前後跳秒與練習速度控制
-- Reference 練習資訊：顯示 reference 調、目前譜面調、相差半音與練習 BPM，並提供 TAP tempo 手動抓 BPM
-- 雙欄編輯體驗：左側編輯，右側即時預覽
-- 中文預設介面：預設優先顯示中文，英文切換保留
-- 全站統一 Key / Capo 選擇器：Song Library、Service Setlist 與預覽列共用同一套 popup picker
-- 簡譜工具列：支援高音 / 中音 / 低音、八分 / 十六分、附點、升降記號、連接線與時值切換
-- 節奏與簡譜共用標籤：可當作節奏標籤、簡譜標籤，也可單獨顯示
-- 小節編輯操作：支援複製、貼上、拖曳、拆分段落、合併到上一段與小節編號顯示
-- 小節數顯示：可選擇不顯示、每行開頭顯示、每小節顯示
-- 固定調顯示：可切換 `1=C` 絕對簡譜模式
-- 段落轉調：可為某段設定轉調，後續段落會一起跟隨，預覽同步標示 `Key: X`
-- 弱起拍：第 `0` 小節可設定半拍、一拍、一拍半等長度，支援簡譜、多聲部與節奏；預覽緊接第 1 小節前，正式小節編號及全曲拍號不變。詳見 [弱起拍編輯](docs/pickup-measures.md)
-- 導覽記號：支援 Segno、Coda、D.S.、D.C.、Fine、D.S. al Fine、D.S. al Coda
-- 預覽、演出與 PDF 匯出：支援右側預覽縮放、拖曳、Performance Mode、PDF 匯出與列印優化
-- 歌單歌詞 A4：預設易讀版，優先同首同欄、同頁，長歌按完整段落換欄；另保留省紙版與大字閱讀。沿用原本灰底黑字、《書名號》標題，PDF 與演出模式使用所選 A4 版面。
-- 舊資料相容：匯入或載入較早版本歌譜時會先自動整理資料格式
-- 帳號系統：支援 Google OAuth 與 Email Magic Link
-- 雲端同步：登入後可同步個人歌曲庫與歌單
-- 團隊曲庫：支援團隊擁有者、歌曲管理員、歌單協作者與僅可檢視四級權限；擁有者可隨時調整成員角色
-- 個人歌曲匯入團隊：保留原歌名，以來源 ID 處理覆蓋、同名副本與舊資料連結
-- 團隊歌單協作：擁有者或歌單建立者可明確指派可編輯成員
-- 公開唯讀分享：可產生歌曲 / 歌單分享連結，並支援受邀者加入 shared setlist
+ChordMaster 是支援手機、平板與電腦的歌曲庫、歌單及看譜工作區。可以先在本機使用，登入後同步個人資料，或與團隊共用曲庫與歌單。
 
-## 最近更新
+| 工作 | 可以做什麼 |
+| --- | --- |
+| 找歌、排歌 | 搜尋歌名與歌詞、查看命中片段、收藏與最近使用、篩選 Key／BPM／拍號，拖曳安排歌序。 |
+| 準備譜面 | 直接在預覽編輯和弦、節奏與簡譜；調整段落、曲序、Key、Capo 及演出註記。 |
+| 看譜演出 | 全螢幕閱讀、切歌與翻頁；歌單保留各次演出的設定，個人顯示偏好不干擾其他團員。 |
+| 歌詞閱讀 | 整份歌單固定字級，依畫面安排欄位；支援中英對照、原唱語言與獨立 A4 列印版面。 |
+| 鼓手練習 | 精簡歌名、TAP 測速、節拍器及音色設定；快速停止、重開與切歌。 |
+| 團隊協作 | 曲庫與歌單權限、來源版本比對、公開唯讀分享，以及 JSON 備份與 PDF 匯出。 |
 
-- 升級到 `0.11.12`：改善和弦、延續斜線與小節邊緣間距，拍內標籤跟隨和弦中心；保留節奏位置與時值。
-- 升級到 `0.11.11`：和弦固定拍位與高度，保留拍內細分及防碰撞微調；旋律和節奏的時值、輸入完整度不再推動和弦位置。
-- 升級到 `0.11.10`：電腦鍵盤記住位置及大小，行動裝置置底；多選小節後統一複製、貼上時選小節／和弦／節奏／簡譜，並加入 Shift 範圍選取、直接拍內和弦輸入、和弦對齊及四種小節線循環。
-- 升級到 `0.11.0`：全局撤銷／重做、專案與歌單刪除恢復、iOS 三指手勢、專案置頂、搜尋列自動收起、連續拖曳修正，以及共享歌單去重。詳見 [全局撤銷](docs/global-workspace-history.md)。
-- 升級到 `0.10.0`：整合資料夾式專案導覽、成員與權限管理、歌單／歌曲庫新介面、直接拖曳排序與 Key／BPM 快調、拼音／注音搜尋、清楚的同步比對，以及小節關閉與右鍵操作；改善平板捲動和鍵盤排列。
-- 升級到 `0.9.27`：記住上次專案／聚會與歌曲，歸檔後退回適當層級；加入進入／返回滑動與右側載入提示，改善歌單、專案及成員列的滑動卡頓與紅色底層外露。
-- 升級到 `0.9.26`：移除譜面列的幾何排版動畫，修正載入時白紙固定、和弦與小節線左右晃動。
-- 升級到 `0.9.25`：修正開啟／重新整理時譜面先偏移再置中的跳動，以及從關於／說明返回後雙指縮放失效。
-- 升級到 `0.9.24`：支援多選小節整批刪除與一次復原、完整小節覆蓋貼上，以及「|」按鈕的雙小節線／終止線／關閉三段切換。
-- 升級到 `0.9.23`：歌單的級數／固定調／首調改為個人顯示偏好，不再同步改變其他團員；移除手機團隊歌單頂部空白狀態列。
-- 升級到 `0.9.22`：和弦數字上標、英文性質置下，改善級數轉位間距；修正輸入 ♭6 自動變成 ♯5，團隊歌單可另存成新歌曲。
-- 升級到 `0.9.21`：兩行譜面依小節實際高度分頁，頁面較滿時適度收緊列距，避免前奏多聲部把最後一行推到下一頁。
-- 升級到 `0.9.20`：修復兩行模式中只有和弦的小節被壓成一行的問題，保留前奏多聲部的局部加高。
-- 升級到 `0.9.19`：改善雙指縮放定位與 App 內部捲動，歌曲詳情支援下拉關閉；整理手機歌單／專案、小節高度及低干擾互動動畫。
+### 從這裡開始
 
-- 升級到 `0.9.18`：重新整理手機歌曲資訊、聲部與文字編輯入口，完善系統深色模式；修正鍵盤排版、譜面間距及切歌頁數跳動。
+1. 在「歌曲」找到需要的歌曲，或匯入自己的歌譜。
+2. 建立歌單、加入歌曲，設定這次演出的順序、調性與曲序。
+3. 按角色選擇樂譜、歌詞或鼓手模式，準備好後進入演出模式。
 
-- 升級到 `0.9.17`：Google 登入每次顯示帳號選擇器，修正登出副帳號後無法改回主帳號的問題。
+歌單內的編輯會保留為該次演出的版本。將改動同步回曲庫是獨立操作，會先比對來源與差異；詳見[歌單來源版本](docs/setlist-source-versions.md)。
 
-- 升級到 `0.9.16`：同曲跨歌單加入來源基準，分辨歌單修改、曲庫新版與雙方衝突；舊副本只提供更新歌單，不能直接覆蓋新版曲庫。衝突或未知來源必須比對選擇，雙向更新均保存備份。
+## 最新版本 · 0.12.17
 
-- 升級到 `0.9.14`：重要改動——團隊擁有者／總管理員可手動將歌單譜面同步回歌曲庫，先預覽差異、保存原曲完整備份並檢查兩邊版本；平常編輯仍只保存歌單。歌單名稱排序加入中文數字辨識，依聚會一、二、三、九、十、十一排列。詳見 [團隊權限與同步規則](docs/team-permissions.md)。
+- 歌詞閱讀維持整份歌單相同字級，依裝置安排欄位，減少不必要的翻頁與孤字換行。
+- 側欄開關、歌單卡片、手機歌曲／歌單切換與演出翻頁的回饋更一致；譜面保持穩定。
+- TAP 即時回饋、節拍器快速重開、鼓手資訊精簡；修正選單中斷、焦點與拖曳操作。
+- 歌曲庫分批顯示結果，減少大量歌曲的畫面負擔；保留完整跨搜尋選取範圍。
 
-- 升級到 `0.9.12`：加入大小調切換、歌詞對照語言及段落／小節速度事件；臨時速度採用與轉調相同的緊湊標籤。修正細分拍和弦的箭頭裁切與註記自動改大小寫，並補上手機歌單模式的「更多 → 譜面操作 → 吉他手模式」入口。
-
-- 升級到 `0.9.11`：演出模式全螢幕與寬螢幕 A4 雙頁、中文／英文逐行混合歌詞；整合簡譜多聲部、裝飾音群、重音與樂句線、二分音符三連音、指定遍數和弦及未定拍位／調性的來源記錄。保留遠端最新的歌單導覽、本機復原與 NAS 查詢修正。
-
-- 升級到 `0.9.8`，修正手機／平板 PDF 附帶分享項目與離線同步誤刪，新增團隊草稿救援、錯誤復原、團隊邀請收件匣及發布檢查；分享頁、編輯器與 PDF 工具改為按需載入
-
-- 升級到 `0.9.7`，新增預覽譜面多小節選取、右鍵批量小節操作與 `Option + 1..9` 批量房子快捷鍵，並整合 `0.9.6` 已發布的小節高度、團隊曲庫權限、匯入、封存與節奏幾何修正更新紀錄
-- 升級到 `0.9.6`，重新校準節奏音符、重音、三連音與連接線的幾何定位，修正反覆房子橫線位置，並新增可切換 2 行／3 行手寫空間的小節高度設定（PDF 也會套用）
-- 升級到 `0.9.5`，修正分享歌單／共享專案讀取時沒有優先使用歌單內歌曲副本，導致歌單中新增或刪除段落後別人看不到的問題
-- 升級到 `0.9.4`，修正點擊已有節奏內容的灰色節奏 lane 時，節奏鍵盤沒有打開的問題
-- 升級到 `0.9.3`，修正完成預覽輸入後重新點回節奏時，節奏鍵盤可能因 lower lane 目標沿用而無法打開的問題
-- 升級到 `0.9.2`，強化預覽直接編輯：新增和弦、節奏與簡譜複製貼上，修正簡譜附點／跨拍容量／連接線判斷，並改善段落標題換行、和弦快捷鍵與放大預覽清晰度
-- 升級到 `0.9.1`，重整 iPad 優先的歌單導覽，改善預覽縮放與手機編輯空間，並修正段落觸控拖曳、重複小節 ID 與連續升降記號輸入
-- 升級到 `0.9.0`，新增預覽直接編輯、段落動作選單、多首歌曲分享連結，並支援登入後將分享歌曲導入個人歌庫
-- 升級到 `0.8.4`，修正 Team Invite 錯誤提示、重複個人區與手機三連音顯示問題
-- 升級到 `0.8.3`，修正 `Bb` 被顯示成 `A#`，並讓新增段落後先聚焦段落標題
-- 升級到 `0.8.2`，修正 TAP tempo 穩定性、版本 / 翻譯欄位輸入與 Segno / Coda 顯示重疊問題
-- 升級到 `0.8.1`，改善搜尋正規化，`你 / 祢` 與簡體 / 繁體可互相命中
-- 升級到 `0.8.0`，新增歌曲層級 YouTube Reference 練習播放器
-- 每首歌可保存兩個 reference：`樂團版本` 與 `歌手版本`，各自包含 YouTube URL、原調與 BPM
-- 看譜、歌單預覽與 Performance Mode 都可開啟底部 mini player，不必離開譜面即可播放 reference
-- 播放器新增樂團 / 歌手切換、播放 / 暫停、前後跳秒、BPM 式速度調整與原 BPM 回復
-- 新增 reference key 對目前譜面 key 的半音差顯示，方便臨時轉調練習
-- 新增 TAP tempo 按鈕，可跟著音樂點擊並套用 BPM
-- 改善 Reference metadata UI、窄螢幕排版與 YouTube / Transpose 插件提示文案
-- 升級到 `0.7.0`，補齊 Supabase 登入 / 同步、分享連結、shared setlist 加入與成員管理的 release note
-- 新增 Google OAuth、Email Magic Link、個人歌曲庫與歌單雲端同步基礎
-- 新增歌曲 / 歌單公開唯讀分享連結，包含 Edge Functions、SPA fallback、剪貼簿 fallback 與登入後開啟受邀歌單流程
-- 新增 shared setlist 管理能力，支援個人 `Key / Capo / display` 覆蓋、離開 shared setlist，以及完整共享歌單歌曲細節
-- 新增 Performance Mode 入口與行動版操作，並改善 performance pagination、page clipping、viewport height 與切歌穩定性
-- 重整 PDF 匯出流程，加入取消按鈕、single-canvas render、行動裝置 adaptive pixel ratio 與 JPEG 輸出
-- 改善行動版 editor、側邊欄、picker overlay、歌詞模式、歌詞分頁密度與譜面小節編號位置
-- 新增 Service Setlist 工作流，可在同一首歌的基礎上建立服事歌單專屬的 `Key / Capo / section order / song order` 覆蓋設定
-- 新增 setlist 層級的顯示模式與歌詞控制，支援 `級數譜 / 和弦 + 固定調 / 和弦 + 首調`，PDF 匯出會一併套用
-- 新增 setlist song instance 編輯流程：右側編輯與預覽會讀取 base song 後再套用 setlist overrides，不會改動 Song Library 原始資料
-- 重做一般歌曲與服事歌單的編輯資訊帶，整理成更緊湊的 `Title / Key / Capo / Tempo / Time / Display` 工具列
-- 全站統一 KeyPicker 與 CapoPicker，避免不同區塊混用下拉、左右切換或不同 popup 版本
-- 新增 setlist 側邊欄的加入歌曲流程，可直接搜尋 Song Library 並將歌曲加入目前歌單
-- 新增段落轉調功能，支援後續段落 cascade 升降 key、預覽 key 標示，以及 editor 和弦自動跟隨
-- 新增弱起拍 `0` 小節流程，editor 可獨立編輯，預覽會在第一小節前顯示弱起簡譜 / 節奏
-- 改善段落拖曳 / 複製後的 key 繼承規則，搬到升調區的段落會自動改寫為目的地 key
-- 微調簡譜升降記號在 preview / editor 的距離，提高清楚度與輸入手感
-- 新增固定調 `1=C` 顯示模式與頁首標示
-- 新增預覽縮放 / 拖曳與更一致的 fit-width / fit-height 行為
-- 新增更多導覽記號與文字標示，支援 `D.S.`、`D.C.`、`Fine`、`D.S. al Fine`、`D.S. al Coda`
-- 新增和弦 `Fermata` 無限延音記號按鈕
-- 重做段落顏色分類，讓 `Turnaround`、`Refrain`、`Breakdown` 等段落分開顯示
-- 修正大量簡譜編輯、連接線與舊歌相容性問題
-- 改善 PDF 匯出與列印品質
-
-完整變更請看 [CHANGELOG.md](./CHANGELOG.md)。
-
-## 技術棧
-
-- React 19
-- TypeScript
-- Vite
-- Supabase Auth / Postgres / Edge Functions
-- Tailwind CSS 4
-- Motion
-- jsPDF
-- html-to-image
+閱讀[本版發佈說明](docs/release-0.12.17.md)或[完整更新紀錄](CHANGELOG.md)。
 
 ## 本機開發
 
-### 需求
-
-- Node.js 22（與發布流程相同）
-- npm
-- Supabase CLI（部署 migration / functions 時需要）
-
-### 安裝
+需求：**Node.js 22** 與 npm，與 GitHub Actions 使用的版本一致。
 
 ```bash
-npm install
-```
-
-### 啟動開發環境
-
-```bash
+git clone https://github.com/Enoooch0921/chordmaster.git
+cd chordmaster
+npm ci
 npm run dev
 ```
 
-預設網址：
+開啟 [localhost:3000](http://localhost:3000)。未設定後端時可使用本機工作區；資料存於瀏覽器 IndexedDB，建議定期匯出 JSON 備份。
 
-- [http://localhost:3000](http://localhost:3000)
+若要開發登入、同步或分享功能，將 `.env.example` 複製為 `.env.local`，填入自己後端的公開用戶端設定。`VITE_` 變數會進入前端，勿填入管理金鑰。正式站使用教會 NAS 的 self-hosted Supabase；維護前請先閱讀 [AGENTS.md](AGENTS.md) 與[後端設定文件](docs/supabase-setup.md)。
 
-### 建置正式版本
+| 指令 | 用途 |
+| --- | --- |
+| `npm run dev` | 啟動開發伺服器。 |
+| `npm run lint` | TypeScript 型別檢查。 |
+| `npm run test:run` | 執行完整 Vitest 測試。 |
+| `npm run build` | 建置 GitHub Pages 網頁，輸出至 `dist/`。 |
+| `npm run build:ipad` | 建置 Capacitor 使用的網頁資產。 |
+| `npm run ipad:sync` | 建置並同步至 iOS 專案。 |
+| `npm run ipad:open` | 在 Xcode 開啟 iPad 專案；執行需要完整 Xcode 與簽署設定。 |
 
-```bash
-npm run build
-```
+## 文件與專案結構
 
-建置輸出目錄：
-
-- `dist/`
-
-### iPadOS App
-
-專案使用 Capacitor 共用同一套 React/Vite 核心，iPadOS 版本會把 `dist/` 包進 `ios/` Xcode 專案。
-
-```bash
-npm run ipad:sync
-npm run ipad:open
-```
-
-- `npm run build:ipad`：使用 Capacitor 專用路徑建置 web assets
-- `npm run ipad:sync`：建置並同步到 `ios/App/App/public`
-- `npm run ipad:open`：用 Xcode 開啟 iPadOS 專案
-
-目前 Xcode target 已設定為 iPad device family。若要在模擬器或實機執行，需要本機安裝完整 Xcode，並在 Xcode 中設定 signing team。
-
-## 使用說明
-
-### Song Library
-
-- 建立新歌
-- 搜尋歌曲
-- 複製現有歌譜
-- 管理與刪除歌曲
-
-### Service Setlist
-
-- 建立多個服事歌單，並自訂名稱
-- 從 Song Library 搜尋歌曲並加入目前歌單
-- 同一首歌可重複加入同一份歌單
-- 每個 SetlistSong 可獨立覆蓋 `Key`、`Capo`、`section order`
-- 整份 setlist 可統一控制 `顯示設定`、`顯示歌詞`，且不影響 Song Library 原始資料
-
-### Reference 參考音源
-
-- 在歌曲 metadata 的 `參考音源` 區塊設定 `樂團版本` 與 `歌手版本`
-- 每個 reference 可填入 YouTube URL、reference 原調與 BPM
-- 支援常見 YouTube URL 格式，包括 `watch?v=...`、`youtu.be/...`、`embed/...`、`shorts/...`
-- 可用 `TAP` 按鈕跟著音樂點擊，自動估算並套用目前 reference BPM
-- 在歌曲模式、歌單預覽與 Performance Mode 可開啟同一首歌的 reference mini player
-- mini player 會顯示 reference key、目前譜面 key、相差半音與練習 BPM
-- 速度控制以樂手習慣的 BPM 增減呈現，支援 `-10 / -5 / -1 / 原 BPM / +1 / +5 / +10`
-- 需要 YouTube 音高升降時，可用 `在 YouTube 開啟` 搭配瀏覽器工具列中的 Transpose 插件；ChordMaster v0.8.0 不直接改變 YouTube 音訊音高
-
-### 編輯區
-
-- 編輯和弦、段落與小節
-- 使用段落建議快速套用 `Verse`、`Pre-Chorus`、`Chorus`、`Turnaround`、`Breakdown` 等名稱
-- 可在段落上設定 section key change，並讓後續段落一起承接新的 key
-- 為節奏與簡譜輸入共用標籤
-- 輸入簡譜、節奏譜與和弦內容
-- 使用快捷鍵加快八度、時值、附點與升降記號編輯
-- 從中間任一小節拆出新段落，或把整段併到上一段
-- 於和弦與小節上加入導覽記號、Fermata、反覆記號、房子記號與 annotation
-
-### 預覽區
-
-- 即時查看和弦、節奏與簡譜排版
-- 顯示段落標題、標籤、備註、導覽記號、小節數與轉調 `Key: X` 標示
-- 支援右側預覽獨立縮放、拖曳與點擊小節回跳左側編輯器
-- 可切換相對簡譜與固定調 `1=C` 絕對簡譜顯示
-- 在 Service Setlist 模式下，預覽會套用當前 `SetlistSong` 覆蓋值與整份歌單的顯示設定
-- 匯出 PDF 前先確認版面
-
-## 專案結構
+[文件索引](docs/README.md)集中整理操作指南、資料同步與發佈紀錄。
 
 ```text
-src/
-  components/
-    CapoPicker.tsx
-    ChordSheet.tsx
-    Jianpu.tsx
-    KeyPicker.tsx
-    LyricsEditor.tsx
-    ReferencePlayer.tsx
-    SetlistEditor.tsx
-    SongMetadataPanel.tsx
-    RhythmNotation.tsx
-    SongEditor.tsx
-  constants/
-    appMeta.ts
-    chordFonts.ts
-    i18n.ts
-  utils/
-    jianpuUtils.ts
-    lyricsUtils.ts
-    musicUtils.ts
-    referenceUtils.ts
-    rhythmUtils.ts
-    setlistUtils.ts
-  App.tsx
-  main.tsx
-public/
-  fonts/
-  logo.svg
+src/          React 介面、音樂資料模型、互動與測試
+public/       圖示、離線 Service Worker 與音訊資源
+ios/          Capacitor iPad 專案
+supabase/     資料庫 migration 與 Edge Functions
+docs/         操作指南、實作說明與版本紀錄
+.github/      自動檢查與 GitHub Pages 發佈流程
 ```
 
-## 部署
+主要使用 React 19、TypeScript、Vite、Tailwind CSS、Motion、Supabase 與 Capacitor。
 
-### GitHub
+推送至 `main` 後，GitHub Actions 依序執行型別檢查、測試與建置，再發佈至 GitHub Pages。網頁發佈不會自動變更 NAS 資料庫，也不會發佈原生 iPad App。
 
-這個專案可直接推到 GitHub 作為原始碼倉庫。
+## 回報與使用範圍
 
-### GitHub Pages
+遇到問題時，請在 [Issues](https://github.com/Enoooch0921/chordmaster/issues) 提供裝置、瀏覽器、版本及重現步驟；截圖請避開私人歌單與帳號資訊。
 
-正式站：[ChordMaster](https://enoooch0921.github.io/chordmaster/)。推送 `main` 後，`.github/workflows/deploy.yml` 會依序執行型別檢查、測試、建置及 GitHub Pages 部署。
+瀏覽器模擬測試不代表所有實體裝置皆已驗證，特別是 iPad／iPhone 的背景音訊與鎖屏操作。YouTube 參考播放器不直接改變音訊音高。
 
-正式資料位於教會 NAS 的自架 Supabase：`https://supabase.living-water.familyds.com`。發布流程使用 GitHub Actions 中的 `VITE_SUPABASE_URL` 與 `VITE_SUPABASE_ANON_KEY`；不在儲存庫保存私密設定。部署前端不會執行歷史資料庫 migration 或轉錄腳本。
-
-`tmp/`、`output/` 與環境設定檔維持本機；正式型別檢查和應用程式測試排除暫存轉錄資料。
-
-## 環境變數
-
-目前專案前端需要：
-
-```bash
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
-VITE_PUBLIC_APP_URL=https://your-domain.example/chordmaster/
-```
-
-`VITE_PUBLIC_APP_URL` 是公開 app 網址，用來產生可分享的 `/share/:token` 連結。若沒有設定，本機開發會產生 `localhost` 分享網址，只能在同一台電腦上開啟。
-
-可參考：
-
-- [.env.example](./.env.example)
-- [docs/supabase-setup.md](./docs/supabase-setup.md)
-
-如果尚未設定 Supabase，app 仍可使用本地模式。
-
-## Supabase 設定
-
-第一次接通雲端功能時，請依序完成：
-
-1. 建立 Supabase project
-2. 設定 Google OAuth 與 Email Magic Link
-3. 設定 `.env`
-4. 執行 migration
-5. 部署 Edge Functions
-
-完整步驟請看：
-
-- [docs/supabase-setup.md](./docs/supabase-setup.md)
-
-## 目前限制
-
-- 未登入模式下，歌曲資料仍只保存在本機瀏覽器
-- Apple Sign-In 尚未實作
-- 團隊即時協作會自動載入已儲存的歌曲變更；不合併多人同時編輯的未儲存內容
-- PDF 目前仍是圖片式輸出，不是向量文字 PDF
-- Reference v1 只支援 YouTube，不支援 Spotify、Apple Music、mp3 上傳或自動音訊分析
-- 內嵌 YouTube 播放器可調整播放速度，但不直接升降音高；若要改變 YouTube 音訊 key，需在 YouTube 頁面搭配瀏覽器插件
-- 簡譜與節奏連接線仍會依不同版型持續微調
-
-## Roadmap
-
-- Apple Sign-In
-- 團隊歌單的更細粒度權限與審核記錄
-- ChordMaster companion 瀏覽器插件，用於更深度整合 YouTube 轉調、循環與練習控制
-- 更完整的簡譜 / 節奏排版邏輯
-- 更完整的分享控制與協作
-- 更完整的快捷鍵與編輯模式
-
-## License
-
-目前未指定開源授權；若要公開發佈，建議補上合適的 License。
+本儲存庫目前未設定開源授權；曲譜與歌詞的權利歸各自權利人所有。

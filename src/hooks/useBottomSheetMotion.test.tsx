@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBottomSheetMotion } from './useBottomSheetMotion';
 const motion = vi.hoisted(() => ({ reduce: false, keyboard: false, controls: { start: vi.fn(async () => {}), stop: vi.fn(), set: vi.fn() } }));
 vi.mock('./useReducedMotionPreference', () => ({ useReducedMotionPreference: () => motion.reduce }));
-vi.mock('./useUiMotion', () => ({ isKeyboardInteraction: () => motion.keyboard }));
+vi.mock('./useUiMotion', async original => ({ ...await original<typeof import('./useUiMotion')>(), isKeyboardInteraction: () => motion.keyboard }));
 vi.mock('motion/react', () => ({ useAnimationControls: () => motion.controls, useReducedMotion: () => motion.reduce }));
 beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); motion.controls.start.mockResolvedValue(undefined); motion.reduce = false; motion.keyboard = false; });
 afterEach(() => { vi.useRealTimers(); document.body.replaceChildren(); });
@@ -16,6 +16,18 @@ function setup() {
  return { sheet, handle, scroll, content, onClose, hook, touch, frame: (ms = 20) => act(() => vi.advanceTimersByTime(ms)) };
 }
 describe('bottom sheet direct manipulation', () => {
+ it('settles entry and completes a pending dismissal when a keyboard takes over', async () => {
+  const { hook, onClose } = setup();
+  fireEvent.keyDown(document, { key: 'Tab' });
+  expect(motion.controls.set).toHaveBeenLastCalledWith({ transform: 'translate3d(0, 0px, 0)', opacity: 1 });
+  expect(onClose).not.toHaveBeenCalled();
+  fireEvent.pointerDown(document);
+  let complete!: () => void;
+  motion.controls.start.mockImplementation(() => new Promise<void>(resolve => { complete = resolve; }));
+  act(() => hook.result.current.dismiss());
+  fireEvent.keyDown(document, { key: 'Tab' }); expect(onClose).toHaveBeenCalledOnce();
+  await act(async () => complete()); expect(onClose).toHaveBeenCalledOnce();
+ });
  it('enters and leaves through the bottom with the shared drawer curve', async () => {
   const { hook, onClose } = setup(); expect(motion.controls.start).toHaveBeenCalledWith({ transform: 'translate3d(0, 0px, 0)', opacity: 1 }, expect.objectContaining({ duration: 0.24 }));
   await act(async () => hook.result.current.dismiss()); expect(onClose).toHaveBeenCalledOnce();

@@ -1,9 +1,11 @@
-import { useEffect, useId, useRef, useState, type PointerEvent, type TouchEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent, type TouchEvent } from 'react';
 import { ArrowLeft, ArrowRight, Copy, Minus, Pencil, Plus, Trash2, Undo2 } from 'lucide-react';
 import type { AppLanguage, SongMapStep } from '../types';
-import { songMapLabel, songMapSuggestions } from '../lib/songMap';
+import { songMapDisplayParts, songMapLabel, songMapSuggestions } from '../lib/songMap';
 import ResponsiveDialog from './ResponsiveDialog';
 import './SongMapEditor.css';
+import { isKeyboardInteraction, useKeyboardMotionInterrupt, useUiMotion } from '../hooks/useUiMotion';
+import { UI_EASE_OUT } from '../lib/uiMotion';
 
 export interface SongMapEditorOptions {
   scope: 'library' | 'setlist';
@@ -36,6 +38,62 @@ export default function SongMapEditor({ steps, options, language, title, close }
   const suppressClick = useRef(false), body = useRef<HTMLDivElement>(null);
   const touchStart = useRef<{ id: number; pointer: number; x: number; y: number; active: boolean } | null>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scrollFrame = useRef<number | null>(null), scrollTime = useRef<number | null>(null);
+  const scrollRemainder = useRef(0);
+  const preference = useUiMotion();
+  const previewLayer = useRef<HTMLDivElement>(null);
+  const preview = useRef<{ node: HTMLElement; offsetX: number; offsetY: number; left: number; top: number; width: number; blockWidth: number } | null>(null);
+  const previewExit = useRef<Animation | null>(null);
+  function clearPreview() {
+    previewExit.current?.cancel(); previewExit.current = null;
+    preview.current?.node.remove(); preview.current = null;
+  }
+  function positionPreview(x: number, y: number) {
+    const current = preview.current;
+    if (!current) return;
+    const left = Math.max(0, Math.min(current.width - current.blockWidth, x - current.left - current.offsetX));
+    current.node.style.transform = `translate3d(${left}px, ${Math.max(0, y - current.top - current.offsetY)}px, 0)`;
+  }
+  function showPreview(id: number, x: number, y: number, touch = false) {
+    const layer = previewLayer.current;
+    const source = body.current?.querySelector<HTMLElement>(`[data-map-step-id="${id}"]`);
+    if (!layer || !source) return;
+    clearPreview();
+    const rect = source.getBoundingClientRect(), bounds = layer.getBoundingClientRect();
+    const node = source.cloneNode(true) as HTMLElement;
+    node.removeAttribute('data-map-step-id'); node.removeAttribute('data-dragging'); node.removeAttribute('aria-label');
+    node.className = 'map-drag-preview'; node.tabIndex = -1; node.setAttribute('inert', ''); node.setAttribute('aria-hidden', 'true');
+    node.style.width = `${rect.width}px`; node.style.height = `${rect.height}px`;
+    // The dialog's general button press transition must not trail the pointer.
+    node.style.transition = 'none';
+    layer.appendChild(node);
+    preview.current = { node, offsetX: x - rect.left, offsetY: touch ? rect.height + 12 : y - rect.top, left: bounds.left, top: bounds.top, width: bounds.width, blockWidth: rect.width };
+    positionPreview(x, y);
+  }
+  function releasePreview() {
+    const node = preview.current?.node;
+    if (!node) return;
+    if (isKeyboardInteraction() || typeof node.animate !== 'function') { clearPreview(); return; }
+    const animation = node.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: preference.reduced ? 80 : 125, easing: `cubic-bezier(${UI_EASE_OUT.join(',')})`, fill: 'forwards'
+    });
+    previewExit.current = animation;
+    void animation.finished?.then(() => { if (previewExit.current === animation) clearPreview(); }).catch(() => {});
+  }
+  useKeyboardMotionInterrupt(() => {
+    endTouch(true);
+    if (drag.current) finishDrag({ pointerId: drag.current.pointer }, true);
+    clearPreview();
+  });
+  useLayoutEffect(() => { if (preference.reduced && previewExit.current) clearPreview(); }, [preference.reduced]);
+  const dragPoint = useRef<{ x: number; y: number } | null>(null);
+  function stopAutoScroll() {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = null;
+    scrollTime.current = null;
+    scrollRemainder.current = 0;
+    dragPoint.current = null;
+  }
   useEffect(() => {
     const element = body.current;
     // React's delegated touch listeners are passive. Cancel native panning only
@@ -44,7 +102,7 @@ export default function SongMapEditor({ steps, options, language, title, close }
       if (touchStart.current?.active && event.touches.length === 1 && event.cancelable) event.preventDefault();
     };
     element?.addEventListener('touchmove', preventDragScroll, { passive: false });
-    return () => { element?.removeEventListener('touchmove', preventDragScroll); clearTimeout(holdTimer.current); };
+    return () => { element?.removeEventListener('touchmove', preventDragScroll); clearTimeout(holdTimer.current); stopAutoScroll(); clearPreview(); };
   }, []);
   const { rows } = draft, selectedIndex = rows.findIndex(r => r.id === draft.selected), selected = rows[selectedIndex];
   const choices = [...new Set([...(options.sections ?? options.fallback), ...options.fallback, ...steps].map(s => songMapLabel(s.label).name).filter(Boolean))];
@@ -75,10 +133,11 @@ export default function SongMapEditor({ steps, options, language, title, close }
     const current = drag.current;
     if (!current || current.pointer !== event.pointerId) return;
     if (!current.moved && Math.hypot(event.clientX - current.x, event.clientY - current.y) < 8) return;
-    event.preventDefault(); current.moved = true; setDragging(current.id);
+    event.preventDefault();
+    if (!current.moved) { showPreview(current.id, current.x, current.y); current.moved = true; setDragging(current.id); }
     updateDrop(event.clientX, event.clientY);
   }
-  function updateDrop(x: number, y: number) {
+  function measureDrop(x: number, y: number) {
     const current = drag.current;
     if (!current) return;
     const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-map-step-id]');
@@ -86,22 +145,50 @@ export default function SongMapEditor({ steps, options, language, title, close }
       const rect = hit.getBoundingClientRect();
       current.target = { id: Number(hit.dataset.mapStepId), after: x > rect.left + rect.width / 2 };
     } else current.target = undefined;
-    setDrop(current.target);
-    if (body.current) {
-      const bounds = body.current.getBoundingClientRect();
-      if (y < bounds.top + 32) body.current.scrollTop -= 16;
-      if (y > bounds.bottom - 32) body.current.scrollTop += 16;
+    const target = current.target;
+    setDrop(previous => previous?.id === target?.id && previous?.after === target?.after ? previous : target);
+  }
+  function autoScroll(time: number) {
+    scrollFrame.current = null;
+    const element = body.current, point = dragPoint.current;
+    if (!element || !point || !drag.current?.moved) return;
+    const bounds = element.getBoundingClientRect();
+    const velocity = point.y < bounds.top + 32 ? -600 * Math.min(1, (bounds.top + 32 - point.y) / 32) ** 2
+      : point.y > bounds.bottom - 32 ? 600 * Math.min(1, (point.y - bounds.bottom + 32) / 32) ** 2 : 0;
+    if (!velocity || point.x < bounds.left || point.x > bounds.right) { scrollTime.current = null; scrollRemainder.current = 0; return; }
+    const elapsed = Math.min(32, Math.max(0, time - (scrollTime.current ?? time)));
+    scrollTime.current = time;
+    const before = element.scrollTop, limit = Math.max(0, element.scrollHeight - element.clientHeight);
+    const desired = Math.max(0, Math.min(limit, before + velocity * elapsed / 1000 + scrollRemainder.current));
+    element.scrollTop = desired;
+    // WebKit can quantize scrollTop. Carry fractional pixels instead of losing
+    // more distance per second on displays that deliver more frames.
+    scrollRemainder.current = desired - element.scrollTop;
+    if (element.scrollTop === before && (desired <= 0 || desired >= limit)) return;
+    if (element.scrollTop !== before) measureDrop(point.x, point.y);
+    scrollFrame.current = requestAnimationFrame(autoScroll);
+  }
+  function updateDrop(x: number, y: number) {
+    dragPoint.current = { x, y };
+    positionPreview(x, y);
+    measureDrop(x, y);
+    if (scrollFrame.current === null) {
+      scrollTime.current = performance.now();
+      scrollRemainder.current = 0;
+      scrollFrame.current = requestAnimationFrame(autoScroll);
     }
   }
   function finishDrag(event: { pointerId: number }, cancel = false) {
     const current = drag.current;
     if (!current || current.pointer !== event.pointerId) return;
+    stopAutoScroll();
     suppressClick.current = current.moved;
     if (!cancel && current.moved && current.target) {
       const remaining = rows.filter(r => r.id !== current.id), targetIndex = remaining.findIndex(r => r.id === current.target!.id);
       if (targetIndex >= 0) move(current.id, targetIndex + (current.target.after ? 1 : 0));
     }
     drag.current = null; setDragging(undefined); setDrop(undefined);
+    releasePreview();
   }
   function beginTouch(event: TouchEvent<HTMLButtonElement>, id: number) {
     clearTimeout(holdTimer.current);
@@ -113,6 +200,7 @@ export default function SongMapEditor({ steps, options, language, title, close }
       const current = touchStart.current;
       if (!current) return;
       current.active = true;
+      showPreview(current.id, current.x, current.y, true);
       drag.current = { ...current, moved: true };
       setDragging(current.id);
       setDraft(d => ({ ...d, selected: current.id }));
@@ -137,6 +225,7 @@ export default function SongMapEditor({ steps, options, language, title, close }
   const resetLabel = options.scope === 'setlist' ? (zh ? '沿用預設曲序' : 'Use default map') : (zh ? '依譜面產生' : 'Use chart sections');
   return <ResponsiveDialog wide subtitleBelow title={options.scope === 'library' ? (zh ? '預設曲序' : 'Default song map') : (zh ? '本場曲序' : 'Service song map')}
     subtitle={[options.setlistName, title].filter(Boolean).join(' · ')} closeLabel={zh ? '取消' : 'Cancel'} onClose={close}>
+    <div ref={previewLayer} className="map-drag-layer" aria-hidden="true" inert />
     <div ref={body} className="map-editor-body">
       <div className="map-editor-heading map-sequence-heading"><h3>{zh ? '演奏順序' : 'Performance order'}</h3>
         <div className="map-editor-small-actions">
@@ -157,7 +246,7 @@ export default function SongMapEditor({ steps, options, language, title, close }
             onPointerMove={pointerMove} onPointerUp={e => { if (e.pointerType !== 'touch') finishDrag(e); }} onPointerCancel={e => { if (e.pointerType !== 'touch') finishDrag(e, true); }} onLostPointerCapture={e => { if (e.pointerType !== 'touch') finishDrag(e, true); }}
             onTouchStart={e => beginTouch(e, row.id)} onTouchMove={moveTouch} onTouchEnd={() => endTouch()} onTouchCancel={() => endTouch(true)}>
             {Number(row.repeats) > 1 && <span className="map-block-repeats" aria-hidden="true">×{row.repeats}</span>}
-            <span className="map-block-code" data-custom={songMapLabel(row.label).code === songMapLabel(row.label).name || undefined} aria-hidden="true">{songMapLabel(row.label).code}</span>
+            <span className="map-block-code" data-wide={songMapDisplayParts(row.label).code.length > 4 || undefined} data-custom={(songMapLabel(row.label).code !== 'Tag' && songMapLabel(row.label).code === songMapLabel(row.label).name) || undefined} aria-hidden="true">{songMapDisplayParts(row.label).code}</span>
             <span className="map-block-name" aria-hidden="true">{songMapLabel(row.label).name}</span>
           </button>
         </li>)}</ol>}
@@ -197,7 +286,7 @@ export default function SongMapEditor({ steps, options, language, title, close }
       <div className="map-section-picker" aria-label={zh ? '可加入的段落' : 'Available sections'}>
         {(choices.length ? choices : songMapSuggestions).map(label => <button key={label} type="button" title={label}
           aria-label={zh ? `加入 ${label}` : `Add ${label}`} onClick={() => add(label)}>
-          <strong>{songMapLabel(label).code}</strong><span className="map-picker-name">{label}</span>
+          <strong>{songMapDisplayParts(label).code}</strong><span className="map-picker-name">{label}</span>
         </button>)}
       </div>
       <div className="map-extra-actions">

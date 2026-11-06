@@ -33,7 +33,7 @@ const names: Record<string, string> = {
   chordSubdivisions: '細分拍和弦', chordPassVariants: '指定遍數和弦', unmeteredChordLines: '未定拍和弦',
   band: '樂團版本', vocal: '歌手版本', chinese: '中文歌詞', english: '英文歌詞', bpm: 'BPM', key: '調性',
   chordTimingUnspecified: '和弦時點待確認', chordKeyUnspecified: '和弦調性待確認', partialMeasure: '不完整小節',
-  translationLanguage: '翻譯語言', blocks: '歌詞段落', marker: '段落標記', pageBreakBefore: '段落前換頁', needsPairingReview: '歌詞配對待確認',
+  translationLanguage: '翻譯語言', blocks: '歌詞段落', marker: '段落標記', pageBreakBefore: '段落前換頁', needsPairingReview: '歌詞配對待確認', singingLanguage: '演唱語言', singingLineLanguages: '逐句演唱語言',
   chord: '和弦', pass: '演出遍數', beatOffset: '拍內位置', special: '特別標記',
   url: '連結', enabled: '啟用', color: '標示顏色', beat: '拍', offset: '拍內位置', text: '文字', labelLane: '標籤位置'
 };

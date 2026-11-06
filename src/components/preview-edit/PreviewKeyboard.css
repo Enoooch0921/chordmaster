@@ -55,6 +55,9 @@
   font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", sans-serif;
   font-weight: 550 !important;
   transition: background-color 90ms;
+  /* Tailwind's independent transform properties must not move musical keys. */
+  translate: none !important;
+  scale: none !important;
   touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
@@ -86,7 +89,7 @@
 [data-keyboard-refined] button:disabled { opacity: .36 !important; }
 [data-keyboard-refined] button:active:not(:disabled) {
   background: var(--keyboard-pressed) !important;
-  transform: translateY(1px) !important;
+  transform: none !important;
 }
 [data-keyboard-refined] button:focus-visible { outline: 2px solid #548367; outline-offset: 2px; }
 [data-keyboard-refined] [data-notation-mode-segments] {

@@ -1,4 +1,5 @@
-import { useEffect, type RefObject } from 'react';
+import { type RefObject } from 'react';
+import DrummerSettingsSurface from './DrummerSettingsSurface';
 import { X } from 'lucide-react';
 import { controlKeyLabel, KEYBOARD_ACTIONS, MIDI_ACTIONS, type KeyboardAction, type MidiAction } from '../lib/drummerMidi';
 import type { useDrummerMidi } from '../hooks/useDrummerMidi';
@@ -15,7 +16,6 @@ export default function DrummerMidiSettings({ midi, zh, onClose, onPrepareAudio,
   midi: ReturnType<typeof useDrummerMidi>; zh: boolean; onClose: () => void; onPrepareAudio: () => Promise<void>; panelRef: RefObject<HTMLElement | null>;
 }) {
   const t = (a: string, b: string) => zh ? a : b;
-  useEffect(() => { panelRef.current?.querySelector<HTMLButtonElement>('button')?.focus(); }, [panelRef]);
   const notices: Record<string, string> = {
     unsupported: t('此瀏覽器未支援 MIDI。iPad 請使用 App；電腦可使用 Chrome 或 Edge。', 'MIDI is unavailable in this browser. Use the iPad app, or Chrome / Edge on a computer.'),
     'connect-failed': t('無法連線。請確認已允許 MIDI 存取，再重試。', 'Could not connect. Check MIDI permissions, then retry.'),
@@ -30,8 +30,7 @@ export default function DrummerMidiSettings({ midi, zh, onClose, onPrepareAudio,
   const keyConflict = midi.notice.startsWith('key-conflict:') ? midi.notice.slice(13) as KeyboardAction : null;
   const conflict = midi.notice.startsWith('conflict:') ? midi.notice.slice(9) as MidiAction : null;
   const message = keyConflict ? t(`這個按鍵已用於「${keyLabel(keyConflict)}」，請換一個。`, `This key is already mapped to ${keyLabel(keyConflict)}.`) : conflict ? t(`這個控制已用於「${midiActionLabel(conflict, zh)}」，請換一個。`, `This control is already mapped to ${midiActionLabel(conflict, zh)}. Choose another.`) : notices[midi.notice];
-  return <div className="drummer-midi-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section ref={panelRef} className="drummer-midi-panel" data-source={midi.source} role="dialog" aria-modal="true" aria-labelledby="drummer-midi-title">
+  return <DrummerSettingsSurface panelRef={panelRef} source={midi.source} titleId="drummer-midi-title" onClose={onClose}>
       <header><div><h2 id="drummer-midi-title">{t('MIDI 與鍵盤', 'MIDI & keyboard')}</h2><p>{t('接上、學習，存成自己的配置。', 'Connect, learn, and save your controls.')}</p></div><button aria-label={t('關閉 MIDI 設定', 'Close MIDI settings')} onClick={onClose}><X size={22}/></button></header>
       <div className="drummer-midi-body">
         <div className="drummer-input-sources" role="group" aria-label={t('控制來源', 'Control source')}><button aria-pressed={midi.source === 'midi'} onClick={() => midi.setSource('midi')}>{t('MIDI 控制器', 'MIDI controller')}</button><button aria-pressed={midi.source === 'keyboard'} onClick={() => { void onPrepareAudio(); midi.setSource('keyboard'); }}>{t('電腦鍵盤', 'Computer keyboard')}</button></div>
@@ -65,6 +64,5 @@ export default function DrummerMidiSettings({ midi, zh, onClose, onPrepareAudio,
         {message && <p className="drummer-midi-notice" role="status">{message}</p>}
       </div>
       <footer><span>{midi.dirty ? t('有未儲存的變更', 'Unsaved changes') : t('配置只儲存在這台裝置', 'Saved on this device')}</span><button className="drummer-midi-save" disabled={!midi.name.trim() || (midi.source === 'keyboard' ? !Object.keys(midi.keyboard).length || Boolean(midi.keyLearning) : !midi.selectedId || !Object.keys(midi.bindings).length || Boolean(midi.learning))} onClick={midi.save}>{t('儲存配置', 'Save profile')}</button></footer>
-    </section>
-  </div>;
+  </DrummerSettingsSurface>;
 }

@@ -1,6 +1,7 @@
+import { mockLyricsReadingGeometry } from '../test/lyricsReadingGeometry';
 import { useLayoutEffect } from 'react';
 import { InvitationTransitionProvider, useInvitationTransition } from '../components/InvitationTransition';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SharedResourcePayload } from '../types';
@@ -42,10 +43,6 @@ vi.mock('../lib/supabase', () => ({
 
 vi.mock('../components/ChordSheet', () => ({
   default: ({ song: sharedSong }: { song: { title: string } }) => <div data-testid="shared-chart">{sharedSong.title}</div>
-}));
-
-vi.mock('../components/LyricsSheet', () => ({
-  default: ({ song: sharedSong }: { song: { title: string } }) => <div data-testid="shared-lyrics">{sharedSong.title}</div>
 }));
 
 const song = (title: string) => ({
@@ -110,7 +107,7 @@ describe('SharedChartPage song imports', () => {
     mocks.rpc.mockResolvedValue({ data: null, error: null });
   });
 
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('updates an open public setlist after the owner changes a key and adds a song', async () => {
     vi.useFakeTimers();
@@ -136,6 +133,7 @@ describe('SharedChartPage song imports', () => {
 
   it('preserves the selected bundle song and lyrics mode during updates', async () => {
     vi.useFakeTimers();
+    mockLyricsReadingGeometry();
     const source: SharedResourcePayload = { resourceType: 'song_bundle', songBundle: { id: 'bundle', songs: [
       { id: 'a', title: 'Alpha', song: song('Alpha') },
       { id: 'b', title: 'Beta', song: { ...song('Beta'), lyricsDoc: { chinese: 'Lyrics' } } }
@@ -150,7 +148,10 @@ describe('SharedChartPage song imports', () => {
       { ...source.songBundle!.songs[1], song: { ...source.songBundle!.songs[1].song, title: 'Updated Beta' } }
     ] } });
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(screen.getByTestId('shared-lyrics')).toHaveTextContent('Updated Beta');
+    const reader = screen.getByRole('region', { name: '整首優先歌詞' });
+    expect(reader).toHaveAttribute('data-reading-song', 'b');
+    expect(within(reader).getByRole('heading', { name: 'Updated Beta' })).toBeInTheDocument();
+    expect(within(reader).getByLabelText('當頁歌詞')).toHaveTextContent('Lyrics');
     expect(screen.queryByTestId('shared-chart')).not.toBeInTheDocument();
   });
 

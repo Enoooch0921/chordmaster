@@ -1,5 +1,5 @@
 import { useReducedMotionPreference } from './useReducedMotionPreference';
-import { isKeyboardInteraction } from './useUiMotion';
+import { isKeyboardInteraction, useKeyboardMotionInterrupt } from './useUiMotion';
 import { UI_DRAWER_EASE } from '../lib/uiMotion';
 import { useAnimationControls } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
@@ -60,6 +60,15 @@ export function useBottomSheetMotion(ref: RefObject<HTMLElement | null>, enabled
     current.sheet.style.pointerEvents = 'none';
     animateDismiss(current);
   }, [animateDismiss, enabled]);
+
+  useKeyboardMotionInterrupt(() => {
+    const current = session.current;
+    if (!current || current.completed) return;
+    const token = ++generation.current;
+    controls.stop(); current.cancelDrag();
+    if (current.closing) finishDismiss(current, token);
+    else controls.set({ transform: 'translate3d(0, 0px, 0)', opacity: 1 });
+  });
 
   useEffect(() => {
     const sheet = element;

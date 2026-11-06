@@ -1,0 +1,5 @@
+/* Settle immediately even before the preference-change event reaches React. */
+[data-ui-input="keyboard"] [data-swipe-foreground] { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  [data-swipe-foreground] { transition: none !important; }
+}

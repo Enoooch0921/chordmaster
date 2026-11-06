@@ -6,11 +6,25 @@ import CapoPicker from './CapoPicker';
 import TempoChangeControl from './TempoChangeControl';
 
 const motion = vi.hoisted(() => ({ instant: true }));
-vi.mock('../hooks/useUiMotion', () => ({ useUiMotion: () => ({ instant: motion.instant, reduced: false }) }));
+vi.mock('../hooks/useUiMotion', async original => ({ ...await original<typeof import('../hooks/useUiMotion')>(), useUiMotion: () => ({ instant: motion.instant, reduced: false }) }));
 vi.mock('./useAnchoredPortalPanel', () => ({ useAnchoredPortalPanel: () => ({
   panelStyle: { position: 'fixed', top: 0, left: 0 }, placement: 'bottom', isPositioned: true, transformOrigin: 'top right'
 }) }));
 beforeEach(() => { motion.instant = true; });
+
+it.each(['key', 'capo'])('closes an open %s picker when it becomes disabled without committing', kind => {
+  const change = vi.fn();
+  const element = (disabled: boolean) => kind === 'key'
+    ? <KeyPicker value="C" label="調性" onChange={change} disabled={disabled} />
+    : <CapoPicker value={0} currentKey="C" onChange={change} disabled={disabled} />;
+  const view = render(element(false));
+  fireEvent.click(screen.getByRole('button'));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  view.rerender(element(true));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('button')).toBeDisabled();
+  expect(change).not.toHaveBeenCalled();
+});
 
 const pickers = [
   { name: 'Key', label: '調性', option: 'D', value: 'D', render: (change: ComponentProps<typeof KeyPicker>['onChange']) => <KeyPicker value="C" label="調性" onChange={change} /> },

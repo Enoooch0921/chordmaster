@@ -40,3 +40,12 @@ it('updates held-key feedback without rerendering its keyboard parent',()=>{
  render(<Keyboard/>);press(screen.getByRole('button',{name:'C'}));expect(document.querySelector('[data-keyboard-key-preview]')).toBeInTheDocument();
  fireEvent(document,new MouseEvent('pointerup',{bubbles:true}));expect(document.querySelector('[data-keyboard-key-preview]')).toBeNull();expect(renders).toHaveBeenCalledTimes(1);
 });
+
+it('removes a held-key preview as soon as its keyboard starts closing',()=>{
+ const view=render(<Harness/>);press(screen.getByRole('button',{name:'C'}));
+ expect(document.querySelector('[data-keyboard-key-preview]')).toBeInTheDocument();
+ view.rerender(<Harness enabled={false}/>);
+ expect(document.querySelector('[data-keyboard-key-preview]')).toBeNull();
+ view.rerender(<Harness/>);
+ expect(document.querySelector('[data-keyboard-key-preview]')).toBeNull();
+});

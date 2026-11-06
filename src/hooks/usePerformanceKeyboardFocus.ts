@@ -11,6 +11,11 @@ export const usePerformanceKeyboardFocus = (
   active.current = enabled;
   const restore = useCallback(() => {
     if (!active.current || document.visibilityState === 'hidden' || document.querySelector('dialog[open]')) return;
+    // Keep deliberate control focus; only reassert the page-turner's capture.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused !== capture.current && focused !== overlay.current
+      && !focused.closest('[inert]') && (overlay.current?.contains(focused) || focused.closest('[data-ui-toast], [role="dialog"]'))
+      && focused.closest('button, a[href], input, select, textarea, summary, [contenteditable="true"], [role="button"], [role="dialog"], [tabindex]:not([tabindex="-1"])')) return;
     // Editable focus can dismiss native fullscreen in iPad WebKit, even with
     // inputMode=none. Select the overlay before the async entry request settles.
     const nativeFullscreen = document.fullscreenElement

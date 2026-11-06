@@ -1,18 +1,13 @@
 export const MIN_TEMPO_BPM = 20;
 export const MAX_TEMPO_BPM = 400;
 
-export const sanitizeTempoInput = (value: string): string => {
-  const normalized = value.replace(/[，。]/g, '.').replace(/[^\d.]+/g, '');
-  const [rawInteger = '', ...rawDecimalParts] = normalized.split('.');
-  const integer = rawInteger.slice(0, 3);
-  const hasDecimalPoint = normalized.includes('.');
-  const decimal = rawDecimalParts.join('').slice(0, 2);
+/** Normalize typography, never remove invalid characters or truncate a pasted value. */
+export const sanitizeTempoInput = (value: string): string => value.replace(/[，。]/g, '.').normalize('NFKC');
 
-  if (!hasDecimalPoint) {
-    return integer;
-  }
-
-  return `${integer}.${decimal}`;
+export const isValidTempoDraft = (value: string): boolean => {
+  const text = sanitizeTempoInput(value).trim();
+  return !text || (/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)
+    && Number(text) >= MIN_TEMPO_BPM && Number(text) <= MAX_TEMPO_BPM);
 };
 
 export const normalizeTempoBpm = (tempo: unknown): number | undefined => {

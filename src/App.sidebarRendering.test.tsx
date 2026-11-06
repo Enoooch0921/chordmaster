@@ -38,6 +38,86 @@ beforeEach(() => {
 });
 const latest = (id: string) => state.renders.filter(p=>p.previewIdentity === id).at(-1)!;
 const settle = () => act(async () => { await new Promise(resolve=>setTimeout(resolve,160)); });
+it('switches both mobile tabs with feedback while retaining the covered chart, then shows the latest selection', async () => {
+  const oldWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+  try {
+    render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+    await screen.findByTestId('chart-entry-first'); await settle();
+    fireEvent.click(screen.getByRole('button', { name: '固定歌曲列表' })); await settle();
+    const nav = document.querySelector<HTMLElement>('[data-mobile-sidebar-navigation]')!;
+    const content = document.querySelector<HTMLElement>('[data-mobile-workspace-content]')!;
+    const fade = vi.fn(() => ({ playState: 'finished', cancel: vi.fn() }) as unknown as Animation);
+    content.animate = fade;
+    const chart = screen.getByTestId('chart-entry-first');
+    state.renders.length = 0;
+    for (const label of ['歌曲', '歌單', '歌曲']) {
+      const button = within(nav).getByRole('button', { name: label });
+      fireEvent.pointerDown(button, { pointerType: 'touch' }); fireEvent.click(button);
+      await settle();
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(document.querySelector('[data-covered-preview]')).toHaveAttribute('inert');
+      expect(document.querySelector('[data-testid="chart-entry-first"]')).toBe(chart);
+      expect(state.renders).toHaveLength(0);
+    }
+    expect(fade).toHaveBeenCalledTimes(3);
+    expect(fade).toHaveBeenLastCalledWith([{ opacity: 0 }, { opacity: 1 }], expect.objectContaining({ duration: 125 }));
+    fireEvent.click(within(nav).getByRole('button', { name: '完成' }));
+    await screen.findByTestId('chart-first');
+    expect(document.querySelector('[data-covered-preview]')).not.toHaveAttribute('inert');
+    expect(screen.queryByTestId('chart-entry-first')).toBeNull();
+  } finally {
+    if (oldWidth) Object.defineProperty(window, 'innerWidth', oldWidth);
+  }
+}, 15000);
+
+it('preserves the reading offset when phone navigation closes without a song change', async () => {
+  const oldWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+  try {
+    render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+    await screen.findByTestId('chart-entry-first'); await settle();
+    const root = document.querySelector<HTMLElement>('[data-print-preview-container]')!;
+    const scroll = vi.fn();
+    root.scrollTo = scroll;
+    root.scrollTop = 350;
+    fireEvent.click(screen.getByRole('button', { name: '固定歌曲列表' })); await settle();
+    const nav = document.querySelector<HTMLElement>('[data-mobile-sidebar-navigation]')!;
+    fireEvent.click(within(nav).getByRole('button', { name: '完成' })); await settle();
+    expect(root.scrollTop).toBe(350);
+    expect(scroll).not.toHaveBeenCalled();
+  } finally {
+    if (oldWidth) Object.defineProperty(window, 'innerWidth', oldWidth);
+  }
+}, 15000);
+
+it('keeps desktop hover navigation over the score and reserves space only for a pinned sidebar', async () => {
+  const oldWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+  try {
+    render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
+    await screen.findByTestId('chart-entry-first'); await settle();
+    const sidebar = document.querySelector<HTMLElement>('[data-sidebar]')!;
+    const shell = document.querySelector<HTMLElement>('[data-sidebar-shell]')!;
+    const toggle = document.querySelector<HTMLButtonElement>('[data-sidebar-toggle]')!;
+    const collapsedWidth = sidebar.style.width;
+    state.renders.length = 0;
+    fireEvent.mouseEnter(shell); await settle();
+    expect(sidebar).toHaveAttribute('data-sidebar-expanded', 'true');
+    expect(sidebar.style.width).toBe(collapsedWidth);
+    expect(screen.queryByRole('button', { name: '調整歌曲列表寬度' })).toBeNull();
+    fireEvent.mouseLeave(shell); await settle();
+    expect(sidebar.style.width).toBe(collapsedWidth);
+    expect(state.renders).toHaveLength(0);
+    fireEvent.click(toggle); await settle();
+    expect(parseFloat(sidebar.style.width)).toBeGreaterThan(parseFloat(collapsedWidth));
+    fireEvent.click(toggle); await settle();
+    expect(sidebar.style.width).toBe(collapsedWidth);
+  } finally {
+    if (oldWidth) Object.defineProperty(window, 'innerWidth', oldWidth);
+  }
+}, 15000);
+
 it.each([false, true])('does not render charts for sidebar hover/menu changes (joined=%s) and keeps hidden list geometry stable', async joined => {
   if (joined) fixture = { ...fixture, songs: [], setlists: [], joinedSetlists: [{ ...fixture.setlists[0], isJoined: true }] };
   render(<MemoryRouter><ToastProvider><App/></ToastProvider></MemoryRouter>);
@@ -171,3 +251,14 @@ it('reuses untouched chart data when selecting another song, and stops backgroun
   act(() => latest('entry-third').onAddBarClick?.(0));
   await waitFor(() => expect(latest('entry-third').song.sections[0].bars).toHaveLength(2));
 }, 15000);
+it('does not redraw the chart for song-library search changes', async () => {
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  await screen.findByTestId('chart-entry-first'); await settle();
+  fireEvent.click(screen.getByRole('button', { name: '歌曲' })); await settle();
+  const search = screen.getByRole('textbox', { name: '搜尋歌曲' });
+  state.renders.length = 0;
+  fireEvent.change(search, { target: { value: 'Song 2' } }); await settle();
+  expect(state.renders).toHaveLength(0);
+  fireEvent.change(search, { target: { value: '' } }); await settle();
+  expect(state.renders).toHaveLength(0);
+});

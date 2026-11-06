@@ -85,6 +85,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: 'Steadier interaction and adaptive lyrics',
+        bullets: [
+          'Keep one font size across the setlist; adapt lyric columns to the screen and avoid isolated characters at line ends.',
+          'Keep charts steady when opening drawers or turning pages; make mobile tabs and whole setlist cards respond consistently.',
+          'Show source singing languages, retain translation references, and keep drummer titles clean while preserving setlist versions.',
+          'Respond to TAP immediately and reuse the warmed audio path for quick metronome restarts.',
+          'Render library results in batches; improve interrupted menus, keyboard focus, drag feedback and reduced-motion behavior.'
+        ]
+      },
+      {
+        version: '0.12.16',
         date: '2026-11-06',
         title: 'Faster navigation and clearer library controls',
         bullets: [
@@ -1018,6 +1030,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: '更穩定的操作與新版歌詞閱讀',
+        bullets: [
+          '整份歌單維持相同字級，依螢幕安排歌詞欄位，減少翻頁與單字掉到下一行。',
+          '側欄開關與翻頁時保持譜面穩定，統一手機歌曲／歌單切換及整張歌單卡片的點按回饋。',
+          '依原始演唱語言顯示歌詞並保留譯文對照；鼓手歌名保持簡潔，一般歌單仍保留版本。',
+          'TAP 按下即時回饋，節拍器短時間停止後重開可沿用已準備的音訊路徑。',
+          '歌曲庫分批顯示結果；改善選單快速開關、鍵盤焦點、曲序拖曳與減少動態設定。'
+        ]
+      },
+      {
+        version: '0.12.16',
         date: '2026-11-06',
         title: '操作加速與歌曲庫體驗更新',
         bullets: [

@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Music2 } from 'lucide-react';
 import { UI_DRAWER_EASE } from '../lib/uiMotion';
+import { useKeyboardMotionInterrupt } from '../hooks/useUiMotion';
 import { invitationPath, invitationTarget, type InvitationAuthReturn, type InvitationMotion, type InvitationResource } from '../lib/invitationJourney';
 import '../styles/invitation.css';
 
@@ -47,6 +48,16 @@ export function InvitationTransitionProvider({ children }: { children: ReactNode
   const readyTarget = useRef<string | null>(null);
   const destinationFocus = useRef<DestinationFocus | undefined>(undefined);
   const reachedApp = useRef(false);
+
+  useKeyboardMotionInterrupt(() => {
+    const journey = current.current;
+    if (!journey || journey.motion === 'instant') return;
+    journey.motion = 'instant';
+    // Settle visuals without revoking the navigation ticket or destination guard.
+    animations.current.forEach(animation => animation.cancel());
+    animations.current.clear();
+    setPending({ ...journey });
+  });
 
   const cancel = useCallback(() => {
     serial.current++;

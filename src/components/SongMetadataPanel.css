@@ -86,3 +86,15 @@
 .song-info-popover .song-info-references input[inputmode="decimal"],
 .song-info-popover .song-info-references > [role="group"] > div > div { grid-column: span 4; }
 .song-info-popover .song-info-references button { min-height: 36px; }
+
+/* Tempo taps are immediate state feedback, including keyboard / reduced motion. */
+button.reference-tap {
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  transition: none; transform: none; scale: none;
+}
+button.reference-tap[data-control-pressed="true"] {
+  background: var(--color-indigo-700) !important; border-color: var(--color-indigo-700) !important; color: white !important;
+}
+.dark button.reference-tap[data-control-pressed="true"] {
+  background: var(--color-indigo-300) !important; border-color: var(--color-indigo-300) !important; color: var(--color-surface) !important;
+}

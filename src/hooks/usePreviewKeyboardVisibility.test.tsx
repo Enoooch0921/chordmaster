@@ -73,6 +73,47 @@ describe('preview keyboard motion coordination', () => {
     expect(closing.stop).toHaveBeenCalled(); expect(t.run().from).toBe(759); expect(t.run().to).toBe(906);
     t.finish(); expect(t.preview.style.paddingBottom).toBe('316px');
   });
+  it.each(['pointerdown', 'touchstart', 'wheel'])('yields dismissal to %s without clamping the current view', type => {
+    const t = setup(true); t.frame(); t.finish(); t.hook.rerender({ anchor: null }); t.advance(0.5);
+    const closing = t.run();
+    fireEvent(t.preview, new Event(type));
+    expect(closing.stop).toHaveBeenCalled();
+    expect(t.preview.scrollTop).toBe(759);
+    expect(t.preview.style.paddingBottom).toBe('316px');
+    // A stale completion must not move the reading position or remove needed space.
+    act(() => { closing.options.onUpdate(612); closing.options.onComplete(); });
+    expect(t.preview.scrollTop).toBe(759);
+    state.preference.reduced = true; t.hook.rerender({ anchor: null }); t.frame();
+    expect(t.preview.scrollTop).toBe(759);
+    expect(t.preview.style.paddingBottom).toBe('316px');
+    t.preview.scrollTop = 400; fireEvent.scroll(t.preview);
+    expect(t.preview.style.paddingBottom).toBe('12px');
+    expect(t.preview.scrollTop).toBe(400);
+  });
+  it('stops a collapsing leading spacer and releases it without moving the visible content', () => {
+    const t = setup(false, 0); t.panel.getBoundingClientRect = () => rect(0, 300); t.frame(); t.finish();
+    t.hook.rerender({ anchor: null }); t.advance(0.5);
+    const collapsing = t.run();
+    fireEvent.wheel(t.preview);
+    expect(collapsing.stop).toHaveBeenCalled();
+    expect(t.bar.getBoundingClientRect().top).toBe(158);
+    act(() => { collapsing.options.onUpdate(0); collapsing.options.onComplete(); });
+    expect(t.bar.getBoundingClientRect().top).toBe(158);
+    t.preview.scrollTop = 200;
+    const before = t.bar.getBoundingClientRect().top;
+    fireEvent.scroll(t.preview);
+    expect(t.preview.querySelector('[data-keyboard-leading-space]')).toBeNull();
+    expect(t.bar.getBoundingClientRect().top).toBe(before);
+    expect(t.preview.scrollTop).toBe(42);
+  });
+  it('keeps a manually panned position when motion preferences change, until another bar is selected', () => {
+    const t = setup(); t.frame(); t.advance(0.5); fireEvent.wheel(t.preview);
+    t.preview.scrollTop = 90;
+    state.preference.reduced = true; t.hook.rerender({ anchor: 'bar' }); t.frame();
+    expect(t.preview.scrollTop).toBe(90); expect(state.runs).toHaveLength(1);
+    t.bar.dataset.previewEditAnchor = 'another'; t.hook.rerender({ anchor: 'another' }); t.frame();
+    expect(t.preview.scrollTop).toBe(296);
+  });
   it('folds temporary leading space away instead of snapping the first row upward', () => {
     const t = setup(false, 0); t.panel.getBoundingClientRect = () => rect(0, 300); t.frame(); t.finish();
     expect(t.bar.getBoundingClientRect().top).toBe(316);

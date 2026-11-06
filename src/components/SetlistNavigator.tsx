@@ -1,6 +1,7 @@
-import React, { useLayoutEffect, useRef } from 'react';
-import { AnimatePresence } from 'motion/react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { AnimatePresence, useMotionValue, type HTMLMotionProps } from 'motion/react';
 import { PresenceSurface } from './ui/InteractionMotion';
+import { useKeyboardMotionInterrupt } from '../hooks/useUiMotion';
 import { UI_DRAWER_EASE, type UiMotionPreference } from '../lib/uiMotion';
 import { Project, Setlist, StoredSong } from '../types';
 
@@ -123,14 +124,34 @@ export const setlistPanelVariants = {
   }),
   visible: ({ reduced, instant }: PanelMotion) => ({
     transform: 'translate3d(0%, 0, 0)', opacity: 1,
-    transition: { duration: instant ? 0 : reduced ? 0.125 : 0.24, ease: UI_DRAWER_EASE }
+    transition: { duration: instant ? 0 : reduced ? 0.125 : 0.24, ease: UI_DRAWER_EASE,
+      transform: { duration: instant || reduced ? 0 : 0.24, ease: UI_DRAWER_EASE } }
   }),
   exit: ({ direction, reduced, instant }: PanelMotion) => ({
     transform: reduced || instant ? 'translate3d(0%, 0, 0)' : `translate3d(${direction > 0 ? '-25%' : '100%'}, 0, 0)`,
     opacity: reduced && !instant ? 0 : 1,
-    transition: { duration: instant ? 0 : reduced ? 0.125 : 0.24, ease: UI_DRAWER_EASE }
+    transition: { duration: instant ? 0 : reduced ? 0.125 : 0.24, ease: UI_DRAWER_EASE,
+      transform: { duration: instant || reduced ? 0 : 0.24, ease: UI_DRAWER_EASE } }
   })
 };
+
+/** Keep navigation intent immediate when input or motion preferences change mid-slide. */
+const PanelMotionPreference = createContext<UiMotionPreference>({ instant: false, reduced: false });
+function SetlistPanelLayer(props: HTMLMotionProps<'div'>) {
+  const preference = useContext(PanelMotionPreference);
+  const transform = useMotionValue('translate3d(0%, 0, 0)');
+  const opacity = useMotionValue(1);
+  const previous = useRef(preference);
+  const finish = () => { transform.animation?.complete(); opacity.animation?.complete(); };
+  useKeyboardMotionInterrupt(finish);
+  useEffect(() => {
+    // A new transition alone does not retarget an unchanged "visible" value.
+    const changed = previous.current.instant !== preference.instant || previous.current.reduced !== preference.reduced;
+    previous.current = preference;
+    if (changed && (preference.instant || preference.reduced)) finish();
+  }, [preference.instant, preference.reduced]);
+  return <PresenceSurface {...props} style={{ ...props.style, transform, opacity }} />;
+}
 
 interface SetlistNavigatorProps {
   view: SetlistPanelView;
@@ -167,18 +188,20 @@ const SetlistNavigator: React.FC<SetlistNavigatorProps> = ({
     return () => { if (scroller) scrollPositions.current.set(location, scroller.scrollTop); };
   }, [location, ready]);
   const panelMotion = { ...preference, direction };
+  // Exiting elements retain their old props, so deliver preference changes separately.
+  const livePreference = useMemo(() => ({ instant: preference.instant, reduced: preference.reduced }), [preference.instant, preference.reduced]);
   const panel = view === 'detail' ? detail : view === 'addSongs' ? addSongs : view === 'manageProjects' ? manageProjects : list;
-  return <div ref={root} data-setlist-navigator data-setlist-panel={view} className="relative flex min-h-0 flex-1 flex-col overflow-hidden" aria-busy={busy}>
+  return <PanelMotionPreference.Provider value={livePreference}><div ref={root} data-setlist-navigator data-setlist-panel={view} className="relative flex min-h-0 flex-1 flex-col overflow-hidden" aria-busy={busy}>
     {/* Recreate presence at restoration so a remembered location appears immediately. */}
     <AnimatePresence key={ready ? 'ready' : 'restoring'} initial={false} custom={panelMotion}>
-      <PresenceSurface key={location} data-setlist-location={location} data-setlist-panel-layer={view} custom={panelMotion}
+      <SetlistPanelLayer key={location} data-setlist-location={location} data-setlist-panel-layer={view} custom={panelMotion}
         variants={setlistPanelVariants} initial="enter" animate="visible" exit="exit"
         inert={busy ? true : undefined} style={{ zIndex: depth }}
         className="absolute inset-0 flex min-h-0 flex-col bg-white dark:bg-[color:var(--color-surface)]">
         {panel}
-      </PresenceSurface>
+      </SetlistPanelLayer>
     </AnimatePresence>
-  </div>;
+  </div></PanelMotionPreference.Provider>;
 };
 
 export default SetlistNavigator;

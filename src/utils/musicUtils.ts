@@ -495,7 +495,7 @@ export function getSectionColor(title: string, useColors: boolean = true) {
   const isCountIn = t.includes('count-in') || t.includes('count in') || t.includes('countoff') || t.includes('count-off') || t.includes('count off');
   const isRefrain = t.includes('refrain');
   const isRap = t.includes('rap');
-  const isTurnaround = t.includes('turnaround');
+  const isTurnaround = /turn[\s_-]*around/.test(t);
   const isBreakdown = t.includes('breakdown');
   
   if (!useColors) {

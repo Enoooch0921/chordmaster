@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
-import { useUiMotion } from './useUiMotion';
+import { useKeyboardMotionInterrupt, useUiMotion } from './useUiMotion';
 import { UI_CONTENT_FADE_DURATION, UI_EASE_OUT } from '../lib/uiMotion';
 
 /** Replace content immediately; only its ink fades, without remounting forms. */
@@ -7,6 +7,7 @@ export function useContentSwitchMotion(ref: RefObject<HTMLElement | null>, value
   const previous = useRef(value);
   const animation = useRef<Animation | null>(null);
   const preference = useUiMotion();
+  useKeyboardMotionInterrupt(() => { animation.current?.cancel(); animation.current = null; });
   useLayoutEffect(() => {
     const changed = previous.current !== value;
     previous.current = value;

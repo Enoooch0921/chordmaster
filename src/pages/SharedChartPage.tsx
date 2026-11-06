@@ -7,7 +7,9 @@ import { invitationPath, type InvitationResource } from '../lib/invitationJourne
 import { useThemeMode } from '../hooks/useThemeMode';
 import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
-import LyricsSheet from '../components/LyricsSheet';
+import SetlistLyricsWorkspace, { type SetlistLyricsMode } from '../components/SetlistLyricsWorkspace';
+import { DEFAULT_LYRICS_BOOK_SETTINGS } from '../utils/lyricsBook';
+import type { Song } from '../types';
 import { APP_NAME } from '../constants/appMeta';
 import {
   AppLanguage,
@@ -37,6 +39,14 @@ const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string |
     // Landing still works through the URL query even if storage is unavailable.
   }
 };
+
+function SharedLyricsReader({ song, identity, language }: { song: Song; identity: string; language: AppLanguage }) {
+  const [mode, setMode] = useState<SetlistLyricsMode>('reading');
+  const [printSettings, setPrintSettings] = useState(DEFAULT_LYRICS_BOOK_SETTINGS);
+  return <div style={{ height: '80dvh' }}><SetlistLyricsWorkspace title={song.title} entries={[{ id: identity, song }]} selectedId={identity}
+    onSelectSong={() => {}} language={language} mode={mode} onModeChange={setMode}
+    printSettings={printSettings} onPrintSettingsChange={setPrintSettings}/></div>;
+}
 
 export default function SharedChartPage() {
   const { token = '' } = useParams();
@@ -575,7 +585,7 @@ export default function SharedChartPage() {
                   <h2 className="mb-3 text-xl font-black text-stone-900">{selectedBundleSong.title}</h2>
                   <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
                     {showSharedLyrics ? (
-                      <LyricsSheet song={selectedBundleSong.song} language={language} />
+                      <SharedLyricsReader identity={selectedBundleSong.id} song={selectedBundleSong.song} language={language} />
                     ) : (
                       <ChordSheet
                         song={selectedBundleSong.song}
@@ -616,7 +626,7 @@ export default function SharedChartPage() {
               </div>
               <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
                 {showSharedLyrics ? (
-                  <LyricsSheet song={payload.song.song} language={language} />
+                  <SharedLyricsReader identity={payload.song.id} song={payload.song.song} language={language} />
                 ) : (
                   <ChordSheet
                     song={payload.song.song}

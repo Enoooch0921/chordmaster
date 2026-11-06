@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import SetlistNavigator, { setlistPanelVariants } from './SetlistNavigator';
 
@@ -17,9 +17,23 @@ it('replaces sliding with a gentle fade for reduced motion and switches instantl
   expect(setlistPanelVariants.enter(reduced)).toEqual({ transform: 'translate3d(0%, 0, 0)', opacity: 0 });
   expect(setlistPanelVariants.exit(reduced).transform).toBe('translate3d(0%, 0, 0)');
   expect(setlistPanelVariants.visible(reduced).transition.duration).toBe(0.125);
+  expect(setlistPanelVariants.visible(reduced).transition.transform.duration).toBe(0);
+  expect(setlistPanelVariants.exit(reduced).transition.transform.duration).toBe(0);
   const keyboard = { ...reduced, reduced: false, instant: true };
   expect(setlistPanelVariants.enter(keyboard)).toEqual({ transform: 'translate3d(0%, 0, 0)', opacity: 1 });
   expect(setlistPanelVariants.exit(keyboard).transition.duration).toBe(0);
+});
+
+it.each(['keyboard', 'reduced'] as const)('settles in-flight navigation when %s takes over', async input => {
+  const props = { list: <button>List</button>, detail: <button>Meeting</button>, addSongs: '', manageProjects: '' };
+  const { container, rerender } = render(<SetlistNavigator {...props} view="list" />);
+  fireEvent.pointerDown(document); rerender(<SetlistNavigator {...props} view="detail" />);
+  if (input === 'keyboard') fireEvent.keyDown(document, { key: 'Tab' });
+  else rerender(<SetlistNavigator {...props} view="detail" motion={{ instant: false, reduced: true }} />);
+  await waitFor(() => {
+    expect(container.querySelector('[data-setlist-panel-layer="detail"]')).toHaveStyle({ transform: 'translate3d(0%, 0, 0)', opacity: '1' });
+    expect(container.querySelectorAll('[data-setlist-panel-layer]')).toHaveLength(1);
+  }, { timeout: 180 });
 });
 
 it('disables outgoing controls during a slide and skips animation when restoring memory', async () => {

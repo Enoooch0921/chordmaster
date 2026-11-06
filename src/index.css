@@ -4,6 +4,11 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Loading keeps its text/status feedback without continuous rotation. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin { animation: none; }
+}
+
 /* The installed app owns its viewport; individual panes own their scrolling. */
 @media screen {
   html, body, #root {
@@ -20,6 +25,20 @@
 
 /* Keep the original page DOM and pagination; arrange it into spread rows only
    inside performance mode. Hidden lyric measurement nodes remain out of flow. */
+[data-performance-overlay] [data-performance-chrome-item] {
+  transition: opacity var(--ui-fade-duration) var(--ease-ui-out);
+}
+[data-performance-overlay][data-performance-chrome="hidden"] [data-performance-chrome-item] {
+  transition-duration: var(--ui-release-duration);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-performance-overlay][data-performance-chrome] [data-performance-chrome-item] {
+    transition-duration: var(--ui-fade-duration);
+  }
+}
+[data-ui-input="keyboard"] [data-performance-overlay] [data-performance-chrome-item] {
+  transition: none;
+}
 [data-performance-overlay]:not([data-handwriting])[data-performance-chrome="hidden"] [data-performance-chrome-item] {
   opacity: 0;
   pointer-events: none;
@@ -28,8 +47,33 @@
   pointer-events: none;
 }
 
-/* A short direct gesture response; layout and vertical page offsets stay still. */
+/* Reading content never follows a gesture. Only the local touch cue moves. */
 [data-performance-swipe-surface] { flex-shrink: 0; }
+.performance-touch-feedback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgb(28 25 23 / 88%);
+  color: var(--color-stone-50);
+  border: 1px solid rgb(255 255 255 / 35%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 14%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--ui-fade-duration) var(--ease-ui-out);
+}
+.performance-touch-feedback[data-active] { opacity: 0.72; }
+.performance-touch-feedback[data-active][data-ready="true"] { opacity: 1; }
+.performance-touch-feedback [data-direction] { display: none; }
+.performance-touch-feedback[data-direction="previous"] [data-direction="previous"],
+.performance-touch-feedback[data-direction="next"] [data-direction="next"] { display: block; }
+/* Reduced motion keeps the cue at the starting touch point (in the hook), with only this fade. */
 :root { --personal-notes-bottom-offset: 80px; --personal-notes-launch-height: 44px; }
 .performance-navigation-hint {
   position: absolute;
@@ -624,7 +668,14 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   [data-ui-input="pointer"] .ui-press:active:not(:disabled) { transform: none; opacity: 0.8; }
 }
 
-.ui-motion-chevron { transition: transform var(--ui-release-duration) var(--ease-ui-out); }
+.ui-anchored-panel { max-height: inherit; max-width: inherit; overflow-y: auto; overscroll-behavior: contain; }
+.mobile-sidebar-navigation { container: mobile-sidebar / inline-size; }
+.mobile-sidebar-layout { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: .5rem; align-items: center; }
+@container mobile-sidebar (max-width: 20rem) {
+  .mobile-sidebar-layout { grid-template-columns: 1fr auto auto; }
+  .mobile-sidebar-layout > nav { grid-column: 1 / -1; grid-row: 2; }
+}
+.ui-motion-chevron { transition: transform var(--ui-release-duration) var(--ease-ui-out), rotate var(--ui-release-duration) var(--ease-ui-out); }
 [data-ui-input="keyboard"] .ui-motion-chevron { transition: none; }
 @media (prefers-reduced-motion: reduce) { .ui-motion-chevron { transition: none; } }
 
@@ -657,13 +708,13 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 [data-ui-input="keyboard"] .ui-details::details-content { transition: none; }
 
 .chart-map { display:flex; align-items:flex-start; gap:12px; padding-top:8px; flex:1; min-width:0; }
-.chart-map-steps { display:grid; flex:1; grid-template-columns:repeat(18,minmax(0,30px)); grid-auto-rows:30px; column-gap:4px; align-items:center; }
-.chart-map[data-inline] { flex:0 1 auto; padding-top:0; align-self:center; }
-.chart-map[data-inline] .chart-map-steps { grid-auto-flow:column; grid-auto-columns:28px; grid-template-columns:none; }
+.chart-map-steps { display:flex; flex-direction:column; flex:1; min-width:0; gap:2px; }
+.chart-map-row { display:grid; column-gap:4px; align-items:center; }
+.chart-map[data-inline] { flex:1; padding-top:0; align-self:center; }
 /* Reuse the original title-to-metadata gap and part of the paper's top inset
    for a dedicated roadmap line. The score below keeps its original geometry. */
 .score-heading { margin-top:-16px; }
-.score-heading[data-map-lines="2"] { padding-bottom:0; }
+.score-heading:has(.chart-map[data-wrapped]) { padding-bottom:0; }
 .sheet-first-heading { grid-template-columns:minmax(0,1fr); }
 .chart-map-hidden-settings { position:absolute; top:42px; right:0; z-index:10; }
 .sheet-first-heading:not(:has([data-chart-song-map])) .sheet-first-meta { margin-top:18px; }
@@ -672,26 +723,21 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   grid-column:1 / -1; grid-row:3; align-items:center; height:34px;
   padding:0; gap:8px; min-width:0;
 }
-.chart-map[data-heading-map] .chart-map-steps {
-  grid-template-columns:repeat(var(--map-columns),minmax(0,34px));
-  grid-auto-rows:30px; column-gap:3px;
-}
-.chart-map[data-heading-map]:not([data-dense]) .chart-map-token { width:27px; height:27px; font-size:12px; }
-.chart-map[data-dense] { height:42px; padding-top:0; align-items:center; }
-.chart-map[data-dense] .chart-map-steps {
-  grid-template-columns:repeat(var(--map-columns),minmax(0,29px));
-  grid-auto-rows:21px; column-gap:2px;
-}
-.chart-map[data-dense] .chart-map-token { width:min(20px,100%); height:20px; font-size:10px; }
-.chart-map[data-dense] .chart-map-token sup { right:-8px; top:-5px; }
-.chart-map-token { position:relative; display:inline-flex; align-items:center; justify-content:center; justify-self:start; width:25px; height:25px; border:1.5px solid; border-radius:50%; font:700 11px/1 var(--font-sans); }
-/* Longer numbered cues earn width; simple cues retain their compact circle. */
-.chart-map-token[data-wide], .chart-map[data-heading-map] .chart-map-token[data-wide], .chart-map[data-dense] .chart-map-token[data-wide] { width:100%; padding-inline:5px; border-radius:8px; }
-.chart-map-token[data-wide][data-repeated], .chart-map[data-heading-map] .chart-map-token[data-wide][data-repeated], .chart-map[data-dense] .chart-map-token[data-wide][data-repeated] { width:calc(100% - 10px); }
-.chart-map-token-label { display:inline-flex; flex:none; align-items:baseline; justify-content:center; gap:2px; width:max-content; white-space:nowrap; transform:scale(var(--map-label-scale,1)); transform-origin:center; }
+.chart-map[data-compact] .chart-map-row { column-gap:2px; }
+.chart-map[data-compact] .chart-map-token { padding-inline:4px; }
+.chart-map[data-dense] { height:34px; padding-top:0; align-items:center; }
+.chart-map[data-dense] .chart-map-token { height:20px; }
+.chart-map[data-wrapped] { height:42px; }
+.chart-map-token { display:inline-flex; align-items:center; justify-content:center; min-width:0; width:100%; height:24px; padding:2px 8px; border:0; border-radius:4px; background:#ecefed; color:#505a56; font:650 13px/20px var(--font-sans); font-variant-numeric:tabular-nums; }
+/* A restrained roadmap palette: related sections share a hue, while their
+   labels carry the precise meaning. Chart paper uses these tones in all themes. */
+.chart-map-token[data-accent=blue] { background:#e7edf2; color:#455a6b; }
+.chart-map-token:is([data-accent=rose],[data-accent=emerald],[data-accent=fuchsia]) { background:#e3eae3; color:#425b4a; }
+.chart-map-token:is([data-accent=amber],[data-accent=violet]) { background:#ece7df; color:#655744; }
+.chart-map-token-label { display:inline-flex; flex:none; align-items:baseline; justify-content:center; gap:4px; font-size:13px; width:max-content; white-space:nowrap; transform:scale(var(--map-label-scale,1)); transform-origin:center; }
 .chart-map-token [data-map-label-line] { flex:none; display:block; }
-.chart-map-token-number { font-size:0.92em; font-weight:700; line-height:1; }
-.chart-map-token sup { position:absolute; right:-6px; top:-5px; padding:0 1px; border-radius:3px; font:800 8px/1 var(--font-sans); background:white; }
+.chart-map-token-cue { font-size:12px; font-weight:500; }
+.chart-map-token-repeat { flex:none; font-size:.85em; font-weight:500; line-height:1; padding-left:4px; border-left:1px solid color-mix(in srgb,currentColor,transparent 72%); }
 .chart-map-edit { display:inline-flex; align-items:center; gap:3px; min-height:30px; font-size:11px; color:var(--color-indigo-700); }
 .chart-map-settings {
   position:relative; display:inline-flex; align-items:center; align-self:center; flex:none; gap:4px;

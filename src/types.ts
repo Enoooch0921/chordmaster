@@ -205,6 +205,10 @@ export interface LyricsBlock {
   marker: string;
   chinese: string;
   english: string;
+  /** Source-confirmed sung language in the main lyrics view; both texts remain available for comparison. */
+  singingLanguage?: 'chinese' | 'english';
+  /** Zero-based source sentence languages for a section that changes language mid-phrase. */
+  singingLineLanguages?: ('chinese' | 'english')[];
   pageBreakBefore?: boolean;
   needsPairingReview?: boolean;
 }

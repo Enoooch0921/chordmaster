@@ -1,6 +1,6 @@
-import { AnimatePresence, motion, useIsPresent, type HTMLMotionProps } from 'motion/react';
+import { AnimatePresence, motion, useIsPresent, useMotionValue, type HTMLMotionProps } from 'motion/react';
 import { type HTMLAttributes, type ReactNode, type Ref } from 'react';
-import { useUiMotion } from '../../hooks/useUiMotion';
+import { useKeyboardMotionInterrupt, useUiMotion } from '../../hooks/useUiMotion';
 import { popoverVariants, UI_EASE_OUT, type UiMotionPreference } from '../../lib/uiMotion';
 
 interface PopoverProps extends HTMLAttributes<HTMLDivElement> {
@@ -23,8 +23,15 @@ export function AnimatedPopover({ open, ready = true, instantExit = false, panel
 }
 function PopoverBody({ panelRef, shellClassName, className, children, style, origin, preference, ready, ...props }: Omit<PopoverProps, 'open' | 'instantExit'> & { preference: UiMotionPreference }) {
   const present = useIsPresent();
+  const transform = useMotionValue(popoverVariants.visible(preference).transform);
+  const opacity = useMotionValue(1);
+  useKeyboardMotionInterrupt(() => {
+    // Complete through Motion so presence still finishes an interrupted exit.
+    transform.animation?.complete();
+    opacity.animation?.complete();
+  });
   return <div {...props} ref={panelRef} style={style} className={shellClassName} data-ui-popover inert={!present ? true : undefined} aria-hidden={!present ? true : undefined}>
-    <motion.div className={className} style={{ transformOrigin: origin }} custom={preference} variants={popoverVariants} initial={preference.instant ? false : 'hidden'} animate={ready ? 'visible' : 'hidden'} exit="exit">
+    <motion.div className={className} style={{ transformOrigin: origin, transform, opacity }} custom={preference} variants={popoverVariants} initial={preference.instant ? false : 'hidden'} animate={ready ? 'visible' : 'hidden'} exit="exit">
       {children}
     </motion.div>
   </div>;
@@ -48,9 +55,11 @@ export function AnimatedDisclosure({ open, children, className, id, resize = fal
 /** Keep final geometry during a short fade, then remove it in one layout change. */
 function DisclosureBody({ preference, children, className, id, resize }: { preference: UiMotionPreference; children: ReactNode; className?: string; id?: string; resize: boolean }) {
   const present = useIsPresent();
+  const opacity = useMotionValue(1);
+  useKeyboardMotionInterrupt(() => opacity.animation?.complete());
   return <motion.div id={id} data-ui-disclosure inert={!present ? true : undefined} aria-hidden={!present ? true : undefined}
     custom={preference} variants={disclosureVariants} initial={resize ? false : 'hidden'}
-    animate="visible" exit="exit" style={{ overflow: 'hidden' }}>
+    animate="visible" exit="exit" style={{ overflow: 'hidden', opacity }}>
     <div className={className}>{children}</div>
   </motion.div>;
 }

@@ -7,7 +7,7 @@ import { getSectionColor } from '../utils/musicUtils';
 import { getSectionBadgeStyle } from '../utils/sectionBadgeStyle';
 import React from 'react';
 import type { Song, AppLanguage, LyricsBlock } from '../types';
-import { getLyricsBlocks, getLyricsLanguage, newLyricsBlock, paginateLyrics, updateLyricsBlocks, type LyricsFragment, type LyricsLanguage, type LyricsPage } from '../utils/lyricsDocument';
+import { getLyricsBlocks, getLyricsFields, getLyricsPairLayout, mainLyricsLabel, getLyricsLanguage, newLyricsBlock, paginateLyrics, updateLyricsBlocks, type LyricsFragment, type LyricsLanguage, type LyricsPage } from '../utils/lyricsDocument';
 import LyricsDocEditor from './LyricsDocEditor';
 import { measureLyricsText, type LyricsTextRow } from '../utils/lyricsMeasurement';
 import { pairLyricsLines, replaceLyricsLine } from '../utils/lyricsPairing';
@@ -25,7 +25,6 @@ interface LyricsSheetProps {
   hideViewToggle?: boolean;
 }
 const buttonClass = 'rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-indigo-50 disabled:opacity-35';
-const fieldsFor = (display: LyricsLanguage): ('chinese' | 'english')[] => display === 'bilingual' || display === 'mixed' ? ['english', 'chinese'] : [display];
 // One full-width character; keep Verse and unlabelled lyrics flush left.
 const lyricsIndent = (marker: string, fontSize: number) => {
   const label = lyricsSectionLabel(marker);
@@ -96,8 +95,6 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
   const [displayOverride, setDisplayOverride] = React.useState<LyricsLanguage>();
   const display = displayOverride ?? getLyricsLanguage(doc);
   const paired = display === 'bilingual' || display === 'mixed';
-  const pairLayout = display === 'mixed' ? 'mixed' : 'columns';
-  const fields = fieldsFor(display);
   const [fontOverride, setFontOverride] = React.useState<number>();
   const [lineOverride, setLineOverride] = React.useState<number>();
   const [readingFontSize, setReadingFontSize] = React.useState(24);
@@ -114,7 +111,7 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
   const [textRows, setTextRows] = React.useState<Record<string, Partial<Record<'chinese' | 'english', LyricsTextRow[]>>>>({});
   const pairedBlocks = React.useMemo(() => Object.fromEntries(blocks.map(block => [block.id, pairLyricsLines({
     english: formattedBlocks[block.id].english.text, chinese: formattedBlocks[block.id].chinese.text,
-  }, {}, 1, pairLayout)])), [blocks, formattedBlocks, pairLayout]);
+  }, {}, 1, getLyricsPairLayout(block, display), { language: block.singingLanguage, lines: block.singingLineLanguages })])), [blocks, formattedBlocks, display]);
   const selected = blocks.find(block => block.id === selectedId);
   const selectedLabel = lyricsSectionLabel(selected?.marker ?? '');
   const selectedType = selectedLabel.replace(/ \d+$/, '');
@@ -122,7 +119,7 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
   const columnCount = display === 'bilingual' ? 1 : 2;
   const textWidth = (728 - 32) / 2;
   const orderedBlocks = React.useMemo(() => sortLyricsSections(blocks), [blocks]);
-  const visibleBlocks = orderedBlocks.filter(block => onChange || fields.some(field => block[field].trim()));
+  const visibleBlocks = orderedBlocks.filter(block => onChange || getLyricsFields(block, display).some(field => block[field].trim()));
   const source = Array.from(new Set([song.lyricist?.trim(), song.composer?.trim()].filter(Boolean))).join(' / ');
 
   const save = (next: LyricsBlock[]) => onChange?.({ ...song, lyricsDoc: updateLyricsBlocks(doc, next) });
@@ -150,10 +147,12 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
       const nextRows: typeof textRows = {};
       const measured = visibleBlocks.map(block => {
         const node = Array.from(root.children).find(child => (child as HTMLElement).dataset.measureBlock === block.id);
+        const fields = getLyricsFields(block, display);
         const rows = Object.fromEntries(fields.map(field => [field, measureLyricsText(node?.querySelector(`[data-field="${field}"]`), formattedBlocks[block.id][field].text, fontSize * lineHeight)])) as Partial<Record<'chinese' | 'english', LyricsTextRow[]>>;
         nextRows[block.id] = rows;
-        const heights = paired
-          ? pairLyricsLines({ english: formattedBlocks[block.id].english.text, chinese: formattedBlocks[block.id].chinese.text }, rows, fontSize * lineHeight, pairLayout).map(pair => pair.height)
+        const pairLayout = getLyricsPairLayout(block, display);
+        const heights = paired || pairLayout === 'sung'
+          ? pairLyricsLines({ english: formattedBlocks[block.id].english.text, chinese: formattedBlocks[block.id].chinese.text }, rows, fontSize * lineHeight, pairLayout, { language: block.singingLanguage, lines: block.singingLineLanguages }).map(pair => pair.height)
           : (rows[fields[0]] ?? []).map(row => row.height);
         return { id: block.id, heights, pageBreakBefore: block.pageBreakBefore, headingHeight: block.marker ? LYRICS_SECTION_HEADING_HEIGHT : 0 };
       });
@@ -181,6 +180,8 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
   const renderFragment = (fragment: LyricsFragment) => {
     const block = blocks.find(candidate => candidate.id === fragment.blockId);
     if (!block) return null;
+    const fields = getLyricsFields(block, display);
+    const pairLayout = getLyricsPairLayout(block, display);
     const headingLabel = lyricsSectionLabel(block.marker);
     const headingStyle = getSectionBadgeStyle(getSectionColor(headingLabel).accent);
     const headingClass = "inline-flex h-[18px] items-center rounded-sm border px-1.5 text-left leading-4";
@@ -191,7 +192,7 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
         {onChange && !exportMode ? <button type="button" aria-label={`${zh ? '段落操作' : 'Section actions'} ${headingLabel}`} onClick={() => selectBlock(block.id)} className={`${headingClass} hover:brightness-95 focus-visible:outline-indigo-500`} style={headingStyle}>{headingLabel}{fragment.continued ? ' (cont.)' : ''}</button> : <span className={headingClass} style={headingStyle}>{headingLabel}{fragment.continued ? ' (cont.)' : ''}</span>}
       </h2>}
       {onChange && !exportMode && block.needsPairingReview && !fragment.continued && <button type="button" data-preview-only-control onClick={() => selectBlock(block.id)} className="absolute -top-3 right-0 rounded bg-amber-100 px-1.5 text-[10px] leading-4 text-amber-900">{zh ? '待配對' : 'Review pairing'}</button>}
-      {paired ? <PairedLyrics pairs={pairedBlocks[block.id]} start={reading ? 0 : fragment.start} end={reading ? pairedBlocks[block.id].length : fragment.end} layout={pairLayout}
+      {paired || pairLayout === 'sung' ? <PairedLyrics pairs={pairedBlocks[block.id]} start={reading ? 0 : fragment.start} end={reading ? pairedBlocks[block.id].length : fragment.end} layout={pairLayout} primaryField={block.singingLanguage} lineLanguages={block.singingLineLanguages}
         gap={32} indent={lyricsIndent(block.marker, fontSize)} renderLine={(field, line, index) => {
           const formatted = formattedBlocks[block.id][field];
           const value = formatted.text.slice(line.start, line.end);
@@ -241,7 +242,7 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
           if (onReadingChange) onReadingChange(next); else setLocalReading(next);
         }}>{reading ? (zh ? '切換 A4 排版' : 'A4 layout') : (zh ? '大字閱讀' : 'Reading view')}</button>}
         <select aria-label={zh ? '歌詞語言' : 'Lyrics language'} value={display} onChange={e => setDisplay(e.target.value as LyricsLanguage)} className={buttonClass}>
-          <option value="chinese">{zh ? '中文' : 'Chinese'}</option><option value="english">{translationName}</option><option value="bilingual">{zh ? `中文／${translationName}對照` : 'Bilingual'}</option><option value="mixed">{zh ? `中文／${translationName}混合（逐行）` : `Chinese / ${translationName} (alternating lines)`}</option>
+          <option value="chinese">{mainLyricsLabel(blocks, language)}</option><option value="english">{translationName}</option><option value="bilingual">{zh ? `中文／${translationName}對照` : 'Bilingual'}</option><option value="mixed">{zh ? `中文／${translationName}混合（逐行）` : `Chinese / ${translationName} (alternating lines)`}</option>
         </select>
         <label className="flex items-center gap-2 text-sm">{zh ? '字級' : 'Size'}<select aria-label={zh ? '歌詞字級' : 'Lyrics font size'} value={fontSize} onChange={e => setSetting('fontSize', Number(e.target.value))} className={buttonClass}>
           {Array.from(new Set([14, 16, 18, DEFAULT_LYRICS_FONT_SIZE, 20, 24, 28, 32, fontSize])).sort((a, b) => a - b).map(size => <option key={size} value={size}>{reading ? `${Math.round(size * 10) / 10} px` : `${Math.round(size * 0.75 * 10) / 10} pt`}</option>)}
@@ -267,6 +268,10 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
           {LYRICS_SECTION_NAMES.map(name => <option key={name} value={name}>{name}</option>)}
           {selectedType && !LYRICS_SECTION_NAMES.some(name => name === selectedType) && <option value={selectedType}>{selectedType}</option>}
         </select>
+        <label className="flex items-center gap-2 text-sm">{zh ? '演唱語言' : 'Sung language'}<select aria-label={zh ? '段落演唱語言' : 'Section sung language'} className={buttonClass} value={selected.singingLineLanguages?.length ? 'lines' : selected.singingLanguage ?? ''} onChange={e => patchSelected({ singingLanguage: (e.target.value || undefined) as LyricsBlock['singingLanguage'], singingLineLanguages: undefined })}>
+          {selected.singingLineLanguages?.length ? <option value="lines" disabled>{zh ? '依原稿逐句' : 'Per source sentence'}</option> : null}
+          <option value="">{zh ? '依顯示設定' : 'Follow display'}</option><option value="chinese" disabled={!selected.chinese.trim()}>{zh ? '中文' : 'Chinese'}</option><option value="english" disabled={!selected.english.trim()}>{translationName}</option>
+        </select></label>
         <input aria-label={zh ? '段落名稱' : 'Section heading'} value={selectedLabel} onChange={e => patchSelected({ marker: e.target.value })} className="w-40 rounded-lg border border-stone-200 px-2 py-2 text-sm" />
         {([-1, 1] as const).map(direction => {
           const neighbor = orderedBlocks[orderedBlocks.indexOf(selected) + direction];
@@ -300,7 +305,7 @@ export default function LyricsSheet({ song, setlistSongNumber, language, onChang
     {!reading && <div ref={measureRef} aria-hidden="true" data-preview-only-control style={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none', width: 728, height: 0, overflow: 'hidden', fontSize, lineHeight, left: -10000, top: 0 }}>
       {header(true)}
       {visibleBlocks.map(block => <div key={block.id} data-measure-block={block.id}>
-        {fields.map(field => <div key={field} data-field={field} style={{ width: textWidth - lyricsIndent(block.marker, fontSize) }}>
+        {getLyricsFields(block, display).map(field => <div key={field} data-field={field} style={{ width: textWidth - lyricsIndent(block.marker, fontSize) }}>
           {formattedBlocks[block.id][field].text.split('\n').map((line, index) => <div key={index} data-line={index} className="lyrics-text">{line || '\u00a0'}</div>)}
         </div>)}
       </div>)}

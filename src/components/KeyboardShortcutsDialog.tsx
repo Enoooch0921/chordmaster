@@ -2,6 +2,7 @@ import React from 'react';
 import { Keyboard, X } from 'lucide-react';
 import type { AppLanguage } from '../types';
 import { KEYBOARD_SHORTCUT_SECTIONS } from '../constants/keyboardShortcuts';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 interface KeyboardShortcutsDialogProps {
   language: AppLanguage;
@@ -11,11 +12,8 @@ interface KeyboardShortcutsDialogProps {
 const keyClassName = 'inline-flex min-h-6 items-center justify-center rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-black leading-none text-slate-700 shadow-[0_1px_0_rgba(15,23,42,0.08)]';
 
 const KeyboardShortcutsDialog: React.FC<KeyboardShortcutsDialogProps> = ({ language, onClose }) => {
-  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
-
-  React.useEffect(() => {
-    closeButtonRef.current?.focus({ preventScroll: true });
-  }, []);
+  const dialogRef = React.useRef<HTMLElement>(null);
+  useModalFocus(true, dialogRef);
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -42,6 +40,7 @@ const KeyboardShortcutsDialog: React.FC<KeyboardShortcutsDialogProps> = ({ langu
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -58,7 +57,6 @@ const KeyboardShortcutsDialog: React.FC<KeyboardShortcutsDialogProps> = ({ langu
             <p className="mt-1 text-sm leading-6 text-slate-500">{subtitle}</p>
           </div>
           <button
-            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700"

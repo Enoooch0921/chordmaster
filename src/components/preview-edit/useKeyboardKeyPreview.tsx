@@ -41,7 +41,7 @@ export function useKeyboardKeyPreview(enabled: boolean) {
   const onPointerDownCapture = React.useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (!enabled || event.button !== 0 || !(event.target instanceof Element)) return;
     const button = event.target.closest<HTMLButtonElement>('button');
-    if (!button || button.disabled || button.hasAttribute('aria-haspopup')
+    if (!button || button.disabled || button.closest('[inert]') || button.hasAttribute('aria-haspopup')
       || !(button.closest('[data-key-surface="character"]') || button.hasAttribute('data-key-preview'))) return;
     const rhythm = button.querySelector<HTMLElement>('[data-rhythm-staff-key-glyph]');
     const jianpu = button.querySelector<HTMLElement>('[data-jianpu-input-glyph]');
@@ -53,7 +53,7 @@ export function useKeyboardKeyPreview(enabled: boolean) {
   }, [enabled]);
 
   let preview: React.ReactPortal | null = null;
-  if (pressed) {
+  if (enabled && pressed) {
     const viewport = window.visualViewport;
     const text = typeof pressed.content === 'string' ? pressed.content : '';
     const width = Math.min(96, Math.max(56, pressed.rect.width + 12, text.length * 16 + 18));

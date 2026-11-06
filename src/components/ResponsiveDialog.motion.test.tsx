@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { beforeAll, expect, it, vi } from 'vitest';
 import ResponsiveDialog from './ResponsiveDialog';
-vi.mock('../hooks/useUiMotion',()=>({useUiMotion:()=>({instant:true,reduced:false}),isKeyboardInteraction:()=>true}));
+vi.mock('../hooks/useUiMotion',async original=>({...await original<typeof import('../hooks/useUiMotion')>(),useUiMotion:()=>({instant:true,reduced:false}),isKeyboardInteraction:()=>true}));
 beforeAll(()=>{
  HTMLDialogElement.prototype.showModal=function(){this.open=true;};
  HTMLDialogElement.prototype.close=function(){this.open=false;};

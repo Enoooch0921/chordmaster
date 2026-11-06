@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 
 /** A touch belongs to the key pressed, even if the dock reflows before release. */
 export function useKeyboardTouchPress(enabled: boolean) {
   const press = useRef<{ id: number; button: HTMLButtonElement; x: number; y: number; cancelled: boolean } | null>(null);
   const suppressClickUntil = useRef(0);
+  useLayoutEffect(() => {
+    // Keep the gesture until release so its compatibility click is still consumed.
+    if (!enabled && press.current) press.current.cancelled = true;
+  }, [enabled]);
   useEffect(() => {
-    if (!enabled) return;
     const start = (event: PointerEvent) => {
       suppressClickUntil.current = 0;
       if (press.current && press.current.id !== event.pointerId) press.current.cancelled = true;
@@ -23,7 +26,7 @@ export function useKeyboardTouchPress(enabled: boolean) {
       // Consume this gesture's native compatibility click, including a different
       // button under the finger after a layout change. Keyboard clicks (detail 0) pass.
       suppressClickUntil.current = performance.now() + 500;
-      if (!current.cancelled && current.button.isConnected && !current.button.disabled) current.button.click();
+      if (!current.cancelled && current.button.isConnected && !current.button.disabled && !current.button.closest('[inert]')) current.button.click();
     };
     const click = (event: MouseEvent) => {
       if (event.detail === 0 || performance.now() >= suppressClickUntil.current) return;
@@ -45,12 +48,12 @@ export function useKeyboardTouchPress(enabled: boolean) {
       window.removeEventListener('click', click, true);
       window.removeEventListener('blur', cancel);
     };
-  }, [enabled]);
+  }, []);
   return useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (!enabled || event.button !== 0 || event.isPrimary === false || !['touch', 'pen'].includes(event.pointerType)
       || !(event.target instanceof Element)) return;
     const button = event.target.closest<HTMLButtonElement>('[data-keyboard-surface] button');
-    if (!button || button.disabled || button.closest('[data-preview-picker-popover]')) return;
+    if (!button || button.disabled || button.closest('[inert], [data-preview-picker-popover]')) return;
     press.current = { id: event.pointerId, button, x: event.clientX, y: event.clientY, cancelled: false };
   }, [enabled]);
 }

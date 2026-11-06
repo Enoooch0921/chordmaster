@@ -13,3 +13,10 @@ coverage/
 supabase/.temp/
 .claude/
 *.zip
+
+# Local design tools and review captures (keep source design specifications).
+/.agents/
+/.impeccable/live/
+/.impeccable/review/
+/.impeccable/critique/
+/.impeccable/surfaces/tmp-*

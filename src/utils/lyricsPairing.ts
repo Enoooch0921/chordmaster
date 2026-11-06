@@ -23,16 +23,23 @@ export function pairLyricsLines(
   text: Record<LyricsField, string>,
   measured: Partial<Record<LyricsField, LyricsTextRow[]>> = {},
   lineHeight = 1,
-  layout: 'columns' | 'mixed' = 'columns',
+  layout: 'columns' | 'mixed' | 'sung' = 'columns',
+  singing?: { language?: LyricsField; lines?: LyricsField[] },
 ): LyricsLinePair[] {
-  if (layout === 'mixed' && !text.chinese && !text.english) {
+  if (layout !== 'columns' && !text.chinese && !text.english) {
     return [{ chinese: { start: 0, end: 0 }, height: lineHeight }];
   }
   const pairs: LyricsLinePair[] = [];
+  const sourceLines = { chinese: text.chinese ? text.chinese.split('\n') : [], english: text.english ? text.english.split('\n') : [] };
+  const sungField = (index: number): LyricsField => {
+    const configured = singing?.lines?.[index] ?? singing?.language;
+    const field = configured === 'english' ? 'english' : 'chinese';
+    return index < sourceLines[field].length ? field : field === 'chinese' ? 'english' : 'chinese';
+  };
   for (const field of ['english', 'chinese'] as const) {
     // A missing translation takes no extra row in the mixed view. Deliberate
     // empty lines inside an existing translation still keep their source index.
-    if (layout === 'mixed' && text[field] === '') continue;
+    if (layout !== 'columns' && text[field] === '') continue;
     let offset = 0;
     let visualIndex = 0;
     const visualRows = measured[field] ?? [];
@@ -42,6 +49,7 @@ export function pairLyricsLines(
       while (visualIndex < visualRows.length && visualRows[visualIndex].start <= end) {
         height += visualRows[visualIndex++].height;
       }
+      if (layout === 'sung' && sungField(index) !== field) { offset = end + 1; return; }
       const pair = pairs[index] ?? { height: layout === 'mixed' ? 0 : lineHeight };
       pair[field] = { start: offset, end };
       pair.height = layout === 'mixed'

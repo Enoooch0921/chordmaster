@@ -32,7 +32,6 @@ export default function KeyboardPopover({ label, children }: { label: string; ch
     place();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
     if (panel.current) observer?.observe(panel.current);
-    panel.current?.focus({ preventScroll: true });
     window.addEventListener('resize', place); window.visualViewport?.addEventListener('resize', place);
     document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape, true);
     return () => {
@@ -40,6 +39,12 @@ export default function KeyboardPopover({ label, children }: { label: string; ch
       document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape, true);
     };
   }, [open, present]);
+  React.useLayoutEffect(() => {
+    // Browsers ignore focus while the positioning shell is visibility:hidden.
+    if (open && present && position && panel.current && !panel.current.contains(document.activeElement)) {
+      panel.current.focus({ preventScroll: true });
+    }
+  }, [open, position, present]);
   return <>
     <button ref={trigger} type="button" aria-label={label} aria-expanded={open} aria-haspopup="dialog"
       className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600"
@@ -51,7 +56,7 @@ export default function KeyboardPopover({ label, children }: { label: string; ch
       className="rounded-xl border border-slate-200 bg-[var(--color-surface-raised)] p-2 shadow-xl"
       onKeyDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}>
       <header className="mb-2 flex items-center justify-between text-xs font-semibold"><span>{label}</span>
-        <button type="button" className="flex size-8 items-center justify-center rounded-md" aria-label={`關閉${label}`} onClick={() => setOpen(false)}><X size={16}/></button>
+        <button type="button" className="flex size-8 items-center justify-center rounded-md" aria-label={`關閉${label}`} onClick={() => { setOpen(false); trigger.current?.focus({ preventScroll: true }); }}><X size={16}/></button>
       </header>{children}
     </AnimatedPopover>, document.body)}
   </>;

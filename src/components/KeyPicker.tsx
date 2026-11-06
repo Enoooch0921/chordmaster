@@ -127,6 +127,8 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
     }
   }, [autoOpen, disabled]);
 
+  React.useEffect(() => { if (disabled) closePanel(true); }, [disabled, closePanel]);
+
   React.useEffect(() => {
     if (!isOpen) {
       return;
@@ -177,10 +179,11 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
   }, [isOpen, originalKey, value]);
 
   const handleSelect = React.useCallback((nextValue: Key | null) => {
+    if (disabled) return;
     if (onModeChange) onChange(nextValue, mode);
     else onChange(nextValue);
     closePanel(true, true);
-  }, [closePanel, onChange, onModeChange, mode]);
+  }, [closePanel, disabled, onChange, onModeChange, mode]);
 
   const handleOptionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, key: Key) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -273,7 +276,7 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
         <AnimatedPopover open={isOpen} ready={isPositioned} instantExit={instantExit.current} origin={transformOrigin}
           id={panelId} role="dialog" aria-label={label}
           panelRef={panelRef}
-          className={`${touchOptimized ? 'w-[216px] p-3' : 'w-[184px] p-2.5'} rounded-[20px] border border-gray-200 bg-white shadow-xl`}
+          className={`ui-anchored-panel ${touchOptimized ? 'w-[216px] p-3' : 'w-[184px] p-2.5'} rounded-[20px] border border-gray-200 bg-white shadow-xl`}
           style={panelStyle}
           data-placement={placement}
         >
@@ -287,11 +290,11 @@ const KeyPicker: React.FC<KeyPickerProps> = ({
           {onModeChange && <div className="mb-2 space-y-2">
             <div className="flex gap-1" role="group" aria-label={language === 'zh' ? '大小調' : 'Tonal mode'}>
               {(['major', 'minor'] as const).map(nextMode => <button key={nextMode} type="button" aria-pressed={mode === nextMode}
-                onClick={() => onModeChange(nextMode)} className={`flex-1 rounded-lg border px-2 py-2 text-xs font-semibold ${mode === nextMode ? 'border-indigo-400 bg-indigo-50 text-indigo-800' : 'border-gray-200'}`}>
+                disabled={disabled} onClick={() => { if (!disabled) onModeChange(nextMode); }} className={`flex-1 rounded-lg border px-2 py-2 text-xs font-semibold ${mode === nextMode ? 'border-indigo-400 bg-indigo-50 text-indigo-800' : 'border-gray-200'}`}>
                 {language === 'zh' ? (nextMode === 'major' ? '大調' : '小調') : (nextMode === 'major' ? 'Major' : 'Minor')}
               </button>)}
             </div>
-            {originalKey && <button type="button" className="w-full rounded-lg border border-gray-200 py-1 text-xs" onClick={() => { onChange(originalKey, originalMode); closePanel(true, true); }}>
+            {originalKey && <button type="button" className="w-full rounded-lg border border-gray-200 py-1 text-xs" disabled={disabled} onClick={() => { if (disabled) return; onChange(originalKey, originalMode); closePanel(true, true); }}>
               {language === 'zh' ? '還原原調' : 'Original'} {formatKeyName(originalKey, originalMode)}
             </button>}
           </div>}

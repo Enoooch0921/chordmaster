@@ -3,12 +3,30 @@ import { parseLyricsBody, type LyricSection } from './lyricsFormat';
 import { lyricsSectionLabel } from './lyricsSections';
 
 export type LyricsLanguage = 'chinese' | 'english' | 'bilingual' | 'mixed';
+export type LyricsField = 'chinese' | 'english';
+export const hasSungLineLanguages = (block: LyricsBlock) => Array.isArray(block.singingLineLanguages) && block.singingLineLanguages.some(field => field === 'chinese' || field === 'english');
+export const getLyricsPairLayout = (block: LyricsBlock, display: LyricsLanguage) => display === 'mixed' ? 'mixed' : display === 'chinese' && hasSungLineLanguages(block) ? 'sung' : 'columns';
+
+// The main (legacy "chinese") view follows explicit performance instructions.
+// Never infer the sung language from an empty translation or an English title.
+export function getLyricsFields(block: LyricsBlock, display: LyricsLanguage): LyricsField[] {
+  if (display === 'bilingual' || display === 'mixed' || (display === 'chinese' && hasSungLineLanguages(block))) return ['english', 'chinese'];
+  const sung = block.singingLanguage;
+  if (display === 'chinese' && (sung === 'chinese' || sung === 'english') && block[sung].trim()) return [sung];
+  return [display];
+}
+
+export function mainLyricsLabel(blocks: LyricsBlock[], language: 'zh' | 'en'): string {
+  return blocks.some(block => (block.singingLanguage === 'english' || (hasSungLineLanguages(block) && block.singingLineLanguages!.includes('english'))) && block.english.trim())
+    ? (language === 'zh' ? '原稿唱詞' : 'Sung lyrics')
+    : (language === 'zh' ? '中文' : 'Chinese');
+}
 export const newLyricsBlock = (): LyricsBlock => ({ id: crypto.randomUUID(), marker: '', chinese: '', english: '' });
 const markerKey = (section: LyricSection) => lyricsSectionLabel(section.marker);
 
 // Match explicit section labels first. Unmatched translations remain independent
 // instead of silently shifting every following verse/chorus by one position.
-export function importLyrics(chinese: string, english = ''): LyricsBlock[] {
+export function importLyrics(chinese: string, english = '', previous: LyricsBlock[] = []): LyricsBlock[] {
   const zh = parseLyricsBody(chinese);
   const en = parseLyricsBody(english);
   const used = new Set<number>();
@@ -30,7 +48,18 @@ export function importLyrics(chinese: string, english = ''): LyricsBlock[] {
       needsPairingReview: bilingual,
     });
   });
-  return blocks;
+  return blocks.map(block => {
+    const key = lyricsSectionLabel(block.marker);
+    const matches = previous.filter(candidate => lyricsSectionLabel(candidate.marker) === key);
+    // Retain source instructions only for an unambiguous existing section.
+    // A paste with repeated/removed headings must not transfer instructions to another verse.
+    const prior = key && matches.length === 1 && blocks.filter(candidate => lyricsSectionLabel(candidate.marker) === key).length === 1 ? matches[0] : undefined;
+    const sung = prior?.singingLanguage;
+    return prior ? { ...block, id: prior.id, pageBreakBefore: prior.pageBreakBefore,
+      singingLanguage: (sung === 'chinese' || sung === 'english') && block[sung].trim() ? sung : undefined,
+      singingLineLanguages: prior.singingLineLanguages,
+    } : previous.length ? { ...block, id: crypto.randomUUID() } : block;
+  });
 }
 
 export function getLyricsBlocks(doc?: LyricsDoc): LyricsBlock[] {

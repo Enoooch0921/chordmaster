@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { usePresence } from 'motion/react';
-import { isKeyboardInteraction, useUiMotion } from './useUiMotion';
+import { isKeyboardInteraction, useKeyboardMotionInterrupt, useUiMotion } from './useUiMotion';
 import { UI_DRAWER_EASE, UI_EASE_OUT } from '../lib/uiMotion';
 
 let nativeLocks = 0;
@@ -14,6 +14,16 @@ export function useNativeDialogMotion(ref: RefObject<HTMLDialogElement | null>, 
   const animation = useRef<Animation | null>(null);
   const generation = useRef(0);
   const hasEntered = useRef(false);
+  useKeyboardMotionInterrupt(() => {
+    const dialog = ref.current;
+    if (!dialog || !animation.current) return;
+    const token = ++generation.current;
+    animation.current.cancel(); animation.current = null;
+    dialog.dataset.nativeDialogInstant = '';
+    if (!present) queueMicrotask(() => {
+      if (generation.current === token) safe.current?.();
+    });
+  });
 
   useLayoutEffect(() => {
     const dialog = ref.current;
@@ -71,7 +81,7 @@ export function useNativeDialogMotion(ref: RefObject<HTMLDialogElement | null>, 
     void motion.finished.then(() => {
       if (generation.current !== token) return;
       if (!present) safe.current?.();
-      else motion.cancel();
+      else { motion.cancel(); animation.current = null; }
     }).catch(() => {});
   }, [present, preference.reduced, kind, ref]);
 }

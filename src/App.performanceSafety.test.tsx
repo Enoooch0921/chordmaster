@@ -132,7 +132,9 @@ describe('on-stage offline and page-turner stability', () => {
     const before = sync.owned.mock.calls.length;
     fireEvent.touchMove(overlay, { touches: [{ clientX: 580, clientY: 300 }] });
     await act(() => new Promise(resolve => setTimeout(resolve, 25)));
-    expect(document.querySelector<HTMLElement>('[data-performance-swipe-surface]')!.style.transform).toBe('translate3d(-26.4px, 0, 0)');
+    expect(document.querySelector<HTMLElement>('[data-performance-swipe-surface]')!.style.transform).toBe('');
+    expect(document.querySelector<HTMLElement>('[data-performance-touch-feedback]')!.dataset.direction).toBe('next');
+    expect(document.querySelector<HTMLElement>('[data-performance-touch-feedback]')!.dataset.active).toBe('true');
     expect(page()).toBe(1);
     fireEvent.touchEnd(overlay, { changedTouches: [{ clientX: 400, clientY: 300 }] });
     expect(page()).toBe(2);
@@ -207,7 +209,23 @@ it('keeps first-use navigation help visible through idle and remembers acknowled
   expect(hint().hidden).toBe(true);
 }, 15000);
 
-it('snaps a short or cancelled swipe back and lets hardware input interrupt without a workspace render', async () => {
+it('turns immediately on a tap with local feedback and lets a pedal clear it', async () => {
+  await start();
+  const surface = document.querySelector<HTMLElement>('[data-performance-swipe-surface]')!;
+  const feedback = document.querySelector<HTMLElement>('[data-performance-touch-feedback]')!;
+  const before = sync.owned.mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: 'Next page' }), { detail: 1, clientX: 700, clientY: 300 });
+  expect(page()).toBe(2);
+  expect(feedback.dataset.active).toBe('true');
+  expect(feedback.dataset.direction).toBe('next');
+  expect(surface.style.transform).toBe(''); expect(surface.style.opacity).toBe('');
+  act(() => { pedal('keydown', 'PageUp'); pedal('keyup', 'PageUp'); });
+  expect(page()).toBe(1); expect(feedback.dataset.active).toBeUndefined();
+  expect(feedback.style.transition).toBe('none');
+  expect(sync.owned.mock.calls.length).toBe(before);
+}, 15000);
+
+it('keeps paper still on a short or cancelled swipe and lets hardware input interrupt without a workspace render', async () => {
   await start();
   const overlay = document.querySelector('[data-performance-overlay]')!;
   const surface = document.querySelector<HTMLElement>('[data-performance-swipe-surface]')!;
@@ -215,7 +233,9 @@ it('snaps a short or cancelled swipe back and lets hardware input interrupt with
   fireEvent.touchStart(overlay, { touches: [{ clientX: 700, clientY: 300 }] });
   fireEvent.touchMove(overlay, { touches: [{ clientX: 680, clientY: 300 }] });
   await act(() => new Promise(resolve => setTimeout(resolve, 25)));
-  expect(surface.style.transform).toBe('translate3d(-4.4px, 0, 0)');
+  expect(surface.style.transform).toBe('');
+  expect(surface.style.opacity).toBe('');
+  expect(document.querySelector<HTMLElement>('[data-performance-touch-feedback]')!.dataset.active).toBe('true');
   fireEvent.touchEnd(overlay, { changedTouches: [{ clientX: 680, clientY: 300 }] });
   expect(page()).toBe(1); expect(surface.style.transform).toBe('');
   fireEvent.touchStart(overlay, { touches: [{ clientX: 700, clientY: 300 }] });

@@ -12,7 +12,7 @@ import KeyPicker from './KeyPicker';
 import CapoPicker from './CapoPicker';
 import { getUiCopy } from '../constants/i18n';
 import { formatInitialCaps } from '../utils/textUtils';
-import { formatTempoBpm, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
+import { formatTempoBpm, isValidTempoDraft, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import { getChordFontFamily } from '../constants/chordFonts';
 import SongMetadataPanel from './SongMetadataPanel';
 import type { PreviewEditorDeviceLayout } from '../lib/previewEditorLayout';
@@ -496,6 +496,7 @@ export default function PreviewWysiwygEditor({
   };
 
   const commitTempo = () => {
+    if (!isValidTempoDraft(tempoDraft)) return;
     if (!markCommitted()) {
       return;
     }
@@ -810,6 +811,8 @@ export default function PreviewWysiwygEditor({
         autoCorrect="off"
         spellCheck={false}
         value={tempoDraft}
+        aria-invalid={!isValidTempoDraft(tempoDraft) || undefined}
+        title={language === 'zh' ? '請輸入單一速度，20–400 BPM' : 'Enter one tempo, 20–400 BPM'}
         onChange={(event) => setTempoDraft(sanitizeTempoInput(event.target.value))}
         onBlur={commitTempo}
         onKeyDown={(event) => {
@@ -849,6 +852,7 @@ export default function PreviewWysiwygEditor({
       >
         +
       </button>
+      {!isValidTempoDraft(tempoDraft) && <p role="status" className="absolute left-0 top-full mt-2 whitespace-nowrap rounded-lg bg-white p-2 text-xs text-rose-600 shadow">{zh ? '請輸入單一速度，20–400 BPM' : 'Enter one tempo, 20–400 BPM'}</p>}
     </div>
     );
   };

@@ -1,4 +1,5 @@
 import SongLibraryRow, { type SongLibraryAction } from './components/SongLibraryRow';
+import SongLibraryResults from './components/SongLibraryResults';
 import SongLibraryFilters from './components/SongLibraryFilters';
 import LibrarySelectionSummary from './components/LibrarySelectionSummary';
 import { useSongLibraryPreferences } from './hooks/useSongLibraryPreferences';
@@ -31,6 +32,7 @@ import { applyWorkspaceHistory as applyHistoryToWorkspace, createWorkspaceHistor
 import { useAppViewport } from './hooks/useAppViewport';
 import { usePerformanceChrome } from './hooks/usePerformanceChrome';
 import { usePerformanceNavigationHint, usePerformanceSwipe } from './hooks/usePerformanceSwipe';
+import CoveredPreview from './components/CoveredPreview';
 import { useWorkspaceSwitcherDismiss } from './hooks/useWorkspaceSwitcherDismiss';
 import { useBottomSheetMotion } from './hooks/useBottomSheetMotion';
 import { useModalFocus } from './hooks/useModalFocus';
@@ -151,6 +153,9 @@ import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
 import LyricsBook from './components/LyricsBook';
 import SetlistLyricsWorkspace from './components/SetlistLyricsWorkspace';
+import PerformanceLyricsReader from './components/PerformanceLyricsReader';
+import type { LyricsReaderHandle } from './components/AdaptiveLyricsReader';
+import type { ReadingAnchor } from './utils/lyricsReading';
 import { DEFAULT_LYRICS_BOOK_SETTINGS } from './utils/lyricsBook';
 import type { PreviewWysiwygTarget } from './components/PreviewWysiwygEditor';
 const PreviewWysiwygEditor = React.lazy(() => import('./components/PreviewWysiwygEditor'));
@@ -405,6 +410,7 @@ const isInteractiveKeyboardTarget = (target: EventTarget | null) => {
 };
 
 const getPerformancePageDirection = (event: KeyboardEvent): PerformancePageDirection | null => {
+  if (event.target instanceof HTMLElement && event.target.closest('.adaptive-lyrics-reader select')) return null;
   const legacyKeyCode = event.keyCode || event.which || 0;
   const isToggleKey = (
     PERFORMANCE_TOGGLE_KEY_VALUES.has(event.key) ||
@@ -1952,12 +1958,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const pdfExportCancelRequestedRef = useRef(false);
   const suppressPreviewClickRef = useRef(false);
   const performanceKeyboardCaptureRef = useRef<HTMLInputElement>(null);
+  const lyricsReadingPositions = useRef(new Map<string, ReadingAnchor | 'last'>());
+  const performanceLyricsRef = useRef<LyricsReaderHandle>(null);
   const performanceSheetRef = useRef<HTMLDivElement>(null);
   const performanceTranslatorRef = useRef<HTMLDivElement>(null);
   const performancePageRangeRef = useRef<HTMLSpanElement>(null);
   const performancePageIndexRef = useRef(0);
   const performancePageOffsetsRef = useRef<number[]>([]);
-  const performanceSwipeSurfaceRef = useRef<HTMLDivElement>(null);
+  const performanceTouchFeedbackRef = useRef<HTMLDivElement>(null);
   const performanceNavigationHintRef = useRef<HTMLDivElement>(null);
   const dismissPerformanceNavigationHint = usePerformanceNavigationHint(isPerformanceMode && !isHandwriting, performanceNavigationHintRef);
   const performanceKeyGateRef = useRef(createPerformanceKeyGate());
@@ -2258,8 +2266,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     responsiveSidebarMinWidth,
     Math.min(responsiveSidebarMaxWidth, sidebarWidth)
   );
-  const currentSidebarWidth = isSidebarExpanded ? resolvedSidebarWidth : collapsedSidebarWidth;
-  const sidebarShellWidth = usesOverlaySidebar ? collapsedSidebarWidth : currentSidebarWidth;
+  // Hover is a temporary peek, not a workspace resize. Only a pinned desktop
+  // sidebar reserves space; overlay navigation leaves the reading canvas still.
+  const sidebarReservesSpace = !usesOverlaySidebar && isSidebarPinned;
+  const sidebarShellWidth = sidebarReservesSpace ? resolvedSidebarWidth : collapsedSidebarWidth;
   const sidebarMotionDuration = isSidebarResizing || uiMotion.instant || reducedPreferenceChanged || (isPhoneViewport && !isMobileNavOpen && sidebarInstantCloseRef.current)
     ? 0 : uiMotion.reduced ? 0.125 : isPhoneViewport
       ? (isSidebarExpanded ? 0.24 : 0.2)
@@ -2456,7 +2466,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     && canManageProject(project)
   );
   const canOpenEditor = isSetlistMode ? canEditSelectedSetlistContent : canEditTeamSongs && hasSongs;
-  const isSetlistLyricsWorkspace = isLyricsMode && isSetlistMode && Boolean(selectedSetlist);
+  const isLyricsWorkspace = isLyricsMode && (isSetlistMode ? Boolean(selectedSetlist) : isLyricsReading);
   const canChangeCurrentKey = isSetlistMode ? canEditSelectedSetlistKey : canEditTeamSongs;
   // Cloud setlist capo is a per-account preference, so read-only setlist
   // viewers may still adjust it without mutating the shared setlist.
@@ -3100,13 +3110,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     const scoped = sortedLibrarySongs.filter(item => matchesLibraryFilters(item, libraryFilters)
       && (libraryScope === 'all' || libraryScope === 'favorites' && libraryPreferences.favoriteIds.has(item.id) || libraryScope === 'recent' && libraryPreferences.recentOrder.has(item.id)));
     if (libraryScope === 'recent') scoped.sort((a, b) => libraryPreferences.recentOrder.get(a.id)! - libraryPreferences.recentOrder.get(b.id)!);
-    return searchItemsWithMatches<StoredSong>(scoped, librarySearch, getSongSearchFields, item => item.lyricsDoc)
-      .map(result => ({ ...result, snippet: result.match === 'lyrics' ? librarySearch.lyricsSnippet(result.item.lyricsDoc) : null }));
+    return searchItemsWithMatches<StoredSong>(scoped, librarySearch, getSongSearchFields, item => item.lyricsDoc);
   }, [sortedLibrarySongs, librarySearch, searchDictionaryState, libraryScope, libraryFilters,
     libraryScope === 'favorites' ? libraryPreferences.favoriteIds : null,
     libraryScope === 'recent' ? libraryPreferences.recentOrder : null]);
   const filteredSongs = React.useMemo(() => libraryResults.map(result => result.item), [libraryResults]);
-  const librarySnippets = React.useMemo(() => new Map(libraryResults.map(result => [result.item.id, result.snippet])), [libraryResults]);
+  const libraryLyricMatches = React.useMemo(() => new Set(libraryResults.filter(result => result.match === 'lyrics').map(result => result.item.id)), [libraryResults]);
   const selectedLibrarySongs = React.useMemo(() => {
     const byId = new Map(userLibrarySongs.map(item => [item.id, item]));
     return librarySelectionIds.flatMap(id => byId.has(id) ? [byId.get(id)!] : []);
@@ -4571,6 +4580,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   // Fit and center the first visible frame, rather than painting the default
   // 794px canvas and correcting it after paint. Reattach when this pane remounts.
+  // Known layout changes also measure before paint: a ResizeObserver RAF would
+  // first paint the new pane with the old centering/scale, then jump back.
   React.useLayoutEffect(() => {
     if (!isSheetView) return;
     let frame: number | null = null;
@@ -4617,7 +4628,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [isEditing, isSheetView, isSetlistLyricsWorkspace]);
+  }, [isEditing, isSheetView, isLyricsWorkspace, sidebarShellWidth, shouldUseSplitEditor, splitEditorWidth, usesDenseDesktopHeader, usesTabletHeader]);
 
   React.useLayoutEffect(() => {
     if (!isSheetView) return;
@@ -4655,7 +4666,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [isSheetView, isSetlistLyricsWorkspace]);
+  }, [isSheetView, isLyricsWorkspace]);
 
   React.useEffect(() => () => {
     if (previewSuppressClickTimeoutRef.current !== null) {
@@ -4809,7 +4820,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     handleSetlistKeyChange(transposeKeyPreferFlats(activeSetlistPreviewSong.currentKey, steps));
   };
 
-  const handleCreateSong = () => {
+  const handleCreateSong = useStableEvent(() => {
     if (!canEditTeamSongs) {
       toast.error(language === 'zh' ? '你沒有編輯這個團隊歌曲庫的權限。' : 'You do not have permission to edit this team song library.');
       return;
@@ -4822,7 +4833,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setActiveAppView('sheet');
     setIsEditing(true);
     setWorkspaceMode('songs');
-  };
+  });
 
   const handleCreateSetlist = () => {
     if (!canCreateTeamSetlists) {
@@ -7688,7 +7699,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // An unrelated workspace commit may have started before the latest pedal/tap.
   // Reapply the live page before paint so that commit cannot restore an old page.
   useLayoutEffect(() => {
-    if (isPerformanceMode) applyPerformanceTranslation(performancePageIndexRef.current, performanceScale);
+    if (isPerformanceMode && !isLyricsMode) applyPerformanceTranslation(performancePageIndexRef.current, performanceScale);
   });
 
   const focusPerformanceKeyboardCapture = usePerformanceKeyboardFocus(
@@ -7720,6 +7731,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   const handlePerformanceNextPage = () => {
     revealPerformanceChrome();
+    if (isLyricsMode) { performanceLyricsRef.current?.next(); return; }
     const current = getPerformanceSpreadStart(performancePageIndexRef.current, performanceTotalPages, performanceColumns);
     if (current + performanceColumns < performanceTotalPages) {
       const next = current + performanceColumns;
@@ -7740,6 +7752,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   const handlePerformancePrevPage = () => {
     revealPerformanceChrome();
+    if (isLyricsMode) { performanceLyricsRef.current?.previous(); return; }
     const current = getPerformanceSpreadStart(performancePageIndexRef.current, performanceTotalPages, performanceColumns);
     if (current > 0) {
       const prev = Math.max(0, current - performanceColumns);
@@ -7763,7 +7776,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     scope: `${isSetlistMode ? selectedSetlistSongId : song.id}:${isLyricsMode}:${isLyricsContinuous}:${performanceColumns}:${performanceScale}:${performanceTotalPages}`,
     reduced: uiMotion.reduced,
     overlay: performanceOverlayRef,
-    surface: performanceSwipeSurfaceRef,
+    feedback: performanceTouchFeedbackRef,
     onNext: handlePerformanceNextPage,
     onPrevious: handlePerformancePrevPage,
     onInteract: revealPerformanceChrome,
@@ -7818,7 +7831,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // Each row is one spread. Keep the same page visible when resizing/rotating,
   // and land on the final spread when returning to the previous song.
   useLayoutEffect(() => {
-    if (!isPerformanceMode) return;
+    if (!isPerformanceMode || isLyricsMode) return;
     let rAF = 0;
     const syncPages = () => {
       const container = performanceSheetRef.current;
@@ -10709,8 +10722,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     if (isLyricsMode) {
       setPreviewMetaEditTarget(null);
       setIsEditing(false);
-      if (isSetlistMode || isPhoneViewport) setIsLyricsReading(true);
-      if (isSetlistMode) setIsLyricsContinuous(true);
+      setIsLyricsReading(true);
+      setIsLyricsContinuous(true);
     }
   }, [isLyricsMode, isSetlistMode]);
 
@@ -10773,8 +10786,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   useSetlistPreviewNavigation({
     previewRef,
-    enabled: !isPerformanceMode && isSetlistMode && !isSetlistLyricsWorkspace,
-    trackScroll: !isLyricsMode && !isEditing && !previewEditSession,
+    enabled: !isPerformanceMode && isSetlistMode && !isLyricsWorkspace,
+    // Covering the score pauses observation, not navigation's lifetime. Treating
+    // it as a reopened preview would jump back to the song's start on dismissal.
+    trackScroll: !isLyricsMode && !isEditing && !previewEditSession && !(isPhoneViewport && isMobileNavOpen),
     selectedSongId: selectedSetlistSongId,
     songCount: setlistPreviewSongs.length,
     skipNextAutoScrollRef: skipNextSetlistPreviewAutoScrollRef,
@@ -10907,7 +10922,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     rootRef: previewRef, sheetRef, activeRef: previewPinchActiveRef, labelRef: previewZoomLabelRef,
     // Info pages unmount the preview; release its native listeners and bind
     // the newly mounted pane when returning to the chart.
-    enabled: isSheetView && !isSetlistLyricsWorkspace && !(isLyricsMode && isLyricsReading),
+    enabled: isSheetView && !isLyricsWorkspace && !(isLyricsMode && isLyricsReading),
     identity: isSetlistMode ? selectedSetlist?.id ?? null : song?.id ?? null,
     minScale: PREVIEW_MIN_SCALE, maxScale: PREVIEW_MAX_SCALE, fitHeightScale: previewFitHeightScale,
     onStart: () => {
@@ -12168,7 +12183,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   onAction: () => handleSetSetlistArchived(item.id, !item.archived) } : undefined}
                 rightAction={canManage ? { label: copy.delete, accessibleLabel: `${copy.delete} ${item.name || copy.untitledSetlist}`, tone: 'delete',
                   onAction: () => handleDeleteSetlist(item.id) } : undefined}
-                contentClassName={`flex select-none items-start gap-2 px-2 py-3 ${baseStyle}`}
+                contentClassName={`setlist-card flex select-none items-start gap-2 px-2 py-3 ${baseStyle}`}
                 contentProps={{
                   onTouchStart: event => {
                     setlistLongPressHandledRef.current = false;
@@ -12210,7 +12225,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       }
                       handleSelectSetlist(item.id);
                     }}
-                    className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                    className="setlist-card-open flex min-w-0 flex-1 items-start gap-2 text-left"
                   >
                     {isSetlistRoot && <ListMusic size={22} className="mt-1 shrink-0 text-gray-500" aria-hidden="true"/>}
                     <div className="min-w-0 flex-1">
@@ -12281,11 +12296,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               return (
                 <div
                   key={item.id}
-                  className={`border-b border-gray-200 px-2 py-3 ${
+                  className={`setlist-card border-b border-gray-200 px-2 py-3 ${
                     isActive ? 'bg-indigo-50' : 'bg-white'
                   }`}
                 >
-                  <button type="button" onClick={() => handleSelectJoinedSetlist(item.id)} className="w-full text-left">
+                  <button type="button" onClick={() => handleSelectJoinedSetlist(item.id)} className="setlist-card-open w-full text-left">
                     <div className="flex items-center gap-2">
                       <div className={`${isPhoneViewport ? 'text-base' : 'text-sm'} min-w-0 flex-1 truncate font-semibold text-gray-900`}>{item.name || copy.untitledSetlist}</div>
                       {isActive && (
@@ -12316,7 +12331,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     ) : null}
                   </button>
                   {!joinedProject && (
-                    <div className="mt-2 flex justify-end">
+                    <div className="setlist-card-actions mt-2 flex justify-end">
                     <button
                       type="button"
                       onClick={() => requestLeaveSharedSetlist(item.id)}
@@ -12879,7 +12894,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           // desktop workspace adopts its final width once, never on each frame.
           style={{ width: `${resolvedSidebarWidth}px` }}
         >
-          {isSidebarExpanded && !usesOverlaySidebar && !isPhoneViewport && (
+          {sidebarReservesSpace && !isPhoneViewport && (
             <button
               type="button"
               onMouseDown={handleSidebarResizeStart}
@@ -13054,7 +13069,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             animate={sidebarContentMotion}
             data-sidebar-content
             inert={!isSidebarExpanded ? true : undefined}
-            className={`min-w-0 min-h-0 shrink-0 flex flex-col ${isPhoneViewport ? '' : 'overflow-hidden border-r border-gray-200 bg-white dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]'} ${!isPhoneViewport && usesOverlaySidebar ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]' : ''}`}
+            className={`min-w-0 min-h-0 shrink-0 flex flex-col ${isPhoneViewport ? '' : 'overflow-hidden border-r border-gray-200 bg-white dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]'} ${!isPhoneViewport && !sidebarReservesSpace ? 'rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]' : ''}`}
             style={{ width: resolvedSidebarWidth - collapsedSidebarWidth, pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
           >
             {isPhoneViewport && !(isSetlistMode && setlistPanelView === 'addSongs') && (
@@ -13207,21 +13222,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     );
                   })()}
                 </header>
-                <div className="song-library-scroll" data-library-scroll>
-                  {filteredSongs.length === 0 && (
-                    <div className="song-library-empty">
-                      <p>{normalizedLibrarySearchQuery ? searchEmptyMessage(librarySearchQuery) : hasLibraryFilters ? (language === 'zh' ? '此範圍沒有符合條件的歌曲。' : 'No songs match this scope and filters.') : (language === 'zh' ? '歌曲庫還沒有歌曲。' : 'Your song library is empty.')}</p>
-                      {libraryScope === 'favorites' && <p>{language === 'zh' ? '點歌曲旁的星號，就能加入收藏。' : 'Use the star beside a song to add it to Favorites.'}</p>}
-                      {libraryScope === 'recent' && <p>{language === 'zh' ? '開啟過的歌曲會列在這裡。' : 'Songs you open appear here.'}</p>}
-                      {hasLibraryFilters && <button type="button" className="song-library-button" onClick={() => { setLibraryScope('all'); setLibraryFilters(EMPTY_LIBRARY_FILTERS); }}>{language === 'zh' ? '顯示全部歌曲' : 'Show all songs'}</button>}
-                      {normalizedLibrarySearchQuery ? (
-                        <button type="button" className="song-library-button" onClick={() => setLibrarySearchQuery('')}>{language === 'zh' ? '清除搜尋' : 'Clear search'}</button>
-                      ) : canEditTeamSongs && !hasLibraryFilters ? (
-                        <button type="button" className="song-library-button" onClick={handleCreateSong}><Plus size={16} />{copy.newSong}</button>
-                      ) : null}
-                    </div>
-                  )}
-                  {filteredSongs.map(item => (
+                <SongLibraryResults items={filteredSongs} language={language}
+                  queryKey={JSON.stringify([normalizedLibrarySearchQuery, libraryScope, libraryFilters, librarySortMode, authenticatedUser?.id, activeLibraryId, isTeamWorkspace, showArchivedSongs])}
+                  renderRow={item => (
                     <SongLibraryRow
                       key={item.id}
                       item={item}
@@ -13229,7 +13232,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       isActive={item.id === song.id}
                       isSelected={selectedLibrarySongIds.includes(item.id)}
                       isFavorite={libraryPreferences.favoriteIds.has(item.id)}
-                      lyricsSnippet={librarySnippets.get(item.id)}
+                      lyricsSnippet={libraryLyricMatches.has(item.id) ? librarySearch.lyricsSnippet(item.lyricsDoc) : null}
                       isLibraryEditing={isLibraryEditing}
                       isTeamWorkspace={isTeamWorkspace}
                       canEditTeamSongs={canEditTeamSongs}
@@ -13246,8 +13249,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       onTouchEnd={handleLibraryRowTouchEnd}
                       onTouchCancel={handleLibraryRowTouchCancel}
                     />
-                  ))}
-                </div>
+                  )}>
+                  {filteredSongs.length === 0 && (
+                    <div className="song-library-empty">
+                      <p>{normalizedLibrarySearchQuery ? searchEmptyMessage(librarySearchQuery) : hasLibraryFilters ? (language === 'zh' ? '此範圍沒有符合條件的歌曲。' : 'No songs match this scope and filters.') : (language === 'zh' ? '歌曲庫還沒有歌曲。' : 'Your song library is empty.')}</p>
+                      {libraryScope === 'favorites' && <p>{language === 'zh' ? '點歌曲旁的星號，就能加入收藏。' : 'Use the star beside a song to add it to Favorites.'}</p>}
+                      {libraryScope === 'recent' && <p>{language === 'zh' ? '開啟過的歌曲會列在這裡。' : 'Songs you open appear here.'}</p>}
+                      {hasLibraryFilters && <button type="button" className="song-library-button" onClick={() => { setLibraryScope('all'); setLibraryFilters(EMPTY_LIBRARY_FILTERS); }}>{language === 'zh' ? '顯示全部歌曲' : 'Show all songs'}</button>}
+                      {normalizedLibrarySearchQuery ? (
+                        <button type="button" className="song-library-button" onClick={() => setLibrarySearchQuery('')}>{language === 'zh' ? '清除搜尋' : 'Clear search'}</button>
+                      ) : canEditTeamSongs && !hasLibraryFilters ? (
+                        <button type="button" className="song-library-button" onClick={handleCreateSong}><Plus size={16} />{copy.newSong}</button>
+                      ) : null}
+                    </div>
+                  )}
+                </SongLibraryResults>
                 {desktopSetlistSavedFooter}
               </div>
             )}
@@ -14547,7 +14563,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           <div data-setlist-preview-pane role={isSetlistMode && selectedSetlist ? 'region' : undefined}
             aria-label={isSetlistMode && selectedSetlist ? selectedSetlist.name || copy.untitledSetlist : undefined}
             aria-busy={Boolean(setlistOpening.opening)} className="relative flex-1 min-w-0 min-h-0 bg-[#F5F5F4] dark:bg-[color:var(--color-surface-muted)]">
-            {isSheetView && isSetlistMode && !isJoinedSetlist && (!isSetlistLyricsWorkspace || !isLyricsContinuous)
+            {isSheetView && isSetlistMode && !isJoinedSetlist && (!isLyricsWorkspace || !isLyricsContinuous)
               && (!isCloudMode || activeLibraryId && (isTeamWorkspace ? isTeamAdministrator(activeLibraryRole) : activeCloudLibrary?.kind === 'personal' && activeCloudLibrary.ownerUserId === authenticatedUser?.id))
               && selectedSetlistSong && selectedSetlistSourceStatus !== 'aligned'
               && canEditSelectedSetlistContent && (
@@ -14638,19 +14654,22 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </div>
               </div>
             )}
-            {isSetlistLyricsWorkspace ? <div className="h-full" inert={setlistOpening.opening ? true : undefined}><SetlistLyricsWorkspace
-              key={selectedSetlist!.id}
-              title={selectedSetlist!.name}
+            <CoveredPreview covered={isPhoneViewport && isMobileNavOpen}
+              scope={JSON.stringify([historyScope, selectedSongId, selectedSetlistId, selectedSetlistSongId, isLyricsMode])}>
+            {isLyricsWorkspace ? <div className="h-full" inert={setlistOpening.opening ? true : undefined}><SetlistLyricsWorkspace
+              key={isSetlistMode ? selectedSetlist!.id : song.id}
+              title={isSetlistMode ? selectedSetlist!.name : song.title}
+              readingPositions={lyricsReadingPositions.current}
               preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}
-              entries={setlistLyricsEntries}
+              entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}
               language={language}
-              selectedId={selectedSetlistSongId}
-              onSelectSong={setSelectedSetlistSongId}
+              selectedId={isSetlistMode ? selectedSetlistSongId : song.id}
+              onSelectSong={isSetlistMode ? setSelectedSetlistSongId : setSelectedSongId}
               mode={!isLyricsContinuous ? 'edit' : isLyricsReading ? 'reading' : 'print'}
               onModeChange={mode => { setIsLyricsContinuous(mode !== 'edit'); setIsLyricsReading(mode !== 'print'); }}
               printSettings={lyricsBookSettings}
               onPrintSettingsChange={setLyricsBookSettings}
-              onSongChange={canOpenEditor ? handleBookLyricsChange : undefined}
+              onSongChange={canOpenEditor ? (isSetlistMode ? handleBookLyricsChange : (_id, lyricsDoc) => handleSongChange({ ...song, lyricsDoc })) : undefined}
               onExport={isExportingPdf ? undefined : handleExportPdf}
             /></div> : <div
               ref={previewRef}
@@ -14687,6 +14706,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </div>
               </div>
             </div>}
+            </CoveredPreview>
             <input
               ref={mobileWysiwygKeyboardProxyInputRef}
               type="text"
@@ -14904,7 +14924,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 onClose={() => setPreviewMetaEditTarget(null)}
               /></React.Suspense></RecoveryBoundary>
             )}
-            {isSetlistMode && !isSetlistLyricsWorkspace && showPreviewBackToTop && (
+            {isSetlistMode && !isLyricsWorkspace && showPreviewBackToTop && (
               <div className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 left-3' : 'bottom-2 left-2 sm:bottom-4 sm:left-4 lg:bottom-6 lg:left-6'
               }`}>
@@ -14919,7 +14939,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </button>
               </div>
             )}
-            {(!isSetlistLyricsWorkspace || !isLyricsContinuous) && !(isPhoneViewport && isEditing) && (
+            {(!isLyricsWorkspace || !isLyricsContinuous) && !(isPhoneViewport && isEditing) && (
               <div className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
@@ -14948,10 +14968,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       >
                         <Redo2 size={16} />
                       </button>
-                      {!isSetlistLyricsWorkspace && <span className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden="true" />}
+                      {!isLyricsWorkspace && <span className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden="true" />}
                     </>
                   )}
-                  {!isSetlistLyricsWorkspace && <><button
+                  {!isLyricsWorkspace && <><button
                     type="button"
                     onClick={handleZoomOutPreview}
                     disabled={(isLyricsMode && isLyricsReading) || previewScale <= PREVIEW_MIN_SCALE + 0.001}
@@ -15536,7 +15556,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               className="w-full max-w-sm rounded-[28px] border border-gray-200 bg-white/95 px-6 py-6 text-center shadow-[0_24px_60px_rgba(15,23,42,0.22)] backdrop-blur-sm"
             >
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-50">
-                <div className="h-7 w-7 rounded-full border-[3px] border-indigo-200 border-t-indigo-600 animate-spin" />
+                <div className="h-7 w-7 rounded-full border-[3px] border-indigo-200 border-t-indigo-600 animate-spin motion-reduce:animate-none" />
               </div>
               <div className="mt-4 text-lg font-bold text-gray-900">{copy.exportingPdfTitle}</div>
               <div className="mt-2 text-sm leading-6 text-gray-500">
@@ -15545,12 +15565,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
               {pdfExportProgress ? (
                 <div className="mt-5 text-left">
-                  <div className="h-2.5 overflow-hidden rounded-full bg-gray-100">
+                  <div className="h-2.5 overflow-hidden rounded-full bg-gray-100" role="progressbar" aria-label={copy.exportingPdfTitle} aria-valuemin={0} aria-valuemax={100} aria-valuenow={exportProgressPercent}>
                     <div
-                      className={`h-full rounded-full transition-[width] duration-200 ${
+                      className={`h-full w-full origin-left rounded-full transition-transform duration-200 ease-[var(--ease-ui-out)] motion-reduce:transition-none ${
                         pdfExportProgress.cancelRequested ? 'bg-amber-500' : 'bg-indigo-600'
                       }`}
-                      style={{ width: `${exportProgressPercent}%` }}
+                      style={{ transform: `scaleX(${exportProgressPercent / 100})` }}
                     />
                   </div>
 
@@ -15607,6 +15627,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       <AnimatePresence initial={false} custom={uiMotion}>
         {pendingLeaveSharedSetlist && (
           <PresenceSurface
+            key="leave-setlist-confirm"
             {...backdropMotion}
             className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
           >
@@ -15640,6 +15661,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         )}
         {pendingLeaveSharedProject && (
           <PresenceSurface
+            key="leave-project-confirm"
             {...backdropMotion}
             className="absolute inset-0 z-[125] flex items-center justify-center bg-stone-950/35 px-4 backdrop-blur-[2px]"
           >
@@ -15704,7 +15726,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
       <AnimatePresence initial={false} custom={uiMotion}>
         {isMultiSelectMode && (
-          <motion.div
+          <PresenceSurface
+            key="setlist-bulk-actions"
             {...feedbackMotion}
             className="pointer-events-none fixed inset-x-0 bottom-4 z-[120] flex justify-center px-3"
           >
@@ -15760,10 +15783,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 {copy.cancel}
               </button>
             </div>
-          </motion.div>
+          </PresenceSurface>
         )}
         {projectPicker && (
           <ResponsiveDialog
+            key="project-picker"
             title={projectPicker.mode === 'move' ? copy.projectPickerMoveTitle : copy.projectPickerCopyTitle}
             subtitle={copy.projects}
             closeLabel={copy.cancel}
@@ -15996,11 +16020,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         />
       )}
 
-      {isHomeScreenGuideOpen && homeScreenInstall.shouldShowInstallGuide && (
-        <HomeScreenGuide language={language} initialDevice={homeScreenDevice}
-          onClose={() => setIsHomeScreenGuideOpen(false)}
-          onAdded={() => { homeScreenInstall.markAsAdded(); setIsHomeScreenGuideOpen(false); }} />
-      )}
+      <AnimatePresence>
+        {isHomeScreenGuideOpen && homeScreenInstall.shouldShowInstallGuide && (
+          <HomeScreenGuide language={language} initialDevice={homeScreenDevice}
+            onClose={() => setIsHomeScreenGuideOpen(false)}
+            onAdded={() => { homeScreenInstall.markAsAdded(); setIsHomeScreenGuideOpen(false); }} />
+        )}
+      </AnimatePresence>
 
       {isPerformanceMode && (
         <div
@@ -16040,8 +16066,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0"
           />
 
-          {/* Horizontal feedback wraps, and never replaces, the vertical page translator. */}
-          <div ref={performanceSwipeSurfaceRef} data-performance-swipe-surface>
+          {isLyricsMode ? <div data-performance-lyrics className="h-full w-full min-h-0 pt-16" onClick={event => {
+            if (!(event.target as Element).closest('.alr-canvas')) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            if (event.clientX < bounds.left + bounds.width / 2) handlePerformancePrevPage();
+            else handlePerformanceNextPage();
+          }}>
+            <PerformanceLyricsReader ref={performanceLyricsRef} entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}
+              selectedId={isSetlistMode ? selectedSetlistSongId : song.id} onSelectSong={isSetlistMode ? setSelectedSetlistSongId : setSelectedSongId}
+              language={language} preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}/>
+          </div> : <>
+          {/* The score stays still during gestures; only its page offset switches on a turn. */}
+          <div data-performance-swipe-surface>
           {/* One full A4 page, or a pair on wide screens. */}
           <div data-performance-spread={performanceColumns} data-performance-page={performanceSpreadStart + 1} data-performance-pages={performanceTotalPages} style={{
             width: performanceLayout.width,
@@ -16061,12 +16097,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               }}
             >
 	              <div ref={performanceSheetRef} data-print-preview className="performance-sheet" style={{ colorScheme: 'light', '--performance-columns': performanceColumns } as React.CSSProperties}>
-	                {isLyricsMode && isSetlistMode && isLyricsContinuous ? (
-                    <LyricsBook title={selectedSetlist?.name ?? ''} entries={setlistLyricsEntries} language={language} settings={lyricsBookSettings} exportMode />
-                  ) : isLyricsMode ? (
-                    <LyricsSheet key={isSetlistMode ? selectedSetlistSong?.id : song.id}
-                      song={isSetlistMode ? (activeSetlistPreviewSong ?? song) : song} setlistSongNumber={isSetlistMode ? setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSong?.id) + 1 : undefined} language={language} exportMode />
-                  ) : isSetlistMode ? (
+	                {isSetlistMode ? (
 	                  activeSetlistPreviewSong && (
 	                    <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
                           notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
@@ -16096,6 +16127,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
           </div>
 
+          </>}
+
+          <div ref={performanceTouchFeedbackRef} data-performance-touch-feedback className="performance-touch-feedback" aria-hidden="true">
+            <ChevronLeft data-direction="previous" size={22} />
+            <ChevronRight data-direction="next" size={22} />
+          </div>
+
           <div ref={performanceNavigationHintRef} data-performance-navigation-hint hidden className="performance-navigation-hint" role="note">
             <span>{language === 'zh' ? '左右滑動翻頁，也可輕點畫面左右兩側' : 'Swipe to turn pages, or tap the left or right half of the screen.'}</span>
             <button type="button" onClick={dismissPerformanceNavigationHint}>{language === 'zh' ? '知道了' : 'Got it'}</button>
@@ -16103,7 +16141,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
           {/* Reference buttons — top left. Dark pills so they stay legible over the
               white sheet; indigo for the active one (never plain white). */}
-          <div data-performance-chrome-item className="absolute left-4 top-4 z-10 flex items-center gap-2 transition-opacity duration-500">
+          <div data-performance-chrome-item className="absolute left-4 top-4 z-10 flex items-center gap-2">
             {renderReferenceButtons(
               'inline-flex h-9 items-center gap-1.5 rounded-full bg-stone-900/70 px-3 text-xs font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-colors hover:bg-stone-900/85',
               {
@@ -16115,7 +16153,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
 	          <div
 	            data-performance-chrome-item
-	            className="pointer-events-none absolute z-20 flex items-center gap-2 transition-opacity duration-500"
+	            className="pointer-events-none absolute z-20 flex items-center gap-2"
 	            style={{
 	              top: 'max(16px, env(safe-area-inset-top, 0px))',
 	              right: 'max(16px, env(safe-area-inset-right, 0px))'
@@ -16142,7 +16180,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 handleExitPerformanceMode();
               }}
 	              onClick={handleExitPerformanceMode}
-              className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-stone-900/70 px-4 py-2 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-[opacity,background-color] duration-500 hover:bg-stone-900/85"
+              className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-stone-900/70 px-4 py-2 text-sm font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-colors duration-[160ms] ease-[var(--ease-ui-out)] hover:bg-stone-900/85"
             >
               {copy.exitPerformanceMode}
             </button>
@@ -16151,8 +16189,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 	          {/* Setlist song indicator — bottom center, above safe-area. Page numbers
 	              stay on the sheet itself so the performance overlay does not compete
 	              with the prominent page badge. */}
-	          {isSetlistMode && activeSetlistPreviewSong && (
-	            <div data-performance-chrome-item className="absolute left-1/2 -translate-x-1/2 pointer-events-none rounded-2xl bg-stone-900/70 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500" style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
+	          {!isLyricsMode && isSetlistMode && activeSetlistPreviewSong && (
+	            <div data-performance-chrome-item className="absolute left-1/2 -translate-x-1/2 pointer-events-none rounded-2xl bg-stone-900/70 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm" style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
 	              <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-stone-300">
 	                {isLyricsMode && isLyricsContinuous ? <>{selectedSetlist?.name ?? ''} · <span ref={performancePageRangeRef} data-performance-page-range>{performancePageRange}</span> / {performanceTotalPages}</> : <>
                     {copy.performanceModeSongIndicator}{' '}
@@ -16163,12 +16201,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 	            </div>
 	          )}
 
+          {!isLyricsMode && <>
           {/* Left tap area — the button stays clickable at all times so page turning
               is never blocked; only the arrow hint fades with the rest of the chrome. */}
           <button
             type="button"
-            onClick={() => {
-              performanceSwipe.cancel();
+            onClick={(event) => {
+              performanceSwipe.tap(event.nativeEvent, 'previous');
               dismissPerformanceNavigationHint();
               handlePerformancePrevPage();
             }}
@@ -16178,7 +16217,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             aria-label="Previous page"
             aria-keyshortcuts="ArrowLeft ArrowUp PageUp Shift+Space"
           >
-            <span data-performance-chrome-item className="flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/55 text-stone-100 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500">
+            <span data-performance-chrome-item className="flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/55 text-stone-100 ring-1 ring-white/10 backdrop-blur-sm">
               <ChevronLeft size={28} />
             </span>
           </button>
@@ -16186,8 +16225,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           {/* Right tap area */}
           <button
             type="button"
-            onClick={() => {
-              performanceSwipe.cancel();
+            onClick={(event) => {
+              performanceSwipe.tap(event.nativeEvent, 'next');
               dismissPerformanceNavigationHint();
               handlePerformanceNextPage();
             }}
@@ -16197,10 +16236,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             aria-label="Next page"
             aria-keyshortcuts="ArrowRight ArrowDown PageDown Space Enter"
           >
-            <span data-performance-chrome-item className="flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/55 text-stone-100 ring-1 ring-white/10 backdrop-blur-sm transition-opacity duration-500">
+            <span data-performance-chrome-item className="flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/55 text-stone-100 ring-1 ring-white/10 backdrop-blur-sm">
               <ChevronRight size={28} />
             </span>
           </button>
+          </>}
         </div>
       )}
     </div>

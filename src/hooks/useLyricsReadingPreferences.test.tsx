@@ -98,3 +98,9 @@ describe('lyrics reading device preferences', () => {
     expect(result.current[0]).toEqual(DEFAULT_LYRICS_READING_SETTINGS);
   });
 });
+
+it('carries the prior readability floor into legacy 18px preferences before fixed sizing', () => {
+  localStorage.setItem(storageKey(), JSON.stringify({ ...preference, fontSize: 18 }));
+  const { result } = renderHook(() => useLyricsReadingPreferences());
+  expect(result.current[0]).toEqual({ ...preference, fontSize: 20 });
+});

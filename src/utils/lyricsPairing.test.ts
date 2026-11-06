@@ -50,3 +50,14 @@ describe('bilingual source-line pairing', () => {
     expect(pages.map(page => page.columns[0].map(({ start, end }) => [start, end]))).toEqual([[[0, 1]], [[1, 2]]]);
   });
 });
+
+it('measures only the chosen language for each sung sentence, while retaining raw source offsets', () => {
+  const pairs = pairLyricsLines({ chinese: '主歌\n譯文', english: 'Verse\nChorus' }, {
+    chinese: [{ start: 0, end: 3, height: 20 }, { start: 3, end: 5, height: 100 }],
+    english: [{ start: 0, end: 6, height: 100 }, { start: 6, end: 12, height: 40 }],
+  }, 20, 'sung', { lines: ['chinese', 'english'] });
+  expect(pairs).toEqual([
+    { chinese: { start: 0, end: 2 }, height: 20 },
+    { english: { start: 6, end: 12 }, height: 40 },
+  ]);
+});

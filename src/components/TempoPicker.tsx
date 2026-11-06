@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, Minus, Plus } from 'lucide-react';
 import { AnimatedPopover } from './ui/InteractionMotion';
 import { useAnchoredPortalPanel, type PanelAlign } from './useAnchoredPortalPanel';
-import { formatTempoBpm, MAX_TEMPO_BPM, MIN_TEMPO_BPM, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
+import { formatTempoBpm, isValidTempoDraft, MAX_TEMPO_BPM, MIN_TEMPO_BPM, normalizeTempoBpm, sanitizeTempoInput } from '../utils/tempoUtils';
 import './TempoPicker.css';
 
 interface TempoPickerProps {
@@ -35,7 +35,7 @@ export default function TempoPicker({ value, onChange, language, disabled = fals
   const close = React.useCallback(() => { if (!adopting) setOpen(false); }, [adopting]);
   const { panelStyle, isPositioned, transformOrigin } = useAnchoredPortalPanel({ isOpen: open, align, triggerRef, panelRef, onRequestClose: close });
   const numericDraft = draft.trim() ? Number(draft) : undefined;
-  const valid = numericDraft === undefined || (Number.isFinite(numericDraft) && numericDraft >= MIN_TEMPO_BPM && numericDraft <= MAX_TEMPO_BPM);
+  const valid = isValidTempoDraft(draft);
   const toggle = () => {
     if (open) { close(); return; }
     setDraft(formatTempoBpm(value));
@@ -99,7 +99,7 @@ export default function TempoPicker({ value, onChange, language, disabled = fals
       <ChevronDown size={12} aria-hidden="true" />
     </button>
     {typeof document !== 'undefined' && createPortal(
-      <AnimatedPopover open={open} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} style={panelStyle} className="tempo-panel" role="dialog" aria-label={zh ? '調整速度' : 'Adjust tempo'} id={id}>
+      <AnimatedPopover open={open} ready={isPositioned} panelRef={panelRef} origin={transformOrigin} style={panelStyle} className="tempo-panel ui-anchored-panel" role="dialog" aria-label={zh ? '調整速度' : 'Adjust tempo'} id={id}>
         <form onSubmit={event => { event.preventDefault(); apply(); }}>
           <div className="tempo-panel-heading"><label htmlFor={`${id}-input`}>{zh ? '速度' : 'Tempo'}</label><span>BPM</span></div>
           {scopeText && !showOriginalTempo && <p className="tempo-scope" id={`${id}-scope`}>{scopeText}</p>}

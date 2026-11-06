@@ -26,7 +26,8 @@ function setup() {
   return { media, decoder, context, sources, load, engine, interrupted, createContext };
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
-it('prepares without claiming the audio session, and releases playback focus on stop', async () => {
+it('prepares without claiming the audio session, and releases playback focus after a short stopped grace period', async () => {
+  vi.useFakeTimers();
   const session = { type: 'auto' };
   vi.stubGlobal('navigator', { audioSession: session });
   const { engine, media, context, sources } = setup();
@@ -38,6 +39,10 @@ it('prepares without claiming the audio session, and releases playback focus on 
   expect(session.type).toBe('playback');
   expect(media.play).toHaveBeenCalledOnce();
   engine.stop();
+  expect(engine.playing).toBe(false);
+  expect(sources[0].stop).toHaveBeenCalled();
+  expect(context.suspend).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1500);
   expect(session.type).toBe('auto');
   expect(context.suspend).toHaveBeenCalledOnce();
   expect(media.paused).toBe(true);
@@ -47,7 +52,100 @@ it('prepares without claiming the audio session, and releases playback focus on 
   engine.dispose();
   expect(session.type).toBe('auto');
 });
+it.each([0, 100, 750, 1400])('restarts from beat one after a %i ms stop without reopening audio or rebuilding the loop', async gap => {
+  vi.useFakeTimers();
+  const session = { type: 'auto' };
+  vi.stubGlobal('navigator', { audioSession: session });
+  const { engine, context, media, sources, load, createContext } = setup();
+  await engine.start(config);
+  for (let index = 0; index < 3; index++) {
+    const previous = sources.at(-1);
+    engine.stop();
+    expect(previous.stop).toHaveBeenCalledWith();
+    expect(engine.playing).toBe(false);
+    expect(engine.getBeat()).toBe(-1);
+    await vi.advanceTimersByTimeAsync(gap);
+    context.currentTime += .8;
+    const restart = engine.start({ ...config });
+    expect(sources).toHaveLength(index + 2); // Schedule before the caller can render or await.
+    expect(sources.at(-1).start).toHaveBeenCalledWith(context.currentTime + .015, 0);
+    expect(await restart).toBe(true);
+  }
+  // A cancelled idle callback must not suspend the newly playing loop later.
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(engine.playing).toBe(true);
+  expect(session.type).toBe('playback');
+  expect(context.suspend).not.toHaveBeenCalled();
+  expect(context.resume).toHaveBeenCalledOnce();
+  expect(media.pause).not.toHaveBeenCalled();
+  expect(media.play).toHaveBeenCalledOnce();
+  expect(context.createBuffer).toHaveBeenCalledOnce();
+  expect(createContext).toHaveBeenCalledOnce();
+  expect(load).toHaveBeenCalledOnce();
+  engine.dispose();
+  expect(media.paused).toBe(true);
+  expect(session.type).toBe('auto');
+});
+it('renders changed settings during a quick restart and releases a stopped engine on disposal immediately', async () => {
+  vi.useFakeTimers();
+  const session = { type: 'auto' };
+  vi.stubGlobal('navigator', { audioSession: session });
+  const { engine, context, media, sources } = setup();
+  await engine.start(config);
+  engine.stop();
+  await engine.start({ ...config, bpm: 60, beats: 3 });
+  expect(sources[1].loopEnd).toBe(3);
+  expect(context.createBuffer).toHaveBeenCalledTimes(2);
+  engine.stop();
+  engine.dispose();
+  expect(media.paused).toBe(true);
+  expect(session.type).toBe('auto');
+  const suspends = context.suspend.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(context.suspend).toHaveBeenCalledTimes(suspends);
+  expect(context.close).toHaveBeenCalledOnce();
+});
+it.each(['idle', 'interrupted'])('resumes audio normally after a stopped context becomes %s', async reason => {
+  vi.useFakeTimers();
+  const { engine, context, media, sources } = setup();
+  context.suspend.mockImplementation(async () => { context.state = 'suspended'; });
+  context.resume.mockImplementation(async () => { context.state = 'running'; });
+  await engine.start(config);
+  engine.stop();
+  if (reason === 'idle') await vi.advanceTimersByTimeAsync(1500);
+  else context.state = 'suspended';
+  expect(context.state).toBe('suspended');
+  expect(await engine.start(config)).toBe(true);
+  expect(context.resume).toHaveBeenCalledTimes(2);
+  expect(media.play).toHaveBeenCalledTimes(2);
+  expect(sources).toHaveLength(2);
+  expect(context.createBuffer).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(engine.playing).toBe(true);
+  engine.dispose();
+});
+it('keeps the newest rapid restart when a cancelled sound load finishes later', async () => {
+  vi.useFakeTimers();
+  const { engine, context, sources, load } = setup();
+  await engine.start(config);
+  engine.stop();
+  let finish!: (value: ClickSamples) => void;
+  load.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const pending = engine.start({ ...config, sound: 'drive' });
+  engine.stop();
+  expect(await engine.start(config)).toBe(true);
+  finish(samples);
+  expect(await pending).toBe(false);
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(sources).toHaveLength(2);
+  expect(sources[1].stop).not.toHaveBeenCalled();
+  expect(context.suspend).not.toHaveBeenCalled();
+  expect(context.resume).toHaveBeenCalledOnce();
+  expect(engine.playing).toBe(true);
+  engine.dispose();
+});
 it('releases audio focus after a failed start and preserves a later session owner', async () => {
+  vi.useFakeTimers();
   const session = { type: 'auto' };
   vi.stubGlobal('navigator', { audioSession: session });
   const { engine, load, context } = setup();
@@ -58,6 +156,7 @@ it('releases audio focus after a failed start and preserves a later session owne
   await engine.start(config);
   session.type = 'play-and-record';
   engine.stop();
+  await vi.advanceTimersByTimeAsync(1500);
   expect(session.type).toBe('play-and-record');
   engine.dispose();
 });
@@ -88,8 +187,8 @@ it('uses a native gapless audio buffer loop and follows the audio clock without 
   expect(timer).not.toHaveBeenCalled();
   context.currentTime = 1.115; expect(engine.getBeat()).toBe(2);
   expect(engine.playing).toBe(true);
-  engine.stop(); expect(media.paused).toBe(true); expect(engine.getBeat()).toBe(-1);
-  engine.dispose();
+  engine.stop(); expect(sources[0].stop).toHaveBeenCalledWith(); expect(engine.getBeat()).toBe(-1);
+  engine.dispose(); expect(media.paused).toBe(true);
 });
 it('keeps the previous loop running when a replacement fails, then retries', async () => {
   const { sources, engine, load } = setup();
