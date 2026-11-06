@@ -43,7 +43,7 @@ describe('safe offline app updates', () => {
     let pending!: Promise<void>;
     listeners.install({ waitUntil: (promise: Promise<void>) => { pending = promise; } }); await pending;
     expect(cache.put).toHaveBeenCalledWith('https://example.test/chordmaster/assets/main.js', expect.anything());
-    expect(cache.put).toHaveBeenCalledWith('https://example.test/chordmaster/fonts/JianpuASCII.ttf', expect.anything());
+    expect(cache.put).toHaveBeenCalledWith('https://example.test/chordmaster/fonts/JianpuASCII.ttf?v=20261107', expect.anything());
     expect(self.skipWaiting).not.toHaveBeenCalled(); expect(caches.delete).not.toHaveBeenCalled();
   });
   it('rejects an incomplete release instead of replacing the working offline cache', async () => {

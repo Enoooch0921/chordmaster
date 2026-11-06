@@ -2,8 +2,8 @@ import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
 
 const INTENT_DISTANCE = 8;
 const TURN_DISTANCE = 44;
-const FEEDBACK_SIZE = 40;
-const FEEDBACK_GAP = 16;
+const FEEDBACK_WIDTH = 4;
+const FEEDBACK_HEIGHT = 80;
 const TAP_HOLD_MS = 100;
 const CLICK_GUARD_MS = 700;
 const GUIDE_KEY = 'chordmaster.performance-navigation-learned.v1';
@@ -22,7 +22,7 @@ type Options = {
   onLearned: () => void;
 };
 
-/** Only the small touch indicator moves; score content and React state stay independent. */
+/** A quiet edge cue confirms the turn direction without moving the score or following the finger. */
 export function usePerformanceSwipe(options: Options) {
   const latest = useRef(options);
   latest.current = options;
@@ -36,7 +36,7 @@ export function usePerformanceSwipe(options: Options) {
     const overlay = options.overlay.current;
     const feedback = options.feedback.current;
     if (!options.enabled || !overlay || !feedback) { suppressClickUntil.current = 0; return; }
-    let touch: { id: number; x: number; y: number; currentX: number; currentY: number; bounds: DOMRect; axis: 'pending' | 'horizontal'; dx: number } | null = null;
+    let touch: { id: number; x: number; y: number; bounds: DOMRect; axis: 'pending' | 'horizontal'; dx: number } | null = null;
     let frame: number | null = null;
     let flashTimer: ReturnType<typeof setTimeout> | null = null;
     const clearFrame = () => { if (frame !== null) cancelAnimationFrame(frame); frame = null; };
@@ -45,11 +45,10 @@ export function usePerformanceSwipe(options: Options) {
       feedback.style.transition = immediate ? 'none' : '';
       delete feedback.dataset.active;
     };
-    const show = (x: number, y: number, direction: Direction, ready: boolean, bounds: DOMRect) => {
-      const maxX = Math.max(8, bounds.width - FEEDBACK_SIZE - 8);
-      const maxY = Math.max(8, bounds.height - FEEDBACK_SIZE - 8);
-      const left = Math.max(8, Math.min(maxX, x - bounds.left - FEEDBACK_SIZE / 2));
-      const top = Math.max(8, Math.min(maxY, y - bounds.top - FEEDBACK_SIZE - FEEDBACK_GAP));
+    const show = (y: number, direction: Direction, ready: boolean, bounds: DOMRect) => {
+      const left = direction === 'previous' ? 8 : Math.max(8, bounds.width - FEEDBACK_WIDTH - 8);
+      const maxY = Math.max(8, bounds.height - FEEDBACK_HEIGHT - 8);
+      const top = Math.max(8, Math.min(maxY, y - bounds.top - FEEDBACK_HEIGHT / 2));
       feedback.style.transition = 'none';
       feedback.style.transform = `translate3d(${left}px, ${top}px, 0)`;
       feedback.dataset.direction = direction;
@@ -67,15 +66,14 @@ export function usePerformanceSwipe(options: Options) {
       resetGesture();
       // Keyboard/pedal/assistive activation stays immediate and has no touch animation.
       if (event.detail === 0) return;
-      show(event.clientX, event.clientY, direction, true, overlay.getBoundingClientRect());
+      show(event.clientY, direction, true, overlay.getBoundingClientRect());
       flashTimer = setTimeout(() => { flashTimer = null; hide(); }, TAP_HOLD_MS);
     };
     flash.current = flashTap;
     const paint = () => {
       frame = null;
       if (!touch || touch.axis !== 'horizontal') return;
-      show(latest.current.reduced ? touch.x : touch.currentX,
-        latest.current.reduced ? touch.y : touch.currentY,
+      show(touch.y,
         touch.dx < 0 ? 'next' : 'previous', Math.abs(touch.dx) >= TURN_DISTANCE, touch.bounds);
     };
     const guardClick = () => { suppressClickUntil.current = performance.now() + CLICK_GUARD_MS; };
@@ -91,13 +89,12 @@ export function usePerformanceSwipe(options: Options) {
       if (!target || target.closest('[data-personal-notes-layer], [data-personal-notes-tools]')
         || (target.closest('button, a, input, textarea, select, [role="button"]') && !target.closest('[data-performance-turn-area]'))) return;
       latest.current.onInteract();
-      clearFrame(); clearFlash();
+      clearFrame(); clearFlash(); hide(true);
       const point = event.touches[0];
       const bounds = overlay.getBoundingClientRect();
-      touch = { id: point.identifier, x: point.clientX, y: point.clientY, currentX: point.clientX, currentY: point.clientY, bounds, axis: 'pending', dx: 0 };
-      const area = target.closest<HTMLElement>('[data-performance-turn-area]')?.dataset.performanceTurnArea;
-      const direction = area === 'previous' || area === 'next' ? area : point.clientX < bounds.left + bounds.width / 2 ? 'previous' : 'next';
-      show(point.clientX, point.clientY, direction, false, bounds);
+      touch = { id: point.identifier, x: point.clientX, y: point.clientY, bounds, axis: 'pending', dx: 0 };
+      // Wait for horizontal intent. Guessing from the screen half flashes the
+      // wrong side before a swipe and also distracts during vertical gestures.
     };
     const move = (event: TouchEvent) => {
       if (!touch) return;
@@ -105,7 +102,7 @@ export function usePerformanceSwipe(options: Options) {
       const point = Array.from(event.touches).find(point => point.identifier === touch!.id);
       if (!point) { abort(); return; }
       const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
-      touch.dx = dx; touch.currentX = point.clientX; touch.currentY = point.clientY;
+      touch.dx = dx;
       if (touch.axis === 'pending') {
         if (Math.max(Math.abs(dx), Math.abs(dy)) < INTENT_DISTANCE) return;
         if (Math.abs(dy) >= Math.abs(dx)) { guardClick(); abort(); return; }
@@ -121,7 +118,7 @@ export function usePerformanceSwipe(options: Options) {
       if (!point) { abort(); return; }
       const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
       const horizontal = touch.axis === 'horizontal' || (Math.abs(dx) >= INTENT_DISTANCE && Math.abs(dx) > Math.abs(dy));
-      touch.dx = dx; touch.currentX = point.clientX; touch.currentY = point.clientY;
+      touch.dx = dx;
       if (horizontal) { touch.axis = 'horizontal'; clearFrame(); paint(); }
       touch = null; clearFrame();
       if (horizontal || Math.max(Math.abs(dx), Math.abs(dy)) >= INTENT_DISTANCE) guardClick();

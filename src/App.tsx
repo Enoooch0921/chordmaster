@@ -16129,10 +16129,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
           </>}
 
-          <div ref={performanceTouchFeedbackRef} data-performance-touch-feedback className="performance-touch-feedback" aria-hidden="true">
-            <ChevronLeft data-direction="previous" size={22} />
-            <ChevronRight data-direction="next" size={22} />
-          </div>
+          <div ref={performanceTouchFeedbackRef} data-performance-touch-feedback className="performance-touch-feedback" aria-hidden="true" />
 
           <div ref={performanceNavigationHintRef} data-performance-navigation-hint hidden className="performance-navigation-hint" role="note">
             <span>{language === 'zh' ? '左右滑動翻頁，也可輕點畫面左右兩側' : 'Swipe to turn pages, or tap the left or right half of the screen.'}</span>

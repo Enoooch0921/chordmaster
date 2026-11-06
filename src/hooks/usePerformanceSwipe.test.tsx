@@ -28,17 +28,19 @@ function setup(reduced = false) {
   return { overlay, surface, feedback, turn, control, onNext, onPrevious, onLearned, onInteract, hook, start, move, end, frame, renders: () => renders };
 }
 
-it('moves only the local cue once per frame, keeping the score still without hook renders', () => {
+it('waits for horizontal intent and keeps both the cue and score stationary without hook renders', () => {
   const t = setup(); t.start();
-  expect(t.feedback.dataset.active).toBe('true');
+  expect(t.feedback.dataset.active).toBeUndefined();
+  t.move(398, 202); t.frame();
+  expect(t.feedback.dataset.active).toBeUndefined();
   const startPosition = t.feedback.style.transform;
   t.move(360); t.move(200);
   expect(t.feedback.style.transform).toBe(startPosition);
-  t.frame(); expect(t.feedback.style.transform).toBe('translate3d(180px, 144px, 0)');
+  t.frame(); expect(t.feedback.style.transform).toBe('translate3d(788px, 160px, 0)');
   expect(t.feedback.dataset.direction).toBe('next'); expect(t.feedback.dataset.ready).toBe('true');
   expect(t.surface.style.transform).toBe(''); expect(t.surface.style.opacity).toBe('');
   expect(t.renders()).toBe(1); expect(t.onNext).not.toHaveBeenCalled();
-  t.move(0); t.frame(); expect(t.feedback.style.transform).toBe('translate3d(8px, 144px, 0)');
+  t.move(0); t.frame(); expect(t.feedback.style.transform).toBe('translate3d(788px, 160px, 0)');
   t.end(0); expect(t.onNext).toHaveBeenCalledOnce(); expect(t.onLearned).toHaveBeenCalledOnce();
   expect(t.surface.style.transform).toBe(''); expect(t.surface.style.opacity).toBe('');
   expect(t.feedback.dataset.active).toBeUndefined(); expect(t.feedback.style.transition).toBe('');
@@ -50,6 +52,7 @@ it('reverses the cue direction and readiness immediately without queuing animati
   expect(t.feedback.dataset.direction).toBe('next'); expect(t.feedback.dataset.ready).toBe('true');
   t.move(420); t.frame();
   expect(t.feedback.dataset.direction).toBe('previous'); expect(t.feedback.dataset.ready).toBe('false');
+  expect(t.feedback.style.transform).toBe('translate3d(8px, 160px, 0)');
   t.end(480); expect(t.onPrevious).toHaveBeenCalledOnce(); expect(t.onNext).not.toHaveBeenCalled();
 });
 
@@ -83,7 +86,7 @@ it.each(['button', 'notes'])('does not own a gesture on %s controls', kind => {
 });
 
 it('keeps reduced-motion feedback at the first touch without moving or fading the paper', () => {
-  const t = setup(true); t.start(); const first = t.feedback.style.transform;
+  const t = setup(true); t.start(); t.move(350); t.frame(); const first = t.feedback.style.transform;
   t.move(250); t.frame();
   expect(t.feedback.style.transform).toBe(first); expect(t.feedback.dataset.active).toBe('true');
   expect(t.surface.style.transform).toBe(''); expect(t.surface.style.opacity).toBe('');
@@ -108,7 +111,7 @@ it('cleans up a pending tap timer without hiding a new gesture after scope chang
   const t = setup();
   act(() => t.hook.result.current.tap({ detail: 1, clientX: 700, clientY: 300 }, 'next'));
   t.hook.rerender({ enabled: true, scope: 'song-b', reduced: false });
-  t.start(); act(() => vi.advanceTimersByTime(150));
+  t.start(); t.move(300); t.frame(); act(() => vi.advanceTimersByTime(150));
   expect(t.feedback.dataset.active).toBe('true');
   t.hook.unmount(); expect(t.feedback.dataset.active).toBeUndefined(); expect(vi.getTimerCount()).toBe(0);
 });

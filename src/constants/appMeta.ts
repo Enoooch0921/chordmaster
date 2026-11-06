@@ -86,6 +86,26 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-07',
+        title: '修復樂譜字型與簡化翻頁回饋',
+        bullets: [
+          '恢復原始簡譜字型並修正連音線字型格式，改善瀏覽器載入與 PDF 內嵌。',
+          '字型網址加入版本，避免已安裝或離線版本繼續使用損壞快取。',
+          '移除全螢幕翻頁的浮動圓圈箭頭，改用短暫邊緣淡光；譜面保持不動，保留連續翻頁與取消手勢。'
+        ]
+      },
+      {
+        version: '0.12.17',
+        date: '2026-11-07',
+        title: 'Repaired score fonts and quieter page turns',
+        bullets: [
+          'Restore the original Jianpu font and repair the slur font format for browser loading and PDF embedding.',
+          'Use versioned font URLs so installed and offline copies fetch the repaired assets.',
+          'Replace floating swipe arrows with a subtle edge light; keep the score still and preserve quick, reversible gestures.'
+        ]
+      },
+      {
+        version: '0.12.17',
+        date: '2026-11-07',
         title: 'Steadier interaction and adaptive lyrics',
         bullets: [
           'Keep one font size across the setlist; adapt lyric columns to the screen and avoid isolated characters at line ends.',

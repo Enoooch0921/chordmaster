@@ -3,7 +3,7 @@ const FONT_FACE_STYLE_ID = 'chordmaster-app-font-faces';
 const APP_FONT_FACES = [
   {
     family: 'JianpuASCII',
-    sources: [{ path: 'fonts/JianpuASCII.ttf', format: 'truetype' }]
+    sources: [{ path: 'fonts/JianpuASCII.ttf?v=20261107', format: 'truetype' }]
   },
   {
     family: 'Bach',
@@ -15,7 +15,7 @@ const APP_FONT_FACES = [
   },
   {
     family: 'BachSlurs',
-    sources: [{ path: 'fonts/BachSlurs.ttf', format: 'truetype' }]
+    sources: [{ path: 'fonts/BachSlurs.ttf?v=20261107', format: 'truetype' }]
   }
 ];
 

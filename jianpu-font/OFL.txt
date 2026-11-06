@@ -1,6 +1,6 @@
-Copyright ï¿½ 2022 Robert Winslow, with Reserved Font Name "Jianpu ASCII".
+Copyright © 2022 Robert Winslow, with Reserved Font Name "Jianpu ASCII".
 
-This font is a derivative work of the font with Reserved Font Name 'Source', Copyright ï¿½ Adobe Systems Incorporated 2010, 2012.
+This font is a derivative work of the font with Reserved Font Name 'Source', Copyright © Adobe Systems Incorporated 2010, 2012.
 In particular, it uses the numbers 0123456789 from "Source Code Pro", by Paul D. Hunt, 
 downloaded from Google Fonts here: https://fonts.google.com/specimen/Source+Code+Pro
 

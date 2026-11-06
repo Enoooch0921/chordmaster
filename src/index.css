@@ -47,33 +47,28 @@
   pointer-events: none;
 }
 
-/* Reading content never follows a gesture. Only the local touch cue moves. */
+/* A short edge light confirms direction; no floating controls or moving paper. */
 [data-performance-swipe-surface] { flex-shrink: 0; }
 .performance-touch-feedback {
   position: absolute;
   top: 0;
   left: 0;
   z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgb(28 25 23 / 88%);
-  color: var(--color-stone-50);
-  border: 1px solid rgb(255 255 255 / 35%);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 14%);
+  width: 4px;
+  height: 80px;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, transparent, var(--color-indigo-400) 25%, var(--color-indigo-400) 75%, transparent);
   pointer-events: none;
   opacity: 0;
   transition: opacity var(--ui-fade-duration) var(--ease-ui-out);
 }
-.performance-touch-feedback[data-active] { opacity: 0.72; }
-.performance-touch-feedback[data-active][data-ready="true"] { opacity: 1; }
-.performance-touch-feedback [data-direction] { display: none; }
-.performance-touch-feedback[data-direction="previous"] [data-direction="previous"],
-.performance-touch-feedback[data-direction="next"] [data-direction="next"] { display: block; }
-/* Reduced motion keeps the cue at the starting touch point (in the hook), with only this fade. */
+.performance-touch-feedback[data-active] { opacity: 0.35; }
+.performance-touch-feedback[data-active][data-ready="true"] { opacity: 0.65; }
+/* Keyboard actions stay immediate; reduced motion keeps only a short fade. */
+[data-ui-input="keyboard"] .performance-touch-feedback { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .performance-touch-feedback { transition-duration: 80ms; }
+}
 :root { --personal-notes-bottom-offset: 80px; --personal-notes-launch-height: 44px; }
 .performance-navigation-hint {
   position: absolute;

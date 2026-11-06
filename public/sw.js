@@ -9,11 +9,11 @@ const APP_SHELL_PATHS = [
   './apple-touch-icon.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './fonts/JianpuASCII.ttf',
+  './fonts/JianpuASCII.ttf?v=20261107',
   './fonts/BachRhythm.ttf',
   './fonts/Bach41.ttf',
   './fonts/Bach.ttf',
-  './fonts/BachSlurs.ttf',
+  './fonts/BachSlurs.ttf?v=20261107',
 ];
 
 const toScopedUrl = (path) => new URL(path, self.registration.scope).toString();
@@ -54,9 +54,9 @@ const cacheAppShell = async () => {
   await cache.put(appShellUrl, appShellResponse.clone());
   const required = new Set([
     ...BUILD_ASSETS,
-    './fonts/JianpuASCII.ttf',
+    './fonts/JianpuASCII.ttf?v=20261107',
     './fonts/BachRhythm.ttf',
-    './fonts/BachSlurs.ttf',
+    './fonts/BachSlurs.ttf?v=20261107',
   ].map(toScopedUrl));
 
   const urls = new Set([
