@@ -222,8 +222,7 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
         // Fit each prepared song independently. A single/double-page song turn
         // must not change inherited grid styles or resize any cached score.
         const fitted = getPerformanceLayout(viewport.width, viewport.height, pageCounts[item.id] ?? 1, isPhone);
-        return <div key={item.id} data-performance-entry={item.id} aria-hidden={active ? undefined : true}
-          style={{ position: 'absolute', inset: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        return <div key={item.id} data-performance-entry={item.id} aria-hidden={active ? undefined : true}>
           <div data-performance-clip style={{ width: fitted.width, height: fitted.height, overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
             <div ref={node => {
               if (node) sheets.current.set(item.id, node);

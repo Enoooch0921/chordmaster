@@ -38,7 +38,7 @@ function PersonalNotes({ root, noteOwner, noteSongId, notesActive = true, notesP
   const [color, setColor] = useState<string>(NOTE_COLORS[0]);
   const [width, setWidth] = useState(2.5);
   const [options, setOptions] = useState(false);
-  const [available, setAvailable] = useState(false);
+  const [toolsHost, setToolsHost] = useState<HTMLElement | null>(null);
   const [shapeEnabled, setShapeEnabled] = useState(true);
   const [shape, setShape] = useState<NoteShapeFeedback>(null);
   const zh = language === 'zh';
@@ -46,7 +46,13 @@ function PersonalNotes({ root, noteOwner, noteSongId, notesActive = true, notesP
     const container = root.current;
     if (!container) return;
     const appRoot = container.closest('[data-app-root]');
-    const updateAvailability = () => setAvailable(!appRoot?.hasAttribute('inert') && appRoot?.getAttribute('aria-hidden') !== 'true');
+    // Adding the toolbar directly to the body on a first visit can make WebKit
+    // restyle the whole workspace. Keep the stage tools outside the moving
+    // sheet, but inside the fullscreen overlay that owns them.
+    const host = notesPerformance
+      ? container.closest<HTMLElement>('[data-performance-overlay]') ?? document.body
+      : document.body;
+    const updateAvailability = () => setToolsHost(appRoot?.hasAttribute('inert') || appRoot?.getAttribute('aria-hidden') === 'true' ? null : host);
     updateAvailability();
     const availability = new MutationObserver(updateAvailability);
     if (appRoot) availability.observe(appRoot, { attributes: true, attributeFilter: ['inert', 'aria-hidden'] });
@@ -60,7 +66,7 @@ function PersonalNotes({ root, noteOwner, noteSongId, notesActive = true, notesP
     });
     observer.observe(container, { childList: true, subtree: true });
     return () => { observer.disconnect(); availability.disconnect(); };
-  }, [root]);
+  }, [root, notesPerformance]);
   useLayoutEffect(() => { if (!notesActive && notesOpen === undefined) setLocalOpen(false); }, [notesActive, notesOpen]);
   useEffect(() => { if (open) setVisible(true); }, [open]);
   useEffect(() => {
@@ -75,7 +81,7 @@ function PersonalNotes({ root, noteOwner, noteSongId, notesActive = true, notesP
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
   }, [open, notesActive, store]);
-  const drawing = open && notesActive && available && visible && state.ready;
+  const drawing = open && notesActive && toolsHost !== null && visible && state.ready;
   const status = { loading: zh ? '載入筆記…' : 'Loading notes…', saving: zh ? '儲存中…' : 'Saving…',
     synced: zh ? '已儲存' : 'Saved', offline: zh ? '已存此裝置，連線後同步' : 'Saved here · sync when online',
     local: zh ? '已存此裝置' : 'Saved on this device', error: zh ? '儲存／同步失敗，點此重試' : 'Save/sync failed · retry' }[state.status];
@@ -85,7 +91,7 @@ function PersonalNotes({ root, noteOwner, noteSongId, notesActive = true, notesP
     {pages.map((page, index) => createPortal(<PersonalNotesPage page={page} pageIndex={index} strokes={state.strokes} drawing={drawing}
       visible={visible} performance={notesPerformance} tool={tool} color={color} width={width} onEdit={store.edit}
       shapeEnabled={shapeEnabled} onShape={setShape} />, page, String(index)))}
-    {notesActive && available && (open || notesPerformance || notesOpen === undefined) && createPortal(<div className="personal-notes-tools" data-personal-notes-tools data-preview-edit-ui data-preview-only-control
+    {notesActive && toolsHost && (open || notesPerformance || notesOpen === undefined) && createPortal(<div className="personal-notes-tools" data-personal-notes-tools data-preview-edit-ui data-preview-only-control
       data-notes-open={open || undefined} onPointerDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()}>
       {!open ? <button type="button" className="personal-notes-launch" onClick={() => { setVisible(true); setOpen(true); }}>
         <Pencil size={17} /><span>{zh ? '個人筆記' : 'My notes'}</span>{state.strokes.length > 0 && <span className="personal-notes-dot" />}
@@ -116,6 +122,6 @@ function PersonalNotes({ root, noteOwner, noteSongId, notesActive = true, notesP
           : shape ? (zh ? `已修成${{ line: '直線', ellipse: '圓圈', rectangle: '方框', triangle: '三角形', diamond: '菱形', pentagon: '五邊形', hexagon: '六邊形', star: '五角星', arrow: '箭頭' }[shape]}` : `Tidied ${shape}`)
           : zh ? (shapeEnabled ? '畫完不抬筆，停住修形 · 手指滑動' : '用筆書寫 · 手指滑動／縮放') : (shapeEnabled ? 'Draw, then hold the pen down to tidy' : 'Use the pen to write · fingers to navigate')}</p>
       </>}
-    </div>, document.body)}
+    </div>, toolsHost)}
   </>;
 }

@@ -60,6 +60,8 @@ it('uses the source song identity for personal ink in a setlist and performance 
   fireEvent.click((await screen.findAllByRole('button', { name: /^演出模式$/ }, { timeout: 6000 }))[0]);
   await waitFor(() => expect(document.querySelector('[data-performance-overlay] [data-personal-note-stroke]')).not.toBeNull());
   expect(screen.getAllByRole('button', { name: '個人筆記' })).toHaveLength(1);
+  const stage = document.querySelector('[data-performance-overlay]')!;
+  expect(stage).toContainElement(screen.getByRole('button', { name: '個人筆記' }));
   fireEvent.click(screen.getByRole('button', { name: '個人筆記' }));
   expect(document.querySelector('[data-performance-overlay]')).toHaveAttribute('data-handwriting', 'true');
   expect(screen.getByRole('button', { name: 'Next page' })).not.toHaveClass('w-1/2');
@@ -88,6 +90,7 @@ it('uses the source song identity for personal ink in a setlist and performance 
   expect(neighbor.querySelector('[data-personal-notes-layer]')).toBe(preparedLayer);
   expect(neighbor.querySelector('[data-personal-note-stroke]')).toBeNull();
   expect(screen.getAllByRole('toolbar', { name: '個人手寫筆記' })).toHaveLength(1);
+  expect(stage).toContainElement(screen.getByRole('toolbar', { name: '個人手寫筆記' }));
   fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
   await waitFor(() => expect(document.querySelector('[data-performance-entry="service-entry"]:not([aria-hidden="true"]) [data-personal-note-stroke]')).toBeInTheDocument());
   expect(previousEntry.querySelector('[data-personal-notes-layer]')).toBe(previousLayer);

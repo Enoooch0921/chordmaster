@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-07',
+        title: 'Faster first visits to prepared charts',
+        bullets: [
+          'Keep personal note tools inside the performance screen so switching songs avoids a workspace-wide style update.',
+          'Prepare the retained chart layers for display before the next tap.'
+        ]
+      },
+      {
+        version: '0.12.28',
+        date: '2026-11-07',
         title: 'Keep ahead of rapid song turns',
         bullets: [
           'Prepare upcoming charts progressively without restarting a half-second wait on every page turn.',
@@ -1094,6 +1103,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: '改善第一次翻到下一首歌的延遲',
+        bullets: [
+          '演出模式的個人筆記工具留在全螢幕內，切換歌曲時可避免整個工作區重新計算樣式。',
+          '預載時也預先繪製譜面，讓連續往後翻歌更快顯示。'
+        ]
+      },
+      {
+        version: '0.12.28',
         date: '2026-11-07',
         title: '改善連續快速換歌的預載進度',
         bullets: [
