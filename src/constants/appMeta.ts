@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-07',
+        title: 'Independent fullscreen song layouts',
+        bullets: [
+          'Keep each prepared chart at its own fitted width, columns and scale when changing between single pages and spreads.',
+          'Reuse page positions and personal ink without measuring every cached chart on a song turn.'
+        ]
+      },
+      {
+        version: '0.12.25',
+        date: '2026-11-07',
         title: "Prepared notes, light drummer paper and larger tablet lyrics",
         bullets: [
           "Keep neighboring charts and personal ink initialized during idle time, reusing their canvases when you change songs.",
@@ -1067,6 +1076,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: '全螢幕換歌保留各首譜面尺寸',
+        bullets: [
+          '單頁與雙頁歌曲各自預排，換歌不再連帶重排前後相鄰的譜面。',
+          '沿用頁面位置與個人筆跡，減少切換當下的量測與版面更新。'
+        ]
+      },
+      {
+        version: '0.12.25',
         date: '2026-11-07',
         title: "相鄰譜與筆記預載、平板閱讀與夜間譜紙修正",
         bullets: [

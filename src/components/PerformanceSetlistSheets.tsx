@@ -35,7 +35,8 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
   const sheets = useRef(new Map<string, HTMLDivElement>());
   const offsets = useRef(new Map<string, number[]>());
   const spread = useRef<HTMLDivElement>(null);
-  const [total, setTotal] = useState(1);
+  const [pageCounts, setPageCounts] = useState<Readonly<Record<string, number>>>({});
+  const total = pageCounts[currentId] ?? 1;
   const layout = getPerformanceLayout(viewport.width, viewport.height, total, isPhone);
   const index = entries.findIndex(entry => entry.item.id === currentId);
   const previous = entries[index - 1]?.item.id;
@@ -51,7 +52,8 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
     const start = getPerformanceSpreadStart(requested, positions.length, fitted.columns);
     page.current = start;
     const translator = sheets.current.get(current.current);
-    if (translator) translator.style.transform = `scale(${fitted.scale}) translateY(-${positions[start]}px)`;
+    const transform = `scale(${fitted.scale}) translateY(-${positions[start]}px)`;
+    if (translator && translator.style.transform !== transform) translator.style.transform = transform;
     if (spread.current) {
       spread.current.dataset.performancePage = String(start + 1);
       spread.current.dataset.performancePages = String(positions.length);
@@ -70,7 +72,6 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
     const targetPages = offsets.current.get(entry.item.id);
     const targetColumns = getPerformanceLayout(viewport.width, viewport.height, targetPages?.length ?? 1, isPhone).columns;
     page.current = direction > 0 ? 0 : targetPages ? getPerformanceSpreadStart(Infinity, targetPages.length, targetColumns) : Infinity;
-    setTotal(targetPages?.length ?? 1);
     setCurrentId(entry.item.id);
     onSongChange(entry.item.id);
   };
@@ -111,15 +112,17 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
   useLayoutEffect(() => {
     let frame = 0;
     const measure = () => {
+      const counts: Record<string, number> = {};
       for (const [id, sheet] of sheets.current) {
         const pages = [...sheet.querySelectorAll<HTMLElement>('[data-print-page]')];
         offsets.current.set(id, pages.length ? pages.map(node => node.offsetTop) : [0]);
+        counts[id] = pages.length || 1;
       }
       for (const id of offsets.current.keys()) {
         if (!sheets.current.has(id)) offsets.current.delete(id);
       }
-      const count = offsets.current.get(current.current)?.length ?? 1;
-      setTotal(count);
+      setPageCounts(old => Object.keys(old).length === Object.keys(counts).length
+        && Object.keys(counts).every(id => old[id] === counts[id]) ? old : counts);
       const activeIndex = entries.findIndex(entry => entry.item.id === current.current);
       for (const [id, positions] of offsets.current) {
         if (id === current.current) continue;
@@ -127,7 +130,8 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
         const fitted = getPerformanceLayout(viewport.width, viewport.height, positions.length, isPhone);
         const start = entryIndex < activeIndex ? getPerformanceSpreadStart(Infinity, positions.length, fitted.columns) : 0;
         const translator = sheets.current.get(id);
-        if (translator) translator.style.transform = `scale(${fitted.scale}) translateY(-${positions[start]}px)`;
+        const transform = `scale(${fitted.scale}) translateY(-${positions[start]}px)`;
+        if (translator && translator.style.transform !== transform) translator.style.transform = transform;
       }
       showPage(page.current);
     };
@@ -142,7 +146,7 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
       mutations.observe(sheet, { childList: true, subtree: true });
     }
     return () => { cancelAnimationFrame(frame); resize.disconnect(); mutations.disconnect(); };
-  }, [entries, mountedIds, viewport.width, viewport.height, isPhone, layout.columns, layout.scale]);
+  }, [entries, mountedIds, viewport.width, viewport.height, isPhone, pageCounts]);
 
   // Reapply the live page after unrelated parent updates without resetting it.
   useLayoutEffect(() => { showPage(page.current); });
@@ -151,22 +155,27 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
   const activeSong = entries[index].song;
   return <>
     <div ref={spread} data-performance-spread={layout.columns} data-performance-page={page.current + 1} data-performance-pages={total}
-      style={{ width: layout.width, height: layout.height, flexShrink: 0, overflow: 'hidden', position: 'relative' }}>
+      style={{ width: viewport.width, height: viewport.height, flexShrink: 0, overflow: 'hidden', position: 'relative' }}>
       {entries.map((entry, entryIndex) => {
         const active = entry.item.id === currentId;
         if (!active && !prepared.includes(entry.item.id)) return null;
         const { item, song } = entry;
+        // Fit each prepared song independently. A single/double-page song turn
+        // must not change inherited grid styles or resize any cached score.
+        const fitted = getPerformanceLayout(viewport.width, viewport.height, pageCounts[item.id] ?? 1, isPhone);
         return <div key={item.id} data-performance-entry={item.id} aria-hidden={active ? undefined : true}
-          style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-          <div ref={node => {
-            if (node) sheets.current.set(item.id, node);
-            else sheets.current.delete(item.id);
-          }} style={{ transformOrigin: 'top left', width: layout.columns * PERFORMANCE_PAGE_WIDTH + (layout.columns - 1) * PERFORMANCE_PAGE_GAP, position: 'relative' }}>
-            <div data-print-preview className="performance-sheet" style={{ colorScheme: 'light', '--performance-columns': layout.columns } as React.CSSProperties}>
-              <RecoveryBoundary label="譜面預覽"><PersonalChordSheet song={song} currentKey={song.currentKey} language={language}
-                lastEditedAt={lastEditedAt(item.songId, item.setlistId, item.id)} setlistSongNumber={entryIndex + 1} previewIdentity={item.id}
-                noteOwner={noteOwner} noteSongId={item.songId} notesPerformance notesActive={active}
-                notesOpen={notesOpen} onNotesOpenChange={onNotesOpenChange} /></RecoveryBoundary>
+          style={{ position: 'absolute', inset: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div data-performance-clip style={{ width: fitted.width, height: fitted.height, overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+            <div ref={node => {
+              if (node) sheets.current.set(item.id, node);
+              else sheets.current.delete(item.id);
+            }} style={{ transformOrigin: 'top left', width: fitted.columns * PERFORMANCE_PAGE_WIDTH + (fitted.columns - 1) * PERFORMANCE_PAGE_GAP, position: 'relative' }}>
+              <div data-print-preview className="performance-sheet" style={{ colorScheme: 'light', '--performance-columns': fitted.columns } as React.CSSProperties}>
+                <RecoveryBoundary label="譜面預覽"><PersonalChordSheet song={song} currentKey={song.currentKey} language={language}
+                  lastEditedAt={lastEditedAt(item.songId, item.setlistId, item.id)} setlistSongNumber={entryIndex + 1} previewIdentity={item.id}
+                  noteOwner={noteOwner} noteSongId={item.songId} notesPerformance notesActive={active}
+                  notesOpen={notesOpen} onNotesOpenChange={onNotesOpenChange} /></RecoveryBoundary>
+              </div>
             </div>
           </div>
         </div>;
