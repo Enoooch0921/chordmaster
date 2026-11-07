@@ -7,9 +7,24 @@ import { DEFAULT_LYRICS_READING_SETTINGS, useLyricsReadingPreferences } from './
 const storageKey = (identity = 'local') => `chordmaster.lyrics-reading.v1:${encodeURIComponent(identity)}`;
 const preference: LyricsBookSettings = { font: 'kaiti', fontSize: 32, lineHeight: 2, language: 'mixed' };
 beforeEach(() => localStorage.clear());
-afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 
 describe('lyrics reading device preferences', () => {
+  it('starts phones at 22px, keeps that size through rotation and honors saved sizes', () => {
+    const media = vi.fn(() => ({ matches: true }));
+    vi.stubGlobal('matchMedia', media);
+    const { result, rerender, unmount } = renderHook(() => useLyricsReadingPreferences());
+    expect(result.current[0].fontSize).toBe(22);
+    expect(localStorage.getItem(storageKey())).toBeNull();
+    media.mockReturnValue({ matches: false });
+    rerender();
+    expect(result.current[0].fontSize).toBe(22);
+    act(() => result.current[1](previous => ({ ...previous, fontSize: 28 })));
+    unmount();
+    media.mockReturnValue({ matches: true });
+    expect(renderHook(() => useLyricsReadingPreferences()).result.current[0].fontSize).toBe(28);
+  });
+
   it('does not write defaults on mount and restores only reader fields after remount', () => {
     const write = vi.spyOn(Storage.prototype, 'setItem');
     const { result, unmount } = renderHook(() => useLyricsReadingPreferences('user/一:二'));

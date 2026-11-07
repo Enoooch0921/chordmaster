@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { paginateReading, paginateReadingColumns, readingColumnCandidates, readingPhrases, readingPhraseTail, prepareReadingSections } from './lyricsReading';
 
 describe('whole-song reading pagination', () => {
+  it('can fill spare space to save a phone page while keeping rows and explicit breaks intact', () => {
+    const sections = [4, 4, 4].map((count, index) => ({ index, header: 26, lines: Array.from({ length: count }, () => 30) }));
+    expect(paginateReadingColumns([sections], 260)).toHaveLength(3);
+    const packed = paginateReadingColumns([sections], 260, 16, false);
+    expect(packed).toHaveLength(2);
+    expect(packed.flat(2).flatMap(part => Array.from({ length: part.end - part.start }, (_, row) => `${part.section}:${part.start + row}`)))
+      .toEqual(sections.flatMap(section => section.lines.map((_, row) => `${section.index}:${row}`)));
+    const forced = paginateReadingColumns([[...sections.slice(0, 2), { ...sections[2], pageBreakBefore: true }]], 260, 16, false);
+    expect(forced).toHaveLength(3);
+    expect(forced[2][0][0]).toMatchObject({ section: 2, start: 0 });
+  });
+
   for (const height of [140, 360, 620, 900]) for (const columns of [1, 2, 3]) for (const scale of [1, 1.5, 2]) {
     it(`retains every source row once, in order at ${height}px / ${columns} columns / ${scale} size`, () => {
       const sections = [4, 12, 3, 28, 1].map((count, index) => ({ index, header: 26, lines: Array.from({ length: count }, () => 30 * scale) }));

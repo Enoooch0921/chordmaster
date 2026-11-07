@@ -41,6 +41,7 @@
   font-weight: 600;
 }
 .slw-toolbar button, .slw-navigation button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; flex-shrink: 0; touch-action: manipulation; }
+.slw-toolbar select, .slw-navigation select { height: 44px; }
 .slw-toolbar button:not(:disabled):hover, .slw-navigation button:not(:disabled):hover { background: var(--color-surface-sunken); }
 .slw-toolbar button:disabled, .slw-navigation button:disabled { opacity: .4; cursor: default; }
 .slw-toolbar button:focus-visible, .slw-toolbar select:focus-visible, .slw-navigation button:focus-visible, .slw-navigation select:focus-visible, .slw-scroll:focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: -2px; }
@@ -104,10 +105,17 @@
 @media (prefers-reduced-motion: reduce) { .setlist-lyrics-workspace * { scroll-behavior: auto; } }
 
 /* Screen reading owns the available height; A4 keeps its separate paper canvas. */
-.slw-scroll-reading { padding: 0; overflow: hidden; background: var(--color-surface); }
+.slw-scroll-reading { padding: 12px 0 0; overflow: hidden; background: var(--color-surface); }
 [data-lyrics-workspace-mode="reading"] .slw-toolbar-top { padding-left: 0; justify-content: flex-end; }
 [data-lyrics-workspace-mode="reading"] .slw-modes { margin-right: auto; }
 .slw-focused .slw-scroll-reading { padding-bottom: env(safe-area-inset-bottom); }
 .slw-focused .slw-toolbar { display: block; }
 
 .slw-size-label { margin-right: 6px; font-size: 13px; color: var(--color-text-muted); }
+.slw-reading-title { flex: 1; min-width: 0; }
+.slw-reading-title h1 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.slw-toolbar .slw-reading-title select { width: 100%; min-width: 0; padding-inline: 4px; font-size: 19px; text-overflow: ellipsis; }
+@container lyrics-workspace (max-width: 699px) {
+  .slw-toolbar .slw-print-mode, .slw-toolbar .slw-edit, .slw-toolbar .slw-focus { width: 44px; padding: 8px; }
+  .slw-print-mode span, .slw-edit span, .slw-focus span { display: none; }
+}

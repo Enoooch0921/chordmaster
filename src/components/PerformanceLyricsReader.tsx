@@ -22,7 +22,7 @@ const PerformanceLyricsReader = React.forwardRef<LyricsReaderHandle, {
   };
   if (!current) return null;
   return <AdaptiveLyricsReader ref={ref} key={current.id} identity={current.id} song={current.song} number={entries.length > 1 ? index + 1 : undefined}
-    language={language} settings={settings} keyboard={false} initialAnchor={anchors.current.get(current.id)}
+    language={language} settings={settings} keyboard={false} gestures={false} initialAnchor={anchors.current.get(current.id)}
     onAnchorChange={anchor => anchors.current.set(current.id, anchor)}
     onNextSong={index < entries.length - 1 ? () => select(index + 1) : undefined}
     onPreviousSong={index > 0 ? () => select(index - 1, true) : undefined}/>;

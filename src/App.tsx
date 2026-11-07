@@ -13400,6 +13400,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   </button>
                 ) : null}
 
+                {isLyricsWorkspace && isLyricsReading && isLyricsContinuous && <button type="button" onClick={handleToggleLyricsMode}
+                  className={`${getMobileTopbarActionClassName('accent')} shrink-0`} title={copy.lyricsMode} aria-label={copy.lyricsMode}>
+                  <FileText size={16} />
+                </button>}
+
                 <button
                   type="button"
                   onClick={() => {
@@ -13418,7 +13423,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 {notificationBell}
               </div>
 
-              {isSheetView ? (
+              {isSheetView && !(isLyricsWorkspace && isLyricsReading && isLyricsContinuous) ? (
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                   <button type="button" onClick={handleToggleHandwriting} disabled={!authenticatedUser}
                     title={handwritingLabel} aria-label={handwritingLabel} aria-pressed={isHandwriting}

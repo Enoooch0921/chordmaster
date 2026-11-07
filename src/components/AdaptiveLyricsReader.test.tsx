@@ -22,6 +22,59 @@ it('preserves a source-line anchor through font changes and a tablet rotation', 
   expect(container.querySelector(`.alr-columns [data-source-line="${id}"]`)).not.toBeNull();
   expect(Number(container.querySelector('.adaptive-lyrics-reader')!.getAttribute('data-font-size'))).toBe(28);
 });
+
+it('turns by touch swipe and half-screen taps without turning on scroll, pinch, selection or controls', () => {
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+  const { container } = render(<AdaptiveLyricsReader song={song} identity="touch" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
+  const reader = container.querySelector('.adaptive-lyrics-reader')!;
+  const canvas = container.querySelector<HTMLElement>('.alr-canvas')!;
+  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({ left: 16, width: 358 } as DOMRect);
+  const point = (x: number, y = 300, identifier = 1) => ({ clientX: x, clientY: y, identifier });
+  const swipe = (x: number, y = 300) => {
+    fireEvent.touchStart(canvas, { touches: [point(300)] });
+    fireEvent.touchMove(canvas, { touches: [point(x, y)] });
+    fireEvent.touchEnd(canvas, { touches: [], changedTouches: [point(x, y)] });
+  };
+  swipe(80);
+  expect(reader).toHaveAttribute('data-reading-page', '2');
+  // The browser's compatibility click must not turn a second page.
+  fireEvent.click(canvas, { clientX: 300, detail: 1 });
+  expect(reader).toHaveAttribute('data-reading-page', '2');
+  fireEvent.pointerDown(canvas);
+  fireEvent.click(canvas, { clientX: 50, detail: 1 });
+  expect(reader).toHaveAttribute('data-reading-page', '1');
+  swipe(290, 420);
+  fireEvent.click(canvas, { clientX: 300, detail: 1 });
+  expect(reader).toHaveAttribute('data-reading-page', '1');
+  fireEvent.touchStart(canvas, { touches: [point(300), point(200, 300, 2)] });
+  fireEvent.touchEnd(canvas, { touches: [], changedTouches: [point(80)] });
+  fireEvent.click(canvas, { clientX: 300, detail: 1 });
+  expect(reader).toHaveAttribute('data-reading-page', '1');
+  const selection = window.getSelection()!;
+  const range = document.createRange();
+  range.selectNodeContents(canvas.querySelector('.alr-line')!);
+  selection.addRange(range);
+  swipe(80);
+  fireEvent.click(canvas, { clientX: 300, detail: 1 });
+  expect(reader).toHaveAttribute('data-reading-page', '1');
+  selection.removeAllRanges();
+  fireEvent.click(screen.getByRole('combobox', { name: '跳到歌詞段落' }), { detail: 1 });
+  expect(reader).toHaveAttribute('data-reading-page', '1');
+  fireEvent.pointerDown(canvas);
+  fireEvent.click(canvas, { clientX: 300, detail: 1 });
+  expect(reader).toHaveAttribute('data-reading-page', '2');
+});
+
+it('uses leftover space only when splitting a section reduces the number of pages', () => {
+  const lyrics = { ...song, lyricsDoc: { chinese: '', blocks: ['Verse 1', 'Chorus', 'Bridge'].map((marker, index) => ({
+    id: `part-${index}`, marker, chinese: Array.from({ length: 5 }, (_, row) => `歌詞 ${row}`).join('\n'), english: '',
+  })) } };
+  const { container } = render(<AdaptiveLyricsReader song={lyrics} identity="packed" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
+  expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-page-count', '2');
+  expect(container.querySelectorAll('.alr-columns .alr-block')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+  expect(container.querySelector('.alr-columns')).toHaveTextContent('Chorus(cont.)');
+});
 it('safely replaces a long song with a shorter song, even before measurement', () => {
   const { container, rerender } = render(<AdaptiveLyricsReader song={song} identity="long" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
   fireEvent.click(screen.getByRole('button', { name: '下一頁' }));

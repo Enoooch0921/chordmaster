@@ -6,6 +6,7 @@ import { LYRICS_BOOK_FONT } from '../utils/lyricsBook';
 import { getLyricsBlocks } from '../utils/lyricsDocument';
 import { paginateReadingColumns, readingColumnCandidates, readingPhrases, readingPhraseTail, prepareReadingSections, type ReadingAnchor, type ReadingPage, type ReadingSection, type MeasuredReadingSection } from '../utils/lyricsReading';
 import SongTitle from './SongTitle';
+import { useLyricsPageGestures } from '../hooks/useLyricsPageGestures';
 import './AdaptiveLyricsReader.css';
 
 export interface LyricsReaderHandle { next: () => boolean; previous: () => boolean }
@@ -17,8 +18,10 @@ interface Props {
   onNextSong?: () => void; onPreviousSong?: () => void;
   onFontSize?: (size: number) => void;
   keyboard?: boolean;
+  hideHeading?: boolean;
+  gestures?: boolean;
 }
-interface Layout { pages: ReadingPage[]; columns: number; widths: number[]; fontSize: number; sections: ReadingSection[]; wraps: number; imbalance: number }
+interface Layout { pages: ReadingPage[]; columns: number; widths: number[]; fontSize: number; sections: ReadingSection[]; splits: number; wraps: number; imbalance: number }
 
 function ReadingSentence({ text }: { text: string }) {
   return readingPhrases(text).map((part, index) => {
@@ -35,10 +38,10 @@ function Rows({ section, start = 0, end = section.rows.length }: { section: Read
   </div>);
 }
 
-const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(function AdaptiveLyricsReader({ song, identity, language, settings, number, songPicker, initialAnchor, onAnchorChange, onNextSong, onPreviousSong, onFontSize, keyboard = true }, ref) {
+const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(function AdaptiveLyricsReader({ song, identity, language, settings, number, songPicker, initialAnchor, onAnchorChange, onNextSong, onPreviousSong, onFontSize, keyboard = true, hideHeading = false, gestures = true }, ref) {
   const zh = language === 'zh';
   const sections = React.useMemo(() => prepareReadingSections(getLyricsBlocks(song.lyricsDoc), settings.language), [song.lyricsDoc, settings.language]);
-  const [layout, setLayout] = React.useState<Layout>({ pages: [], columns: 1, widths: [1], fontSize: settings.fontSize, sections, wraps: 0, imbalance: 0 });
+  const [layout, setLayout] = React.useState<Layout>({ pages: [], columns: 1, widths: [1], fontSize: settings.fontSize, sections, splits: 0, wraps: 0, imbalance: 0 });
   const [page, setPage] = React.useState(0);
   const canvas = React.useRef<HTMLDivElement>(null), measure = React.useRef<HTMLDivElement>(null);
   const position = React.useRef<{ identity: string; anchor?: ReadingAnchor | 'last' }>({ identity, anchor: initialAnchor });
@@ -91,17 +94,26 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
       let best: Layout | undefined;
       // Font size is a setlist preference, never a fitting variable. Compare
       // column widths using their real sentence/pair heights, then minimize
-      // pages first and avoid unnecessary sentence wraps within that page count.
+      // pages first, keeping sections together and avoiding unnecessary wraps
+      // whenever those choices do not add a page.
       for (const widths of readingColumnCandidates(width, maxColumns)) {
         const metrics = widths.map(measureColumn);
-        const pages = paginateReadingColumns(metrics.map(value => value.sections), height);
+        const measurements = metrics.map(value => value.sections);
+        let pages = paginateReadingColumns(measurements, height);
+        // Relax section grouping only when it actually saves a page. Source
+        // rows/pairs and authored breaks are indivisible in either layout.
+        if (pages.length > 1) {
+          const packed = paginateReadingColumns(measurements, height, 16, false);
+          if (packed.length < pages.length) pages = packed;
+        }
         const wraps = pages.reduce((sum, p) => sum + p.reduce((total, col, c) => total + col.reduce((count, part) =>
           count + metrics[c].wraps[part.section].slice(part.start, part.end).reduce((a, b) => a + b, 0), 0), 0), 0);
+        const splits = pages.flat(2).filter(part => part.continued).length;
         const average = widths.reduce((a, b) => a + b, 0) / widths.length;
         const imbalance = widths.reduce((sum, value) => sum + Math.abs(value - average), 0);
         if (!best || pages.length < best.pages.length || (pages.length === best.pages.length && (
-          wraps < best.wraps || (wraps === best.wraps && imbalance < best.imbalance)
-        ))) best = { pages, columns: widths.length, widths, fontSize, sections, wraps, imbalance };
+          splits < best.splits || (splits === best.splits && (wraps < best.wraps || (wraps === best.wraps && imbalance < best.imbalance)))
+        ))) best = { pages, columns: widths.length, widths, fontSize, sections, splits, wraps, imbalance };
         if (pages.length === 1 && wraps === 0 && imbalance === 0) break;
       }
       if (!best) return;
@@ -134,6 +146,7 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
     if (onPreviousSong) { onPreviousSong(); return true; } return false;
   };
   React.useImperativeHandle(ref, () => ({ next, previous }));
+  useLyricsPageGestures({ canvas, enabled: gestures && sections.length > 0, scope: identity, onNext: next, onPrevious: previous });
   return <section className="adaptive-lyrics-reader" aria-label={zh ? '整首優先歌詞' : 'Whole-song lyrics'} data-reading-song={identity} data-font-size={layout.fontSize} data-column-count={layout.columns} data-column-widths={layout.widths.map(width => Math.round(width)).join(",")} data-page-count={layout.pages.length} data-reading-page={active + 1}
     style={{ '--lyrics-reading-font': fontFamily, '--lyrics-reading-leading': settings.lineHeight } as React.CSSProperties}
     onKeyDown={event => {
@@ -141,9 +154,9 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
       if (event.key === 'ArrowRight' || event.key === 'PageDown') { event.preventDefault(); next(); }
       if (event.key === 'ArrowLeft' || event.key === 'PageUp') { event.preventDefault(); previous(); }
     }}>
-    <header className="alr-heading"><div>{songPicker ?? <>{number && <span className="alr-song-number">{String(number).padStart(2, '0')}</span>}<h1><SongTitle title={song.title}/></h1></>}</div>
-      <span className="alr-page-note">{sections.length > 0 && layout.pages.length === 1 ? <><Check size={13}/>{zh ? '整首一頁' : 'One page'}</> : `${sections.length} ${zh ? '個段落' : 'sections'}`}</span></header>
-    <div className="alr-canvas" ref={canvas} tabIndex={0} aria-label={zh ? '當頁歌詞' : 'Current lyrics page'}>
+    {!hideHeading && <header className="alr-heading"><div>{songPicker ?? <>{number && <span className="alr-song-number">{String(number).padStart(2, '0')}</span>}<h1><SongTitle title={song.title}/></h1></>}</div>
+      <span className="alr-page-note">{sections.length > 0 && layout.pages.length === 1 ? <><Check size={13}/>{zh ? '整首一頁' : 'One page'}</> : `${sections.length} ${zh ? '個段落' : 'sections'}`}</span></header>}
+    <div className="alr-canvas" ref={canvas} tabIndex={0} aria-label={zh ? '當頁歌詞' : 'Current lyrics page'} aria-description={zh ? '左右滑動，或輕點左半邊往前、右半邊往後翻頁' : 'Swipe, or tap the left half to go back and the right half to go forward'}>
       {!sections.length ? <div className="alr-empty">{zh ? '尚無此語言的歌詞，可在閱讀設定切換語言。' : 'No lyrics in this language. Choose another language in reading settings.'}</div> : <div className="alr-columns" style={{ gridTemplateColumns: layout.widths.map(width => `minmax(0, ${width}fr)`).join(" "), fontSize: layout.fontSize }}>
         {(layout.sections === sections ? layout.pages[active] ?? [] : []).map((column, c) => <div className="alr-column" key={`${active}-${c}`}>{column.map(segment => {
           const section = sections[segment.section];

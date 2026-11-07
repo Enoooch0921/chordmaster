@@ -50,13 +50,15 @@ const mountLyrics = async () => {
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
   await screen.findByDisplayValue('歌詞排版聚會');
   fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
-  await screen.findByRole('button', { name: '閱讀' });
+  await waitFor(() => expect(document.querySelector('.adaptive-lyrics-reader')).not.toBeNull());
 };
 
 it('opens locked reading, navigates songs, and retains both A4 layouts independently of reading size', async () => {
   const original = JSON.stringify(fixture);
   await mountLyrics();
-  expect(screen.getByRole('button', { name: '閱讀' })).toHaveAttribute('aria-pressed', 'true');
+  expect(document.querySelector('[data-lyrics-workspace-mode]')).toHaveAttribute('data-lyrics-workspace-mode', 'reading');
+  expect(screen.getByRole('combobox', { name: '目前歌曲' }).closest('.slw-toolbar')).not.toBeNull();
+  expect(document.querySelector('.alr-heading')).toBeNull();
   expect(document.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-song', 'entry-one');
   expect(document.querySelector('.alr-canvas button')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '下一首' }));
@@ -154,7 +156,7 @@ it('retains the single-song reading anchor across its original A4 print view', a
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
   await screen.findAllByRole('button', { name: '歌詞模式' });
   fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
-  await screen.findByRole('button', { name: '閱讀' });
+  await waitFor(() => expect(document.querySelector('.adaptive-lyrics-reader')).not.toBeNull());
   fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
   const firstLine = document.querySelector('.alr-columns [data-source-line]')!.getAttribute('data-source-line');
   fireEvent.click(screen.getByRole('button', { name: '列印排版' }));

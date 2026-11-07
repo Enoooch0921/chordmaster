@@ -13,6 +13,7 @@ type Options = {
   onPrevious: () => void;
   onInteract: () => void;
   onLearned: () => void;
+  ignoreTextSelection?: boolean;
 };
 
 /** Track intent during the swipe and turn once, on release. */
@@ -36,9 +37,12 @@ export function usePerformanceSwipe(options: Options) {
       touch = null;
     };
     reset.current = abort;
+    const selecting = () => latest.current.ignoreTextSelection && window.getSelection()?.isCollapsed === false;
     const start = (event: TouchEvent) => {
       if (event.touches.length !== 1) { guardClick(); abort(); return; }
       suppressClickUntil.current = 0;
+      touch = null;
+      if (selecting()) return;
       const target = event.target instanceof Element ? event.target : null;
       if (!target || target.closest('[data-personal-notes-layer], [data-personal-notes-tools]')
         || (target.closest('button, a, input, textarea, select, [role="button"]') && !target.closest('[data-performance-turn-area]'))) return;
@@ -48,6 +52,7 @@ export function usePerformanceSwipe(options: Options) {
     };
     const move = (event: TouchEvent) => {
       if (!touch) return;
+      if (selecting()) { guardClick(); abort(); return; }
       if (event.touches.length !== 1) { guardClick(); abort(); return; }
       const point = event.touches[0];
       if (point.identifier !== touch.id) { abort(); return; }
@@ -61,6 +66,7 @@ export function usePerformanceSwipe(options: Options) {
     };
     const end = (event: TouchEvent) => {
       if (!touch) return;
+      if (selecting()) { guardClick(); abort(); return; }
       if (event.touches.length > 0) { guardClick(); abort(); return; }
       const point = Array.from(event.changedTouches).find(point => point.identifier === touch!.id);
       if (!point) { abort(); return; }

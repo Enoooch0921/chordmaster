@@ -150,7 +150,7 @@ describe('SharedChartPage song imports', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     const reader = screen.getByRole('region', { name: '整首優先歌詞' });
     expect(reader).toHaveAttribute('data-reading-song', 'b');
-    expect(within(reader).getByRole('heading', { name: 'Updated Beta' })).toBeInTheDocument();
+    expect(within(reader.closest('.setlist-lyrics-workspace')!).getByRole('heading', { name: 'Updated Beta' })).toBeInTheDocument();
     expect(within(reader).getByLabelText('當頁歌詞')).toHaveTextContent('Lyrics');
     expect(screen.queryByTestId('shared-chart')).not.toBeInTheDocument();
   });

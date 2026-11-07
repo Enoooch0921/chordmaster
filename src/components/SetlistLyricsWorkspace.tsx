@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Pencil, Check, Download, Maximize2, Minimize2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Pencil, Check, Download, Maximize2, Minimize2, Printer } from 'lucide-react';
 import type { AppLanguage, Song } from '../types';
 import LyricsBook, { type LyricsBookEntry } from './LyricsBook';
 import LyricsSheet from './LyricsSheet';
@@ -10,6 +10,7 @@ import { useModalFocus } from '../hooks/useModalFocus';
 import { useModalScrollLock } from '../hooks/useModalScrollLock';
 import { getLyricsBlocks, mainLyricsLabel } from '../utils/lyricsDocument';
 import AdaptiveLyricsReader from './AdaptiveLyricsReader';
+import SongTitle from './SongTitle';
 import type { ReadingAnchor } from '../utils/lyricsReading';
 import MeasuredSlidingSelection from './ui/MeasuredSlidingSelection';
 import { AnimatedDisclosure } from './ui/InteractionMotion';
@@ -102,13 +103,16 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
       }
     }}>
       <div className="slw-toolbar-top">
+        {mode === 'reading' && current && <div className="slw-reading-title">{entries.length > 1
+          ? <select aria-label={zh ? '目前歌曲' : 'Current song'} value={current.id} onChange={event => selectSong(event.target.value)}>{entries.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.song.title}</option>)}</select>
+          : <h1><SongTitle title={current.song.title}/></h1>}</div>}
         {mode !== 'reading' && <strong className="slw-title" title={title}>{title || (zh ? '歌單歌詞' : 'Setlist lyrics')}</strong>}
         {isFocused ? <button type="button" className="slw-focus-exit" aria-label={zh ? '離開專注閱讀' : 'Exit focused reading'} onClick={() => changeFocus(false)}><Minimize2 size={20} aria-hidden="true"/><span>{zh ? '離開專注' : 'Exit focus'}</span></button> : mode === 'edit' ? <button type="button" className="slw-done" onClick={() => changeMode('reading')}><Check size={18} aria-hidden="true"/>{zh ? '完成編輯' : 'Done editing'}</button> : <>
-          <div className="slw-modes ui-segmented-control" role="group" aria-label={zh ? '歌詞用途' : 'Lyrics view'}>
+          {mode === 'reading' ? <button type="button" className="slw-print-mode" aria-label={zh ? '列印排版' : 'Print layout'} title={zh ? '列印排版' : 'Print layout'} onClick={() => changeMode('print')}><Printer size={18} aria-hidden="true"/><span>{zh ? '列印' : 'Print'}</span></button> : <div className="slw-modes ui-segmented-control" role="group" aria-label={zh ? '歌詞用途' : 'Lyrics view'}>
             <MeasuredSlidingSelection value={mode} layoutKey={language} />
-            <button type="button" aria-pressed={mode === 'reading'} onClick={() => changeMode('reading')}>{zh ? '閱讀' : 'Read'}</button>
+            <button type="button" aria-pressed={false} onClick={() => changeMode('reading')}>{zh ? '閱讀' : 'Read'}</button>
             <button type="button" aria-label={zh ? '列印排版' : 'Print layout'} aria-pressed={mode === 'print'} onClick={() => changeMode('print')}>{zh ? '列印' : 'Print'}</button>
-          </div>
+          </div>}
           <button ref={optionsTriggerRef} type="button" className="slw-icon" aria-label={zh ? (mode === 'print' ? '列印設定' : '閱讀設定') : (mode === 'print' ? 'Print settings' : 'Reading settings')} aria-expanded={optionsOpen} aria-controls={optionsId} onClick={() => { setOptionsOpen(value => !value); }}><Settings2 size={20} aria-hidden="true"/></button>
           {mode === 'reading' && onSongChange && <button type="button" className="slw-edit" aria-label={zh ? '編輯' : 'Edit'} disabled={!current} onClick={() => changeMode('edit')}><Pencil size={18} aria-hidden="true"/><span>{zh ? '編輯' : 'Edit'}</span></button>}
           {mode === 'reading' && <button ref={focusTriggerRef} type="button" className="slw-focus" disabled={!current} aria-label={zh ? '專注閱讀' : 'Focus reading'} onClick={() => changeFocus(true)}><Maximize2 size={18} aria-hidden="true"/><span>{zh ? '專注閱讀' : 'Focus'}</span></button>}
@@ -133,11 +137,10 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
       </div></AnimatedDisclosure>
     </header>
     <div ref={scrollRef} className={`slw-scroll slw-scroll-${mode}`} tabIndex={0} aria-label={zh ? (mode === 'print' ? 'A4 歌詞預覽' : '歌詞內容') : (mode === 'print' ? 'A4 lyrics preview' : 'Lyrics content')}>
-      {!entries.length ? <div className="slw-empty"><h2>{zh ? '歌單還沒有歌曲' : 'No songs in this setlist'}</h2><p>{zh ? '從歌單加入歌曲後，就能在這裡閱讀歌詞。' : 'Add songs to the setlist to read their lyrics here.'}</p></div> : mode === 'reading' ? <AdaptiveLyricsReader key={current.id} identity={current.id} song={current.song} language={language} settings={readingSettings}
+      {!entries.length ? <div className="slw-empty"><h2>{zh ? '歌單還沒有歌曲' : 'No songs in this setlist'}</h2><p>{zh ? '從歌單加入歌曲後，就能在這裡閱讀歌詞。' : 'Add songs to the setlist to read their lyrics here.'}</p></div> : mode === 'reading' ? <AdaptiveLyricsReader key={current.id} identity={current.id} song={current.song} language={language} settings={readingSettings} hideHeading
         initialAnchor={anchors.get(current.id)} onAnchorChange={anchor => anchors.set(current.id, anchor)}
         onNextSong={currentIndex < entries.length - 1 ? () => selectSong(entries[currentIndex + 1].id) : undefined}
-        onPreviousSong={currentIndex > 0 ? () => selectSong(entries[currentIndex - 1].id, true) : undefined}
-        songPicker={entries.length > 1 ? <select aria-label={zh ? '目前歌曲' : 'Current song'} value={current.id} onChange={event => selectSong(event.target.value)}>{entries.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.song.title}</option>)}</select> : undefined}/>
+        onPreviousSong={currentIndex > 0 ? () => selectSong(entries[currentIndex - 1].id, true) : undefined}/>
          : mode === 'print' ? <div className="slw-paper-area" ref={paperAreaRef}><div className="slw-paper-size" style={{ width: PAPER_WIDTH * paperSize.scale, height: paperSize.height * paperSize.scale }}><div ref={paperRef} className="slw-paper" data-print-preview style={{ width: PAPER_WIDTH, transform: `scale(${paperSize.scale})`, colorScheme: 'light' }}><LyricsBook title={title} entries={entries} language={language} settings={printSettings} hideControls /></div></div></div> : current && <div className="slw-editor" data-print-preview style={{ colorScheme: 'light' }}><LyricsSheet key={current.id} song={current.song} setlistSongNumber={currentIndex + 1} language={language} reading hideViewToggle onChange={onSongChange ? song => onSongChange(current.id, song.lyricsDoc) : undefined}/></div>}
     </div>
     {mode === 'edit' && <div className="slw-navigation" role="group" aria-label={zh ? '切換歌曲' : 'Song navigation'}>

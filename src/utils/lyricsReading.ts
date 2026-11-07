@@ -75,7 +75,7 @@ export function readingColumnCandidates(width: number, maxColumns: number, gap =
 }
 
 /** Keep source rows/pairs intact while using the actual metrics of each column. */
-export function paginateReadingColumns(measurements: MeasuredReadingSection[][], height: number, gap = 16): ReadingPage[] {
+export function paginateReadingColumns(measurements: MeasuredReadingSection[][], height: number, gap = 16, keepSectionsTogether = true): ReadingPage[] {
   if (!measurements.length) return [[[]]];
   height = Math.max(1, height);
   const columns = measurements.length, pages: ReadingPage[] = [[[]]];
@@ -97,7 +97,7 @@ export function paginateReadingColumns(measurements: MeasuredReadingSection[][],
     while (start < measurements[0][index].lines.length) {
       let block = measurements[column][index];
       const full = block.header + block.lines.reduce((sum, value) => sum + value, 0);
-      if (current().length && ((start === 0 && full <= height && full > room()) || room() < block.header + block.lines[start])) {
+      if (current().length && ((keepSectionsTogether && start === 0 && full <= height && full > room()) || room() < block.header + block.lines[start])) {
         nextColumn(); block = measurements[column][index];
       }
       let end = start, occupied = block.header;
