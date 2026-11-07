@@ -119,3 +119,17 @@ it('carries the prior readability floor into legacy 18px preferences before fixe
   const { result } = renderHook(() => useLyricsReadingPreferences());
   expect(result.current[0]).toEqual({ ...preference, fontSize: 20 });
 });
+
+it('starts touch tablets at 28px while retaining explicit sizes and rotation continuity', () => {
+  const media = vi.fn((query: string) => ({ matches: query === '(any-pointer: coarse)' }));
+  vi.stubGlobal('matchMedia', media);
+  const { result, rerender, unmount } = renderHook(() => useLyricsReadingPreferences());
+  expect(result.current[0].fontSize).toBe(28);
+  media.mockReturnValue({ matches: false });
+  rerender();
+  expect(result.current[0].fontSize).toBe(28);
+  unmount();
+  localStorage.setItem(storageKey(), JSON.stringify({ ...DEFAULT_LYRICS_READING_SETTINGS, fontSize: 24 }));
+  media.mockImplementation(query => ({ matches: query === '(any-pointer: coarse)' }));
+  expect(renderHook(() => useLyricsReadingPreferences()).result.current[0].fontSize).toBe(24);
+});

@@ -77,7 +77,7 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
       const fullHeight = height + (navigation && navigationStyle ? Math.max(0, navigation.offsetHeight
         + (parseFloat(navigationStyle.marginTop) || 0) - (parseFloat(navigationStyle.paddingBottom) || 0)) : 0);
       const bilingual = settings.language === 'bilingual';
-      const maxColumns = bilingual ? (width >= 1100 ? 2 : 1) : width >= 1100 ? 3 : width >= 640 ? 2 : 1;
+      const maxColumns = bilingual ? (width >= 1100 ? 2 : 1) : width >= Math.max(960, settings.fontSize * 36) ? 3 : width >= 640 ? 2 : 1;
       const fontSize = settings.fontSize;
       ruler.style.fontSize = `${fontSize}px`;
       const blocks = Array.from(ruler.querySelectorAll<HTMLElement>('.alr-block')).map(node => ({
@@ -126,10 +126,13 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
         const splits = pages.flat(2).filter(part => part.continued).length;
         const average = widths.reduce((a, b) => a + b, 0) / widths.length;
         const imbalance = widths.reduce((sum, value) => sum + Math.abs(value - average), 0);
-        if (!best || pages.length < best.pages.length || (pages.length === best.pages.length && (
-          splits < best.splits || (splits === best.splits && (wraps < best.wraps || (wraps === best.wraps && imbalance < best.imbalance)))
-        ))) best = { pages, columns: widths.length, widths, fontSize, sections, splits, wraps, imbalance };
-        if (pages.length === 1 && wraps === 0 && imbalance === 0) break;
+        const rank = [pages.length, splits, wraps, widths.length, imbalance];
+        const bestRank = best ? [best.pages.length, best.splits, best.wraps, best.columns, best.imbalance] : [];
+        const difference = rank.findIndex((value, index) => value !== bestRank[index]);
+        if (!best || (difference >= 0 && rank[difference] < bestRank[difference])) {
+          best = { pages, columns: widths.length, widths, fontSize, sections, splits, wraps, imbalance };
+        }
+        if (pages.length === 1 && wraps === 0 && widths.length === 1) break;
       }
       if (!best) return;
       const anchor = position.current.identity === identity ? position.current.anchor : initialAnchor;

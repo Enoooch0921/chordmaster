@@ -18,9 +18,10 @@ export default function PersonalChordSheet(props: Props) {
     <div ref={root} className="personal-notes-sheet" data-personal-notes-owner={noteOwner}>
       <MemoChordSheet {...sheetProps} />
     </div>
-    {(!notesPerformance || notesActive !== false) && <PersonalNotes key={JSON.stringify([noteOwner, noteSongId])}
+    {/* Prepared stage neighbors keep their ink and measured anchors mounted. */}
+    <PersonalNotes key={JSON.stringify([noteOwner, noteSongId])}
       root={root} noteOwner={noteOwner} noteSongId={noteSongId} language={sheetProps.language}
-      notesActive={notesActive} notesPerformance={notesPerformance} notesOpen={notesOpen} onNotesOpenChange={onNotesOpenChange} />}
+      notesActive={notesActive} notesPerformance={notesPerformance} notesOpen={notesOpen} onNotesOpenChange={onNotesOpenChange} />
   </>;
 }
 function PersonalNotes({ root, noteOwner, noteSongId, notesActive = true, notesPerformance = false, notesOpen, onNotesOpenChange, language }:

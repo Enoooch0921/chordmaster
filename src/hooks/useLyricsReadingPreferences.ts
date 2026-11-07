@@ -29,10 +29,11 @@ function readSettings(key: string): LyricsBookSettings {
       if (settings) return settings;
     }
   } catch { /* Private browsing and malformed values use the same safe defaults. */ }
-  // Choose a modest phone default once; an explicit preference stays exact,
+  // Choose phone and touch-tablet defaults once; an explicit preference stays exact,
   // including through rotation, focus mode and subsequent songs.
   const phone = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 639px)').matches;
-  return { ...DEFAULT_LYRICS_READING_SETTINGS, fontSize: phone ? 22 : DEFAULT_LYRICS_READING_SETTINGS.fontSize };
+  const tablet = typeof window !== 'undefined' && window.matchMedia?.('(any-pointer: coarse)').matches;
+  return { ...DEFAULT_LYRICS_READING_SETTINGS, fontSize: phone ? 22 : tablet ? 28 : DEFAULT_LYRICS_READING_SETTINGS.fontSize };
 }
 
 /** Device-local reader settings, scoped to the active account or an explicit local identity. */

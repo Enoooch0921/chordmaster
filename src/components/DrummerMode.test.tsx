@@ -853,3 +853,13 @@ it('keeps version and bilingual labels out of setlist rows while preserving the 
   expect(row).not.toHaveTextContent('Writer');
   expect(screen.getByTestId('chart')).toHaveTextContent(title);
 });
+
+it('keeps the drummer score inside the light paper scope in night mode', () => {
+  document.documentElement.classList.add('dark');
+  try {
+    render(<DrummerMode {...session} language="zh" onClose={() => {}}/>);
+    const paper = screen.getByTestId('chart').closest('[data-print-preview]');
+    expect(paper).not.toBeNull();
+    expect(paper).toHaveStyle({ colorScheme: 'light' });
+  } finally { document.documentElement.classList.remove('dark'); }
+});

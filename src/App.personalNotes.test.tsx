@@ -71,16 +71,26 @@ it('uses the source song identity for personal ink in a setlist and performance 
     expect(node).toBeInTheDocument();
     return node!;
   });
-  expect(neighbor.querySelector('[data-personal-notes-layer]')).toBeNull();
+  const preparedLayer = await waitFor(() => {
+    const layer = neighbor.querySelector('[data-personal-notes-layer]');
+    expect(layer).toBeInTheDocument();
+    return layer!;
+  });
+  const previousEntry = document.querySelector('[data-performance-entry="service-entry"]')!;
+  const previousLayer = previousEntry.querySelector('[data-personal-notes-layer]');
+  const previousInk = previousEntry.querySelector('[data-personal-note-stroke]');
+  expect(neighbor.querySelector('[data-personal-notes-drawing]')).toBeNull();
   const spread = document.querySelector<HTMLElement>('[data-performance-spread]')!;
   for (let i = 0; i < Number(spread.dataset.performancePages); i += Number(spread.dataset.performanceSpread)) {
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
   }
   expect(neighbor).not.toHaveAttribute('aria-hidden', 'true');
-  await waitFor(() => expect(neighbor.querySelector('[data-personal-notes-layer]')).toBeInTheDocument());
+  expect(neighbor.querySelector('[data-personal-notes-layer]')).toBe(preparedLayer);
   expect(neighbor.querySelector('[data-personal-note-stroke]')).toBeNull();
   expect(screen.getAllByRole('toolbar', { name: '個人手寫筆記' })).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
   await waitFor(() => expect(document.querySelector('[data-performance-entry="service-entry"]:not([aria-hidden="true"]) [data-personal-note-stroke]')).toBeInTheDocument());
+  expect(previousEntry.querySelector('[data-personal-notes-layer]')).toBe(previousLayer);
+  expect(previousEntry.querySelector('[data-personal-note-stroke]')).toBe(previousInk);
   expect(state.saveSong).not.toHaveBeenCalled(); expect(state.saveSetlist).not.toHaveBeenCalled();
 }, 15000);

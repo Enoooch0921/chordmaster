@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createLiveNotePath, hitsNote, noteId, notePath, projectNotePoints, type NoteAnchor, type NoteFrame, type NoteStroke, type NoteTool } from '../lib/personalNotes';
 import { recognizeNoteShape, type NoteShapeFeedback } from '../lib/noteShapes';
 import { stationaryNoteEndpoint, type NoteHoldSample } from '../lib/noteHold';
@@ -15,7 +15,7 @@ type Frame = NoteFrame & { anchor: NoteAnchor };
 const anchorKey = (anchor: NoteAnchor) => JSON.stringify(anchor.kind === 'bar'
   ? ['bar', anchor.sectionId, anchor.barId]
   : ['page', anchor.page]);
-export default function PersonalNotesPage(props: Props) {
+function PersonalNotesPage(props: Props) {
   const { page, pageIndex, strokes, drawing, visible, performance, tool, color, width, onEdit } = props;
   const latest = useRef(props); latest.current = props;
   const [frames, setFrames] = useState<Frame[]>([]);
@@ -235,3 +235,5 @@ export default function PersonalNotesPage(props: Props) {
     <path ref={livePen} data-personal-note-live="pen" />
   </svg></>;
 }
+
+export default memo(PersonalNotesPage);

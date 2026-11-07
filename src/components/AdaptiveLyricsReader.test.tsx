@@ -101,7 +101,7 @@ it('highlights every section on the current page while preserving one-press jump
   expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '1');
   rerender(<AdaptiveLyricsReader {...props} settings={{ ...props.settings, fontSize: 28 }}/>);
   act(() => geometry.resize(1000, 600));
-  await waitFor(() => expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-column-count', '2'));
+  await waitFor(() => expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-column-count', '1'));
   expectGroup(['Verse 1', 'Verse 2', 'Chorus']);
   expect(anchors).toHaveBeenLastCalledWith({ blockId: 'v2', line: 0 });
   fireEvent.click(screen.getByRole('button', { name: '跳到 Chorus' }));

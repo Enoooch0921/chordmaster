@@ -23,6 +23,11 @@
   [data-sheet-drag-handle] { touch-action: none; }
 }
 
+/* Tablet reading keeps the main controls in a compact, stationary row. */
+@media screen and (min-width: 640px) and (max-width: 1366px) {
+  [data-topbar][data-lyrics-reading] { padding-block: 8px; }
+}
+
 /* Keep the covered workspace mounted without laying out its scores on stage. */
 [data-performing] > :is([data-main-panel], [data-sidebar], [data-sidebar-backdrop]) {
   content-visibility: hidden;
@@ -94,8 +99,8 @@
 /* Keep read-only stage charts fitted in separate layers. Snap the prepared
    neighbor into the clip without changing opacity or recalculating inert on
    every score descendant. Keep pointer-events constant to avoid inherited style
-   changes. Drawing layers opt back into hit testing; inactive charts have no
-   enabled controls or notes. */
+   changes. Drawing layers opt back into hit testing. Prepared charts retain non-drawing
+   ink; their inactive controls stay disabled. */
 [data-performance-entry] { min-width: 0; contain: layout paint; pointer-events: none; transform: translate3d(0, 0, 0); will-change: transform; }
 [data-performance-entry][aria-hidden="true"] { transform: translate3d(100%, 0, 0); }
 @media print { [data-performance-entry][aria-hidden="true"] { display: none; } }

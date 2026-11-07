@@ -13334,7 +13334,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         ) : null}
 
         {/* Top Control Bar */}
-        <header data-topbar className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]/85 ${
+        <header data-topbar data-lyrics-reading={isLyricsWorkspace && isLyricsReading && isLyricsContinuous || undefined} className={`z-40 flex-shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-[color:var(--color-border)] dark:bg-[color:var(--color-surface)]/85 ${
           isPhoneViewport
             ? 'px-3 py-2.5'
             : usesDenseDesktopHeader

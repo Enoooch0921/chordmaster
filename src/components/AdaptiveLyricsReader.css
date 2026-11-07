@@ -42,7 +42,7 @@
 .adaptive-lyrics-reader ::selection { background: var(--color-indigo-200); color: var(--color-indigo-950); }
 .alr-empty { padding-top: 24px; line-height: 1.6; color: var(--color-text-muted); }
 .alr-measure { position: fixed; left: -20000px; top: 0; visibility: hidden; pointer-events: none; container: lyrics-column / inline-size; }
-@container lyrics-workspace (max-width: 699px) { .adaptive-lyrics-reader { padding-inline: 16px; } }
+@container lyrics-workspace (max-width: 1099px) { .adaptive-lyrics-reader { padding-inline: 16px; } }
 @container lyrics-reader (max-width: 600px) {
   .alr-heading { padding: 8px 0; margin-bottom: 12px; gap: 8px; }
   .alr-heading h1, .alr-heading select { font-size: 19px; }

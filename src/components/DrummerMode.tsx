@@ -160,7 +160,7 @@ const DrummerScore = React.memo(function DrummerScore({ song, songNumber, langua
         else if (Math.abs(dx) < 12 && Math.abs(dy) < 12) { const bounds = event.currentTarget.getBoundingClientRect(); turnPage(event.clientX < bounds.left+bounds.width/2 ? -1 : 1); } }}>
 
       <div style={{ width: 794 * scale, height: height * scale }} className="drummer-scaled-paper">
-        <div ref={paper} style={{ width: 794, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+        <div ref={paper} data-print-preview style={{ colorScheme: 'light', width: 794, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
           <RecoveryBoundary label="樂譜"><ChordSheet song={song} setlistSongNumber={songNumber} currentKey={song.currentKey} language={language}/></RecoveryBoundary>
         </div>
       </div>

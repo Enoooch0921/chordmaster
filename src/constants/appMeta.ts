@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-07',
+        title: "Prepared notes, light drummer paper and larger tablet lyrics",
+        bullets: [
+          "Keep neighboring charts and personal ink initialized during idle time, reusing their canvases when you change songs.",
+          "Restore light paper in dark-theme Drummer Mode, and improve tablet lyrics with a 28px touch default and adaptive columns."
+        ]
+      },
+      {
+        version: '0.12.21',
+        date: '2026-11-07',
         title: "Quicker song changes on stage",
         bullets: [
           "Reuse prepared chart layers and page positions when tapping, swiping or using a pedal to change songs.",
@@ -1058,6 +1067,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: "相鄰譜與筆記預載、平板閱讀與夜間譜紙修正",
+        bullets: [
+          "閒置時先準備相鄰歌曲的譜與個人筆記，換歌時沿用畫布與筆跡定位。",
+          "修正鼓手模式夜間譜紙背景，平板歌詞預設 28px 並改善分欄與可用空間。"
+        ]
+      },
+      {
+        version: '0.12.21',
         date: '2026-11-07',
         title: "減少全螢幕換歌延遲",
         bullets: [
