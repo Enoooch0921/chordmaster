@@ -1,6 +1,7 @@
-import { forwardRef, startTransition, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, startTransition, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppLanguage, SetlistSong, Song } from '../types';
 import { getPerformanceLayout, getPerformanceSpreadStart, PERFORMANCE_PAGE_GAP, PERFORMANCE_PAGE_WIDTH } from '../utils/performanceLayout';
+import { getPerformanceCacheIds } from '../utils/performanceCache';
 import PersonalChordSheet from './PersonalChordSheet';
 import RecoveryBoundary from './RecoveryBoundary';
 
@@ -35,15 +36,13 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
   const sheets = useRef(new Map<string, HTMLDivElement>());
   const offsets = useRef(new Map<string, number[]>());
   const deferPreparation = useRef(() => {});
+  const writingContacts = useRef(new Set<number>());
   const spread = useRef<HTMLDivElement>(null);
   const [pageCounts, setPageCounts] = useState<Readonly<Record<string, number>>>({});
   const total = pageCounts[currentId] ?? 1;
   const layout = getPerformanceLayout(viewport.width, viewport.height, total, isPhone);
   const index = entries.findIndex(entry => entry.item.id === currentId);
-  const previous = entries[index - 1]?.item.id;
-  const next = entries[index + 1]?.item.id;
-  const earlier = entries[index - 2]?.item.id;
-  const later = entries[index + 2]?.item.id;
+  const wanted = useMemo(() => getPerformanceCacheIds(entries, currentId), [entries, currentId]);
   const [prepared, setPrepared] = useState<readonly string[]>([]);
   const mountedIds = JSON.stringify(entries
     .filter(entry => entry.item.id === currentId || prepared.includes(entry.item.id))
@@ -72,10 +71,15 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
     const entryIndex = entries.findIndex(entry => entry.item.id === current.current);
     const entry = entries[entryIndex + direction];
     if (!entry) return;
+    const from = current.current;
     current.current = entry.item.id;
     const targetPages = offsets.current.get(entry.item.id);
     const targetColumns = getPerformanceLayout(viewport.width, viewport.height, targetPages?.length ?? 1, isPhone).columns;
     page.current = direction > 0 ? 0 : targetPages ? getPerformanceSpreadStart(Infinity, targetPages.length, targetColumns) : Infinity;
+    // A cold/rapid turn must not discard the chart we just displayed. Retain it
+    // for the return trip, using the same bounded cache policy as idle fills.
+    setPrepared(old => old.includes(from) && old.includes(entry.item.id) ? old
+      : getPerformanceCacheIds(entries, entry.item.id).filter(id => id === from || id === entry.item.id || old.includes(id)));
     setCurrentId(entry.item.id);
     onSongChange(entry.item.id);
   };
@@ -101,47 +105,68 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
   }, [entries, index, selectedId]);
 
   useEffect(() => {
-    if (!previous && !next) return;
-    let timer = 0, idle = 0;
-    const wanted = [currentId, previous, next, earlier, later].filter(id => id !== undefined);
+    if (wanted.length <= 1) return;
+    let timer = 0, idle = 0, frame = 0;
     if (prepared.length === wanted.length && wanted.every(id => prepared.includes(id))) return;
     const prepare = () => startTransition(() => {
-      // Fill one chart at a time, retaining two neighbors in each direction.
-      // A quick second tap can then reuse a chart prepared before the first tap.
-      const missing = wanted.find(id => id !== currentId && !prepared.includes(id));
-      setPrepared(wanted.filter(id => id === currentId || id === missing || prepared.includes(id)));
+      setPrepared(old => {
+        if (current.current !== currentId) return old;
+        const missing = wanted.find(id => id !== currentId && !old.includes(id));
+        return wanted.filter(id => id === currentId || id === missing || old.includes(id));
+      });
     });
     const cancel = () => {
       window.clearTimeout(timer);
+      cancelAnimationFrame(frame);
       if (idle) window.cancelIdleCallback(idle);
       idle = 0;
+      frame = 0;
     };
-    const schedule = () => {
-      cancel();
-      if (document.hidden) return;
-      // A cached song can appear before the next animation-frame callback,
-      // while layout/paint still follows it. Do not mount another whole score
-      // in that same frame, or during rapid taps, swipes or pedal input.
-      timer = window.setTimeout(() => {
-        if (typeof window.requestIdleCallback === 'function') {
-          idle = window.requestIdleCallback(() => { idle = 0; prepare(); });
-        } else prepare();
-      }, 500);
+    const afterPaint = () => {
+      if (document.hidden || writingContacts.current.size) return;
+      // Let the active score reach a rendering opportunity first. Then keep
+      // filling one chart per idle pass, without a fresh 500ms debounce for
+      // every chart or page turn that can starve preparation during fast taps.
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          if (document.hidden || writingContacts.current.size) return;
+          if (typeof window.requestIdleCallback === 'function') {
+            idle = window.requestIdleCallback(() => { idle = 0; prepare(); });
+          } else timer = window.setTimeout(prepare, 0);
+        });
+      });
     };
+    const schedule = () => { cancel(); afterPaint(); };
     deferPreparation.current = schedule;
     const source = spread.current;
-    const writing = (event: PointerEvent) => { if (event.buttons) schedule(); };
-    source?.addEventListener('pointerdown', schedule, true);
+    const press = (event: PointerEvent) => { writingContacts.current.add(event.pointerId); cancel(); };
+    const writing = (event: PointerEvent) => {
+      if (event.buttons) { cancel(); timer = window.setTimeout(afterPaint, 500); }
+    };
+    const release = (event: PointerEvent) => {
+      writingContacts.current.delete(event.pointerId);
+      cancel(); timer = window.setTimeout(afterPaint, 500);
+    };
+    const visibility = () => {
+      if (document.hidden) writingContacts.current.clear();
+      schedule();
+    };
+    source?.addEventListener('pointerdown', press, true);
     source?.addEventListener('pointermove', writing, true);
-    document.addEventListener('visibilitychange', schedule);
+    source?.addEventListener('pointerup', release, true);
+    source?.addEventListener('pointercancel', release, true);
+    document.addEventListener('visibilitychange', visibility);
     schedule();
     return () => {
       cancel(); deferPreparation.current = () => {};
-      source?.removeEventListener('pointerdown', schedule, true);
+      source?.removeEventListener('pointerdown', press, true);
       source?.removeEventListener('pointermove', writing, true);
-      document.removeEventListener('visibilitychange', schedule);
+      source?.removeEventListener('pointerup', release, true);
+      source?.removeEventListener('pointercancel', release, true);
+      document.removeEventListener('visibilitychange', visibility);
     };
-  }, [currentId, previous, next, earlier, later, notesOpen, prepared]);
+  }, [currentId, wanted, notesOpen, prepared]);
 
   useLayoutEffect(() => {
     let frame = 0;

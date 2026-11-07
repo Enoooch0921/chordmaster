@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-07',
+        title: 'Keep ahead of rapid song turns',
+        bullets: [
+          'Prepare upcoming charts progressively without restarting a half-second wait on every page turn.',
+          'Retain visited charts and expand lookahead within entry and score-size budgets; keep drawing preparation deferred during contact.'
+        ]
+      },
+      {
+        version: '0.12.27',
+        date: '2026-11-07',
         title: 'Reliable taps after idle and lighter stage updates',
         bullets: [
           'Turn a page on touch release, including the first tap after idle, while suppressing duplicate touch clicks.',
@@ -1085,6 +1094,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: '改善連續快速換歌的預載進度',
+        bullets: [
+          '逐首往後準備歌曲，移除每次翻頁重新等待半秒的限制，減少快翻時按下才建立新譜面的情況。',
+          '保留看過的譜面，依曲目數與譜面大小限制預載量；手寫接觸期間繼續暫停背景準備。'
+        ]
+      },
+      {
+        version: '0.12.27',
         date: '2026-11-07',
         title: '修正閒置後輕點與演出換歌停頓',
         bullets: [

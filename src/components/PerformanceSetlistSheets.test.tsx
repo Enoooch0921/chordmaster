@@ -35,36 +35,56 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('independent prepared score layouts', () => {
-  it('waits for quiet input, prepares one neighbor at a time, and bounds the retained window', async () => {
+  it('keeps preparing ahead during rapid navigation instead of waiting for a 500ms pause', async () => {
     vi.useFakeTimers();
     try {
       const ref = createRef<PerformanceSetlistHandle>();
-      render(<><PerformanceSetlistSheets ref={ref} {...defaults} selectedId="song-0" entries={Array.from({ length: 7 }, (_, i) => entry(`song-${i}`, i === 0 ? 3 : 1))} />
+      render(<><PerformanceSetlistSheets ref={ref} {...defaults} selectedId="song-0" entries={Array.from({ length: 10 }, (_, i) => entry(`song-${i}`, 1))} />
         <button onClick={() => ref.current!.next()}>next</button></>);
       const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
-      await advance(400);
-      fireEvent.click(document.querySelector('button')!); // Within-song input postpones preparation too.
-      await advance(400);
-      expect(chart('song-1')).toBeNull();
-      const writing = new Event('pointermove', { bubbles: true });
-      Object.defineProperty(writing, 'buttons', { value: 1 });
-      fireEvent(spread(), writing);
-      await advance(400);
-      expect(chart('song-1')).toBeNull();
-      await advance(110);
-      expect(chart('song-1')).not.toBeNull(); expect(chart('song-2')).toBeNull();
-      await advance(510);
-      const prepared = chart('song-2'); expect(prepared).not.toBeNull();
-      fireEvent.click(document.querySelector('button')!); // First adjacent song.
-      fireEvent.click(document.querySelector('button')!); // A quick second song reuses the ahead buffer.
-      expect(chart('song-2')).toBe(prepared);
-      expect(prepared).not.toHaveAttribute('aria-hidden');
-      await advance(510); await advance(510);
-      expect(document.querySelectorAll('[data-performance-entry]')).toHaveLength(5);
-      fireEvent.click(document.querySelector('button')!);
-      await advance(510);
-      expect(chart('song-0')).toBeNull(); expect(chart('song-5')).not.toBeNull();
-      expect(document.querySelectorAll('[data-performance-entry]')).toHaveLength(5);
+      await advance(80);
+      for (let i = 1; i < 10; i++) {
+        const ready = chart(`song-${i}`);
+        expect(ready).not.toBeNull();
+        fireEvent.click(document.querySelector('button')!);
+        expect(chart(`song-${i}`)).toBe(ready);
+        expect(ready).not.toHaveAttribute('aria-hidden');
+        await advance(80); // No 500ms quiet interval anywhere in this sequence.
+        expect(document.querySelectorAll('[data-performance-entry]').length).toBeLessThanOrEqual(8);
+      }
+    } finally { cleanup(); vi.useRealTimers(); }
+  });
+
+  it('preserves already displayed charts for a fast return even when idle preparation cannot run', () => {
+    vi.stubGlobal('requestIdleCallback', () => 1);
+    const ref = createRef<PerformanceSetlistHandle>();
+    render(<><PerformanceSetlistSheets ref={ref} {...defaults} selectedId="song-0" entries={Array.from({ length: 3 }, (_, i) => entry(`song-${i}`, 1))} />
+      <button onClick={() => ref.current!.next()}>next</button><button onClick={() => ref.current!.previous()}>previous</button></>);
+    const original = chart('song-0');
+    fireEvent.click(document.querySelector('button')!);
+    const second = chart('song-1');
+    fireEvent.click(document.querySelector('button')!);
+    fireEvent.click(document.querySelectorAll('button')[1]);
+    expect(chart('song-1')).toBe(second);
+    fireEvent.click(document.querySelectorAll('button')[1]);
+    expect(chart('song-0')).toBe(original);
+  });
+
+  it('pauses background preparation while a pen is held and resumes after release', async () => {
+    vi.useFakeTimers();
+    try {
+      render(<PerformanceSetlistSheets {...defaults} selectedId="song-0" entries={[entry('song-0', 1), entry('song-1', 1)]} />);
+      const pointer = (type: string, buttons: number) => {
+        const event = new Event(type, { bubbles: true });
+        Object.defineProperties(event, { pointerId: { value: 1 }, buttons: { value: buttons } });
+        fireEvent(spread(), event);
+      };
+      const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+      pointer('pointerdown', 1); pointer('pointermove', 1);
+      await advance(1000); expect(chart('song-1')).toBeNull();
+      pointer('pointerup', 0);
+      await advance(400); expect(chart('song-1')).toBeNull();
+      await advance(180); expect(chart('song-1')).not.toBeNull();
     } finally { cleanup(); vi.useRealTimers(); }
   });
   it('keeps a single-page neighbor fitted while showing a spread and reuses both without measuring on a song turn', async () => {
