@@ -74,11 +74,12 @@ it('handles all six page keys without canvas focus and leaves native editing and
   expect(after.defaultPrevented).toBe(false);
 });
 
-it('jumps to a section with one press, selects it on the same page and keeps its anchor through reflow', async () => {
+it('highlights every section on the current page while preserving one-press jumps and anchors through reflow', async () => {
   const lyrics = { ...song, lyricsDoc: { chinese: '', blocks: [
     { id: 'v1', marker: 'Verse 1', chinese: '主歌第一段', english: '' },
     { id: 'v2', marker: 'Verse 2', chinese: '主歌第二段', english: '' },
-    { id: 'c', marker: 'Chorus', chinese: '副歌第一句\n副歌第二句', english: '', pageBreakBefore: true },
+    { id: 'c', marker: 'Chorus', chinese: '副歌第一句\n副歌第二句', english: '' },
+    { id: 'b', marker: 'Bridge', chinese: '橋段', english: '', pageBreakBefore: true },
   ] } };
   const anchors = vi.fn();
   const props = { song: lyrics, identity: 'sections', language: 'zh' as const, settings: DEFAULT_LYRICS_READING_SETTINGS, onAnchorChange: anchors };
@@ -88,22 +89,50 @@ it('jumps to a section with one press, selects it on the same page and keeps its
   expect(screen.queryByRole('combobox', { name: '跳到歌詞段落' })).toBeNull();
   expect(screen.getByRole('button', { name: '跳到 Verse 1' })).toHaveTextContent('V1');
   expect(screen.getByRole('button', { name: '跳到 Verse 2' })).toHaveTextContent('V2');
+  const expectGroup = (names: string[]) => {
+    for (const name of ['Verse 1', 'Verse 2', 'Chorus', 'Bridge']) {
+      expect(screen.getByRole('button', { name: `跳到 ${name}` })).toHaveAttribute('aria-pressed', String(names.includes(name)));
+    }
+  };
+  expectGroup(['Verse 1', 'Verse 2', 'Chorus']);
   fireEvent.click(screen.getByRole('button', { name: '跳到 Verse 2' }));
-  expect(screen.getByRole('button', { name: '跳到 Verse 2' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('button', { name: '跳到 Verse 1' })).toHaveAttribute('aria-pressed', 'false');
+  expectGroup(['Verse 1', 'Verse 2', 'Chorus']);
   expect(anchors).toHaveBeenLastCalledWith({ blockId: 'v2', line: 0 });
   expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '1');
   rerender(<AdaptiveLyricsReader {...props} settings={{ ...props.settings, fontSize: 28 }}/>);
   act(() => geometry.resize(1000, 600));
   await waitFor(() => expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-column-count', '2'));
-  expect(screen.getByRole('button', { name: '跳到 Verse 2' })).toHaveAttribute('aria-pressed', 'true');
+  expectGroup(['Verse 1', 'Verse 2', 'Chorus']);
   expect(anchors).toHaveBeenLastCalledWith({ blockId: 'v2', line: 0 });
   fireEvent.click(screen.getByRole('button', { name: '跳到 Chorus' }));
-  expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '2');
+  expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '1');
   expect(container.querySelector('.alr-columns')).toHaveTextContent('副歌第一句');
-  expect(screen.getByRole('button', { name: '跳到 Chorus' })).toHaveAttribute('aria-pressed', 'true');
+  expectGroup(['Verse 1', 'Verse 2', 'Chorus']);
+  fireEvent.click(screen.getByRole('button', { name: '跳到 Bridge' }));
+  expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '2');
+  expectGroup(['Bridge']);
   fireEvent.keyDown(screen.getByLabelText('當頁歌詞'), { key: 'ArrowLeft' });
-  expect(screen.getByRole('button', { name: '跳到 Verse 1' })).toHaveAttribute('aria-pressed', 'true');
+  expectGroup(['Verse 1', 'Verse 2', 'Chorus']);
+});
+
+it('keeps a continued section highlighted on every page containing its rows', () => {
+  const lyrics = { ...song, lyricsDoc: { chinese: '', blocks: [
+    { id: 'v1', marker: 'Verse 1', chinese: Array.from({ length: 22 }, (_, i) => `主歌 ${i}`).join('\n'), english: '' },
+    { id: 'v2', marker: 'Verse 2', chinese: '第二段', english: '' },
+    { id: 'c', marker: 'Chorus', chinese: Array.from({ length: 10 }, (_, i) => `副歌 ${i}`).join('\n'), english: '' },
+  ] } };
+  const { container } = render(<AdaptiveLyricsReader song={lyrics} identity="continued" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
+  const pages = Number(container.querySelector('.adaptive-lyrics-reader')!.getAttribute('data-page-count'));
+  expect(pages).toBeGreaterThan(1);
+  let sawContinuation = false;
+  for (let page = 1; page <= pages; page++) {
+    const visible = new Set(Array.from(container.querySelectorAll('.alr-columns [data-reading-section]'), node => node.getAttribute('data-reading-section')));
+    const highlighted = new Set(Array.from(container.querySelectorAll('[data-lyrics-section-target][aria-pressed="true"]'), node => node.getAttribute('data-lyrics-section-target')));
+    expect(highlighted).toEqual(visible);
+    sawContinuation ||= container.querySelector('.alr-columns h2 small') !== null;
+    if (page < pages) fireEvent.keyDown(window, { key: 'ArrowRight' });
+  }
+  expect(sawContinuation).toBe(true);
 });
 it('preserves a source-line anchor through font changes and a tablet rotation', async () => {
   const props = { song, identity: 'entry', language: 'zh' as const, settings: DEFAULT_LYRICS_READING_SETTINGS };

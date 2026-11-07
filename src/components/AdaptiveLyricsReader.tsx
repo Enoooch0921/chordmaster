@@ -45,7 +45,6 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
   const sections = React.useMemo(() => prepareReadingSections(getLyricsBlocks(song.lyricsDoc), settings.language), [song.lyricsDoc, settings.language]);
   const [layout, setLayout] = React.useState<Layout>({ pages: [], columns: 1, widths: [1], fontSize: settings.fontSize, sections, splits: 0, wraps: 0, imbalance: 0 });
   const [page, setPage] = React.useState(0);
-  const [selectedSection, setSelectedSection] = React.useState<string>();
   const reader = React.useRef<HTMLElement>(null);
   const canvas = React.useRef<HTMLDivElement>(null), measure = React.useRef<HTMLDivElement>(null);
   const position = React.useRef<{ identity: string; anchor?: ReadingAnchor | 'last' }>({ identity, anchor: initialAnchor });
@@ -60,7 +59,6 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
     if (section && segment) {
       const anchor = retained && preferred ? preferred : { blockId: section.id, line: segment.start };
       position.current = { identity, anchor };
-      setSelectedSection(section.id);
       latest.current.onAnchorChange?.(anchor);
     }
   };
@@ -150,6 +148,8 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
   }, [sections, settings.fontSize, settings.lineHeight, fontFamily, identity]);
 
   const active = Math.min(page, Math.max(0, layout.pages.length - 1));
+  const visibleSectionIds = layout.sections === sections
+    ? [...new Set(layout.pages[active]?.flat().map(segment => sections[segment.section].id) ?? [])] : [];
   const turn = (index: number, anchor?: ReadingAnchor) => {
     setPage(index); remember(layout, index, anchor);
     canvas.current?.querySelectorAll('.alr-column').forEach(node => { node.scrollTop = 0; });
@@ -177,7 +177,7 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
         })}</div>)}
       </div>}
     </div>
-    {layout.pages.length > 1 && <LyricsSectionNavigation sections={sections} selectedId={selectedSection} page={active + 1} pages={layout.pages.length} language={language} onSelect={id => {
+    {layout.pages.length > 1 && <LyricsSectionNavigation sections={sections} visibleIds={visibleSectionIds} page={active + 1} pages={layout.pages.length} language={language} onSelect={id => {
       const target = layout.pages.findIndex(p => p.some(col => col.some(segment => sections[segment.section].id === id)));
       if (target >= 0) turn(target, { blockId: id, line: 0 });
     }}/>}

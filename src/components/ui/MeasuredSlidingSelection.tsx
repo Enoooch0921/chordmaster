@@ -6,10 +6,11 @@ type Box = { left: number; top: number; width: number; height: number };
 interface Props {
   value: string;
   layoutKey: string;
+  selection?: 'single' | 'range';
 }
 
-/** A single-row selection follows the actual button boxes, including unequal labels. */
-export default function MeasuredSlidingSelection({ value, layoutKey }: Props) {
+/** Follow one selected button, or a contiguous group, using their actual boxes. */
+export default function MeasuredSlidingSelection({ value, layoutKey, selection = 'single' }: Props) {
   const markerRef = useRef<HTMLSpanElement>(null);
   const animation = useRef<Animation | null>(null);
   const previous = useRef<{ value: string; layoutKey: string; geometry: string; box: Box } | null>(null);
@@ -21,9 +22,12 @@ export default function MeasuredSlidingSelection({ value, layoutKey }: Props) {
       const marker = markerRef.current, container = marker?.parentElement;
       if (!container || !marker) return;
       const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>(':scope > button'));
-      const selected = buttons.find(button => button.getAttribute('aria-pressed') === 'true');
+      const selected = buttons.flatMap((button, index) => button.getAttribute('aria-pressed') === 'true' ? [index] : []);
       const boxes = buttons.map(button => ({ left: button.offsetLeft, top: button.offsetTop, width: button.offsetWidth, height: button.offsetHeight }));
-      const box = selected ? boxes[buttons.indexOf(selected)] : null;
+      const first = boxes[selected[0]], last = boxes[selected[selected.length - 1]];
+      const contiguous = selected.every((index, offset) => index === selected[0] + offset);
+      const box = first && (selection === 'single' ? first : contiguous
+        ? { ...first, width: last.left + last.width - first.left } : null);
       // Hidden controls and unexpected wrapping retain their ordinary selected fill.
       if (!box?.width || !box.height || boxes.some(candidate => candidate.top !== box.top)) {
         animation.current?.cancel(); animation.current = null;
@@ -67,7 +71,7 @@ export default function MeasuredSlidingSelection({ value, layoutKey }: Props) {
       }
     };
     refresh.current(true);
-  }, [value, layoutKey, preference.instant, preference.reduced]);
+  }, [value, layoutKey, selection, preference.instant, preference.reduced]);
 
   useLayoutEffect(() => {
     const container = markerRef.current?.parentElement;
