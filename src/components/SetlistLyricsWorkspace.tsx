@@ -56,6 +56,9 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
   const isFocused = focused && mode === 'reading';
   useModalFocus(isFocused, workspaceRef);
   useModalScrollLock(isFocused, backgroundRef);
+  React.useLayoutEffect(() => {
+    if (isFocused) workspaceRef.current?.querySelector<HTMLElement>('.alr-canvas')?.focus({ preventScroll: true });
+  }, [isFocused]);
   const activeSettings = mode === 'print' ? printSettings : readingSettings;
   const selectSong = (id: string, last = false) => {
     anchors.delete(id);

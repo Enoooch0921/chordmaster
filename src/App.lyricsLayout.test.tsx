@@ -135,6 +135,8 @@ it('turns lyrics once per pedal press and retains the page on an App refresh', a
 });
 
 it('preserves native section-button activation in performance', async () => {
+  fixture.songs[0].lyricsDoc = { chinese: '[Verse 1]\n' + Array.from({ length: 50 }, (_, i) => `主歌 ${i}`).join('\n') };
+  fixture.setlists[0].songs[0].songData = fixture.songs[0];
   await mountLyrics();
   fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
   const overlay = document.querySelector('[data-performance-overlay]')!;

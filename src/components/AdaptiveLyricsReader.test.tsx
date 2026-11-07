@@ -8,8 +8,72 @@ import { mockLyricsReadingGeometry } from '../test/lyricsReadingGeometry';
 import type { Song } from '../types';
 const song: Song = { title: '長歌', originalKey: 'C', currentKey: 'C', timeSignature: '4/4', sections: [], lyricsDoc: { chinese: '', blocks: [{ id: 'v', marker: 'Verse 1', chinese: Array.from({ length: 40 }, (_, i) => `歌詞 ${i}`).join('\n'), english: '' }] } };
 let geometry: ReturnType<typeof mockLyricsReadingGeometry>;
-beforeEach(() => { localStorage.clear(); geometry = mockLyricsReadingGeometry(); });
+beforeEach(() => { localStorage.clear(); window.getSelection()?.removeAllRanges(); geometry = mockLyricsReadingGeometry(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('hides the entire section rail for a whole-song page and restores it only when needed after resize', async () => {
+  const lyrics = { ...song, lyricsDoc: { chinese: '[Verse 1]\n第一段\n[Verse 2]\n第二段\n[Chorus]\n副歌' } };
+  const { container } = render(<AdaptiveLyricsReader song={lyrics} identity="fits" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
+  const reader = () => container.querySelector('.adaptive-lyrics-reader');
+  expect(reader()).toHaveAttribute('data-page-count', '1');
+  expect(container.querySelector('[data-lyrics-navigation]')).toBeNull();
+  expect(Array.from(container.querySelectorAll('.alr-columns [data-source-line]'), line => line.textContent)).toEqual(['第一段', '第二段', '副歌']);
+  act(() => geometry.resize(390, 110));
+  await waitFor(() => expect(container.querySelector('[data-lyrics-navigation]')).not.toBeNull());
+  expect(screen.getByRole('button', { name: '跳到 Verse 2' })).toBeInTheDocument();
+  act(() => geometry.resize(1000, 600));
+  await waitFor(() => expect(reader()).toHaveAttribute('data-page-count', '1'));
+  expect(container.querySelector('[data-lyrics-navigation]')).toBeNull();
+});
+
+it.each([
+  { lyricsDoc: undefined, language: 'chinese' as const },
+  { lyricsDoc: { chinese: '', english: '' }, language: 'chinese' as const },
+  { lyricsDoc: { chinese: '[Verse 1]\n有中文歌詞', english: '' }, language: 'english' as const },
+])('keeps both tap and swipe directions available without visible lyrics: %j', ({ lyricsDoc, language }) => {
+  const onNextSong = vi.fn(), onPreviousSong = vi.fn();
+  const { container } = render(<AdaptiveLyricsReader song={{ ...song, lyricsDoc }} identity="empty" language="zh" settings={{ ...DEFAULT_LYRICS_READING_SETTINGS, language }} onNextSong={onNextSong} onPreviousSong={onPreviousSong}/>);
+  const canvas = container.querySelector<HTMLElement>('.alr-canvas')!;
+  expect(container.querySelector('[data-lyrics-navigation]')).toBeNull();
+  expect(canvas).toHaveTextContent('尚無此語言的歌詞');
+  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({ left: 16, width: 358 } as DOMRect);
+  const point = (x: number) => ({ clientX: x, clientY: 200, identifier: 1 });
+  const touch = (start: number, end: number) => {
+    fireEvent.touchStart(canvas, { touches: [point(start)] });
+    if (start !== end) fireEvent.touchMove(canvas, { touches: [point(end)] });
+    fireEvent.touchEnd(canvas, { touches: [], changedTouches: [point(end)] });
+    fireEvent.click(canvas, { clientX: end, detail: 1 });
+  };
+  touch(300, 300); touch(50, 50);
+  expect(onNextSong).toHaveBeenCalledTimes(1); expect(onPreviousSong).toHaveBeenCalledTimes(1);
+  touch(300, 80); touch(80, 300);
+  expect(onNextSong).toHaveBeenCalledTimes(2); expect(onPreviousSong).toHaveBeenCalledTimes(2);
+});
+
+it('handles all six page keys without canvas focus and leaves native editing and modal keys alone', () => {
+  const { container, unmount } = render(<AdaptiveLyricsReader song={song} identity="keyboard" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
+  const reader = container.querySelector('.adaptive-lyrics-reader')!;
+  const key = (name: string, target: HTMLElement | Window = window, extra = {}) => fireEvent.keyDown(target, { key: name, ...extra });
+  for (const name of ['ArrowRight', 'ArrowDown', 'PageDown']) key(name);
+  expect(reader).toHaveAttribute('data-reading-page', '4');
+  for (const name of ['ArrowLeft', 'ArrowUp', 'PageUp']) key(name);
+  expect(reader).toHaveAttribute('data-reading-page', '1');
+  key('ArrowDown', window, { repeat: true }); key('ArrowDown', window, { shiftKey: true });
+  key('ArrowRight', window, { ctrlKey: true }); key('ArrowDown', window, { isComposing: true });
+  for (const tag of ['input', 'textarea', 'select']) {
+    const field = document.createElement(tag); document.body.append(field); field.focus(); key('ArrowDown', field); field.remove();
+  }
+  const modal = document.createElement('div'); modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); document.body.append(modal);
+  key('ArrowDown'); modal.remove();
+  expect(reader).toHaveAttribute('data-reading-page', '1');
+  const button = screen.getByRole('button', { name: '跳到 Verse 1' });
+  button.focus(); key('ArrowDown', button);
+  expect(reader).toHaveAttribute('data-reading-page', '2');
+  unmount();
+  const after = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+  window.dispatchEvent(after);
+  expect(after.defaultPrevented).toBe(false);
+});
+
 it('jumps to a section with one press, selects it on the same page and keeps its anchor through reflow', async () => {
   const lyrics = { ...song, lyricsDoc: { chinese: '', blocks: [
     { id: 'v1', marker: 'Verse 1', chinese: '主歌第一段', english: '' },
@@ -81,6 +145,7 @@ it('turns by touch swipe and half-screen taps without turning on scroll, pinch, 
   fireEvent.click(canvas, { clientX: 300, detail: 1 });
   expect(reader).toHaveAttribute('data-reading-page', '1');
   const selection = window.getSelection()!;
+  selection.removeAllRanges();
   const range = document.createRange();
   range.selectNodeContents(canvas.querySelector('.alr-line')!);
   selection.addRange(range);

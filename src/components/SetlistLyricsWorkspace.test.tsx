@@ -29,7 +29,6 @@ describe('setlist lyrics reading workspace', () => {
       { id: 'v', marker: 'Verse 1', chinese: '中文主歌', english: '' },
       { id: 'c', marker: 'Chorus', chinese: '', english: 'Sung chorus', singingLanguage: 'english' },
     ] } } }]}/>);
-    fireEvent.click(screen.getByRole('button', { name: '跳到 Chorus' }));
     expect(screen.getByRole('heading', { name: 'Chorus' })).toBeInTheDocument();
     expect(container.querySelector('[data-reading-section="c"]')).toHaveTextContent('Sung chorus');
   });
@@ -55,7 +54,9 @@ describe('setlist lyrics reading workspace', () => {
     expect(dialog.parentElement).toBe(document.body);
     expect(screen.queryByRole('button', { name: '列印排版' })).toBeNull();
     expect(screen.queryByRole('button', { name: '編輯' })).toBeNull();
-    expect(within(dialog).getByRole('button', { name: '跳到 Verse 1' })).toBeEnabled();
+    expect(within(dialog).queryByRole('navigation', { name: '歌詞段落' })).toBeNull();
+    expect(within(dialog).getByRole('combobox', { name: '目前歌曲' })).toBeEnabled();
+    expect(within(dialog).getByLabelText('當頁歌詞')).toHaveFocus();
     expect(document.querySelector('[data-reading-song]')).toHaveAttribute('data-reading-song', 'first-entry');
     expect(document.body.style.overflow).toBe('hidden');
     fireEvent.keyDown(screen.getByRole('button', { name: '離開專注閱讀' }), { key: 'Escape' });
