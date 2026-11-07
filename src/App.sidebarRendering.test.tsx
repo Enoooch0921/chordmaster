@@ -248,7 +248,7 @@ it('reuses untouched chart data when selecting another song, and stops backgroun
   state.renders.length = 0;
   fireEvent.click(screen.getByRole('button', { name: 'Next page' })); await settle();
   expect(document.querySelector('[data-performance-entry]:not([aria-hidden="true"]) h1')).toBe(nextHeading);
-  expect(document.querySelector('[data-performance-entry="entry-first"]')).toBeNull();
+  expect(document.querySelector('[data-performance-entry="entry-first"]')).toHaveAttribute('aria-hidden', 'true');
   expect(state.renders.every(props => !props.onElementClick)).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '退出' })); await settle();
   expect(latest('entry-third').onAddBarClick).toBeTypeOf('function');

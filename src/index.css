@@ -38,22 +38,22 @@
 [data-performance-overlay] [data-performance-chrome-item] {
   transition: opacity var(--ui-fade-duration) var(--ease-ui-out);
 }
-[data-performance-overlay][data-performance-chrome="hidden"] [data-performance-chrome-item] {
+[data-performance-chrome-item][data-performance-chrome-hidden] {
   transition-duration: var(--ui-release-duration);
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-performance-overlay][data-performance-chrome] [data-performance-chrome-item] {
+  [data-performance-overlay] [data-performance-chrome-item] {
     transition-duration: var(--ui-fade-duration);
   }
 }
 [data-ui-input="keyboard"] [data-performance-overlay] [data-performance-chrome-item] {
   transition: none;
 }
-[data-performance-overlay]:not([data-handwriting])[data-performance-chrome="hidden"] [data-performance-chrome-item] {
+[data-performance-overlay]:not([data-handwriting]) [data-performance-chrome-item][data-performance-chrome-hidden] {
   opacity: 0;
   pointer-events: none;
 }
-[data-performance-overlay]:not([data-handwriting])[data-performance-chrome="hidden"] [data-performance-chrome-item] * {
+[data-performance-overlay]:not([data-handwriting]) [data-performance-chrome-item][data-performance-chrome-hidden] * {
   pointer-events: none;
 }
 

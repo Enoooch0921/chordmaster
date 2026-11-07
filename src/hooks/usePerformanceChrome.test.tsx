@@ -29,3 +29,17 @@ it('clears timers on exit/unmount and starts visible when reopened', () => {
   expect(overlay.current.dataset.performanceChrome).toBe('visible');
   unmount();act(()=>vi.advanceTimersByTime(3000));expect(overlay.current.dataset.performanceChrome).toBe('visible');
 });
+
+it('changes styling state only on chrome controls and leaves score attributes untouched', () => {
+  const overlay = createRef<HTMLDivElement>(); overlay.current = document.createElement('div');
+  const score = document.createElement('article'), chrome = document.createElement('div');
+  chrome.dataset.performanceChromeItem = ''; overlay.current.append(score, chrome);
+  const scoreAttributes = vi.spyOn(score, 'setAttribute');
+  const { result } = renderHook(() => usePerformanceChrome(true, overlay));
+  act(() => vi.advanceTimersByTime(2000));
+  expect(chrome).toHaveAttribute('data-performance-chrome-hidden');
+  expect(overlay.current).not.toHaveAttribute('data-performance-chrome-hidden');
+  act(() => result.current());
+  expect(chrome).not.toHaveAttribute('data-performance-chrome-hidden');
+  expect(scoreAttributes).not.toHaveBeenCalled();
+});

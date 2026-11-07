@@ -35,12 +35,37 @@ it('tracks a drag without a layout read or animation frame and turns in the fina
   expect(bounds).not.toHaveBeenCalled(); expect(frame).not.toHaveBeenCalled();
 });
 
+it.each(['next', 'previous'])('handles the first %s tap after idle without a compatibility click', direction => {
+  const t = setup(); t.turn.dataset.performanceTurnArea = direction;
+  const clicks = vi.fn(); t.turn.addEventListener('click', clicks);
+  act(() => vi.advanceTimersByTime(10000));
+  t.start();
+  const event = new Event('touchend', { bubbles: true, cancelable: true });
+  Object.defineProperties(event, { touches: { value: [] }, changedTouches: { value: [point(402, 201)] } });
+  fireEvent(t.turn, event);
+  expect(direction === 'next' ? t.onNext : t.onPrevious).toHaveBeenCalledOnce();
+  expect(event.defaultPrevented).toBe(true);
+  expect(t.onLearned).toHaveBeenCalledOnce();
+  t.hook.rerender({ enabled: true, scope: 'next-song' });
+  fireEvent.click(t.turn, { detail: 1 });
+  expect(clicks).not.toHaveBeenCalled();
+  // The next deliberate touch is accepted immediately, even in the click guard.
+  t.start(); t.end(400);
+  expect(direction === 'next' ? t.onNext : t.onPrevious).toHaveBeenCalledTimes(2);
+});
+
+it('does not convert a tap outside the page-turn targets into a swipe action', () => {
+  const t = setup(); t.start(t.overlay); t.end(400);
+  expect(t.onNext).not.toHaveBeenCalled(); expect(t.onPrevious).not.toHaveBeenCalled();
+});
+
 it('dismisses a short horizontal drag without turning and consumes its synthesized click only once', () => {
   const t = setup(); const clicks = vi.fn(); t.turn.addEventListener('click', clicks);
   t.start(); t.move(380); t.end(380);
   expect(t.onNext).not.toHaveBeenCalled(); expect(t.onPrevious).not.toHaveBeenCalled();
   fireEvent.click(t.turn, { detail: 1 }); expect(clicks).not.toHaveBeenCalled();
-  t.start(); t.end(400); fireEvent.click(t.turn, { detail: 1 }); expect(clicks).toHaveBeenCalledOnce();
+  t.start(); t.end(400); expect(t.onNext).toHaveBeenCalledOnce();
+  fireEvent.click(t.turn, { detail: 1 }); expect(clicks).not.toHaveBeenCalled();
 });
 
 it('locks a vertical gesture out and prevents its release from becoming a page tap', () => {

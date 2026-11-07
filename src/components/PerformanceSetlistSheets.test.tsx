@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Song, SetlistSong } from '../types';
@@ -35,6 +35,38 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('independent prepared score layouts', () => {
+  it('waits for quiet input, prepares one neighbor at a time, and bounds the retained window', async () => {
+    vi.useFakeTimers();
+    try {
+      const ref = createRef<PerformanceSetlistHandle>();
+      render(<><PerformanceSetlistSheets ref={ref} {...defaults} selectedId="song-0" entries={Array.from({ length: 7 }, (_, i) => entry(`song-${i}`, i === 0 ? 3 : 1))} />
+        <button onClick={() => ref.current!.next()}>next</button></>);
+      const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+      await advance(400);
+      fireEvent.click(document.querySelector('button')!); // Within-song input postpones preparation too.
+      await advance(400);
+      expect(chart('song-1')).toBeNull();
+      const writing = new Event('pointermove', { bubbles: true });
+      Object.defineProperty(writing, 'buttons', { value: 1 });
+      fireEvent(spread(), writing);
+      await advance(400);
+      expect(chart('song-1')).toBeNull();
+      await advance(110);
+      expect(chart('song-1')).not.toBeNull(); expect(chart('song-2')).toBeNull();
+      await advance(510);
+      const prepared = chart('song-2'); expect(prepared).not.toBeNull();
+      fireEvent.click(document.querySelector('button')!); // First adjacent song.
+      fireEvent.click(document.querySelector('button')!); // A quick second song reuses the ahead buffer.
+      expect(chart('song-2')).toBe(prepared);
+      expect(prepared).not.toHaveAttribute('aria-hidden');
+      await advance(510); await advance(510);
+      expect(document.querySelectorAll('[data-performance-entry]')).toHaveLength(5);
+      fireEvent.click(document.querySelector('button')!);
+      await advance(510);
+      expect(chart('song-0')).toBeNull(); expect(chart('song-5')).not.toBeNull();
+      expect(document.querySelectorAll('[data-performance-entry]')).toHaveLength(5);
+    } finally { cleanup(); vi.useRealTimers(); }
+  });
   it('keeps a single-page neighbor fitted while showing a spread and reuses both without measuring on a song turn', async () => {
     const ref = createRef<PerformanceSetlistHandle>();
     render(<><PerformanceSetlistSheets ref={ref} {...defaults} selectedId="long" entries={[entry('long', 3), entry('short', 1), entry('next', 3)]} />

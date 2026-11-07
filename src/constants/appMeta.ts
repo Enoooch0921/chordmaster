@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-07',
+        title: 'Reliable taps after idle and lighter stage updates',
+        bullets: [
+          'Turn a page on touch release, including the first tap after idle, while suppressing duplicate touch clicks.',
+          'Keep toolbar visibility updates away from score styling. Prepare nearby charts one at a time after a quiet input gap.'
+        ]
+      },
+      {
+        version: '0.12.26',
+        date: '2026-11-07',
         title: 'Independent fullscreen song layouts',
         bullets: [
           'Keep each prepared chart at its own fitted width, columns and scale when changing between single pages and spreads.',
@@ -1076,6 +1085,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: '修正閒置後輕點與演出換歌停頓',
+        bullets: [
+          '輕點在觸控結束時直接翻頁，處理閒置後第一下點按，並防止同次觸控重複翻頁。',
+          '工具列顯示與隱藏只更新控制項；空檔逐首預備前後歌曲，避開連續翻頁與書寫。'
+        ]
+      },
+      {
+        version: '0.12.26',
         date: '2026-11-07',
         title: '全螢幕換歌保留各首譜面尺寸',
         bullets: [

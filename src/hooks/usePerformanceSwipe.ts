@@ -30,7 +30,7 @@ export function usePerformanceSwipe(options: Options) {
       suppressClickUntil.current = 0;
       return;
     }
-    let touch: { id: number; x: number; y: number; horizontal: boolean } | null = null;
+    let touch: { id: number; x: number; y: number; horizontal: boolean; turn: string | null } | null = null;
     const guardClick = () => { suppressClickUntil.current = performance.now() + CLICK_GUARD_MS; };
     const abort = () => {
       if (touch?.horizontal) guardClick();
@@ -48,7 +48,8 @@ export function usePerformanceSwipe(options: Options) {
         || (target.closest('button, a, input, textarea, select, [role="button"]') && !target.closest('[data-performance-turn-area]'))) return;
       latest.current.onInteract();
       const point = event.touches[0];
-      touch = { id: point.identifier, x: point.clientX, y: point.clientY, horizontal: false };
+      touch = { id: point.identifier, x: point.clientX, y: point.clientY, horizontal: false,
+        turn: target.closest('[data-performance-turn-area]')?.getAttribute('data-performance-turn-area') ?? null };
     };
     const move = (event: TouchEvent) => {
       if (!touch) return;
@@ -71,9 +72,17 @@ export function usePerformanceSwipe(options: Options) {
       const point = Array.from(event.changedTouches).find(point => point.identifier === touch!.id);
       if (!point) { abort(); return; }
       const dx = point.clientX - touch.x, dy = point.clientY - touch.y;
-      if (touch.horizontal || Math.max(Math.abs(dx), Math.abs(dy)) >= INTENT_DISTANCE) guardClick();
+      const moved = touch.horizontal || Math.max(Math.abs(dx), Math.abs(dy)) >= INTENT_DISTANCE;
+      const tap = !moved && (touch.turn === 'next' || touch.turn === 'previous') ? touch.turn : null;
+      if (moved || tap) guardClick();
       touch = null;
-      if (Math.abs(dx) >= TURN_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
+      if (tap) {
+        // Safari may omit the compatibility click after idle chrome/focus
+        // changes. Complete a tap here, then consume any duplicate click.
+        if (event.cancelable) event.preventDefault();
+        latest.current.onLearned();
+        if (tap === 'next') latest.current.onNext(); else latest.current.onPrevious();
+      } else if (Math.abs(dx) >= TURN_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
         latest.current.onLearned();
         if (dx < 0) latest.current.onNext(); else latest.current.onPrevious();
       }

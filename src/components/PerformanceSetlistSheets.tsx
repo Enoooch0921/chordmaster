@@ -34,6 +34,7 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
   const page = useRef(0);
   const sheets = useRef(new Map<string, HTMLDivElement>());
   const offsets = useRef(new Map<string, number[]>());
+  const deferPreparation = useRef(() => {});
   const spread = useRef<HTMLDivElement>(null);
   const [pageCounts, setPageCounts] = useState<Readonly<Record<string, number>>>({});
   const total = pageCounts[currentId] ?? 1;
@@ -41,6 +42,8 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
   const index = entries.findIndex(entry => entry.item.id === currentId);
   const previous = entries[index - 1]?.item.id;
   const next = entries[index + 1]?.item.id;
+  const earlier = entries[index - 2]?.item.id;
+  const later = entries[index + 2]?.item.id;
   const [prepared, setPrepared] = useState<readonly string[]>([]);
   const mountedIds = JSON.stringify(entries
     .filter(entry => entry.item.id === currentId || prepared.includes(entry.item.id))
@@ -61,6 +64,7 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
   };
 
   const turn = (direction: number) => {
+    deferPreparation.current();
     const positions = offsets.current.get(current.current) ?? [0];
     const columns = getPerformanceLayout(viewport.width, viewport.height, positions.length, isPhone).columns;
     const target = page.current + direction * columns;
@@ -98,16 +102,46 @@ const PerformanceSetlistSheets = forwardRef<PerformanceSetlistHandle, Props>(fun
 
   useEffect(() => {
     if (!previous && !next) return;
+    let timer = 0, idle = 0;
+    const wanted = [currentId, previous, next, earlier, later].filter(id => id !== undefined);
+    if (prepared.length === wanted.length && wanted.every(id => prepared.includes(id))) return;
     const prepare = () => startTransition(() => {
-      setPrepared([previous, currentId, next].filter(id => id !== undefined));
+      // Fill one chart at a time, retaining two neighbors in each direction.
+      // A quick second tap can then reuse a chart prepared before the first tap.
+      const missing = wanted.find(id => id !== currentId && !prepared.includes(id));
+      setPrepared(wanted.filter(id => id === currentId || id === missing || prepared.includes(id)));
     });
-    if (typeof window.requestIdleCallback === 'function') {
-      const id = window.requestIdleCallback(prepare, { timeout: 500 });
-      return () => window.cancelIdleCallback(id);
-    }
-    const timer = window.setTimeout(prepare, 100);
-    return () => window.clearTimeout(timer);
-  }, [currentId, previous, next]);
+    const cancel = () => {
+      window.clearTimeout(timer);
+      if (idle) window.cancelIdleCallback(idle);
+      idle = 0;
+    };
+    const schedule = () => {
+      cancel();
+      if (document.hidden) return;
+      // A cached song can appear before the next animation-frame callback,
+      // while layout/paint still follows it. Do not mount another whole score
+      // in that same frame, or during rapid taps, swipes or pedal input.
+      timer = window.setTimeout(() => {
+        if (typeof window.requestIdleCallback === 'function') {
+          idle = window.requestIdleCallback(() => { idle = 0; prepare(); });
+        } else prepare();
+      }, 500);
+    };
+    deferPreparation.current = schedule;
+    const source = spread.current;
+    const writing = (event: PointerEvent) => { if (event.buttons) schedule(); };
+    source?.addEventListener('pointerdown', schedule, true);
+    source?.addEventListener('pointermove', writing, true);
+    document.addEventListener('visibilitychange', schedule);
+    schedule();
+    return () => {
+      cancel(); deferPreparation.current = () => {};
+      source?.removeEventListener('pointerdown', schedule, true);
+      source?.removeEventListener('pointermove', writing, true);
+      document.removeEventListener('visibilitychange', schedule);
+    };
+  }, [currentId, previous, next, earlier, later, notesOpen, prepared]);
 
   useLayoutEffect(() => {
     let frame = 0;

@@ -1,5 +1,5 @@
 import { createRef } from 'react';
-import { act, renderHook } from '@testing-library/react';
+import { act, fireEvent, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePerformanceKeyboardFocus } from './usePerformanceKeyboardFocus';
 beforeEach(() => {
@@ -16,6 +16,57 @@ const setup = (fullscreenTarget = false) => {
   return { ...hook, capture, overlay, focus };
 };
 describe('iPad standalone page-turner focus recovery', () => {
+  it('does not refocus during contact or compatibility mouse activation, then resumes recovery', () => {
+    const { overlay, focus, result } = setup();
+    fireEvent.touchStart(overlay.current!, { touches: [{ identifier: 1 }] });
+    focus.mockClear();
+    act(() => { result.current(); vi.advanceTimersByTime(3000); });
+    expect(focus).not.toHaveBeenCalled();
+    fireEvent.touchEnd(overlay.current!, { touches: [], changedTouches: [{ identifier: 1 }] });
+    act(() => result.current());
+    expect(focus).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(501); result.current(); });
+    expect(focus).toHaveBeenCalledOnce();
+  });
+
+  it('protects the pointerdown phase before touchstart reaches React and clears contact on cancel', () => {
+    const { overlay, focus, result } = setup();
+    const press = new Event('pointerdown', { bubbles: true });
+    Object.defineProperty(press, 'pointerType', { value: 'touch' });
+    fireEvent(overlay.current!, press);
+    focus.mockClear(); act(() => result.current()); expect(focus).not.toHaveBeenCalled();
+    const cancel = new Event('pointercancel', { bubbles: true });
+    Object.defineProperty(cancel, 'pointerType', { value: 'touch' });
+    fireEvent(overlay.current!, cancel);
+    act(() => { vi.advanceTimersByTime(501); result.current(); });
+    expect(focus).toHaveBeenCalledOnce();
+  });
+
+  it('waits for the final finger to lift before recovering focus', () => {
+    const { overlay, focus, result } = setup();
+    const pointer = (type: string, id: number) => {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperties(event, { pointerType: { value: 'touch' }, pointerId: { value: id } });
+      fireEvent(overlay.current!, event);
+    };
+    pointer('pointerdown', 1); pointer('pointerdown', 2);
+    pointer('pointerup', 1);
+    fireEvent.touchEnd(overlay.current!, { touches: [{ identifier: 2 }] });
+    focus.mockClear(); act(() => { vi.advanceTimersByTime(3000); result.current(); });
+    expect(focus).not.toHaveBeenCalled();
+    pointer('pointerup', 2); fireEvent.touchEnd(overlay.current!, { touches: [] });
+    act(() => { vi.advanceTimersByTime(501); result.current(); });
+    expect(focus).toHaveBeenCalledOnce();
+  });
+
+  it('recovers a contact interrupted by backgrounding even without touchend', () => {
+    const { overlay, focus } = setup();
+    fireEvent.touchStart(overlay.current!, { touches: [{ identifier: 1 }] });
+    focus.mockClear();
+    act(() => window.dispatchEvent(new Event('blur')));
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(focus).toHaveBeenCalledOnce();
+  });
   it('continues asserting native focus after 30 minutes even when DOM focus has not changed', () => {
     const { focus, capture } = setup();
     act(() => vi.advanceTimersByTime(30 * 60 * 1000));
