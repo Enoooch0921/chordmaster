@@ -241,13 +241,13 @@ it('reuses untouched chart data when selecting another song, and stops backgroun
 
   fireEvent.click(screen.getByRole('button', { name: '演出模式' })); await settle();
   const nextHeading = await waitFor(() => {
-    const heading = document.querySelector('[data-performance-entry="entry-third"][inert] h1');
+    const heading = document.querySelector('[data-performance-entry="entry-third"][aria-hidden="true"] h1');
     expect(heading).toHaveTextContent('Song 3');
     return heading;
   });
   state.renders.length = 0;
   fireEvent.click(screen.getByRole('button', { name: 'Next page' })); await settle();
-  expect(document.querySelector('[data-performance-entry]:not([inert]) h1')).toBe(nextHeading);
+  expect(document.querySelector('[data-performance-entry]:not([aria-hidden="true"]) h1')).toBe(nextHeading);
   expect(document.querySelector('[data-performance-entry="entry-first"]')).toBeNull();
   expect(state.renders.every(props => !props.onElementClick)).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '退出' })); await settle();

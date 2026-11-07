@@ -67,7 +67,7 @@ it('uses the source song identity for personal ink in a setlist and performance 
   fireEvent.click(screen.getByRole('button', { name: '隱藏筆記' }));
   expect(document.querySelector<SVGElement>('[data-performance-overlay] [data-personal-notes-layer]')?.style.visibility).toBe('hidden');
   const neighbor = await waitFor(() => {
-    const node = document.querySelector('[data-performance-entry="encore-entry"][inert]');
+    const node = document.querySelector('[data-performance-entry="encore-entry"][aria-hidden="true"]');
     expect(node).toBeInTheDocument();
     return node!;
   });
@@ -76,11 +76,11 @@ it('uses the source song identity for personal ink in a setlist and performance 
   for (let i = 0; i < Number(spread.dataset.performancePages); i += Number(spread.dataset.performanceSpread)) {
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
   }
-  expect(neighbor).not.toHaveAttribute('inert');
+  expect(neighbor).not.toHaveAttribute('aria-hidden', 'true');
   await waitFor(() => expect(neighbor.querySelector('[data-personal-notes-layer]')).toBeInTheDocument());
   expect(neighbor.querySelector('[data-personal-note-stroke]')).toBeNull();
   expect(screen.getAllByRole('toolbar', { name: '個人手寫筆記' })).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
-  await waitFor(() => expect(document.querySelector('[data-performance-entry="service-entry"]:not([inert]) [data-personal-note-stroke]')).toBeInTheDocument());
+  await waitFor(() => expect(document.querySelector('[data-performance-entry="service-entry"]:not([aria-hidden="true"]) [data-personal-note-stroke]')).toBeInTheDocument());
   expect(state.saveSong).not.toHaveBeenCalled(); expect(state.saveSetlist).not.toHaveBeenCalled();
 }, 15000);
