@@ -91,10 +91,14 @@
 }
 .performance-navigation-hint button:focus-visible { outline: 2px solid var(--color-stone-50); outline-offset: 2px; }
 
-/* Overlap the pre-laid-out songs in setlist order. Only the active one is visible. */
-[data-performance-entry] { grid-area: 1 / 1; align-self: start; min-width: 0; contain: layout paint; }
-[data-performance-entry][inert] { opacity: 0; pointer-events: none; }
-@media print { [data-performance-entry][inert] { display: none; } }
+/* Keep read-only stage charts fitted in separate layers. Snap the prepared
+   neighbor into the clip without changing opacity or recalculating inert on
+   every score descendant. Keep pointer-events constant to avoid inherited style
+   changes. Drawing layers opt back into hit testing; inactive charts have no
+   enabled controls or notes. */
+[data-performance-entry] { min-width: 0; contain: layout paint; pointer-events: none; transform: translate3d(0, 0, 0); will-change: transform; }
+[data-performance-entry][aria-hidden="true"] { transform: translate3d(100%, 0, 0); }
+@media print { [data-performance-entry][aria-hidden="true"] { display: none; } }
 
 .performance-sheet :has(> [data-print-page]) {
   display: grid;

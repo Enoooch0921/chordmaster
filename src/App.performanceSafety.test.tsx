@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
@@ -94,16 +94,51 @@ describe('on-stage offline and page-turner stability', () => {
 
   it('crosses song boundaries in both directions and returns to the previous song final page', async () => {
     await start();
+    await waitFor(() => expect(document.querySelector('[data-performance-entry="entry-1"][aria-hidden="true"]')).not.toBeNull());
+    const hiddenSheet = document.querySelector('[data-performance-entry="entry-1"][aria-hidden="true"]')!;
+    expect(hiddenSheet.querySelector('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"], [contenteditable="true"]')).toBeNull();
+    const before = sync.owned.mock.calls.length;
+    const positions = vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get');
     const total=Number(document.querySelector('[data-performance-pages]')!.getAttribute('data-performance-pages'));
     for(let i=1;i<total;i++)fireEvent.click(screen.getByRole('button',{name:'Next page'}));
     expect(page()).toBe(total);
     fireEvent.click(screen.getByRole('button',{name:'Next page'}));
-    await waitFor(()=>expect(document.querySelector('[data-performance-entry]:not([inert]) h1')).toHaveTextContent('Stage two'));
+    await waitFor(()=>expect(document.querySelector('[data-performance-entry]:not([aria-hidden="true"]) h1')).toHaveTextContent('Stage two'));
     expect(page()).toBe(1);
     fireEvent.click(screen.getByRole('button',{name:'Previous page'}));
-    await waitFor(()=>expect(document.querySelector('[data-performance-entry]:not([inert]) h1')).toHaveTextContent('Stage one'));
+    await waitFor(()=>expect(document.querySelector('[data-performance-entry]:not([aria-hidden="true"]) h1')).toHaveTextContent('Stage one'));
     expect(page()).toBe(total);
+    expect(sync.owned.mock.calls.length).toBe(before);
+    expect(positions).not.toHaveBeenCalled();
+    positions.mockRestore();
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    fireEvent.click(screen.getByRole('button', { name: '退出' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
+    await waitFor(() => expect(document.querySelector('[data-performance-entry]:not([aria-hidden="true"]) h1')).toHaveTextContent('Stage two'));
   },15000);
+  it('can change songs before adjacent charts have been prepared', async () => {
+    const idle = Object.getOwnPropertyDescriptor(window, 'requestIdleCallback');
+    const cancel = Object.getOwnPropertyDescriptor(window, 'cancelIdleCallback');
+    Object.defineProperty(window, 'requestIdleCallback', { configurable: true, value: () => 1 });
+    Object.defineProperty(window, 'cancelIdleCallback', { configurable: true, value: () => {} });
+    try {
+      await start();
+      expect(document.querySelectorAll('[data-performance-entry]')).toHaveLength(1);
+      const total = Number(document.querySelector('[data-performance-pages]')!.getAttribute('data-performance-pages'));
+      for (let i = 0; i < total; i++) fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+      await waitFor(() => expect(document.querySelector('[data-performance-entry]:not([aria-hidden="true"]) h1')).toHaveTextContent('Stage two'));
+      expect(page()).toBe(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
+      await waitFor(() => expect(document.querySelector('[data-performance-entry]:not([aria-hidden="true"]) h1')).toHaveTextContent('Stage one'));
+      expect(page()).toBe(total);
+    } finally {
+      cleanup();
+      if (idle) Object.defineProperty(window, 'requestIdleCallback', idle);
+      else Reflect.deleteProperty(window, 'requestIdleCallback');
+      if (cancel) Object.defineProperty(window, 'cancelIdleCallback', cancel);
+      else Reflect.deleteProperty(window, 'cancelIdleCallback');
+    }
+  }, 15000);
   it('keeps live updates and keyboard/manual turns through disconnect and reconnect', async () => {
     await start();
     expect((sync.owned.mock.calls.at(-1) as unknown as [{ paused: boolean }])[0].paused).toBe(false);

@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-07',
+        title: "Quicker song changes on stage",
+        bullets: [
+          "Reuse prepared chart layers and page positions when tapping, swiping or using a pedal to change songs.",
+          "Keep stage navigation local, then return the workspace to the current song when you exit."
+        ]
+      },
+      {
+        version: '0.12.19',
+        date: '2026-11-07',
         title: 'Faster song changes in Performance Mode',
         bullets: [
           'The setlist prepares the previous and next charts during idle time so they are ready when you change songs.',
@@ -1049,6 +1058,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: "減少全螢幕換歌延遲",
+        bullets: [
+          "換歌時直接使用已排好的譜面圖層與頁面位置，減少重新排版和樣式計算。",
+          "演出畫面自行管理翻頁與換歌，退出時回到剛才的歌曲。"
+        ]
+      },
+      {
+        version: '0.12.19',
         date: '2026-11-07',
         title: '全螢幕換歌加速',
         bullets: [

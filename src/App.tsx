@@ -8,7 +8,7 @@ import { searchItemsWithMatches } from './lib/songSearch';
 import { getSongLibraryMeta } from './lib/songLibraryPresentation';
 import SongTitle from './components/SongTitle';
 import PersonalChordSheet from './components/PersonalChordSheet';
-import PerformanceSetlistSheets from './components/PerformanceSetlistSheets';
+import PerformanceSetlistSheets, { type PerformanceSetlistHandle } from './components/PerformanceSetlistSheets';
 import SetlistPreviewSong from './components/SetlistPreviewSong';
 import { findPreviewAnchor, samePreviewAnchorRect } from './lib/previewAnchor';
 import { useHandwritingSelectionGuard } from './hooks/useHandwritingSelectionGuard';
@@ -65,7 +65,7 @@ import { usePerformanceFullscreen } from './hooks/usePerformanceFullscreen';
 import PerformanceFullscreenControl from './components/PerformanceFullscreenControl';
 import HomeScreenGuide from './components/HomeScreenGuide';
 import { useHomeScreenInstall } from './hooks/useHomeScreenInstall';
-import { getPerformanceLayout, getPerformancePageRange, getPerformanceSpreadStart, PERFORMANCE_PAGE_GAP } from './utils/performanceLayout';
+import { getPerformanceLayout, getPerformanceSpreadStart, PERFORMANCE_PAGE_GAP } from './utils/performanceLayout';
 import { CURRENT_CHORD_TIMING_VERSION, migrateChordTimingArrows } from './lib/chordTimingMigration';
 import LegacyDraftRecovery from './components/LegacyDraftRecovery';
 import MobileSidebarNavigation from './components/MobileSidebarNavigation';
@@ -1735,7 +1735,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   isPerformanceModeRef.current = isPerformanceMode;
   const [performanceTotalPages, setPerformanceTotalPages] = useState(1);
   const [performanceViewport, setPerformanceViewport] = useState({ width: viewportWidth, height: viewportHeight });
-  const performanceFullscreen = usePerformanceFullscreen(() => setIsPerformanceMode(false));
+  const performanceSetlistRef = useRef<PerformanceSetlistHandle>(null);
+  const syncPerformanceSelection = () => {
+    const selectedId = performanceSetlistRef.current?.selectedId();
+    if (selectedId) setSelectedSetlistSongId(selectedId);
+  };
+  const performanceFullscreen = usePerformanceFullscreen(() => {
+    syncPerformanceSelection();
+    setIsPerformanceMode(false);
+  });
   const homeScreenInstall = useHomeScreenInstall(Capacitor.isNativePlatform());
   const [isHomeScreenGuideOpen, setIsHomeScreenGuideOpen] = useState(false);
   const [activeReferenceKind, setActiveReferenceKind] = useState<SongReferenceKind | null>(null);
@@ -1963,7 +1971,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const performanceLyricsRef = useRef<LyricsReaderHandle>(null);
   const performanceSheetRef = useRef<HTMLDivElement>(null);
   const performanceTranslatorRef = useRef<HTMLDivElement>(null);
-  const performancePageRangeRef = useRef<HTMLSpanElement>(null);
   const performancePageIndexRef = useRef(0);
   const performancePageOffsetsRef = useRef<number[]>([]);
   const performanceNavigationHintRef = useRef<HTMLDivElement>(null);
@@ -2206,7 +2213,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   );
   const { columns: performanceColumns, scale: performanceScale } = performanceLayout;
   const performanceSpreadStart = getPerformanceSpreadStart(performancePageIndexRef.current, performanceTotalPages, performanceColumns);
-  const performancePageRange = getPerformancePageRange(performanceSpreadStart, performanceTotalPages, performanceColumns);
   const isStandaloneDisplay = homeScreenInstall.isStandalone;
   const homeScreenDevice = /iPad/i.test(previewEditorUserAgent)
     || (previewEditorPlatform === 'MacIntel' && previewEditorTouchPoints > 1) ? 'ipad' : 'iphone';
@@ -3005,7 +3011,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const activeReferenceCurrentKey = isSetlistMode ? currentSetlistKey : song.currentKey;
   const playableReferenceKinds = (['band', 'vocal'] as SongReferenceKind[])
     .filter((kind) => hasPlayableReference(activeReferenceSong?.references?.[kind]));
-  const shouldShowReferenceControls = isSheetView && Boolean(activeReferenceSong) && playableReferenceKinds.length > 0;
   const getReferenceKindLabel = (kind: SongReferenceKind) => (
     language === 'zh'
       ? kind === 'band' ? '樂團' : '歌手'
@@ -3016,15 +3021,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
   const renderReferenceButtons = (
     className: string,
-    options: { showLabels?: boolean; activeClassName?: string } = {}
+    options: { showLabels?: boolean; activeClassName?: string; song?: Song; onOpen?: (kind: SongReferenceKind) => void } = {}
   ) => {
-    if (!shouldShowReferenceControls) {
+    const kinds = options.song
+      ? (['band', 'vocal'] as SongReferenceKind[]).filter(kind => hasPlayableReference(options.song?.references?.[kind]))
+      : playableReferenceKinds;
+    if (!isSheetView || kinds.length === 0) {
       return null;
     }
 
     return (
       <>
-        {playableReferenceKinds.map((kind) => {
+        {kinds.map((kind) => {
           const isActive = activeReferenceKind === kind;
           const buttonClassName = isActive && options.activeClassName ? options.activeClassName : className;
 
@@ -3032,7 +3040,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             <button
               key={kind}
               type="button"
-              onClick={() => openReferencePlayer(kind)}
+              onClick={() => (options.onOpen ?? openReferencePlayer)(kind)}
               className={buttonClassName}
               title={`${getReferenceKindLabel(kind)} Reference`}
               aria-label={`${getReferenceKindLabel(kind)} Reference`}
@@ -7691,15 +7699,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       spread.dataset.performancePage = String(start + 1);
       spread.dataset.performancePages = String(total);
     }
-    if (performancePageRangeRef.current) {
-      performancePageRangeRef.current.textContent = getPerformancePageRange(start, total, performanceColumns);
-    }
   };
 
   // An unrelated workspace commit may have started before the latest pedal/tap.
   // Reapply the live page before paint so that commit cannot restore an old page.
   useLayoutEffect(() => {
-    if (isPerformanceMode && !isLyricsMode) applyPerformanceTranslation(performancePageIndexRef.current, performanceScale);
+    if (isPerformanceMode && !isLyricsMode && !isSetlistMode) applyPerformanceTranslation(performancePageIndexRef.current, performanceScale);
   });
 
   const focusPerformanceKeyboardCapture = usePerformanceKeyboardFocus(
@@ -7725,6 +7730,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   const handleExitPerformanceMode = () => {
+    syncPerformanceSelection();
     setIsPerformanceMode(false);
     performanceFullscreen.exitFullscreen(true);
   };
@@ -7732,6 +7738,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const handlePerformanceNextPage = () => {
     revealPerformanceChrome();
     if (isLyricsMode) { performanceLyricsRef.current?.next(); return; }
+    if (isSetlistMode) { performanceSetlistRef.current?.next(); return; }
     const current = getPerformanceSpreadStart(performancePageIndexRef.current, performanceTotalPages, performanceColumns);
     if (current + performanceColumns < performanceTotalPages) {
       const next = current + performanceColumns;
@@ -7739,35 +7746,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       applyPerformanceTranslation(next, performanceScale);
       return;
     }
-    if (isSetlistMode && !(isLyricsMode && isLyricsContinuous)) {
-      const items = setlistSongsWithSource.map(({ item }) => item);
-      const idx = items.findIndex((s) => s.id === selectedSetlistSongId);
-      const nextSong = items[idx + 1];
-      if (nextSong) {
-        performancePageIndexRef.current = 0;
-        setSelectedSetlistSongId(nextSong.id);
-      }
-    }
   };
 
   const handlePerformancePrevPage = () => {
     revealPerformanceChrome();
     if (isLyricsMode) { performanceLyricsRef.current?.previous(); return; }
+    if (isSetlistMode) { performanceSetlistRef.current?.previous(); return; }
     const current = getPerformanceSpreadStart(performancePageIndexRef.current, performanceTotalPages, performanceColumns);
     if (current > 0) {
       const prev = Math.max(0, current - performanceColumns);
       performancePageIndexRef.current = prev;
       applyPerformanceTranslation(prev, performanceScale);
       return;
-    }
-    if (isSetlistMode && !(isLyricsMode && isLyricsContinuous)) {
-      const items = setlistSongsWithSource.map(({ item }) => item);
-      const idx = items.findIndex((s) => s.id === selectedSetlistSongId);
-      const prevSong = items[idx - 1];
-      if (prevSong) {
-        performancePageIndexRef.current = Infinity;
-        setSelectedSetlistSongId(prevSong.id);
-      }
     }
   };
 
@@ -7829,7 +7819,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // Each row is one spread. Keep the same page visible when resizing/rotating,
   // and land on the final spread when returning to the previous song.
   useLayoutEffect(() => {
-    if (!isPerformanceMode || isLyricsMode) return;
+    if (!isPerformanceMode || isLyricsMode || isSetlistMode) return;
     let rAF = 0;
     const syncPages = () => {
       const container = performanceSheetRef.current;
@@ -7858,7 +7848,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     if (performanceSheetRef.current) mutations.observe(performanceSheetRef.current, { childList: true, subtree: true });
     return () => { observer.disconnect(); mutations.disconnect(); window.cancelAnimationFrame(rAF); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPerformanceMode, selectedSetlistSongId, selectedSongId, isLyricsMode, isLyricsContinuous, performanceColumns, performanceScale]);
+  }, [isPerformanceMode, selectedSetlistSongId, selectedSongId, isLyricsMode, isLyricsContinuous, isSetlistMode, performanceColumns, performanceScale]);
 
   // Keep refs to latest handlers so the keyboard effect never has stale closures.
   const handlePerformanceNextPageRef = useRef(handlePerformanceNextPage);
@@ -16080,6 +16070,17 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               selectedId={isSetlistMode ? selectedSetlistSongId : song.id} onSelectSong={isSetlistMode ? setSelectedSetlistSongId : setSelectedSongId}
               language={language} preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}/>
           </div> : (
+          isSetlistMode ? <PerformanceSetlistSheets ref={performanceSetlistRef} entries={setlistBasePreviewSongs}
+            selectedId={selectedSetlistSongId ?? ''} viewport={performanceViewport} isPhone={previewEditorIsPhoneDevice}
+            language={language} lastEditedAt={savedChartEditedAt} noteOwner={authenticatedUser?.id}
+            notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
+            onSongChange={id => { if (activeReferenceKind) setSelectedSetlistSongId(id); }}
+            renderReferences={(song, id) => renderReferenceButtons(
+              'inline-flex h-9 items-center gap-1.5 rounded-full bg-stone-900/70 px-3 text-xs font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-colors hover:bg-stone-900/85',
+              { song, showLabels: true,
+                activeClassName: 'inline-flex h-9 items-center gap-1.5 rounded-full bg-indigo-500 px-3 text-xs font-bold text-white shadow-sm ring-1 ring-indigo-300/40 transition-colors hover:bg-indigo-500',
+                onOpen: kind => { setSelectedSetlistSongId(id); openReferencePlayer(kind); } }
+            )} /> :
           <div data-performance-spread={performanceColumns} data-performance-page={performanceSpreadStart + 1} data-performance-pages={performanceTotalPages} style={{
             width: performanceLayout.width,
             height: performanceLayout.height,
@@ -16098,18 +16099,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               }}
             >
 	              <div data-print-preview className="performance-sheet" style={{ colorScheme: 'light', '--performance-columns': performanceColumns } as React.CSSProperties}>
-                {isSetlistMode ? (
-                  selectedSetlistSong && <PerformanceSetlistSheets entries={setlistBasePreviewSongs} selectedId={selectedSetlistSong.id}
-                    sheetRef={performanceSheetRef} language={language} lastEditedAt={savedChartEditedAt}
-                    noteOwner={authenticatedUser?.id} notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} />
-                ) : (
                   <div ref={performanceSheetRef}>
                     <RecoveryBoundary label="譜面預覽"><PersonalChordSheet song={song} currentKey={song.currentKey} language={language}
                       lastEditedAt={savedChartEditedAt(song.id)} previewIdentity={song.id}
                       noteOwner={authenticatedUser?.id} noteSongId={song.id} notesPerformance
                       notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} /></RecoveryBoundary>
                   </div>
-                )}
               </div>
             </div>
           </div>
@@ -16123,7 +16118,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           {/* Reference buttons — top left. Dark pills so they stay legible over the
               white sheet; indigo for the active one (never plain white). */}
           <div data-performance-chrome-item className="absolute left-4 top-4 z-10 flex items-center gap-2">
-            {renderReferenceButtons(
+            {(!isSetlistMode || isLyricsMode) && renderReferenceButtons(
               'inline-flex h-9 items-center gap-1.5 rounded-full bg-stone-900/70 px-3 text-xs font-bold text-stone-50 ring-1 ring-white/10 backdrop-blur-sm transition-colors hover:bg-stone-900/85',
               {
                 showLabels: true,
@@ -16166,21 +16161,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               {copy.exitPerformanceMode}
             </button>
           </div>
-
-	          {/* Setlist song indicator — bottom center, above safe-area. Page numbers
-	              stay on the sheet itself so the performance overlay does not compete
-	              with the prominent page badge. */}
-	          {!isLyricsMode && isSetlistMode && activeSetlistPreviewSong && (
-	            <div data-performance-chrome-item className="absolute left-1/2 -translate-x-1/2 pointer-events-none rounded-2xl bg-stone-900/70 px-3 py-1.5 ring-1 ring-white/10 backdrop-blur-sm" style={{ bottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
-	              <div className="max-w-[80vw] truncate text-center text-xs font-semibold text-stone-300">
-	                {isLyricsMode && isLyricsContinuous ? <>{selectedSetlist?.name ?? ''} · <span ref={performancePageRangeRef} data-performance-page-range>{performancePageRange}</span> / {performanceTotalPages}</> : <>
-                    {copy.performanceModeSongIndicator}{' '}
-                    {setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSongId) + 1}
-                    {' / '}{setlistSongsWithSource.length}{'  ·  '}{activeSetlistPreviewSong.title}
-                  </>}
-	              </div>
-	            </div>
-	          )}
 
           {!isLyricsMode && <>
           {/* Keep the two tap targets accessible while leaving the score unobstructed. */}
