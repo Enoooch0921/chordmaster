@@ -240,12 +240,16 @@ it('reuses untouched chart data when selecting another song, and stops backgroun
   expect(latest('entry-second').onAddBarClick).toBeTypeOf('function');
 
   fireEvent.click(screen.getByRole('button', { name: '演出模式' })); await settle();
+  const nextHeading = await waitFor(() => {
+    const heading = document.querySelector('[data-performance-entry="entry-third"][inert] h1');
+    expect(heading).toHaveTextContent('Song 3');
+    return heading;
+  });
   state.renders.length = 0;
   fireEvent.click(screen.getByRole('button', { name: 'Next page' })); await settle();
-  expect(document.querySelector('[data-performance-overlay] h1')).toHaveTextContent('Song 3');
-  // The stage renders; the background previews must stay unchanged.
-  expect(state.renders.length).toBeGreaterThan(0);
-  expect(state.renders.every(props => props.previewIdentity === 'entry-third' && !props.onElementClick)).toBe(true);
+  expect(document.querySelector('[data-performance-entry]:not([inert]) h1')).toBe(nextHeading);
+  expect(document.querySelector('[data-performance-entry="entry-first"]')).toBeNull();
+  expect(state.renders.every(props => !props.onElementClick)).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '退出' })); await settle();
   expect(latest('entry-third').onAddBarClick).toBeTypeOf('function');
   act(() => latest('entry-third').onAddBarClick?.(0));

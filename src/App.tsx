@@ -8,6 +8,7 @@ import { searchItemsWithMatches } from './lib/songSearch';
 import { getSongLibraryMeta } from './lib/songLibraryPresentation';
 import SongTitle from './components/SongTitle';
 import PersonalChordSheet from './components/PersonalChordSheet';
+import PerformanceSetlistSheets from './components/PerformanceSetlistSheets';
 import SetlistPreviewSong from './components/SetlistPreviewSong';
 import { findPreviewAnchor, samePreviewAnchorRect } from './lib/previewAnchor';
 import { useHandwritingSelectionGuard } from './hooks/useHandwritingSelectionGuard';
@@ -1965,7 +1966,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const performancePageRangeRef = useRef<HTMLSpanElement>(null);
   const performancePageIndexRef = useRef(0);
   const performancePageOffsetsRef = useRef<number[]>([]);
-  const performanceTouchFeedbackRef = useRef<HTMLDivElement>(null);
   const performanceNavigationHintRef = useRef<HTMLDivElement>(null);
   const dismissPerformanceNavigationHint = usePerformanceNavigationHint(isPerformanceMode && !isHandwriting, performanceNavigationHintRef);
   const performanceKeyGateRef = useRef(createPerformanceKeyGate());
@@ -4583,7 +4583,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // Known layout changes also measure before paint: a ResizeObserver RAF would
   // first paint the new pane with the old centering/scale, then jump back.
   React.useLayoutEffect(() => {
-    if (!isSheetView) return;
+    if (!isSheetView || isPerformanceMode) return;
     let frame: number | null = null;
     const updateScale = () => {
       if (!previewRef.current || previewPinchActiveRef.current) {
@@ -4628,10 +4628,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [isEditing, isSheetView, isLyricsWorkspace, sidebarShellWidth, shouldUseSplitEditor, splitEditorWidth, usesDenseDesktopHeader, usesTabletHeader]);
+  }, [isEditing, isSheetView, isPerformanceMode, isLyricsWorkspace, sidebarShellWidth, shouldUseSplitEditor, splitEditorWidth, usesDenseDesktopHeader, usesTabletHeader]);
 
   React.useLayoutEffect(() => {
-    if (!isSheetView) return;
+    if (!isSheetView || isPerformanceMode) return;
     let frame: number | null = null;
     const updateSheetMetrics = () => {
       if (!sheetRef.current) {
@@ -4666,7 +4666,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [isSheetView, isLyricsWorkspace]);
+  }, [isSheetView, isPerformanceMode, isLyricsWorkspace]);
 
   React.useEffect(() => () => {
     if (previewSuppressClickTimeoutRef.current !== null) {
@@ -7771,12 +7771,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
   };
 
-  const performanceSwipe = usePerformanceSwipe({
+  const cancelPerformanceSwipe = usePerformanceSwipe({
     enabled: isPerformanceMode && !isHandwriting,
     scope: `${isSetlistMode ? selectedSetlistSongId : song.id}:${isLyricsMode}:${isLyricsContinuous}:${performanceColumns}:${performanceScale}:${performanceTotalPages}`,
-    reduced: uiMotion.reduced,
     overlay: performanceOverlayRef,
-    feedback: performanceTouchFeedbackRef,
     onNext: handlePerformanceNextPage,
     onPrevious: handlePerformancePrevPage,
     onInteract: revealPerformanceChrome,
@@ -7865,8 +7863,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   // Keep refs to latest handlers so the keyboard effect never has stale closures.
   const handlePerformanceNextPageRef = useRef(handlePerformanceNextPage);
   const handlePerformancePrevPageRef = useRef(handlePerformancePrevPage);
-  handlePerformanceNextPageRef.current = () => { performanceSwipe.cancel(); handlePerformanceNextPage(); };
-  handlePerformancePrevPageRef.current = () => { performanceSwipe.cancel(); handlePerformancePrevPage(); };
+  handlePerformanceNextPageRef.current = () => { cancelPerformanceSwipe(); handlePerformanceNextPage(); };
+  handlePerformancePrevPageRef.current = () => { cancelPerformanceSwipe(); handlePerformancePrevPage(); };
 
   // Keyboard navigation in performance mode
   useEffect(() => {
@@ -10610,7 +10608,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               // frame: iOS WebKit mis-scales `outline` on transform:scale()'d
               // elements, which made this frame the wrong size in iPad landscape.
               // box-shadow scales correctly under the preview's transform.
-              isSelected ? 'ring-2 ring-indigo-300 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'ring-2 ring-transparent'
+              isInteractive ? 'ring-2 ring-indigo-300 shadow-[0_0_0_8px_rgba(199,210,254,0.22)]' : 'ring-2 ring-transparent'
             }`}
           >
             <RecoveryBoundary label="譜面預覽"><SetlistPreviewSong
@@ -12787,6 +12785,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       onRetry={() => { retryAuthentication?.(); setWorkspaceBootstrapAttempt(attempt => attempt + 1); }} retryLabel={language === 'zh' ? '重試' : 'Retry'} />}
     <div
       data-app-root
+      data-performing={isPerformanceMode || undefined}
       ref={appViewportRef}
       inert={isApplyingAppUpdate || isRestoringWorkspace || isSwitchingLibrary || globalHistory.busy || historyForwardBusy ? true : undefined}
       aria-hidden={isRestoringWorkspace || undefined}
@@ -12843,7 +12842,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           animate={{ opacity: isSidebarExpanded ? 1 : 0 }}
           transition={{ duration: sidebarMotionDuration, ease: UI_DRAWER_EASE }}
           data-sidebar-backdrop
-          inert={!isSidebarExpanded ? true : undefined}
+          inert={isPerformanceMode || !isSidebarExpanded ? true : undefined}
           aria-hidden={!isSidebarExpanded ? true : undefined}
           tabIndex={isSidebarExpanded ? 0 : -1}
           style={{ pointerEvents: isSidebarExpanded ? 'auto' : 'none' }}
@@ -12865,7 +12864,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       <aside
         data-sidebar
         data-sidebar-expanded={isSidebarExpanded}
-        inert={isPhoneViewport && !isMobileNavOpen ? true : undefined}
+        inert={isPerformanceMode || (isPhoneViewport && !isMobileNavOpen) ? true : undefined}
         aria-hidden={isPhoneViewport && !isMobileNavOpen ? true : undefined}
         className={isPhoneViewport
           ? 'absolute inset-y-0 left-0 z-50 overflow-hidden'
@@ -13273,7 +13272,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       </aside>
 
       {/* Main Content */}
-      <main data-main-panel className="flex min-w-0 flex-1 flex-col">
+      <main data-main-panel inert={isPerformanceMode || undefined} className="flex min-w-0 flex-1 flex-col">
         {(!isAuthenticated || authUiError || authUiMessage || isLoadingCloudWorkspace) && (
           <div className={`flex-shrink-0 border-b ${
             authUiError
@@ -16075,10 +16074,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             <PerformanceLyricsReader ref={performanceLyricsRef} entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}
               selectedId={isSetlistMode ? selectedSetlistSongId : song.id} onSelectSong={isSetlistMode ? setSelectedSetlistSongId : setSelectedSongId}
               language={language} preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}/>
-          </div> : <>
-          {/* The score stays still during gestures; only its page offset switches on a turn. */}
-          <div data-performance-swipe-surface>
-          {/* One full A4 page, or a pair on wide screens. */}
+          </div> : (
           <div data-performance-spread={performanceColumns} data-performance-page={performanceSpreadStart + 1} data-performance-pages={performanceTotalPages} style={{
             width: performanceLayout.width,
             height: performanceLayout.height,
@@ -16096,40 +16092,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 willChange: 'transform',
               }}
             >
-	              <div ref={performanceSheetRef} data-print-preview className="performance-sheet" style={{ colorScheme: 'light', '--performance-columns': performanceColumns } as React.CSSProperties}>
-	                {isSetlistMode ? (
-	                  activeSetlistPreviewSong && (
-	                    <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
-                          notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
-        noteOwner={authenticatedUser?.id} noteSongId={selectedSetlistSong?.songId} notesPerformance
-	                      song={activeSetlistPreviewSong}
-                          setlistSongNumber={setlistSongsWithSource.findIndex(({ item }) => item.id === selectedSetlistSong?.id) + 1}
-	                      lastEditedAt={savedChartEditedAt(selectedSetlistSong?.songId ?? '', selectedSetlist?.id, selectedSetlistSong?.id)}
-	                      language={language}
-	                      currentKey={activeSetlistPreviewSong.currentKey}
-	                      previewIdentity={selectedSetlistSong?.id ?? null}
-	                    /></RecoveryBoundary>
-	                  )
-	                ) : (
-	                  <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
-                        notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
-        noteOwner={authenticatedUser?.id} noteSongId={song.id} notesPerformance
-	                    song={song}
-	                    lastEditedAt={savedChartEditedAt(song.id)}
-	                    language={language}
-	                    currentKey={song.currentKey}
-	                    previewIdentity={song.id}
-	                  /></RecoveryBoundary>
-	                )}
+	              <div data-print-preview className="performance-sheet" style={{ colorScheme: 'light', '--performance-columns': performanceColumns } as React.CSSProperties}>
+                {isSetlistMode ? (
+                  selectedSetlistSong && <PerformanceSetlistSheets entries={setlistBasePreviewSongs} selectedId={selectedSetlistSong.id}
+                    sheetRef={performanceSheetRef} language={language} lastEditedAt={savedChartEditedAt}
+                    noteOwner={authenticatedUser?.id} notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} />
+                ) : (
+                  <div ref={performanceSheetRef}>
+                    <RecoveryBoundary label="譜面預覽"><PersonalChordSheet song={song} currentKey={song.currentKey} language={language}
+                      lastEditedAt={savedChartEditedAt(song.id)} previewIdentity={song.id}
+                      noteOwner={authenticatedUser?.id} noteSongId={song.id} notesPerformance
+                      notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} /></RecoveryBoundary>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-
-          </div>
-
-          </>}
-
-          <div ref={performanceTouchFeedbackRef} data-performance-touch-feedback className="performance-touch-feedback" aria-hidden="true" />
+          )}
 
           <div ref={performanceNavigationHintRef} data-performance-navigation-hint hidden className="performance-navigation-hint" role="note">
             <span>{language === 'zh' ? '左右滑動翻頁，也可輕點畫面左右兩側' : 'Swipe to turn pages, or tap the left or right half of the screen.'}</span>
@@ -16199,44 +16178,34 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 	          )}
 
           {!isLyricsMode && <>
-          {/* Left tap area — the button stays clickable at all times so page turning
-              is never blocked; only the arrow hint fades with the rest of the chrome. */}
+          {/* Keep the two tap targets accessible while leaving the score unobstructed. */}
           <button
             type="button"
-            onClick={(event) => {
-              performanceSwipe.tap(event.nativeEvent, 'previous');
+            onClick={() => {
+              cancelPerformanceSwipe();
               dismissPerformanceNavigationHint();
               handlePerformancePrevPage();
             }}
-            className={isHandwriting ? "absolute left-3 top-1/2 z-10 -translate-y-1/2 touch-manipulation" : "absolute bottom-0 left-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-start pl-3"}
+            className={isHandwriting ? "absolute left-3 top-1/2 z-10 h-11 w-11 -translate-y-1/2 touch-manipulation" : "absolute bottom-0 left-0 top-0 z-[1] w-1/2 touch-manipulation"}
             data-performance-turn-area="previous"
             title={language === 'zh' ? '上一頁：輕點左半邊，或向右滑動' : 'Previous page: tap the left half, or swipe right'}
             aria-label="Previous page"
             aria-keyshortcuts="ArrowLeft ArrowUp PageUp Shift+Space"
-          >
-            <span data-performance-chrome-item className="flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/55 text-stone-100 ring-1 ring-white/10 backdrop-blur-sm">
-              <ChevronLeft size={28} />
-            </span>
-          </button>
+          />
 
-          {/* Right tap area */}
           <button
             type="button"
-            onClick={(event) => {
-              performanceSwipe.tap(event.nativeEvent, 'next');
+            onClick={() => {
+              cancelPerformanceSwipe();
               dismissPerformanceNavigationHint();
               handlePerformanceNextPage();
             }}
-            className={isHandwriting ? "absolute right-3 top-1/2 z-10 -translate-y-1/2 touch-manipulation" : "absolute bottom-0 right-0 top-0 z-[1] flex w-1/2 touch-manipulation items-center justify-end pr-3"}
+            className={isHandwriting ? "absolute right-3 top-1/2 z-10 h-11 w-11 -translate-y-1/2 touch-manipulation" : "absolute bottom-0 right-0 top-0 z-[1] w-1/2 touch-manipulation"}
             data-performance-turn-area="next"
             title={language === 'zh' ? '下一頁：輕點右半邊，或向左滑動' : 'Next page: tap the right half, or swipe left'}
             aria-label="Next page"
             aria-keyshortcuts="ArrowRight ArrowDown PageDown Space Enter"
-          >
-            <span data-performance-chrome-item className="flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/55 text-stone-100 ring-1 ring-white/10 backdrop-blur-sm">
-              <ChevronRight size={28} />
-            </span>
-          </button>
+          />
           </>}
         </div>
       )}

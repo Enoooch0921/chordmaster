@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ComponentProps } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Eraser, Eye, EyeOff, Highlighter, LockKeyhole, Pencil, Redo2, Undo2 } from 'lucide-react';
 import ChordSheet from './ChordSheet';
@@ -12,13 +12,22 @@ const MemoChordSheet = memo(ChordSheet);
 type Props = ComponentProps<typeof ChordSheet> & { noteOwner?: string; noteSongId?: string; notesActive?: boolean; notesPerformance?: boolean; notesOpen?: boolean; onNotesOpenChange?: (open: boolean) => void };
 export default function PersonalChordSheet(props: Props) {
   const { noteOwner, noteSongId, notesActive, notesPerformance, notesOpen, onNotesOpenChange, ...sheetProps } = props;
-  if (!noteOwner || !noteSongId) return <ChordSheet {...sheetProps} />;
-  return <NotedSheet key={JSON.stringify([noteOwner, noteSongId])} {...sheetProps} noteOwner={noteOwner} noteSongId={noteSongId}
-    notesActive={notesActive} notesPerformance={notesPerformance} notesOpen={notesOpen} onNotesOpenChange={onNotesOpenChange} />;
-}
-function NotedSheet({ noteOwner, noteSongId, notesActive = true, notesPerformance = false, notesOpen, onNotesOpenChange, ...sheetProps }: Props & { noteOwner: string; noteSongId: string }) {
-  const { store, state } = usePersonalNotes(noteOwner, noteSongId);
   const root = useRef<HTMLDivElement>(null);
+  if (!noteOwner || !noteSongId) return <ChordSheet {...sheetProps} />;
+  return <>
+    <div ref={root} className="personal-notes-sheet" data-personal-notes-owner={noteOwner}>
+      <MemoChordSheet {...sheetProps} />
+    </div>
+    {(!notesPerformance || notesActive !== false) && <PersonalNotes key={JSON.stringify([noteOwner, noteSongId])}
+      root={root} noteOwner={noteOwner} noteSongId={noteSongId} language={sheetProps.language}
+      notesActive={notesActive} notesPerformance={notesPerformance} notesOpen={notesOpen} onNotesOpenChange={onNotesOpenChange} />}
+  </>;
+}
+function PersonalNotes({ root, noteOwner, noteSongId, notesActive = true, notesPerformance = false, notesOpen, onNotesOpenChange, language }:
+  Pick<Props, 'notesActive' | 'notesPerformance' | 'notesOpen' | 'onNotesOpenChange' | 'language'> & {
+    root: RefObject<HTMLDivElement | null>; noteOwner: string; noteSongId: string;
+  }) {
+  const { store, state } = usePersonalNotes(noteOwner, noteSongId);
   const [pages, setPages] = useState<HTMLElement[]>([]);
   const [localOpen, setLocalOpen] = useState(false);
   const open = notesOpen ?? localOpen;
@@ -31,7 +40,7 @@ function NotedSheet({ noteOwner, noteSongId, notesActive = true, notesPerformanc
   const [available, setAvailable] = useState(false);
   const [shapeEnabled, setShapeEnabled] = useState(true);
   const [shape, setShape] = useState<NoteShapeFeedback>(null);
-  const zh = sheetProps.language === 'zh';
+  const zh = language === 'zh';
   useLayoutEffect(() => {
     const container = root.current;
     if (!container) return;
@@ -50,7 +59,7 @@ function NotedSheet({ noteOwner, noteSongId, notesActive = true, notesPerformanc
     });
     observer.observe(container, { childList: true, subtree: true });
     return () => { observer.disconnect(); availability.disconnect(); };
-  }, []);
+  }, [root]);
   useLayoutEffect(() => { if (!notesActive && notesOpen === undefined) setLocalOpen(false); }, [notesActive, notesOpen]);
   useEffect(() => { if (open) setVisible(true); }, [open]);
   useEffect(() => {
@@ -71,8 +80,7 @@ function NotedSheet({ noteOwner, noteSongId, notesActive = true, notesPerformanc
     local: zh ? '已存此裝置' : 'Saved on this device', error: zh ? '儲存／同步失敗，點此重試' : 'Save/sync failed · retry' }[state.status];
   const button = (label: string, content: React.ReactNode, action: () => void, pressed?: boolean, disabled?: boolean) =>
     <button key={label} type="button" title={label} aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={action}>{content}</button>;
-  return <div ref={root} className="personal-notes-sheet" data-personal-notes-owner={noteOwner}>
-    <MemoChordSheet {...sheetProps} />
+  return <>
     {pages.map((page, index) => createPortal(<PersonalNotesPage page={page} pageIndex={index} strokes={state.strokes} drawing={drawing}
       visible={visible} performance={notesPerformance} tool={tool} color={color} width={width} onEdit={store.edit}
       shapeEnabled={shapeEnabled} onShape={setShape} />, page, String(index)))}
@@ -108,5 +116,5 @@ function NotedSheet({ noteOwner, noteSongId, notesActive = true, notesPerformanc
           : zh ? (shapeEnabled ? '畫完不抬筆，停住修形 · 手指滑動' : '用筆書寫 · 手指滑動／縮放') : (shapeEnabled ? 'Draw, then hold the pen down to tidy' : 'Use the pen to write · fingers to navigate')}</p>
       </>}
     </div>, document.body)}
-  </div>;
+  </>;
 }

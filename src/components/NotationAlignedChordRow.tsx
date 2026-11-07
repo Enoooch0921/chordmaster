@@ -65,7 +65,9 @@ export default function NotationAlignedChordRow({ anchors, spans, labels, contin
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     [row, ...contents].forEach(element => observer?.observe(element));
-    void document.fonts?.ready.then(measure);
+    // The synchronous pass already used loaded fonts. Only repeat it when
+    // pending fonts can still change the glyph metrics.
+    if (document.fonts?.status === 'loading') void document.fonts.ready.then(measure);
     window.addEventListener('beforeprint', measure);
     return () => { cancelled = true; observer?.disconnect(); window.removeEventListener('beforeprint', measure); };
   }, [anchors, spans, continuations, balanceSpacing, children]);

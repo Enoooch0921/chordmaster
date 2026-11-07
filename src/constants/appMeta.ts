@@ -86,15 +86,14 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-07',
-        title: '修復樂譜字型與簡化翻頁回饋',
+        title: 'Faster song changes in Performance Mode',
         bullets: [
-          '恢復原始簡譜字型並修正連音線字型格式，改善瀏覽器載入與 PDF 內嵌。',
-          '字型網址加入版本，避免已安裝或離線版本繼續使用損壞快取。',
-          '移除全螢幕翻頁的浮動圓圈箭頭，改用短暫邊緣淡光；譜面保持不動，保留連續翻頁與取消手勢。'
+          'The setlist prepares the previous and next charts during idle time so they are ready when you change songs.',
+          'Swipe, tap either half of the screen or use a pedal to turn the page. The side arrows and edge flash have been removed.'
         ]
       },
       {
-        version: '0.12.17',
+        version: '0.12.18',
         date: '2026-11-07',
         title: 'Repaired score fonts and quieter page turns',
         bullets: [
@@ -1050,6 +1049,25 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-07',
+        title: '全螢幕換歌加速',
+        bullets: [
+          '歌單會在空檔先排好前後相鄰的譜，縮短點按或滑動換歌時的停頓。',
+          '移除左右箭頭與翻頁時的邊緣淡光。可左右滑動、點按畫面兩側或使用踏板翻頁。'
+        ]
+      },
+      {
+        version: '0.12.18',
+        date: '2026-11-07',
+        title: '修復樂譜字型與簡化翻頁回饋',
+        bullets: [
+          '恢復原始簡譜字型並修正連音線字型格式，改善瀏覽器載入與 PDF 內嵌。',
+          '字型網址加入版本，避免已安裝或離線版本繼續使用損壞快取。',
+          '移除全螢幕翻頁的浮動圓圈箭頭，改用短暫邊緣淡光；譜面保持不動，保留連續翻頁與取消手勢。'
+        ]
+      },
+      {
+        version: '0.12.17',
         date: '2026-11-07',
         title: '更穩定的操作與新版歌詞閱讀',
         bullets: [
