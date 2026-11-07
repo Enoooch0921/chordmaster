@@ -44,7 +44,7 @@ export function usePerformanceSwipe(options: Options) {
       touch = null;
       if (selecting()) return;
       const target = event.target instanceof Element ? event.target : null;
-      if (!target || target.closest('[data-personal-notes-layer], [data-personal-notes-tools]')
+      if (!target || target.closest('[data-personal-notes-layer], [data-personal-notes-tools], [data-lyrics-navigation]')
         || (target.closest('button, a, input, textarea, select, [role="button"]') && !target.closest('[data-performance-turn-area]'))) return;
       latest.current.onInteract();
       const point = event.touches[0];

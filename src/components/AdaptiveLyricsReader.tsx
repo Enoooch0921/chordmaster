@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
+import { Check } from 'lucide-react';
 import type { AppLanguage, Song } from '../types';
 import type { LyricsBookSettings } from '../utils/lyricsBook';
 import { LYRICS_BOOK_FONT } from '../utils/lyricsBook';
@@ -7,6 +7,7 @@ import { getLyricsBlocks } from '../utils/lyricsDocument';
 import { paginateReadingColumns, readingColumnCandidates, readingPhrases, readingPhraseTail, prepareReadingSections, type ReadingAnchor, type ReadingPage, type ReadingSection, type MeasuredReadingSection } from '../utils/lyricsReading';
 import SongTitle from './SongTitle';
 import { useLyricsPageGestures } from '../hooks/useLyricsPageGestures';
+import LyricsSectionNavigation from './LyricsSectionNavigation';
 import './AdaptiveLyricsReader.css';
 
 export interface LyricsReaderHandle { next: () => boolean; previous: () => boolean }
@@ -43,17 +44,21 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
   const sections = React.useMemo(() => prepareReadingSections(getLyricsBlocks(song.lyricsDoc), settings.language), [song.lyricsDoc, settings.language]);
   const [layout, setLayout] = React.useState<Layout>({ pages: [], columns: 1, widths: [1], fontSize: settings.fontSize, sections, splits: 0, wraps: 0, imbalance: 0 });
   const [page, setPage] = React.useState(0);
+  const [selectedSection, setSelectedSection] = React.useState<string>();
   const canvas = React.useRef<HTMLDivElement>(null), measure = React.useRef<HTMLDivElement>(null);
   const position = React.useRef<{ identity: string; anchor?: ReadingAnchor | 'last' }>({ identity, anchor: initialAnchor });
   const latest = React.useRef({ onAnchorChange, onFontSize });
   latest.current = { onAnchorChange, onFontSize };
   const fontFamily = settings.font === 'kaiti' ? LYRICS_BOOK_FONT : 'Inter, -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif';
-  const remember = (next: Layout, index: number) => {
+  const remember = (next: Layout, index: number, preferred?: ReadingAnchor) => {
     const first = next.pages[index]?.flat()[0];
-    const section = first && next.sections[first.section];
-    if (section) {
-      const anchor = { blockId: section.id, line: first.start };
+    const retained = preferred && next.pages[index]?.flat().find(part => next.sections[part.section].id === preferred.blockId && part.start <= preferred.line && part.end > preferred.line);
+    const segment = retained ?? first;
+    const section = segment && next.sections[segment.section];
+    if (section && segment) {
+      const anchor = retained && preferred ? preferred : { blockId: section.id, line: segment.start };
       position.current = { identity, anchor };
+      setSelectedSection(section.id);
       latest.current.onAnchorChange?.(anchor);
     }
   };
@@ -120,7 +125,7 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
       const anchor = position.current.identity === identity ? position.current.anchor : initialAnchor;
       const next = anchor === 'last' ? best.pages.length - 1 : anchor ? best.pages.findIndex(p => p.some(col => col.some(segment => sections[segment.section].id === anchor.blockId && segment.start <= anchor.line && segment.end > anchor.line))) : 0;
       const index = Math.max(0, next);
-      setLayout(best); setPage(index); remember(best, index);
+      setLayout(best); setPage(index); remember(best, index, anchor === 'last' ? undefined : anchor);
       latest.current.onFontSize?.(best.fontSize);
     };
     const schedule = () => { if (!disposed) { cancelAnimationFrame(frame); frame = requestAnimationFrame(calculate); } };
@@ -133,8 +138,8 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
   }, [sections, settings.fontSize, settings.lineHeight, fontFamily, identity]);
 
   const active = Math.min(page, Math.max(0, layout.pages.length - 1));
-  const turn = (index: number) => {
-    setPage(index); remember(layout, index);
+  const turn = (index: number, anchor?: ReadingAnchor) => {
+    setPage(index); remember(layout, index, anchor);
     canvas.current?.querySelectorAll('.alr-column').forEach(node => { node.scrollTop = 0; });
   };
   const next = () => {
@@ -164,14 +169,10 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
         })}</div>)}
       </div>}
     </div>
-    <footer className="alr-footer">
-      <button type="button" onClick={previous} disabled={active === 0 && !onPreviousSong} aria-label={active === 0 ? (zh ? '上一首' : 'Previous song') : (zh ? '上一頁' : 'Previous page')}><ArrowLeft size={18}/><span>{active === 0 ? (zh ? '上一首' : 'Previous song') : (zh ? '上一頁' : 'Previous page')}</span></button>
-      <div className="alr-page-control"><select aria-label={zh ? '跳到歌詞段落' : 'Jump to lyrics section'} value="" disabled={!sections.length} onChange={event => {
-        const target = layout.pages.findIndex(p => p.some(col => col.some(segment => sections[segment.section].id === event.target.value))); if (target >= 0) turn(target);
-      }}><option value="" disabled>{zh ? '段落' : 'Section'}</option>{sections.map((section, i) => <option key={section.id} value={section.id}>{section.label || `${zh ? '段落' : 'Section'} ${i + 1}`}</option>)}</select>
-        <span role="status" aria-live="polite">{active + 1} / {Math.max(1, layout.pages.length)}</span></div>
-      <button type="button" className="alr-forward" onClick={next} disabled={active >= layout.pages.length - 1 && !onNextSong} aria-label={active < layout.pages.length - 1 ? (zh ? '下一頁' : 'Next page') : (zh ? '下一首' : 'Next song')}><span>{active < layout.pages.length - 1 ? (zh ? '下一頁' : 'Next page') : (zh ? '下一首' : 'Next song')}</span><ArrowRight size={18}/></button>
-    </footer>
+    <LyricsSectionNavigation sections={sections} selectedId={selectedSection} page={active + 1} pages={Math.max(1, layout.pages.length)} language={language} onSelect={id => {
+      const target = layout.pages.findIndex(p => p.some(col => col.some(segment => sections[segment.section].id === id)));
+      if (target >= 0) turn(target, { blockId: id, line: 0 });
+    }}/>
     <div className="alr-measure" ref={measure} aria-hidden="true" inert>{sections.map(section => <section className="alr-block" key={section.id}>{section.label && <h2>{section.label}</h2>}<Rows section={section}/></section>)}</div>
   </section>;
 });

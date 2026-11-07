@@ -57,9 +57,10 @@ it('cancels when a second finger arrives and never resumes from a leftover finge
   expect(t.onNext).not.toHaveBeenCalled();
 });
 
-it.each(['button', 'notes'])('does not own a gesture on %s controls', kind => {
+it.each(['button', 'notes', 'lyrics-navigation'])('does not own a gesture on %s controls', kind => {
   const t = setup(); const target = kind === 'button' ? t.control : document.createElement('div');
   if (kind === 'notes') { (target as HTMLElement).dataset.personalNotesLayer = ''; t.overlay.append(target); }
+  if (kind === 'lyrics-navigation') { (target as HTMLElement).dataset.lyricsNavigation = ''; t.overlay.append(target); }
   t.start(target); t.move(100); t.end(100);
   expect(t.onNext).not.toHaveBeenCalled();
 });

@@ -30,7 +30,6 @@ export function useLyricsPageGestures(options: {
     };
     const click = (event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.detail === 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (!window.matchMedia('(max-width: 1023px), (any-pointer: coarse)').matches) return;
       if ((event.target as Element).closest(CONTROL) || selectedAtStart || window.getSelection()?.isCollapsed === false) return;
       if (started && performance.now() - started > 500) return;
       const bounds = canvas.getBoundingClientRect();

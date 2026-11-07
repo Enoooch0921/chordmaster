@@ -21,16 +21,21 @@
 .alr-line[data-lyrics-language="english"] { letter-spacing: 0; font-weight: 400; }
 .alr-pair { display: grid; gap: 0 24px; }
 @container lyrics-column (min-width: 540px) { .alr-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.alr-footer { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; min-height: 50px; margin-top: 12px; border-top: 1px solid var(--color-border); font-size: 12px; background: var(--color-surface); }
-.alr-footer button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; min-height: 44px; min-width: 88px; border-radius: 6px; }
-[data-performance-lyrics] .alr-footer > button > svg { display: none; }
-.alr-footer button:disabled { opacity: .4; cursor: default; }
-.alr-footer button:not(:disabled):hover { background: var(--color-surface-muted); }
-.alr-forward:not(:disabled) { background: var(--color-indigo-50); color: var(--color-indigo-800); }
-.dark .alr-forward:not(:disabled) { background: var(--color-indigo-900); color: var(--color-indigo-100); }
-.alr-page-control { display: flex; align-items: center; gap: 12px; }
-.alr-page-control > span { font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.alr-page-control select { border: 0; font-size: 12px; width: 66px; height: 44px; min-height: 44px; padding: 0 4px; background: transparent; color: var(--color-text-muted); }
+.alr-footer { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; margin-top: 12px; padding: 8px 0 calc(16px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--color-border); background: var(--color-surface); }
+/* The performance overlay already insets its content by the device safe area. */
+[data-performance-lyrics] .alr-footer { padding-bottom: 16px; }
+.alr-section-scroll { min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
+.alr-section-tabs { position: relative; display: flex; align-items: center; gap: 6px; width: max-content; }
+.alr-section-button { position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 44px; min-height: 44px; max-width: 192px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+.alr-section-button > span { overflow: hidden; text-overflow: ellipsis; }
+.alr-section-button[aria-pressed="true"] { background: var(--color-indigo-100); border-color: var(--color-indigo-300); color: var(--color-indigo-800); }
+.alr-section-tabs > .ui-measured-selection { border-radius: 8px; border: 1px solid var(--color-indigo-300); background: var(--color-indigo-100); }
+.alr-section-tabs[data-selection-ready="true"] > .ui-measured-selection { display: block; }
+.alr-section-tabs[data-selection-ready="true"] > .alr-section-button[aria-pressed="true"] { background: transparent; border-color: transparent; }
+.dark .alr-section-button[aria-pressed="true"] { color: var(--color-indigo-100); background: var(--color-indigo-900); border-color: var(--color-indigo-700); }
+.dark .alr-section-tabs > .ui-measured-selection { background: var(--color-indigo-900); border-color: var(--color-indigo-700); }
+.alr-page-count { flex-shrink: 0; margin-left: auto; font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) { .alr-section-button:not([aria-pressed="true"]):hover { background: var(--color-surface-muted); } }
 .adaptive-lyrics-reader :focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: -2px; }
 .adaptive-lyrics-reader ::selection { background: var(--color-indigo-200); color: var(--color-indigo-950); }
 .alr-empty { padding-top: 24px; line-height: 1.6; color: var(--color-text-muted); }
@@ -40,8 +45,5 @@
   .alr-heading { padding: 8px 0; margin-bottom: 12px; gap: 8px; }
   .alr-heading h1, .alr-heading select { font-size: 19px; }
   .alr-footer { margin-top: 8px; }
-  .alr-footer button { padding-inline: 8px; min-width: 76px; gap: 4px; }
-  .alr-page-control { gap: 6px; }
-  .alr-page-control select { width: 56px; }
   .alr-page-note { display: none; }
 }

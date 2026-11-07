@@ -61,7 +61,7 @@ it('opens locked reading, navigates songs, and retains both A4 layouts independe
   expect(document.querySelector('.alr-heading')).toBeNull();
   expect(document.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-song', 'entry-one');
   expect(document.querySelector('.alr-canvas button')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '下一首' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '目前歌曲' }), { target: { value: 'entry-two' } });
   expect(screen.getByRole('combobox', { name: '目前歌曲' })).toHaveValue('entry-two');
   fireEvent.click(screen.getByRole('button', { name: '閱讀設定' }));
   fireEvent.click(screen.getByRole('button', { name: '放大歌詞' }));
@@ -134,17 +134,17 @@ it('turns lyrics once per pedal press and retains the page on an App refresh', a
   expect(reader()).toHaveAttribute('data-reading-page', '2');
 });
 
-it('preserves native section-picker keys in performance', async () => {
+it('preserves native section-button activation in performance', async () => {
   await mountLyrics();
   fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
   const overlay = document.querySelector('[data-performance-overlay]')!;
-  const select = overlay.querySelector('select')!;
-  select.focus();
-  const event = new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true, cancelable: true });
-  act(() => select.dispatchEvent(event));
+  const section = overlay.querySelector<HTMLButtonElement>('[data-lyrics-section-target]')!;
+  section.focus();
+  const event = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true });
+  act(() => section.dispatchEvent(event));
   expect(event.defaultPrevented).toBe(false);
   expect(overlay.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-song', 'entry-one');
-  expect(select).toHaveFocus();
+  expect(section).toHaveFocus();
 });
 
 it('retains the single-song reading anchor across its original A4 print view', async () => {
@@ -157,7 +157,7 @@ it('retains the single-song reading anchor across its original A4 print view', a
   await screen.findAllByRole('button', { name: '歌詞模式' });
   fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
   await waitFor(() => expect(document.querySelector('.adaptive-lyrics-reader')).not.toBeNull());
-  fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+  fireEvent.keyDown(screen.getByLabelText('當頁歌詞'), { key: 'ArrowRight' });
   const firstLine = document.querySelector('.alr-columns [data-source-line]')!.getAttribute('data-source-line');
   fireEvent.click(screen.getByRole('button', { name: '列印排版' }));
   expect(document.querySelector('.adaptive-lyrics-reader')).toBeNull();

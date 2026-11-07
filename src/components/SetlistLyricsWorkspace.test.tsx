@@ -29,7 +29,7 @@ describe('setlist lyrics reading workspace', () => {
       { id: 'v', marker: 'Verse 1', chinese: '中文主歌', english: '' },
       { id: 'c', marker: 'Chorus', chinese: '', english: 'Sung chorus', singingLanguage: 'english' },
     ] } } }]}/>);
-    fireEvent.change(screen.getByRole('combobox', { name: '跳到歌詞段落' }), { target: { value: 'c' } });
+    fireEvent.click(screen.getByRole('button', { name: '跳到 Chorus' }));
     expect(screen.getByRole('heading', { name: 'Chorus' })).toBeInTheDocument();
     expect(container.querySelector('[data-reading-section="c"]')).toHaveTextContent('Sung chorus');
   });
@@ -55,7 +55,7 @@ describe('setlist lyrics reading workspace', () => {
     expect(dialog.parentElement).toBe(document.body);
     expect(screen.queryByRole('button', { name: '列印排版' })).toBeNull();
     expect(screen.queryByRole('button', { name: '編輯' })).toBeNull();
-    expect(within(dialog).getByRole('button', { name: '下一首' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: '跳到 Verse 1' })).toBeEnabled();
     expect(document.querySelector('[data-reading-song]')).toHaveAttribute('data-reading-song', 'first-entry');
     expect(document.body.style.overflow).toBe('hidden');
     fireEvent.keyDown(screen.getByRole('button', { name: '離開專注閱讀' }), { key: 'Escape' });
@@ -69,7 +69,7 @@ describe('setlist lyrics reading workspace', () => {
     render(<Harness onSongChange={onSongChange}/>);
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.queryByRole('button', { name: '同一首歌 · Verse 1 · 中文' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '下一首' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '目前歌曲' }), { target: { value: 'repeat-entry' } });
     expect(screen.getByRole('combobox', { name: '目前歌曲' })).toHaveValue('repeat-entry');
     fireEvent.click(screen.getByRole('button', { name: '編輯' }));
     expect(screen.queryByRole('button', { name: '切換 A4 排版' })).toBeNull();
@@ -104,7 +104,7 @@ describe('setlist lyrics reading workspace', () => {
   it('keeps the selected source section through focus, print and font reflow', () => {
     const blocks = ['Verse 1', 'Chorus', 'Bridge'].map((marker, i) => ({ id: `section-${i}`, marker, chinese: Array.from({ length: 7 }, (_, n) => `${marker} 第${n}行`).join('\n'), english: '' }));
     const { container } = render(<Harness items={[{ id: 'first-entry', song: { ...song, lyricsDoc: { chinese: '', blocks } } }]}/>);
-    fireEvent.change(screen.getByRole('combobox', { name: '跳到歌詞段落' }), { target: { value: 'section-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '跳到 Chorus' }));
     expect(container.querySelector('[data-reading-section="section-1"]')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '專注閱讀' }));
     expect(document.querySelector('[data-reading-section="section-1"]')).not.toBeNull();

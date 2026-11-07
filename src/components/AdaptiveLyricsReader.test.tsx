@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import AdaptiveLyricsReader from './AdaptiveLyricsReader';
+import AdaptiveLyricsReader, { type LyricsReaderHandle } from './AdaptiveLyricsReader';
 import PerformanceLyricsReader from './PerformanceLyricsReader';
 import { DEFAULT_LYRICS_READING_SETTINGS } from '../hooks/useLyricsReadingPreferences';
 import { mockLyricsReadingGeometry } from '../test/lyricsReadingGeometry';
@@ -10,10 +10,41 @@ const song: Song = { title: '長歌', originalKey: 'C', currentKey: 'C', timeSig
 let geometry: ReturnType<typeof mockLyricsReadingGeometry>;
 beforeEach(() => { localStorage.clear(); geometry = mockLyricsReadingGeometry(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('jumps to a section with one press, selects it on the same page and keeps its anchor through reflow', async () => {
+  const lyrics = { ...song, lyricsDoc: { chinese: '', blocks: [
+    { id: 'v1', marker: 'Verse 1', chinese: '主歌第一段', english: '' },
+    { id: 'v2', marker: 'Verse 2', chinese: '主歌第二段', english: '' },
+    { id: 'c', marker: 'Chorus', chinese: '副歌第一句\n副歌第二句', english: '', pageBreakBefore: true },
+  ] } };
+  const anchors = vi.fn();
+  const props = { song: lyrics, identity: 'sections', language: 'zh' as const, settings: DEFAULT_LYRICS_READING_SETTINGS, onAnchorChange: anchors };
+  const { container, rerender } = render(<AdaptiveLyricsReader {...props}/>);
+  expect(screen.queryByRole('button', { name: '下一頁' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '上一頁' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: '跳到歌詞段落' })).toBeNull();
+  expect(screen.getByRole('button', { name: '跳到 Verse 1' })).toHaveTextContent('V1');
+  expect(screen.getByRole('button', { name: '跳到 Verse 2' })).toHaveTextContent('V2');
+  fireEvent.click(screen.getByRole('button', { name: '跳到 Verse 2' }));
+  expect(screen.getByRole('button', { name: '跳到 Verse 2' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '跳到 Verse 1' })).toHaveAttribute('aria-pressed', 'false');
+  expect(anchors).toHaveBeenLastCalledWith({ blockId: 'v2', line: 0 });
+  expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '1');
+  rerender(<AdaptiveLyricsReader {...props} settings={{ ...props.settings, fontSize: 28 }}/>);
+  act(() => geometry.resize(1000, 600));
+  await waitFor(() => expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-column-count', '2'));
+  expect(screen.getByRole('button', { name: '跳到 Verse 2' })).toHaveAttribute('aria-pressed', 'true');
+  expect(anchors).toHaveBeenLastCalledWith({ blockId: 'v2', line: 0 });
+  fireEvent.click(screen.getByRole('button', { name: '跳到 Chorus' }));
+  expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '2');
+  expect(container.querySelector('.alr-columns')).toHaveTextContent('副歌第一句');
+  expect(screen.getByRole('button', { name: '跳到 Chorus' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.keyDown(screen.getByLabelText('當頁歌詞'), { key: 'ArrowLeft' });
+  expect(screen.getByRole('button', { name: '跳到 Verse 1' })).toHaveAttribute('aria-pressed', 'true');
+});
 it('preserves a source-line anchor through font changes and a tablet rotation', async () => {
   const props = { song, identity: 'entry', language: 'zh' as const, settings: DEFAULT_LYRICS_READING_SETTINGS };
   const { container, rerender } = render(<AdaptiveLyricsReader {...props}/>);
-  fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+  fireEvent.keyDown(screen.getByLabelText('當頁歌詞'), { key: 'ArrowRight' });
   const id = container.querySelector('.alr-columns [data-source-line]')!.getAttribute('data-source-line');
   rerender(<AdaptiveLyricsReader {...props} settings={{ ...props.settings, fontSize: 28 }}/>);
   expect(container.querySelector(`.alr-columns [data-source-line="${id}"]`)).not.toBeNull();
@@ -24,7 +55,6 @@ it('preserves a source-line anchor through font changes and a tablet rotation', 
 });
 
 it('turns by touch swipe and half-screen taps without turning on scroll, pinch, selection or controls', () => {
-  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
   const { container } = render(<AdaptiveLyricsReader song={song} identity="touch" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
   const reader = container.querySelector('.adaptive-lyrics-reader')!;
   const canvas = container.querySelector<HTMLElement>('.alr-canvas')!;
@@ -58,7 +88,7 @@ it('turns by touch swipe and half-screen taps without turning on scroll, pinch, 
   fireEvent.click(canvas, { clientX: 300, detail: 1 });
   expect(reader).toHaveAttribute('data-reading-page', '1');
   selection.removeAllRanges();
-  fireEvent.click(screen.getByRole('combobox', { name: '跳到歌詞段落' }), { detail: 1 });
+  fireEvent.click(screen.getByRole('button', { name: '跳到 Verse 1' }), { detail: 1 });
   expect(reader).toHaveAttribute('data-reading-page', '1');
   fireEvent.pointerDown(canvas);
   fireEvent.click(canvas, { clientX: 300, detail: 1 });
@@ -72,28 +102,29 @@ it('uses leftover space only when splitting a section reduces the number of page
   const { container } = render(<AdaptiveLyricsReader song={lyrics} identity="packed" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
   expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-page-count', '2');
   expect(container.querySelectorAll('.alr-columns .alr-block')).toHaveLength(2);
-  fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+  fireEvent.keyDown(screen.getByLabelText('當頁歌詞'), { key: 'ArrowRight' });
   expect(container.querySelector('.alr-columns')).toHaveTextContent('Chorus(cont.)');
 });
 it('safely replaces a long song with a shorter song, even before measurement', () => {
   const { container, rerender } = render(<AdaptiveLyricsReader song={song} identity="long" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
-  fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+  fireEvent.keyDown(screen.getByLabelText('當頁歌詞'), { key: 'ArrowRight' });
   rerender(<AdaptiveLyricsReader song={{ ...song, title: '短歌', lyricsDoc: { chinese: '[Chorus]\n短歌詞' } }} identity="short" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}/>);
   expect(container.querySelector('.alr-columns')).toHaveTextContent('短歌詞');
   expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '1');
 });
 it('opens the previous song on its last page and uses entry identity for repeated songs', () => {
   const entries = [{ id: 'first', song }, { id: 'repeat', song }];
+  const handle = React.createRef<LyricsReaderHandle>();
   function Harness() {
     const [id, setId] = React.useState('repeat');
-    return <PerformanceLyricsReader entries={entries} selectedId={id} onSelectSong={setId} language="zh" preferenceKey="test"/>;
+    return <PerformanceLyricsReader ref={handle} entries={entries} selectedId={id} onSelectSong={setId} language="zh" preferenceKey="test"/>;
   }
   const { container } = render(<Harness/>);
-  fireEvent.click(screen.getByRole('button', { name: '上一首' }));
+  act(() => { handle.current!.previous(); });
   const reader = container.querySelector('.adaptive-lyrics-reader')!;
   expect(reader).toHaveAttribute('data-reading-song', 'first');
   expect(reader.getAttribute('data-reading-page')).toBe(reader.getAttribute('data-page-count'));
-  fireEvent.click(screen.getByRole('button', { name: '下一首' }));
+  act(() => { handle.current!.next(); });
   expect(reader.isConnected).toBe(false);
   expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-song', 'repeat');
   expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page', '1');
@@ -140,7 +171,7 @@ it('keeps every song, page and viewport at the same requested size until the use
   const { container, rerender } = render(<AdaptiveLyricsReader {...props}/>);
   const size = () => container.querySelector('.adaptive-lyrics-reader')!.getAttribute('data-font-size');
   expect(size()).toBe('30');
-  fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
+  fireEvent.keyDown(screen.getByLabelText('當頁歌詞'), { key: 'ArrowRight' });
   expect(size()).toBe('30');
   act(() => geometry.resize(1200, 700));
   await waitFor(() => expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-column-count', '3'));
