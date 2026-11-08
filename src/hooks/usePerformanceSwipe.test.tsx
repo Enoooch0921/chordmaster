@@ -8,12 +8,12 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); document.body.replaceChildren(); });
 const point = (x: number, y = 200, identifier = 1) => ({ identifier, clientX: x, clientY: y });
-function setup() {
+function setup(lyricHandwriting = false) {
   const overlay = document.createElement('div');
   const turn = document.createElement('button'), control = document.createElement('button');
   turn.dataset.performanceTurnArea = 'next'; overlay.append(turn, control); document.body.append(overlay);
   const onNext = vi.fn(), onPrevious = vi.fn(), onLearned = vi.fn(), onInteract = vi.fn();
-  const base = { overlay: { current: overlay }, onNext, onPrevious, onLearned, onInteract };
+  const base = { overlay: { current: overlay }, lyricHandwriting, onNext, onPrevious, onLearned, onInteract };
   const hook = renderHook(({ enabled, scope }) => usePerformanceSwipe({ ...base, enabled, scope }), {
     initialProps: { enabled: true, scope: 'song-a' },
   });
@@ -145,4 +145,23 @@ it('hides the guide while handwriting disables swiping and restores only an unle
   hook.rerender({ enabled: true }); expect(hint.hidden).toBe(false);
   act(() => hook.result.current());
   hook.rerender({ enabled: false }); hook.rerender({ enabled: true }); expect(hint.hidden).toBe(true);
+});
+
+it('turns lyrics with a finger over ink and ignores the stylus and palm across columns', () => {
+  const t = setup(true);
+  const column = document.createElement('div'), ink = document.createElement('div');
+  column.dataset.lyricsNotePage = ''; ink.dataset.personalNotesLayer = '';
+  column.append(ink); t.overlay.append(column);
+  vi.spyOn(t.overlay, 'getBoundingClientRect').mockReturnValue({ width: 600, left: 0 } as DOMRect);
+  const gesture = (from: number, to: number, touchType = 'direct') => {
+    fireEvent.touchStart(ink, { touches: [{ ...point(from), touchType }] });
+    if (from !== to) fireEvent.touchMove(ink, { touches: [point(to)] });
+    fireEvent.touchEnd(ink, { touches: [], changedTouches: [point(to)] });
+  };
+  gesture(450, 450); gesture(100, 100); gesture(450, 200);
+  expect(t.onNext).toHaveBeenCalledTimes(2); expect(t.onPrevious).toHaveBeenCalledTimes(1);
+  gesture(450, 450, 'stylus');
+  const other = document.createElement('div'); other.dataset.penContact = 'true'; t.overlay.append(other);
+  gesture(450, 200);
+  expect(t.onNext).toHaveBeenCalledTimes(2); expect(t.onPrevious).toHaveBeenCalledTimes(1);
 });

@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Pencil, Check, Download, Maximize2, Minimize2, Printer } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Pencil, PenLine, Check, Download, Maximize2, Minimize2, Printer } from 'lucide-react';
 import type { AppLanguage, Song } from '../types';
 import LyricsBook, { type LyricsBookEntry } from './LyricsBook';
 import LyricsSheet from './LyricsSheet';
@@ -9,6 +9,7 @@ import { useLyricsReadingPreferences } from '../hooks/useLyricsReadingPreference
 import { useModalFocus } from '../hooks/useModalFocus';
 import { useModalScrollLock } from '../hooks/useModalScrollLock';
 import { getLyricsBlocks, mainLyricsLabel } from '../utils/lyricsDocument';
+import type { PersonalNotesOptions } from './PersonalNotes';
 import AdaptiveLyricsReader from './AdaptiveLyricsReader';
 import SongTitle from './SongTitle';
 import type { ReadingAnchor } from '../utils/lyricsReading';
@@ -17,7 +18,7 @@ import { AnimatedDisclosure } from './ui/InteractionMotion';
 import './SetlistLyricsWorkspace.css';
 
 export type SetlistLyricsMode = 'reading' | 'print' | 'edit';
-interface Props {
+interface Props extends PersonalNotesOptions {
   title: string;
   entries: LyricsBookEntry[];
   language: AppLanguage;
@@ -29,12 +30,13 @@ interface Props {
   onPrintSettingsChange: (settings: LyricsBookSettings) => void;
   onSongChange?: (id: string, lyrics: Song['lyricsDoc']) => void;
   onExport?: () => void;
+  phoneHandwritingButton?: boolean;
   preferenceKey?: string;
   readingPositions?: Map<string, ReadingAnchor | 'last'>;
 }
 const PAPER_WIDTH = 794;
 
-export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, preferenceKey = 'local', readingPositions }: Props) {
+export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
   const zh = language === 'zh';
   const [readingSettings, setReadingSettings] = useLyricsReadingPreferences(preferenceKey);
   const [focused, setFocused] = React.useState(false);
@@ -110,6 +112,8 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
           ? <select aria-label={zh ? '目前歌曲' : 'Current song'} value={current.id} onChange={event => selectSong(event.target.value)}>{entries.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.song.title}</option>)}</select>
           : <h1><SongTitle title={current.song.title}/></h1>}</div>}
         {mode !== 'reading' && <strong className="slw-title" title={title}>{title || (zh ? '歌單歌詞' : 'Setlist lyrics')}</strong>}
+        {mode === 'reading' && (isFocused || phoneHandwritingButton) && notes.noteOwner && current && <button type="button" className="slw-icon" aria-label={zh ? '手寫筆記' : 'Handwriting'}
+          title={zh ? '手寫筆記' : 'Handwriting'} aria-pressed={notes.notesOpen ?? false} onClick={() => notes.onNotesOpenChange?.(!notes.notesOpen)}><PenLine size={20}/></button>}
         {isFocused ? <button type="button" className="slw-focus-exit" aria-label={zh ? '離開專注閱讀' : 'Exit focused reading'} onClick={() => changeFocus(false)}><Minimize2 size={20} aria-hidden="true"/><span>{zh ? '離開專注' : 'Exit focus'}</span></button> : mode === 'edit' ? <button type="button" className="slw-done" onClick={() => changeMode('reading')}><Check size={18} aria-hidden="true"/>{zh ? '完成編輯' : 'Done editing'}</button> : <>
           {mode === 'reading' ? <button type="button" className="slw-print-mode" aria-label={zh ? '列印排版' : 'Print layout'} title={zh ? '列印排版' : 'Print layout'} onClick={() => changeMode('print')}><Printer size={18} aria-hidden="true"/><span>{zh ? '列印' : 'Print'}</span></button> : <div className="slw-modes ui-segmented-control" role="group" aria-label={zh ? '歌詞用途' : 'Lyrics view'}>
             <MeasuredSlidingSelection value={mode} layoutKey={language} />
@@ -140,7 +144,7 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
       </div></AnimatedDisclosure>
     </header>
     <div ref={scrollRef} className={`slw-scroll slw-scroll-${mode}`} tabIndex={0} aria-label={zh ? (mode === 'print' ? 'A4 歌詞預覽' : '歌詞內容') : (mode === 'print' ? 'A4 lyrics preview' : 'Lyrics content')}>
-      {!entries.length ? <div className="slw-empty"><h2>{zh ? '歌單還沒有歌曲' : 'No songs in this setlist'}</h2><p>{zh ? '從歌單加入歌曲後，就能在這裡閱讀歌詞。' : 'Add songs to the setlist to read their lyrics here.'}</p></div> : mode === 'reading' ? <AdaptiveLyricsReader key={current.id} identity={current.id} song={current.song} language={language} settings={readingSettings} hideHeading
+      {!entries.length ? <div className="slw-empty"><h2>{zh ? '歌單還沒有歌曲' : 'No songs in this setlist'}</h2><p>{zh ? '從歌單加入歌曲後，就能在這裡閱讀歌詞。' : 'Add songs to the setlist to read their lyrics here.'}</p></div> : mode === 'reading' ? <AdaptiveLyricsReader {...notes} noteSongId={current.sourceSongId ?? current.id} key={current.id} identity={current.id} song={current.song} language={language} settings={readingSettings} hideHeading
         initialAnchor={anchors.get(current.id)} onAnchorChange={anchor => anchors.set(current.id, anchor)}
         onNextSong={currentIndex < entries.length - 1 ? () => selectSong(entries[currentIndex + 1].id) : undefined}
         onPreviousSong={currentIndex > 0 ? () => selectSong(entries[currentIndex - 1].id, true) : undefined}/>

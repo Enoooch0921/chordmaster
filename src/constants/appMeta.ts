@@ -85,6 +85,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-08',
+        title: 'Apple Pencil in lyrics mode',
+        bullets: [
+          'Write private notes in the lyrics reader, focused reading and performance mode.',
+          'Handwriting scales around its character. Horizontal underlines and highlights follow the words when they wrap.'
+        ]
+      },
+      {
+        version: '0.12.29',
         date: '2026-11-07',
         title: 'Faster first visits to prepared charts',
         bullets: [
@@ -1103,6 +1112,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-08',
+        title: '歌詞模式支援 Apple Pencil',
+        bullets: [
+          '在歌詞閱讀、專注閱讀和全螢幕演出中加入個人手寫筆記。',
+          '旋轉平板或調整字級時，筆跡跟著落筆處的字縮放。跨字的水平底線與螢光標記會隨歌詞折行。'
+        ]
+      },
+      {
+        version: '0.12.29',
         date: '2026-11-07',
         title: '改善第一次翻到下一首歌的延遲',
         bullets: [

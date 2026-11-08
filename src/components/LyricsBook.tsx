@@ -13,7 +13,7 @@ import { InlineLyrics } from './LyricsSheet';
 import { pairLyricsLines, replaceLyricsLine } from '../utils/lyricsPairing';
 import PairedLyrics from './PairedLyrics';
 
-export interface LyricsBookEntry { id: string; song: Song }
+export interface LyricsBookEntry { id: string; sourceSongId?: string; song: Song }
 interface BookBlock {
   id: string;
   entry: LyricsBookEntry;

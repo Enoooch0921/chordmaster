@@ -1,5 +1,5 @@
 import { IDBFactory } from 'fake-indexeddb';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
@@ -97,3 +97,34 @@ it('uses the source song identity for personal ink in a setlist and performance 
   expect(previousEntry.querySelector('[data-personal-note-stroke]')).toBe(previousInk);
   expect(state.saveSong).not.toHaveBeenCalled(); expect(state.saveSetlist).not.toHaveBeenCalled();
 }, 15000);
+
+it('opens private lyrics ink in the ordinary reader, the focus dialog and the performance screen', async () => {
+  localStorage.clear();
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const song = { id: 'lyrics-notes-source', title: '歌詞筆記測試', originalKey: 'C' as const, currentKey: 'C' as const,
+    timeSignature: '4/4', updatedAt: 1, sections: [], lyricsDoc: { chinese: '[Chorus]\n奇異恩典' } };
+  state.fixture = { songs: [song], setlists: [{ id: 'lyric-set', name: '歌詞測試', displayMode: 'chord-movable-key', createdAt: 1, updatedAt: 1,
+    songs: [{ id: 'lyric-entry', setlistId: 'lyric-set', songId: song.id, order: 0, sectionOrder: [], songData: song }] }],
+    projects: [], joinedSetlists: [], joinedProjects: [], lastSavedAt: 1 };
+  localStorage.setItem('chordmaster.workspace-mode.v1', 'setlists');
+  localStorage.setItem('chordmaster.selected-setlist-id.v1', 'lyric-set');
+  localStorage.setItem('chordmaster.active-library.note-owner.v1', 'personal');
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  fireEvent.click((await screen.findAllByRole('button', { name: '歌詞模式' }))[0]);
+  await screen.findByLabelText('當頁歌詞');
+  fireEvent.click(screen.getByRole('button', { name: '手寫筆記' }));
+  const toolbar = () => screen.getByRole('toolbar', { name: '個人手寫筆記' });
+  expect(document.querySelector('[data-lyrics-workspace-mode="reading"]')).toContainElement(toolbar());
+  fireEvent.click(screen.getByRole('button', { name: '完成筆記' }));
+  fireEvent.click(screen.getByRole('button', { name: '專注閱讀' }));
+  const dialog = screen.getByRole('dialog', { name: '專注閱讀歌詞' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '手寫筆記' }));
+  expect(dialog).toContainElement(toolbar());
+  fireEvent.click(screen.getByRole('button', { name: '完成筆記' }));
+  fireEvent.click(screen.getByRole('button', { name: '離開專注閱讀' }));
+  fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
+  fireEvent.click(await screen.findByRole('button', { name: '個人筆記' }));
+  expect(document.querySelector('[data-performance-overlay]')).toContainElement(toolbar());
+  expect(document.querySelector('[data-performance-lyrics]')).toBeInTheDocument();
+  expect(state.saveSong).not.toHaveBeenCalled(); expect(state.saveSetlist).not.toHaveBeenCalled();
+});

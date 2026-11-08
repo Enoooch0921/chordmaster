@@ -2,13 +2,14 @@ import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { usePerformanceSwipe } from './usePerformanceSwipe';
 
 const noop = () => {};
-const CONTROL = 'button, a, input, textarea, select, [role="button"], [contenteditable]';
+const CONTROL = 'button, a, input, textarea, select, [role="button"], [contenteditable], [data-personal-notes-layer]';
 
 /** Share the performance swipe recognizer; keep normal text selection and scrolling. */
 export function useLyricsPageGestures(options: {
   canvas: RefObject<HTMLElement | null>;
   enabled: boolean;
   scope: string;
+  writing?: boolean;
   onNext: () => unknown;
   onPrevious: () => unknown;
 }) {
@@ -17,7 +18,7 @@ export function useLyricsPageGestures(options: {
   usePerformanceSwipe({
     enabled: options.enabled, scope: options.scope, overlay: options.canvas,
     onNext: options.onNext, onPrevious: options.onPrevious,
-    onInteract: noop, onLearned: noop, ignoreTextSelection: true,
+    onInteract: noop, onLearned: noop, ignoreTextSelection: true, lyricHandwriting: options.writing,
   });
   useLayoutEffect(() => {
     const canvas = options.canvas.current;

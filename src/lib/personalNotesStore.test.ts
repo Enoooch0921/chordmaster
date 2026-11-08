@@ -69,3 +69,20 @@ describe('personal note persistence and synchronization', () => {
     expect(await readNoteRecords('user-a', song)).toHaveLength(2);
   });
 });
+
+it('keeps score and lyric undo histories independent while syncing both as personal notes on the source song', async () => {
+  const song = noteId(), store = new PersonalNotesStore('user-a', song);
+  await store.start();
+  store.edit({ add: [stroke()], remove: [] });
+  const lyric: NoteStroke = { ...stroke(), anchor: { kind: 'lyric', sourceLine: 'verse:chinese:0', offset: 0, fontSize: 28 } };
+  store.edit({ add: [lyric], remove: [] }, 'lyrics');
+  store.undo();
+  expect(store.getSnapshot().strokes.map(s => s.anchor.kind)).toEqual(['lyric']);
+  store.undo('lyrics');
+  store.redo();
+  expect(store.getSnapshot().strokes.map(s => s.anchor.kind)).toEqual(['page']);
+  store.redo('lyrics');
+  await waitFor(() => expect(store.getSnapshot().status).toBe('synced'));
+  const reopened = new PersonalNotesStore('user-a', song); await reopened.start();
+  expect(reopened.getSnapshot().strokes.map(s => s.anchor.kind).sort()).toEqual(['lyric', 'page']);
+});

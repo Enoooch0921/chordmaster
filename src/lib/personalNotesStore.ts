@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { supabase } from './supabase';
 import { readNoteRecords, writeNoteRecords } from './personalNotesDatabase';
-import { mergeNoteOperations, noteId, validNoteOperation, type NoteOperation, type NoteStroke } from './personalNotes';
+import { mergeNoteOperations, noteId, validNoteOperation, type NoteOperation, type NoteStroke, type NoteSurface } from './personalNotes';
 
 type Status = 'loading' | 'saving' | 'synced' | 'offline' | 'local' | 'error';
-interface Snapshot { strokes: NoteStroke[]; ready: boolean; status: Status; undo: boolean; redo: boolean }
+interface Snapshot { strokes: NoteStroke[]; ready: boolean; status: Status; undo: Record<NoteSurface, boolean>; redo: Record<NoteSurface, boolean> }
 type Edit = { add: NoteStroke[]; remove: string[] };
 export class PersonalNotesStore {
   private operations = new Map<string, NoteOperation>();
   private pending = new Set<string>();
   private listeners = new Set<() => void>();
-  private past: Edit[] = [];
-  private future: Edit[] = [];
+  private past: Record<NoteSurface, Edit[]> = { score: [], lyrics: [] };
+  private future: Record<NoteSurface, Edit[]> = { score: [], lyrics: [] };
   private ready = false;
   private busy: Promise<void> | null = null;
   private loading: Promise<void> | null = null;
   private writes: Promise<void> = Promise.resolve();
   private localError = false;
   private broadcast: BroadcastChannel | null = null;
-  private snapshot: Snapshot = { strokes: [], ready: false, status: 'loading', undo: false, redo: false };
+  private snapshot: Snapshot = { strokes: [], ready: false, status: 'loading', undo: { score: false, lyrics: false }, redo: { score: false, lyrics: false } };
   constructor(readonly owner: string, readonly song: string) {}
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => {
@@ -27,7 +27,8 @@ export class PersonalNotesStore {
   }; };
   private publish(status = this.snapshot.status) {
     this.snapshot = { strokes: mergeNoteOperations(this.operations.values()), ready: this.ready,
-      status: this.localError ? 'error' : status, undo: !!this.past.length, redo: !!this.future.length };
+      status: this.localError ? 'error' : status, undo: { score: !!this.past.score.length, lyrics: !!this.past.lyrics.length },
+      redo: { score: !!this.future.score.length, lyrics: !!this.future.lyrics.length } };
     this.listeners.forEach(fn => fn());
   }
   start = () => {
@@ -69,12 +70,12 @@ export class PersonalNotesStore {
     });
     return { add: removed, remove: added.map(s => s.id) };
   }
-  edit = (edit: Edit) => {
+  edit = (edit: Edit, surface: NoteSurface = 'score') => {
     if (!this.ready || (!edit.add.length && !edit.remove.length)) return;
-    this.past.push(this.apply(edit)); this.future = []; this.publish();
+    this.past[surface].push(this.apply(edit)); this.future[surface] = []; this.publish();
   };
-  undo = () => { const edit = this.past.pop(); if (edit) { this.future.push(this.apply(edit)); this.publish(); } };
-  redo = () => { const edit = this.future.pop(); if (edit) { this.past.push(this.apply(edit)); this.publish(); } };
+  undo = (surface: NoteSurface = 'score') => { const edit = this.past[surface].pop(); if (edit) { this.future[surface].push(this.apply(edit)); this.publish(); } };
+  redo = (surface: NoteSurface = 'score') => { const edit = this.future[surface].pop(); if (edit) { this.past[surface].push(this.apply(edit)); this.publish(); } };
   connect() {
     if (typeof BroadcastChannel !== 'undefined' && !this.broadcast) {
       this.broadcast = new BroadcastChannel(`chordmaster-notes:${this.owner}:${this.song}`);

@@ -14,6 +14,7 @@ type Options = {
   onInteract: () => void;
   onLearned: () => void;
   ignoreTextSelection?: boolean;
+  lyricHandwriting?: boolean;
 };
 
 /** Track intent during the swipe and turn once, on release. */
@@ -42,14 +43,24 @@ export function usePerformanceSwipe(options: Options) {
       if (event.touches.length !== 1) { guardClick(); abort(); return; }
       suppressClickUntil.current = 0;
       touch = null;
+      if (latest.current.lyricHandwriting && ((event.touches[0] as Touch & { touchType?: string }).touchType === 'stylus' || overlay.querySelector('[data-pen-contact]'))) {
+        guardClick(); return;
+      }
       if (selecting()) return;
       const target = event.target instanceof Element ? event.target : null;
-      if (!target || target.closest('[data-personal-notes-layer], [data-personal-notes-tools], [data-lyrics-navigation]')
+      const ink = target?.closest('[data-personal-notes-layer]');
+      const lyricInk = ink?.closest('[data-lyrics-note-page]');
+      if (!target || (ink && !lyricInk) || target.closest('[data-personal-notes-tools], [data-lyrics-navigation]')
         || (target.closest('button, a, input, textarea, select, [role="button"]') && !target.closest('[data-performance-turn-area]'))) return;
       latest.current.onInteract();
       const point = event.touches[0];
+      let turn = target.closest('[data-performance-turn-area]')?.getAttribute('data-performance-turn-area') ?? null;
+      if (lyricInk) {
+        const bounds = overlay.getBoundingClientRect();
+        turn = point.clientX < bounds.left + bounds.width / 2 ? 'previous' : 'next';
+      }
       touch = { id: point.identifier, x: point.clientX, y: point.clientY, horizontal: false,
-        turn: target.closest('[data-performance-turn-area]')?.getAttribute('data-performance-turn-area') ?? null };
+        turn };
     };
     const move = (event: TouchEvent) => {
       if (!touch) return;
@@ -95,6 +106,7 @@ export function usePerformanceSwipe(options: Options) {
       event.preventDefault(); event.stopPropagation();
     };
     const pointer = (event: PointerEvent) => {
+      if (event.pointerType === 'pen' && latest.current.lyricHandwriting) { abort(); guardClick(); }
       if (event.pointerType === 'mouse') { suppressClickUntil.current = 0; abort(); }
     };
     overlay.addEventListener('touchstart', start, { passive: true });

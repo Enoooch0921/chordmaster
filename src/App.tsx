@@ -4123,7 +4123,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     const change = () => {
       setPreviewEditSession(null);
       setIsEditing(false);
-      setIsLyricsMode(false);
+      if (isLyricsMode && open) { setIsLyricsContinuous(true); setIsLyricsReading(true); }
       setIsSidebarPinned(false); setIsSidebarHovered(false); setIsMobileNavOpen(false);
       setIsHandwriting(open);
     };
@@ -4135,8 +4135,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     change();
   };
   useEffect(() => {
-    if (isEditing || activePreviewEditSession || isLyricsMode || !authenticatedUser) setIsHandwriting(false);
-  }, [isEditing, activePreviewEditSession, isLyricsMode, authenticatedUser?.id]);
+    if (isEditing || activePreviewEditSession || !authenticatedUser || (isLyricsMode && (!isLyricsReading || !isLyricsContinuous))) setIsHandwriting(false);
+  }, [isEditing, activePreviewEditSession, isLyricsMode, isLyricsReading, isLyricsContinuous, authenticatedUser?.id]);
 
   const handleToggleLibraryEditing = () => {
     if (!isLibraryEditing && !canEditTeamSongs) {
@@ -4569,6 +4569,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   const handleToggleLyricsMode = () => {
+    setIsHandwriting(false);
     if (!isLyricsMode && isSetlistMode) {
       setIsLyricsReading(true);
       setIsLyricsContinuous(true);
@@ -10552,6 +10553,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   const setlistLyricsEntries = React.useMemo(() => setlistSongsWithSource.map(({ item, sourceSong }) => ({
     id: item.id,
+    sourceSongId: item.songId,
     song: item.songData ?? sourceSong,
   })), [setlistSongsWithSource]);
 
@@ -14653,7 +14655,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             {isLyricsWorkspace ? <div className="h-full" inert={setlistOpening.opening ? true : undefined}><SetlistLyricsWorkspace
               key={isSetlistMode ? selectedSetlist!.id : song.id}
               title={isSetlistMode ? selectedSetlist!.name : song.title}
-              readingPositions={lyricsReadingPositions.current}
+              noteOwner={authenticatedUser?.id} notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} notesActive={!isPerformanceMode}
+              phoneHandwritingButton={isPhoneViewport} readingPositions={lyricsReadingPositions.current}
               preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}
               entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}
               language={language}
@@ -16026,7 +16029,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         <div
           ref={performanceOverlayRef}
           data-performance-overlay
-          data-performance-notes-available={Boolean(authenticatedUser && !isLyricsMode) || undefined}
+          data-performance-notes-available={Boolean(authenticatedUser) || undefined}
           data-handwriting={isHandwriting || undefined}
           tabIndex={-1}
           className="fixed inset-0 z-[200] flex items-center justify-center bg-stone-950 select-none"
@@ -16061,12 +16064,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           />
 
           {isLyricsMode ? <div data-performance-lyrics className="h-full w-full min-h-0 pt-16" onClick={event => {
-            if (!(event.target as Element).closest('.alr-canvas')) return;
+            if (!(event.target as Element).closest('.alr-canvas') || (event.target as Element).closest('[data-personal-notes-layer]')) return;
             const bounds = event.currentTarget.getBoundingClientRect();
             if (event.clientX < bounds.left + bounds.width / 2) handlePerformancePrevPage();
             else handlePerformanceNextPage();
           }}>
-            <PerformanceLyricsReader ref={performanceLyricsRef} entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}
+            <PerformanceLyricsReader noteOwner={authenticatedUser?.id} notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
+              ref={performanceLyricsRef} entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}
               selectedId={isSetlistMode ? selectedSetlistSongId : song.id} onSelectSong={isSetlistMode ? setSelectedSetlistSongId : setSelectedSongId}
               language={language} preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}/>
           </div> : (

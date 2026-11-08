@@ -1,10 +1,12 @@
 export const NOTE_COLORS = ['#1e293b', '#dc2626', '#2563eb', '#238454', '#d97706'] as const;
 export type NoteTool = 'pen' | 'highlighter' | 'eraser';
-export type NoteAnchor = { kind: 'bar'; sectionId: string; barId: string } | { kind: 'page'; page: number };
+export type NoteSurface = 'score' | 'lyrics';
+export type NoteAnchor = { kind: 'bar'; sectionId: string; barId: string } | { kind: 'page'; page: number } | { kind: 'lyric'; sourceLine: string; offset: number; fontSize: number };
 export interface NoteStroke {
   id: string;
   anchor: NoteAnchor;
   points: [number, number][];
+  lyricOffsets?: number[];
   color: string;
   width: number;
   tool: 'pen' | 'highlighter';
@@ -23,8 +25,12 @@ export function validNoteOperation(value: unknown): value is NoteOperation {
     && (s.tool === 'pen' || s.tool === 'highlighter') && (s.shape === undefined || ['line', 'ellipse', 'rectangle', 'triangle', 'diamond', 'pentagon', 'hexagon', 'star', 'arrow'].includes(s.shape))
     && Number.isFinite(s.width) && s.width >= 1 && s.width <= 24
     && s.anchor && (s.anchor.kind === 'bar' ? typeof s.anchor.sectionId === 'string' && typeof s.anchor.barId === 'string'
+      : s.anchor.kind === 'lyric' ? typeof s.anchor.sourceLine === 'string' && !!s.anchor.sourceLine
+        && Number.isSafeInteger(s.anchor.offset) && s.anchor.offset >= 0 && Number.isFinite(s.anchor.fontSize) && s.anchor.fontSize > 0
       : s.anchor.kind === 'page' && Number.isInteger(s.anchor.page) && s.anchor.page >= 0)
     && Array.isArray(s.points) && s.points.length > 0 && s.points.length <= 4096
+    && (s.lyricOffsets === undefined || (s.anchor.kind === 'lyric' && Array.isArray(s.lyricOffsets)
+      && s.lyricOffsets.length === s.points.length && s.lyricOffsets.every(offset => Number.isSafeInteger(offset) && offset >= 0)))
     && s.points.every(p => Array.isArray(p) && p.length === 2 && p.every(n => Number.isFinite(n) && Math.abs(n) <= 100)));
 }
 export function mergeNoteOperations(operations: Iterable<NoteOperation>): NoteStroke[] {

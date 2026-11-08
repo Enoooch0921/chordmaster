@@ -11,6 +11,9 @@
 .alr-columns { display: grid; gap: 28px; height: 100%; }
 .alr-columns, .alr-measure { font-family: var(--lyrics-reading-font); line-height: var(--lyrics-reading-leading); letter-spacing: .01em; }
 .alr-column { min-width: 0; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; overscroll-behavior: contain; container: lyrics-column / inline-size; }
+[data-lyrics-note-page] { position: relative; min-height: 100%; isolation: isolate; }
+.dark [data-lyrics-note-page] .personal-notes-layer path[stroke="#1e293b"] { stroke: var(--color-text); }
+.dark [data-lyrics-note-page] .personal-notes-highlighter { mix-blend-mode: screen; }
 .alr-block + .alr-block { margin-top: 16px; }
 .alr-block h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-family: Inter, -apple-system, "PingFang TC", sans-serif; font-size: 12px; font-weight: 600; line-height: 20px; letter-spacing: 0; color: var(--color-indigo-700); }
 .dark .alr-block h2 { color: var(--color-indigo-300); }

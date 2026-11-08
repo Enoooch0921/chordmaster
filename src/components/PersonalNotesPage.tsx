@@ -1,24 +1,26 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createLiveNotePath, hitsNote, noteId, notePath, projectNotePoints, type NoteAnchor, type NoteFrame, type NoteStroke, type NoteTool } from '../lib/personalNotes';
+import { createLiveNotePath, hitsNote, noteId, notePath, projectNotePoints, type NoteAnchor, type NoteFrame, type NoteStroke, type NoteSurface, type NoteTool } from '../lib/personalNotes';
+import { bindLyricMark, measureLyricLines, pickLyricAnchor, projectLyricInk, type LyricLine } from '../lib/lyricInk';
 import { recognizeNoteShape, type NoteShapeFeedback } from '../lib/noteShapes';
 import { stationaryNoteEndpoint, type NoteHoldSample } from '../lib/noteHold';
 
 interface Props {
-  page: HTMLElement; pageIndex: number; strokes: NoteStroke[]; drawing: boolean; visible: boolean;
+  page: HTMLElement; layoutRevision?: object; surface?: NoteSurface; pageIndex: number; strokes: NoteStroke[]; drawing: boolean; visible: boolean;
   performance: boolean; tool: NoteTool; color: string; width: number;
   shapeEnabled: boolean; onShape: (shape: NoteShapeFeedback) => void;
   onEdit: (edit: { add: NoteStroke[]; remove: string[] }) => void;
 }
-type Frame = NoteFrame & { anchor: NoteAnchor };
+type Frame = NoteFrame & { anchor: NoteAnchor; line?: LyricLine };
 // Storage (including JSONB) may reorder object keys. Match semantic identity so
 // synced and restored ink still finds the same bar/page as a freshly drawn mark.
 const anchorKey = (anchor: NoteAnchor) => JSON.stringify(anchor.kind === 'bar'
   ? ['bar', anchor.sectionId, anchor.barId]
-  : ['page', anchor.page]);
+  : anchor.kind === 'page' ? ['page', anchor.page] : ['lyric', anchor.sourceLine, anchor.offset]);
 function PersonalNotesPage(props: Props) {
-  const { page, pageIndex, strokes, drawing, visible, performance, tool, color, width, onEdit } = props;
+  const { page, pageIndex, surface = 'score', strokes, drawing, visible, performance, tool, color, width, onEdit } = props;
   const latest = useRef(props); latest.current = props;
   const [frames, setFrames] = useState<Frame[]>([]);
+  const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
   const [size, setSize] = useState({ width: 794, height: 1123 });
   const livePen = useRef<SVGPathElement>(null), liveHighlighter = useRef<SVGPathElement>(null);
   const [erasing, setErasing] = useState<Set<string>>(new Set());
@@ -27,46 +29,62 @@ function PersonalNotesPage(props: Props) {
     ink: ReturnType<typeof createLiveNotePath>; path: SVGPathElement | null;
     holdSamples: NoteHoldSample[]; holdStarted?: number; holdResultAt?: [number, number]; erased: Set<string>; eraser: boolean } | null>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const touch = useRef<{ x: number; y: number; root: HTMLElement } | null>(null);
+  const touch = useRef<{ x: number; y: number; startX: number; startY: number; root: HTMLElement } | null>(null);
   const animation = useRef<number | null>(null);
   const framesRef = useRef(frames); framesRef.current = frames;
   const renderedStrokes = useMemo(() => {
     const byAnchor = new Map(frames.map(frame => [anchorKey(frame.anchor), frame]));
+    const byLine = new Map(lyricLines.map(line => [line.sourceLine, line]));
     return strokes.flatMap(stroke => {
+      if (stroke.anchor.kind === 'lyric') {
+        const line = byLine.get(stroke.anchor.sourceLine);
+        const ink = line && projectLyricInk(stroke, line);
+        return ink ? [{ stroke, ...ink, path: ink.segments.map(points => notePath(points, !stroke.shape)).join(' ') }] : [];
+      }
       const frame = byAnchor.get(anchorKey(stroke.anchor));
       if (!frame) return [];
       const points = projectNotePoints(stroke, frame);
-      return [{ stroke, points, path: notePath(points, !stroke.shape) }];
+      return [{ stroke, segments: [points], width: stroke.width, path: notePath(points, !stroke.shape) }];
     });
-  }, [strokes, frames]);
+  }, [strokes, frames, lyricLines]);
   const renderedRef = useRef(renderedStrokes); renderedRef.current = renderedStrokes;
   useLayoutEffect(() => {
     let scheduled = 0;
     const measure = () => {
       const bounds = page.getBoundingClientRect(), scale = bounds.width / page.offsetWidth;
       if (!scale) return;
-      const newFrames: Frame[] = [{ anchor: { kind: 'page', page: pageIndex }, x: 0, y: 0, width: page.offsetWidth, height: page.offsetHeight }];
-      for (const bar of page.querySelectorAll<HTMLElement>('[data-preview-clipboard-bar]')) {
-        const sectionId = bar.dataset.previewClipboardSection, barId = bar.dataset.previewClipboardBar;
-        if (!sectionId || !barId) continue;
-        const rect = bar.getBoundingClientRect();
-        newFrames.push({ anchor: { kind: 'bar', sectionId, barId }, x: (rect.left - bounds.left) / scale,
-          y: (rect.top - bounds.top) / scale, width: rect.width / scale, height: rect.height / scale });
+      if (surface === 'lyrics') {
+        setLyricLines(measureLyricLines(page, bounds, scale));
+      } else {
+        const newFrames: Frame[] = [{ anchor: { kind: 'page', page: pageIndex }, x: 0, y: 0, width: page.offsetWidth, height: page.offsetHeight }];
+        for (const bar of page.querySelectorAll<HTMLElement>('[data-preview-clipboard-bar]')) {
+          const sectionId = bar.dataset.previewClipboardSection, barId = bar.dataset.previewClipboardBar;
+          if (!sectionId || !barId) continue;
+          const rect = bar.getBoundingClientRect();
+          newFrames.push({ anchor: { kind: 'bar', sectionId, barId }, x: (rect.left - bounds.left) / scale,
+            y: (rect.top - bounds.top) / scale, width: rect.width / scale, height: rect.height / scale });
+        }
+        setFrames(old => JSON.stringify(old) === JSON.stringify(newFrames) ? old : newFrames);
       }
-      setFrames(old => JSON.stringify(old) === JSON.stringify(newFrames) ? old : newFrames);
       setSize(old => old.width === page.offsetWidth && old.height === page.offsetHeight ? old : { width: page.offsetWidth, height: page.offsetHeight });
     };
     const schedule = () => { cancelAnimationFrame(scheduled); scheduled = requestAnimationFrame(measure); };
     measure();
-    const resize = new ResizeObserver(schedule); resize.observe(page);
-    for (const bar of page.querySelectorAll('[data-preview-clipboard-bar]')) resize.observe(bar);
+    const resize = new ResizeObserver(surface === 'lyrics' ? measure : schedule); resize.observe(page);
+    const observeAnchors = () => {
+      for (const node of page.querySelectorAll(surface === 'lyrics' ? '[data-source-line]' : '[data-preview-clipboard-bar]')) resize.observe(node);
+    };
+    observeAnchors();
     // Header visibility and rearrangement can move bars without resizing them.
     const mutations = new MutationObserver(records => {
-      if (records.some(r => !(r.target as Element).closest?.('[data-personal-notes-layer]'))) schedule();
+      if (records.some(r => !(r.target as Element).closest?.('[data-personal-notes-layer]'))) {
+        if (records.some(r => r.type === 'childList')) observeAnchors();
+        schedule();
+      }
     });
-    mutations.observe(page, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+    mutations.observe(page, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'data-source-line'] });
     return () => { resize.disconnect(); mutations.disconnect(); cancelAnimationFrame(scheduled); };
-  }, [page, pageIndex]);
+  }, [page, pageIndex, surface, props.layoutRevision]);
 
   const screenPoint = (x: number, y: number): [number, number] => {
     const rect = page.getBoundingClientRect();
@@ -81,6 +99,8 @@ function PersonalNotesPage(props: Props) {
     current?.path?.removeAttribute('d');
     if (current?.eraser) setErasing(new Set());
     if (!current) return;
+    svg.current?.removeAttribute('data-pen-contact');
+    if (current.frame.line && !current.eraser) current.stroke = bindLyricMark(current.stroke, current.frame, current.frame.line);
     latest.current.onEdit(current.eraser ? { add: [], remove: [...current.erased] } : { add: [current.stroke], remove: [] });
   };
   const finishRef = useRef(finish); finishRef.current = finish;
@@ -131,8 +151,8 @@ function PersonalNotesPage(props: Props) {
     for (const sample of samples.length ? samples : [event.nativeEvent]) {
       const x = (sample.clientX - bounds.left) * scale, y = (sample.clientY - bounds.top) * scale;
       if (current.eraser) {
-        for (const { stroke, points } of renderedRef.current) {
-          if (hitsNote(points, x, y, 9 + stroke.width / 2)) current.erased.add(stroke.id);
+        for (const { stroke, segments, width } of renderedRef.current) {
+          if (segments.some(points => hitsNote(points, x, y, 9 + width / 2))) current.erased.add(stroke.id);
         }
       } else {
         const p: [number, number] = [(x - current.frame.x) / current.frame.width, (y - current.frame.y) / current.frame.height];
@@ -165,12 +185,13 @@ function PersonalNotesPage(props: Props) {
       setErasing(new Set(current.erased));
     });
   };
+  const penInContact = () => active.current || (surface === 'lyrics' && page.closest('.alr-canvas')?.querySelector('[data-pen-contact]'));
   const layerStyle = { visibility: visible ? 'visible' as const : 'hidden' as const };
   return <>
     <svg data-personal-notes-layer data-personal-highlighter-layer data-preview-edit-ui data-preview-only-control aria-hidden="true"
       className="personal-notes-layer personal-notes-highlighter" viewBox={`0 0 ${size.width} ${size.height}`} style={layerStyle}>
-      {renderedStrokes.filter(({ stroke }) => stroke.tool === 'highlighter' && !erasing.has(stroke.id)).map(({ stroke, path }) =>
-        <path key={stroke.id} data-personal-note-stroke={stroke.id} d={path} stroke={stroke.color} strokeWidth={stroke.width} opacity={0.36} />)}
+      {renderedStrokes.filter(({ stroke }) => stroke.tool === 'highlighter' && !erasing.has(stroke.id)).map(({ stroke, path, width }) =>
+        <path key={stroke.id} data-personal-note-stroke={stroke.id} d={path} stroke={stroke.color} strokeWidth={width} opacity={0.36} />)}
       <path ref={liveHighlighter} data-personal-note-live="highlighter" opacity={0.36} />
     </svg>
     <svg ref={svg} data-personal-notes-layer data-personal-notes-drawing={drawing || undefined}
@@ -184,11 +205,16 @@ function PersonalNotesPage(props: Props) {
       if (!drawing || event.pointerType === 'touch' || event.button !== 0 || active.current) return;
       event.preventDefault(); event.stopPropagation();
       const [x, y] = screenPoint(event.clientX, event.clientY);
-      let frame = framesRef.current[0];
-      let distance = 60;
-      for (const candidate of framesRef.current.slice(1)) {
-        const d = Math.hypot(Math.max(candidate.x - x, 0, x - candidate.x - candidate.width), Math.max(candidate.y - y, 0, y - candidate.y - candidate.height));
-        if (d < distance) { frame = candidate; distance = d; }
+      let frame: Frame | undefined;
+      if (surface === 'lyrics') {
+        frame = pickLyricAnchor(lyricLines, x, y);
+      } else {
+        frame = framesRef.current[0];
+        let distance = 60;
+        for (const candidate of framesRef.current.slice(1)) {
+          const d = Math.hypot(Math.max(candidate.x - x, 0, x - candidate.x - candidate.width), Math.max(candidate.y - y, 0, y - candidate.y - candidate.height));
+          if (d < distance) { frame = candidate; distance = d; }
+        }
       }
       if (!frame) return;
       const path = tool === 'eraser' ? null : tool === 'highlighter' ? liveHighlighter.current : livePen.current;
@@ -200,6 +226,7 @@ function PersonalNotesPage(props: Props) {
         rawPoints: [[(x - frame.x) / frame.width, (y - frame.y) / frame.height]],
         stroke: { id: noteId(), anchor: frame.anchor, points: [[(x - frame.x) / frame.width, (y - frame.y) / frame.height]], color,
           width: tool === 'highlighter' ? 14 : width, tool: tool === 'highlighter' ? 'highlighter' : 'pen' } };
+      event.currentTarget.dataset.penContact = 'true';
       latest.current.onShape(null);
       event.currentTarget.setPointerCapture(event.pointerId);
       move(event);
@@ -209,28 +236,35 @@ function PersonalNotesPage(props: Props) {
     onPointerCancel={event => { if (active.current?.pointer === event.pointerId) finish(); }}
     onLostPointerCapture={event => { if (active.current?.pointer === event.pointerId) finish(); }}
     onTouchStart={event => {
-      if (active.current || Array.from(event.touches).some(t => (t as Touch & { touchType?: string }).touchType === 'stylus')) { event.preventDefault(); event.stopPropagation(); return; }
-      if (!performance && event.touches.length === 1) {
-        const root = page.closest<HTMLElement>('[data-print-preview-container]');
-        if (root) touch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY, root };
+      if (penInContact() || Array.from(event.touches).some(t => (t as Touch & { touchType?: string }).touchType === 'stylus')) { event.preventDefault(); event.stopPropagation(); return; }
+      if ((surface === 'lyrics' || !performance) && event.touches.length === 1) {
+        const root = page.closest<HTMLElement>(surface === 'lyrics' ? '.alr-column' : '[data-print-preview-container]');
+        const { clientX: x, clientY: y } = event.touches[0];
+        if (root) touch.current = { x, y, startX: x, startY: y, root };
       } else touch.current = null;
     }}
     onTouchMove={event => {
-      if (active.current) { event.preventDefault(); event.stopPropagation(); return; }
+      if (penInContact()) { event.preventDefault(); event.stopPropagation(); return; }
       if (touch.current && event.touches.length === 1) {
         const t = event.touches[0], previous = touch.current;
+        if (surface === 'lyrics') {
+          if (Math.abs(t.clientY - previous.startY) > Math.abs(t.clientX - previous.startX)) previous.root.scrollTop += previous.y - t.clientY;
+          previous.y = t.clientY;
+          return;
+        }
         previous.root.scrollLeft += previous.x - t.clientX; previous.root.scrollTop += previous.y - t.clientY;
         previous.x = t.clientX; previous.y = t.clientY;
         event.preventDefault(); event.stopPropagation();
       }
     }}
+    onTouchCancel={() => { touch.current = null; }}
     onTouchEnd={event => {
       touch.current = null;
       if (active.current || Array.from(event.changedTouches).some(t => (t as Touch & { touchType?: string }).touchType === 'stylus')) event.stopPropagation();
     }}>
-    {renderedStrokes.filter(({ stroke }) => stroke.tool !== 'highlighter').map(({ stroke, path }) => {
+    {renderedStrokes.filter(({ stroke }) => stroke.tool !== 'highlighter').map(({ stroke, path, width }) => {
       return !erasing.has(stroke.id) ? <path key={stroke.id} data-personal-note-stroke={stroke.id} d={path}
-        stroke={stroke.color} strokeWidth={stroke.width} opacity={stroke.tool === 'highlighter' ? 0.28 : 1} /> : null;
+        stroke={stroke.color} strokeWidth={width} opacity={stroke.tool === 'highlighter' ? 0.28 : 1} /> : null;
     })}
     <path ref={livePen} data-personal-note-live="pen" />
   </svg></>;
