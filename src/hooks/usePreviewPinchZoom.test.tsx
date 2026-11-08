@@ -47,6 +47,23 @@ describe('preview pinch ownership and compositor updates', () => {
     touch('touchstart',[point(3,100),point(4,200)]);touch('touchend',[]);
     expect(options.onCommit).toHaveBeenCalledTimes(1);
   });
+  it('keeps the sheet still when a palm lands outside the active Pencil layer', () => {
+    const { sheet, options, touch, frame } = setup();
+    const ink = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    sheet.append(ink);
+    ink.setAttribute('data-pen-contact', 'true');
+    const contacts = [point(1, 40), point(2, 120)];
+    expect(touch('touchstart', contacts).defaultPrevented).toBe(true);
+    touch('touchmove', [point(1, 35), point(2, 160)]);
+    frame();
+    expect(sheet.style.transform).toBe('scale(0.5)');
+    expect(options.onStart).not.toHaveBeenCalled();
+    touch('touchend', []);
+    ink.removeAttribute('data-pen-contact');
+    touch('touchstart', contacts);
+    expect(options.onStart).toHaveBeenCalledOnce();
+  });
+
   it('keeps single-finger scrolling native', () => {
     const { options, touch } = setup();
     expect(touch('touchstart', [point(1, 100)]).defaultPrevented).toBe(false);

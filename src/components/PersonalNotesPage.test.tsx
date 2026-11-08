@@ -47,6 +47,40 @@ it.each(['pen', 'highlighter'] as const)('paints %s samples immediately without 
   expect(live.hasAttribute('d')).toBe(false);
   expect(saved.tool).toBe(tool);
 });
+it.each([.68, 1.35])('saves the stabilized live tip at sheet scale %f, including the last native sample', zoom => {
+  const { layer, onEdit, point } = setup(zoom, false);
+  const live = layer.querySelector('[data-personal-note-live="pen"]')!;
+  const penEvent = (type: string, x: number, y: number, time: number) => {
+    const e = new PointerEvent(type, { ...point(x, y), bubbles: true });
+    Object.defineProperty(e, 'timeStamp', { value: time });
+    return e;
+  };
+  fireEvent(layer, penEvent('pointerdown', 50, 50, 100));
+  for (let i = 1; i <= 60; i++) {
+    const x = 50 + i / 4, y = 50 + Math.sin(i * .43);
+    const e = penEvent('pointermove', x, y, 100 + i * 8);
+    Object.defineProperty(e, 'getCoalescedEvents', { value: () => [
+      penEvent('pointermove', x - .125, 50 + Math.sin((i - .5) * .43), 96 + i * 8),
+    ] });
+    fireEvent(layer, e);
+    const coords = live.getAttribute('d')!.match(/L([\d.]+) ([\d.]+)$/);
+    if (i > 5) {
+      expect(coords).not.toBeNull();
+      expect(Math.abs(Number(coords![2]) * zoom - 50)).toBeLessThan(.8);
+    }
+  }
+  const beforeLift = live.getAttribute('d');
+  const endY = 50 + Math.sin(60 * .43);
+  fireEvent(layer, penEvent('pointerup', 65, endY, 590));
+  const saved = onEdit.mock.calls[0][0].add[0];
+  expect(notePath(projectNotePoints(saved, { x: 0, y: 0, width: 800, height: 1000 }))).toBe(beforeLift);
+  fireEvent(layer, penEvent('pointerdown', 30, 40, 700));
+  const final = penEvent('pointerup', 60, 45, 714);
+  Object.defineProperty(final, 'getCoalescedEvents', { value: () => [penEvent('pointermove', 49, 44, 708)] });
+  fireEvent(layer, final);
+  const points = projectNotePoints(onEdit.mock.calls[1][0].add[0], { x: 0, y: 0, width: 800, height: 1000 });
+  expect(points.at(-1)![0] * zoom).toBeCloseTo(60, 8);
+});
 it('includes every coalesced sample in immediate ink and can resume freehand after snapping', () => {
   const { layer, onEdit, point } = setup();
   fireEvent.pointerDown(layer, point(50, 50));
@@ -134,6 +168,20 @@ it('does not start recognition during slow continuous drawing inside the old hol
   act(() => vi.advanceTimersByTime(750));
   expect(onShape).toHaveBeenLastCalledWith('line');
 });
+it('keeps a small handwritten loop freehand while the pen is moving through noisy samples', () => {
+  const { layer, onEdit, onShape, point } = setup();
+  const sample = (i: number) => point(80 + 6 * Math.cos(i / 19) + .8 * Math.sin(i * 1.4),
+    80 + 8 * Math.sin(i / 19) + .7 * Math.cos(i * 1.6));
+  fireEvent.pointerDown(layer, sample(0));
+  for (let i = 1; i <= 145; i++) {
+    act(() => vi.advanceTimersByTime(8));
+    fireEvent.pointerMove(layer, sample(i));
+  }
+  fireEvent.pointerUp(layer, sample(145));
+  expect(onShape).not.toHaveBeenCalledWith('holding');
+  expect(onEdit.mock.calls[0][0].add[0].shape).toBeUndefined();
+});
+
 it('keeps the final edges of a small hexagon drawn at a natural pace', () => {
   const { layer, onShape, point } = setup();
   const vertices = [[25,5],[75,6],[99,49],[75,93],[25,94],[2,50],[25,5]];

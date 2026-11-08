@@ -63,8 +63,8 @@ function denoiseSample(a: InkPoint, b: InkPoint, c: InkPoint): InkPoint {
   return [b[0] + dx * weight, b[1] + dy * weight];
 }
 
-/** Only the tail is provisional. The latest sample always reaches the Pencil
- * tip in the same event, including when the pen lifts at a sharp corner. */
+/** Only the tail is provisional. The latest accepted ink point is drawn in
+ * the same event, including when the pen lifts at a sharp corner. */
 export function createLiveNotePath(first: InkPoint) {
   let prefix = `M${inkXY(first)}`;
   let previousRaw: InkPoint | undefined, tip = first;

@@ -26,6 +26,23 @@ export function stationaryNoteEndpoint(samples: NoteHoldSample[], now: number) {
   else tailStart = Math.max(0, tailStart - 1);
   const tail = recent.slice(tailStart);
   if (progressing(recent) || progressing(tail)) return null;
+  // A small loop can end where it started, especially amid Pencil noise.
+  // Compare short-window centers to distinguish travel from jitter in place.
+  const centers = new Map<number, { x: number; y: number; count: number; first: number; last: number }>();
+  for (const sample of recent) {
+    if (sample.time < cutoff) continue;
+    const bucket = Math.floor((sample.time - cutoff) / 80);
+    const center = centers.get(bucket) ?? { x: 0, y: 0, count: 0, first: sample.time, last: sample.time };
+    center.x += sample.x; center.y += sample.y; center.count++; center.last = sample.time;
+    centers.set(bucket, center);
+  }
+  let firstCenter: { x: number; y: number } | undefined;
+  for (const window of centers.values()) {
+    if (window.last - window.first < 45) continue;
+    const x = window.x / window.count, y = window.y / window.count;
+    firstCenter ??= { x, y };
+    if (Math.hypot(x - firstCenter.x, y - firstCenter.y) > 3) return null;
+  }
   return { x: tail.reduce((n, p) => n + p.x, 0) / tail.length,
     y: tail.reduce((n, p) => n + p.y, 0) / tail.length };
 }

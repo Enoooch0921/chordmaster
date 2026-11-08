@@ -2,6 +2,7 @@ import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createLiveNotePath, hitsNote, noteId, notePath, projectNotePoints, type NoteAnchor, type NoteFrame, type NoteStroke, type NoteSurface, type NoteTool } from '../lib/personalNotes';
 import { bindLyricMark, measureLyricLines, pickLyricAnchor, projectLyricInk, type LyricLine } from '../lib/lyricInk';
 import { recognizeNoteShape, type NoteShapeFeedback } from '../lib/noteShapes';
+import { createPencilInput } from '../lib/pencilInput';
 import { stationaryNoteEndpoint, type NoteHoldSample } from '../lib/noteHold';
 
 interface Props {
@@ -21,11 +22,12 @@ function PersonalNotesPage(props: Props) {
   const latest = useRef(props); latest.current = props;
   const [frames, setFrames] = useState<Frame[]>([]);
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
-  const [size, setSize] = useState({ width: 794, height: 1123 });
+  const [size, setSize] = useState({ width: 794, height: 1123, left: 0, top: 0 });
   const livePen = useRef<SVGPathElement>(null), liveHighlighter = useRef<SVGPathElement>(null);
   const [erasing, setErasing] = useState<Set<string>>(new Set());
   const svg = useRef<SVGSVGElement>(null);
   const active = useRef<{ pointer: number; frame: Frame; stroke: NoteStroke; rawPoints: [number, number][];
+    freehand: NoteStroke['points']; filter?: ReturnType<typeof createPencilInput>;
     ink: ReturnType<typeof createLiveNotePath>; path: SVGPathElement | null;
     holdSamples: NoteHoldSample[]; holdStarted?: number; holdResultAt?: [number, number]; erased: Set<string>; eraser: boolean } | null>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,7 +68,10 @@ function PersonalNotesPage(props: Props) {
         }
         setFrames(old => JSON.stringify(old) === JSON.stringify(newFrames) ? old : newFrames);
       }
-      setSize(old => old.width === page.offsetWidth && old.height === page.offsetHeight ? old : { width: page.offsetWidth, height: page.offsetHeight });
+      // Absolute SVG children start inside the paper border. Match the outer box
+      // used by the bar anchors and pointer coordinates, including at sheet zoom.
+      const width = page.offsetWidth, height = page.offsetHeight, left = -page.clientLeft, top = -page.clientTop;
+      setSize(old => old.width === width && old.height === height && old.left === left && old.top === top ? old : { width, height, left, top });
     };
     const schedule = () => { cancelAnimationFrame(scheduled); scheduled = requestAnimationFrame(measure); };
     measure();
@@ -86,10 +91,6 @@ function PersonalNotesPage(props: Props) {
     return () => { resize.disconnect(); mutations.disconnect(); cancelAnimationFrame(scheduled); };
   }, [page, pageIndex, surface, props.layoutRevision]);
 
-  const screenPoint = (x: number, y: number): [number, number] => {
-    const rect = page.getBoundingClientRect();
-    return [(x - rect.left) * page.offsetWidth / rect.width, (y - rect.top) * page.offsetHeight / rect.height];
-  };
   const finish = () => {
     const current = active.current; active.current = null;
     if (animation.current !== null) cancelAnimationFrame(animation.current);
@@ -146,26 +147,37 @@ function PersonalNotesPage(props: Props) {
     const current = active.current;
     if (!current || current.pointer !== event.pointerId) return;
     event.preventDefault(); event.stopPropagation();
-    const samples = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
+    const native = event.nativeEvent, samples = native.getCoalescedEvents?.() ?? [];
+    const lastSample = samples.at(-1);
+    // Some dispatches include the parent event in the batch, others end just before it.
+    const input = lastSample && lastSample.clientX === native.clientX && lastSample.clientY === native.clientY
+      ? samples : [...samples, native];
     const bounds = page.getBoundingClientRect(), scale = page.offsetWidth / bounds.width;
-    for (const sample of samples.length ? samples : [event.nativeEvent]) {
+    for (const sample of input) {
       const x = (sample.clientX - bounds.left) * scale, y = (sample.clientY - bounds.top) * scale;
       if (current.eraser) {
         for (const { stroke, segments, width } of renderedRef.current) {
           if (segments.some(points => hitsNote(points, x, y, 9 + width / 2))) current.erased.add(stroke.id);
         }
       } else {
-        const p: [number, number] = [(x - current.frame.x) / current.frame.width, (y - current.frame.y) / current.frame.height];
-        const last = current.rawPoints.at(-1)!;
-        if (current.rawPoints.length < 4096 && Math.hypot((p[0] - last[0]) * current.frame.width, (p[1] - last[1]) * current.frame.height) > 0.45) {
-          current.rawPoints.push(p);
-          current.ink.append([x, y]);
-          if (current.holdResultAt && Math.hypot(x / scale - current.holdResultAt[0], y / scale - current.holdResultAt[1]) > 12) {
+        const { frame, rawPoints, freehand } = current;
+        const screenX = sample.clientX - bounds.left, screenY = sample.clientY - bounds.top;
+        const last = rawPoints.at(-1)!;
+        if (rawPoints.length < 4096 && Math.hypot(x - frame.x - last[0] * frame.width, y - frame.y - last[1] * frame.height) > 0.45) {
+          rawPoints.push([(x - frame.x) / frame.width, (y - frame.y) / frame.height]);
+          if (current.holdResultAt && Math.hypot(screenX - current.holdResultAt[0], screenY - current.holdResultAt[1]) > 12) {
             current.holdResultAt = undefined; current.holdStarted = undefined;
-            current.stroke.shape = undefined;
+            current.stroke.shape = undefined; current.stroke.points = freehand;
             latest.current.onShape(null);
           }
-          if (!current.stroke.shape) current.stroke.points = current.rawPoints;
+        }
+        const filtered = current.filter?.(screenX, screenY, sample.timeStamp);
+        const inkX = filtered ? filtered[0] * scale : x, inkY = filtered ? filtered[1] * scale : y;
+        const tip = freehand.at(-1)!;
+        const spacing = filtered ? .3 * scale : .45;
+        if (freehand.length < 4096 && Math.hypot(inkX - frame.x - tip[0] * frame.width, inkY - frame.y - tip[1] * frame.height) > spacing) {
+          freehand.push([(inkX - frame.x) / frame.width, (inkY - frame.y) / frame.height]);
+          current.ink.append([inkX, inkY]);
         }
       }
     }
@@ -185,8 +197,8 @@ function PersonalNotesPage(props: Props) {
       setErasing(new Set(current.erased));
     });
   };
-  const penInContact = () => active.current || (surface === 'lyrics' && page.closest('.alr-canvas')?.querySelector('[data-pen-contact]'));
-  const layerStyle = { visibility: visible ? 'visible' as const : 'hidden' as const };
+  const penInContact = () => active.current || page.closest(surface === 'lyrics' ? '.alr-canvas' : '[data-print-preview-container]')?.querySelector('[data-pen-contact]');
+  const layerStyle = { ...size, visibility: visible ? 'visible' as const : 'hidden' as const };
   return <>
     <svg data-personal-notes-layer data-personal-highlighter-layer data-preview-edit-ui data-preview-only-control aria-hidden="true"
       className="personal-notes-layer personal-notes-highlighter" viewBox={`0 0 ${size.width} ${size.height}`} style={layerStyle}>
@@ -197,14 +209,16 @@ function PersonalNotesPage(props: Props) {
     <svg ref={svg} data-personal-notes-layer data-personal-notes-drawing={drawing || undefined}
     data-preview-edit-ui data-preview-only-control aria-label="Personal handwritten notes"
     className={`personal-notes-layer ${drawing ? 'is-drawing' : ''}`} viewBox={`0 0 ${size.width} ${size.height}`}
-    style={{ pointerEvents: drawing ? 'auto' : 'none', touchAction: drawing ? 'none' : 'auto', visibility: visible ? 'visible' : 'hidden' }}
+    style={{ ...layerStyle, pointerEvents: drawing ? 'auto' : 'none', touchAction: drawing ? 'none' : 'auto' }}
     onContextMenu={event => { if (drawing) event.preventDefault(); }}
     onClick={event => { if (drawing) { event.preventDefault(); event.stopPropagation(); } }}
     onMouseDown={event => { if (drawing) event.stopPropagation(); }}
     onPointerDown={event => {
       if (!drawing || event.pointerType === 'touch' || event.button !== 0 || active.current || page.closest('[data-lyrics-pinching]')) return;
       event.preventDefault(); event.stopPropagation();
-      const [x, y] = screenPoint(event.clientX, event.clientY);
+      const bounds = page.getBoundingClientRect(), scale = page.offsetWidth / bounds.width;
+      const screenX = event.clientX - bounds.left, screenY = event.clientY - bounds.top;
+      const x = screenX * scale, y = screenY * scale;
       let frame: Frame | undefined;
       if (surface === 'lyrics') {
         frame = pickLyricAnchor(lyricLines, x, y);
@@ -220,11 +234,14 @@ function PersonalNotesPage(props: Props) {
       const path = tool === 'eraser' ? null : tool === 'highlighter' ? liveHighlighter.current : livePen.current;
       path?.setAttribute('stroke', color);
       path?.setAttribute('stroke-width', String(tool === 'highlighter' ? 14 : width));
+      const start: [number, number] = [(x - frame.x) / frame.width, (y - frame.y) / frame.height];
+      const freehand = [start];
       active.current = { pointer: event.pointerId, frame, erased: new Set(), eraser: tool === 'eraser',
-        ink: createLiveNotePath([x, y]), path,
-        holdSamples: [{ x: event.clientX - page.getBoundingClientRect().left, y: event.clientY - page.getBoundingClientRect().top, time: Date.now() }],
-        rawPoints: [[(x - frame.x) / frame.width, (y - frame.y) / frame.height]],
-        stroke: { id: noteId(), anchor: frame.anchor, points: [[(x - frame.x) / frame.width, (y - frame.y) / frame.height]], color,
+        ink: createLiveNotePath([x, y]), path, freehand,
+        filter: event.pointerType === 'pen' && tool !== 'eraser' ? createPencilInput(screenX, screenY, event.timeStamp) : undefined,
+        holdSamples: [{ x: screenX, y: screenY, time: Date.now() }],
+        rawPoints: [start],
+        stroke: { id: noteId(), anchor: frame.anchor, points: freehand, color,
           width: tool === 'highlighter' ? 14 : width, tool: tool === 'highlighter' ? 'highlighter' : 'pen' } };
       event.currentTarget.dataset.penContact = 'true';
       latest.current.onShape(null);

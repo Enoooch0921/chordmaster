@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-08',
+        title: 'Steadier Pencil handwriting',
+        bullets: [
+          'Small movements of the pen tip are smoothed as you write. Lyrics and charts save the same freehand stroke you see on screen.',
+          'The ink layer follows the paper border at every zoom level. Small handwritten loops are less likely to trigger hold-to-shape.'
+        ]
+      },
+      {
+        version: '0.12.31',
+        date: '2026-11-08',
         title: 'Pinch to size each song and smoother Pencil strokes',
         bullets: [
           'Pinch the lyrics in reading, focus or performance mode. Each song remembers its size on this device.',
@@ -1121,6 +1130,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-08',
+        title: '改善 Pencil 寫字時的抖動',
+        bullets: [
+          '在歌詞和樂譜上慢慢寫字時，即時穩定線尾，抬筆後也會保留寫下的筆畫。',
+          '修正放大樂譜時筆跡與落筆處的偏移，也減少書寫小迴圈時誤觸停筆修形。'
+        ]
+      },
+      {
+        version: '0.12.31',
         date: '2026-11-08',
         title: '雙指調整每首歌的字級與手寫筆跡改善',
         bullets: [
