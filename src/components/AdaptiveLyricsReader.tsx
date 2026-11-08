@@ -7,6 +7,7 @@ import { getLyricsBlocks } from '../utils/lyricsDocument';
 import { paginateReadingColumns, readingColumnCandidates, readingPhrases, readingPhraseTail, prepareReadingSections, type ReadingAnchor, type ReadingPage, type ReadingSection, type MeasuredReadingSection } from '../utils/lyricsReading';
 import PersonalNotes, { type PersonalNotesOptions } from './PersonalNotes';
 import SongTitle from './SongTitle';
+import { useLyricsPinch } from '../hooks/useLyricsPinch';
 import { useLyricsPageGestures } from '../hooks/useLyricsPageGestures';
 import LyricsSectionNavigation from './LyricsSectionNavigation';
 import { useLyricsKeyboardNavigation } from '../hooks/useLyricsKeyboardNavigation';
@@ -19,6 +20,7 @@ interface Props extends PersonalNotesOptions {
   initialAnchor?: ReadingAnchor | 'last';
   onAnchorChange?: (anchor: ReadingAnchor) => void;
   onNextSong?: () => void; onPreviousSong?: () => void;
+  onSizeChange?: (size: number) => void;
   onFontSize?: (size: number) => void;
   keyboard?: boolean;
   hideHeading?: boolean;
@@ -41,7 +43,7 @@ function Rows({ section, start = 0, end = section.rows.length }: { section: Read
   </div>);
 }
 
-const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(function AdaptiveLyricsReader({ song, identity, language, settings, number, songPicker, initialAnchor, onAnchorChange, onNextSong, onPreviousSong, onFontSize, keyboard = true, hideHeading = false, gestures = true, ...notes }, ref) {
+const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(function AdaptiveLyricsReader({ song, identity, language, settings, number, songPicker, initialAnchor, onAnchorChange, onNextSong, onPreviousSong, onSizeChange, onFontSize, keyboard = true, hideHeading = false, gestures = true, ...notes }, ref) {
   const zh = language === 'zh';
   const sections = React.useMemo(() => prepareReadingSections(getLyricsBlocks(song.lyricsDoc), settings.language), [song.lyricsDoc, settings.language]);
   const [layout, setLayout] = React.useState<Layout>({ pages: [], columns: 1, widths: [1], fontSize: settings.fontSize, sections, splits: 0, wraps: 0, imbalance: 0 });
@@ -167,13 +169,17 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
     if (onPreviousSong) { onPreviousSong(); return true; } return false;
   };
   React.useImperativeHandle(ref, () => ({ next, previous }));
+  useLyricsPinch(canvas, identity, settings.fontSize, onSizeChange && ((size, anchor) => {
+    if (anchor) position.current = { identity, anchor };
+    onSizeChange(size);
+  }));
   useLyricsPageGestures({ canvas, enabled: gestures, scope: identity, writing: notes.notesOpen, onNext: next, onPrevious: previous });
   useLyricsKeyboardNavigation({ reader, enabled: keyboard, onNext: next, onPrevious: previous });
   return <section ref={reader} className={`adaptive-lyrics-reader${layout.pages.length > 1 ? '' : ' alr-single-page'}`} aria-label={zh ? '整首優先歌詞' : 'Whole-song lyrics'} data-reading-song={identity} data-font-size={layout.fontSize} data-column-count={layout.columns} data-column-widths={layout.widths.map(width => Math.round(width)).join(",")} data-page-count={layout.pages.length} data-reading-page={active + 1}
     style={{ '--lyrics-reading-font': fontFamily, '--lyrics-reading-leading': settings.lineHeight } as React.CSSProperties}>
     {!hideHeading && <header className="alr-heading"><div>{songPicker ?? <>{number && <span className="alr-song-number">{String(number).padStart(2, '0')}</span>}<h1><SongTitle title={song.title}/></h1></>}</div>
       <span className="alr-page-note">{sections.length > 0 && layout.pages.length === 1 ? <><Check size={13}/>{zh ? '整首一頁' : 'One page'}</> : `${sections.length} ${zh ? '個段落' : 'sections'}`}</span></header>}
-    <div className="alr-canvas" ref={canvas} tabIndex={0} aria-label={zh ? '當頁歌詞' : 'Current lyrics page'} aria-description={zh ? '左右滑動或點按翻頁；方向鍵與 Page Up、Page Down 也可翻頁切歌' : 'Swipe or click to navigate; arrow keys and Page Up or Page Down also turn pages and songs'}>
+    <div className="alr-canvas" ref={canvas} tabIndex={0} aria-label={zh ? '當頁歌詞' : 'Current lyrics page'} aria-description={zh ? '雙指縮放本曲字級，左右滑動或點按翻頁，也可用方向鍵或 Page Up、Page Down 切換' : 'Pinch to resize lyrics for this song. Swipe, tap or use the arrow and page keys to navigate.'}>
       {!sections.length ? <div className="alr-empty">{zh ? '尚無此語言的歌詞，可在閱讀設定切換語言。' : 'No lyrics in this language. Choose another language in reading settings.'}</div> : <div className="alr-columns" style={{ gridTemplateColumns: layout.widths.map(width => `minmax(0, ${width}fr)`).join(" "), fontSize: layout.fontSize }}>
         {(layout.sections === sections ? layout.pages[active] ?? [] : []).map((column, c) => <div className="alr-column" key={`${active}-${c}`}><div data-lyrics-note-page>{column.map(segment => {
           const section = sections[segment.section];

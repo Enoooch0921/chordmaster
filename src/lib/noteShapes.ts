@@ -77,6 +77,59 @@ function fitTemplate(source: ReturnType<typeof centered>, energy: number, target
   return best;
 }
 
+const turn = (a: Point, b: Point, c: Point) =>
+  (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+
+function edgeDistance(p: Point, a: Point, b: Point) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
+
+/** Simplify the two arcs of a closed loop. Split at distant points so starting
+ * halfway down an edge, or reversing the stroke, does not add an extra corner. */
+function contourCorners(loop: Point[], tolerance: number) {
+  const farthest = (p: Point) => loop.reduce((best, q, i) => distance(q, p) > distance(loop[best], p) ? i : best, 0);
+  const a = farthest(loop[0]), b = farthest(loop[a]);
+  const start = Math.min(a, b), split = Math.max(a, b);
+  const corners: Point[] = [];
+  const simplify = (arc: Point[], lo: number, hi: number) => {
+    let error = tolerance, pivot = -1;
+    for (let i = lo + 1; i < hi; i++) {
+      const d = edgeDistance(arc[i], arc[lo], arc[hi]);
+      if (d > error) { error = d; pivot = i; }
+    }
+    if (pivot < 0) { corners.push(arc[lo]); return; }
+    simplify(arc, lo, pivot); simplify(arc, pivot, hi);
+  };
+  const first = loop.slice(start, split + 1), second = [...loop.slice(split), ...loop.slice(0, start + 1)];
+  simplify(first, 0, first.length - 1); simplify(second, 0, second.length - 1);
+  // The two forced split points can sit on a rounded edge.
+  for (let i = corners.length - 1; i >= 0 && corners.length > 3; i--) {
+    const n = corners.length;
+    if (edgeDistance(corners[i], corners[(i + n - 1) % n], corners[(i + 1) % n]) < tolerance) corners.splice(i, 1);
+  }
+  return corners;
+}
+
+function polygonHint(loop: Point[], w: number, h: number, gap: number) {
+  const corners = contourCorners(loop, Math.max(.9, Math.min(Math.hypot(w, h) * .04, Math.min(w, h) * .1)));
+  const n = corners.length;
+  if (n === 3 && gap < Math.min(w, h) * .85) return { kind: 'triangle', vertices: 4 };
+  if (n < 5 || n > 12) return;
+  let crossings = 0, leftTurns = 0;
+  for (let i = 0; i < n; i++) {
+    const a = corners[i], b = corners[(i + 1) % n];
+    if (turn(a, b, corners[(i + 2) % n]) > 0) leftTurns++;
+    for (let j = i + 2; j < n; j++) {
+      const c = corners[j], d = corners[(j + 1) % n];
+      if (turn(a, b, c) * turn(a, b, d) < 0 && turn(c, d, a) * turn(c, d, b) < 0) crossings++;
+    }
+  }
+  if (n <= 7 && crossings >= 4 && crossings <= 6) return { kind: 'star', vertices: 6 };
+  if (!crossings && n >= 9 && Math.min(leftTurns, n - leftTurns) >= 4) return { kind: 'star', vertices: 11 };
+}
+
 /** Fit complete stroke trajectories rather than requiring an exact corner count. */
 export function recognizeNoteShape(samples: Point[], highlighter = false): { kind: NoteShape; points: Point[] } | null {
   if (samples.length < 2) return null;
@@ -85,7 +138,7 @@ export function recognizeNoteShape(samples: Point[], highlighter = false): { kin
   const minX = Math.min(...samples.map(p => p[0])), maxX = Math.max(...samples.map(p => p[0]));
   const minY = Math.min(...samples.map(p => p[1])), maxY = Math.max(...samples.map(p => p[1]));
   const w = maxX - minX, h = maxY - minY;
-  if (Math.max(w, h) < 24) return null;
+  if (Math.max(w, h) < 18) return null;
   if (direct >= 24) {
     // Fit the whole stroke, so a noisy final sample cannot tilt the intended line.
     const { center, points } = centered(samples);
@@ -100,17 +153,20 @@ export function recognizeNoteShape(samples: Point[], highlighter = false): { kin
       }) };
     }
   }
-  if (Math.min(w, h) < 16) return null;
+  if (Math.min(w, h) < 10) return null;
   const closed = direct < Math.min(w, h) * .55;
-  const source = centered(resample(samples, closed));
+  const polygonLoop = direct <= Math.hypot(w, h) * .55 ? resample(samples, true) : undefined;
+  const hint = polygonLoop && polygonHint(polygonLoop, w, h, direct);
+  if (!hint && (Math.max(w, h) < 24 || Math.min(w, h) < 16)) return null;
+  const source = centered(polygonLoop && (closed || hint) ? polygonLoop : resample(samples, closed));
   const energy = source.points.reduce((n, [x, y]) => n + x * x + y * y, 0);
-  let best: { template: Template; score: number; a: number; b: number } | undefined;
+  let best: ReturnType<typeof fitTemplate> | undefined;
   for (const target of templates) {
-    if (target.closed !== closed) continue;
+    if (hint ? target.kind !== hint.kind || target.vertices.length !== hint.vertices : target.closed !== closed) continue;
     const fit = fitTemplate(source, energy, target);
     if (!best || fit.score < best.score) best = fit;
   }
-  if (!best || best.score > .24) return null;
+  if (!best || best.score > (hint ? .40 : .24)) return null;
   // Refit the ideal shape with a single scale, so recognition tolerance never
   // turns into unequal star arms, a stretched circle or a scalene triangle.
   if (best.template.regular) best = fitTemplate(source, energy, best.template.regular);

@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-08',
+        title: 'Pinch to size each song and smoother Pencil strokes',
+        bullets: [
+          'Pinch the lyrics in reading, focus or performance mode. Each song remembers its size on this device.',
+          'Freehand strokes filter small zigzags. Hold to tidy an uneven triangle or a five-point star with a small gap.'
+        ]
+      },
+      {
+        version: '0.12.30',
+        date: '2026-11-08',
         title: 'Apple Pencil in lyrics mode',
         bullets: [
           'Write private notes in the lyrics reader, focused reading and performance mode.',
@@ -1112,6 +1121,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-08',
+        title: '雙指調整每首歌的字級與手寫筆跡改善',
+        bullets: [
+          '歌詞閱讀、專注閱讀和全螢幕演出都可雙指縮放，每首歌在此裝置各自記住字級。',
+          '改善手寫直線的小鋸齒，並放寬細長三角形、不規則五角星與收筆缺口的停筆修形判定。'
+        ]
+      },
+      {
+        version: '0.12.30',
         date: '2026-11-08',
         title: '歌詞模式支援 Apple Pencil',
         bullets: [

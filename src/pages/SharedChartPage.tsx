@@ -40,10 +40,10 @@ const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string |
   }
 };
 
-function SharedLyricsReader({ song, identity, language }: { song: Song; identity: string; language: AppLanguage }) {
+function SharedLyricsReader({ song, identity, language, userId }: { song: Song; identity: string; language: AppLanguage; userId: string | null }) {
   const [mode, setMode] = useState<SetlistLyricsMode>('reading');
   const [printSettings, setPrintSettings] = useState(DEFAULT_LYRICS_BOOK_SETTINGS);
-  return <div style={{ height: '80dvh' }}><SetlistLyricsWorkspace title={song.title} entries={[{ id: identity, song }]} selectedId={identity}
+  return <div style={{ height: '80dvh' }}><SetlistLyricsWorkspace preferenceKey={userId ? `user:${userId}` : 'local'} title={song.title} entries={[{ id: identity, song }]} selectedId={identity}
     onSelectSong={() => {}} language={language} mode={mode} onModeChange={setMode}
     printSettings={printSettings} onPrintSettingsChange={setPrintSettings}/></div>;
 }
@@ -585,7 +585,7 @@ export default function SharedChartPage() {
                   <h2 className="mb-3 text-xl font-black text-stone-900">{selectedBundleSong.title}</h2>
                   <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
                     {showSharedLyrics ? (
-                      <SharedLyricsReader identity={selectedBundleSong.id} song={selectedBundleSong.song} language={language} />
+                      <SharedLyricsReader userId={authUserId} identity={selectedBundleSong.id} song={selectedBundleSong.song} language={language} />
                     ) : (
                       <ChordSheet
                         song={selectedBundleSong.song}
@@ -626,7 +626,7 @@ export default function SharedChartPage() {
               </div>
               <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
                 {showSharedLyrics ? (
-                  <SharedLyricsReader identity={payload.song.id} song={payload.song.song} language={language} />
+                  <SharedLyricsReader userId={authUserId} identity={payload.song.id} song={payload.song.song} language={language} />
                 ) : (
                   <ChordSheet
                     song={payload.song.song}

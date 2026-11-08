@@ -48,3 +48,13 @@ describe('private handwritten note operations', () => {
     expect(mergeNoteOperations([JSON.parse(JSON.stringify(operation))])[0]).toEqual(mark);
   });
 });
+
+it('filters alternating Pencil jitter along a diagonal and still reaches the raw tip immediately', () => {
+  const points = Array.from({ length: 90 }, (_, i): [number, number] => [i, i * .4 + (i % 2 ? 1 : -1)]);
+  const path = notePath(points);
+  const coordinates = Array.from(path.matchAll(/(-?\d+\.\d+) (-?\d+\.\d+)/g), m => [Number(m[1]), Number(m[2])]);
+  const interior = coordinates.filter(([x]) => x > 4 && x < 85);
+  expect(interior.length).toBeGreaterThan(70);
+  expect(Math.max(...interior.map(([x, y]) => Math.abs(y - .4 * x)))).toBeLessThan(.15);
+  expect(path.endsWith('L89.00 36.60')).toBe(true);
+});

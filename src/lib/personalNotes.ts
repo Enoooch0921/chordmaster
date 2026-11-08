@@ -50,26 +50,49 @@ function inkSegment(a: InkPoint, b: InkPoint, c: InkPoint): string {
   const corner = ab * bc > 0 && ((b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1])) / (ab * bc) < 0.4;
   return corner ? ` L${inkXY(b)}` : ` Q${inkXY(b)} ${inkXY([(b[0] + c[0]) / 2, (b[1] + c[1]) / 2])}`;
 }
-/** Append only new geometry while drawing; use the same curves as persisted ink. */
+// Integer-rounded Pencil samples can alternate either side of a straight line.
+// Average a small deviation toward the chord at the same relative travel.
+// Larger departures describe deliberate turns and keep their original vertex.
+function denoiseSample(a: InkPoint, b: InkPoint, c: InkPoint): InkPoint {
+  const ab = Math.hypot(b[0] - a[0], b[1] - a[1]), bc = Math.hypot(c[0] - b[0], c[1] - b[1]);
+  if (!ab || !bc) return b;
+  const t = ab / (ab + bc);
+  const dx = a[0] + t * (c[0] - a[0]) - b[0], dy = a[1] + t * (c[1] - a[1]) - b[1];
+  const deviation = Math.hypot(dx, dy);
+  const weight = .5 * Math.min(1, Math.max(0, 4 - deviation));
+  return [b[0] + dx * weight, b[1] + dy * weight];
+}
+
+/** Only the tail is provisional. The latest sample always reaches the Pencil
+ * tip in the same event, including when the pen lifts at a sharp corner. */
 export function createLiveNotePath(first: InkPoint) {
-  let prefix = `M${inkXY(first)}`, previous: InkPoint | undefined, last = first;
+  let prefix = `M${inkXY(first)}`;
+  let previousRaw: InkPoint | undefined, tip = first;
+  let previousClean: InkPoint | undefined, lastClean = first;
   return {
     append(next: InkPoint) {
-      if (previous) prefix += inkSegment(previous, last, next);
-      previous = last; last = next;
+      if (previousRaw) {
+        const clean = denoiseSample(previousRaw, tip, next);
+        if (previousClean) prefix += inkSegment(previousClean, lastClean, clean);
+        previousClean = lastClean;
+        lastClean = clean;
+      }
+      previousRaw = tip;
+      tip = next;
     },
-    path: () => `${prefix}${previous ? ` L${inkXY(last)}` : ' l0.01 0'}`,
+    path() {
+      if (!previousRaw) return prefix + ' l0.01 0';
+      const tail = previousClean ? inkSegment(previousClean, lastClean, tip) : '';
+      return prefix + tail + ` L${inkXY(tip)}`;
+    },
   };
 }
-export function notePath(points: [number, number][], smooth = true): string {
-  if (points.length < 3 || !smooth) return points.map((p, i) => `${i ? 'L' : 'M'}${inkXY(p)}`).join(' ') + (points.length === 1 ? ' l0.01 0' : '');
-  // Local midpoint curves remove sample corners without a delayed moving average.
-  // Keep the live endpoint at the pen and leave deliberate sharp turns intact.
-  let path = `M${inkXY(points[0])}`;
-  for (let i = 1; i < points.length - 1; i++) {
-    path += inkSegment(points[i - 1], points[i], points[i + 1]);
-  }
-  return `${path} L${inkXY(points[points.length - 1])}`;
+export function notePath(points: InkPoint[], smooth = true): string {
+  if (!points.length) return '';
+  if (!smooth) return points.map((p, i) => `${i ? 'L' : 'M'}${inkXY(p)}`).join(' ') + (points.length === 1 ? ' l0.01 0' : '');
+  const ink = createLiveNotePath(points[0]);
+  for (let i = 1; i < points.length; i++) ink.append(points[i]);
+  return ink.path();
 }
 export function hitsNote(points: [number, number][], x: number, y: number, radius: number): boolean {
   return points.some(([px, py], index) => {

@@ -2,7 +2,7 @@ import React from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LyricsBookSettings } from '../utils/lyricsBook';
-import { DEFAULT_LYRICS_READING_SETTINGS, useLyricsReadingPreferences } from './useLyricsReadingPreferences';
+import { DEFAULT_LYRICS_READING_SETTINGS, useLyricsReadingPreferences, useSongReadingSize } from './useLyricsReadingPreferences';
 
 const storageKey = (identity = 'local') => `chordmaster.lyrics-reading.v1:${encodeURIComponent(identity)}`;
 const preference: LyricsBookSettings = { font: 'kaiti', fontSize: 32, lineHeight: 2, language: 'mixed' };
@@ -132,4 +132,21 @@ it('starts touch tablets at 28px while retaining explicit sizes and rotation con
   localStorage.setItem(storageKey(), JSON.stringify({ ...DEFAULT_LYRICS_READING_SETTINGS, fontSize: 24 }));
   media.mockImplementation(query => ({ matches: query === '(any-pointer: coarse)' }));
   expect(renderHook(() => useLyricsReadingPreferences()).result.current[0].fontSize).toBe(24);
+});
+
+it('inherits the old reading size for unadjusted songs and isolates overrides by account and source', () => {
+  localStorage.setItem(storageKey('alice'), JSON.stringify(preference));
+  const { result, rerender } = renderHook(({ account, song }) => {
+    const [base] = useLyricsReadingPreferences(account);
+    return useSongReadingSize(account, song, base.fontSize);
+  }, { initialProps: { account: 'alice', song: '甲/1' } });
+  expect(result.current[0]).toBe(32);
+  act(() => result.current[1](38));
+  rerender({ account: 'alice', song: '乙/1' });
+  expect(result.current[0]).toBe(32);
+  rerender({ account: 'bob', song: '甲/1' });
+  expect(result.current[0]).toBe(24);
+  rerender({ account: 'alice', song: '甲/1' });
+  expect(result.current[0]).toBe(38);
+  expect(JSON.parse(localStorage.getItem(storageKey('alice'))!)).toEqual(preference);
 });

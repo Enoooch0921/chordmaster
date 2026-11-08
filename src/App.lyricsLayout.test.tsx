@@ -166,3 +166,28 @@ it('retains the single-song reading anchor across its original A4 print view', a
   fireEvent.click(screen.getByRole('button', { name: '大字閱讀' }));
   expect(document.querySelector(`.alr-columns [data-source-line="${firstLine}"]`)).not.toBeNull();
 });
+
+it('remembers a pinch in the stage reader when returning to the workspace, without turning or resizing another song', async () => {
+  await mountLyrics();
+  fireEvent.click(screen.getAllByRole('button', { name: /^演出模式$/ })[0]);
+  const stage = await waitFor(() => {
+    const element = document.querySelector('[data-performance-overlay] .alr-canvas');
+    expect(element).toBeInTheDocument();
+    return element!;
+  });
+  const point = (x: number, id: number) => ({ clientX: x, clientY: 60, identifier: id, target: stage });
+  const a = point(40, 4), b = point(140, 5), end = point(190, 5);
+  fireEvent.touchStart(stage, { touches: [a] });
+  fireEvent.touchStart(stage, { touches: [a, b] });
+  fireEvent.touchMove(stage, { touches: [a, end] });
+  fireEvent.touchEnd(stage, { touches: [a], changedTouches: [end] });
+  fireEvent.touchEnd(stage, { touches: [], changedTouches: [a] });
+  fireEvent.click(stage, { clientX: 320, detail: 1 });
+  expect(stage.closest('[data-reading-song]')).toHaveAttribute('data-reading-song', 'entry-one');
+  expect(stage.closest('[data-reading-song]')).toHaveAttribute('data-font-size', '36');
+  fireEvent.keyDown(window, { key: 'Escape' });
+  await waitFor(() => expect(document.querySelector('[data-performance-overlay]')).toBeNull());
+  expect(document.querySelector('[data-reading-song]')).toHaveAttribute('data-font-size', '36');
+  fireEvent.change(screen.getByRole('combobox', { name: '目前歌曲' }), { target: { value: 'entry-two' } });
+  expect(document.querySelector('[data-reading-song]')).toHaveAttribute('data-font-size', '24');
+});

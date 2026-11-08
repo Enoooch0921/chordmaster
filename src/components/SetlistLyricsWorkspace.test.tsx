@@ -136,3 +136,53 @@ describe('setlist lyrics reading workspace', () => {
     expect(screen.queryByRole('button', { name: '下一首' })).toBeNull();
   });
 });
+
+it('commits a two-finger resize once for the source song, keeps the other song independent and restores the size after remount', () => {
+  const items = [
+    { id: 'first-entry', sourceSongId: 'source-a', song }, { id: 'second-entry', sourceSongId: 'source-b', song },
+    { id: 'repeat-entry', sourceSongId: 'source-a', song },
+  ];
+  const view = render(<Harness items={items}/>);
+  const canvas = screen.getByLabelText('當頁歌詞');
+  const p = (x: number, id: number) => ({ clientX: x, clientY: 40, identifier: id, target: canvas });
+  const a = p(20, 0), b = p(120, 1), c = p(170, 1);
+  const size = () => view.container.querySelector('.adaptive-lyrics-reader')?.getAttribute('data-font-size');
+  const navigate = (id: string) => fireEvent.change(screen.getByLabelText('目前歌曲'), { target: { value: id } });
+  const write = vi.spyOn(Storage.prototype, 'setItem');
+  fireEvent.touchStart(canvas, { touches: [a] });
+  fireEvent.touchStart(canvas, { touches: [a, b] });
+  fireEvent.touchMove(canvas, { touches: [c, a] });
+  expect(canvas.querySelector<HTMLElement>('.alr-columns')?.style.transform).toBe('scale(1.5)');
+  expect(size()).toBe('24');
+  expect(write).not.toHaveBeenCalled();
+  fireEvent.touchEnd(canvas, { touches: [a], changedTouches: [c] });
+  fireEvent.touchEnd(canvas, { touches: [], changedTouches: [a] });
+  fireEvent.click(canvas, { detail: 1, clientX: 350 });
+  expect(view.container.querySelector('[data-reading-song]')).toHaveAttribute('data-reading-song', 'first-entry');
+  expect(size()).toBe('36'); expect(write).toHaveBeenCalledTimes(1);
+  navigate('second-entry'); expect(size()).toBe('24');
+  navigate('repeat-entry'); expect(size()).toBe('36');
+  view.unmount();
+  const restored = render(<Harness items={items}/>);
+  expect(restored.container.querySelector('[data-reading-song]')).toHaveAttribute('data-font-size', '36');
+});
+
+it('discards a canceled, three-finger or Pencil/palm resize and keeps the next deliberate tap working', () => {
+  const view = render(<Harness/>), canvas = screen.getByLabelText('當頁歌詞');
+  const p = (id: number, x: number) => ({ identifier: id, clientX: x, clientY: 80, target: canvas });
+  const a = p(1, 30), b = p(2, 130);
+  for (const mode of ['cancel', 'third', 'palm']) {
+    const second = { ...b, touchType: mode === 'palm' ? 'stylus' : 'direct' };
+    fireEvent.touchStart(canvas, { touches: [a, second] });
+    fireEvent.touchMove(canvas, { touches: [a, { ...second, clientX: 190 }] });
+    if (mode === 'cancel') fireEvent.touchCancel(canvas, { touches: [] });
+    if (mode === 'third') fireEvent.touchStart(canvas, { touches: [a, b, p(3, 220)] });
+    fireEvent.touchEnd(canvas, { touches: [], changedTouches: [a, second] });
+    expect(view.container.querySelector('[data-reading-song]')).toHaveAttribute('data-font-size', '24');
+    expect(canvas.querySelector<HTMLElement>('.alr-columns')?.style.transform).toBe('');
+  }
+  fireEvent.touchStart(canvas, { touches: [a] });
+  fireEvent.touchEnd(canvas, { touches: [], changedTouches: [a] });
+  fireEvent.click(canvas, { detail: 1, clientX: 360 });
+  expect(view.container.querySelector('[data-reading-song]')).toHaveAttribute('data-reading-song', 'repeat-entry');
+});

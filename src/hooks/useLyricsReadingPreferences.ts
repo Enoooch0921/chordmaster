@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react';
 import type { LyricsBookSettings } from '../utils/lyricsBook';
 
 export const DEFAULT_LYRICS_READING_SETTINGS: LyricsBookSettings = {
@@ -66,4 +66,35 @@ export function useLyricsReadingPreferences(identity = 'local'): [LyricsBookSett
   }, [key]);
 
   return [settings, setSettings];
+}
+
+const unsavedSizes = new Map<string, number>();
+const SONG_SIZE_EVENT = 'chordmaster-song-reading-size';
+
+/** Per-source-song override. The existing account preference is the default
+ * for songs without an override. One write changes only the selected song. */
+export function useSongReadingSize(identity: string, songId: string | undefined, defaultSize: number) {
+  const key = songId && `chordmaster.lyrics-song-size.v1:${encodeURIComponent(identity)}:${encodeURIComponent(songId)}`;
+  const read = useCallback(() => {
+    if (!key) return defaultSize;
+    let size = unsavedSizes.get(key);
+    if (size === undefined) {
+      try { size = Number(localStorage.getItem(key)); } catch { return defaultSize; }
+    }
+    return size >= 20 && size <= 40 && size % 2 === 0 ? size : defaultSize;
+  }, [defaultSize, key]);
+  const subscribe = useCallback((notify: () => void) => {
+    const stored = (event: StorageEvent) => { if (event.key === key || event.key === null) notify(); };
+    const changed = (event: Event) => { if ((event as CustomEvent).detail === key) notify(); };
+    window.addEventListener('storage', stored); window.addEventListener(SONG_SIZE_EVENT, changed);
+    return () => { window.removeEventListener('storage', stored); window.removeEventListener(SONG_SIZE_EVENT, changed); };
+  }, [key]);
+  const value = useSyncExternalStore(subscribe, read, () => defaultSize);
+  const set = useCallback((size: number) => {
+    if (!key || !(size >= 20 && size <= 40 && size % 2 === 0)) return;
+    try { localStorage.setItem(key, String(size)); unsavedSizes.delete(key); }
+    catch { unsavedSizes.set(key, size); }
+    window.dispatchEvent(new CustomEvent(SONG_SIZE_EVENT, { detail: key }));
+  }, [key]);
+  return [value, set] as const;
 }

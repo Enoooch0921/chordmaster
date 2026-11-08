@@ -8,6 +8,8 @@
 .alr-song-number, .alr-page-note { font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .alr-page-note { display: flex; gap: 5px; align-items: center; white-space: nowrap; font-size: 11px; }
 .alr-canvas { flex: 1; min-height: 0; min-width: 0; }
+.alr-canvas, .alr-column { touch-action: pan-y; }
+.alr-canvas[data-lyrics-pinching] { overflow: clip; }
 .alr-columns { display: grid; gap: 28px; height: 100%; }
 .alr-columns, .alr-measure { font-family: var(--lyrics-reading-font); line-height: var(--lyrics-reading-leading); letter-spacing: .01em; }
 .alr-column { min-width: 0; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; overscroll-behavior: contain; container: lyrics-column / inline-size; }

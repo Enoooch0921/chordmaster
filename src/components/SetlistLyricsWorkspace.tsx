@@ -5,7 +5,7 @@ import type { AppLanguage, Song } from '../types';
 import LyricsBook, { type LyricsBookEntry } from './LyricsBook';
 import LyricsSheet from './LyricsSheet';
 import type { LyricsBookSettings } from '../utils/lyricsBook';
-import { useLyricsReadingPreferences } from '../hooks/useLyricsReadingPreferences';
+import { useLyricsReadingPreferences, useSongReadingSize } from '../hooks/useLyricsReadingPreferences';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { useModalScrollLock } from '../hooks/useModalScrollLock';
 import { getLyricsBlocks, mainLyricsLabel } from '../utils/lyricsDocument';
@@ -38,7 +38,7 @@ const PAPER_WIDTH = 794;
 
 export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
   const zh = language === 'zh';
-  const [readingSettings, setReadingSettings] = useLyricsReadingPreferences(preferenceKey);
+  const [defaults, setReadingSettings] = useLyricsReadingPreferences(preferenceKey);
   const [focused, setFocused] = React.useState(false);
   const workspaceRef = React.useRef<HTMLElement>(null);
   const backgroundRef = React.useRef<HTMLElement>(null);
@@ -55,6 +55,8 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
   const currentIndex = Math.max(0, entries.findIndex(entry => entry.id === selectedId));
   const current = entries[currentIndex];
   const currentId = current?.id;
+  const [fontSize, setFontSize] = useSongReadingSize(preferenceKey, current?.sourceSongId ?? currentId, defaults.fontSize);
+  const readingSettings = { ...defaults, fontSize };
   const isFocused = focused && mode === 'reading';
   useModalFocus(isFocused, workspaceRef);
   useModalScrollLock(isFocused, backgroundRef);
@@ -72,7 +74,7 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
   };
   const changeSettings = (next: LyricsBookSettings) => {
     if (mode === 'print') onPrintSettingsChange(next);
-    else setReadingSettings(next);
+    else setReadingSettings({ ...next, fontSize: defaults.fontSize });
   };
   const changeFocus = (next: boolean) => {
     setOptionsOpen(false); setFocused(next);
@@ -131,10 +133,10 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
       </div>}
       <AnimatedDisclosure open={optionsOpen && mode !== 'edit'}><div className="slw-options" id={optionsId}>
         {mode === 'reading' && <div className="slw-font-controls" role="group" aria-label={zh ? '閱讀字級' : 'Reading size'}>
-          <span className="slw-size-label">{zh ? '歌單字級' : 'Setlist size'}</span>
-          <button type="button" className="slw-icon" aria-label={zh ? '縮小歌詞' : 'Smaller lyrics'} disabled={readingSettings.fontSize <= 20} onClick={() => changeSettings({ ...readingSettings, fontSize: Math.max(20, readingSettings.fontSize - 2) })}><Minus size={18} aria-hidden="true"/></button>
+          <span className="slw-size-label">{zh ? '本曲字級' : 'Song size'}</span>
+          <button type="button" className="slw-icon" aria-label={zh ? '縮小歌詞' : 'Smaller lyrics'} disabled={readingSettings.fontSize <= 20} onClick={() => setFontSize(Math.max(20, fontSize - 2))}><Minus size={18} aria-hidden="true"/></button>
           <output aria-label={zh ? '目前字級' : 'Current font size'}>{readingSettings.fontSize}</output>
-          <button type="button" className="slw-icon" aria-label={zh ? '放大歌詞' : 'Larger lyrics'} disabled={readingSettings.fontSize >= 40} onClick={() => changeSettings({ ...readingSettings, fontSize: Math.min(40, readingSettings.fontSize + 2) })}><Plus size={18} aria-hidden="true"/></button>
+          <button type="button" className="slw-icon" aria-label={zh ? '放大歌詞' : 'Larger lyrics'} disabled={readingSettings.fontSize >= 40} onClick={() => setFontSize(Math.min(40, fontSize + 2))}><Plus size={18} aria-hidden="true"/></button>
         </div>}
 
         <label>{zh ? '字體' : 'Font'}<select aria-label={zh ? '歌詞字體' : 'Lyrics font'} value={activeSettings.font} onChange={event => changeSettings({ ...activeSettings, font: event.target.value as LyricsBookSettings['font'] })}><option value="sans">{zh ? '黑體' : 'Sans serif'}</option><option value="kaiti">{zh ? '楷體' : 'KaiTi'}</option></select></label>
@@ -144,7 +146,7 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
       </div></AnimatedDisclosure>
     </header>
     <div ref={scrollRef} className={`slw-scroll slw-scroll-${mode}`} tabIndex={0} aria-label={zh ? (mode === 'print' ? 'A4 歌詞預覽' : '歌詞內容') : (mode === 'print' ? 'A4 lyrics preview' : 'Lyrics content')}>
-      {!entries.length ? <div className="slw-empty"><h2>{zh ? '歌單還沒有歌曲' : 'No songs in this setlist'}</h2><p>{zh ? '從歌單加入歌曲後，就能在這裡閱讀歌詞。' : 'Add songs to the setlist to read their lyrics here.'}</p></div> : mode === 'reading' ? <AdaptiveLyricsReader {...notes} noteSongId={current.sourceSongId ?? current.id} key={current.id} identity={current.id} song={current.song} language={language} settings={readingSettings} hideHeading
+      {!entries.length ? <div className="slw-empty"><h2>{zh ? '歌單還沒有歌曲' : 'No songs in this setlist'}</h2><p>{zh ? '從歌單加入歌曲後，就能在這裡閱讀歌詞。' : 'Add songs to the setlist to read their lyrics here.'}</p></div> : mode === 'reading' ? <AdaptiveLyricsReader {...notes} noteSongId={current.sourceSongId ?? current.id} key={current.id} identity={current.id} song={current.song} language={language} settings={readingSettings} onSizeChange={setFontSize} hideHeading
         initialAnchor={anchors.get(current.id)} onAnchorChange={anchor => anchors.set(current.id, anchor)}
         onNextSong={currentIndex < entries.length - 1 ? () => selectSong(entries[currentIndex + 1].id) : undefined}
         onPreviousSong={currentIndex > 0 ? () => selectSong(entries[currentIndex - 1].id, true) : undefined}/>

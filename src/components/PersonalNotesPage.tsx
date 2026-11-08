@@ -202,7 +202,7 @@ function PersonalNotesPage(props: Props) {
     onClick={event => { if (drawing) { event.preventDefault(); event.stopPropagation(); } }}
     onMouseDown={event => { if (drawing) event.stopPropagation(); }}
     onPointerDown={event => {
-      if (!drawing || event.pointerType === 'touch' || event.button !== 0 || active.current) return;
+      if (!drawing || event.pointerType === 'touch' || event.button !== 0 || active.current || page.closest('[data-lyrics-pinching]')) return;
       event.preventDefault(); event.stopPropagation();
       const [x, y] = screenPoint(event.clientX, event.clientY);
       let frame: Frame | undefined;
