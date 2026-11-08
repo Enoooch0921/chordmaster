@@ -86,6 +86,14 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-08',
+        title: 'Clear pastel colors for the song map',
+        bullets: [
+          'Song map labels share a dark ink on distinct pastel section colors at the selected 115% strength, including in performance mode and print.'
+        ]
+      },
+      {
+        version: '0.12.32',
+        date: '2026-11-08',
         title: 'Steadier Pencil handwriting',
         bullets: [
           'Small movements of the pen tip are smoothed as you write. Lyrics and charts save the same freehand stroke you see on screen.',
@@ -1130,6 +1138,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-08',
+        title: '譜面曲序套用「淡彩深字・清透版」',
+        bullets: [
+          '譜面、演出及列印的曲序色塊套用第二款配色，使用 115% 色彩濃度和統一深墨色文字。'
+        ]
+      },
+      {
+        version: '0.12.32',
         date: '2026-11-08',
         title: '改善 Pencil 寫字時的抖動',
         bullets: [

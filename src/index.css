@@ -738,12 +738,16 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
 .chart-map[data-dense] { height:34px; padding-top:0; align-items:center; }
 .chart-map[data-dense] .chart-map-token { height:20px; }
 .chart-map[data-wrapped] { height:42px; }
-.chart-map-token { display:inline-flex; align-items:center; justify-content:center; min-width:0; width:100%; height:24px; padding:2px 8px; border:0; border-radius:4px; background:#ecefed; color:#505a56; font:650 13px/20px var(--font-sans); font-variant-numeric:tabular-nums; }
-/* A restrained roadmap palette: related sections share a hue, while their
-   labels carry the precise meaning. Chart paper uses these tones in all themes. */
-.chart-map-token[data-accent=blue] { background:#e7edf2; color:#455a6b; }
-.chart-map-token:is([data-accent=rose],[data-accent=emerald],[data-accent=fuchsia]) { background:#e3eae3; color:#425b4a; }
-.chart-map-token:is([data-accent=amber],[data-accent=violet]) { background:#ece7df; color:#655744; }
+.chart-map-token { display:inline-flex; align-items:center; justify-content:center; min-width:0; width:100%; height:24px; padding:2px 8px; border:0; border-radius:4px; background:hsl(var(--map-hue, 238) 73.6% 94%); color:#303c48; font:650 13px/20px var(--font-sans); font-variant-numeric:tabular-nums; }
+/* Clear pastel, 115% strength in the approved preview (64% × 1.15). */
+.chart-map-token[data-accent=blue] { --map-hue:221; }
+.chart-map-token[data-accent=rose] { --map-hue:346; }
+.chart-map-token[data-accent=emerald] { --map-hue:153; }
+.chart-map-token[data-accent=cyan] { --map-hue:187; }
+.chart-map-token[data-accent=violet] { --map-hue:263; }
+.chart-map-token[data-accent=amber] { --map-hue:34; }
+.chart-map-token[data-accent=fuchsia] { --map-hue:295; }
+.chart-map-token[data-accent=slate] { background:hsl(215 11.5% 95%); }
 .chart-map-token-label { display:inline-flex; flex:none; align-items:baseline; justify-content:center; gap:4px; font-size:13px; width:max-content; white-space:nowrap; transform:scale(var(--map-label-scale,1)); transform-origin:center; }
 .chart-map-token [data-map-label-line] { flex:none; display:block; }
 .chart-map-token-cue { font-size:12px; font-weight:500; }
