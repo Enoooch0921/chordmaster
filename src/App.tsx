@@ -9653,7 +9653,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     if (result.error) {
       const messages = {
         'missing-target': ['請將滑鼠移到要貼上的小節，或先選取小節。', 'Hover over or select a destination bar.'],
-        'count-mismatch': ['來源與目的小節數不同，請選取相同數量的小節。', 'Select the same number of destination bars.'],
+        'count-mismatch': [
+          `已複製 ${content.items.length} 小節，目前選取 ${targets.length} 小節，尚未貼上。請選取相同數量，或只選起始小節。`,
+          `Copied ${content.items.length} bars; selected ${targets.length}. Nothing pasted. Select the same number or just the starting bar.`
+        ],
         'time-signature': ['拍號不同，尚未貼上。請選擇相同拍號的小節。', 'Nothing pasted: choose bars with the same time signature.'],
         'unmetered-content': ['未定拍位序列不能覆蓋已有節奏或導航；請以整段內容貼上，或選擇空白位置。', 'Unmeasured chords cannot replace existing notation or navigation. Paste the whole block or choose an empty destination.'],
         'jianpu-mode': ['簡譜輸入模式不同，請先統一固定調／首調模式。', 'Use the same fixed/movable jianpu input mode before pasting.']
@@ -9661,7 +9664,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       toast.info(messages[result.error][language === 'zh' ? 0 : 1], { id: 'preview-clipboard' });
       return;
     }
-    if (result.song !== sourceSong) {
+    const changed = result.song !== sourceSong;
+    if (changed) {
       if (activePreviewEditSession) applyPreviewEditDraft(result.song);
       else commitPreviewBarBatchSong(result.song, sourceSong);
     }
@@ -9669,6 +9673,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       setPreviewSelectedBars(result.targets.map((target) => ({ ...target, previewIdentity: activePreviewIdentity! })));
     } else if (hovered && !hoverIsSelected) setPreviewSelectedBars([]);
     setPreviewBarContextMenu(null);
+    if (!changed) {
+      toast.info(language === 'zh'
+        ? `所選小節的${clipboardKindLabel(content.kind)}與複製內容相同，未變更。`
+        : `The selected ${clipboardKindLabel(content.kind)} already matches the copied content. No changes made.`, { id: 'preview-clipboard' });
+      return;
+    }
     toast.success(language === 'zh'
       ? `已${result.inserted ? '在後方插入' : '貼上'}${clipboardKindLabel(content.kind)}（${result.targets.length} 小節）`
       : `Pasted ${clipboardKindLabel(content.kind)} (${result.targets.length} bar(s))`, { id: 'preview-clipboard' });

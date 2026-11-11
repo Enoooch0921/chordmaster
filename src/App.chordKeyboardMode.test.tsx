@@ -27,6 +27,71 @@ async function openKeyboard() {
   fireEvent.click(document.querySelector('[data-preview-slot-index="0"]')!);
   return screen.findByRole('textbox', { name: '和弦直接輸入' });
 }
+it.each(['songs', 'setlists'])('uses Tab for individual beats and Enter for bars, retains edits and crosses bar boundaries in %s', async mode => {
+  localStorage.setItem('chordmaster.workspace-mode.v1', mode);
+  fixture.songs[0].sections = [
+    { id: 'verse', title: 'Verse', bars: [
+      { id: 'bar', chords: ['C', 'Dm', 'Em', 'F'] }, { id: 'bar-2', chords: ['G', 'Am', 'Bm', 'C'] },
+      { id: 'bar-3', chords: ['F'] }, { id: 'bar-4', chords: ['Am'] }
+    ] },
+    { id: 'chorus', title: 'Chorus', bars: [{ id: 'bar-5', chords: ['Dm'] }] }
+  ];
+  const before = JSON.stringify(fixture);
+  mount();
+  await openKeyboard();
+  expect(screen.getAllByText(mode === 'setlists' ? '服事歌單模式' : '歌曲庫模式')[0]).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '切換為字母和弦' }));
+  const capture = () => screen.getByRole('textbox', { name: '和弦直接輸入' });
+  const activeBar = () => document.querySelector('[data-preview-active-bar="true"]')?.getAttribute('data-preview-clipboard-bar');
+  fireEvent.keyDown(capture(), { key: 'Tab', shiftKey: true });
+  expect(activeBar()).toBe('bar');
+  fireEvent.change(capture(), { target: { value: 'Cmaj7' } });
+  fireEvent.keyDown(capture(), { key: 'Tab' });
+  expect(activeBar()).toBe('bar');
+  expect(capture()).toHaveValue('Dm');
+  fireEvent.change(capture(), { target: { value: 'Dm7' } });
+  fireEvent.keyDown(capture(), { key: 'Tab', shiftKey: true });
+  expect(activeBar()).toBe('bar');
+  expect(capture()).toHaveValue('Cmaj7');
+  for (const chord of ['Dm7', 'Em', 'F']) {
+    fireEvent.keyDown(capture(), { key: 'Tab' });
+    expect(activeBar()).toBe('bar');
+    expect(capture()).toHaveValue(chord);
+    expect(capture()).toHaveFocus();
+  }
+  fireEvent.keyDown(capture(), { key: 'Tab' });
+  await waitFor(() => expect(activeBar()).toBe('bar-2'));
+  expect(capture()).toHaveValue('G');
+  fireEvent.keyDown(capture(), { key: 'Tab', shiftKey: true });
+  await waitFor(() => expect(activeBar()).toBe('bar'));
+  expect(capture()).toHaveValue('F');
+  fireEvent.keyDown(capture(), { key: 'Tab' });
+  for (const [id, chord] of [['bar-3', 'F'], ['bar-4', 'Am'], ['bar-5', 'Dm']]) {
+    fireEvent.keyDown(capture(), { key: 'Enter' });
+    await waitFor(() => expect(activeBar()).toBe(id));
+    expect(capture()).toHaveValue(chord);
+  }
+  for (let beat = 1; beat <= 3; beat++) {
+    fireEvent.keyDown(capture(), { key: 'Tab' });
+    expect(activeBar()).toBe('bar-5');
+    expect(capture()).toHaveValue('');
+  }
+  fireEvent.keyDown(capture(), { key: 'Tab' });
+  await waitFor(() => {
+    expect(activeBar()).toBeTruthy();
+    expect(activeBar()).not.toBe('bar-5');
+  });
+  expect(capture()).toHaveValue('');
+  expect(capture()).toHaveFocus();
+  fireEvent.keyDown(capture(), { key: 'Tab', shiftKey: true });
+  await waitFor(() => expect(activeBar()).toBe('bar-5'));
+  fireEvent.click(screen.getByRole('button', { name: '完成' }));
+  expect(await openKeyboard()).toHaveValue('Cmaj7');
+  fireEvent.keyDown(capture(), { key: 'Tab' });
+  expect(activeBar()).toBe('bar');
+  expect(capture()).toHaveValue('Dm7');
+  expect(JSON.stringify(fixture)).toBe(before);
+}, 20000);
 it.each(['songs', 'setlists'])('remembers an explicit letter keyboard across close, performance mode and reload in %s', async mode => {
   localStorage.setItem('chordmaster.workspace-mode.v1', mode);
   let app = mount();

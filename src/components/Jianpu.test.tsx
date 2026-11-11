@@ -3,6 +3,27 @@ import { describe, expect, it, vi } from 'vitest';
 import Jianpu from './Jianpu';
 
 describe('Jianpu', () => {
+  it('keeps each dense sixteenth note independently clickable without overlapping its neighbor', () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(160);
+    try {
+      const { container } = render(<Jianpu notation="1=2=3=4= | | |" compact onNoteClick={vi.fn()}
+        activeNote={{ tokenIndex: 0, noteIndex: 1 }} />);
+      const targets = [...container.querySelectorAll<HTMLElement>('button[aria-label^="Select jianpu note"]')];
+      expect(targets).toHaveLength(4);
+      for (const [index, target] of targets.entries()) {
+        const center = parseFloat(target.style.left);
+        const halfWidth = parseFloat(target.style.width) / 2;
+        if (index) {
+          const previous = targets[index - 1];
+          expect(center - halfWidth).toBeGreaterThanOrEqual(parseFloat(previous.style.left) + parseFloat(previous.style.width) / 2 - 0.01);
+        }
+      }
+      expect(targets[1]).toHaveAttribute('aria-pressed', 'true');
+      expect(parseFloat(container.querySelector<HTMLElement>('[data-jianpu-selected-note-highlight]')!.style.width))
+        .toBeLessThanOrEqual(parseFloat(targets[1].style.width));
+    } finally { width.mockRestore(); }
+  });
+
   it('keeps ordinary compact jianpu at the normal height', () => {
     const { container } = render(
       <Jianpu notation="1 2 3 4" compact />

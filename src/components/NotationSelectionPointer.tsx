@@ -25,12 +25,12 @@ export default function NotationSelectionPointer({ style, jianpuOnset, voiceId, 
       const { jianpuOnset, voiceId } = latest.current;
       const lane = Array.from(pointer.parentElement?.querySelectorAll<HTMLElement>('[data-jianpu-voice]') ?? [])
         .find(element => element.dataset.jianpuVoice === (voiceId ?? 'primary')) ?? pointer.parentElement;
-      const digit = jianpuOnset === undefined ? null : Array.from(lane?.querySelectorAll<HTMLElement>('[data-jianpu-onset]') ?? [])
-        .find(element => Math.abs(Number(element.dataset.jianpuOnset) - jianpuOnset) < 0.001);
-      const digitBox = digit?.getBoundingClientRect();
+      const anchor = jianpuOnset === undefined ? null : Array.from(lane?.querySelectorAll<HTMLElement>('[data-jianpu-onset], [data-jianpu-insert-onset]') ?? [])
+        .find(element => Math.abs(Number(element.dataset.jianpuOnset ?? element.dataset.jianpuInsertOnset) - jianpuOnset) < 0.001);
+      const anchorBox = anchor?.getBoundingClientRect();
       const naturalCenter = rect.left + rect.width / 2 - shift.current.x * zoom;
       const next = {
-        x: digitBox ? (digitBox.left + digitBox.width / 2 - naturalCenter) / zoom : 0,
+        x: anchorBox ? (anchorBox.left + anchorBox.width / 2 - naturalCenter) / zoom : 0,
         y: overlapsBorder ? (border.bottom + gap - naturalTop) / zoom : 0
       };
       if (Math.abs(next.x - shift.current.x) < 0.05 && Math.abs(next.y - shift.current.y) < 0.05) return;

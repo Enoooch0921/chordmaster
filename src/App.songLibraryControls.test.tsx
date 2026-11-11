@@ -293,6 +293,22 @@ it('finds 點燃 in the library with both two-letter and two-symbol initials', a
   }
 });
 
+it('puts the complete title initials above literal Drop section matches without selecting another song', async () => {
+  fixture.songs[0].title = 'In The River';
+  fixture.songs[0].sections[0].title = 'Drop';
+  fixture.songs[0].updatedAt = 30;
+  fixture.songs[1].title = '主祢真好';
+  fixture.songs[1].sections[0].title = 'Drop';
+  fixture.songs[1].updatedAt = 20;
+  fixture.songs[2].title = '點燃（待人工）';
+  fixture.songs[2].updatedAt = 10;
+  await mount();
+  fireEvent.change(screen.getByRole('textbox', { name: '搜尋歌曲' }), { target: { value: 'dr' } });
+  await waitFor(() => expect([...document.querySelectorAll<HTMLElement>('[data-library-song-id]')].map(node => node.dataset.librarySongId))
+    .toEqual(['third', 'first', 'second']));
+  expect(selectedSongId()).toBe('first');
+});
+
 it.each([false, true])('finds saved lyrics in the song library without changing selection (team: %s)', async cloud => {
   state.cloud = cloud; state.role = 'viewer';
   fixture.songs[1].lyricsDoc = { chinese: '已刪除的歌詞', blocks: [

@@ -1795,8 +1795,9 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
   };
   const shouldIgnorePreviewBarMultiSelectEvent = (target: EventTarget | null) => (
     target instanceof Element
-    && !target.closest('[data-preview-closed-hit]')
-    && Boolean(target.closest('[data-preview-only-control], button, a, input, textarea, select, [role="button"]'))
+    && (Boolean(target.closest('[data-preview-only-control], a, input, textarea, select'))
+      || Boolean(target.closest('button, [role="button"]'))
+        && !target.closest('[data-preview-closed-hit], [data-preview-hover-field]'))
   );
   const getPreviewBarActionTarget = (
     element: HTMLElement,
@@ -2215,7 +2216,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
   // geometry transitions on its rows animate those ancestor measurements,
   // making chords and barlines drift inside otherwise stationary paper.
   return (
-    <ChordFitScope className="flex flex-col gap-8 print:gap-0">
+    <ChordFitScope data-chord-sheet className="flex flex-col gap-8 print:gap-0">
       {sectionDrag && typeof document !== 'undefined' && createPortal(
         <div
           data-preview-section-drag-ghost
@@ -2451,7 +2452,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                     style={{ flexGrow: row.layoutWeight || 1 }}
                     initial={false}
                   >
-                    <div className="relative w-16 sm:w-20 shrink-0" />
+                    <div data-preview-bar-gutter className="relative w-16 sm:w-20 [--bar-gutter-width:64px] sm:[--bar-gutter-width:80px] shrink-0"
+                      style={{ width: 'var(--pickup-gutter-width, var(--bar-gutter-width))' }} />
                     <div
                       data-preview-invisible-page-spacer
                       className="flex-1 min-h-0"
@@ -2618,7 +2620,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                     />
                   )}
                   {/* Left Column: Section Title */}
-                <div className="relative w-16 sm:w-20 shrink-0 flex flex-col items-center justify-start pr-2 pt-1 overflow-visible">
+                <div data-preview-bar-gutter className="relative w-16 min-w-16 sm:w-20 sm:min-w-20 [--bar-gutter-width:64px] sm:[--bar-gutter-width:80px] shrink-0 flex flex-col items-center justify-start pr-2 pt-1 overflow-visible"
+                  style={{ width: 'var(--pickup-gutter-width, var(--bar-gutter-width))' }}>
                     {(row.startBIdx === 0 || row.addSectionAfter || (onElementClick && row.startBIdx > 0 && Boolean(row.bars[0]))) && (() => {
                       const isSectionStartRow = row.startBIdx === 0;
                       const title = isSectionStartRow ? section?.title ?? '' : '';
@@ -2808,6 +2811,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                   previewIdentity={previewIdentity ?? 'preview'} cursor={isPickupActive ? resolvedActiveNotationTarget?.cursor : undefined}
                   notationTop={usesCompactNotationAnchor(sectionStartBar) ? sectionStartLowerTop + (!pickup?.rhythm?.trim() && sectionStartHasChords && sectionStartHasRhythm && sectionStartHasRiff ? sectionStartRhythmHeight + 6 : 0) : undefined}
                   rhythmLaneHeight={sectionStartRhythmHeight}
+                  leadingLabel={hasPickupDisplay && sectionStartBarLabel ? renderSectionStartGutterLabel() : undefined}
+                  labelLane={sectionStartLabelLane} scale={previewJianpuScale}
                   nextRiff={sectionStartBar?.riff} nextRhythm={sectionStartBar?.rhythm}
                   nextTimeSignature={sectionStartEffectiveTimeSignature}
                   onSelect={onElementClick ? (event, field, cursor) => emitElementClick(event, 0, -1, field, undefined, undefined, cursor) : undefined} />}
@@ -2949,7 +2954,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                     const hasRiff = hasVisiblePreviewRiff(previewRiffNotation) || extraRiffVoices.length > 0;
                     const hasInlineTimeSignature = Boolean(bar?.timeSignature && !bar.partialMeasure);
                     const isSectionLeadBar = Boolean(row.startBIdx === 0 && bIdx === 0 && section?.title.trim() && !hasPickupDisplay);
-                    const showSectionGutterBarLabel = hasBarLabel && isSectionLeadBar;
+                    const showSectionGutterBarLabel = hasBarLabel && (isSectionLeadBar || hasPickupDisplay && row.startBIdx === 0 && bIdx === 0);
                     const showSectionGutterTimeSignature = hasInlineTimeSignature && isSectionLeadBar;
                     const hasBarLabelInMeasure = hasBarLabel && !showSectionGutterBarLabel;
                     const showInlineTimeSignatureBarLabel = hasBarLabelInMeasure && hasInlineTimeSignature;
@@ -3896,6 +3901,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                               voices={extraRiffVoices}
                                               showPrimary={hasVisiblePreviewRiff(previewRiffNotation)}
                                               activeVoiceId={activeJianpuCursor?.voiceId}
+                                              activeInsertPosition={activeJianpuCursor && activeJianpuCursor.noteIndex == null ? {
+                                                tokenIndex: activeJianpuCursor.beatIndex, slotIndex: activeJianpuCursor.unitIndex, slotCount: notationBeatUnits,
+                                                spanSlots: activeJianpuCursor.inputUnits
+                                              } : null}
                                               onVoiceTokenClick={onElementClick ? (voiceId, beat, unit, event) => emitJianpuInsertSelection(beat, unit, event, voiceId) : undefined}
                                               onVoiceNoteClick={onElementClick ? (voiceId, beat, note, event) => emitJianpuNoteSelection(beat, note, event, voiceId) : undefined}
                                               primaryLabel={bar.riffLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
@@ -3973,6 +3982,10 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                                               voices={extraRiffVoices}
                                               showPrimary={hasVisiblePreviewRiff(previewRiffNotation)}
                                               activeVoiceId={activeJianpuCursor?.voiceId}
+                                              activeInsertPosition={activeJianpuCursor && activeJianpuCursor.noteIndex == null ? {
+                                                tokenIndex: activeJianpuCursor.beatIndex, slotIndex: activeJianpuCursor.unitIndex, slotCount: notationBeatUnits,
+                                                spanSlots: activeJianpuCursor.inputUnits
+                                              } : null}
                                               onVoiceTokenClick={onElementClick ? (voiceId, beat, unit, event) => emitJianpuInsertSelection(beat, unit, event, voiceId) : undefined}
                                               onVoiceNoteClick={onElementClick ? (voiceId, beat, note, event) => emitJianpuNoteSelection(beat, note, event, voiceId) : undefined}
                                               primaryLabel={bar.riffLabel || bar.label || (language === 'zh' ? '主聲部' : 'Main')}
@@ -4036,7 +4049,8 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
             {/* Keep the remaining page as writable ruled chart space. */}
             {!excerpt && pIdx === pages.length - 1 && Array.from({ length: Math.max(0, Math.floor((pIdx === 0 ? ROWS_PER_PAGE_FIRST : ROWS_PER_PAGE_OTHER) - pageRows.reduce((sum, row) => sum + row.layoutWeight, 0))) }).map((_, i) => (
               <div key={`empty-${i}`} className="flex-1 flex w-full min-h-0">
-                <div className="w-16 sm:w-20 shrink-0" />
+                <div data-preview-bar-gutter className="w-16 sm:w-20 [--bar-gutter-width:64px] sm:[--bar-gutter-width:80px] shrink-0"
+                  style={{ width: 'var(--pickup-gutter-width, var(--bar-gutter-width))' }} />
                 <div className="flex-1 grid min-h-0 grid-cols-4 w-full">
                   {Array.from({ length: 4 }).map((_, bIdx) => (
                     <div key={bIdx} className={`sheet-bar relative min-h-0 border-l border-gray-900 px-1 pt-1.5 pb-6 flex flex-col min-w-0 ${bIdx === 3 ? 'border-r border-r-gray-900 sheet-bar-right-edge' : ''} ${bIdx === 0 ? 'border-l-2 sheet-bar-left-edge' : ''} ${bIdx === 3 ? 'border-r-2' : ''}`} />

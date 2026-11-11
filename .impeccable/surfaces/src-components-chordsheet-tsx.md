@@ -72,3 +72,9 @@ The drummer score now receives the current setlist entry's one-based number, mat
 Map tokens recognize section names embedded in performance cues and display the compact base code, retaining any section number after that name. An ordinal before the name does not become a section number. Full cue names remain available unchanged in the arrangement, editor, tooltip and score. Shared `Intro 2/Outro` expands into separate Intro 2 and Outro steps; generated defaults put Outros last. Explicitly arranged standalone Outros retain their chosen position.
 
 Independent fresh finish review: **ship**, no material fixes. Chrome desktop/tablet/mobile and WebKit evidence is in `.impeccable/review/refinements-1105/`. Validation passed 208 test files / 2353 tests, lint and both web/iPad builds. The detector reported 50 inherited findings and zero on edited lines; they are not new design rules. Global design files remain unchanged.
+
+### Pickup labels and beat spacing — 2026-11-11
+
+An opening instrument label such as PN precedes the pickup notation. Keep its saved ownership on the first full measure so its existing label editor still works, and display it only once. Pickup notes use the same font scale and horizontal width per time unit as the following measures; reserve label space rather than compressing notes into the old fixed gutter. All music and empty ruled rows share the resulting gutter width. Short pickups align to the right without stretching their notes to fill the section-title gutter. Preserve source pitches, durations, IDs, and measure numbering.
+
+Local browser evidence in `output/playwright/pickup-label-20261111/` covers one-, two-, and three-beat pickups at desktop/tablet/phone widths, 70/100/140% visual scaling, and print layout. The 27 screen cases retain matching notation size, no duplicate label, matching time-unit widths, and aligned gutters. No production score rows were changed.

@@ -644,15 +644,28 @@ const Jianpu: React.FC<JianpuProps> = ({
       {tokenList.map((_, tokenIndex) => {
         const leftPercent = ((tokenIndex * TOKEN_WIDTH_UNITS) / totalWidthUnits) * 100;
         const widthPercent = (TOKEN_WIDTH_UNITS / totalWidthUnits) * 100;
-        const isActive = activeTokenIndex === tokenIndex;
         const insertBoxWidth = renderMode === 'editor' ? 10 : 8;
         const insertBoxHeight = renderMode === 'editor' ? 24 : 18;
         const occupiedSlots = Math.max(0, Math.min(gridSlotCount, leadingOccupiedSlots[tokenIndex] ?? 0));
         const insertPosition = activeInsertPosition?.tokenIndex === tokenIndex
           ? activeInsertPosition
           : null;
+        const insertUnit = insertPosition
+          ? insertPosition.slotIndex / insertPosition.slotCount * tokenCapacityUnits : 0;
+        const occupied = insertPosition && layoutNotes.some(note => (
+          note.tokenIndex * tokenCapacityUnits + note.unitStart <= tokenIndex * tokenCapacityUnits + insertUnit + JIANPU_LAYOUT_EPSILON
+          && note.tokenIndex * tokenCapacityUnits + note.unitEnd > tokenIndex * tokenCapacityUnits + insertUnit + JIANPU_LAYOUT_EPSILON
+        ));
+        const nextNoteUnit = insertPosition && !occupied ? Math.min(tokenCapacityUnits, ...layoutNotes
+          .filter(note => note.tokenIndex === tokenIndex && note.unitStart > insertUnit + JIANPU_LAYOUT_EPSILON)
+          .map(note => note.unitStart)) : tokenCapacityUnits;
+        const previewInsertSpan = insertPosition && !occupied
+          ? (nextNoteUnit - insertUnit) / tokenCapacityUnits * insertPosition.slotCount : 0;
+        const isActive = renderMode === 'editor' ? activeTokenIndex === tokenIndex
+          : Boolean(insertPosition && previewInsertSpan > JIANPU_LAYOUT_EPSILON);
         const insertVisibleSpanSlots = insertPosition
-          ? Math.max(0, Math.min(insertPosition.spanSlots ?? 0, insertPosition.slotCount - insertPosition.slotIndex))
+          ? Math.max(0, Math.min(insertPosition.spanSlots ?? (renderMode === 'editor' ? 0 : previewInsertSpan),
+              renderMode === 'editor' ? Infinity : previewInsertSpan, insertPosition.slotCount - insertPosition.slotIndex))
           : 0;
         const insertLeft = insertPosition
           ? `${leftPercent + ((widthPercent / insertPosition.slotCount) * insertPosition.slotIndex)}%`
@@ -679,6 +692,7 @@ const Jianpu: React.FC<JianpuProps> = ({
               <span
                 data-preview-edit-ui
                 data-jianpu-active-insert-highlight
+                data-jianpu-insert-onset={renderMode !== 'editor' && insertPosition ? tokenIndex + insertUnit / tokenCapacityUnits : undefined}
                 className="absolute bg-indigo-200/45 ring-1 ring-indigo-300/90"
                 style={{
                   left: insertLeft,
@@ -829,7 +843,7 @@ const Jianpu: React.FC<JianpuProps> = ({
 	        })()
 	      ))}
 
-	      {layoutNotes.map((note) => {
+	      {layoutNotes.map((note, layoutIndex) => {
         const xPercent = (note.xUnits / totalWidthUnits) * 100;
         const noteLocalUnits = note.xUnits - (note.tokenIndex * TOKEN_WIDTH_UNITS);
         const centerPx = useSnappedPixelCenter && containerWidth !== null
@@ -852,7 +866,7 @@ const Jianpu: React.FC<JianpuProps> = ({
               ? { width: 12, height: 25, radius: '4px' }
               : { width: 15, height: 27, radius: '4px' }
           : { width: 18, height: 26, radius: '4px' };
-        const selectedNoteClass = 'absolute bg-indigo-200/60 ring-1 ring-indigo-300/90';
+        const selectedNoteClass = 'pointer-events-none absolute bg-indigo-200/60 ring-1 ring-indigo-300/90';
         const selectedNoteInsertCaretClass = 'pointer-events-none absolute z-20 w-[2px] -translate-x-1/2 rounded-full bg-indigo-600 shadow-[0_0_0_1px_rgba(255,255,255,0.86)]';
         const hasLaterNoteInToken = layoutNotes.some((candidate) => (
           candidate.tokenIndex === note.tokenIndex
@@ -885,9 +899,22 @@ const Jianpu: React.FC<JianpuProps> = ({
 
         if (!isSelectedNote && !onNoteClick) return null;
 
+        const noteCenter = (item: LayoutNote) => useSnappedPixelCenter && containerWidth !== null
+          ? getTokenAlignedPx(item.tokenIndex, item.xUnits - item.tokenIndex * TOKEN_WIDTH_UNITS)!
+          : item.xUnits / totalWidthUnits * (containerWidth ?? 0);
+        const previous = layoutNotes[layoutIndex - 1];
+        const next = layoutNotes[layoutIndex + 1];
+        // Dense sixteenths still own their digit: fixed-width hit areas used
+        // to cover the preceding note's center and steal its clicks.
+        const hitWidth = containerWidth === null || containerWidth <= 0 ? hitMetrics.width : Math.max(1, Math.min(
+          hitMetrics.width,
+          previous ? noteCenter(note) - noteCenter(previous) : Infinity,
+          next ? noteCenter(next) - noteCenter(note) : Infinity
+        ));
+
         return (
           <React.Fragment key={`note-ui-${note.tokenIndex}-${note.noteIndex}-${note.start}`}>
-            {isSelectedNote && renderMode === 'editor' && (
+            {isSelectedNote && (
               <span
                 data-preview-edit-ui
                 data-jianpu-selected-note-highlight
@@ -902,7 +929,7 @@ const Jianpu: React.FC<JianpuProps> = ({
                     : 'translate(-50%, -50%)',
                   width: renderMode === 'editor' && selectionVisibleSpanUnits > 0
                     ? `${selectionWidthPercent}%`
-                    : `${selectionMetrics.width}px`,
+                    : `${Math.min(selectionMetrics.width, hitWidth)}px`,
                   height: `${selectionMetrics.height}px`,
                   borderRadius: selectionMetrics.radius
                 }}
@@ -911,9 +938,9 @@ const Jianpu: React.FC<JianpuProps> = ({
 
             {isSelectedNote && renderMode !== 'editor' && (
               <NotationSelectionPointer data-preview-edit-ui data-jianpu-selected-note-pointer
-                data-jianpu-selected-note-insert-caret={hasTrailingInsertSpace || undefined}
+                jianpuOnset={(note.tokenIndex * tokenCapacityUnits + note.unitStart) / (16 / parseTimeSignature(timeSignature).beatValue)}
                 className="notation-note-pointer pointer-events-none absolute z-20"
-                style={{ left: hasTrailingInsertSpace ? trailingInsertLeft : centerLeft, top: metrics.digitCenterY + selectionMetrics.height / 2 + 3 }} />
+                style={{ left: centerLeft, top: metrics.digitCenterY + selectionMetrics.height / 2 + 3 }} />
             )}
             {hasTrailingInsertSpace && renderMode === 'editor' && (
               <span data-preview-edit-ui data-jianpu-selected-note-insert-caret
@@ -930,7 +957,7 @@ const Jianpu: React.FC<JianpuProps> = ({
                   left: centerLeft,
                   top: `${metrics.digitCenterY}px`,
                   transform: 'translate(-50%, -50%)',
-                  width: `${hitMetrics.width}px`,
+                  width: `${hitWidth}px`,
                   height: `${hitMetrics.height}px`
                 }}
                 onMouseDown={(event) => event.preventDefault()}
@@ -939,6 +966,7 @@ const Jianpu: React.FC<JianpuProps> = ({
                   onNoteClick(note.tokenIndex, note.noteIndex, event);
                 }}
                 aria-label={`Select jianpu note ${note.noteIndex + 1} in beat ${note.tokenIndex + 1}`}
+                aria-pressed={isSelectedNote}
               />
             )}
           </React.Fragment>

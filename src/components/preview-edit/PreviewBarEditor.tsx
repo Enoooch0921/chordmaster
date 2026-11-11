@@ -54,7 +54,7 @@ import {
 } from '../../lib/previewEditSession';
 import type { PreviewEditorDeviceLayout } from '../../lib/previewEditorLayout';
 import { getRestGlyph, parseTimeSignature } from '../../utils/rhythmUtils';
-import { getJianpuGraceNotes, type JianpuInputMode, type JianpuGraceNote } from '../../utils/jianpuUtils';
+import { getJianpuDurationUnits, getJianpuGraceNotes, type JianpuInputMode, type JianpuGraceNote } from '../../utils/jianpuUtils';
 import KeyPicker from '../KeyPicker';
 import ChordTimingArrow from '../ChordTimingArrow';
 import {
@@ -559,6 +559,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     }, action, jianpuInputMode, jianpuPitchContext ?? (voiceTarget ? buildJianpuPitchContext(session.draftSong) : undefined));
     setNotationActionError(result.error);
     setJianpuInputMode(result.inputMode);
+    const insertionPreview = result.cursor.noteIndex === null ? {
+      inputUnits: getJianpuDurationUnits(result.inputMode.duration, result.inputMode.dotted, result.inputMode.triplet)
+    } : {};
     const movedToAnotherBar = result.target.sectionId !== session.target.sectionId
       || result.target.barId !== session.target.barId;
     if (movedToAnotherBar) {
@@ -569,6 +572,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           : 'next';
       onNavigate(direction, {
         kind: 'jianpu',
+        ...insertionPreview,
         ...(voiceTarget ? { voiceId: voiceTarget.id } : {}),
         beatIndex: result.cursor.beatIndex,
         unitIndex: result.cursor.unitIndex,
@@ -577,6 +581,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     } else {
       onNotationCursorChange({
         kind: 'jianpu',
+        ...insertionPreview,
         ...(voiceTarget ? { voiceId: voiceTarget.id } : {}),
         beatIndex: result.cursor.beatIndex,
         unitIndex: result.cursor.unitIndex,
@@ -691,7 +696,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         return;
       }
       if (hasUnmeteredChords(bar) || (bar.chordTimingUnspecified && notationMode === 'chords') || isTyping || isButtonActivation || event.altKey || meta) return;
-      if (isChordEditing && event.shiftKey && event.key === ' ') {
+      if (isChordEditing && event.key === 'Tab' && !event.isComposing && (element === document.body || element === panelRef.current)) {
+        event.preventDefault();
+        onNavigate(event.shiftKey ? 'previous' : 'next');
+      } else if (isChordEditing && event.shiftKey && event.key === ' ') {
         event.preventDefault();
         onApplyDraft(
           insertChordBeatBeforeSlot(session.draftSong, session.target),
@@ -1908,6 +1916,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               event.preventDefault();
               event.stopPropagation();
               onDone();
+            } else if (event.key === 'Tab' && !meta && !event.altKey && !event.nativeEvent.isComposing && !hasUnmeteredChords(bar) && !bar.chordTimingUnspecified) {
+              event.preventDefault();
+              event.stopPropagation();
+              onNavigate(event.shiftKey ? 'previous' : 'next');
             } else if (!meta && event.altKey && !event.shiftKey && applyChordEndingShortcut(event.key, event.code)) {
               event.preventDefault();
               event.stopPropagation();
@@ -1954,6 +1966,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
+          aria-keyshortcuts="Tab Shift+Tab Enter"
           tabIndex={-1}
           className="pointer-events-none fixed left-0 top-0 h-px w-px opacity-0"
           aria-label={language === 'zh' ? '和弦直接輸入' : 'Direct chord input'}

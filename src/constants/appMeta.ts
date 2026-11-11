@@ -85,6 +85,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-11',
+        title: 'More precise notation entry and song search',
+        bullets: [
+          'Keep multi-bar selection when clicking jianpu; paste feedback explains count mismatches and unchanged content.',
+          'Align eighth- and sixteenth-note selection and insertion positions. Place the opening label before pickup notes and match their spacing to full bars.',
+          'Choose shared section labels such as Verse 1/2 independently in the song map.',
+          'Rank complete titles and title initials before metadata and lyric fragments.',
+          'Chord entry: Tab or Space moves to the next beat, Shift+Tab to the previous beat, and Enter to the next bar.'
+        ]
+      },
+      {
+        version: '0.12.33',
         date: '2026-11-08',
         title: 'Clear pastel colors for the song map',
         bullets: [
@@ -1138,6 +1150,18 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-11',
+        title: '簡譜選取、弱起排版與逐拍輸入',
+        bullets: [
+          '多選小節時點到簡譜不再中斷選取；貼上數量不符或內容相同時顯示明確提示。',
+          '對齊八分與十六分音符的選取及輸入位置；段首標記移到弱起前方，弱起與後續小節的音符間距一致。',
+          '曲序編輯可分別安排 Verse 1/2 等共用段落的各個選項。',
+          '完整歌名與完整縮寫優先於其他資訊及歌詞片段，例如 dr 優先列出「點燃」。',
+          '和弦輸入：Tab 或 Space 下一拍、Shift+Tab 上一拍、Enter 下一小節。'
+        ]
+      },
+      {
+        version: '0.12.33',
         date: '2026-11-08',
         title: '譜面曲序套用「淡彩深字・清透版」',
         bullets: [

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
@@ -83,6 +84,73 @@ function nativeClipboardEvent(type: 'copy' | 'paste', values: Map<string, string
   Object.defineProperty(event, 'clipboardData', { value: { getData: (key: string) => values.get(key) ?? '', setData: (key: string, value: string) => values.set(key, value) } });
   fireEvent(window, event);
 }
+
+it.each(['songs', 'setlists'])('pastes jianpu into a newly selected range and undoes the whole paste in %s', async mode => {
+  const user = userEvent.setup();
+  await start(mode);
+  await user.keyboard('{Meta>}');
+  await user.click(within(bar(0)).getByRole('button', { name: 'Select jianpu note 1 in beat 1' }));
+  await user.keyboard('{/Meta}{Shift>}');
+  await user.click(within(bar(1)).getByRole('button', { name: 'Select jianpu note 1 in beat 1' }));
+  await user.keyboard('{/Shift}');
+  expect(selection()).toEqual(['bar-0', 'bar-1']);
+  await user.pointer({ target: within(bar(1)).getByRole('button', { name: 'Select jianpu note 1 in beat 1' }), keys: '[MouseRight]' });
+  await user.click(screen.getByRole('menuitem', { name: '複製小節' }));
+
+  await user.keyboard('{Meta>}');
+  await user.click(within(bar(4)).getByRole('button', { name: 'Select jianpu note 1 in beat 1' }));
+  await user.keyboard('{/Meta}{Shift>}');
+  await user.click(within(bar(5)).getByRole('button', { name: 'Select jianpu note 1 in beat 1' }));
+  await user.keyboard('{/Shift}');
+  expect(selection()).toEqual(['bar-4', 'bar-5']);
+  await user.pointer({ target: within(bar(5)).getByRole('button', { name: 'Select jianpu note 1 in beat 1' }), keys: '[MouseRight]' });
+  await user.click(screen.getByRole('menuitem', { name: '貼上…' }));
+  await user.click(screen.getByRole('menuitem', { name: '貼上簡譜' }));
+
+  await waitFor(() => {
+    expect(bar(4).querySelector('[data-jianpu-onset="0"]')).toHaveTextContent('1');
+    expect(bar(5).querySelector('[data-jianpu-onset="0"]')).toHaveTextContent('2');
+  });
+  expect(selection()).toEqual(['bar-4', 'bar-5']);
+  expect(bar(4).querySelector('[data-chord-root]')).toHaveTextContent('C');
+  expect(within(bar(5)).getAllByRole('button', { name: /Select rhythm note/ })).toHaveLength(2);
+  fireEvent.click(document.querySelector<HTMLButtonElement>('[data-preview-undo]')!);
+  await waitFor(() => {
+    expect(bar(4).querySelector('[data-jianpu-onset="0"]')).toHaveTextContent('5');
+    expect(bar(5).querySelector('[data-jianpu-onset="0"]')).toHaveTextContent('6');
+  });
+}, 15000);
+
+it('reports the actual copied and selected counts without changing any jianpu when they differ', async () => {
+  await start();
+  fireEvent.click(bar(1), { metaKey: true });
+  fireEvent.click(bar(3), { shiftKey: true });
+  fireEvent.contextMenu(bar(3));
+  fireEvent.click(screen.getByRole('menuitem', { name: '複製小節' }));
+  fireEvent.click(bar(4), { metaKey: true });
+  fireEvent.click(bar(7), { shiftKey: true });
+  fireEvent.contextMenu(bar(7));
+  fireEvent.click(screen.getByRole('menuitem', { name: '貼上…' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '貼上簡譜' }));
+  expect(await screen.findByText('已複製 3 小節，目前選取 4 小節，尚未貼上。請選取相同數量，或只選起始小節。')).toBeInTheDocument();
+  expect(screen.queryByText(/已貼上簡譜/)).not.toBeInTheDocument();
+  for (const i of [4, 5, 6]) expect(bar(i).querySelector('[data-jianpu-onset="0"]')).toHaveTextContent(String(i + 1));
+  expect(bar(7).querySelector('[data-jianpu-onset="0"]')).toHaveTextContent('1');
+});
+
+it('reports unchanged jianpu instead of a successful paste when pasting onto the copied range', async () => {
+  await start();
+  fireEvent.click(bar(0), { metaKey: true });
+  fireEvent.click(bar(1), { shiftKey: true });
+  fireEvent.contextMenu(bar(1));
+  fireEvent.click(screen.getByRole('menuitem', { name: '複製小節' }));
+  fireEvent.contextMenu(bar(1));
+  fireEvent.click(screen.getByRole('menuitem', { name: '貼上…' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '貼上簡譜' }));
+  expect(await screen.findByText('所選小節的簡譜與複製內容相同，未變更。')).toBeInTheDocument();
+  expect(screen.queryByText(/已貼上簡譜/)).not.toBeInTheDocument();
+  expect(document.querySelector('[data-preview-undo]')).toBeDisabled();
+});
 
 it.each(['songs', 'setlists'])('deletes the right-clicked bar outside the selection and restores it with undo in %s', async mode => {
   await start(mode);

@@ -51,6 +51,15 @@ export function songMapLabel(label: string) {
   return { name: match.name + (number ? ' ' + number : ''), code: match.code + (number ?? '') };
 }
 
+/** Independent arrangement choices for a shared score section; never split the score itself. */
+export function expandSongMapSectionLabel(label: string): string[] {
+  const { name } = songMapLabel(label);
+  const match = /^(.*?) (\d+(?:[/&,、]\d+)+)$/.exec(name);
+  if (!match) return name ? [name] : [];
+  const section = names.get(key(match[1]));
+  return section ? [...new Set(match[2].split(/[/&,、]/))].map(number => `${section.name} ${number}`) : [name];
+}
+
 const expandDisplayCode = (code: string) => code.replace(/^(I|It|O|E|R|Bd)(?=\d|$)/,
   prefix => ({ I: 'Intro', It: 'Inter', O: 'Outro', E: 'End', R: 'Ref', Bd: 'Break' })[prefix]!);
 

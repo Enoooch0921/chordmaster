@@ -856,6 +856,26 @@ describe('ChordSheet preview input caret', () => {
     expect(container.querySelector('[data-notation-aligned-chords]')).toHaveClass('h-[27px]');
   });
 
+  it('places the opening instrument label before the pickup and keeps it editable without duplicating it in bar one', () => {
+    const source: Song = { ...song, pickup: { timeSignature: '2/4', riff: '1 | 7,_1_' }, sections: [{ id: 'intro', title: 'Intro', bars: [
+      { id: 'first', chords: ['Bbadd9'], label: 'PN', riff: '5 | - | - | 3_2_' }
+    ] }] };
+    const before = JSON.stringify(source);
+    const onElementClick = vi.fn();
+    const { container } = render(<ChordSheet song={source} language="zh" currentKey="C" onElementClick={onElementClick} />);
+    const pickup = container.querySelector('[data-preview-pickup]')!;
+    const label = pickup.querySelector('[data-preview-pickup-label]')!;
+    expect(label).toHaveTextContent('PN');
+    expect(container.querySelectorAll('[data-preview-bar-label]')).toHaveLength(1);
+    expect(container.querySelector('.sheet-bar [data-preview-bar-label]')).toBeNull();
+    const openingDigit = pickup.querySelector<HTMLElement>('[data-jianpu-onset="0"]')!;
+    const barDigit = container.querySelector<HTMLElement>('.sheet-bar [data-jianpu-onset="0"]')!;
+    expect(openingDigit.style.fontSize).toBe(barDigit.style.fontSize);
+    fireEvent.click(label.firstElementChild!);
+    expect(onElementClick).toHaveBeenCalledWith(0, 0, 'label', expect.objectContaining({ sectionId: 'intro', barId: 'first' }));
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
   it.each(['subdivided', 'unmetered', 'untimed'] as const)('aligns pickup and gutter with the %s first-measure anchor', kind => {
     const baseBar = { id: 'first', chords: ['C'], rhythm: 'q q q q', riff: '1 | 2 | 3 | 4', label: 'Band', labelLane: 'rhythm' as const };
     const bar = { ...baseBar, ...(kind === 'subdivided' ? { chordSubdivisions: [{ beat: 0, offset: 0.5 as const, chord: 'G' }] } : kind === 'unmetered' ? { unmeteredChordLines: [['C', 'G']] } : { chordTimingUnspecified: true }) };
@@ -2588,7 +2608,7 @@ describe('ChordSheet preview notation interactions', () => {
     expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).not.toBeInTheDocument();
   });
 
-  it('marks the next insert point after a selected preview jianpu note when the beat has free space', () => {
+  it('points to the selected preview jianpu note when the beat has free space', () => {
     const partialBeatSong: Song = {
       ...song,
       sections: [{
@@ -2614,12 +2634,15 @@ describe('ChordSheet preview notation interactions', () => {
 
     expect(screen.getByRole('button', { name: 'Select jianpu note 1 in beat 1' })).toHaveAttribute('data-preview-edit-ui');
     expect(container.querySelector('[data-jianpu-selected-note-pointer]')).toBeInTheDocument();
-    expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).not.toBeInTheDocument();
+    const note = container.querySelector<HTMLElement>('[data-jianpu-onset="0"]')!;
+    expect(container.querySelector<HTMLElement>('[data-jianpu-selected-note-pointer]')!.style.left).toBe(note.style.left);
+    expect(container.querySelector('[data-jianpu-selected-note-highlight]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
     expect(container.querySelector('[data-preview-notation-cursor-caret]')).not.toBeInTheDocument();
   });
 
-  it('marks trailing insert space after auto-shortened preview jianpu notes', () => {
+  it('keeps selection on the last auto-shortened preview jianpu note', () => {
     const shorthandSong: Song = {
       ...song,
       sections: [{
@@ -2645,8 +2668,33 @@ describe('ChordSheet preview notation interactions', () => {
 
     expect(screen.getByRole('button', { name: 'Select jianpu note 3 in beat 1' })).toHaveAttribute('data-preview-edit-ui');
     expect(container.querySelector('[data-jianpu-selected-note-pointer]')).toBeInTheDocument();
-    expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-selected-note-insert-caret]')).not.toBeInTheDocument();
+    const note = container.querySelector<HTMLElement>('[data-jianpu-onset="0.5"]')!;
+    expect(container.querySelector<HTMLElement>('[data-jianpu-selected-note-pointer]')!.style.left).toBe(note.style.left);
     expect(container.querySelector('[data-preview-notation-cursor-beat]')).toBeInTheDocument();
+  });
+
+  it.each([
+    { riff: '2_', unitIndex: 2, inputUnits: 2, left: '12.5%', width: '12.5%' },
+    { riff: '2=', unitIndex: 1, inputUnits: 1, left: '6.25%', width: '6.25%' },
+    { riff: '2=3=', unitIndex: 2, inputUnits: 1, left: '12.5%', width: '6.25%' },
+    { riff: '2=3=4=', unitIndex: 3, inputUnits: 1, left: '18.75%', width: '6.25%' },
+    { riff: '2_3=', unitIndex: 3, inputUnits: 1, left: '18.75%', width: '6.25%' },
+    { riff: '2=', unitIndex: 1, inputUnits: 2, left: '6.25%', width: '12.5%' }
+  ])('marks the next input position after $riff with input length $inputUnits', ({ riff, unitIndex, inputUnits, left, width }) => {
+    const partialBeatSong: Song = { ...song, sections: [{ ...song.sections[0], bars: [
+      { id: 'bar-1', chords: ['C'], riff: `${riff} | | |` }
+    ] }] };
+    const { container } = render(<ChordSheet song={partialBeatSong} language="zh" currentKey="C"
+      previewIdentity="song-1" onElementClick={vi.fn()}
+      activePreviewNotationTarget={{ sectionId: 'section-1', barId: 'bar-1', notationMode: 'jianpu',
+        cursor: { kind: 'jianpu', beatIndex: 0, unitIndex, noteIndex: null, inputUnits } }} />);
+    const nextInput = container.querySelector<HTMLElement>(`[data-jianpu-insert-onset="${unitIndex / 4}"]`)!;
+    expect(nextInput).toHaveAttribute('data-preview-edit-ui');
+    expect(nextInput.style.left).toBe(left);
+    expect(nextInput.style.width).toBe(width);
+    expect(container.querySelector('[data-preview-notation-cursor-caret]')).toBeInTheDocument();
+    expect(container.querySelector('[data-jianpu-selected-note-pointer]')).not.toBeInTheDocument();
   });
 
   it('exposes the editor-only empty lower target only while preview editing is enabled', () => {

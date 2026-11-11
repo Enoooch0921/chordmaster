@@ -23,6 +23,29 @@ function setup(steps = initial) {
 const button = (name: string) => screen.getByRole('button', { name });
 const sequence = () => within(screen.getByRole('list', { name: '目前曲序' })).getAllByRole('button');
 
+it.each(['library', 'setlist'] as const)('arranges shared numbered sections independently in the %s map', scope => {
+  const onSave = vi.fn();
+  const steps: SongMapStep[] = [{ label: 'Verse 1/2', repeats: 2 }, { label: 'Chorus 1&2', repeats: 1 }];
+  const sections = [...steps, { label: 'Pre-Chorus 1／2', repeats: 1 }, { label: 'Verse 1', repeats: 1 }];
+  const before = structuredClone({ steps, sections });
+  render(<SongMapEditor steps={steps} title="Song" language="zh" close={vi.fn()}
+    options={{ scope, sections, fallback: steps, onSave }} />);
+  expect(button('加入 Verse 1')).toBeInTheDocument();
+  expect(button('加入 Verse 2')).toBeInTheDocument();
+  expect(button('加入 Chorus 1')).toBeInTheDocument();
+  expect(button('加入 Chorus 2')).toBeInTheDocument();
+  expect(button('加入 Pre Chorus 1')).toBeInTheDocument();
+  expect(button('加入 Pre Chorus 2')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '加入 Verse 1/2' })).toBeNull();
+  expect(onSave).not.toHaveBeenCalled();
+  expect(sequence()[0]).toHaveAttribute('aria-label', '第 1 段 Verse 1/2，共 2 遍');
+  fireEvent.click(button('清空重排'));
+  for (const label of ['Verse 1', 'Chorus 1', 'Verse 2', 'Pre Chorus 2', 'Chorus 2']) fireEvent.click(button(`加入 ${label}`));
+  fireEvent.click(button('儲存曲序'));
+  expect(onSave).toHaveBeenCalledWith(['Verse 1', 'Chorus 1', 'Verse 2', 'Pre Chorus 2', 'Chorus 2'].map(label => ({ label, repeats: 1 })));
+  expect({ steps, sections }).toEqual(before);
+});
+
 it('builds a map from chart choices without typing, including a section omitted from the default', () => {
   const { onSave } = setup();
   fireEvent.click(button('清空重排'));

@@ -26,6 +26,52 @@ beforeAll(() => loadSearchDictionary());
 const match = (query: string, ...fields: string[]) => createSearchQuery(query).match(fields);
 
 describe('song search, adapted from Spotlight Han', () => {
+  it.each(['dr', 'DR', 'ㄉㄖ'])('ranks a complete title abbreviation ahead of section and author matches for %s', raw => {
+    const songs = [
+      { title: 'In The River', author: 'Jesus Culture', section: 'Drop' },
+      { title: '主祢真好', author: 'Israel Houghton', section: 'Drop' },
+      { title: '點燃（官方版）（待人工）', author: '新店行道會', section: 'Verse' },
+      { title: 'Another Song', author: '得榮耀', section: 'Verse' }
+    ];
+    const result = searchItems(songs, createSearchQuery(raw), song => [song.title, song.author, song.section]);
+    expect(result[0]).toBe(songs[2]);
+  });
+
+  it('orders complete titles, complete initials, title prefixes, title fragments, metadata, then lyrics', () => {
+    const songs = [
+      { title: 'Same God', author: '', section: 'Verse', lyricsDoc: { chinese: '', english: 'Dreams awaken' } },
+      { title: 'In The River', author: '', section: 'Drop' },
+      { title: '聖靈點燃我心', author: '', section: 'Verse' },
+      { title: 'New Drive', author: '', section: 'Verse' },
+      { title: '點燃生命', author: '', section: 'Verse' },
+      { title: 'Drive', author: '', section: 'Verse' },
+      { title: '點燃（手寫F調）（待人工）', author: '', section: 'Verse' },
+      { title: 'DR', author: '', section: 'Verse' }
+    ];
+    expect(searchItems(songs, createSearchQuery('dr'), song => [song.title, song.author, song.section], song => song.lyricsDoc))
+      .toEqual([...songs].reverse());
+  });
+
+  it('ranks Chinese title prefixes and fragments ahead of metadata while preserving tied input order', () => {
+    const songs = [
+      { title: '另一首歌', author: '星光' },
+      { title: '盼望星光', author: '' },
+      { title: '星光照亮前路', author: '' },
+      { title: '星光（現場版）', author: '' },
+      { title: '星光（官方版）', author: '' }
+    ];
+    expect(searchItems(songs, createSearchQuery('星光'), song => [song.title, song.author]))
+      .toEqual([songs[3], songs[4], songs[2], songs[1], songs[0]]);
+    expect(searchItems(songs, createSearchQuery(''), song => [song.title, song.author])).toEqual(songs);
+    expect(searchItems(songs, createSearchQuery('現場版'), song => [song.title, song.author])).toEqual([songs[3]]);
+  });
+
+  it('treats a version suffix as secondary metadata while keeping the full versioned title searchable', () => {
+    const songs = [{ title: 'Mercy (Live)', author: '' }, { title: 'Another Song', author: 'Live Band' }, { title: 'Live Again', author: '' }];
+    expect(searchItems(songs, createSearchQuery('live'), song => [song.title, song.author])).toEqual([songs[2], songs[0], songs[1]]);
+    expect(searchItems(songs, createSearchQuery('Mercy (Live)'), song => [song.title, song.author])).toEqual([songs[0]]);
+  });
+
   it.each(['dr', 'DR', 'ㄉㄖ', 'dianran'])('finds 點燃 and its library versions using %s', query => {
     for (const title of ['點燃', '點燃（官方版）', '點燃（手寫F調）（待人工）']) {
       expect(match(query, title)).toBe('phonetic');

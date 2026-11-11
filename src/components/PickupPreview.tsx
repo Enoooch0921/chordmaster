@@ -8,6 +8,7 @@ import { visibleJianpuVoices } from '../utils/jianpuVoices';
 import JianpuVoiceStack from './JianpuVoiceStack';
 import RhythmNotation from './RhythmNotation';
 import { parseTimeSignature } from '../utils/rhythmUtils';
+import { usePickupSpacing } from '../hooks/usePickupSpacing';
 
 interface Props {
   pickup?: PickupMeasure;
@@ -23,11 +24,19 @@ interface Props {
   nextTimeSignature?: string;
   notationTop?: number;
   rhythmLaneHeight?: number;
+  leadingLabel?: React.ReactNode;
+  labelLane?: 'rhythm' | 'riff';
+  scale?: number;
   onSelect?: (event: React.MouseEvent<HTMLElement>, field: 'riff' | 'rhythm', cursor?: PreviewNotationCursor) => void;
 }
 
 export default function PickupPreview({ pickup, meter, language, playKey, absolute, active,
-  nextRiff, nextRhythm, nextTimeSignature, notationTop, rhythmLaneHeight, onSelect, previewIdentity = 'preview', cursor }: Props) {
+  nextRiff, nextRhythm, nextTimeSignature, notationTop, rhythmLaneHeight, leadingLabel, labelLane = 'riff', scale = 0.86, onSelect, previewIdentity = 'preview', cursor }: Props) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const display = pickup ? getPickupDisplay(pickup, meter) : null;
+  const hasLeadingLabel = Boolean(leadingLabel);
+  const spacingLayout = React.useMemo(() => ({ pickup, nextRiff, nextRhythm, hasLeadingLabel }), [pickup, nextRiff, nextRhythm, hasLeadingLabel]);
+  usePickupSpacing(ref, display?.durationUnits ?? 0, parseTimeSignature(nextTimeSignature ?? meter).barUnits, spacingLayout);
   const zh = language === 'zh';
   const anchor = (mode: string) => `${previewIdentity}|${PICKUP_EDITOR_SECTION_ID}|${PICKUP_EDITOR_BAR_ID}|${mode}|all`;
   if (!pickup) return onSelect ? <button type="button" data-preview-only-control="true"
@@ -35,8 +44,7 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
     className="mt-2 self-center whitespace-nowrap rounded border border-dashed border-gray-200 px-1 py-1 text-[9px] text-gray-400 hover:border-emerald-400 hover:text-emerald-700"
     aria-label={zh ? '新增弱起拍（第 0 小節）' : 'Add pickup (bar 0)'}
     onClick={event => onSelect(event, 'riff')}>{zh ? '＋ 弱起' : '+ Pickup'}</button> : null;
-  const display = getPickupDisplay(pickup, meter);
-  if (!display.hasContent && !onSelect) return null;
+  if (!display || !display.hasContent && !onSelect) return null;
   const convert = (riff: string) => absolute ? convertRelativeJianpuToAbsoluteNotation(riff, playKey) : riff;
   const voices = visibleJianpuVoices(display.riffVoices).map(voice => ({
     id: voice.id, label: voice.label, notation: convert(voice.riff)
@@ -50,10 +58,12 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
     event.stopPropagation();
     onSelect?.(event, field, nextCursor);
   };
-  return <div data-preview-pickup role="group" aria-label={zh ? '第 0 小節・弱起拍' : 'Bar 0 · Pickup'}
+  return <div ref={ref} data-preview-pickup role="group" aria-label={zh ? '第 0 小節・弱起拍' : 'Bar 0 · Pickup'}
     data-preview-edit-anchor={anchor('lower')}
     data-pickup-duration-units={display.durationUnits}
-    className={`${notationTop === undefined ? 'relative mt-auto gap-0.5' : 'absolute inset-x-0 gap-1.5'} flex w-full min-w-0 flex-col py-1`} style={notationTop === undefined ? undefined : { top: notationTop - 4 }}>
+    className={`${notationTop === undefined ? 'relative mt-auto self-end' : 'absolute right-0'} flex w-full min-w-0 items-start gap-1 py-1`} style={notationTop === undefined ? undefined : { top: notationTop - 4 }}>
+    {leadingLabel && <div data-preview-pickup-label className="max-w-12 shrink-0" style={{ paddingTop: 3 + (labelLane === 'riff' && pickup.rhythm?.trim() ? (rhythmLaneHeight ?? 18) + 6 : 0) }}>{leadingLabel}</div>}
+    <div className={`flex min-w-0 flex-1 flex-col ${notationTop === undefined ? 'gap-0.5' : 'gap-1.5'}`}>
     {(pickup.rhythm?.trim() || active && cursor?.kind === 'rhythm') && <div role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined} className={laneClass} style={rhythmLaneHeight ? { minHeight: rhythmLaneHeight } : undefined}
       data-preview-edit-anchor={anchor('rhythm')}
       aria-label={zh ? '編輯弱起節奏' : 'Edit pickup rhythm'} onClick={event => selectLane(event, 'rhythm')}
@@ -78,8 +88,12 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
           style={{ left: `${cursorUnit! / barUnits * 100}%`, top: 'calc(100% + 6px)' }} />}
       </>}
       <JianpuVoiceStack voices={voices} primaryLabel={zh ? '主聲部' : 'Main'} showPrimary={hasPrimary || Boolean(jianpuCursor)}
-        notation={convert(display.riff)} timeSignature={display.timeSignature} literalDurations compact scale={0.86}
+        notation={convert(display.riff)} timeSignature={display.timeSignature} literalDurations compact scale={scale}
         gridSlotCount={beatUnits}
+        activeInsertPosition={jianpuCursor && jianpuCursor.noteIndex == null ? {
+          tokenIndex: jianpuCursor.beatIndex, slotIndex: jianpuCursor.unitIndex, slotCount: beatUnits,
+          spanSlots: jianpuCursor.inputUnits
+        } : null}
         activeNote={active && cursor?.kind === 'jianpu' && cursor.noteIndex != null ? { tokenIndex: cursor.beatIndex, noteIndex: cursor.noteIndex } : null}
         showPlaceholders={Boolean(active)}
         onNoteClick={onSelect ? (beatIndex, noteIndex, event) => { if (event) selectLane(event, 'riff', { kind: 'jianpu', beatIndex, unitIndex: 0, noteIndex }); } : undefined}
@@ -87,5 +101,6 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
         nextNotationForCrossBar={nextRiff ? convert(nextRiff) : undefined} className="w-full min-w-0" />
       </div>
     </div>}
+    </div>
   </div>;
 }

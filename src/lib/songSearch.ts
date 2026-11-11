@@ -175,10 +175,12 @@ const getLyricsData = (doc: LyricsDoc) => {
 const getLyricsIndex = (doc?: LyricsDoc): readonly string[] => doc ? getLyricsData(doc).fields : [];
 
 export type SearchMatch = 'text' | 'phonetic' | 'keyboard' | 'lyrics';
+const matchOrder: Record<SearchMatch, number> = { text: 0, phonetic: 1, keyboard: 2, lyrics: 3 };
 export type SearchQuery = {
   isEmpty: boolean;
   match: (fields: readonly (string | undefined | null)[], lyrics?: LyricsDoc) => SearchMatch | null;
   isExactTitleMatch: (title: string | undefined | null) => boolean;
+  titleRank: (title: string | undefined | null) => number | null;
   lyricsSnippet: (lyrics?: LyricsDoc) => string | null;
 };
 
@@ -248,20 +250,33 @@ export const createSearchQuery = (raw: string): SearchQuery => {
   };
   const lyricText = normalizeLyricsText(text);
   const terms = text.split(/\s+/u).filter(Boolean).map(term => ({ text: term, lyricText: normalizeLyricsText(term), latin: pinyinQuery(term), symbols: ZHUYIN_ONLY.test(term) ? term.replace(/[^ㄅ-ㄩ]/gu, '') : '', keyboard: keyboardQuery(term) }));
-  return {
+  const titleRank = (title: string | undefined | null): number | null => {
+    if (!title || !text) return null;
+    const stored = getField(title);
+    if (stored.text === text) return 0;
+    // Rank the song name separately from its trailing version/status labels.
+    // Those labels remain searchable through the full metadata match below.
+    const field = getField(stored.text.replace(/(?:\s*\([^()]*\))+\s*$/u, '').trim());
+    if (!field.text) return null;
+    if (field.text === text) return 0;
+    const index = latin || symbols || keyboard ? getPhonetics(field) : EMPTY_PHONETICS;
+    const phonetic = latin ? [index.pinyin, index.initials]
+      : symbols ? [index.zhuyin, ...(symbols.length >= 2 ? [index.zhuyinInitials] : [])] : [];
+    const needle = latin || symbols;
+    const keys = keyboard?.initialsOnly ? index.zhuyinInitials : index.zhuyin;
+    if (phonetic.includes(needle)) return 1;
+    if (keyboard && keys === keyboard.symbols) return 2;
+    if (field.text.startsWith(text)) return 3;
+    if (phonetic.some(value => value.startsWith(needle))) return 4;
+    if (keyboard && keys.startsWith(keyboard.symbols)) return 5;
+    const match = query.match([field.text]);
+    return match ? 6 + matchOrder[match] : null;
+  };
+  const query: SearchQuery = {
     isEmpty: !text,
     lyricsSnippet: lyrics => lyricsSnippet(lyrics, text ? [lyricText, ...terms.map(term => term.lyricText)] : []),
-    isExactTitleMatch(title) {
-      if (!title || !text) return false;
-      // A library version suffix does not change the underlying song name.
-      const field = getField(normalizeSearchText(title).replace(/(?:\s*\([^()]*\))+\s*$/u, '').trim());
-      if (!field.text) return false;
-      if (field.text === text) return true;
-      if (!latin && !symbols) return false;
-      const index = getPhonetics(field);
-      return Boolean(latin && (index.pinyin === latin || index.initials === latin))
-        || Boolean(symbols && (index.zhuyin === symbols || index.zhuyinInitials === symbols));
-    },
+    titleRank,
+    isExactTitleMatch: title => { const rank = titleRank(title); return rank !== null && rank < 3; },
     match(values, lyrics) {
       if (!text) return 'text';
       const fields = values.filter((value): value is string => Boolean(value)).map(getField);
@@ -279,16 +294,17 @@ export const createSearchQuery = (raw: string): SearchQuery => {
       return result;
     }
   };
+  return query;
 };
 
-/** Metadata results lead lyrics; exact song names lead partial matches within each tier. */
+/** Complete names/initials, title prefixes, title fragments, metadata, then lyrics.
+ * Preserve the caller's sort order when relevance is tied. */
 export const searchItemsWithMatches = <T,>(items: readonly T[], query: SearchQuery, fields: (item: T) => readonly (string | undefined | null)[], lyrics?: (item: T) => LyricsDoc | undefined): Array<{ item: T; match: SearchMatch }> => {
   if (query.isEmpty) return items.map(item => ({ item, match: 'text' }));
-  const ranks = { text: 0, phonetic: 1, keyboard: 2, lyrics: 3 };
   return items.flatMap(item => {
     const values = fields(item);
     const match = query.match(values, lyrics?.(item));
-    return match ? [{ item, match, rank: ranks[match] * 2 + (query.isExactTitleMatch(values[0]) ? 0 : 1) }] : [];
+    return match ? [{ item, match, rank: query.titleRank(values[0]) ?? (match === 'lyrics' ? 12 : 9 + matchOrder[match]) }] : [];
   }).sort((left, right) => left.rank - right.rank);
 };
 

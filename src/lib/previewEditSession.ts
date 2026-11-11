@@ -42,6 +42,8 @@ export interface PreviewJianpuCursor {
   beatIndex: number;
   unitIndex: number;
   noteIndex?: number | null;
+  /** Pending input length in sixteenth-note units; preview UI only. */
+  inputUnits?: number;
 }
 
 export type PreviewNotationCursor = PreviewChordCursor | PreviewRhythmCursor | PreviewJianpuCursor;

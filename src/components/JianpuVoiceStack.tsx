@@ -20,7 +20,7 @@ type Props = React.ComponentProps<typeof Jianpu> & {
 };
 
 export default function JianpuVoiceStack({ voices, primaryLabel, showPrimary, activeVoiceId, onVoiceTokenClick, onVoiceNoteClick, ...primary }: Props) {
-  const main = activeVoiceId ? { ...primary, activeNote: null, showPlaceholders: false } : primary;
+  const main = activeVoiceId ? { ...primary, activeNote: null, activeInsertPosition: null, showPlaceholders: false } : primary;
   if (!voices.length) return <Jianpu {...main} />;
   const lane = (label: string, notation: React.ReactNode, id: string) => (
     <div key={id} data-jianpu-voice={id} data-preview-active-voice={id === activeVoiceId ? true : undefined} className="relative flex w-full min-w-0 items-center gap-1">
@@ -34,6 +34,7 @@ export default function JianpuVoiceStack({ voices, primaryLabel, showPrimary, ac
     {voices.map(voice => lane(voice.label, <Jianpu
       notation={voice.notation}
       activeNote={voice.id === activeVoiceId ? primary.activeNote : null}
+      activeInsertPosition={voice.id === activeVoiceId ? primary.activeInsertPosition : null}
       showPlaceholders={voice.id === activeVoiceId && primary.showPlaceholders}
       onTokenClick={onVoiceTokenClick ? (beat, unit, event) => onVoiceTokenClick(voice.id, beat, unit, event) : undefined}
       onNoteClick={onVoiceNoteClick ? (beat, note, event) => onVoiceNoteClick(voice.id, beat, note, event) : undefined}

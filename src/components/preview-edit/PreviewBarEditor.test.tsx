@@ -731,7 +731,10 @@ describe('PreviewBarEditor', () => {
     expect(onPasteRhythm).toHaveBeenCalledTimes(1);
   });
 
-  it('writes jianpu with independent duration formatting and reports its semantic cursor', async () => {
+  it.each([
+    { label: '八分', marker: '_', units: 2 },
+    { label: '十六分', marker: '=', units: 1 }
+  ])('writes $label jianpu and reports the next input length with its semantic cursor', async ({ label, marker, units }) => {
     const user = userEvent.setup();
     const jianpuTarget = {
       ...target,
@@ -748,13 +751,15 @@ describe('PreviewBarEditor', () => {
 
     expect(document.querySelector('[data-keyboard-view="jianpu"]')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '和弦直接輸入' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '切換簡譜八分音符' }));
+    await user.click(screen.getByRole('button', { name: `切換簡譜${label}音符` }));
     await user.click(screen.getByRole('button', { name: '輸入簡譜 5' }));
     const nextSong = onApplyDraft.mock.calls.at(-1)?.[0] as Song;
-    expect(nextSong.sections[0].bars[0].riff).toMatch(/^5_/);
+    expect(nextSong.sections[0].bars[0].riff).toMatch(new RegExp(`^5${marker}`));
     expect(onNotationCursorChange).toHaveBeenLastCalledWith(expect.objectContaining({
       kind: 'jianpu',
-      beatIndex: 0
+      beatIndex: 0,
+      unitIndex: units,
+      inputUnits: units
     }));
   });
 
@@ -1075,6 +1080,7 @@ describe('PreviewBarEditor', () => {
     await user.click(screen.getByRole('button', { name: 'Next beat' }));
     expect(onNavigate).toHaveBeenCalledWith('next', {
       kind: 'jianpu',
+      inputUnits: 4,
       beatIndex: 0,
       unitIndex: 0,
       noteIndex: null
@@ -1129,6 +1135,7 @@ describe('PreviewBarEditor', () => {
     await user.click(screen.getByRole('button', { name: 'Next beat' }));
     expect(onNotationCursorChange).toHaveBeenLastCalledWith({
       kind: 'jianpu',
+      inputUnits: 2,
       beatIndex: 0,
       unitIndex: 2,
       noteIndex: null
@@ -1606,6 +1613,39 @@ describe('PreviewBarEditor', () => {
         expect(fireEvent.keyDown(capture, { key, ...modifier })).toBe(true);
       }
     }
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it.each(['letters', 'nashville'] as const)('uses Tab and Shift Tab to switch chord beats in %s input without writing another chord', inputMode => {
+    const { onNavigate, onApplyDraft } = renderEditor({ session: createPreviewEditSession({ song, target, inputMode }) });
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+    expect(fireEvent.keyDown(capture, { key: 'Tab' })).toBe(false);
+    expect(onNavigate).toHaveBeenNthCalledWith(1, 'next');
+    expect(fireEvent.keyDown(capture, { key: 'Tab', shiftKey: true })).toBe(false);
+    expect(onNavigate).toHaveBeenNthCalledWith(2, 'previous');
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+    expect(onApplyDraft).not.toHaveBeenCalled();
+  });
+
+  it('leaves modified and IME Tab events to the browser', () => {
+    const { onNavigate } = renderEditor();
+    const capture = screen.getByRole('textbox', { name: '和弦直接輸入' });
+    for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }, { isComposing: true }]) {
+      expect(fireEvent.keyDown(capture, { key: 'Tab', ...modifier })).toBe(true);
+    }
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it('supports hardware Tab from the tablet chord surface while controls retain normal focus traversal', () => {
+    const { onNavigate } = renderEditor({ deviceLayout: 'tablet' });
+    expect(fireEvent.keyDown(document.body, { key: 'Tab' })).toBe(false);
+    expect(onNavigate).toHaveBeenLastCalledWith('next');
+    expect(fireEvent.keyDown(document.body, { key: 'Tab', shiftKey: true })).toBe(false);
+    expect(onNavigate).toHaveBeenLastCalledWith('previous');
+    onNavigate.mockClear();
+    expect(fireEvent.keyDown(screen.getByRole('button', { name: '完成' }), { key: 'Tab' })).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '文字欄位' }));
+    expect(fireEvent.keyDown(screen.getByRole('textbox', { name: '上方註記' }), { key: 'Tab' })).toBe(true);
     expect(onNavigate).not.toHaveBeenCalled();
   });
 

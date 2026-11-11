@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent, type TouchEvent } from 'react';
 import { ArrowLeft, ArrowRight, Copy, Minus, Pencil, Plus, Trash2, Undo2 } from 'lucide-react';
 import type { AppLanguage, SongMapStep } from '../types';
-import { songMapDisplayParts, songMapLabel, songMapSuggestions } from '../lib/songMap';
+import { expandSongMapSectionLabel, songMapDisplayParts, songMapLabel, songMapSuggestions } from '../lib/songMap';
 import ResponsiveDialog from './ResponsiveDialog';
 import './SongMapEditor.css';
 import { isKeyboardInteraction, useKeyboardMotionInterrupt, useUiMotion } from '../hooks/useUiMotion';
@@ -105,7 +105,7 @@ export default function SongMapEditor({ steps, options, language, title, close }
     return () => { element?.removeEventListener('touchmove', preventDragScroll); clearTimeout(holdTimer.current); stopAutoScroll(); clearPreview(); };
   }, []);
   const { rows } = draft, selectedIndex = rows.findIndex(r => r.id === draft.selected), selected = rows[selectedIndex];
-  const choices = [...new Set([...(options.sections ?? options.fallback), ...options.fallback, ...steps].map(s => songMapLabel(s.label).name).filter(Boolean))];
+  const choices = [...new Set([...(options.sections ?? options.fallback), ...options.fallback, ...steps].flatMap(s => expandSongMapSectionLabel(s.label)))];
   const suggestions = [...new Set([...choices, ...rows.map(r => r.label), ...songMapSuggestions])];
   const valid = rows.length > 0 && rows.every(r => r.label.trim() && Number.isSafeInteger(Number(r.repeats)) && Number(r.repeats) > 0);
   const commit = (next: Draft) => { setHistory(h => [...h.slice(-49), draft]); setDraft(next); };

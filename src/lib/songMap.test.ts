@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Setlist, SetlistSong, Song } from '../types';
 import { applySetlistSongOverrides } from '../utils/setlistUtils';
-import { getSongMap, normalizeSongMap, shouldShowSongMap, songMapDisplayParts, songMapLabel } from './songMap';
+import { expandSongMapSectionLabel, getSongMap, normalizeSongMap, shouldShowSongMap, songMapDisplayParts, songMapLabel } from './songMap';
 import { normalizeSongBars } from './workspace';
 import { mergeSetlistSourceScore } from './setlistSourceSync';
 
@@ -13,6 +13,22 @@ const meeting: Setlist = { id: 'a', name: '聚會一', displayMode: 'chord-movab
 const entry: SetlistSong = { id: 's', songId: 's', setlistId: 'a', order: 0, sectionOrder: ['v','b','b'] };
 
 describe('song map', () => {
+  it.each<[string, string[]]>([
+    ['Verse1/2', ['Verse 1', 'Verse 2']],
+    ['主歌 1／2', ['Verse 1', 'Verse 2']],
+    ['Pre-Chorus 1 / 2 / 3', ['Pre Chorus 1', 'Pre Chorus 2', 'Pre Chorus 3']],
+    ['Chorus 2＆1', ['Chorus 2', 'Chorus 1']],
+    ['Bridge 10,11、12', ['Bridge 10', 'Bridge 11', 'Bridge 12']],
+    ['Interlude 1/1/2', ['Interlude 1', 'Interlude 2']],
+    ['V1&2', ['Verse 1', 'Verse 2']]
+  ])('offers independent arrangement choices for %s', (label, expected) => {
+    expect(expandSongMapSectionLabel(label)).toEqual(expected);
+  });
+
+  it.each(['Verse 1', 'Intro / Outro', '1st Chorus Drop', 'Verse 1/2 Drop', 'Solo 1/2', '6/8'])('preserves an ordinary or custom arrangement label: %s', label => {
+    expect(expandSongMapSectionLabel(label)).toEqual([songMapLabel(label).name]);
+  });
+
   it('does not show a section inventory by default, even when saved as a map', () => {
     expect(shouldShowSongMap(song)).toBe(false);
     const basic = ['Intro', 'Verse 1', 'Verse 2', 'Chorus', 'Bridge', 'Outro'].map(label => ({ label, repeats: 1 }));
