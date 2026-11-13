@@ -111,6 +111,18 @@ it('shares a project directly from the list and keeps its management invitation'
   expect(await screen.findByRole('button', { name: '邀請' })).toBeEnabled();
 });
 
+it('keeps the first invitation available in an unshared project folder', async () => {
+  saveNavigationLocation(navigationKey(), { ...loadNavigationLocation(navigationKey())!,
+    filter: { kind: 'owned-project', projectId: 'project' }, view: 'list' });
+  mount();
+  const actions = await screen.findByRole('button', { name: '專案操作' });
+  expect(screen.queryByRole('button', { name: /^成員與權限/ })).toBeNull();
+  fireEvent.click(actions);
+  fireEvent.click(await screen.findByRole('menuitem', { name: '分享／邀請' }));
+  expect(await screen.findByRole('textbox', { name: '分享連結' })).toHaveValue(`${window.location.origin}/share/target-token`);
+  expect(state.create).toHaveBeenCalledWith('project', 'project');
+});
+
 it('keeps sharing actions unavailable for a team viewer', async () => {
   state.kind = 'team'; state.role = 'viewer'; mount();
   await screen.findByRole('button', { name: '專案操作：測試專案' });

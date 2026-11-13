@@ -89,7 +89,7 @@ export function MembersButton({ language, kind, status, loading, error, onClick 
   language: AppLanguage; kind: 'project' | 'setlist'; status: ProjectShareStatus | null;
   loading: boolean; error: boolean; onClick: () => void;
 }) {
-  if (kind === 'setlist' && !error && !status?.activeToken && !status?.participants.length) return null;
+  if (!error && !status?.activeToken && !status?.participants.length) return null;
   const zh = language === 'zh';
   const label = zh ? '成員與權限' : 'Members and permissions';
   const description = loading ? (zh ? '正在載入…' : 'Loading…')

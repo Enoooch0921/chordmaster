@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-13',
+        title: 'Member count on shared projects',
+        bullets: ['The member count appears when a project has an active invitation or a shared member. Open Share / invite in the project actions to invite the first member.']
+      },
+      {
+        version: '0.12.37',
+        date: '2026-11-13',
         title: 'Member count on shared setlists',
         bullets: ['Setlists show the member count once an invitation is active or someone has joined. To invite the first member, choose Share Setlist from the setlist actions.']
       },
@@ -1171,6 +1177,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-13',
+        title: '專案開放邀請後顯示成員人數',
+        bullets: ['專案沒有有效邀請且尚無共享成員時，會隱藏「成員 0 人」。需要邀請第一位成員時，可從「專案操作 → 分享／邀請」開啟。']
+      },
+      {
+        version: '0.12.37',
         date: '2026-11-13',
         title: '歌單開放邀請後顯示成員人數',
         bullets: ['未開啟邀請且尚無共享成員時，歌單會隱藏「成員 0 人」。可從「歌單操作 → 分享歌單」開啟邀請。']
