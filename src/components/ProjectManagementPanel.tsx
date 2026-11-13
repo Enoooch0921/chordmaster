@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, Edit3, ExternalLink, MoreHorizontal, Pin, PinOff, Plus, RefreshCw, Share2, Trash2 } from 'lucide-react';
+import { Users, CloudAlert, Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, Edit3, ExternalLink, MoreHorizontal, Pin, PinOff, Plus, RefreshCw, Share2, Trash2 } from 'lucide-react';
 import type { AppLanguage, JoinedProject, Project, SharedMemberRole, ProjectShareStatus, Setlist, ShareParticipant } from '../types';
 import { AnimatedPopover } from './ui/InteractionMotion';
 import { useAnchoredPortalPanel } from './useAnchoredPortalPanel';
@@ -42,7 +42,7 @@ export function ManagementActions({ label, actions, disabled = false, triggerCon
   </>;
 }
 
-export function SharedMemberRow({ language, member, busy, onRoleChange, onRemove }: {
+function SharedMemberRow({ language, member, busy, onRoleChange, onRemove }: {
   language: AppLanguage;
   member: ShareParticipant;
   busy: boolean;
@@ -82,6 +82,72 @@ export function SharedMemberRow({ language, member, busy, onRoleChange, onRemove
       <ManagementActions label={zh ? name + '的成員操作' : 'Actions for ' + name} disabled={disabled}
         actions={[{ label: zh ? '移除成員' : 'Remove member', icon: <Trash2 size={16}/>, danger: true, run: onRemove }]}/>
     </span>
+  </div>;
+}
+
+export function MembersButton({ language, kind, status, loading, error, onClick }: {
+  language: AppLanguage; kind: 'project' | 'setlist'; status: ProjectShareStatus | null;
+  loading: boolean; error: boolean; onClick: () => void;
+}) {
+  const zh = language === 'zh';
+  const label = zh ? '成員與權限' : 'Members and permissions';
+  const description = loading ? (zh ? '正在載入…' : 'Loading…')
+    : error ? (zh ? '成員載入失敗，點選查看並重試' : 'Members could not load. Open to retry.')
+    : status?.participants.length ? status.participants.map(member => member.name || member.email).join('、')
+    : zh ? (kind === 'project' ? '邀請團員加入此專案' : '邀請團員加入此歌單') : 'Invite your team';
+  return <button type="button" className="setlist-project-members" data-members-trigger={kind}
+    aria-label={label + '：' + description} aria-description={status && !loading && !error ? status.participants.length + (zh ? ' 位成員' : ' members') : undefined} title={label + ' · ' + description} aria-busy={loading || undefined} onClick={onClick}>
+    <Users size={16} aria-hidden="true"/><span>{zh ? '成員' : 'Members'}</span>
+    <span className="setlist-project-member-count">{loading ? '…' : error ? <CloudAlert size={15} aria-hidden="true"/> : status?.participants.length ?? 0}</span>
+  </button>;
+}
+
+export function MembersPanel({ language, kind, id, name, meta, actions, backLabel, onBack, canViewMembers,
+  canShare, memberStatus, membersLoading, membersError, sharing, onRefresh, onShare, onRoleChange, onRemove }: {
+  language: AppLanguage; kind: 'project' | 'setlist'; id: string; name: string; meta: string; actions: Action[];
+  backLabel: string; onBack: () => void; canViewMembers: boolean; canShare: boolean; memberStatus: ProjectShareStatus | null;
+  membersLoading: boolean; membersError: boolean; sharing: boolean; onRefresh: () => void; onShare: () => void;
+  onRoleChange: (member: ShareParticipant, role: SharedMemberRole) => Promise<void>; onRemove: (member: ShareParticipant) => void;
+}) {
+  const zh = language === 'zh';
+  const heading = useRef<HTMLHeadingElement>(null);
+  const headingId = useId();
+  const [pendingHere, setPending] = useState(false);
+  const participants = memberStatus?.participants ?? [];
+  useLayoutEffect(() => { heading.current?.focus({ preventScroll: true }); }, [id]);
+  const changeRole = async (member: ShareParticipant, role: SharedMemberRole) => {
+    setPending(true);
+    try { await onRoleChange(member, role); } finally { setPending(false); }
+  };
+  return <div lang={zh ? 'zh-Hant' : 'en'} className="project-manager" data-project-management={kind === 'project' || undefined}>
+    <header className="pm-header">
+      <button type="button" className="pm-back" onClick={onBack}><ChevronLeft size={17}/>{backLabel}</button>
+      <div className="pm-title-row"><h2 ref={heading} tabIndex={-1}>{name}</h2>
+        <ManagementActions label={kind === 'project' ? (zh ? '更多專案操作' : 'More project actions') : (zh ? '更多歌單操作' : 'More setlist actions')} actions={actions}/>
+      </div>
+      <p className="pm-header-note">{meta}</p>
+    </header>
+    <div className="pm-scroll" data-project-scroll>
+      <div data-project-management-detail={kind === 'project' ? id : undefined} data-members-detail={kind}>
+        <section className='pm-section' aria-labelledby={headingId} data-project-sharing-id={kind === 'project' ? id : undefined} aria-busy={membersLoading || pendingHere}>
+          <div className='pm-section-heading'><h3 id={headingId}>{zh ? '成員與權限' : 'Members and permissions'}{canViewMembers && <span>{membersLoading && !memberStatus ? '…' : participants.length}</span>}</h3>
+            <div className='pm-section-actions'>{canViewMembers && <button type='button' className='pm-icon-button' aria-label={zh ? '重新整理成員' : 'Refresh members'} disabled={membersLoading || pendingHere} onClick={onRefresh}><RefreshCw size={16} /></button>}{canShare && <button type='button' className='pm-text-button ui-press' disabled={sharing} onClick={onShare}><Share2 size={15} />{sharing ? (zh ? '準備中…' : 'Preparing…') : (zh ? '邀請' : 'Invite')}</button>}</div>
+          </div>
+          {!canViewMembers ? <p className='pm-message'>{zh ? '目前無法查看共享成員。' : 'Shared members are unavailable.'}</p>
+            : membersError ? <p role='alert' className='pm-message pm-error'>{zh ? '無法載入成員。請重新整理再試。' : 'Members could not be loaded. Refresh to retry.'}</p>
+            : membersLoading && !memberStatus ? <div role='status' className='pm-loading'>{zh ? '正在載入成員…' : 'Loading members…'}</div>
+            : <>
+              {participants.length > 0 ? <ul className='pm-members'>{participants.map(member =>
+                <li key={member.userId}>
+                  <SharedMemberRow language={language} member={member} busy={membersLoading || pendingHere}
+                    onRoleChange={role => changeRole(member, role)} onRemove={() => onRemove(member)}/>
+                </li>
+              )}</ul> : <p className='pm-message'>{zh ? (kind === 'project' ? '尚無共享成員。邀請團員加入，一起使用專案歌單。' : '尚無共享成員。邀請團員加入這份歌單。') : (kind === 'project' ? 'No shared members yet. Invite your team to use this project’s setlists.' : 'No shared members yet. Invite your team to this setlist.')}</p>}
+              {participants.length > 0 && <p className='pm-permission-note'>{zh ? '管理員可改調性與歌曲順序；唯讀僅查看。' : 'Managers can change keys and song order. Viewers can read.'}</p>}
+            </>}
+        </section>
+      </div>
+    </div>
   </div>;
 }
 
@@ -127,25 +193,16 @@ export default function ProjectManagementPanel(props: Props) {
   const scroll = useRef<HTMLDivElement>(null), heading = useRef<HTMLHeadingElement>(null);
   const rows = useRef(new Map<string, HTMLButtonElement>());
   const previousProject = useRef<string | null>(null), indexScrollTop = useRef(0);
-  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+
   useLayoutEffect(() => {
     const previous = previousProject.current;
     if (project?.id === previous) return;
-    if (project) { if (scroll.current) scroll.current.scrollTop = 0; heading.current?.focus({ preventScroll: true }); }
-    else if (previous) { if (scroll.current) scroll.current.scrollTop = indexScrollTop.current; (rows.current.get(previous) ?? heading.current)?.focus({ preventScroll: true }); }
+    if (!project && previous) { if (scroll.current) scroll.current.scrollTop = indexScrollTop.current; (rows.current.get(previous) ?? heading.current)?.focus({ preventScroll: true }); }
     previousProject.current = project?.id ?? null;
   }, [project?.id]);
   const inspect = (id: string) => { indexScrollTop.current = scroll.current?.scrollTop ?? 0; props.onInspect(id); };
   const countSetlists = (id: string) => setlists.filter(item => item.projectId === id && !item.archived).length;
   const projectSetlists = project ? setlists.filter(item => item.projectId === project.id && !item.archived) : [];
-  const participants = memberStatus?.participants ?? [];
-  const pendingHere = pendingProjectId !== null && pendingProjectId === project?.id;
-  const changeRole = async (member: ShareParticipant, role: SharedMemberRole) => {
-    if (!project || role === (member.role ?? 'viewer')) return;
-    setPendingProjectId(project.id);
-    try { await props.onRoleChange(project, member, role); }
-    finally { setPendingProjectId(current => current === project.id ? null : current); }
-  };
   const projectActions: Action[] = project ? [
     { label: zh ? '開啟專案歌單' : 'Open project setlists', icon: <ExternalLink size={16} />, run: () => props.onOpenProject(project.id) },
     ...(props.onTogglePin && !project.archived ? [{ label: props.pinnedProjectIds?.has(project.id) ? (zh ? '取消置頂' : 'Unpin project') : (zh ? '置頂專案' : 'Pin project'), icon: props.pinnedProjectIds?.has(project.id) ? <PinOff size={16}/> : <Pin size={16}/>, run: () => props.onTogglePin?.(project.id) }] : []),
@@ -155,36 +212,22 @@ export default function ProjectManagementPanel(props: Props) {
       { label: zh ? '刪除專案' : 'Delete project', icon: <Trash2 size={16} />, run: () => props.onDelete(project), danger: true }
     ] : [])
   ] : [];
+  if (project) return <MembersPanel key={project.id} language={language} kind="project" id={project.id} name={project.name}
+    meta={String(projectSetlists.length) + (zh ? ' 份歌單' : ' setlists') + (project.archived ? (zh ? ' · 已歸檔' : ' · Archived') : '')}
+    actions={projectActions} backLabel={props.projectBackLabel ?? (zh ? '所有專案' : 'All projects')} onBack={() => props.onInspect(null)}
+    canViewMembers={canViewMembers} canShare={props.canShare(project)} memberStatus={memberStatus} membersLoading={membersLoading}
+    membersError={membersError} sharing={props.sharing} onRefresh={() => props.onRefreshMembers(project.id)} onShare={() => props.onShare(project)}
+    onRoleChange={(member, role) => props.onRoleChange(project, member, role)} onRemove={member => props.onRemoveMember(project, member)}/>;
   return <div lang={zh ? 'zh-Hant' : 'en'} className='project-manager' data-project-management>
     <header className='pm-header'>
-      <button type='button' className='pm-back' onClick={() => project ? props.onInspect(null) : props.onBack()}><ChevronLeft size={17} />{project ? props.projectBackLabel ?? (zh ? '所有專案' : 'All projects') : (zh ? '歌單' : 'Setlists')}</button>
+      <button type='button' className='pm-back' onClick={props.onBack}><ChevronLeft size={17}/>{zh ? '歌單' : 'Setlists'}</button>
       <div className='pm-title-row'>
-        <h2 ref={heading} tabIndex={-1}>{project ? project.name : (props.archivedOnly ? (zh ? '已歸檔專案' : 'Archived projects') : (zh ? '專案管理' : 'Project management'))}</h2>
-        {project ? <ManagementActions key={project.id} label={zh ? '更多專案操作' : 'More project actions'} actions={projectActions} /> : props.canCreate && !props.archivedOnly && <button type='button' className='pm-new-button' onClick={props.onCreate}><Plus size={16} />{zh ? '新增' : 'New'}</button>}
+        <h2 ref={heading} tabIndex={-1}>{props.archivedOnly ? (zh ? '已歸檔專案' : 'Archived projects') : (zh ? '專案管理' : 'Project management')}</h2>
+        {props.canCreate && !props.archivedOnly && <button type='button' className='pm-new-button' onClick={props.onCreate}><Plus size={16}/>{zh ? '新增' : 'New'}</button>}
       </div>
-      <p className='pm-header-note'>{project ? String(projectSetlists.length) + (zh ? ' 份歌單' : ' setlists') + (project.archived ? (zh ? ' · 已歸檔' : ' · Archived') : '') : (props.archivedOnly ? (zh ? '選擇專案以取消歸檔。' : 'Choose a project to restore.') : (zh ? '選擇專案，管理成員與歌單。' : 'Choose a project to manage members and setlists.'))}</p>
+      <p className='pm-header-note'>{props.archivedOnly ? (zh ? '選擇專案以取消歸檔。' : 'Choose a project to restore.') : (zh ? '選擇專案，管理成員與歌單。' : 'Choose a project to manage members and setlists.')}</p>
     </header>
     <div ref={scroll} data-project-scroll className='pm-scroll'>
-      {project ? <div key={project.id} data-project-management-detail={project.id}>
-        <section className='pm-section' aria-labelledby='pm-members-heading' data-project-sharing-id={project.id} aria-busy={membersLoading || pendingHere}>
-          <div className='pm-section-heading'><h3 id='pm-members-heading'>{zh ? '成員與權限' : 'Members and permissions'}{canViewMembers && <span>{membersLoading && !memberStatus ? '…' : participants.length}</span>}</h3>
-            <div className='pm-section-actions'>{canViewMembers && <button type='button' className='pm-icon-button' aria-label={zh ? '重新整理成員' : 'Refresh members'} disabled={membersLoading || pendingHere} onClick={() => props.onRefreshMembers(project.id)}><RefreshCw size={16} /></button>}{props.canShare(project) && <button type='button' className='pm-text-button ui-press' disabled={props.sharing} onClick={() => props.onShare(project)}><Share2 size={15} />{props.sharing ? (zh ? '準備中…' : 'Preparing…') : (zh ? '邀請' : 'Invite')}</button>}</div>
-          </div>
-          {!canViewMembers ? <p className='pm-message'>{zh ? '目前無法查看此專案的共享成員。' : 'Shared members are unavailable for this project.'}</p>
-            : membersError ? <p role='alert' className='pm-message pm-error'>{zh ? '無法載入成員。請重新整理再試。' : 'Members could not be loaded. Refresh to retry.'}</p>
-            : membersLoading && !memberStatus ? <div role='status' className='pm-loading'>{zh ? '正在載入成員…' : 'Loading members…'}</div>
-            : <>
-              {participants.length > 0 ? <ul className='pm-members'>{participants.map(member =>
-                <li key={member.userId}>
-                  <SharedMemberRow language={language} member={member} busy={membersLoading || pendingHere}
-                    onRoleChange={role => changeRole(member, role)} onRemove={() => props.onRemoveMember(project, member)}/>
-                </li>
-              )}</ul> : <p className='pm-message'>{zh ? '尚無共享成員。邀請團員加入，一起使用專案歌單。' : 'No shared members yet. Invite your team to use this project’s setlists.'}</p>}
-              {participants.length > 0 && <p className='pm-permission-note'>{zh ? '管理員可改調性與歌曲順序；唯讀僅查看。' : 'Managers can change keys and song order. Viewers can read.'}</p>}
-            </>}
-        </section>
-
-      </div> : <>
         <section className='pm-section' aria-label={zh ? '我的專案' : 'My projects'}>
           <div className='pm-section-heading'><h3>{props.archivedOnly ? (zh ? '已歸檔' : 'Archived') : (zh ? '我的專案' : 'My projects')}<span>{projects.length}</span></h3></div>
           <ul className='pm-list'>{projects.map(item => <li key={item.id} data-project-id={item.id}><button type='button' ref={node => { if(node) rows.current.set(item.id,node); else rows.current.delete(item.id); }} className='pm-list-row' onClick={() => inspect(item.id)}><span className='pm-row-copy'><strong>{item.name}</strong><small>{countSetlists(item.id)}{zh ? ' 份歌單' : ' setlists'}{item.archived ? (zh ? ' · 已歸檔' : ' · Archived') : ''}</small></span><ChevronRight size={17}/></button></li>)}</ul>
@@ -192,7 +235,6 @@ export default function ProjectManagementPanel(props: Props) {
           {props.archivedCount > 0 && !props.archivedOnly && <button type='button' className='pm-archive-toggle' aria-pressed={props.showArchived} onClick={props.onToggleArchived}><Archive size={15}/>{props.showArchived ? (zh ? '隱藏已歸檔專案' : 'Hide archived projects') : (zh ? '顯示已歸檔專案' : 'Show archived projects')}{' (' + props.archivedCount + ')'}</button>}
         </section>
         {joinedProjects.length > 0 && !props.archivedOnly && <section className='pm-section'><div className='pm-section-heading'><h3>{zh ? '與我共享' : 'Shared with me'}<span>{joinedProjects.length}</span></h3></div><ul className='pm-list'>{joinedProjects.map(item=><li key={item.id}><button type='button' className='pm-list-row' onClick={()=>props.onOpenJoinedProject(item.id)}><span className='pm-row-copy'><strong>{item.name}</strong><small>{item.setlists.filter(list=>!list.archived).length}{zh ? ' 份歌單 · 已加入' : ' setlists · Joined'}</small></span><ChevronRight size={17}/></button></li>)}</ul></section>}
-      </>}
     </div>
   </div>;
 }

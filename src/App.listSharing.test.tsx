@@ -73,7 +73,12 @@ it('opens the existing selected-setlist invitation directly and reuses its own l
   const location = loadNavigationLocation(navigationKey())!;
   saveNavigationLocation(navigationKey(), { ...location, view: 'detail' }); mount();
   await waitFor(() => expect(state.status).toHaveBeenCalledWith('first'));
-  fireEvent.click(await screen.findByRole('button', { name: '邀請加入歌單' }));
+  const members = await screen.findByRole('button', { name: /^成員與權限/ });
+  expect(members).toHaveTextContent('成員0');
+  expect(screen.queryByRole('heading', { name: /^成員與權限/ })).toBeNull();
+  fireEvent.click(members);
+  await screen.findByText(/尚無共享成員/);
+  fireEvent.click(await screen.findByRole('button', { name: '邀請' }));
   expect(await screen.findByRole('textbox', { name: '分享連結' })).toHaveValue(`${window.location.origin}/share/first-token`);
   expect(state.create).not.toHaveBeenCalled();
 });
@@ -107,7 +112,10 @@ it('changes a direct member’s role from a standalone setlist and restores the 
   state.setRole.mockImplementation(async (_id, _user, role) => { member.role = role; });
   saveNavigationLocation(navigationKey(), { ...loadNavigationLocation(navigationKey())!, view: 'detail' });
   mount();
-  fireEvent.click(await screen.findByText('成員與權限'));
+  const members = await screen.findByRole('button', { name: '成員與權限：小安' });
+  expect(members).toHaveTextContent('成員1');
+  expect(screen.queryByRole('combobox', { name: '小安的權限' })).toBeNull();
+  fireEvent.click(members);
   const select = await screen.findByRole('combobox', { name: '小安的權限' });
   fireEvent.change(select, { target: { value: 'manager' } });
   await waitFor(() => expect(state.setRole).toHaveBeenCalledWith('first', 'guest', 'manager'));
@@ -117,6 +125,10 @@ it('changes a direct member’s role from a standalone setlist and restores the 
   fireEvent.change(select, { target: { value: 'viewer' } });
   await screen.findByText('更新成員權限失敗，請重試。');
   expect(select).toHaveValue('manager');
+  fireEvent.click(screen.getByRole('button', { name: '歌單內容' }));
+  await waitFor(() => expect(screen.queryByRole('combobox', { name: '小安的權限' })).toBeNull());
+  expect(await screen.findByRole('button', { name: '成員與權限：小安' })).toHaveFocus();
+  expect(loadNavigationLocation(navigationKey())).toMatchObject({ view: 'detail', setlistId: 'first', songId: 'first-entry' });
 });
 
 it.each(['viewer', 'manager'] as const)('uses the direct %s role for the shared Key and order controls', async role => {
@@ -163,4 +175,16 @@ it('reorders a directly joined setlist and undoes it without writing to the pers
   await waitFor(() => expect(order()).toEqual(['first-entry', 'other-entry']));
   expect(state.reorder.mock.calls.map(call => call[1])).toEqual(['redo', 'undo']);
   expect(state.saveSetlist).not.toHaveBeenCalled();
+});
+
+
+it('opens a failed count and retries from the setlist member page', async () => {
+  state.status.mockRejectedValueOnce(new Error('offline'));
+  saveNavigationLocation(navigationKey(), { ...loadNavigationLocation(navigationKey())!, view: 'detail' });
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: /成員載入失敗/ }));
+  const detail = await screen.findByRole('region', { name: /^成員與權限/ });
+  expect(within(detail).getByRole('alert')).toHaveTextContent('無法載入成員');
+  fireEvent.click(screen.getByRole('button', { name: '重新整理成員' }));
+  await screen.findByText(/尚無共享成員/);
 });

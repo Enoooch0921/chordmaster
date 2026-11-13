@@ -25,7 +25,7 @@ import { useUiMotion } from './hooks/useUiMotion';
 import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants, popoverVariants } from './lib/uiMotion';
 import SetlistSongActions from './components/SetlistSongActions';
 import './components/SongLibraryPanel.css';
-import ProjectManagementPanel, { ManagementActions, SharedMemberRow } from './components/ProjectManagementPanel';
+import ProjectManagementPanel, { ManagementActions, MembersButton, MembersPanel } from './components/ProjectManagementPanel';
 import SetlistBrowserHeader from './components/SetlistBrowserHeader';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
 import { useThreeFingerHistory } from './hooks/useThreeFingerHistory';
@@ -1833,6 +1833,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [pendingLeaveSharedProjectId, setPendingLeaveSharedProjectId] = useState<string | null>(null);
   const [removingMemberKey, setRemovingMemberKey] = useState<string | null>(null);
   const [selectedSetlistShareStatus, setSelectedSetlistShareStatus] = useState<ScopedSetlistShareStatus | null>(null);
+  const [setlistShareStatusError, setSetlistShareStatusError] = useState(false);
+  const [creatingSetlistShareLinkId, setCreatingSetlistShareLinkId] = useState<string | null>(null);
   const [isLoadingSetlistShareStatus, setIsLoadingSetlistShareStatus] = useState(false);
   const [selectedProjectShareStatus, setSelectedProjectShareStatus] = useState<ScopedProjectShareStatus | null>(null);
   const [projectMembersTargetId, setProjectMembersTargetId] = useState<string | null>(null);
@@ -2365,7 +2367,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     explicitProjectId: navigationLinkProjectId,
     current: {
       version: 1, workspaceMode, filter: setlistProjectFilter,
-      view: setlistPanelView === 'detail' || setlistPanelView === 'addSongs' ? 'detail' : 'list',
+      view: setlistPanelView === 'detail' || setlistPanelView === 'addSongs' || setlistPanelView === 'setlistMembers' ? 'detail' : 'list',
       setlistId: selectedSetlistId, songId: selectedSetlistSongId,
       parentFilter: getSetlistParentFilter(selectedSetlistId, navigationWorkspace)
     },
@@ -3233,6 +3235,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const projectShareContext = managedProject ?? selectedProject ?? null;
   const canViewProjectMembers = Boolean(projectShareContext && !isLoadingCloudWorkspace && !isSwitchingLibrary
     && workspaceOwnerId === authenticatedUser?.id && canShareProject(projectShareContext));
+  const canViewSetlistMembers = Boolean(authenticatedUser && workspaceOwnerId === authenticatedUser.id
+    && !isLoadingCloudWorkspace && !isSwitchingLibrary && selectedSetlist && canShareSelectedSetlist);
   selectedSetlistForShareRef.current = selectedSetlist?.id ?? null;
   selectedProjectForShareRef.current = projectShareContext?.id ?? null;
   const activeSetlistShareStatus = selectedSetlistShareStatus?.resourceId === selectedSetlist?.id
@@ -3278,12 +3282,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   ), [activeLibrarySongs, setlistSongSearch, searchDictionaryState]);
 
   useEffect(() => {
+    if (navigationMemoryReady && setlistPanelView === 'setlistMembers' && !canViewSetlistMembers) {
+      setSetlistPanelView(selectedSetlist ? 'detail' : 'list');
+    }
+  }, [navigationMemoryReady, setlistPanelView, canViewSetlistMembers, selectedSetlist?.id]);
+
+  useEffect(() => {
     if (!navigationMemoryReady || !isPhoneSetlistDrawer) return;
 
     if (!selectedSetlist) {
       // Keep an intentional 'manageProjects' (or 'list') view; only setlist-bound
       // views fall back to the list when nothing is selected.
-      setSetlistPanelView((view) => (view === 'detail' || view === 'addSongs') ? 'list' : view);
+      setSetlistPanelView((view) => (view === 'detail' || view === 'addSongs' || view === 'setlistMembers') ? 'list' : view);
       return;
     }
   }, [navigationMemoryReady, isPhoneSetlistDrawer, selectedSetlist?.id]);
@@ -3309,7 +3319,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       // Only the views that REQUIRE a selected setlist fall back to the list.
       // The 'manageProjects' (and 'list') views are valid with no selection, so a new
       // user who opens 'manageProjects' isn't bounced straight back to the setlist list.
-      setSetlistPanelView((view) => (view === 'detail' || view === 'addSongs') ? 'list' : view);
+      setSetlistPanelView((view) => (view === 'detail' || view === 'addSongs' || view === 'setlistMembers') ? 'list' : view);
       return;
     }
 
@@ -5510,6 +5520,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     if (selectedSetlistForShareRef.current !== setlistId) return;
     const repository = cloudRepositoryRef.current;
     const requestGeneration = ++setlistShareStatusGenerationRef.current;
+    setSetlistShareStatusError(false);
     setSelectedSetlistShareStatus(current => current?.resourceId === setlistId ? current : null);
     if (!repository) {
       setIsLoadingSetlistShareStatus(false);
@@ -5531,12 +5542,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       if (selectedSetlistForShareRef.current !== setlistId) return;
       setSelectedSetlistShareStatus({ ...status, resourceId: setlistId });
       setAuthUiError(null);
-    } catch (error) {
-      if (requestGeneration !== setlistShareStatusGenerationRef.current) return;
-      if (selectedSetlistForShareRef.current !== setlistId) return;
-      setSelectedSetlistShareStatus(current => current?.resourceId === setlistId ? current : null);
-      const reason = error instanceof Error ? error.message.trim() : '';
-      setAuthUiError(reason ? `${copy.setlistSharingLoadError}\n\n${reason}` : copy.setlistSharingLoadError);
+    } catch {
+      if (requestGeneration !== setlistShareStatusGenerationRef.current || selectedSetlistForShareRef.current !== setlistId) return;
+      setSetlistShareStatusError(true);
     } finally {
       if (requestGeneration === setlistShareStatusGenerationRef.current
           && selectedSetlistForShareRef.current === setlistId) {
@@ -5547,7 +5555,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   const selectedSetlistIsSaved = savedSetlists.some(item => item.id === selectedSetlist?.id);
   useEffect(() => {
-    if (!authenticatedUser || !cloudRepositoryRef.current || !selectedSetlist || !canShareSelectedSetlist || !isSetlistMode) {
+    if (!authenticatedUser || !cloudRepositoryRef.current || !selectedSetlist || !canViewSetlistMembers || !isSetlistMode) {
+      setSetlistShareStatusError(false);
       setlistShareStatusGenerationRef.current += 1;
       setSelectedSetlistShareStatus(null);
       setIsLoadingSetlistShareStatus(false);
@@ -5555,7 +5564,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
 
     void loadSetlistShareStatus(selectedSetlist.id);
-  }, [authenticatedUser, activeLibraryId, canShareSelectedSetlist, isSetlistMode, selectedSetlistIsSaved, selectedSetlist?.id]);
+  }, [authenticatedUser, activeLibraryId, canViewSetlistMembers, isSetlistMode, selectedSetlistIsSaved, selectedSetlist?.id]);
 
   // Project "who joined" — mirrors the setlist share status, but for the whole
   // project. Only loadable for owned/manageable projects (not joined ones).
@@ -11306,6 +11315,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
 
+    if (resourceType === 'setlist') {
+      if (creatingSetlistShareLinkId) return;
+      setCreatingSetlistShareLinkId(resourceId);
+    }
     const releaseCloudMutation = beginCloudMutation();
     try {
       await ensureShareResourceIsSynced(resourceType, resourceId);
@@ -11344,6 +11357,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
       toast.error(copy.shareFailedWithReason.replace('{reason}', localizedReason));
     } finally {
+      if (resourceType === 'setlist') setCreatingSetlistShareLinkId(null);
       releaseCloudMutation();
     }
 	  };
@@ -11639,87 +11653,25 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     </button>
   ) : null;
 
-  // Collapsible on every viewport (incl. desktop) so the participant list never
-  // permanently covers the setlist area — closed by default.
-  // Mirror the project panel: only surface once the setlist is actually shared
-  // (active link) or someone has joined. Starting a share still works from the
-  // "…" menu, which reloads the status and brings this panel back.
-  const hasSetlistShareActivity = Boolean(activeSetlistShareStatus?.activeToken)
-    || (activeSetlistShareStatus?.participantCount ?? 0) > 0;
-  const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist && hasSetlistShareActivity ? (
-    <details key={selectedSetlist.id} className="group setlist-sharing-summary">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-900">{language === 'zh' ? '成員與權限' : 'Members and permissions'}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-              activeSetlistShareStatus?.activeToken
-                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-                : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
-            }`}>
-              {isLoadingSetlistShareStatus && !activeSetlistShareStatus
-                ? copy.cloudSyncSyncing
-                : activeSetlistShareStatus?.activeToken
-                  ? copy.setlistSharingActive
-                  : copy.setlistSharingInactive}
-            </span>
-            <span className="text-xs font-semibold text-gray-500">
-              {copy.setlistSharingParticipants}: {activeSetlistShareStatus?.participantCount ?? 0}
-            </span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void loadSetlistShareStatus(selectedSetlist.id); }}
-            disabled={isLoadingSetlistShareStatus}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500 transition-colors hover:bg-gray-100 hover:text-indigo-600 disabled:cursor-wait disabled:opacity-60"
-            title={copy.setlistSharingRefresh}
-            aria-label={copy.setlistSharingRefresh}
-          >
-            <RefreshCw size={13} className={isLoadingSetlistShareStatus ? 'animate-spin' : ''} />
-          </button>
-          <ChevronRight size={16} className="text-gray-400 transition-transform group-open:rotate-90" />
-        </div>
-      </summary>
-
-      <div className="mt-3 border-t border-gray-100 pt-3">
-        {activeSetlistShareStatus?.participants.length ? <>
-          <div className="max-h-48 overflow-y-auto">
-            {activeSetlistShareStatus.participants.map(member => {
-              const name = member.name || member.email;
-              const remove = () => void handleRemoveSharedMember('setlist', selectedSetlist.id, member);
-              return <SwipeActionRow key={member.userId} contentClassName=""
-                rightAction={{ label: copy.removeMember, accessibleLabel: copy.removeMember + ' ' + name, tone: 'delete', onAction: remove }}>
-                <SharedMemberRow language={language} member={member} busy={isLoadingSetlistShareStatus || isRevokingSetlistShare}
-                  onRoleChange={role => handleSharedMemberRoleChange('setlist', selectedSetlist.id, member, role)} onRemove={remove}/>
-              </SwipeActionRow>;
-            })}
-          </div>
-          <p className="pm-permission-note">{language === 'zh' ? '管理員可調整這份歌單的調性與歌曲順序。' : 'Managers can change keys and song order in this setlist.'}</p>
-        </> : <p className="pm-message">{copy.setlistSharingNoParticipants}</p>}
-
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => void handleCreateShareLink('setlist')}
-            disabled={isExportingPdf || isRevokingSetlistShare}
-            className="ui-press inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-wait disabled:opacity-60"
-          >
-            <Share2 size={13} />
-            <span>{activeSetlistShareStatus?.activeToken ? copy.setlistSharingCopyLink : copy.shareCurrentSetlist}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setPendingRevokeShareSetlistId(selectedSetlist.id)}
-            disabled={!activeSetlistShareStatus?.activeToken || isRevokingSetlistShare}
-            className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {copy.setlistSharingCancel}
-          </button>
-        </div>
-      </div>
-    </details>
+  const backFromSetlistMembers = () => {
+    setSetlistPanelView('detail');
+    window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-members-trigger="setlist"]')?.focus({ preventScroll: true }));
+  };
+  const setlistMembersPanel = setlistPanelView === 'setlistMembers' && canViewSetlistMembers && selectedSetlist ? (
+    <MembersPanel key={selectedSetlist.id} language={language} kind="setlist" id={selectedSetlist.id} name={selectedSetlist.name || copy.untitledSetlist}
+      meta={selectedSetlist.songs.length + (language === 'zh' ? ' 首歌曲' : ' songs')}
+      actions={[
+        { label: language === 'zh' ? '開啟歌單' : 'Open setlist', icon: <ExternalLink size={16}/>, run: backFromSetlistMembers },
+        ...(activeSetlistShareStatus?.activeToken ? [{ label: copy.setlistSharingCancel, icon: <LogOut size={16}/>, danger: true,
+          disabled: isRevokingSetlistShare, run: () => setPendingRevokeShareSetlistId(selectedSetlist.id) }] : [])
+      ]}
+      backLabel={language === 'zh' ? '歌單內容' : 'Setlist details'} onBack={backFromSetlistMembers}
+      canViewMembers={canViewSetlistMembers} canShare={canShareSelectedSetlist} memberStatus={activeSetlistShareStatus}
+      membersLoading={isLoadingSetlistShareStatus} membersError={setlistShareStatusError}
+      sharing={creatingSetlistShareLinkId === selectedSetlist.id} onRefresh={() => void loadSetlistShareStatus(selectedSetlist.id)}
+      onShare={() => void handleCreateShareLink('setlist', selectedSetlist.id)}
+      onRoleChange={(member, role) => handleSharedMemberRoleChange('setlist', selectedSetlist.id, member, role)}
+      onRemove={member => void handleRemoveSharedMember('setlist', selectedSetlist.id, member)}/>
   ) : null;
 
   const joinedSetlistDisplayPreferencePanel = isJoinedSetlist && selectedSetlist && effectiveSelectedSetlist ? (
@@ -11995,26 +11947,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     ] : [])
   ];
 
-  const projectMembersLabel = canViewProjectMembers
-    ? (language === 'zh' ? '成員與權限' : 'Members and permissions')
-    : (language === 'zh' ? '管理專案' : 'Project settings');
-  const projectMembersDescription = !canViewProjectMembers
-    ? (language === 'zh' ? '重新命名、歸檔與其他操作' : 'Rename, archive and other actions')
-    : isLoadingProjectShareStatus
-      ? (language === 'zh' ? '正在載入…' : 'Loading…')
-      : projectShareStatusError
-        ? (language === 'zh' ? '成員載入失敗，點選查看並重試' : 'Members could not load. Open to retry.')
-        : activeProjectShareStatus?.participants.length
-          ? activeProjectShareStatus.participants.map(member => member.name || member.email).join('、')
-          : (language === 'zh' ? '邀請團員加入此專案' : 'Invite your team');
-  const projectMembersAction = selectedProject && (canViewProjectMembers || canManageProject(selectedProject))
-    ? <button type="button" className="setlist-project-members" aria-label={`${projectMembersLabel}：${projectMembersDescription}`}
-        title={`${projectMembersLabel} · ${projectMembersDescription}`} aria-busy={isLoadingProjectShareStatus || undefined}
-        onClick={() => handleOpenProjectManagement(selectedProject.id)}>
-        {canViewProjectMembers ? <Users size={16}/> : <MoreHorizontal size={16}/>}
-        <span>{canViewProjectMembers ? (language === 'zh' ? '成員' : 'Members') : (language === 'zh' ? '管理' : 'Manage')}</span>
-        {canViewProjectMembers && <span className="setlist-project-member-count">{isLoadingProjectShareStatus ? '…' : projectShareStatusError ? <CloudAlert size={15}/> : activeProjectShareStatus?.participants.length ?? 0}</span>}
-      </button>
+  const projectMembersAction = selectedProject && canViewProjectMembers
+    ? <MembersButton language={language} kind="project" status={activeProjectShareStatus} loading={isLoadingProjectShareStatus}
+        error={projectShareStatusError} onClick={() => handleOpenProjectManagement(selectedProject.id)}/>
+    : selectedProject && canManageProject(selectedProject)
+      ? <button type="button" className="setlist-project-members"
+          aria-label={language === 'zh' ? '管理專案：重新命名、歸檔與其他操作' : 'Project settings：Rename, archive and other actions'}
+          onClick={() => handleOpenProjectManagement(selectedProject.id)}><MoreHorizontal size={16}/>{language === 'zh' ? '管理' : 'Manage'}</button>
     : selectedJoinedProject && canShareSelectedProject
       ? <button type="button" className="ui-press setlist-project-members" aria-label={language === 'zh' ? '分享專案' : 'Share project'}
           onClick={() => void handleCreateProjectShareLink(selectedJoinedProject.id)} disabled={creatingProjectShareLinkId === selectedJoinedProject.id}>
@@ -12288,11 +12227,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           ]}/>}
         </div>
         <div className="setlist-detail-toolbar">
-          <span>{setlistSongsWithSource.length}{language === 'zh' ? ' 首歌曲' : ' songs'}</span>
+          <div className="setlist-project-context">
+            <span>{setlistSongsWithSource.length}{language === 'zh' ? ' 首歌曲' : ' songs'}</span>
+            {canViewSetlistMembers && !isSetlistSongSortMode && <MembersButton language={language} kind="setlist" status={activeSetlistShareStatus}
+              loading={isLoadingSetlistShareStatus} error={setlistShareStatusError} onClick={() => setSetlistPanelView('setlistMembers')}/>}
+          </div>
           <div className="flex items-center gap-2">
-            {canShareSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="ui-press pm-text-button"
-              aria-label={language === 'zh' ? '邀請加入歌單' : 'Invite to setlist'} disabled={isRevokingSetlistShare}
-              onClick={() => { void handleCreateShareLink('setlist'); }}><Share2 size={15}/>{language === 'zh' ? '邀請' : 'Invite'}</button>}
             {canEditSelectedSetlist && !isSetlistSongSortMode && <button type="button" className="pm-new-button" aria-label={copy.addToSetlist}
               onClick={() => { setSetlistAddSongSelection([]); setSetlistPanelView('addSongs'); }}><Plus size={16}/>{language === 'zh' ? '加入歌曲' : 'Add songs'}</button>}
           </div>
@@ -12304,7 +12244,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       </div>
 
       <div data-setlist-detail-scroll className="setlist-detail-scroll">
-        {canShareSelectedSetlist && setlistSharingPanel ? <div className="mb-3">{setlistSharingPanel}</div> : null}
         {joinedSetlistDisplayPreferencePanel ? <div className="mb-3">{joinedSetlistDisplayPreferencePanel}</div> : null}
 
 
@@ -12601,7 +12540,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const showSidebarWorkspacePanels = !isPhoneViewport
     || !isSetlistMode
     || setlistPanelView === 'list'
-    || setlistPanelView === 'manageProjects';
+    || setlistPanelView === 'manageProjects' || setlistPanelView === 'setlistMembers';
 
   const isRestoringWorkspace = (isAuthConfigured && (authStatus === 'loading' || authStatus === 'offline') && !usingStartupCache)
     || Boolean(authenticatedUser && (workspaceBootstrap?.userId !== authenticatedUser.id || !workspaceBootstrap.ready))
@@ -13007,8 +12946,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 view={setlistPanelView}
                 path={[
                   ...((setlistProjectFilter.kind === 'owned-project' || setlistProjectFilter.kind === 'shared-project') ? [serializeSetlistProjectFilter(setlistProjectFilter)] : []),
-                  ...((setlistPanelView === 'detail' || setlistPanelView === 'addSongs') ? ['setlist:' + selectedSetlistId] : []),
+                  ...((setlistPanelView === 'detail' || setlistPanelView === 'addSongs' || setlistPanelView === 'setlistMembers') ? ['setlist:' + selectedSetlistId] : []),
                   ...(setlistPanelView === 'manageProjects' ? selectedProject ? ['members'] : ['archived-projects', ...(managedProject ? [managedProject.id] : [])] : []),
+                  ...(setlistPanelView === 'setlistMembers' ? ['members'] : []),
                   ...(setlistPanelView === 'addSongs' ? ['add-songs'] : [])
                 ]}
                 busy={Boolean(setlistOpening.opening)}
@@ -13018,6 +12958,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 detail={desktopSetlistDetailPanel}
                 addSongs={desktopSetlistAddSongsPanel}
                 manageProjects={desktopSetlistProjectsPanel}
+                setlistMembers={setlistMembersPanel}
               />
               </SwipeActionGroup>
             ) : (

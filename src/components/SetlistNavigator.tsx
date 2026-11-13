@@ -5,7 +5,7 @@ import { useKeyboardMotionInterrupt } from '../hooks/useUiMotion';
 import { UI_DRAWER_EASE, type UiMotionPreference } from '../lib/uiMotion';
 import { Project, Setlist, StoredSong } from '../types';
 
-export type SetlistPanelView = 'list' | 'detail' | 'addSongs' | 'manageProjects';
+export type SetlistPanelView = 'list' | 'detail' | 'addSongs' | 'manageProjects' | 'setlistMembers';
 
 export type SetlistProjectFilter =
   | { kind: 'all' }
@@ -115,7 +115,7 @@ export const getSetlistPreviewTitles = (
 };
 
 type PanelMotion = UiMotionPreference & { direction: number };
-const panelDepth: Record<SetlistPanelView, number> = { list: 0, manageProjects: 1, detail: 1, addSongs: 2 };
+const panelDepth: Record<SetlistPanelView, number> = { list: 0, manageProjects: 1, detail: 1, addSongs: 2, setlistMembers: 2 };
 
 export const setlistPanelVariants = {
   enter: ({ direction, reduced, instant }: PanelMotion) => ({
@@ -159,6 +159,7 @@ interface SetlistNavigatorProps {
   detail: React.ReactNode;
   addSongs: React.ReactNode;
   manageProjects: React.ReactNode;
+  setlistMembers?: React.ReactNode;
   busy?: boolean;
   ready?: boolean;
   motion?: UiMotionPreference;
@@ -166,7 +167,7 @@ interface SetlistNavigatorProps {
 }
 
 const SetlistNavigator: React.FC<SetlistNavigatorProps> = ({
-  view, list, detail, addSongs, manageProjects, busy = false, ready = true, path,
+  view, list, detail, addSongs, manageProjects, setlistMembers, busy = false, ready = true, path,
   motion: preference = { instant: false, reduced: false }
 }) => {
   const depth = path?.length ?? panelDepth[view];
@@ -190,7 +191,7 @@ const SetlistNavigator: React.FC<SetlistNavigatorProps> = ({
   const panelMotion = { ...preference, direction };
   // Exiting elements retain their old props, so deliver preference changes separately.
   const livePreference = useMemo(() => ({ instant: preference.instant, reduced: preference.reduced }), [preference.instant, preference.reduced]);
-  const panel = view === 'detail' ? detail : view === 'addSongs' ? addSongs : view === 'manageProjects' ? manageProjects : list;
+  const panel = view === 'detail' ? detail : view === 'addSongs' ? addSongs : view === 'manageProjects' ? manageProjects : view === 'setlistMembers' ? setlistMembers : list;
   return <PanelMotionPreference.Provider value={livePreference}><div ref={root} data-setlist-navigator data-setlist-panel={view} className="relative flex min-h-0 flex-1 flex-col overflow-hidden" aria-busy={busy}>
     {/* Recreate presence at restoration so a remembered location appears immediately. */}
     <AnimatePresence key={ready ? 'ready' : 'restoring'} initial={false} custom={panelMotion}>

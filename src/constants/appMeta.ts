@@ -1160,6 +1160,18 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-13',
+        title: 'One member management flow for setlists and projects',
+        bullets: ['Click Members beside the song count to open the same member list, invitations and role controls used in projects.']
+      },
+      {
+        version: '0.12.35',
+        date: '2026-11-13',
+        title: '歌單與專案使用相同的成員管理入口',
+        bullets: ['點歌曲數旁的「成員」與人數，進入和專案相同的成員管理頁，可邀請、調整權限或移除成員。']
+      },
+      {
+        version: '0.12.35',
+        date: '2026-11-13',
         title: '共享歌單的成員權限',
         bullets: [
           '開啟共享歌單的「成員與權限」，即可將成員設為唯讀或管理員。',

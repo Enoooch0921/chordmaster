@@ -64,11 +64,7 @@ async function mount(width: number) {
   render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
   await waitFor(() => expect(state.share).toHaveBeenCalledWith('meeting'));
   if (width < 640) fireEvent.click(await screen.findByRole('button', { name: '固定歌曲列表' }));
-  const panel = await waitFor(() => {
-    const panel = document.querySelector<HTMLDetailsElement>('.setlist-sharing-summary'); expect(panel).not.toBeNull(); return panel!;
-  });
-  panel.open = true;
-  return panel;
+  return screen.findByRole('button', { name: '成員與權限：測試團員' });
 }
 
 it.each([390, 834, 1440])('keeps sharing status mounted through undo/redo at %ipx and centers completion feedback', async width => {
@@ -86,32 +82,35 @@ it.each([390, 834, 1440])('keeps sharing status mounted through undo/redo at %ip
   fireEvent.click(undo);
   const loading = await screen.findByText('正在撤銷歌曲排序…');
   const feedback = loading.closest('[data-ui-toast]');
-  expect(document.querySelector('.setlist-sharing-summary')).toBe(panel); expect(panel.open).toBe(true);
+  expect(screen.getByRole('button', { name: '成員與權限：測試團員' })).toBe(panel);
   await act(async () => pending.resolve());
   await waitFor(() => expect(rowOrder()).toEqual(['entry-0', 'entry-1']));
   const message = await screen.findByText('已撤銷歌曲排序');
   expect(message.closest('[data-ui-toast]')).toBe(feedback);
   expect(message.closest('[data-toast-viewport]')).toHaveAttribute('data-toast-viewport', 'history');
-  expect(document.querySelector('.setlist-sharing-summary')).toBe(panel); expect(panel.open).toBe(true);
-  expect(panel).toHaveTextContent('測試團員'); expect(state.share).toHaveBeenCalledTimes(initialReads);
+  expect(screen.getByRole('button', { name: '成員與權限：測試團員' })).toBe(panel);
+  expect(panel).toHaveTextContent('成員1'); expect(state.share).toHaveBeenCalledTimes(initialReads);
   const redo = screen.getByRole('button', { name: '重做 (Shift+Cmd/Ctrl+Z)' });
   await waitFor(() => expect(redo).toBeEnabled()); fireEvent.click(redo);
   await waitFor(() => expect(rowOrder()).toEqual(['entry-1', 'entry-0']));
   expect(await screen.findByText('已重做歌曲排序')).toBeInTheDocument();
-  expect(document.querySelector('.setlist-sharing-summary')).toBe(panel); expect(panel.open).toBe(true);
+  expect(screen.getByRole('button', { name: '成員與權限：測試團員' })).toBe(panel);
   expect(state.share).toHaveBeenCalledTimes(initialReads);
 }, 15000);
 
-it('keeps the current share panel and badge while an explicit refresh is pending', async () => {
-  const panel = await mount(834);
+it.each([390, 834, 1440])('opens the member page and keeps its rows during refresh at %ipx', async width => {
+  const panel = await mount(width);
   const update = deferred<SetlistShareStatus>(); state.share.mockReturnValueOnce(update.promise);
-  const badge = panel.querySelector('summary span')!;
-  const text = badge.textContent;
-  fireEvent.click(within(panel).getByRole('button', { name: /^重新整理$/ }));
-  expect(document.querySelector('.setlist-sharing-summary')).toBe(panel); expect(panel.open).toBe(true);
-  expect(badge).toHaveTextContent(text!); expect(panel).toHaveTextContent('測試團員');
-  await act(async () => update.resolve({ ...status, participantCount: 2 }));
-  expect(document.querySelector('.setlist-sharing-summary')).toBe(panel); expect(panel.open).toBe(true);
+  fireEvent.click(panel);
+  const detail = (await screen.findByRole('combobox', { name: '測試團員的權限' })).closest('[data-members-detail]') as HTMLElement;
+  fireEvent.click(within(detail).getByRole('button', { name: '重新整理成員' }));
+  expect(within(detail).getByRole('combobox')).toBeDisabled();
+  expect(detail).toHaveTextContent('測試團員');
+  await act(async () => update.resolve(status));
+  await waitFor(() => expect(within(detail).getByRole('combobox')).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '歌單內容' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '成員與權限：測試團員' })).toHaveFocus());
+  expect(rowOrder()).toEqual(['entry-0', 'entry-1']);
 });
 
 it('keeps failed history replay visible in the same centered card and preserves sharing data', async () => {
@@ -124,6 +123,6 @@ it('keeps failed history replay visible in the same centered card and preserves 
   const error = await screen.findByText('連線中斷，請重試撤銷');
   expect(error.closest('[data-toast-viewport]')).toHaveAttribute('data-toast-viewport', 'history');
   expect(rowOrder()).toEqual(['entry-1', 'entry-0']);
-  expect(document.querySelector('.setlist-sharing-summary')).toBe(panel); expect(panel.open).toBe(true);
-  expect(panel).toHaveTextContent('測試團員'); await waitFor(() => expect(undo).toBeEnabled());
+  expect(screen.getByRole('button', { name: '成員與權限：測試團員' })).toBe(panel);
+  expect(panel).toHaveTextContent('成員1'); await waitFor(() => expect(undo).toBeEnabled());
 });
