@@ -85,6 +85,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-14',
+        title: 'Square corners for the selected score',
+        bullets: ['The selection frame in the setlist preview follows the square corners of the score page.']
+      },
+      {
+        version: '0.12.38',
         date: '2026-11-13',
         title: 'Member count on shared projects',
         bullets: ['The member count appears when a project has an active invitation or a shared member. Open Share / invite in the project actions to invite the first member.']
@@ -1177,6 +1183,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-14',
+        title: '歌單譜頁外框改為直角',
+        bullets: ['歌單中選取的譜頁改用直角外框，四角與白色譜頁對齊。']
+      },
+      {
+        version: '0.12.38',
         date: '2026-11-13',
         title: '專案開放邀請後顯示成員人數',
         bullets: ['專案沒有有效邀請且尚無共享成員時，會隱藏「成員 0 人」。需要邀請第一位成員時，可從「專案操作 → 分享／邀請」開啟。']

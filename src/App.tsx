@@ -10589,7 +10589,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           <div
             key={item.id}
             data-setlist-preview-song-id={item.id}
-            className={`w-full rounded-[18px] transition-shadow duration-200 ${
+            className={`w-full transition-shadow duration-200 ${
               // Use a ring (box-shadow) rather than `outline` for the selection
               // frame: iOS WebKit mis-scales `outline` on transform:scale()'d
               // elements, which made this frame the wrong size in iPad landscape.
