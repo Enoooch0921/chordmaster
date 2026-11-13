@@ -85,6 +85,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-13',
+        title: 'Member roles for shared setlists',
+        bullets: [
+          'Open Members and permissions in a shared setlist to give a member viewer or manager access.',
+          'Setlist managers can change its performance keys and song order. Project manager access also applies to setlists in that project.'
+        ]
+      },
+      {
+        version: '0.12.34',
         date: '2026-11-11',
         title: 'More precise notation entry and song search',
         bullets: [
@@ -1150,6 +1159,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-13',
+        title: '共享歌單的成員權限',
+        bullets: [
+          '開啟共享歌單的「成員與權限」，即可將成員設為唯讀或管理員。',
+          '歌單管理員可調整該歌單的共用 Key 和歌序。專案管理員的權限也適用於專案內的歌單。'
+        ]
+      },
+      {
+        version: '0.12.34',
         date: '2026-11-11',
         title: '簡譜選取、弱起排版與逐拍輸入',
         bullets: [

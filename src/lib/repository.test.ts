@@ -90,12 +90,13 @@ describe('cloud repository personal workspace imports', () => {
     const version = 'a'.repeat(64);
     const setlist = { id: 'sl', name: 'Sunday', songs: [{ id: 'entry', songId: 'song', songData: makeSong() }] };
     mocks.rpc.mockResolvedValue({ error: null, data: { version, unchanged: false, payload: {
-      setlists: [setlist], projects: [{ id: 'p', role: 'manager', setlists: [setlist] }],
+      setlists: [{ ...setlist, role: 'manager' }], projects: [{ id: 'p', role: 'manager', setlists: [setlist] }],
       personalCapos: [{ setlist_song_id: 'entry', capo: 0 }]
     } } });
     const repository = createRepository();
     const result = await repository.loadJoinedWorkspaceUpdate!(null);
     expect(result.version).toBe(version);
+    expect(result.payload?.joinedSetlists[0].role).toBe('manager');
     expect(result.payload?.joinedSetlists[0].songs[0].personalCapoOverride).toBe(0);
     expect(result.payload?.joinedProjects?.[0].setlists[0].songs[0].personalCapoOverride).toBe(0);
     expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('get_joined_workspace_snapshot', { p_known_version: null });

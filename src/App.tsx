@@ -25,7 +25,7 @@ import { useUiMotion } from './hooks/useUiMotion';
 import { UI_DRAWER_EASE, UI_EASE_OUT, backdropVariants, modalVariants, drawerVariants, notificationVariants, popoverVariants } from './lib/uiMotion';
 import SetlistSongActions from './components/SetlistSongActions';
 import './components/SongLibraryPanel.css';
-import ProjectManagementPanel, { ManagementActions } from './components/ProjectManagementPanel';
+import ProjectManagementPanel, { ManagementActions, SharedMemberRow } from './components/ProjectManagementPanel';
 import SetlistBrowserHeader from './components/SetlistBrowserHeader';
 import { useWorkspaceHistory } from './hooks/useWorkspaceHistory';
 import { useThreeFingerHistory } from './hooks/useThreeFingerHistory';
@@ -113,7 +113,7 @@ import {
   Setlist,
   SetlistShareStatus,
   ProjectShareStatus,
-  ProjectMemberRole,
+  SharedMemberRole,
   ShareParticipant,
   SetlistSong,
   SetlistDisplayMode,
@@ -2427,17 +2427,14 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     && canManageTeamSetlistAssignments(selectedSetlist);
   const canCreateNewShareLink = !usingStartupCache && (!isTeamWorkspace || TEAM_EDIT_ROLES.has(activeLibraryRole));
   const canShareSelectedSetlist = canEditSelectedSetlist && canCreateNewShareLink;
-  // The joined project (if any) that contains the currently-selected setlist, plus
-  // whether I'm a *manager* of it. Managers may edit the shared key + song order of
-  // the project's setlists (Phase 1); everyone else stays read-only.
   const selectedSetlistJoinedProject = selectedSetlistId
     ? joinedProjects.find((jp) => jp.setlists.some((sl) => sl.id === selectedSetlistId)) ?? null
     : null;
-  const isJoinedProjectManager = !usingStartupCache && selectedSetlistJoinedProject?.role === 'manager';
-  // Key picker + drag-reorder unlock for owners/team-editors as before, *and* for
-  // joined-project managers.
-  const canEditSelectedSetlistKey = canEditSelectedSetlist || isJoinedProjectManager;
-  const canReorderSelectedSetlist = canEditSelectedSetlist || isJoinedProjectManager;
+  const canArrangeJoinedSetlist = !usingStartupCache && isJoinedSetlist && (
+    (selectedSetlist as JoinedSetlist).role === 'manager' || selectedSetlistJoinedProject?.role === 'manager'
+  );
+  const canEditSelectedSetlistKey = canEditSelectedSetlist || canArrangeJoinedSetlist;
+  const canReorderSelectedSetlist = canEditSelectedSetlist || canArrangeJoinedSetlist;
   const canManageSetlist = (setlist: Pick<Setlist, 'createdBy' | 'assignedToCurrentUser'>) => !usingStartupCache && (!isTeamWorkspace
     || canEditOwnedTeamSetlist(setlist));
   const isMultiSelectMode = multiSelectedSetlistIds.length > 0;
@@ -3791,8 +3788,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const historyScope = JSON.stringify([authenticatedUser?.id ?? 'local', activeLibraryId ?? 'local']);
   const historyFeedbackId = 'workspace-history-feedback';
   useEffect(() => () => toast.dismiss(historyFeedbackId), [historyScope, toast]);
-  const historyLive = useRef({ scope: historyScope, songs, setlists, projects, joinedProjects });
-  historyLive.current = { scope: historyScope, songs, setlists, projects, joinedProjects };
+  // The same setlist can be joined directly and through its project.
+  const updateJoinedSetlistSongs = (id: string, update: (songs: SetlistSong[]) => SetlistSong[]) => {
+    const apply = <T extends Setlist,>(list: T): T => list.id === id ? { ...list, songs: update(list.songs) } : list;
+    setJoinedSetlists(current => current.map(apply));
+    setJoinedProjects(current => current.map(project => project.setlists.some(list => list.id === id)
+      ? { ...project, setlists: project.setlists.map(apply) } : project));
+  };
+  const historyLive = useRef({ scope: historyScope, songs, setlists, projects, joinedProjects, joinedSetlists });
+  historyLive.current = { scope: historyScope, songs, setlists, projects, joinedProjects, joinedSetlists };
   const persistHistoryBaseline = useRef(persistWorkspace); persistHistoryBaseline.current = persistWorkspace;
   const historyDragGroup = useRef<string | undefined>(undefined);
   const historyRenameGroup = useRef<string | undefined>(undefined);
@@ -3820,7 +3824,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         // Shared project order entries use their role-checked endpoint, outside owned autosave.
         const joinedChange = entry.changes.length === 1 && entry.changes[0].resource === 'setlist'
           && !current.setlists.some(list => list.id === entry.changes[0].id);
-        const joinedList = joinedChange ? current.joinedProjects.flatMap(project => project.setlists).find(list => list.id === entry.changes[0].id) : null;
+        const joinedList = joinedChange ? current.joinedSetlists.find(list => list.id === entry.changes[0].id)
+          ?? current.joinedProjects.flatMap(project => project.setlists).find(list => list.id === entry.changes[0].id) : null;
         const before: HistoryWorkspace = { songs: current.songs, setlists: joinedList ? [joinedList] : current.setlists, projects: current.projects };
         let next = applyHistoryToWorkspace(before, entry, direction);
         if (repository) {
@@ -3832,7 +3837,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           try {
             if (joinedList) {
               const fresh = await repository.loadJoinedWorkspace();
-              const restored = fresh.joinedProjects.flatMap(project => project.setlists).find(list => list.id === joinedList.id);
+              const restored = fresh.joinedSetlists.find(list => list.id === joinedList.id)
+                ?? fresh.joinedProjects.flatMap(project => project.setlists).find(list => list.id === joinedList.id);
               if (restored) next = { ...next, setlists: [restored] };
             } else {
               const fresh = await repository.loadLibraryContent(activeLibraryId ?? await repository.getPersonalLibraryId());
@@ -3849,7 +3855,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         if (historyLive.current.scope !== scope || cloudRepositoryRef.current !== repository) return entry;
         historyReplay.current = true;
         if (joinedList) {
-          setJoinedProjects(current => current.map(project => ({ ...project, setlists: project.setlists.map(list => list.id === joinedList.id ? next.setlists[0] : list) })));
+          updateJoinedSetlistSongs(joinedList.id, () => next.setlists[0].songs);
         } else {
           setSongs(next.songs); setSetlists(next.setlists); setProjects(next.projects);
           setSavedSongs(cloneSong(next.songs)); setSavedSetlists(cloneSong(next.setlists)); setSavedProjects(cloneSong(next.projects));
@@ -4740,28 +4746,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     });
   };
 
-  // A project manager editing a setlist that lives inside a *joined* project: the
-  // new key is the shared base everyone sees, so it persists via a role-checked RPC
-  // (set_project_setlist_song_key) and updates the local joinedProjects copy.
-  const handleJoinedProjectSetlistKeyChange = (setlistSongId: string, key: Key) => {
-    setJoinedProjects((current) => current.map((jp) => {
-      if (!jp.setlists.some((sl) => sl.id === selectedSetlistId)) return jp;
-      return {
-        ...jp,
-        setlists: jp.setlists.map((sl) =>
-          sl.id !== selectedSetlistId ? sl : {
-            ...sl,
-            songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, overrideKey: key } : s)
-          }
-        )
-      };
-    }));
-    if (cloudRepositoryRef.current) {
-      const release = beginCloudMutation();
-      void cloudRepositoryRef.current.setProjectSetlistSongKey(setlistSongId, key)
-        .catch((error) => toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed))
-        .finally(release);
-    }
+  const handleJoinedSetlistKeyChange = (listId: string, entryId: string, key: Key, suggestedCapo?: number) => {
+    const repository = cloudRepositoryRef.current;
+    if (!repository) return;
+    const work = joinedHistoryWork.current;
+    const release = beginCloudMutation();
+    work.queue = work.queue.then(async () => {
+      await repository.setProjectSetlistSongKey(entryId, key);
+      if (joinedHistoryWork.current === work && cloudRepositoryRef.current === repository) {
+        updateJoinedSetlistSongs(listId, songs => songs.map(entry => entry.id === entryId
+          ? { ...entry, overrideKey: key, ...(suggestedCapo === undefined ? {} : { personalCapoOverride: suggestedCapo }) } : entry));
+        if (suggestedCapo !== undefined) savePersonalCapoOverride(entryId, suggestedCapo);
+      }
+    }).catch(error => { toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed); }).finally(release);
   };
 
   const handleSetlistSongKeyChange = (setlistSongId: string, currentKey: Key, currentCapo: number, newKey: Key) => {
@@ -4772,12 +4769,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     const nextCapo = getSuggestedGuitarCapo(newKey);
     const shouldUpdateCapoForKeyChange = currentKey !== newKey && currentCapo > 0;
 
-    // Joined project + I'm a manager: edit the shared key for everyone.
-    if (isJoinedProjectManager) {
-      handleJoinedProjectSetlistKeyChange(setlistSongId, newKey);
-      if (shouldUpdateCapoForKeyChange) {
-        handleJoinedSetlistCapoChange(setlistSongId, nextCapo);
-      }
+    if (canArrangeJoinedSetlist) {
+      handleJoinedSetlistKeyChange(selectedSetlist.id, setlistSongId, newKey, shouldUpdateCapoForKeyChange ? nextCapo : undefined);
       return;
     }
 
@@ -5368,25 +5361,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   const handleJoinedSetlistCapoChange = (setlistSongId: string, capo: number) => {
-    setJoinedSetlists((current) => current.map((sl) =>
-      sl.id !== selectedSetlistId ? sl : {
-        ...sl,
-        songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, personalCapoOverride: capo } : s)
-      }
-    ));
-    // Joined-project setlists live inside joinedProjects, not joinedSetlists.
-    setJoinedProjects((current) => current.map((jp) => {
-      if (!jp.setlists.some((sl) => sl.id === selectedSetlistId)) return jp;
-      return {
-        ...jp,
-        setlists: jp.setlists.map((sl) =>
-          sl.id !== selectedSetlistId ? sl : {
-            ...sl,
-            songs: sl.songs.map((s) => s.id === setlistSongId ? { ...s, personalCapoOverride: capo } : s)
-          }
-        )
-      };
-    }));
+    if (!selectedSetlistId) return;
+    updateJoinedSetlistSongs(selectedSetlistId, songs => songs.map(entry =>
+      entry.id === setlistSongId ? { ...entry, personalCapoOverride: capo } : entry));
     savePersonalCapoOverride(setlistSongId, capo);
   };
 
@@ -5611,15 +5588,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
   };
 
-  // Owner promotes a project participant to manager (can edit shared key + order)
-  // or demotes back to viewer, then refreshes the participant list.
-  const handleToggleProjectMemberRole = async (projectId: string, participant: ShareParticipant) => {
+  const handleSharedMemberRoleChange = async (
+    type: 'setlist' | 'project', id: string, member: ShareParticipant, role: SharedMemberRole
+  ) => {
     const repository = cloudRepositoryRef.current;
-    if (!repository) return;
-    const nextRole: ProjectMemberRole = participant.role === 'manager' ? 'viewer' : 'manager';
+    if (!repository || role === (member.role ?? 'viewer')) return;
     try {
-      await repository.setProjectMemberRole(projectId, participant.userId, nextRole);
-      await loadProjectShareStatus(projectId);
+      if (type === 'project') {
+        await repository.setProjectMemberRole(id, member.userId, role);
+        await loadProjectShareStatus(id);
+      } else {
+        await repository.setSetlistMemberRole(id, member.userId, role);
+        if (repository !== cloudRepositoryRef.current || selectedSetlistForShareRef.current !== id) return;
+        setSelectedSetlistShareStatus(current => current?.resourceId === id ? {
+          ...current, participants: current.participants.map(item => item.userId === member.userId ? { ...item, role } : item)
+        } : current);
+        await loadSetlistShareStatus(id);
+      }
     } catch {
       toast.error(language === 'zh' ? '更新成員權限失敗，請重試。' : 'Failed to update member role. Please try again.');
     }
@@ -6289,9 +6274,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setSelectedSetlistSongId(remainingSongs[0]?.id ?? null);
   };
 
-  // Reorder within a *joined* project's setlist (manager only). Updates the local
-  // joinedProjects copy and persists the new order via a role-checked RPC.
-  const moveJoinedProjectSetlistSong = (sourceId: string, targetId: string) => {
+  const moveJoinedSetlistSong = (sourceId: string, targetId: string) => {
     if (!selectedSetlist || !cloudRepositoryRef.current) return;
     const nextSongs = reorderSetlistSongs(selectedSetlist.songs, sourceId, targetId);
     if (nextSongs === selectedSetlist.songs) return;
@@ -6301,18 +6284,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     const repository = cloudRepositoryRef.current;
     const work = joinedHistoryWork.current;
     const requestLibraryId = activeLibraryId;
-    setJoinedProjects((current) => current.map((jp) => {
-      if (!jp.setlists.some((sl) => sl.id === selectedSetlistId)) return jp;
-      return {
-        ...jp,
-        setlists: jp.setlists.map((sl) => {
-          if (sl.id !== selectedSetlistId) return sl;
-          const reindexed = reorderSetlistSongs(sl.songs, sourceId, targetId);
-          if (reindexed === sl.songs) return sl;
-          return { ...sl, songs: reindexed };
-        })
-      };
-    }));
+    updateJoinedSetlistSongs(before.id, songs => reorderSetlistSongs(songs, sourceId, targetId));
     const release = beginCloudMutation();
     work.pending += 1;
     if (!historyDragGroup.current) setHistoryForwardBusy(true);
@@ -6324,7 +6296,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       toast.error(error instanceof Error ? error.message : copy.cloudSyncFailed);
       try {
         const fresh = await repository.loadJoinedWorkspace();
-        if (historyLive.current.scope === work.scope && cloudRepositoryRef.current === repository) setJoinedProjects(fresh.joinedProjects);
+        if (historyLive.current.scope === work.scope && cloudRepositoryRef.current === repository) {
+          setJoinedProjects(fresh.joinedProjects);
+          setJoinedSetlists(fresh.joinedSetlists);
+        }
       } catch { /* Keep the dirty order visible; a retry must pass the server guard. */ }
     }).finally(() => {
       work.pending -= 1; release();
@@ -6337,8 +6312,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
 
-    if (isJoinedProjectManager) {
-      moveJoinedProjectSetlistSong(sourceId, targetId);
+    if (canArrangeJoinedSetlist) {
+      moveJoinedSetlistSong(sourceId, targetId);
       return;
     }
 
@@ -11598,7 +11573,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           }}
           keyValue={currentSetlistKey}
           capoValue={currentSetlistCapo}
-          onKeyChange={isJoinedSetlist ? undefined : handleSetlistKeyChange}
+          onKeyChange={canEditSelectedSetlistKey ? handleSetlistKeyChange : undefined}
           onCapoChange={handleSelectedSetlistCapoChange}
           displayMode={effectiveSelectedSetlist.displayMode}
           onDisplayModeChange={handleSetlistDisplayModeChange}
@@ -11664,80 +11639,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     </button>
   ) : null;
 
-  // Shared "who joined" list, reused by both the setlist and project panels.
-  // When onToggleManager is supplied (project panel, owner view), each participant
-  // gets a control to promote them to manager (edit shared key + order) or demote.
-  const renderShareParticipantList = (
-    participants: ProjectShareStatus['participants'] | undefined,
-    maxHeightClass: string,
-    onToggleManager?: (participant: ShareParticipant) => void,
-    onRemove?: (participant: ShareParticipant) => void
-  ) => (
-    participants && participants.length ? (
-      <div className={`mt-3 ${maxHeightClass} space-y-2 overflow-y-auto`}>
-        {participants.map((participant) => {
-          const isManager = participant.role === 'manager';
-          const rowContent = (
-            <>
-              {participant.picture ? (
-                <img src={participant.picture} alt={participant.name} className="h-7 w-7 rounded-full border border-gray-200 object-cover" />
-              ) : (
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
-                  {(participant.name || participant.email || '?').slice(0, 1).toUpperCase()}
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-bold text-gray-900">{participant.name || participant.email}</div>
-                <div className="truncate text-[11px] text-gray-500">{participant.email}</div>
-              </div>
-              {onToggleManager ? (
-                <button
-                  type="button"
-                  data-swipe-ignore
-                  onClick={() => {
-                    onToggleManager(participant);
-                  }}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition-colors ${
-                    isManager
-                      ? 'bg-indigo-600 text-white ring-indigo-600 hover:bg-indigo-500'
-                      : 'bg-white text-gray-600 ring-gray-200 hover:ring-indigo-300 hover:text-indigo-600'
-                  }`}
-                  title={language === 'zh'
-                    ? (isManager ? '管理員（可改 key/順序）— 點擊改回唯讀' : '唯讀 — 點擊設為管理員')
-                    : (isManager ? 'Manager (can edit key/order) — tap to make viewer' : 'Viewer — tap to make manager')}
-                >
-                  {language === 'zh' ? (isManager ? '管理員' : '唯讀') : (isManager ? 'Manager' : 'Viewer')}
-                </button>
-              ) : null}
-            </>
-          );
-
-          // No remove capability → plain, non-swipe row.
-          if (!onRemove) {
-            return (
-              <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-xl bg-gray-50 px-2.5 py-2">
-                {rowContent}
-              </div>
-            );
-          }
-
-          return (
-            <SwipeActionRow key={participant.userId} className="rounded-xl"
-              contentClassName="flex min-w-0 select-none items-center gap-2 bg-gray-50 px-2.5 py-2"
-              rightAction={{ label: copy.removeMember, accessibleLabel: `${copy.removeMember} ${participant.name || participant.email}`,
-                tone: 'delete', onAction: () => onRemove(participant) }}>
-              {rowContent}
-            </SwipeActionRow>
-          );
-        })}
-      </div>
-    ) : (
-      <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
-        {copy.setlistSharingNoParticipants}
-      </div>
-    )
-  );
-
   // Collapsible on every viewport (incl. desktop) so the participant list never
   // permanently covers the setlist area — closed by default.
   // Mirror the project panel: only surface once the setlist is actually shared
@@ -11746,10 +11647,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const hasSetlistShareActivity = Boolean(activeSetlistShareStatus?.activeToken)
     || (activeSetlistShareStatus?.participantCount ?? 0) > 0;
   const setlistSharingPanel = selectedSetlist && canShareSelectedSetlist && hasSetlistShareActivity ? (
-    <details className="group setlist-sharing-summary">
+    <details key={selectedSetlist.id} className="group setlist-sharing-summary">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-900">{copy.setlistSharingTitle}</div>
+          <div className="text-sm font-semibold text-gray-900">{language === 'zh' ? '成員與權限' : 'Members and permissions'}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
               activeSetlistShareStatus?.activeToken
@@ -11783,12 +11684,20 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       </summary>
 
       <div className="mt-3 border-t border-gray-100 pt-3">
-        {renderShareParticipantList(
-          activeSetlistShareStatus?.participants,
-          'max-h-48',
-          undefined,
-          selectedSetlist ? (participant) => { void handleRemoveSharedMember('setlist', selectedSetlist.id, participant); } : undefined
-        )}
+        {activeSetlistShareStatus?.participants.length ? <>
+          <div className="max-h-48 overflow-y-auto">
+            {activeSetlistShareStatus.participants.map(member => {
+              const name = member.name || member.email;
+              const remove = () => void handleRemoveSharedMember('setlist', selectedSetlist.id, member);
+              return <SwipeActionRow key={member.userId} contentClassName=""
+                rightAction={{ label: copy.removeMember, accessibleLabel: copy.removeMember + ' ' + name, tone: 'delete', onAction: remove }}>
+                <SharedMemberRow language={language} member={member} busy={isLoadingSetlistShareStatus || isRevokingSetlistShare}
+                  onRoleChange={role => handleSharedMemberRoleChange('setlist', selectedSetlist.id, member, role)} onRemove={remove}/>
+              </SwipeActionRow>;
+            })}
+          </div>
+          <p className="pm-permission-note">{language === 'zh' ? '管理員可調整這份歌單的調性與歌曲順序。' : 'Managers can change keys and song order in this setlist.'}</p>
+        </> : <p className="pm-message">{copy.setlistSharingNoParticipants}</p>}
 
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <button
@@ -12064,7 +11973,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       onDelete={project => { void handleDeleteProject(project.id); }}
       onShare={project => { void handleCreateProjectShareLink(project.id); }}
       onRefreshMembers={id => { void loadProjectShareStatus(id); }}
-      onRoleChange={async (project, member, role) => { if (role !== (member.role ?? 'viewer')) await handleToggleProjectMemberRole(project.id, member); }}
+      onRoleChange={(project, member, role) => handleSharedMemberRoleChange('project', project.id, member, role)}
       onRemoveMember={(project, member) => { void handleRemoveSharedMember('project', project.id, member); }}
       pinnedProjectIds={pinnedProjectIds} onTogglePin={toggleProjectPin}
     />

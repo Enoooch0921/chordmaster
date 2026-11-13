@@ -7,7 +7,7 @@ import {
   LibraryRole,
   ShareContactResourceType,
   Project,
-  ProjectMemberRole,
+  SharedMemberRole,
   ProjectShareStatus,
   ShareContact,
   Setlist,
@@ -200,6 +200,7 @@ interface JoinedSetlistRpcSong {
 }
 
 interface JoinedSetlistRpcRow {
+  role?: unknown;
   id?: unknown;
   name?: unknown;
   displayMode?: unknown;
@@ -342,7 +343,8 @@ export interface WorkspaceRepository {
   leaveSharedProject(projectId: string): Promise<void>;
   getProjectShareStatus(projectId: string): Promise<ProjectShareStatus>;
   revokeProjectSharing(projectId: string): Promise<void>;
-  setProjectMemberRole(projectId: string, userId: string, role: ProjectMemberRole): Promise<void>;
+  setSetlistMemberRole(setlistId: string, userId: string, role: SharedMemberRole): Promise<void>;
+  setProjectMemberRole(projectId: string, userId: string, role: SharedMemberRole): Promise<void>;
   removeSharedMember(resourceType: ShareResourceType, resourceId: string, userId: string): Promise<void>;
   setProjectSetlistSongKey(setlistSongId: string, key: string | null): Promise<void>;
   reorderProjectSetlist(setlistId: string, songIds: string[]): Promise<void>;
@@ -555,6 +557,7 @@ const normalizeJoinedSetlistRpcPayload = (payload: unknown): JoinedSetlist[] => 
       return {
         id,
         name: typeof setlistRow.name === 'string' && setlistRow.name.trim() ? setlistRow.name : `Shared Setlist ${index + 1}`,
+        role: setlistRow.role === 'manager' ? 'manager' : 'viewer',
         displayMode: normalizeSetlistDisplayMode(setlistRow.displayMode),
         createdAt: parseRemoteTimestamp(setlistRow.createdAt),
         updatedAt: parseRemoteTimestamp(setlistRow.updatedAt),
@@ -1016,6 +1019,9 @@ export const createLocalRepository = (): WorkspaceRepository => ({
   async revokeProjectSharing() {
     throw new Error('Please sign in to manage sharing.');
   },
+  async setSetlistMemberRole() {
+    throw new Error('Please sign in to manage setlist members.');
+  },
   async setProjectMemberRole() {
     throw new Error('Please sign in to manage project members.');
   },
@@ -1342,12 +1348,15 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
 
   const { data: memberships, error: membershipError } = await supabase
     .from('user_setlist_memberships')
-    .select('setlist_id')
+    .select('*')
     .eq('user_id', userId);
 
   if (membershipError) throw membershipError;
 
-  const joinedSetlistIds = (memberships ?? []).map((m: { setlist_id: string }) => m.setlist_id);
+  const roles = new Map<string, SharedMemberRole>((memberships ?? []).map(m => [
+    m.setlist_id, m.role === 'manager' ? 'manager' : 'viewer'
+  ]));
+  const joinedSetlistIds = [...roles.keys()];
   if (joinedSetlistIds.length === 0) return [];
 
   const [
@@ -1418,6 +1427,7 @@ const getJoinedSetlistsUnsafe = async (userId: string): Promise<JoinedSetlist[]>
       createdAt: new Date(row.created_at).getTime(),
       updatedAt: new Date(row.updated_at).getTime(),
       songs,
+      role: roles.get(row.id),
       isJoined: true
     };
   });
@@ -2533,6 +2543,14 @@ export const createCloudRepository = (params: {
     async revokeProjectSharing(projectId) {
       if (!supabase) throw new Error('Supabase is not configured.');
       const { error } = await supabase.rpc('revoke_project_sharing', { p_project_id: projectId });
+      if (error) throw error;
+    },
+
+    async setSetlistMemberRole(setlistId, userId, role) {
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { error } = await supabase.rpc('set_setlist_member_role', {
+        p_setlist_id: setlistId, p_user_id: userId, p_role: role
+      });
       if (error) throw error;
     },
 

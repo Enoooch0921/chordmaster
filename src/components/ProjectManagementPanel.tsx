@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, Edit3, ExternalLink, MoreHorizontal, Pin, PinOff, Plus, RefreshCw, Share2, Trash2 } from 'lucide-react';
-import type { AppLanguage, JoinedProject, Project, ProjectMemberRole, ProjectShareStatus, Setlist, ShareParticipant } from '../types';
+import type { AppLanguage, JoinedProject, Project, SharedMemberRole, ProjectShareStatus, Setlist, ShareParticipant } from '../types';
 import { AnimatedPopover } from './ui/InteractionMotion';
 import { useAnchoredPortalPanel } from './useAnchoredPortalPanel';
 import './ProjectManagementPanel.css';
@@ -42,6 +42,49 @@ export function ManagementActions({ label, actions, disabled = false, triggerCon
   </>;
 }
 
+export function SharedMemberRow({ language, member, busy, onRoleChange, onRemove }: {
+  language: AppLanguage;
+  member: ShareParticipant;
+  busy: boolean;
+  onRoleChange: (role: SharedMemberRole) => Promise<void>;
+  onRemove: () => void;
+}) {
+  const zh = language === 'zh';
+  const name = member.name || member.email;
+  const [pendingRole, setPendingRole] = useState<SharedMemberRole | null>(null);
+  const disabled = busy || pendingRole !== null;
+  const changeRole = async (role: SharedMemberRole) => {
+    setPendingRole(role);
+    try { await onRoleChange(role); }
+    finally { setPendingRole(null); }
+  };
+
+  return <div className="pm-member" aria-busy={disabled}>
+    {member.picture
+      ? <img className="pm-avatar" src={member.picture} alt="" width={24} height={24} loading="lazy"/>
+      : <span className="pm-avatar" aria-hidden="true">{name.slice(0, 1)}</span>}
+    <div className="pm-member-info">
+      <div className="pm-member-top"><strong>{name}</strong>
+        <span className="pm-role-control" lang={zh ? 'zh-Hant' : 'en'} data-swipe-ignore>
+          <select aria-label={zh ? name + '的權限' : 'Role for ' + name}
+            value={pendingRole ?? member.role ?? 'viewer'} disabled={disabled}
+            onChange={event => void changeRole(event.target.value as SharedMemberRole)}>
+            <option value="viewer">{zh ? '唯讀' : 'Viewer'}</option>
+            <option value="manager">{zh ? '管理員' : 'Manager'}</option>
+          </select>
+          <ChevronDown size={12} aria-hidden="true"/>
+        </span>
+      </div>
+      <span className="pm-member-email" title={member.email}>{member.email}</span>
+      {member.inheritsProjectManager && <small className="pm-permission-note">{zh ? '此成員也有專案管理員權限。' : 'Also a project manager.'}</small>}
+    </div>
+    <span data-swipe-ignore>
+      <ManagementActions label={zh ? name + '的成員操作' : 'Actions for ' + name} disabled={disabled}
+        actions={[{ label: zh ? '移除成員' : 'Remove member', icon: <Trash2 size={16}/>, danger: true, run: onRemove }]}/>
+    </span>
+  </div>;
+}
+
 interface Props {
   language: AppLanguage;
   projects: Project[];
@@ -72,7 +115,7 @@ interface Props {
   onDelete: (project: Project) => void;
   onShare: (project: Project) => void;
   onRefreshMembers: (id: string) => void;
-  onRoleChange: (project: Project, member: ShareParticipant, role: ProjectMemberRole) => Promise<void>;
+  onRoleChange: (project: Project, member: ShareParticipant, role: SharedMemberRole) => Promise<void>;
   onRemoveMember: (project: Project, member: ShareParticipant) => void;
   pinnedProjectIds?: ReadonlySet<string>;
   onTogglePin?: (projectId: string) => void;
@@ -84,7 +127,7 @@ export default function ProjectManagementPanel(props: Props) {
   const scroll = useRef<HTMLDivElement>(null), heading = useRef<HTMLHeadingElement>(null);
   const rows = useRef(new Map<string, HTMLButtonElement>());
   const previousProject = useRef<string | null>(null), indexScrollTop = useRef(0);
-  const [pendingRole, setPendingRole] = useState<{ key: string; projectId: string; role: ProjectMemberRole } | null>(null);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
   useLayoutEffect(() => {
     const previous = previousProject.current;
     if (project?.id === previous) return;
@@ -96,13 +139,12 @@ export default function ProjectManagementPanel(props: Props) {
   const countSetlists = (id: string) => setlists.filter(item => item.projectId === id && !item.archived).length;
   const projectSetlists = project ? setlists.filter(item => item.projectId === project.id && !item.archived) : [];
   const participants = memberStatus?.participants ?? [];
-  const pendingHere = pendingRole?.projectId === project?.id;
-  const changeRole = async (member: ShareParticipant, role: ProjectMemberRole) => {
+  const pendingHere = pendingProjectId !== null && pendingProjectId === project?.id;
+  const changeRole = async (member: ShareParticipant, role: SharedMemberRole) => {
     if (!project || role === (member.role ?? 'viewer')) return;
-    const key = project.id + '|' + member.userId;
-    setPendingRole({ key, projectId: project.id, role });
+    setPendingProjectId(project.id);
     try { await props.onRoleChange(project, member, role); }
-    finally { setPendingRole(current => current?.key === key ? null : current); }
+    finally { setPendingProjectId(current => current === project.id ? null : current); }
   };
   const projectActions: Action[] = project ? [
     { label: zh ? '開啟專案歌單' : 'Open project setlists', icon: <ExternalLink size={16} />, run: () => props.onOpenProject(project.id) },
@@ -132,17 +174,12 @@ export default function ProjectManagementPanel(props: Props) {
             : membersError ? <p role='alert' className='pm-message pm-error'>{zh ? '無法載入成員。請重新整理再試。' : 'Members could not be loaded. Refresh to retry.'}</p>
             : membersLoading && !memberStatus ? <div role='status' className='pm-loading'>{zh ? '正在載入成員…' : 'Loading members…'}</div>
             : <>
-              {participants.length > 0 ? <ul className='pm-members'>{participants.map(member => {
-                const name = member.name || member.email;
-                const key = project.id + '|' + member.userId;
-                return <li key={member.userId} className='pm-member'>
-                  {member.picture ? <img className='pm-avatar' src={member.picture} alt='' /> : <span className='pm-avatar' aria-hidden='true'>{name.slice(0,1)}</span>}
-                  <div className='pm-member-info'><div className='pm-member-top'><strong>{name}</strong>
-                    <span className='pm-role-control'><select aria-label={zh ? name + '的權限' : 'Role for ' + name} value={pendingRole?.key === key ? pendingRole.role : member.role ?? 'viewer'} disabled={membersLoading || pendingHere} onChange={event => void changeRole(member, event.target.value as ProjectMemberRole)}><option value='viewer'>{zh ? '唯讀' : 'Viewer'}</option><option value='manager'>{zh ? '管理員' : 'Manager'}</option></select><ChevronDown size={12} aria-hidden='true'/></span></div><span className='pm-member-email' title={member.email}>{member.email}</span>
-                  </div>
-                  <ManagementActions label={zh ? name + '的成員操作' : 'Actions for ' + name} disabled={membersLoading || pendingHere} actions={[{label:zh ? '移除成員' : 'Remove member',icon:<Trash2 size={16}/>,danger:true,run:()=>props.onRemoveMember(project,member)}]} />
-                </li>;
-              })}</ul> : <p className='pm-message'>{zh ? '尚無共享成員。邀請團員加入，一起使用專案歌單。' : 'No shared members yet. Invite your team to use this project’s setlists.'}</p>}
+              {participants.length > 0 ? <ul className='pm-members'>{participants.map(member =>
+                <li key={member.userId}>
+                  <SharedMemberRow language={language} member={member} busy={membersLoading || pendingHere}
+                    onRoleChange={role => changeRole(member, role)} onRemove={() => props.onRemoveMember(project, member)}/>
+                </li>
+              )}</ul> : <p className='pm-message'>{zh ? '尚無共享成員。邀請團員加入，一起使用專案歌單。' : 'No shared members yet. Invite your team to use this project’s setlists.'}</p>}
               {participants.length > 0 && <p className='pm-permission-note'>{zh ? '管理員可改調性與歌曲順序；唯讀僅查看。' : 'Managers can change keys and song order. Viewers can read.'}</p>}
             </>}
         </section>
