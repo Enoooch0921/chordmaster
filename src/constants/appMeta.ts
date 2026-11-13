@@ -86,6 +86,18 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-13',
+        title: 'Member count on shared setlists',
+        bullets: ['Setlists show the member count once an invitation is active or someone has joined. To invite the first member, choose Share Setlist from the setlist actions.']
+      },
+      {
+        version: '0.12.36',
+        date: '2026-11-13',
+        title: 'One member management flow for setlists and projects',
+        bullets: ['Click Members beside the song count to open the same member list, invitations and role controls used in projects.']
+      },
+      {
+        version: '0.12.35',
+        date: '2026-11-13',
         title: 'Member roles for shared setlists',
         bullets: [
           'Open Members and permissions in a shared setlist to give a member viewer or manager access.',
@@ -1160,11 +1172,11 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-13',
-        title: 'One member management flow for setlists and projects',
-        bullets: ['Click Members beside the song count to open the same member list, invitations and role controls used in projects.']
+        title: '歌單開放邀請後顯示成員人數',
+        bullets: ['未開啟邀請且尚無共享成員時，歌單會隱藏「成員 0 人」。可從「歌單操作 → 分享歌單」開啟邀請。']
       },
       {
-        version: '0.12.35',
+        version: '0.12.36',
         date: '2026-11-13',
         title: '歌單與專案使用相同的成員管理入口',
         bullets: ['點歌曲數旁的「成員」與人數，進入和專案相同的成員管理頁，可邀請、調整權限或移除成員。']

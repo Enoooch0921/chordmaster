@@ -69,6 +69,21 @@ it.each(['personal', 'team'])('shares a different setlist from the %s list witho
   expect(state.status).not.toHaveBeenCalledWith('second');
 });
 
+it('shows the member count only after the owner enables sharing on an empty setlist', async () => {
+  let activeToken: string | null = null;
+  state.status.mockImplementation(async () => ({ activeToken, activeCreatedAt: null, participantCount: 0, participants: [] }));
+  state.create.mockImplementationOnce(async () => { activeToken = 'new-token'; return activeToken; });
+  saveNavigationLocation(navigationKey(), { ...loadNavigationLocation(navigationKey())!, view: 'detail' });
+  mount();
+  await waitFor(() => expect(state.status).toHaveBeenCalledWith('first'));
+  expect(screen.queryByRole('button', { name: /^成員與權限/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '歌單操作' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: '分享歌單' }));
+  await waitFor(() => expect(state.create).toHaveBeenCalledWith('setlist', 'first'));
+  expect(await screen.findByRole('textbox', { name: '分享連結' })).toHaveValue(`${window.location.origin}/share/new-token`);
+  await waitFor(() => expect(document.querySelector('[data-members-trigger="setlist"]')).toHaveTextContent('成員0'));
+});
+
 it('opens the existing selected-setlist invitation directly and reuses its own link', async () => {
   const location = loadNavigationLocation(navigationKey())!;
   saveNavigationLocation(navigationKey(), { ...location, view: 'detail' }); mount();
@@ -108,7 +123,7 @@ it('keeps sharing actions unavailable for a team viewer', async () => {
 
 it('changes a direct member’s role from a standalone setlist and restores the saved value on failure', async () => {
   const member = { userId: 'guest', name: '小安', email: 'guest@example.invalid', role: 'viewer', joinedAt: '' };
-  state.status.mockImplementation(async () => ({ activeToken: 'token', participantCount: 1, participants: [{ ...member }] }));
+  state.status.mockImplementation(async () => ({ activeToken: null, participantCount: 1, participants: [{ ...member }] }));
   state.setRole.mockImplementation(async (_id, _user, role) => { member.role = role; });
   saveNavigationLocation(navigationKey(), { ...loadNavigationLocation(navigationKey())!, view: 'detail' });
   mount();
