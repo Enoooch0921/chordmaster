@@ -10016,7 +10016,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               : {
                   kind: 'chord',
                   slotIndex,
-                  rawChordIndex
+                  rawChordIndex,
+                  ...(target?.cursor?.kind === 'chord' ? {
+                    orderedIndex: target.cursor.orderedIndex, auditionOffset: target.cursor.auditionOffset
+                  } : {})
                 };
           const fallbackNotationAnchorKey = requestedNotationMode && requestedNotationMode !== 'chords'
             ? `${previewIdentity}|${actualSection.id}|${editableBar.id}|${requestedNotationMode}|all`
@@ -14590,7 +14593,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               );
               return (
                 <PreviewBarEditor
+                  key={activePreviewEditSession.previewIdentity}
                   session={activePreviewEditSession}
+                  auditionSong={activeDraftNavigationPreviewSong}
                   language={language}
                   deviceLayout={previewEditorDeviceLayout}
                   storedKey={storedKey}
@@ -14939,6 +14944,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               </section>
             )}
 
+            {activeAppView === 'about' && <p className="px-2 text-sm leading-6 text-gray-600">
+              {language === 'zh' ? '鋼琴試聽採用 Alexander Holm 錄製的 ' : 'Piano samples recorded by Alexander Holm for the '}
+              <a className="underline" href="https://sfzinstruments.github.io/pianos/salamander/" target="_blank" rel="noreferrer">Salamander Grand Piano V3</a>
+              {language === 'zh' ? '，經選錄、裁切與轉檔，依 ' : ', excerpted, trimmed and encoded under '}
+              <a className="underline" href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer">CC BY 3.0</a>
+              {language === 'zh' ? ' 授權使用。' : '.'}
+            </p>}
             {activeAppView === 'about' && (
               <section className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7">
                 <div className="flex flex-wrap items-center justify-between gap-3">

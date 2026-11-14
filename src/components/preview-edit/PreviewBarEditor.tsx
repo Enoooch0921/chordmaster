@@ -1,4 +1,6 @@
 import './PreviewKeyboard.css';
+import ChordAuditionControl from './ChordAuditionControl';
+import type { AuditionScope } from '../../lib/chordAudition';
 import KeyboardSurface from './KeyboardSurface';
 import KeyboardEditActions from './KeyboardEditActions';
 import SlidingSelection from '../ui/SlidingSelection';
@@ -123,6 +125,7 @@ interface PickerAnchor {
 
 interface PreviewBarEditorProps {
   session: PreviewEditSession;
+  auditionSong?: Song;
   language: AppLanguage;
   deviceLayout: PreviewEditorDeviceLayout;
   storedKey: Key;
@@ -259,6 +262,7 @@ const getCleanChordMarks = (marks: Bar['chordMarks']) => (
 
 const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   session: sourceSession,
+  auditionSong = sourceSession.draftSong,
   language,
   deviceLayout,
   storedKey,
@@ -335,6 +339,15 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [pickerAnchor, setPickerAnchor] = React.useState<PickerAnchor | null>(null);
   const [bassMode, setBassMode] = React.useState(false);
   const [landscapeChordPage, setLandscapeChordPage] = React.useState<'input'|'tools'>('input');
+  const [auditionFeedbackHost, setAuditionFeedbackHost] = React.useState<HTMLDivElement | null>(null);
+  const [auditionScope, setAuditionScope] = React.useState<AuditionScope>('chord');
+  const [auditionMetronome, setAuditionMetronome] = React.useState(true);
+  const [auditionSelection, setAuditionSelection] = React.useState<{
+    cursor: PreviewNotationCursor | undefined; anchorKey: string; orderedIndex?: number; beat?: number; offset?: number
+  } | null>(null);
+  React.useLayoutEffect(() => {
+    if (!present) { setAuditionScope('chord'); setAuditionSelection(null); setAuditionMetronome(true); }
+  }, [present]);
   const [collapsed, setCollapsed] = React.useState(false);
   const [subdivisionsExpanded, setSubdivisionsExpanded] = React.useState(false);
   const [graceDraft, setGraceDraft] = React.useState<JianpuGraceNote[] | null>(null);
@@ -529,7 +542,10 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     if (run.length > 4) { setMultiRestActionError(language === 'zh' ? '每拍最多輸入四個和弦。' : 'Enter up to four chords per beat.'); return; }
     const stored = run.map(input => convertDisplayedChordToStoredChord({ input: normalizeChordTextInput(input, chordInputMode), inputMode: chordInputMode, storageMode, displayedKey, storedKey }));
     setMultiRestActionError(null);
-    onApplyDraft(setChordRunAtBeatSlot(session.draftSong, session.target, stored), { mergeKey });
+    const draft = setChordRunAtBeatSlot(session.draftSong, session.target, stored);
+    const last = findSongBar(draft, session.target)?.bar.chordSubdivisions?.filter(entry => entry.beat === session.target.slotIndex).at(-1);
+    setAuditionSelection({ anchorKey: sourceSession.target.anchorKey, cursor: chordCursor, offset: last?.offset });
+    onApplyDraft(draft, { mergeKey });
   }
 
   function applyRhythmAction(action: RhythmEditAction) {
@@ -670,6 +686,14 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       const meta = event.metaKey || event.ctrlKey;
       const isChordEditing = !hasUnmeteredChords(bar) && !bar.chordTimingUnspecified && notationMode === 'chords' && session.target.field === 'chords';
       if (event.defaultPrevented) return;
+      if (notationMode === 'chords' && !event.isComposing && event.altKey && !meta && !event.shiftKey && event.code === 'KeyP') {
+        const button = panelRef.current?.querySelector<HTMLButtonElement>('[data-audition-button]');
+        if (button) {
+          event.preventDefault();
+          if (!event.repeat) { button.focus({ preventScroll: true }); button.click(); }
+        }
+        return;
+      }
       if (graceDraft) {
         if (event.key === 'Escape') { event.preventDefault(); setGraceDraft(null); }
         return;
@@ -1161,9 +1185,30 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
     );
   }
 
+  const chordCursor = sourceSession.target.kind === 'bar' && sourceSession.target.cursor?.kind === 'chord'
+    ? sourceSession.target.cursor : undefined;
+  const selectedAudio = auditionSelection?.anchorKey === sourceSession.target.anchorKey && auditionSelection.cursor === chordCursor
+    ? auditionSelection : null;
+  const auditionOffset = selectedAudio ? selectedAudio.offset : chordCursor?.auditionOffset;
+  const auditionBeat = selectedAudio?.beat ?? sourceSession.target.slotIndex;
+  const orderedIndex = selectedAudio?.orderedIndex ?? chordCursor?.orderedIndex ?? 0;
+  const orderedChords = bar.unmeteredChordLines?.flat() ?? (bar.chordTimingUnspecified ? bar.chords.filter(chord => chord.trim()) : null);
+  const subdivision = auditionOffset !== undefined && bar.chordSubdivisions?.find(entry => entry.offset === auditionOffset && entry.beat === auditionBeat);
+  const selectedToken = orderedChords?.[orderedIndex] ?? (subdivision ? subdivision.chord : undefined);
+  const selectedChordLabel = selectedToken && !bar.chordKeyUnspecified ? convertStoredChordToDisplayedChord({
+    chord: selectedToken, storageMode, outputMode: chordInputMode, storedKey, displayedKey
+  }) : selectedToken ?? displayedChord;
+  const audition = present && !isPickup && notationMode === 'chords' && <ChordAuditionControl
+    song={auditionSong} language={language} identity={sourceSession.previewIdentity}
+    selectionLabel={selectedChordLabel} feedbackHost={auditionFeedbackHost}
+    scope={auditionScope} setScope={setAuditionScope}
+    metronome={auditionMetronome} setMetronome={setAuditionMetronome}
+    target={{ ...sourceSession.target, slotIndex: auditionBeat, orderedIndex, offset: auditionOffset }} />;
+
   if (hasUnmeteredChords(bar) || (bar.chordTimingUnspecified && notationMode === 'chords' && session.target.field === 'chords')) return <KeyboardSurface docked={isDocked} ref={panelRef} data-preview-bar-editor data-keyboard-refined data-preview-edit-ui data-device-layout={deviceLayout} role="dialog" aria-label={language==='zh'?'未定拍位和弦編輯':'Unmetered chord editor'} className="z-[5000] flex flex-col gap-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-xl" style={panelStyle}>
-    <header className="flex shrink-0 items-center gap-2">{dragGrip}{scaleControls}<span className="min-w-0 flex-1 truncate text-sm font-bold">{section.title}</span><button type="button" className={toolbarButtonClass} onClick={onUndo} disabled={!session.past.length} aria-label="Undo"><Undo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onRedo} disabled={!session.future.length} aria-label="Redo"><Redo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onCancel} aria-label="Cancel"><X size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onDone} aria-label={language==='zh'?'完成':'Done'}><Check size={15}/></button></header>
-    <UnmeteredChordsEditor keyUnspecified={bar.chordKeyUnspecified} withinMeasure={!hasUnmeteredChords(bar)} lines={hasUnmeteredChords(bar)?bar.unmeteredChordLines!:[bar.chords]} language={language} onChange={lines=>hasUnmeteredChords(bar)?updateFields({unmeteredChordLines:lines}):onApplyDraft(updateBarById(session.draftSong,session.target,old=>({...old,chords:lines.flat()})))}/>
+    <header className="flex shrink-0 items-center gap-2">{dragGrip}{scaleControls}<span className="min-w-0 flex-1 truncate text-sm font-bold">{section.title}</span>{audition}<button type="button" className={toolbarButtonClass} onClick={onUndo} disabled={!session.past.length} aria-label="Undo"><Undo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onRedo} disabled={!session.future.length} aria-label="Redo"><Redo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onCancel} aria-label="Cancel"><X size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onDone} aria-label={language==='zh'?'完成':'Done'}><Check size={15}/></button></header>
+    <div ref={setAuditionFeedbackHost} className="chord-audition-feedback" />
+    <UnmeteredChordsEditor onSelectChord={orderedIndex => setAuditionSelection({ anchorKey: sourceSession.target.anchorKey, cursor: chordCursor, orderedIndex })} keyUnspecified={bar.chordKeyUnspecified} withinMeasure={!hasUnmeteredChords(bar)} lines={hasUnmeteredChords(bar)?bar.unmeteredChordLines!:[bar.chords]} language={language} onChange={lines=>hasUnmeteredChords(bar)?updateFields({unmeteredChordLines:lines}):onApplyDraft(updateBarById(session.draftSong,session.target,old=>({...old,chords:lines.flat()})))}/>
     {!hasUnmeteredChords(bar)&&<button type="button" className="self-start rounded-md border border-slate-300 px-2 py-1 text-xs" onClick={()=>updateFields({chordTimingUnspecified:undefined})}>{language==='zh'?'設定和弦拍位':'Set chord beat positions'}</button>}
   </KeyboardSurface>;
 
@@ -1295,7 +1340,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   </div>;
   const repeatBarTitle = language === 'zh' ? '加入重複前一小節的記號' : 'Insert a previous-bar repeat mark';
   const keyboardContent = notationMode === 'chords' && subdivisionsExpanded ? (
-    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2"><ChordSubdivisionsEditor bar={bar} beats={beatCount} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})}/><ChordPassVariantsEditor bar={bar} beats={beatCount} language={language} onChange={chordPassVariants => updateFields({chordPassVariants})}/>{tempoControls}</div>
+    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2"><ChordSubdivisionsEditor onSelectChord={entry => setAuditionSelection({ anchorKey: sourceSession.target.anchorKey, cursor: chordCursor, beat: entry.beat, offset: entry.offset })} bar={bar} beats={beatCount} language={language} onChange={chordSubdivisions => updateFields({chordSubdivisions})}/><ChordPassVariantsEditor bar={bar} beats={beatCount} language={language} onChange={chordPassVariants => updateFields({chordPassVariants})}/>{tempoControls}</div>
   ) : (
     <div data-keyboard-mode={keyboardSurfaceMode} data-notation-mode={notationMode} data-keyboard-surface="system" className={`relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-hidden bg-[linear-gradient(180deg,rgba(241,245,249,0.92)_0%,rgba(203,213,225,0.82)_100%)] ${mode === 'symbols' ? 'gap-1.5 p-2' : 'gap-2 p-2.5'}`}>
       {!isPickup && sourceBar?.unisonMark?.enabled && <button
@@ -1477,8 +1522,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
               {activePicker === 'articulation' && (
                 <div className="grid min-h-0 flex-1 grid-cols-4 gap-1.5">
                   <div className="col-span-4">{renderChordBeatOffsetPicker()}</div>
-                  <button type="button" className={`${buttonClass} min-h-0 ${trailingModifiers(displayedChord).includes('<') ? activeButtonClass : ''}`} onClick={() => toggleModifier('<')} aria-label={language === 'zh' ? '搶拍' : 'Push'}><ChordTimingArrow marker="<" className="h-6 w-8" strokeWidth={1.8} /></button>
-                  <button type="button" className={`${buttonClass} min-h-0 ${trailingModifiers(displayedChord).includes('>') ? activeButtonClass : ''}`} onClick={() => toggleModifier('>')} aria-label={language === 'zh' ? '拖拍' : 'Pull'}><ChordTimingArrow marker=">" className="h-6 w-8" strokeWidth={1.8} /></button>
+                  <button type="button" className={`${buttonClass} min-h-0 ${trailingModifiers(displayedChord).includes('<') ? activeButtonClass : ''}`} onClick={() => toggleModifier('<')} title={language === 'zh' ? '提前半拍' : 'Half a beat early'} aria-label={language === 'zh' ? '搶拍' : 'Push'}><ChordTimingArrow marker="<" className="h-6 w-8" strokeWidth={1.8} /></button>
+                  <button type="button" className={`${buttonClass} min-h-0 ${trailingModifiers(displayedChord).includes('>') ? activeButtonClass : ''}`} onClick={() => toggleModifier('>')} title={language === 'zh' ? '延後半拍' : 'Half a beat late'} aria-label={language === 'zh' ? '拖拍' : 'Pull'}><ChordTimingArrow marker=">" className="h-6 w-8" strokeWidth={1.8} /></button>
                   <button type="button" className={`${buttonClass} min-h-0 text-xl ${trailingModifiers(displayedChord).includes('^') ? activeButtonClass : ''}`} onClick={() => toggleModifier('^')} aria-label={language === 'zh' ? '重音' : 'Accent'}>&gt;</button>
                   <button type="button" className={`${buttonClass} min-h-0 ${trailingModifiers(displayedChord).includes('~') ? activeButtonClass : ''}`} onClick={() => toggleModifier('~')} aria-label={language === 'zh' ? '延長記號' : 'Fermata'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">ß</span></button>
                 </div>
@@ -1567,8 +1612,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
           {renderChordBeatOffsetPicker()}
           <div className="grid grid-cols-4 gap-1">
-            <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('<') ? activeButtonClass : ''}`} onClick={() => toggleModifier('<')} aria-label={language === 'zh' ? '搶拍' : 'Push'}><ChordTimingArrow marker="<" className="h-6 w-8" strokeWidth={1.8} /></button>
-            <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('>') ? activeButtonClass : ''}`} onClick={() => toggleModifier('>')} aria-label={language === 'zh' ? '拖拍' : 'Pull'}><ChordTimingArrow marker=">" className="h-6 w-8" strokeWidth={1.8} /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('<') ? activeButtonClass : ''}`} onClick={() => toggleModifier('<')} title={language === 'zh' ? '提前半拍' : 'Half a beat early'} aria-label={language === 'zh' ? '搶拍' : 'Push'}><ChordTimingArrow marker="<" className="h-6 w-8" strokeWidth={1.8} /></button>
+            <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('>') ? activeButtonClass : ''}`} onClick={() => toggleModifier('>')} title={language === 'zh' ? '延後半拍' : 'Half a beat late'} aria-label={language === 'zh' ? '拖拍' : 'Pull'}><ChordTimingArrow marker=">" className="h-6 w-8" strokeWidth={1.8} /></button>
             <button type="button" className={`${buttonClass} !min-h-7 text-xl ${trailingModifiers(displayedChord).includes('^') ? activeButtonClass : ''}`} onClick={() => toggleModifier('^')} aria-label={language === 'zh' ? '重音' : 'Accent'}>&gt;</button>
             <button type="button" className={`${buttonClass} !min-h-7 ${trailingModifiers(displayedChord).includes('~') ? activeButtonClass : ''}`} onClick={() => toggleModifier('~')} aria-label={language === 'zh' ? '延長記號' : 'Fermata'}><span className="font-rhythm text-[22px] leading-none" aria-hidden="true">ß</span></button>
           </div>
@@ -1768,6 +1813,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
       ? (language === 'zh' ? '下一個節奏' : 'Next rhythm')
       : (language === 'zh' ? '下一音' : 'Next note');
   const visibleNotationModes = PREVIEW_NOTATION_MODES.filter(candidate => !isPickup || candidate !== 'chords');
+  const headerAudition = mode !== 'text' && audition;
+  const phoneAudition = deviceLayout === 'phone' && headerAudition;
+  const previousBeatButton = deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={16} /></button>;
   const selectedModeIndex = mode === 'text' ? visibleNotationModes.length : Math.max(0, visibleNotationModes.indexOf(notationMode));
 
   return (
@@ -1796,8 +1844,8 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           {collapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
       </div>}
-      <header className={`flex shrink-0 items-center ${deviceLayout === 'phone' ? 'gap-1' : 'gap-1.5'} border-b border-white/70 bg-white/70 px-2.5 py-2 backdrop-blur-xl`}>
-        {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={16} /></button>}
+      <header data-audition-header={headerAudition ? true : undefined} className={`flex shrink-0 items-center ${deviceLayout === 'phone' ? 'gap-1' : 'gap-1.5'} border-b border-white/70 bg-white/70 px-2.5 py-2 backdrop-blur-xl`}>
+        {!headerAudition && previousBeatButton}
         <div
           data-notation-mode-segments
           style={isPickup ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' } : undefined}
@@ -1838,10 +1886,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           </button>}
         </div>
         {compactLandscapeKeyboard && notationMode==='chords' && <div role="group" aria-label="和弦鍵盤頁面" className="flex gap-1">{(['input','tools'] as const).map(page=><button type="button" key={page} aria-pressed={landscapeChordPage===page} className={toolbarButtonClass} onClick={()=>setLandscapeChordPage(page)}>{page==='input'?'輸入':'功能'}</button>)}</div>}
-        <div data-keyboard-status className="min-w-0 flex-1">
-          <div className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-indigo-500">{isPickup ? (language === 'zh' ? '弱起拍 · 第 0 小節' : 'Pickup · Bar 0') : section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}</div>
-          <div className="truncate text-xs font-black text-slate-900">{headerValue}{bassMode && notationMode === 'chords' && <span className="ml-2 text-[10px] font-medium text-indigo-700" role="status">{language === 'zh' ? '低音輸入' : 'Bass input'}</span>}</div>
-        </div>
+        {headerAudition && previousBeatButton}
+        {!phoneAudition && <div data-keyboard-status className="min-w-0 flex-1">
+          <div className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-indigo-500">{isPickup ? (language === 'zh' ? '弱起拍 · 第 0 小節' : 'Pickup · Bar 0') : section.title || (language === 'zh' ? '未命名段落' : 'Untitled section')}{bassMode && notationMode === 'chords' && <span className="ml-1 normal-case tracking-normal" role="status">{language === 'zh' ? '低音輸入' : 'Bass input'}</span>}</div>
+          {headerAudition ? audition
+            : <div className="truncate text-xs font-black text-slate-900">{headerValue}</div>}
+        </div>}
         {deviceLayout === 'desktop' && <button type="button" className={toolbarButtonClass} onClick={() => navigateNotation('next')} aria-label="Next beat"><ChevronRight size={16} /></button>}
         {notationMode === 'chords' && <button type="button" className={toolbarButtonClass} aria-label={language === 'zh' ? '拍內和弦與指定遍數和弦' : 'Chords within beats and numbered passes'} aria-pressed={subdivisionsExpanded} onClick={()=>setSubdivisionsExpanded(value=>!value)}>&amp;+</button>}
         {deviceLayout === 'desktop' && notationMode === 'chords' && (
@@ -1882,6 +1932,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
 
 
+      <div ref={setAuditionFeedbackHost} className="chord-audition-feedback" />
       {isPickup && sourceSession.draftSong.pickup && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/70 bg-emerald-50/80 px-3 py-2">
         <label className="flex items-center gap-2 text-xs font-semibold text-emerald-900">
           {language === 'zh' ? '弱起長度（♩ = 1 拍）' : 'Pickup length (♩ = 1 beat)'}
@@ -1985,14 +2036,19 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
 
       {deviceLayout !== 'desktop' && (
-        <footer className="relative flex shrink-0 items-stretch gap-2 border-t border-white/70 bg-slate-200/90 px-2.5 py-2">
+        <footer data-audition-footer={phoneAudition ? true : undefined} className="relative flex shrink-0 items-stretch gap-2 border-t border-white/70 bg-slate-200/90 px-2.5 py-2">
           {compactLandscapeKeyboard && <KeyboardPopover label={language==='zh'?'設定':'Settings'}>{voiceControls}{tempoControls && React.cloneElement(tempoControls,{open:true})}</KeyboardPopover>}
           {!isPickup && !voiceTarget && <NotationColorControls label={previewColorLabel} language={language} selected={selectedPreviewColor} disabled={previewColorDisabled} persistent={false} onSelect={applyPreviewColor}/>}
           <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-white/80 bg-white/80 whitespace-nowrap text-xs font-semibold text-indigo-700 sm:text-sm shadow-[0_1px_0_rgba(15,23,42,0.16),0_3px_7px_rgba(15,23,42,0.10)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-white active:shadow-none" onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={20} className="mr-1 shrink-0" />{previousLabel}</button>
-          <div className="flex min-w-14 flex-col items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 px-1 text-center shadow-inner">
+          {phoneAudition ? <div data-keyboard-status className="chord-audition-position">
+            <span className="chord-audition-location" title={`${section.title} · ${footerPositionLabel} · ${footerPositionValue}`}>
+              {bassMode ? <span role="status">{language === 'zh' ? '低音輸入' : 'Bass input'}</span> : section.title} · {footerBeatPosition}/{footerBeatCount}
+            </span>
+            {audition}
+          </div> : <div className="flex min-w-14 flex-col items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 px-1 text-center shadow-inner">
             <span className="text-[9px] font-black uppercase text-slate-400">{footerPositionLabel}</span>
             <span className="text-xs font-black text-slate-800">{footerPositionValue}</span>
-          </div>
+          </div>}
           <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-indigo-500/60 bg-indigo-700 whitespace-nowrap text-xs font-semibold text-white sm:text-sm shadow-[0_1px_0_rgba(49,46,129,0.9),0_4px_10px_rgba(79,70,229,0.28)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-indigo-700 active:shadow-none" onClick={() => navigateNotation('next')} aria-label="Next beat">{nextLabel}<ChevronRight size={20} className="ml-1 shrink-0" /></button>
           <button type="button" className="inline-flex min-w-10 items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 text-slate-600 shadow-[0_1px_3px_rgba(15,23,42,0.10)] transition-[transform,background-color] duration-75 active:translate-y-px active:bg-slate-300" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? (language === 'zh' ? '展開鍵盤' : 'Expand keyboard') : (language === 'zh' ? '收合鍵盤' : 'Collapse keyboard')}>
             {collapsed ? <Plus size={17} /> : <ChevronDown size={17} />}

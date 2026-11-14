@@ -26,6 +26,9 @@ export type PreviewNotationMode = typeof PREVIEW_NOTATION_MODES[number];
 
 export interface PreviewChordCursor {
   kind: 'chord';
+  /** Local audition selection within an ordered line or a subdivided beat. */
+  orderedIndex?: number;
+  auditionOffset?: number;
   slotIndex: number;
   rawChordIndex: number | null;
 }

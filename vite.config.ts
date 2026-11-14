@@ -21,7 +21,7 @@ export default defineConfig(({mode}) => {
         return html.replaceAll('__CHORDMASTER_VERSION__', packageJson.version);
       },
       writeBundle(options, bundle) {
-        const assets = Object.keys(bundle).filter((file) => /\.(js|css|wav)$/.test(file)).sort();
+        const assets = Object.keys(bundle).filter((file) => /\.(js|css|wav|mp3)$/.test(file)).sort();
         const version = createHash('sha256').update(JSON.stringify(assets)).digest('hex').slice(0, 12);
         const worker = readFileSync(new URL('./public/sw.js', import.meta.url), 'utf-8')
           .replace("'chordmaster-pwa-v2'", JSON.stringify(`chordmaster-pwa-${version}`))

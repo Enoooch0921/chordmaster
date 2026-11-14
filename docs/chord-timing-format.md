@@ -1,6 +1,6 @@
 # Chord timing arrows
 
-`Song.chordTimingVersion: 2` defines a trailing `<` as earlier/left and `>` as later/right. The sheet, full editor and preview editor use `ChordTimingArrow` so their icons agree. New song templates carry version 2; external JSON generators must also set this field on each song (the enclosing backup version is independent).
+`Song.chordTimingVersion: 2` defines a trailing `<` as half a notated beat earlier (left) and `>` as half a notated beat later (right). In 4/4 the displacement is an eighth note, and in 6/8 it is a sixteenth note. During continuous audition a pushed downbeat sounds before the barline. The sheet, full editor and preview editor use `ChordTimingArrow` so their icons agree. New song templates carry version 2; external JSON generators must also set this field on each song (the enclosing backup version is independent).
 
 Songs with no timing version or version 1 used the opposite arrow drawings. At ingestion, `migrateChordTimingArrows` swaps only the trailing chord modifier characters and sets version 2. For example, legacy `C<^` becomes `C>^`, preserving its right arrow and accent. Titles, lyrics, annotations, rhythm, jianpu, identities and timestamps are retained. Subsequent normalization and JSON round trips leave the migrated arrows unchanged.
 

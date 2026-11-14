@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-14',
+        title: 'Piano chord audition and metronome',
+        bullets: [
+          'Hear an unsaved chord, the current bar, or the rest of the section in concert pitch, including slash bass notes.',
+          'Timed playback includes an optional metronome. Left and right arrows shift the chord half a beat earlier or later.'
+        ]
+      },
+      {
+        version: '0.12.39',
+        date: '2026-11-14',
         title: 'Square corners for the selected score',
         bullets: ['The selection frame in the setlist preview follows the square corners of the score page.']
       },
@@ -1183,6 +1192,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-14',
+        title: '鋼琴和弦試聽與節拍器',
+        bullets: [
+          '點選譜上的和弦就能試聽未儲存的修改，或從播放鍵旁選擇整個小節、從目前拍位播到段尾。鋼琴依實際調性發聲，也能聽出斜線低音。',
+          '連播預設開啟節拍器，每小節第一拍有重音，可在播放中切換。左箭頭提前半拍，右箭頭延後半拍。'
+        ]
+      },
+      {
+        version: '0.12.39',
         date: '2026-11-14',
         title: '歌單譜頁外框改為直角',
         bullets: ['歌單中選取的譜頁改用直角外框，四角與白色譜頁對齊。']

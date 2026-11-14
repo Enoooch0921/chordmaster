@@ -105,6 +105,11 @@ export const KEYBOARD_SHORTCUT_SECTIONS: KeyboardShortcutSection[] = [
         action: { en: 'Move to the next bar', zh: '移到下一小節' }
       },
       {
+        keys: ['Alt + P'],
+        action: { en: 'Play or stop the selected audition range', zh: '開始或停止目前範圍的和弦試聽' },
+        context: { en: 'Chord editor. Tab from the play button to choose the range.', zh: '和弦編輯器。從播放鍵按 Tab 可選擇試聽範圍。' }
+      },
+      {
         keys: ['Tab', 'Shift + Tab'],
         action: { en: 'Move to the next or previous beat', zh: '移到下一拍或前一拍' },
         context: { en: 'Chord input: Tab goes forward; Shift + Tab goes back', zh: '和弦輸入：Tab 往後，Shift + Tab 往前' }
