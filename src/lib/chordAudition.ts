@@ -235,7 +235,7 @@ export function buildChordAudition(song: Song, target: AuditionTarget, scope: Au
           attacks.push({ written, position: written + halfBeatShift(token), harmony });
           preceding = harmony;
         }
-        if (!raw.length) attacks.push({ position: 0, written: 0, harmony: { notes: [] } });
+        // A blank measure sustains the preceding harmony. Only a written rest releases it.
       }
 
       if (single) {

@@ -295,13 +295,11 @@
 .chord-audition-notice:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .chord-audition-notice:not(:empty) { padding: 5px 10px; font-size: 12px; line-height: 1.4; color: var(--keyboard-text); overflow-wrap: anywhere; }
 
-/* The phone already has beat navigation under the keys. Group playback there as well. */
+/* Keep the beat navigation and Done action reachable on narrow phones. */
 [data-device-layout="phone"] [data-audition-header] [data-notation-mode-segments] { margin-inline-end: auto; }
+[data-device-layout="phone"] [data-keyboard-done] { min-width: 44px; min-height: 44px; padding-inline: 5px; font-size: 14px; }
 [data-audition-footer] { gap: 5px; padding-inline: 6px; }
-.chord-audition-position { display: grid; flex: 0 1 auto; min-width: 0; max-width: 32%; align-content: center; justify-items: center; }
-.chord-audition-location { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--keyboard-muted); font-size: 10px; font-weight: 650; }
-[data-audition-footer] .chord-audition-split { background: var(--keyboard-key); }
-[data-audition-footer] .chord-audition-split[data-playing] { background: var(--keyboard-active); }
+
 [data-audition-footer] > button[aria-label$="beat"] { min-width: 0; }
 @media (max-width: 359px) {
   [data-device-layout="phone"] [data-audition-header] [data-notation-mode-segments] { width: 7rem; }
@@ -317,3 +315,56 @@
 @media screen {
   [data-audition-playing] { background-color: rgb(88 176 126 / 26%) !important; box-shadow: inset 0 -2px #33784f; }
 }
+
+/* Playback stays at reading size outside the scaled score and the phone key grid. */
+.reader-audition, .phone-audition-row {
+  flex: none;
+  padding: 6px 12px;
+  background: var(--keyboard-header);
+  color: var(--keyboard-text);
+  border-bottom: 1px solid var(--keyboard-border);
+}
+.reader-audition-controls, .phone-audition-row { display: flex; align-items: center; gap: 10px; }
+.reader-audition-controls { flex-wrap: wrap; }
+.reader-audition label { display: grid; gap: 2px; min-width: 0; font-size: 12px; line-height: 1.2; color: var(--keyboard-muted); }
+.reader-audition select {
+  height: 44px; max-width: 100%; min-width: 0; padding: 0 6px; border: 1px solid var(--keyboard-border);
+  border-radius: 7px; background: var(--keyboard-key); color: var(--keyboard-text); font-size: 16px;
+}
+.reader-audition select:focus-visible { outline: 2px solid var(--color-focus-ring, #548367); outline-offset: 2px; }
+@media screen {
+  .shared-audition-score { overflow-x: auto; }
+  .shared-audition-score > [data-chord-sheet] { min-width: 44rem; }
+}
+.reader-measure { flex: 0 1 15rem; }
+.reader-beat { flex: 0 1 5rem; }
+.reader-audition-controls > .chord-audition { align-self: end; }
+.phone-audition-position { flex: 1 1 35%; min-width: 0; display: grid; line-height: 1.35; }
+.phone-audition-position strong, .phone-audition-position span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-audition-position strong { font-size: 14px; }
+.phone-audition-position span { font-size: 13px; color: var(--keyboard-muted); }
+.chord-audition[data-prominent] { min-width: 0; max-width: 100%; }
+.chord-audition[data-prominent] .chord-audition-split {
+  border-radius: 8px; background: #285e41; color: white;
+}
+.chord-audition[data-prominent] [data-audition-button] {
+  min-height: 44px; padding-inline: 12px; gap: 7px; font-size: 16px; line-height: 1.2; font-weight: 650;
+}
+.chord-audition[data-prominent] [data-audition-button] svg { width: 16px; height: 16px; color: inherit; }
+.chord-audition[data-prominent] .chord-audition-scope { flex: none; width: 44px; min-height: 44px; }
+.chord-audition[data-prominent] .chord-audition-scope::before { height: 21px; opacity: .45; }
+.chord-audition[data-prominent] .chord-audition-scope svg { width: 18px; height: 18px; }
+.chord-audition[data-prominent] .chord-audition-split[data-playing] { background: #174831; }
+@media (hover: hover) {
+  .chord-audition[data-prominent] .chord-audition-split button:hover { background: #194b32; }
+}
+@media (max-width: 600px) {
+  .reader-audition { padding: 6px 8px; }
+  .reader-audition-controls { gap: 6px; }
+  .reader-measure { flex: 1 1 90px; }
+  .reader-beat { flex: 0 1 48px; }
+  .reader-audition-controls > .chord-audition { flex: none; }
+  .phone-audition-row .chord-audition { flex: 0 1 auto; max-width: 70%; }
+  .chord-audition-settings label { min-height: 44px; font-size: 16px; }
+}
+@media print { .reader-audition { display: none !important; } }

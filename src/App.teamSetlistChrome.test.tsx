@@ -36,6 +36,13 @@ it.each(['owner', 'viewer'] as const)('removes empty team-setlist chrome and per
   expect(document.querySelector('[data-library-live-status]')).toBeNull();
   expect(document.querySelector('[data-main-panel]')?.firstElementChild).toBe(document.querySelector('[data-topbar]'));
   const before = JSON.stringify(latest().workspace.setlists);
+  if (role === 'viewer') {
+    const beat = await screen.findByRole('combobox', { name: '拍位' });
+    fireEvent.change(beat, { target: { value: '2' } });
+    expect(beat).toHaveValue('2');
+    expect(screen.getByRole('button', { name: '試聽設定' })).toBeEnabled();
+    expect(document.querySelector('[data-preview-bar-editor]')).toBeNull();
+  }
   const controls = screen.getByRole('group', { name: '個人顯示模式' });
   expect(within(controls).getByRole('button', { name: '級數' })).toBeEnabled();
   fireEvent.click(within(controls).getByRole('button', { name: '級數' }));
@@ -45,6 +52,7 @@ it.each(['owner', 'viewer'] as const)('removes empty team-setlist chrome and per
   await waitFor(() => expect(document.querySelector('[data-main-panel]')?.firstElementChild).toBe(document.querySelector('[data-topbar]')));
   expect(document.querySelector('[data-library-live-status]')).toBeNull();
   expect(screen.queryByText('歌曲庫自動同步')).toBeNull();
+  if (role === 'viewer') expect(await screen.findByRole('combobox', { name: '起始小節' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: /同步狀態: .*歌曲庫自動同步/ }));
   expect(screen.getByText(/歌曲庫自動同步/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '歌單' }));

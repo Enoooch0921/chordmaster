@@ -1201,14 +1201,17 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   }) : selectedToken ?? displayedChord;
   const audition = present && !isPickup && notationMode === 'chords' && <ChordAuditionControl
     song={auditionSong} language={language} identity={sourceSession.previewIdentity}
-    selectionLabel={selectedChordLabel} feedbackHost={auditionFeedbackHost}
+    editorShortcut prominent={deviceLayout === 'phone'} selectionLabel={selectedChordLabel} feedbackHost={auditionFeedbackHost}
     scope={auditionScope} setScope={setAuditionScope}
     metronome={auditionMetronome} setMetronome={setAuditionMetronome}
     melody={auditionMelody} setMelody={setAuditionMelody}
     target={{ ...sourceSession.target, slotIndex: auditionBeat, orderedIndex, offset: auditionOffset }} />;
 
   if (hasUnmeteredChords(bar) || (bar.chordTimingUnspecified && notationMode === 'chords' && session.target.field === 'chords')) return <KeyboardSurface docked={isDocked} ref={panelRef} data-preview-bar-editor data-keyboard-refined data-preview-edit-ui data-device-layout={deviceLayout} role="dialog" aria-label={language==='zh'?'未定拍位和弦編輯':'Unmetered chord editor'} className="z-[5000] flex flex-col gap-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-xl" style={panelStyle}>
-    <header className="flex shrink-0 items-center gap-2">{dragGrip}{scaleControls}<span className="min-w-0 flex-1 truncate text-sm font-bold">{section.title}</span>{audition}<button type="button" className={toolbarButtonClass} onClick={onUndo} disabled={!session.past.length} aria-label="Undo"><Undo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onRedo} disabled={!session.future.length} aria-label="Redo"><Redo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onCancel} aria-label="Cancel"><X size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onDone} aria-label={language==='zh'?'完成':'Done'}><Check size={15}/></button></header>
+    <header className="flex shrink-0 items-center gap-2">{dragGrip}{scaleControls}<span className="min-w-0 flex-1 truncate text-sm font-bold">{section.title}</span>{deviceLayout !== 'phone' && audition}<button type="button" className={toolbarButtonClass} onClick={onUndo} disabled={!session.past.length} aria-label="Undo"><Undo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onRedo} disabled={!session.future.length} aria-label="Redo"><Redo2 size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onCancel} aria-label="Cancel"><X size={15}/></button><button type="button" className={toolbarButtonClass} onClick={onDone} aria-label={language==='zh'?'完成':'Done'}><Check size={15}/></button></header>
+    {deviceLayout === 'phone' && audition && <div className="phone-audition-row">
+      <span className="phone-audition-position">{language === 'zh' ? '未定拍位' : 'Unmetered'}</span>{audition}
+    </div>}
     <div ref={setAuditionFeedbackHost} className="chord-audition-feedback" />
     <UnmeteredChordsEditor onSelectChord={orderedIndex => setAuditionSelection({ anchorKey: sourceSession.target.anchorKey, cursor: chordCursor, orderedIndex })} keyUnspecified={bar.chordKeyUnspecified} withinMeasure={!hasUnmeteredChords(bar)} lines={hasUnmeteredChords(bar)?bar.unmeteredChordLines!:[bar.chords]} language={language} onChange={lines=>hasUnmeteredChords(bar)?updateFields({unmeteredChordLines:lines}):onApplyDraft(updateBarById(session.draftSong,session.target,old=>({...old,chords:lines.flat()})))}/>
     {!hasUnmeteredChords(bar)&&<button type="button" className="self-start rounded-md border border-slate-300 px-2 py-1 text-xs" onClick={()=>updateFields({chordTimingUnspecified:undefined})}>{language==='zh'?'設定和弦拍位':'Set chord beat positions'}</button>}
@@ -1910,7 +1913,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
         <button type="button" className={toolbarButtonClass} disabled={session.past.length === 0} onClick={onUndo} aria-label="Undo"><Undo2 size={14} /></button>
         <button type="button" className={toolbarButtonClass} disabled={session.future.length === 0} onClick={onRedo} aria-label="Redo"><Redo2 size={14} /></button>
         <button type="button" className={`${toolbarButtonClass} !text-rose-700`} onClick={onCancel} aria-label="Cancel"><X size={15} /></button>
-        <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-700 !text-white hover:!bg-indigo-800`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'}><Check size={15} /><span className={deviceLayout === 'phone' ? 'sr-only' : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
+        <button type="button" className={`${toolbarButtonClass} !border-indigo-500 !bg-indigo-700 !text-white hover:!bg-indigo-800`} onClick={onDone} aria-label={language === 'zh' ? '完成' : 'Done'} data-keyboard-done>{deviceLayout !== 'phone' && <Check size={15} />}<span className={deviceLayout === 'phone' ? undefined : 'ml-1'}>{language === 'zh' ? '完成' : 'Done'}</span></button>
       </header>
 
       {!collapsed && mode !== 'text' && !graceDraft && !(notationMode === 'chords' && subdivisionsExpanded) && <KeyboardEditActions
@@ -1934,6 +1937,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
 
 
+      {phoneAudition && <div className="phone-audition-row">
+        <div className="phone-audition-position"><strong>{section.title}</strong>
+          <span>{bassMode ? (language === 'zh' ? '低音輸入 · ' : 'Bass · ') : ''}{footerPositionLabel} {footerPositionValue}</span>
+        </div>
+        {audition}
+      </div>}
       <div ref={setAuditionFeedbackHost} className="chord-audition-feedback" />
       {isPickup && sourceSession.draftSong.pickup && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/70 bg-emerald-50/80 px-3 py-2">
         <label className="flex items-center gap-2 text-xs font-semibold text-emerald-900">
@@ -2042,12 +2051,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
           {compactLandscapeKeyboard && <KeyboardPopover label={language==='zh'?'設定':'Settings'}>{voiceControls}{tempoControls && React.cloneElement(tempoControls,{open:true})}</KeyboardPopover>}
           {!isPickup && !voiceTarget && <NotationColorControls label={previewColorLabel} language={language} selected={selectedPreviewColor} disabled={previewColorDisabled} persistent={false} onSelect={applyPreviewColor}/>}
           <button type="button" className="inline-flex min-h-11 flex-1 items-center justify-center rounded-[15px] border border-white/80 bg-white/80 whitespace-nowrap text-xs font-semibold text-indigo-700 sm:text-sm shadow-[0_1px_0_rgba(15,23,42,0.16),0_3px_7px_rgba(15,23,42,0.10)] transition-[transform,box-shadow,background-color] duration-75 active:translate-y-px active:scale-[0.99] active:bg-white active:shadow-none" onClick={() => navigateNotation('previous')} aria-label="Previous beat"><ChevronLeft size={20} className="mr-1 shrink-0" />{previousLabel}</button>
-          {phoneAudition ? <div data-keyboard-status className="chord-audition-position">
-            <span className="chord-audition-location" title={`${section.title} · ${footerPositionLabel} · ${footerPositionValue}`}>
-              {bassMode ? <span role="status">{language === 'zh' ? '低音輸入' : 'Bass input'}</span> : section.title} · {footerBeatPosition}/{footerBeatCount}
-            </span>
-            {audition}
-          </div> : <div className="flex min-w-14 flex-col items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 px-1 text-center shadow-inner">
+          {!phoneAudition && <div className="flex min-w-14 flex-col items-center justify-center rounded-[15px] border border-white/40 bg-slate-300/70 px-1 text-center shadow-inner">
             <span className="text-[9px] font-black uppercase text-slate-400">{footerPositionLabel}</span>
             <span className="text-xs font-black text-slate-800">{footerPositionValue}</span>
           </div>}

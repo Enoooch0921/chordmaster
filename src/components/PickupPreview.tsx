@@ -12,6 +12,7 @@ import { usePickupSpacing } from '../hooks/usePickupSpacing';
 
 interface Props {
   pickup?: PickupMeasure;
+  readerAudition?: boolean;
   meter: string;
   language: AppLanguage;
   playKey: Key;
@@ -30,7 +31,7 @@ interface Props {
   onSelect?: (event: React.MouseEvent<HTMLElement>, field: 'riff' | 'rhythm', cursor?: PreviewNotationCursor) => void;
 }
 
-export default function PickupPreview({ pickup, meter, language, playKey, absolute, active,
+export default function PickupPreview({ pickup, readerAudition, meter, language, playKey, absolute, active,
   nextRiff, nextRhythm, nextTimeSignature, notationTop, rhythmLaneHeight, leadingLabel, labelLane = 'riff', scale = 0.86, onSelect, previewIdentity = 'preview', cursor }: Props) {
   const ref = React.useRef<HTMLDivElement>(null);
   const display = pickup ? getPickupDisplay(pickup, meter) : null;
@@ -59,7 +60,7 @@ export default function PickupPreview({ pickup, meter, language, playKey, absolu
     onSelect?.(event, field, nextCursor);
   };
   return <div ref={ref} data-preview-pickup role="group" aria-label={zh ? '第 0 小節・弱起拍' : 'Bar 0 · Pickup'}
-    data-audition-chart={onSelect ? previewIdentity : undefined} data-audition-section={PICKUP_EDITOR_SECTION_ID} data-audition-bar={PICKUP_EDITOR_BAR_ID}
+    data-audition-chart={onSelect || readerAudition ? previewIdentity : undefined} data-audition-section={PICKUP_EDITOR_SECTION_ID} data-audition-bar={PICKUP_EDITOR_BAR_ID}
     data-preview-edit-anchor={anchor('lower')}
     data-pickup-duration-units={display.durationUnits}
     className={`${notationTop === undefined ? 'relative mt-auto self-end' : 'absolute right-0'} flex w-full min-w-0 items-start gap-1 py-1`} style={notationTop === undefined ? undefined : { top: notationTop - 4 }}>

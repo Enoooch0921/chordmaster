@@ -22,6 +22,18 @@ it('continues through a 2 chord with a slash bass and plays its added second in 
   expect(resolveAuditionChord('G C/ B', 'G', 'G', false)).toEqual({ issue: 'unsupported', token: 'G C/ B' });
 });
 
+it('holds across blank bars without reattacking, and inherits either the harmony or the preceding rest at a new start', () => {
+  const song = score([{ chords: ['F'] }, { chords: [] }, { chords: ['',''] }, { chords: ['Dm', 'N.C.'] }, { chords: [] }]);
+  const full = buildChordAudition(song, target, 'song');
+  expect(full.sounds.map(({start, end}) => [start, end])).toEqual([[0, 6], [6, 7]]);
+  expect([...auditionBeats(full.bars)]).toHaveLength(20);
+  const blank = { ...target, barId: '1' };
+  expect(buildChordAudition(song, blank, 'bar').sounds).toEqual([{ ...full.sounds[0], end: 2 }]);
+  expect(buildChordAudition(song, blank, 'chord').sounds[0].notes).toEqual(full.sounds[0].notes);
+  expect(buildChordAudition(song, { ...target, barId: '4' }, 'bar').sounds).toEqual([]);
+  expect(buildChordAudition(score([{ chords: [] }]), target, 'bar').sounds).toEqual([]);
+});
+
 it('includes the pickup melody before bar one only when the excerpt starts there with melody enabled', () => {
   const song = score([{ chords: ['C'], riff: '1' }, { chords: ['G'] }],
     { currentKey: 'D', capo: 2, pickup: { timeSignature: '1/4', riff: '5_6_' } });

@@ -7,6 +7,7 @@ import { invitationPath, type InvitationResource } from '../lib/invitationJourne
 import { useThemeMode } from '../hooks/useThemeMode';
 import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
+import ReaderAudition from '../components/ReaderAudition';
 import SetlistLyricsWorkspace, { type SetlistLyricsMode } from '../components/SetlistLyricsWorkspace';
 import { DEFAULT_LYRICS_BOOK_SETTINGS } from '../utils/lyricsBook';
 import type { Song } from '../types';
@@ -39,6 +40,16 @@ const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string |
     // Landing still works through the URL query even if storage is unavailable.
   }
 };
+
+function SharedAuditionChart({ song, language, identity }: { song: Song; language: AppLanguage; identity: string }) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  return <>
+    <ReaderAudition key={identity} song={song} identity={identity} chartRef={chartRef} language={language} />
+    <div ref={chartRef} className="shared-audition-score">
+      <ChordSheet readerAudition song={song} language={language} currentKey={song.currentKey} previewIdentity={identity} />
+    </div>
+  </>;
+}
 
 function SharedLyricsReader({ song, identity, language, userId }: { song: Song; identity: string; language: AppLanguage; userId: string | null }) {
   const [mode, setMode] = useState<SetlistLyricsMode>('reading');
@@ -473,7 +484,7 @@ export default function SharedChartPage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(191,219,254,0.45),_transparent_36%),linear-gradient(180deg,_#fafaf9_0%,_#f5f5f4_100%)] px-4 py-8 sm:px-6 lg:px-8">
       <div className={`mx-auto ${isSongShare ? 'max-w-6xl' : 'max-w-md'}`}>
-        <div className="rounded-[2rem] border border-stone-200/80 bg-white/90 p-6 shadow-[0_25px_80px_rgba(28,25,23,0.08)] backdrop-blur">
+        <div className="rounded-[2rem] border border-stone-200/80 bg-white/90 p-3 sm:p-6 shadow-[0_25px_80px_rgba(28,25,23,0.08)] backdrop-blur">
 
           {/* Header bar */}
           <div className="mb-6 flex items-center justify-between">
@@ -583,16 +594,11 @@ export default function SharedChartPage() {
                 </div>
                 <div className="min-w-0">
                   <h2 className="mb-3 text-xl font-black text-stone-900">{selectedBundleSong.title}</h2>
-                  <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
+                  <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-1 shadow-sm sm:p-6">
                     {showSharedLyrics ? (
                       <SharedLyricsReader userId={authUserId} identity={selectedBundleSong.id} song={selectedBundleSong.song} language={language} />
                     ) : (
-                      <ChordSheet
-                        song={selectedBundleSong.song}
-                        language={language}
-                        currentKey={selectedBundleSong.song.currentKey}
-                        previewIdentity={selectedBundleSong.id}
-                      />
+                      <SharedAuditionChart song={selectedBundleSong.song} language={language} identity={selectedBundleSong.id} />
                     )}
                   </div>
                 </div>
@@ -624,16 +630,11 @@ export default function SharedChartPage() {
                   </div>
                 ) : null}
               </div>
-              <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
+              <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-1 shadow-sm sm:p-6">
                 {showSharedLyrics ? (
                   <SharedLyricsReader userId={authUserId} identity={payload.song.id} song={payload.song.song} language={language} />
                 ) : (
-                  <ChordSheet
-                    song={payload.song.song}
-                    language={language}
-                    currentKey={payload.song.song.currentKey}
-                    previewIdentity={payload.song.id}
-                  />
+                  <SharedAuditionChart song={payload.song.song} language={language} identity={payload.song.id} />
                 )}
               </div>
               {renderSongImportControls()}

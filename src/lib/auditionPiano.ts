@@ -5,7 +5,7 @@ const CLICK_VOLUME = 0.32;
 
 const files = import.meta.glob<string>('../assets/audio/salamander/*.mp3', { eager: true, import: 'default', query: '?url' });
 const samples = Object.entries(files).map(([name, url]) => ({ midi: Number(name.match(/(\d+)\.mp3$/)![1]), url }));
-type PianoSample = { buffer: AudioBuffer; attackSeconds: number };
+type PianoSample = { buffer: AudioBuffer; attackSeconds: number; sustain?: AudioBuffer };
 const decoded = new Map<string, Promise<PianoSample>>();
 
 // Measure the hammer transient in the decoded audio, including any decoder padding.
@@ -20,6 +20,29 @@ export function pianoAttackSeconds(buffer: Pick<AudioBuffer, 'getChannelData' | 
   }
   return 0;
 }
+// The bundled notes fade out in their eighth second. For longer written holds,
+// crossfade the ringing part into a loop so a barline never introduces a new attack.
+function sustainedBuffer(context: AudioContext, sample: PianoSample) {
+  if (sample.sustain) return sample.sustain;
+  const original = sample.buffer;
+  const rate = original.sampleRate;
+  const frames = Math.round(rate * 5);
+  const blend = Math.round(rate * .12);
+  const result = context.createBuffer(original.numberOfChannels, frames, rate);
+  for (let channel = 0; channel < original.numberOfChannels; channel++) {
+    const source = original.getChannelData(channel);
+    const output = result.getChannelData(channel);
+    output.set(source.subarray(0, frames));
+    for (let i = 0; i < blend; i++) {
+      const mix = (1 - Math.cos(Math.PI * i / (blend - 1))) / 2;
+      output[frames - blend + i] = source[frames - blend + i] * (1 - mix)
+        + source[3 * rate - blend + i] * mix;
+    }
+  }
+  sample.sustain = result;
+  return result;
+}
+
 function nearest(midi: number) {
   return samples.reduce((best, sample) => Math.abs(midi - sample.midi) < Math.abs(midi - best.midi) ? sample : best);
 }
@@ -129,7 +152,13 @@ export class AuditionPiano {
           const end = origin + event.end;
           const sample = buffers.get(midi)!;
           const attackStart = start - sample.attackSeconds / rate;
-          source.buffer = sample.buffer;
+          const sustain = sample.buffer.duration >= 6 && (end - attackStart) * rate > sample.buffer.duration - 1;
+          source.buffer = sustain ? sustainedBuffer(context, sample) : sample.buffer;
+          if (sustain) {
+            source.loop = true;
+            source.loopStart = 3;
+            source.loopEnd = 5;
+          }
           source.playbackRate.value = rate;
           // Keep the previous harmony up to the change. A short release avoids a click
           // without fading out the whole ensemble in the last 65 ms of every chord.
@@ -141,7 +170,10 @@ export class AuditionPiano {
           source.onended = () => { source.disconnect(); gain.disconnect(); this.sources.delete(source); };
           // If the main thread stalls, resume at the corresponding sample position.
           const late = Math.max(0, context.currentTime - attackStart);
-          source.start(attackStart + late, Math.min(source.buffer.duration, late * rate));
+          const offset = late * rate;
+          source.start(attackStart + late, sustain && offset >= source.loopEnd
+            ? source.loopStart + (offset - source.loopStart) % (source.loopEnd - source.loopStart)
+            : Math.min(source.buffer.duration, offset));
           source.stop(end);
         }
       }

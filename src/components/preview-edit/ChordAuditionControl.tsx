@@ -12,6 +12,8 @@ interface Props {
   target: AuditionTarget;
   identity: string;
   selectionLabel: string;
+  prominent?: boolean;
+  editorShortcut?: boolean;
   feedbackHost: HTMLElement | null;
   scope: AuditionScope;
   setScope: (value: AuditionScope) => void;
@@ -31,12 +33,16 @@ function issueText(issue: AuditionPlan['issue'], zh: boolean) {
   }
 }
 
-export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, feedbackHost, metronome, setMetronome, melody, setMelody }: Props) {
+export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, prominent = false, editorShortcut = false, feedbackHost, metronome, setMetronome, melody, setMelody }: Props) {
   const zh = language === 'zh';
   const labels = zh ? { chord: '這個和弦', bar: '這個小節', section: '從這裡到段尾', song: '從這裡到曲尾' }
     : { chord: 'This Chord', bar: 'This Bar', section: 'To Section End', song: 'To Song End' };
-  const label = scope === 'chord' ? selectionLabel || (zh ? '試聽' : 'Play')
+  const compactLabel = scope === 'chord' ? selectionLabel || (zh ? '試聽' : 'Play')
     : scope === 'bar' ? (zh ? '小節' : 'Bar') : scope === 'section' ? (zh ? '至段尾' : 'Section End') : (zh ? '至曲尾' : 'Song End');
+  const label = prominent ? (scope === 'chord' && selectionLabel
+    ? (zh ? `試聽 ${selectionLabel}` : `Play ${selectionLabel}`)
+    : zh ? { chord: '試聽和弦', bar: '播放小節', section: '播至段尾', song: '播至曲尾' }[scope]
+      : { chord: 'Play chord', bar: 'Play bar', section: 'To section end', song: 'To song end' }[scope]) : compactLabel;
   const [playing, setPlaying] = useState(false);
   const stopLabel = zh ? '停止' : 'Stop';
   const playTarget = scope === 'chord' && selectionLabel ? selectionLabel : labels[scope];
@@ -130,11 +136,11 @@ export default function ChordAuditionControl({ language, song, target, identity,
     } catch { failed(); }
   };
 
-  return <div className="chord-audition" role="group" aria-label={zh ? '和弦試聽' : 'Chord audition'}>
+  return <div className="chord-audition" data-prominent={prominent || undefined} role="group" aria-label={zh ? '和弦試聽' : 'Chord audition'}>
     <div className="chord-audition-split" data-playing={playing || undefined}>
       <button type="button" data-audition-button data-playing={playing || undefined}
-        aria-keyshortcuts="Alt+P"
-        title={`${actionLabel} (Alt + P)`}
+        aria-keyshortcuts={editorShortcut ? 'Alt+P' : undefined}
+        title={editorShortcut ? `${actionLabel} (Alt + P)` : actionLabel}
         aria-label={actionLabel}
         onMouseDown={event => event.preventDefault()} onClick={event => {
           if (event.detail > 0) {

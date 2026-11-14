@@ -10,6 +10,7 @@ import SongTitle from './components/SongTitle';
 import PersonalChordSheet from './components/PersonalChordSheet';
 import PerformanceSetlistSheets, { type PerformanceSetlistHandle } from './components/PerformanceSetlistSheets';
 import SetlistPreviewSong from './components/SetlistPreviewSong';
+import ReaderAudition from './components/ReaderAudition';
 import { findPreviewAnchor, samePreviewAnchorRect } from './lib/previewAnchor';
 import { useHandwritingSelectionGuard } from './hooks/useHandwritingSelectionGuard';
 import { getSongMap, sectionSongMap } from './lib/songMap';
@@ -10428,6 +10429,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
         noteOwner={authenticatedUser?.id} noteSongId={song.id} notesActive={!isPerformanceMode && !isEditing && !activePreviewEditSession}
         song={renderedSong}
+        readerAudition={!canOpenEditor && !isPerformanceMode && !isHandwriting}
         songMapEditor={canEditTeamSongs && !activePreviewEditSession && !isEditing ? {
           scope: 'library', fallback: sectionSongMap(song.sections), sections: sectionSongMap(song.sections),
           onSave: songMap => handleSongChange({ ...song, songMap }),
@@ -10604,6 +10606,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
         noteOwner={authenticatedUser?.id} noteSongId={item.songId} notesActive={isInteractive && !isEditing && !activePreviewEditSession}
               entryId={item.id}
+              readerAudition={isInteractive && !canOpenEditor && !isHandwriting}
               song={previewSong}
               setlistSongNumber={songIndex + 1}
               songMapEditor={isInteractive && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession && !isEditing ? {
@@ -14513,6 +14516,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </div>
               </div>
             )}
+            <div className="flex h-full min-h-0 flex-col">
+            {isSheetView && !canOpenEditor && !isLyricsMode && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
+              && !setlistOpening.opening && activeNavigationPreviewSong && activePreviewIdentity &&
+              <ReaderAudition key={activePreviewIdentity} song={activeNavigationPreviewSong} identity={activePreviewIdentity}
+                language={language} chartRef={previewRef} />}
+            <div className="relative min-h-0 flex-1">
             <CoveredPreview covered={isPhoneViewport && isMobileNavOpen}
               scope={JSON.stringify([historyScope, selectedSongId, selectedSetlistId, selectedSetlistSongId, isLyricsMode])}>
             {isLyricsWorkspace ? <div className="h-full" inert={setlistOpening.opening ? true : undefined}><SetlistLyricsWorkspace
@@ -14567,6 +14576,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               </div>
             </div>}
             </CoveredPreview>
+            </div></div>
             <input
               ref={mobileWysiwygKeyboardProxyInputRef}
               type="text"

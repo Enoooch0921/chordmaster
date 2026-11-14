@@ -86,6 +86,16 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-14',
+        title: 'Sustained chords and read-only playback',
+        bullets: [
+          'An empty bar holds the preceding chord until the next chord or a written rest, including N.C.',
+          'Listeners can select a starting bar and beat in read-only libraries, setlists and shared charts, with optional metronome and melody.',
+          'Phone playback and settings have larger tap targets. The chord editor shows the playback target and a visible Done label.'
+        ]
+      },
+      {
+        version: '0.12.42',
+        date: '2026-11-14',
         title: 'Added-second chords in piano audition',
         bullets: [
           'Chord audition recognizes added-second shorthand such as G2/B, C2 and A2/C# and plays the specified bass. This fixes playback stopping at bar 2 of the intro to “聖靈請祢來充滿我心”.'
@@ -1209,6 +1219,16 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-14',
+        title: '空白小節延音與唯讀試聽',
+        bullets: [
+          '空白小節會延續上一個和弦，遇到下一個和弦、休止或 N.C. 才換音或收音。',
+          '唯讀曲庫、歌單與歌曲分享頁可選起始小節及拍位，搭配節拍器與簡譜旋律試聽。',
+          '手機上的試聽與設定按鈕加大，和弦編輯器會顯示試聽對象及「完成」文字。'
+        ]
+      },
+      {
+        version: '0.12.42',
         date: '2026-11-14',
         title: '加二音和弦試聽',
         bullets: [

@@ -49,3 +49,39 @@ it('cancels an in-flight start, and a restarted audition owns its sources and vi
   engine.dispose();
   expect(close).toHaveBeenCalledOnce();
 });
+
+it('sustains a long hold with a continuous loop until the scheduled release', async () => {
+  vi.useFakeTimers();
+  const pcm = new Float32Array(8000).map((_, i) => Math.sin(i / 23) * .4);
+  const voices: { buffer?: AudioBuffer; loop?: boolean; loopStart?: number; loopEnd?: number; stop: ReturnType<typeof vi.fn> }[] = [];
+  class Context {
+    state = 'running';
+    currentTime = 0;
+    destination = {};
+    resume = async () => {};
+    close = async () => {};
+    decodeAudioData = async () => ({ duration: 8, sampleRate: 1000, numberOfChannels: 1, getChannelData: () => pcm });
+    createBuffer = (_channels: number, frames: number, rate: number) => {
+      const data = new Float32Array(frames);
+      return {duration: frames / rate, getChannelData: () => data};
+    };
+    createGain = () => ({ gain: { setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() }, connect: vi.fn(), disconnect: vi.fn() });
+    createBufferSource = () => {
+      const voice = { playbackRate: {}, start: vi.fn(), stop: vi.fn(), connect: (node: object) => node, disconnect: vi.fn() };
+      voices.push(voice);
+      return voice;
+    };
+  }
+  vi.stubGlobal('AudioContext', Context);
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) })));
+  vi.stubGlobal('requestAnimationFrame', () => 1);
+  vi.stubGlobal('cancelAnimationFrame', () => {});
+  const engine = new AuditionPiano();
+  await engine.play({ ...plan, duration: 12, sounds: [{start: 0, end: 12, notes: [72]}] }, vi.fn(), vi.fn(), vi.fn());
+  expect(voices).toHaveLength(1);
+  const [voice] = voices;
+  expect(voice).toMatchObject({loop: true, loopStart: 3, loopEnd: 5});
+  expect(voice.buffer!.getChannelData(0)[4999]).toBe(pcm[2999]);
+  expect(voice.stop.mock.calls[0][0]).toBeGreaterThanOrEqual(12);
+  engine.dispose();
+});

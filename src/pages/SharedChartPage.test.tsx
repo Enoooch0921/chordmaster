@@ -199,8 +199,7 @@ describe('SharedChartPage song imports', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '導入到我的個人歌庫' }));
     expect(await screen.findByText('發現 2 首已導入歌曲')).toBeInTheDocument();
-    const selects = screen.getAllByRole('combobox');
-    fireEvent.change(selects[1], { target: { value: 'overwrite' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /Beta/ }), { target: { value: 'overwrite' } });
     fireEvent.click(screen.getByRole('button', { name: '確認並導入' }));
 
     await waitFor(() => expect(mocks.importSharedSongs).toHaveBeenCalledWith(
