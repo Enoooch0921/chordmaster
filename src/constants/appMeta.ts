@@ -86,6 +86,14 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-14',
+        title: 'Added-second chords in piano audition',
+        bullets: [
+          'Chord audition recognizes added-second shorthand such as G2/B, C2 and A2/C# and plays the specified bass. This fixes playback stopping at bar 2 of the intro to “聖靈請祢來充滿我心”.'
+        ]
+      },
+      {
+        version: '0.12.41',
+        date: '2026-11-14',
         title: 'Melody, pickups and playback to song end',
         bullets: [
           'Choose “From here to song end” to play across sections in the order shown on the score. Toggle the jianpu melody beside the metronome during playback.',
@@ -1201,6 +1209,14 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-14',
+        title: '加二音和弦試聽',
+        bullets: [
+          '和弦試聽支援 G2/B、C2 與 A2/C# 等加二音簡寫，依譜彈出斜線低音。修正《聖靈請祢來充滿我心》在前奏第 2 小節中斷的問題。'
+        ]
+      },
+      {
+        version: '0.12.41',
         date: '2026-11-14',
         title: '曲尾連播、簡譜旋律與弱起試聽',
         bullets: [

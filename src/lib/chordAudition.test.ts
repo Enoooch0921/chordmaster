@@ -8,6 +8,20 @@ const score = (bars: Bar[], extra?: Partial<Song>): Song => ({
   sections: [{ id: 'v', title: 'Verse', bars: bars.map((bar, i) => ({ id: String(i), ...bar })) }], ...extra,
 });
 const target = { sectionId: 'v', barId: '0', slotIndex: 0 };
+it('continues through a 2 chord with a slash bass and plays its added second in concert pitch', () => {
+  const song = score([{ chords: ['Am7'] }, { chords: ['G2/B'] }, { chords: ['C'] }], { originalKey: 'G', currentKey: 'G' });
+  const plan = buildChordAudition(song, target, 'song');
+  expect(plan.issue).toBeUndefined();
+  expect(plan.sounds.map(sound => sound.start)).toEqual([0, 2, 4]);
+  expect(plan.sounds[1].notes).toEqual([47, 55, 57, 59, 62]);
+  for (const token of ['G2/B', 'G 2/ B', 'G2 / B']) {
+    expect(resolveAuditionChord(token, 'G', 'A', false)).toEqual({ notes: [49, 57, 59, 61, 64] });
+  }
+  expect(resolveAuditionChord('C2', 'C', 'C', false)).toEqual(resolveAuditionChord('Cadd2', 'C', 'C', false));
+  expect(resolveAuditionChord('2', 'G', 'G', false)).toEqual(resolveAuditionChord('A', 'G', 'G', false));
+  expect(resolveAuditionChord('G C/ B', 'G', 'G', false)).toEqual({ issue: 'unsupported', token: 'G C/ B' });
+});
+
 it('includes the pickup melody before bar one only when the excerpt starts there with melody enabled', () => {
   const song = score([{ chords: ['C'], riff: '1' }, { chords: ['G'] }],
     { currentKey: 'D', capo: 2, pickup: { timeSignature: '1/4', riff: '5_6_' } });

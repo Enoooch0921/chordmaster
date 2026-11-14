@@ -28,7 +28,8 @@ export type Harmony = { notes: number[] } | { issue: 'key' | 'unsupported'; toke
 export function resolveAuditionChord(token: string, storedKey: Key, concertKey: Key, unknownKey: boolean): Harmony {
   const cleaned = token.trim().replace(/[<>^~]+$/, '');
   const inner = getParenthesizedChordInner(cleaned) ?? cleaned;
-  const normalized = normalizeChordQualityAliases(inner.replace(/[<>^~]+$/, '')).replaceAll('♭', 'b').replaceAll('♯', '#');
+  const normalized = normalizeChordQualityAliases(inner.replace(/[<>^~]+$/, '').replace(/\s*\/\s*/g, '/'))
+    .replaceAll('♭', 'b').replaceAll('♯', '#');
   // A standalone slash bass changes the left hand under the preceding harmony.
   if (/^\/(?:[A-G][#b]?|[#b]?[1-7][#b]?)$/.test(normalized)) {
     const bass = resolveAuditionChord(normalized.slice(1), storedKey, concertKey, unknownKey);
@@ -43,7 +44,7 @@ export function resolveAuditionChord(token: string, storedKey: Key, concertKey: 
     chord: symbol, storageMode: isNashville(symbol) ? 'nashville' : 'letters',
     outputMode: 'letters', storedKey, displayedKey: concertKey
   });
-  const quality = suffix.replace(/\(([^()]+)\)$/, '$1')
+  const quality = suffix.trim().replace(/\(([^()]+)\)$/, '$1').replace(/^2$/, 'add2')
     .replace(/^(?:ø7?|Ø7?)$/, 'm7b5').replace(/^°/, 'dim').replace(/^\+/, 'aug')
     .replace(/^[△Δ](7|9)?$/, (_, extension) => 'maj' + (extension ?? '7'))
     .replace(/^M(?=7|9)/, 'maj').replace(/^min/, 'm').replace(/^mmaj/, 'mMaj');
