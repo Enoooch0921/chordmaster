@@ -8,6 +8,55 @@ const score = (bars: Bar[], extra?: Partial<Song>): Song => ({
   sections: [{ id: 'v', title: 'Verse', bars: bars.map((bar, i) => ({ id: String(i), ...bar })) }], ...extra,
 });
 const target = { sectionId: 'v', barId: '0', slotIndex: 0 };
+it('includes the pickup melody before bar one only when the excerpt starts there with melody enabled', () => {
+  const song = score([{ chords: ['C'], riff: '1' }, { chords: ['G'] }],
+    { currentKey: 'D', capo: 2, pickup: { timeSignature: '1/4', riff: '5_6_' } });
+  for (const range of ['bar', 'section', 'song'] as const) {
+    const plan = buildChordAudition(song, target, range);
+    expect(plan.bars[0]).toMatchObject({ pickup: true, start: 0, end: .5 });
+    expect(plan.bars[1].start).toBe(.5);
+    expect(plan.sounds.filter(n => n.voice === 'melody').map(n => [n.start,n.end,n.notes[0]]))
+      .toEqual([[0,.25,69],[.25,.5,71],[.5,1,62]]);
+    expect([...auditionBeats(plan.bars)].slice(0,2)).toEqual([{at:0,accent:false},{at:.5,accent:true}]);
+    expect(buildChordAudition(song, target, range, false).bars[0].barId).toBe('0');
+  }
+  expect(buildChordAudition(song, {...target,slotIndex:1}, 'song').bars[0].pickup).toBeUndefined();
+  expect(buildChordAudition(song, {...target,barId:'1'}, 'bar').bars[0].pickup).toBeUndefined();
+  expect(buildChordAudition(song, target, 'chord').sounds).toHaveLength(1);
+  const legacy = {...song,pickup:{riff:' | | | 5_6_'}};
+  expect(buildChordAudition(legacy,target,'song').bars[0].end).toBe(.5);
+  expect(buildChordAudition({...song,pickup:{timeSignature:'1/4',riff:'0'}},target,'song').bars[0].pickup).toBeUndefined();
+});
+it('plays through the printed section occurrences to the end, with the correct melody from a mid-beat start', () => {
+  const verse = { id: 'v', title: 'Verse', bars: [{ id: '0', chords: ['C'], riff: '1 | 2_3_ | 0 | 5' }] };
+  const song = score([], { currentKey: 'D', capo: 2, sections: [
+    verse,
+    { id: 'b', title: 'Bridge', keyChangeTo: 'F', bars: [{ id: '0', chords: ['1'], riff: "1 | - | #4'", timeSignature: '3/4', tempo: 60 }] },
+    verse,
+  ] });
+  const from = { ...target, slotIndex: 1, offset: .5 };
+  const plan = buildChordAudition(song, from, 'song');
+  expect(plan.bars.map(b => [b.sectionId, b.sectionOccurrence])).toEqual([['v',0],['b',0],['v',1]]);
+  expect(plan.bars.map(b => b.start)).toEqual([0,1.25,4.25]);
+  const lead = plan.sounds.filter(n => n.voice === 'melody');
+  expect(lead.slice(0,4).map(n => [n.start,n.end,n.notes[0]])).toEqual([
+    [0,.25,66],[.75,1.25,69],[1.25,3.25,67],[3.25,4.25,85]
+  ]);
+  expect(buildChordAudition(song, from, 'section').bars).toHaveLength(1);
+  expect(buildChordAudition(song, { ...target, sectionOccurrence: 1 }, 'song').bars).toHaveLength(1);
+  expect(buildChordAudition(song, target, 'chord').sounds.some(n => n.voice === 'melody')).toBe(false);
+});
+
+it('plays ties, grace notes and triplets while preserving the timing of the main jianpu voice', () => {
+  const song = score([{chords:['C'], riff: '0 | e3_ | {12}5 | (6', riffVoices: [{id:'low', label:'Bass', riff:'1 1 1 1'}]},
+    {chords:['N.C.'], riff:'6) | 1_t2_t3_t | 0 | 7,'}]);
+  const lead = buildChordAudition(song, target, 'song').sounds.filter(n => n.voice === 'melody');
+  expect(lead.map(n => n.notes[0])).toEqual([64,60,62,67,69,60,62,64,59]);
+  expect(lead[0].start).toBe(.75);
+  expect(lead[4]).toMatchObject({start:1.5,end:2.5});
+  expect(lead[5].start).toBe(2.5);
+  expect(lead[7].end).toBeCloseTo(3);
+});
 it('keeps the click on the written beat through a partial start, rests, a pushed downbeat and a meter/tempo change', () => {
   const song = score([{ chords: ['C', 'N.C.', '/', '/'] }, { chords: ['G<'], timeSignature: '3/8', tempo: 80 }]);
   const plan = buildChordAudition(song, { ...target, slotIndex: 1, offset: .5 }, 'section');

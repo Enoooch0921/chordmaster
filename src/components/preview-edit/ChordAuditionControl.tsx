@@ -17,6 +17,8 @@ interface Props {
   setScope: (value: AuditionScope) => void;
   metronome: boolean;
   setMetronome: (enabled: boolean) => void;
+  melody: boolean;
+  setMelody: (enabled: boolean) => void;
 }
 function issueText(issue: AuditionPlan['issue'], zh: boolean) {
   switch (issue?.kind) {
@@ -29,12 +31,12 @@ function issueText(issue: AuditionPlan['issue'], zh: boolean) {
   }
 }
 
-export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, feedbackHost, metronome, setMetronome }: Props) {
+export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, feedbackHost, metronome, setMetronome, melody, setMelody }: Props) {
   const zh = language === 'zh';
-  const labels = zh ? { chord: '這個和弦', bar: '這個小節', section: '從這裡到段尾' }
-    : { chord: 'This Chord', bar: 'This Bar', section: 'To Section End' };
+  const labels = zh ? { chord: '這個和弦', bar: '這個小節', section: '從這裡到段尾', song: '從這裡到曲尾' }
+    : { chord: 'This Chord', bar: 'This Bar', section: 'To Section End', song: 'To Song End' };
   const label = scope === 'chord' ? selectionLabel || (zh ? '試聽' : 'Play')
-    : scope === 'bar' ? (zh ? '小節' : 'Bar') : (zh ? '至段尾' : 'To End');
+    : scope === 'bar' ? (zh ? '小節' : 'Bar') : scope === 'section' ? (zh ? '至段尾' : 'Section End') : (zh ? '至曲尾' : 'Song End');
   const [playing, setPlaying] = useState(false);
   const stopLabel = zh ? '停止' : 'Stop';
   const playTarget = scope === 'chord' && selectionLabel ? selectionLabel : labels[scope];
@@ -43,6 +45,7 @@ export default function ChordAuditionControl({ language, song, target, identity,
   const [clickUnavailable, setClickUnavailable] = useState(false);
   const piano = useRef<AuditionPiano | null>(null);
   useLayoutEffect(() => piano.current?.setMetronomeEnabled(metronome), [metronome]);
+  useLayoutEffect(() => piano.current?.setMelodyEnabled(melody), [melody]);
   const run = useRef(0);
   const loading = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const marked = useRef<HTMLElement | null>(null);
@@ -78,7 +81,7 @@ export default function ChordAuditionControl({ language, song, target, identity,
   const play = async () => {
     if (playing) { stop(); return; }
     setClickUnavailable(false);
-    const plan = buildChordAudition(song, target, scope);
+    const plan = buildChordAudition(song, target, scope, melody);
     const problem = issueText(plan.issue, zh);
     if (plan.duration <= 0) { setNotice(problem || issueText({ kind: 'empty' }, zh)); return; }
     const hints = plan.fallbackTempo ? (zh ? '試聽速度 80 BPM' : 'Preview tempo 80 BPM') : '';
@@ -90,19 +93,20 @@ export default function ChordAuditionControl({ language, song, target, identity,
     }, 220);
     piano.current ??= new AuditionPiano();
     piano.current.setMetronomeEnabled(metronome);
+    piano.current.setMelodyEnabled(melody);
     let index = 0;
     let priorBeat = -1;
-    let priorBar = '';
+    let priorSpan = -1;
     const paint = (elapsed: number) => {
       while (index + 1 < plan.bars.length && plan.bars[index].end <= elapsed) index++;
       const span = plan.bars[index];
       const beat = Math.floor(span.firstBeat + (elapsed - span.start) / span.beatSeconds) % span.beats;
-      if (priorBar === span.barId && priorBeat === beat) return;
-      priorBar = span.barId;
+      if (priorSpan === index && priorBeat === beat) return;
+      priorSpan = index;
       priorBeat = beat;
       clearMark();
-      const prefix = `[data-audition-chart="${CSS.escape(identity)}"][data-audition-section="${CSS.escape(target.sectionId)}"][data-audition-bar="${CSS.escape(span.barId)}"]`;
-      const cell = document.querySelectorAll<HTMLElement>(prefix)[target.sectionOccurrence ?? 0];
+      const prefix = `[data-audition-chart="${CSS.escape(identity)}"][data-audition-section="${CSS.escape(span.sectionId)}"][data-audition-bar="${CSS.escape(span.barId)}"]`;
+      const cell = document.querySelectorAll<HTMLElement>(prefix)[span.sectionOccurrence];
       if (!cell) return;
       const tokens = cell.querySelectorAll<HTMLElement>('[data-unmetered-chord], [data-untimed-chord]');
       const slot = tokens[target.orderedIndex ?? 0] ?? cell.querySelector<HTMLElement>(`[data-preview-slot-index="${beat}"]`);
@@ -146,7 +150,7 @@ export default function ChordAuditionControl({ language, song, target, identity,
         </span>
       </button>
       <ChordAuditionSettings zh={zh} labels={labels} scope={scope} setScope={setScope}
-        metronome={metronome} setMetronome={setMetronome} />
+        metronome={metronome} setMetronome={setMetronome} melody={melody} setMelody={setMelody} />
     </div>
     {feedbackHost && createPortal(<div aria-live="polite" className="chord-audition-notice">{[notice,
       metronome && clickUnavailable ? (zh ? '節拍器載入失敗，可再按播放重試。' : 'Metronome unavailable. Play again to retry.') : ''

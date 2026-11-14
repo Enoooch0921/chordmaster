@@ -11,9 +11,11 @@ interface Props {
   setScope: (scope: AuditionScope) => void;
   metronome: boolean;
   setMetronome: (enabled: boolean) => void;
+  melody: boolean;
+  setMelody: (enabled: boolean) => void;
 }
 
-export default function ChordAuditionSettings({ zh, labels, scope, setScope, metronome, setMetronome }: Props) {
+export default function ChordAuditionSettings({ zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody }: Props) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -54,14 +56,15 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
         if (event.key === 'Escape') { event.preventDefault(); returnFocus(); }
         // Move out of the portal in the editor's own tab order.
         const checkbox = event.target instanceof HTMLInputElement && event.target.type === 'checkbox';
-        if (event.key === 'Tab' && (event.shiftKey ? !checkbox : checkbox)) {
+        const last = panel.current?.querySelector('input[name="audition-melody"]');
+        if (event.key === 'Tab' && (event.shiftKey ? !checkbox : event.target === last)) {
           if (event.shiftKey) event.preventDefault();
           returnFocus();
         }
       }}>
       <fieldset>
         <legend>{zh ? '試聽範圍' : 'Audition range'}</legend>
-        {(['chord', 'bar', 'section'] as const).map(value =>
+        {(['chord', 'bar', 'section', 'song'] as const).map(value =>
           <label className="chord-audition-option" key={value}>
             <input type="radio" name={id} checked={scope === value} value={value} onChange={() => setScope(value)}
               onClick={event => { if (event.detail > 0) returnFocus(); }}
@@ -71,8 +74,12 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
           </label>)}
       </fieldset>
       <label className="chord-audition-click-option">
-        <span>{zh ? '連播節拍器' : 'Metronome for bars and sections'}</span>
-        <input type="checkbox" checked={metronome} onChange={event => setMetronome(event.target.checked)} />
+        <span>{zh ? '連播節拍器' : 'Playback metronome'}</span>
+        <input name="audition-metronome" type="checkbox" checked={metronome} onChange={event => setMetronome(event.target.checked)} />
+      </label>
+      <label className="chord-audition-melody-option">
+        <span>{zh ? '旋律（簡譜）' : 'Melody (jianpu)'}</span>
+        <input name="audition-melody" type="checkbox" checked={melody} onChange={event => setMelody(event.target.checked)} />
       </label>
     </div>, document.body)}
   </>;

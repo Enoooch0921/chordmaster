@@ -243,18 +243,16 @@ export const fitJianpuInputModeToUnits = (
   return duration ? { ...normalized, duration, dotted: false, triplet: normalized.triplet } : normalized;
 };
 
-const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | null => {
-  const located = findSongBar(song, target);
-  if (!located) return null;
-  const timeSignature = getEffectiveTimeSignatureForTarget(song, target);
+/** The editor and audition use the same implicit subdivisions, gaps and carried durations. */
+export function layoutJianpuBeats(riff: string | undefined, timeSignature: string, isPickup = false) {
   const { beatUnits } = parseTimeSignature(timeSignature);
-  const tokens = getCanonicalJianpuBeatTokens(located.bar.riff, timeSignature);
+  const tokens = getCanonicalJianpuBeatTokens(riff, timeSignature);
   let carryUnits = 0;
 
   const beats: InternalBeatLayout[] = tokens.map((token, tokenIndex) => {
     const rawNotes = findJianpuNoteRanges(token);
     const rawPlaceholders = findJianpuPlaceholderRanges(token);
-    const parsedNotes = target.sectionId === PICKUP_EDITOR_SECTION_ID ? rawNotes : applyJianpuAutoDurationShorthand(
+    const parsedNotes = isPickup ? rawNotes : applyJianpuAutoDurationShorthand(
       rawNotes,
       rawNotes.length + rawPlaceholders.length,
       rawPlaceholders.length > 0,
@@ -349,15 +347,17 @@ const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | n
     };
   });
 
+  return { beatUnits, tokens, beats };
+}
+
+const buildContext = (song: Song, target: SongBarIdentity): JianpuBarContext | null => {
+  const located = findSongBar(song, target);
+  if (!located) return null;
+  const timeSignature = getEffectiveTimeSignatureForTarget(song, target);
+  const isPickup = target.sectionId === PICKUP_EDITOR_SECTION_ID;
   return {
-    isPickup: target.sectionId === PICKUP_EDITOR_SECTION_ID,
-    sectionIndex: located.sectionIndex,
-    barIndex: located.barIndex,
-    bar: located.bar,
-    timeSignature,
-    beatUnits,
-    tokens,
-    beats
+    isPickup, sectionIndex: located.sectionIndex, barIndex: located.barIndex, bar: located.bar, timeSignature,
+    ...layoutJianpuBeats(located.bar.riff, timeSignature, isPickup)
   };
 };
 

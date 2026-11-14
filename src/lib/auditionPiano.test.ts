@@ -1,10 +1,21 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { AuditionPiano } from './auditionPiano';
+import { AuditionPiano, pianoAttackSeconds } from './auditionPiano';
 import type { AuditionPlan } from './chordAudition';
 
 const plan: AuditionPlan = { duration: 1, fallbackTempo: false, bars: [],
   sounds: [{ start: 0, end: 1, notes: [48, 60] }] };
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+it('locates the acoustic onset after a quiet lead-in at the decoded sample rate', () => {
+  const signal = new Float32Array(4800);
+  signal[250] = .001;
+  signal[720] = -.11;
+  signal[960] = 1;
+  const sample = { sampleRate: 48000, getChannelData: () => signal };
+  expect(pianoAttackSeconds(sample)).toBe(.015);
+  signal.fill(0);
+  expect(pianoAttackSeconds(sample)).toBe(0);
+});
 
 it('cancels an in-flight start, and a restarted audition owns its sources and visual callbacks', async () => {
   vi.useFakeTimers();
@@ -17,7 +28,7 @@ it('cancels an in-flight start, and a restarted audition owns its sources and vi
     destination = {};
     resume = () => cold;
     close = async () => close();
-    decodeAudioData = async () => ({ duration: 8 });
+    decodeAudioData = async () => ({ duration: 8, sampleRate: 48000, getChannelData: () => new Float32Array(64) });
     createGain = () => ({ gain: { setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() }, connect: vi.fn(), disconnect: vi.fn() });
     createBufferSource = () => ({ playbackRate: {}, connect: (node: object) => node, disconnect: vi.fn(), start: starts, stop: stops });
   }

@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-14',
+        title: 'Melody, pickups and playback to song end',
+        bullets: [
+          'Choose “From here to song end” to play across sections in the order shown on the score. Toggle the jianpu melody beside the metronome during playback.',
+          'Starting at bar 1 with melody enabled includes the pickup in bar 0. Piano attacks line up with the metronome, including the first beat of each bar.'
+        ]
+      },
+      {
+        version: '0.12.40',
+        date: '2026-11-14',
         title: 'Piano chord audition and metronome',
         bullets: [
           'Hear an unsaved chord, the current bar, or the rest of the section in concert pitch, including slash bass notes.',
@@ -1192,6 +1201,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-14',
+        title: '曲尾連播、簡譜旋律與弱起試聽',
+        bullets: [
+          '選「從這裡到曲尾」可依譜面順序跨段播放。在節拍器旁勾選「旋律（簡譜）」，就能一起核對和弦與主旋律。',
+          '從第一小節開頭啟播時，勾選旋律會先彈第 0 小節的弱起。鋼琴現在依取樣的實際起音對拍，並縮短換和弦前的淡出。'
+        ]
+      },
+      {
+        version: '0.12.40',
         date: '2026-11-14',
         title: '鋼琴和弦試聽與節拍器',
         bullets: [

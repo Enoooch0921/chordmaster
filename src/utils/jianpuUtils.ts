@@ -433,12 +433,16 @@ export function rebuildJianpuNote(note: JianpuNoteRange, overrides: Partial<Pick
   return `${'['.repeat(phraseStarts)}${slurStart ? '(' : ''}${/^[1-7]$/.test(pitch) ? buildJianpuGracePrefix(grace) : ''}${buildAccidentalPrefix(accidental, pitch)}${pitch}${buildOctaveMarks(octave, pitch)}${DURATION_MARKERS[duration]}${triplet ? 't' : ''}${dotted ? '.' : ''}${accent ? '!' : ''}${slurEnd ? ')' : ''}${']'.repeat(phraseEnds)}`;
 }
 
+export function jianpuMidi(pitch: string, accidental: string, octave: number, key: Key): number {
+  const degree = RELATIVE_MAJOR_SCALE_OFFSETS[pitch as keyof typeof RELATIVE_MAJOR_SCALE_OFFSETS];
+  return 60 + KEY_TO_SEMITONE_INDEX[key] + degree + (accidental.includes('b') ? -1 : accidental.includes('#') ? 1 : 0) + octave * 12;
+}
+
 export function convertRelativeJianpuToAbsoluteNotation(notation: string | undefined, key: Key): string | undefined {
   if (!notation?.trim() || notation.trim() === '-') {
     return notation;
   }
 
-  const tonicSemitone = KEY_TO_SEMITONE_INDEX[key];
   const preferFlats = FLAT_KEYS.has(key);
   const noteRanges = findJianpuNoteRanges(notation);
 
@@ -453,14 +457,7 @@ export function convertRelativeJianpuToAbsoluteNotation(notation: string | undef
       return;
     }
 
-    const scaleOffset = RELATIVE_MAJOR_SCALE_OFFSETS[note.pitch as keyof typeof RELATIVE_MAJOR_SCALE_OFFSETS];
-    const accidentalOffset = note.accidental.includes('b')
-      ? -1
-      : note.accidental.includes('#')
-        ? 1
-        : 0;
-    const relativeOctaveShift = note.octave * 12;
-    const absoluteMidi = 60 + tonicSemitone + scaleOffset + accidentalOffset + relativeOctaveShift;
+    const absoluteMidi = jianpuMidi(note.pitch, note.accidental, note.octave, key);
     const semitoneClass = ((absoluteMidi - 60) % 12 + 12) % 12;
     const absoluteOctaveShift = Math.floor((absoluteMidi - 60) / 12);
     const fixedDoNote = (preferFlats ? FIXED_DO_FLAT_MAP : FIXED_DO_SHARP_MAP)[semitoneClass];
