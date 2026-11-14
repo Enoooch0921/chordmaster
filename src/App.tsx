@@ -10430,7 +10430,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
         noteOwner={authenticatedUser?.id} noteSongId={song.id} notesActive={!isPerformanceMode && !isEditing && !activePreviewEditSession}
         song={renderedSong}
-        readerAudition={!canOpenEditor && !isPerformanceMode && !isHandwriting}
+        readerAudition={!isPerformanceMode && !isHandwriting}
         songMapEditor={canEditTeamSongs && !activePreviewEditSession && !isEditing ? {
           scope: 'library', fallback: sectionSongMap(song.sections), sections: sectionSongMap(song.sections),
           onSave: songMap => handleSongChange({ ...song, songMap }),
@@ -10607,7 +10607,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
         noteOwner={authenticatedUser?.id} noteSongId={item.songId} notesActive={isInteractive && !isEditing && !activePreviewEditSession}
               entryId={item.id}
-              readerAudition={isInteractive && !canOpenEditor && !isHandwriting}
+              readerAudition={isInteractive && !isHandwriting}
               song={previewSong}
               setlistSongNumber={songIndex + 1}
               songMapEditor={isInteractive && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession && !isEditing ? {
@@ -14518,10 +14518,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               </div>
             )}
             <div className="flex h-full min-h-0 flex-col">
-            {isSheetView && !canOpenEditor && !isLyricsMode && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
+            {isSheetView && !isEditing && !activePreviewEditSession && !isLyricsMode && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
               && !setlistOpening.opening && activeNavigationPreviewSong && activePreviewIdentity &&
               <ReaderAudition key={activePreviewIdentity} song={activeNavigationPreviewSong} identity={activePreviewIdentity}
-                language={language} chartRef={previewRef} triggerHost={readerAuditionHost} />}
+                userId={authenticatedUser?.id} language={language} chartRef={previewRef} triggerHost={readerAuditionHost} />}
             <div className="relative min-h-0 flex-1">
             <CoveredPreview covered={isPhoneViewport && isMobileNavOpen}
               scope={JSON.stringify([historyScope, selectedSongId, selectedSetlistId, selectedSetlistSongId, isLyricsMode])}>
@@ -14607,6 +14607,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                   key={activePreviewEditSession.previewIdentity}
                   session={activePreviewEditSession}
                   auditionSong={activeDraftNavigationPreviewSong}
+                  userId={authenticatedUser?.id}
                   language={language}
                   deviceLayout={previewEditorDeviceLayout}
                   storedKey={storedKey}
@@ -14817,7 +14818,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
                 <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
-                  {!canOpenEditor && !isLyricsMode && <span className="contents" ref={setReaderAuditionHost} />}
+                  {!isLyricsMode && <span className="contents" ref={setReaderAuditionHost} />}
                   {(canOpenEditor || globalHistory.canUndo || globalHistory.canRedo) && !activePreviewEditSession && (
                     <>
                       <button

@@ -41,10 +41,10 @@ const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string |
   }
 };
 
-function SharedAuditionChart({ song, language, identity, triggerHost }: { song: Song; language: AppLanguage; identity: string; triggerHost: HTMLSpanElement | null }) {
+function SharedAuditionChart({ song, language, identity, triggerHost, userId }: { song: Song; language: AppLanguage; identity: string; userId: string | null; triggerHost: HTMLSpanElement | null }) {
   const chartRef = useRef<HTMLDivElement>(null);
   return <>
-    <ReaderAudition key={identity} song={song} identity={identity} chartRef={chartRef} language={language} triggerHost={triggerHost} />
+    <ReaderAudition userId={userId} key={identity} song={song} identity={identity} chartRef={chartRef} language={language} triggerHost={triggerHost} />
     <div ref={chartRef} className="shared-audition-score">
       <ChordSheet readerAudition song={song} language={language} currentKey={song.currentKey} previewIdentity={identity} />
     </div>
@@ -602,7 +602,7 @@ export default function SharedChartPage() {
                     {showSharedLyrics ? (
                       <SharedLyricsReader userId={authUserId} identity={selectedBundleSong.id} song={selectedBundleSong.song} language={language} />
                     ) : (
-                      <SharedAuditionChart triggerHost={auditionHost} song={selectedBundleSong.song} language={language} identity={selectedBundleSong.id} />
+                      <SharedAuditionChart userId={authUserId} triggerHost={auditionHost} song={selectedBundleSong.song} language={language} identity={selectedBundleSong.id} />
                     )}
                   </div>
                 </div>
@@ -639,7 +639,7 @@ export default function SharedChartPage() {
                 {showSharedLyrics ? (
                   <SharedLyricsReader userId={authUserId} identity={payload.song.id} song={payload.song.song} language={language} />
                 ) : (
-                  <SharedAuditionChart triggerHost={auditionHost} song={payload.song.song} language={language} identity={payload.song.id} />
+                  <SharedAuditionChart userId={authUserId} triggerHost={auditionHost} song={payload.song.song} language={language} identity={payload.song.id} />
                 )}
               </div>
               {renderSongImportControls()}

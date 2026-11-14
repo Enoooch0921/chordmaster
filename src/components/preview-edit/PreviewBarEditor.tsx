@@ -1,6 +1,6 @@
 import './PreviewKeyboard.css';
 import ChordAuditionControl from './ChordAuditionControl';
-import type { AuditionScope } from '../../lib/chordAudition';
+import { useAuditionPreferences } from '../../hooks/useAuditionPreferences';
 import KeyboardSurface from './KeyboardSurface';
 import KeyboardEditActions from './KeyboardEditActions';
 import SlidingSelection from '../ui/SlidingSelection';
@@ -126,6 +126,7 @@ interface PickerAnchor {
 interface PreviewBarEditorProps {
   session: PreviewEditSession;
   auditionSong?: Song;
+  userId?: string | null;
   language: AppLanguage;
   deviceLayout: PreviewEditorDeviceLayout;
   storedKey: Key;
@@ -263,6 +264,7 @@ const getCleanChordMarks = (marks: Bar['chordMarks']) => (
 const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   session: sourceSession,
   auditionSong = sourceSession.draftSong,
+  userId,
   language,
   deviceLayout,
   storedKey,
@@ -340,14 +342,12 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const [bassMode, setBassMode] = React.useState(false);
   const [landscapeChordPage, setLandscapeChordPage] = React.useState<'input'|'tools'>('input');
   const [auditionFeedbackHost, setAuditionFeedbackHost] = React.useState<HTMLDivElement | null>(null);
-  const [auditionScope, setAuditionScope] = React.useState<AuditionScope>('chord');
-  const [auditionMetronome, setAuditionMetronome] = React.useState(true);
-  const [auditionMelody, setAuditionMelody] = React.useState(true);
+  const auditionPreferences = useAuditionPreferences(userId, 'chord');
   const [auditionSelection, setAuditionSelection] = React.useState<{
     cursor: PreviewNotationCursor | undefined; anchorKey: string; orderedIndex?: number; beat?: number; offset?: number
   } | null>(null);
   React.useLayoutEffect(() => {
-    if (!present) { setAuditionScope('chord'); setAuditionSelection(null); setAuditionMetronome(true); setAuditionMelody(true); }
+    if (!present) setAuditionSelection(null);
   }, [present]);
   const [collapsed, setCollapsed] = React.useState(false);
   const [subdivisionsExpanded, setSubdivisionsExpanded] = React.useState(false);
@@ -1202,9 +1202,7 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
   const audition = present && !isPickup && notationMode === 'chords' && <ChordAuditionControl
     song={auditionSong} language={language} identity={sourceSession.previewIdentity}
     editorShortcut prominent={deviceLayout === 'phone'} selectionLabel={selectedChordLabel} feedbackHost={auditionFeedbackHost}
-    scope={auditionScope} setScope={setAuditionScope}
-    metronome={auditionMetronome} setMetronome={setAuditionMetronome}
-    melody={auditionMelody} setMelody={setAuditionMelody}
+    {...auditionPreferences}
     target={{ ...sourceSession.target, slotIndex: auditionBeat, orderedIndex, offset: auditionOffset }} />;
 
   if (hasUnmeteredChords(bar) || (bar.chordTimingUnspecified && notationMode === 'chords' && session.target.field === 'chords')) return <KeyboardSurface docked={isDocked} ref={panelRef} data-preview-bar-editor data-keyboard-refined data-preview-edit-ui data-device-layout={deviceLayout} role="dialog" aria-label={language==='zh'?'未定拍位和弦編輯':'Unmetered chord editor'} className="z-[5000] flex flex-col gap-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-xl" style={panelStyle}>

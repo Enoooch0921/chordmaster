@@ -2,7 +2,7 @@ import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } f
 import { createPortal } from 'react-dom';
 import { Headphones, ChevronUp } from 'lucide-react';
 import type { AppLanguage, Bar, Song } from '../types';
-import type { AuditionScope } from '../lib/chordAudition';
+import { useAuditionPreferences } from '../hooks/useAuditionPreferences';
 import { getSongTimeSignatureStates } from '../lib/songEditing';
 import { isClosedBar } from '../utils/closedBar';
 import { getChordEvents } from '../utils/chordSubdivisions';
@@ -15,6 +15,7 @@ interface Props {
   song: Song;
   identity: string;
   language: AppLanguage;
+  userId?: string | null;
   triggerHost: HTMLSpanElement | null;
   chartRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -31,7 +32,7 @@ function auditionPositions(bar: Bar, beats: number) {
   ).flat();
 }
 
-export default function ReaderAudition({ song, identity, language, chartRef, triggerHost }: Props) {
+export default function ReaderAudition({ song, identity, language, chartRef, triggerHost, userId }: Props) {
   const zh = language === 'zh';
   const [open, setOpen] = useState(false);
   const panelId = useId();
@@ -44,9 +45,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
     setOpen(false);
     triggerRef.current?.focus({ preventScroll: true });
   };
-  const [scope, setScope] = useState<AuditionScope>('song');
-  const [metronome, setMetronome] = useState(true);
-  const [melody, setMelody] = useState(true);
+  const preferences = useAuditionPreferences(userId, 'song');
   const [feedbackHost, setFeedbackHost] = useState<HTMLDivElement | null>(null);
   const [selection, setSelection] = useState({ measure: 0, position: 0 });
   const measures = useMemo(() => {
@@ -84,6 +83,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
       const offset = Number(mark?.dataset.auditionOffset ?? 0);
       const position = mark?.dataset.auditionToken !== undefined ? Number(mark.dataset.auditionToken)
         : auditionPositions(m.bar, m.beats).findIndex(p => p.beat === beat && p.offset === offset);
+      event.stopPropagation();
       setSelection({ measure: index, position: Math.max(0, position) });
     };
     chart.addEventListener('click', pick, true);
@@ -121,8 +121,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
         <ChordAuditionControl song={song} identity={identity} language={language} selectionLabel="" prominent
           target={{ sectionId: measure.sectionId, sectionOccurrence: measure.sectionOccurrence, barId: measure.barId,
             slotIndex: position?.beat ?? 0, offset: position?.offset, orderedIndex: position?.orderedIndex }}
-          scope={scope} setScope={setScope} melody={melody} setMelody={setMelody}
-          metronome={metronome} setMetronome={setMetronome} feedbackHost={feedbackHost}/>
+          {...preferences} feedbackHost={feedbackHost}/>
         <button type="button" className="reader-audition-close" aria-label={zh ? '收起試聽面板' : 'Collapse playback panel'}
           title={toggleLabel} onClick={close}><ChevronUp size={18} aria-hidden="true" /></button>
       </div>}

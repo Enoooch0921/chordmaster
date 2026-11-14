@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-14',
+        title: 'Personal playback preferences',
+        bullets: ['Editors can also open playback from the chart toolbar. The reader and editor share playback range, metronome and melody preferences for each account on this device.']
+      },
+      {
+        version: '0.12.44',
+        date: '2026-11-14',
         title: 'On-demand playback in read-only charts',
         bullets: ['Read-only charts open with playback controls collapsed. Select Listen to choose a starting bar and beat. Closing the controls stops playback.']
       },
@@ -1225,6 +1231,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-14',
+        title: '記住個人試聽設定',
+        bullets: ['編輯者也能從看譜工具列開啟試聽。播放範圍、節拍器與簡譜旋律的選擇會依帳號記在這台裝置，並在看譜和打譜時共用。']
+      },
+      {
+        version: '0.12.44',
         date: '2026-11-14',
         title: '唯讀試聽按需展開',
         bullets: ['唯讀譜面預設收起播放控制。點「試聽」可選小節與拍位，收起時會停止播放。']

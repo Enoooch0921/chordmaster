@@ -67,7 +67,7 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
         {(['chord', 'bar', 'section', 'song'] as const).map(value =>
           <label className="chord-audition-option" key={value}>
             <input type="radio" name={id} checked={scope === value} value={value} onChange={() => setScope(value)}
-              onClick={event => { if (event.detail > 0) returnFocus(); }}
+              onClick={event => { if (scope === value) setScope(value); if (event.detail > 0) returnFocus(); }}
               onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setScope(value); returnFocus(); } }} />
             <span>{labels[value]}</span>
             {scope === value && <Check size={16} aria-hidden="true" />}
