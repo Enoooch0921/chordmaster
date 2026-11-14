@@ -1938,8 +1938,9 @@ const PreviewBarEditor: React.FC<PreviewBarEditorProps> = ({
 
 
       {phoneAudition && <div className="phone-audition-row">
-        <div className="phone-audition-position"><strong>{section.title}</strong>
-          <span>{bassMode ? (language === 'zh' ? '低音輸入 · ' : 'Bass · ') : ''}{footerPositionLabel} {footerPositionValue}</span>
+        <div className="phone-audition-position">
+          <strong>{bassMode ? <span role="status">{language === 'zh' ? '低音輸入' : 'Bass input'}</span> : section.title}</strong>
+          <span>{footerPositionLabel} {footerPositionValue}</span>
         </div>
         {audition}
       </div>}
