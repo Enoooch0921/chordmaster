@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-14',
+        title: 'On-demand playback in read-only charts',
+        bullets: ['Read-only charts open with playback controls collapsed. Select Listen to choose a starting bar and beat. Closing the controls stops playback.']
+      },
+      {
+        version: '0.12.43',
+        date: '2026-11-14',
         title: 'Sustained chords and read-only playback',
         bullets: [
           'An empty bar holds the preceding chord until the next chord or a written rest, including N.C.',
@@ -1219,6 +1225,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-14',
+        title: '唯讀試聽按需展開',
+        bullets: ['唯讀譜面預設收起播放控制。點「試聽」可選小節與拍位，收起時會停止播放。']
+      },
+      {
+        version: '0.12.43',
         date: '2026-11-14',
         title: '空白小節延音與唯讀試聽',
         bullets: [

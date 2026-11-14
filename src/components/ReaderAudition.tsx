@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Headphones, ChevronUp } from 'lucide-react';
 import type { AppLanguage, Bar, Song } from '../types';
 import type { AuditionScope } from '../lib/chordAudition';
 import { getSongTimeSignatureStates } from '../lib/songEditing';
@@ -13,6 +15,7 @@ interface Props {
   song: Song;
   identity: string;
   language: AppLanguage;
+  triggerHost: HTMLSpanElement | null;
   chartRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -28,8 +31,19 @@ function auditionPositions(bar: Bar, beats: number) {
   ).flat();
 }
 
-export default function ReaderAudition({ song, identity, language, chartRef }: Props) {
+export default function ReaderAudition({ song, identity, language, chartRef, triggerHost }: Props) {
   const zh = language === 'zh';
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const measureRef = useRef<HTMLSelectElement>(null);
+  useLayoutEffect(() => {
+    if (open) measureRef.current?.focus({ preventScroll: true });
+  }, [open]);
+  const close = () => {
+    setOpen(false);
+    triggerRef.current?.focus({ preventScroll: true });
+  };
   const [scope, setScope] = useState<AuditionScope>('song');
   const [metronome, setMetronome] = useState(true);
   const [melody, setMelody] = useState(true);
@@ -56,7 +70,7 @@ export default function ReaderAudition({ song, identity, language, chartRef }: P
   // Listen on the visible chart only. The reader never opens an editing session.
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart) return;
+    if (!open || !chart) return;
     const pick = (event: MouseEvent) => {
       if (event.defaultPrevented || !(event.target instanceof Element) || event.target.closest('button,select,a,input')) return;
       const cell = event.target.closest<HTMLElement>('[data-audition-section-index][data-audition-bar-index]');
@@ -74,31 +88,45 @@ export default function ReaderAudition({ song, identity, language, chartRef }: P
     };
     chart.addEventListener('click', pick, true);
     return () => chart.removeEventListener('click', pick, true);
-  }, [chartRef, identity, measures]);
+  }, [open, chartRef, identity, measures]);
 
   if (!measure) return null;
   const position = positions[selection.position] ?? positions[0];
   const measureLabel = zh ? '起始小節' : 'Starting bar';
   const beatLabel = untimed ? (zh ? '和弦' : 'Chord') : (zh ? '拍位' : 'Beat');
-  return <div className="reader-audition" data-keyboard-refined data-preview-only-control>
-    <div className="reader-audition-controls">
-      <label className="reader-measure"><span>{measureLabel}</span>
-        <select value={measureIndex} onChange={e => setSelection({ measure: Number(e.target.value), position: 0 })}>
-          {measures.map((m, index) => <option key={index} value={index}>{m.sectionTitle} · {zh ? `第 ${m.barIndex + 1} 小節` : `Bar ${m.barIndex + 1}`}</option>)}
-        </select>
-      </label>
-      <label className="reader-beat"><span>{beatLabel}</span>
-        <select value={Math.max(0, positions.indexOf(position))} disabled={!positions.length}
-          onChange={e => setSelection({ measure: measureIndex, position: Number(e.target.value) })}>
-          {positions.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
-        </select>
-      </label>
-      <ChordAuditionControl song={song} identity={identity} language={language} selectionLabel="" prominent
-        target={{ sectionId: measure.sectionId, sectionOccurrence: measure.sectionOccurrence, barId: measure.barId,
-          slotIndex: position?.beat ?? 0, offset: position?.offset, orderedIndex: position?.orderedIndex }}
-        scope={scope} setScope={setScope} melody={melody} setMelody={setMelody}
-        metronome={metronome} setMetronome={setMetronome} feedbackHost={feedbackHost}/>
+  const toggleLabel = open ? (zh ? '收起試聽' : 'Hide playback') : (zh ? '試聽' : 'Listen');
+  return <>
+    {triggerHost && createPortal(
+      <button type="button" ref={triggerRef} className="reader-audition-toggle" data-preview-only-control
+        aria-expanded={open} aria-controls={panelId} aria-label={toggleLabel} onClick={() => open ? close() : setOpen(true)}>
+        <Headphones size={16} aria-hidden="true" />{open ? (zh ? '收起' : 'Hide') : toggleLabel}
+      </button>, triggerHost)}
+    <div id={panelId} hidden={!open} role="region" aria-label={zh ? '和弦試聽' : 'Chord playback'}
+      className="reader-audition" data-keyboard-refined data-preview-only-control
+      onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.stopPropagation(); close();
+      } }}>
+      {open && <div className="reader-audition-controls">
+        <label className="reader-measure"><span>{measureLabel}</span>
+          <select ref={measureRef} value={measureIndex} onChange={e => setSelection({ measure: Number(e.target.value), position: 0 })}>
+            {measures.map((m, index) => <option key={index} value={index}>{m.sectionTitle} · {zh ? `第 ${m.barIndex + 1} 小節` : `Bar ${m.barIndex + 1}`}</option>)}
+          </select>
+        </label>
+        <label className="reader-beat"><span>{beatLabel}</span>
+          <select value={Math.max(0, positions.indexOf(position))} disabled={!positions.length}
+            onChange={e => setSelection({ measure: measureIndex, position: Number(e.target.value) })}>
+            {positions.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
+          </select>
+        </label>
+        <ChordAuditionControl song={song} identity={identity} language={language} selectionLabel="" prominent
+          target={{ sectionId: measure.sectionId, sectionOccurrence: measure.sectionOccurrence, barId: measure.barId,
+            slotIndex: position?.beat ?? 0, offset: position?.offset, orderedIndex: position?.orderedIndex }}
+          scope={scope} setScope={setScope} melody={melody} setMelody={setMelody}
+          metronome={metronome} setMetronome={setMetronome} feedbackHost={feedbackHost}/>
+        <button type="button" className="reader-audition-close" aria-label={zh ? '收起試聽面板' : 'Collapse playback panel'}
+          title={toggleLabel} onClick={close}><ChevronUp size={18} aria-hidden="true" /></button>
+      </div>}
+      <div ref={setFeedbackHost} />
     </div>
-    <div ref={setFeedbackHost} />
-  </div>;
+  </>;
 }

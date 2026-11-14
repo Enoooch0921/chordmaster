@@ -41,10 +41,10 @@ const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string |
   }
 };
 
-function SharedAuditionChart({ song, language, identity }: { song: Song; language: AppLanguage; identity: string }) {
+function SharedAuditionChart({ song, language, identity, triggerHost }: { song: Song; language: AppLanguage; identity: string; triggerHost: HTMLSpanElement | null }) {
   const chartRef = useRef<HTMLDivElement>(null);
   return <>
-    <ReaderAudition key={identity} song={song} identity={identity} chartRef={chartRef} language={language} />
+    <ReaderAudition key={identity} song={song} identity={identity} chartRef={chartRef} language={language} triggerHost={triggerHost} />
     <div ref={chartRef} className="shared-audition-score">
       <ChordSheet readerAudition song={song} language={language} currentKey={song.currentKey} previewIdentity={identity} />
     </div>
@@ -84,6 +84,7 @@ export default function SharedChartPage() {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [showSharedLyrics, setShowSharedLyrics] = useState(false);
+  const [auditionHost, setAuditionHost] = useState<HTMLSpanElement | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [selectedBundleSongId, setSelectedBundleSongId] = useState<string | null>(null);
   const [importInspection, setImportInspection] = useState<SharedSongImportInspection | null>(null);
@@ -593,12 +594,15 @@ export default function SharedChartPage() {
                   ))}
                 </div>
                 <div className="min-w-0">
-                  <h2 className="mb-3 text-xl font-black text-stone-900">{selectedBundleSong.title}</h2>
+                  <div className="mb-3 flex flex-wrap items-center gap-x-3">
+                    <h2 className="min-w-0 flex-[1_1_11rem] text-xl font-black text-stone-900">{selectedBundleSong.title}</h2>
+                    <span className="contents" ref={setAuditionHost} />
+                  </div>
                   <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-1 shadow-sm sm:p-6">
                     {showSharedLyrics ? (
                       <SharedLyricsReader userId={authUserId} identity={selectedBundleSong.id} song={selectedBundleSong.song} language={language} />
                     ) : (
-                      <SharedAuditionChart song={selectedBundleSong.song} language={language} identity={selectedBundleSong.id} />
+                      <SharedAuditionChart triggerHost={auditionHost} song={selectedBundleSong.song} language={language} identity={selectedBundleSong.id} />
                     )}
                   </div>
                 </div>
@@ -608,9 +612,10 @@ export default function SharedChartPage() {
           ) : payload?.song ? (
             <>
               <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-                <h1 className="text-3xl font-bold tracking-tight text-stone-900">
+                <h1 className="min-w-0 flex-[1_1_11rem] text-3xl font-bold tracking-tight text-stone-900">
                   {payload.song.title}
                 </h1>
+                <span className="contents" ref={setAuditionHost} />
                 {(payload.song.song.lyricsDoc?.chinese?.trim() || payload.song.song.lyricsDoc?.english?.trim()) ? (
                   <div className="inline-flex rounded-xl border border-stone-200 bg-white p-1 text-sm font-semibold shadow-sm">
                     <button
@@ -634,7 +639,7 @@ export default function SharedChartPage() {
                 {showSharedLyrics ? (
                   <SharedLyricsReader userId={authUserId} identity={payload.song.id} song={payload.song.song} language={language} />
                 ) : (
-                  <SharedAuditionChart song={payload.song.song} language={language} identity={payload.song.id} />
+                  <SharedAuditionChart triggerHost={auditionHost} song={payload.song.song} language={language} identity={payload.song.id} />
                 )}
               </div>
               {renderSongImportControls()}

@@ -1927,6 +1927,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const performanceOverlayRef = useRef<HTMLDivElement>(null);
   const appViewportRef = useAppViewport(performanceOverlayRef, isPerformanceMode);
   const previewRef = React.useRef<HTMLDivElement>(null);
+  const [readerAuditionHost, setReaderAuditionHost] = useState<HTMLSpanElement | null>(null);
   const mobileMetadataRef = React.useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -14520,7 +14521,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             {isSheetView && !canOpenEditor && !isLyricsMode && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
               && !setlistOpening.opening && activeNavigationPreviewSong && activePreviewIdentity &&
               <ReaderAudition key={activePreviewIdentity} song={activeNavigationPreviewSong} identity={activePreviewIdentity}
-                language={language} chartRef={previewRef} />}
+                language={language} chartRef={previewRef} triggerHost={readerAuditionHost} />}
             <div className="relative min-h-0 flex-1">
             <CoveredPreview covered={isPhoneViewport && isMobileNavOpen}
               scope={JSON.stringify([historyScope, selectedSongId, selectedSetlistId, selectedSetlistSongId, isLyricsMode])}>
@@ -14816,6 +14817,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>
                 <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm">
+                  {!canOpenEditor && !isLyricsMode && <span className="contents" ref={setReaderAuditionHost} />}
                   {(canOpenEditor || globalHistory.canUndo || globalHistory.canRedo) && !activePreviewEditSession && (
                     <>
                       <button
