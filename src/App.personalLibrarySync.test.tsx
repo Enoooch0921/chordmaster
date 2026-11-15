@@ -92,7 +92,7 @@ it('updates the already mounted drummer list and chart while protecting its play
   expect(within(dialog).getByTestId('sync-chart')).toBe(chart);
   expect(list.scrollTop).toBe(43);
   expect(within(dialog).getByTestId('sync-chart')).toHaveAttribute('data-key', 'D');
-  expect(within(dialog).getByRole('textbox', { name: '節拍器速度 BPM' })).toHaveValue('72');
+  expect(within(dialog).getByRole('status', { name: '節拍器速度 BPM' })).toHaveTextContent('72');
   expect(state.audio.start).toHaveBeenCalledOnce();
   expect(state.save).not.toHaveBeenCalled();
   view.unmount();

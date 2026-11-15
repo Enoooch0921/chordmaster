@@ -39,9 +39,9 @@
 .drummer-song-heading h2 { flex: 1; min-width: 0; margin: 0; font-weight: 650; font-size: 20px; line-height: 1.4; overflow-wrap: anywhere; }
 .drummer-tempo { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 4px 0 12px; }
 .drummer-tempo > button { flex-shrink: 0; width: 48px; height: 54px; background: var(--color-surface-muted); }
-.drummer-tempo label { container-type: inline-size; min-width: 0; flex: 1; text-align: center; }
-.drummer-tempo input { width: 100%; min-width: 0; padding: 0; font: inherit; --tempo-font-size: 64px; font-size: min(var(--tempo-font-size), calc(155cqi / var(--tempo-digits, 3))); font-weight: 650; letter-spacing: -.03em; text-align: center; background: transparent; line-height: 1.1; color: var(--color-text); border-radius: 8px; }
-.drummer-tempo label > span { font-size: 12px; color: var(--color-text-muted); }
+.drummer-tempo-readout { container-type: inline-size; min-width: 0; flex: 1; text-align: center; }
+.drummer-tempo output { display: block; width: 100%; min-width: 0; padding: 0; font: inherit; --tempo-font-size: 64px; font-size: min(var(--tempo-font-size), calc(155cqi / var(--tempo-digits, 3))); font-weight: 650; letter-spacing: -.03em; text-align: center; background: transparent; line-height: 1.1; color: var(--color-text); border-radius: 8px; }
+.drummer-tempo-readout > span { font-size: 12px; color: var(--color-text-muted); }
 .drummer-tempo-meta { position: relative; display: flex; justify-content: center; align-items: center; gap: 8px; min-height: 44px; margin-top: 4px; font-size: 14px; color: var(--color-text-muted); }
 .drummer-tempo-meta button { min-height: 36px; padding: 4px 8px; }
 .drummer-transport { display: grid; grid-template-columns: 1fr 1fr 104px; gap: 8px; }
@@ -57,11 +57,6 @@
 .drummer-song-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .drummer-song-navigation button { min-width: 0; padding: 8px; }
 .drummer-notice { margin: 10px 0 0; font-size: 13px; color: var(--color-text-muted); line-height: 1.5; }
-.drummer-settings { margin-top: 10px; border-bottom: 1px solid var(--color-border); }
-.drummer-settings-toggle { display: flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; font-size: 13px; list-style: none; }
-.drummer-settings-toggle > .drummer-settings-label { margin-left: 0; color: inherit; }
-.drummer-settings-toggle::-webkit-details-marker { display: none; }
-.drummer-settings-toggle > span { margin-left: auto; color: var(--color-text-muted); }
 .drummer-settings-body { display: grid; gap: 8px; max-height: clamp(100px, calc(100dvh - 640px), 235px); overflow: auto; padding: 4px 8px 16px 4px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
 .drummer-settings-body label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
 .drummer-settings-body select { min-height: 44px; max-width: 65%; padding: 8px; border: 1px solid var(--color-border); background: var(--color-surface); border-radius: 8px; color: inherit; }
@@ -98,16 +93,15 @@
   .drummer-song-list, .drummer-score { grid-column: 1; grid-row: 1; }
   .drummer-workspace[data-view="songs"] .drummer-score, .drummer-workspace[data-view="score"] .drummer-song-list { display: none; }
   .drummer-score { border: 0; }
-  .drummer-tempo input { --tempo-font-size: 68px; }
+  .drummer-tempo output { --tempo-font-size: 68px; }
   .drummer-tempo { max-width: 360px; margin-left: auto; margin-right: auto; }
 }
 @media (max-height: 650px) {
   .drummer-workspace { overflow: hidden; grid-template-rows: minmax(100px, 1fr) auto; }
   .drummer-controls { padding-top: 10px; }
   .drummer-tempo { margin-top: 4px; }
-  .drummer-tempo input { --tempo-font-size: 44px; }
+  .drummer-tempo output { --tempo-font-size: 44px; }
   .drummer-transport button { min-height: 48px; }
-  .drummer-settings { margin-top: 4px; }
 }
 
 .drummer-beats { display: grid; gap: 5px; margin: 0 0 10px; }
@@ -151,7 +145,7 @@
   .drummer-mode .drummer-song-heading { display: none; }
   .drummer-mode .drummer-tempo-meta { margin-top: 0; font-size: 18px; }
   .drummer-mode .drummer-subdivision-trigger { min-width: 96px; min-height: 56px; background: var(--color-surface-sunken); }
-  .drummer-mode .drummer-tempo input { --tempo-font-size: 48px; }
+  .drummer-mode .drummer-tempo output { --tempo-font-size: 48px; }
   .drummer-mode .drummer-tempo > button { width: 56px; height: 64px; }
   .drummer-mode .drummer-beat-stack > span { height: 9px; }
   .drummer-mode .drummer-transport { grid-template-columns: 1fr 1fr 104px; }
@@ -193,18 +187,14 @@
   }
   .drummer-mode .drummer-tempo > button { width: 64px; height: 72px; padding: 12px; background: var(--color-surface-sunken); }
   .drummer-mode .drummer-tempo > button svg { width: 30px; height: 30px; }
-  .drummer-mode .drummer-tempo input { --tempo-font-size: 48px; }
-  .drummer-mode .drummer-tempo label > span { font-size: 11px; }
+  .drummer-mode .drummer-tempo output { --tempo-font-size: 48px; }
+  .drummer-mode .drummer-tempo-readout > span { font-size: 11px; }
   .drummer-mode .drummer-play { grid-column: 1 / 3; grid-row: 4; flex-direction: row; min-height: 76px; font-size: 20px; }
   .drummer-mode .drummer-beats { grid-column: 1 / -1; grid-row: 2; margin: 0; }
   .drummer-mode .drummer-beat-stack > span { height: 10px; }
   .drummer-mode .drummer-tap { grid-column: 3; grid-row: 4; align-self: start; min-height: 76px; padding: 12px; font-size: 26px; }
   .drummer-mode .drummer-tap > span { display: none; }
   .drummer-mode .drummer-song-navigation { grid-column: 3; grid-row: 1; align-self: center; min-height: 56px; }
-  .drummer-mode .drummer-settings { grid-column: 1 / -1; grid-row: 5; margin: 0; border: 0; min-width: 0; }
-  .drummer-mode .drummer-settings-label { display: none; }
-  .drummer-mode .drummer-settings-toggle > svg { flex-shrink: 0; }
-  .drummer-mode .drummer-settings-toggle > span { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
   .drummer-mode .drummer-settings-body { max-height: 160px; padding-top: 8px; }
   .drummer-mode .drummer-notice { grid-column: 1 / -1; grid-row: 6; margin: 0; }
   .drummer-mode .drummer-song-navigation button { min-height: 56px; }
@@ -231,15 +221,12 @@
   .drummer-mode .drummer-tempo-meta { grid-column: 1; grid-row: 1; gap: 4px; font-size: 14px; }
   .drummer-mode .drummer-subdivision-trigger { min-width: 80px; }
   .drummer-mode .drummer-tempo { grid-column: 1; grid-row: 2; grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 4px; }
-  .drummer-mode .drummer-tempo input { --tempo-font-size: 32px; }
+  .drummer-mode .drummer-tempo output { --tempo-font-size: 32px; }
   .drummer-mode .drummer-tempo > button { width: 56px; height: 56px; }
   .drummer-mode .drummer-play { grid-column: 2; grid-row: 1 / 3; min-height: 116px; flex-direction: column; font-size: 17px; }
   .drummer-mode .drummer-tap { grid-column: 3; grid-row: 1 / 3; align-self: stretch; min-height: 116px; font-size: 22px; padding: 4px; }
   .drummer-mode .drummer-beats { grid-column: 1 / -1; grid-row: 3; }
   .drummer-mode .drummer-beat-stack > span { height: 6px; }
-  .drummer-mode .drummer-settings { display: block; grid-column: 3; grid-row: 4; }
-  .drummer-mode .drummer-settings-toggle { width: 100%; min-height: 56px; }
-  .drummer-mode .drummer-settings-toggle > span, .drummer-mode .drummer-settings-toggle > svg:last-child { display: none; }
   .drummer-mode .drummer-song-navigation { grid-column: 1 / 3; grid-row: 4; min-height: 56px; }
   .drummer-mode .drummer-notice { grid-row: 5; }
   }
@@ -262,9 +249,6 @@
     .drummer-mode .drummer-tap { grid-column: 2; grid-row: 3; }
     .drummer-mode .drummer-song-navigation { grid-column: 3; grid-row: 3; min-height: 76px; }
     .drummer-mode .drummer-song-navigation button { min-height: 76px; }
-    .drummer-mode .drummer-settings { grid-row: 4; }
-    .drummer-mode .drummer-settings-label { display: inline; }
-    .drummer-mode .drummer-settings-toggle > span:last-child { margin-left: auto; }
   }
 }
 
@@ -276,7 +260,6 @@
 .drummer-song-row[aria-current="true"] .drummer-song-tempo, .drummer-song-row[aria-current="true"] small { color: inherit; }
 .drummer-song-order { display: inline; font-variant-numeric: tabular-nums; }
 
-.drummer-settings-toggle { width: 100%; text-align: left; padding: 0 !important; }
 .drummer-midi-backdrop[hidden] { display: none; }
 .drummer-mode .drummer-sound-panel .drummer-settings-body { min-height: 0; max-height: none; overflow-y: auto; padding: 20px; gap: 16px; }
 .drummer-sound-panel .drummer-settings-body label { min-height: 44px; }
@@ -341,16 +324,13 @@
 .drummer-mode button.drummer-play:is(:active, [data-control-pressed="true"]):not(:disabled) { background: var(--color-indigo-900); color: white; }
 .drummer-mode button.drummer-tap:active > span,
 .drummer-mode button.drummer-tap[data-control-pressed="true"] > span { color: inherit; }
-.drummer-subdivision-trigger > svg:last-child,
-.drummer-settings-toggle > svg:last-child {
+.drummer-subdivision-trigger > svg:last-child {
   transition: transform var(--ui-release-duration) var(--ease-ui-out);
 }
-.drummer-subdivision-trigger[aria-expanded="true"] > svg:last-child,
-.drummer-settings-toggle[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+.drummer-subdivision-trigger[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
 [data-ui-input="keyboard"] .drummer-mode .drummer-subdivisions,
 [data-ui-input="keyboard"] .drummer-mode .drummer-midi-panel,
 [data-ui-input="keyboard"] .drummer-mode .drummer-midi-backdrop,
-[data-ui-input="keyboard"] .drummer-mode .drummer-settings-toggle > svg:last-child,
 [data-ui-input="keyboard"] .drummer-mode .drummer-subdivision-trigger > svg:last-child { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   .drummer-mode button.drummer-tap { transition: none; }
@@ -361,8 +341,7 @@
   .drummer-mode button:not(:where(.drummer-scaled-paper *))[data-control-pressed="true"] { transform: none; }
   [data-ui-input="pointer"] .drummer-mode .drummer-subdivisions,
   [data-ui-input="pointer"] .drummer-mode .drummer-midi-panel { transition-property: opacity; }
-  .drummer-mode .drummer-subdivision-trigger > svg:last-child,
-  .drummer-mode .drummer-settings-toggle > svg:last-child { transition: none; }
+  .drummer-mode .drummer-subdivision-trigger > svg:last-child { transition: none; }
 }
 
 .drummer-score-view[data-paged="true"] [data-print-page][data-drummer-page-active="false"] { display: none !important; }
@@ -385,9 +364,6 @@
 .drummer-mode .drummer-song-subdivision { padding: 2px; color: inherit; }
 [data-ui-input="pointer"] .drummer-mode .drummer-row-subdivisions { transform-origin: right top; }
 
-/* Reset stays in the same place beside BPM, without adding a layout row. */
-.drummer-tempo label { position: relative; }
-.drummer-mode .drummer-reset-tempo { position: absolute; left: calc(50% + 18px); bottom: -13px; width: 44px; min-height: 44px; padding: 8px; background: transparent; color: var(--color-indigo-700); }
 .drummer-controls { position: relative; }
 .drummer-mode .drummer-notice { position: absolute; z-index: 3; bottom: 4px; left: 12px; right: 12px; margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--color-surface); box-shadow: 0 3px 12px rgb(0 0 0 / 12%); font-size: 13px; line-height: 20px; }
 .drummer-notice:empty { display: none; }
@@ -449,14 +425,14 @@
   .drummer-mode[data-stage="true"] .drummer-controls { grid-column: 1; grid-row: 2; align-self: end; max-height: none; }
   .drummer-mode[data-stage="true"] .drummer-console-layout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: 56px 88px 76px 44px;
+    grid-template-rows: 56px 88px 76px;
     gap: 8px 12px; align-content: start;
   }
   .drummer-mode[data-stage="true"] .drummer-tempo-meta { grid-column: 1; grid-row: 1; }
   .drummer-mode[data-stage="true"] .drummer-tempo {
     grid-column: 1; grid-row: 2; grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 4px;
   }
-  .drummer-mode[data-stage="true"] .drummer-tempo input { --tempo-font-size: 64px; }
+  .drummer-mode[data-stage="true"] .drummer-tempo output { --tempo-font-size: 64px; }
   .drummer-mode[data-stage="true"] .drummer-tempo > button { width: 56px; height: 72px; }
   .drummer-mode[data-stage="true"] .drummer-tempo > button svg { width: 28px; height: 28px; }
   .drummer-mode[data-stage="true"] .drummer-beats { grid-column: 2; grid-row: 2; align-self: center; }
@@ -465,14 +441,12 @@
   .drummer-mode[data-stage="true"] .drummer-tap { grid-column: 2; grid-row: 3; height: 76px; min-height: 76px; font-size: 28px; }
   .drummer-mode[data-stage="true"] .drummer-song-navigation { grid-column: 2; grid-row: 1; justify-self: end; width: 120px; min-height: 56px; }
   .drummer-mode[data-stage="true"] .drummer-song-navigation button { min-height: 56px; }
-  .drummer-mode[data-stage="true"] .drummer-settings { grid-column: 1 / -1; grid-row: 4; }
   @container drummer-click (max-width: 419px) {
-    .drummer-mode[data-stage="true"] .drummer-console-layout { grid-template-rows: 56px 64px 88px 76px 44px; }
+    .drummer-mode[data-stage="true"] .drummer-console-layout { grid-template-rows: 56px 64px 88px 76px; }
     .drummer-mode[data-stage="true"] .drummer-beats { grid-column: 1 / -1; grid-row: 2; }
     .drummer-mode[data-stage="true"] .drummer-tempo { grid-column: 1 / -1; grid-row: 3; }
     .drummer-mode[data-stage="true"] .drummer-play,
     .drummer-mode[data-stage="true"] .drummer-tap { grid-row: 4; }
-    .drummer-mode[data-stage="true"] .drummer-settings { grid-row: 5; }
   }
 }
 
@@ -572,15 +546,11 @@
       align-self: center; max-width: 360px; justify-self: center;
       padding-right: 12px;
     }
-    .drummer-mode[data-stage="true"] .drummer-tempo input { --tempo-font-size: 72px; }
+    .drummer-mode[data-stage="true"] .drummer-tempo output { --tempo-font-size: 72px; }
     .drummer-mode[data-stage="true"] .drummer-tempo-meta {
       grid-column: 3 / 5; grid-row: 1; justify-content: center;
     }
     .drummer-mode[data-stage="true"] .drummer-beats { grid-column: 3 / 5; grid-row: 2; }
-    .drummer-mode[data-stage="true"] .drummer-settings {
-      grid-column: 3 / 5; grid-row: 3; align-self: center;
-    }
-    .drummer-mode[data-stage="true"] .drummer-settings-toggle { width: 100%; justify-content: center; }
     .drummer-mode[data-stage="true"] .drummer-play,
     .drummer-mode[data-stage="true"] .drummer-tap {
       grid-row: 1 / 3; width: 100%; max-width: 176px;
@@ -623,7 +593,7 @@
   .drummer-mode[data-stage] .drummer-console-layout {
     display: grid; width: 100%; height: 100%; margin: 0;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    grid-template-rows: minmax(56px, 1fr) 76px 56px 44px;
+    grid-template-rows: minmax(56px, 1fr) 76px 56px;
     gap: 6px 8px;
   }
   .drummer-mode[data-stage] .drummer-current,
@@ -632,20 +602,7 @@
     grid-column: 1 / 4; grid-row: 2; display: grid; width: 100%; margin: 0;
     grid-template-columns: 48px minmax(0, 1fr) 48px; gap: 4px;
   }
-  .drummer-mode[data-stage] .drummer-tempo input { --tempo-font-size: 56px; }
-  .drummer-mode[data-stage] .drummer-tempo label {
-    display: grid; grid-template-columns: minmax(0, 1fr) 44px;
-    grid-template-rows: 58px 18px; column-gap: 4px; height: 76px;
-  }
-  .drummer-mode[data-stage] .drummer-tempo input {
-    grid-column: 1; grid-row: 1; height: 100%; line-height: 1;
-    font-size: min(var(--tempo-font-size), calc((100cqi - 48px) * 1.55 / var(--tempo-digits, 3)));
-  }
-  .drummer-mode[data-stage] .drummer-tempo label > span:not(.sr-only) { grid-column: 1; grid-row: 2; line-height: 18px; }
-  .drummer-mode[data-stage] .drummer-reset-tempo {
-    position: static; grid-column: 2; grid-row: 1 / 3; align-self: center;
-    width: 44px; height: 44px; min-height: 44px;
-  }
+  .drummer-mode[data-stage] .drummer-tempo output { --tempo-font-size: 56px; }
   .drummer-mode[data-stage] .drummer-tempo > button { width: 48px; height: 56px; }
   .drummer-mode[data-stage] .drummer-tempo-meta {
     grid-column: 4; grid-row: 2; justify-content: center; margin: 0;
@@ -672,10 +629,6 @@
     grid-column: 3 / 5; grid-row: 3; width: 100%; min-height: 56px;
   }
   .drummer-mode[data-stage] .drummer-song-navigation button { min-height: 56px; }
-  .drummer-mode[data-stage] .drummer-settings { grid-column: 1 / -1; grid-row: 4; margin: 0; border: 0; }
-  .drummer-mode[data-stage] .drummer-settings-toggle { min-height: 44px; justify-content: center; }
-  .drummer-mode[data-stage] .drummer-settings-toggle > span { display: inline; margin: 0; font-size: 12px; }
-  .drummer-mode[data-stage] .drummer-settings-label { display: none; }
   .drummer-mode[data-stage] .drummer-song-list {
     display: flex; grid-column: 2; grid-row: 2; height: 100%; min-height: 0;
     padding: 0 8px 8px; border-left: 1px solid var(--color-border);
@@ -723,7 +676,7 @@
   .drummer-mode[data-stage] .drummer-console-layout {
     width: min(100%, 600px); margin-inline: auto; padding: 0;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    grid-template-rows: 64px minmax(116px, auto) 72px 44px;
+    grid-template-rows: 64px minmax(116px, auto) 72px;
     gap: 12px; align-content: start;
   }
   .drummer-mode[data-stage] .drummer-current,
@@ -737,15 +690,6 @@
     grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 4px;
   }
   .drummer-mode[data-stage] .drummer-tempo > button { width: 56px; height: 72px; }
-  .drummer-mode[data-stage] .drummer-tempo label {
-    display: grid; grid-template-columns: minmax(0, 1fr) 28px 44px minmax(0, 1fr);
-    grid-template-rows: auto 44px; align-items: center;
-  }
-  .drummer-mode[data-stage] .drummer-tempo input { grid-column: 1 / -1; grid-row: 1; }
-  .drummer-mode[data-stage] .drummer-tempo label > span:not(.sr-only) { grid-column: 2; grid-row: 2; }
-  .drummer-mode[data-stage] .drummer-reset-tempo {
-    position: static; grid-column: 3; grid-row: 2; width: 44px; height: 44px;
-  }
   .drummer-mode[data-stage] .drummer-tempo-meta {
     grid-column: 4; grid-row: 2; justify-content: center; margin: 0;
   }
@@ -765,41 +709,22 @@
   }
   .drummer-mode[data-stage] .drummer-song-navigation button { min-height: 72px; }
   .drummer-mode[data-stage] .drummer-song-navigation button svg { width: 28px; height: 28px; }
-  .drummer-mode[data-stage] .drummer-settings { grid-column: 1 / -1; grid-row: 4; }
 }
 
 .drummer-sound-loading { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12px; color: var(--color-text-muted); }
 .drummer-sound-loading > span { width: 14px; height: 14px; border: 2px solid var(--color-border); border-top-color: var(--color-indigo-700); border-radius: 50%; animation: drummer-sound-spin .8s linear infinite; }
 @keyframes drummer-sound-spin { to { transform: rotate(360deg); } }
 
-/* Keep native BPM entry above the software keyboard without panning the page. */
-.drummer-mode[data-tempo-editing="true"] { display: flex; flex-direction: column; }
-.drummer-mode[data-tempo-editing="true"] .drummer-left-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-.drummer-mode[data-tempo-editing="true"] .drummer-left-body { display: block; min-height: 0; flex: 1; overflow: hidden; }
-.drummer-mode[data-tempo-editing="true"] .drummer-workspace { display: block; min-height: 0; height: 100%; }
-.drummer-mode[data-tempo-editing="true"] .drummer-controls { min-height: 0; max-height: 100%; height: 100%; margin: 0; overflow-y: auto; }
-.drummer-mode[data-tempo-editing="true"] .drummer-console-layout { display: block; height: auto; }
-.drummer-mode[data-tempo-editing="true"] .drummer-current { display: contents; }
-.drummer-mode[data-tempo-editing="true"] .drummer-tempo { display: flex; width: 100%; max-width: 480px; margin: 4px auto; }
-.drummer-mode[data-tempo-editing="true"] .drummer-song-heading,
-.drummer-mode[data-tempo-editing="true"] .drummer-tempo-meta,
-.drummer-mode[data-tempo-editing="true"] .drummer-beats,
-.drummer-mode[data-tempo-editing="true"] .drummer-transport,
-.drummer-mode[data-tempo-editing="true"] .drummer-settings,
-.drummer-mode[data-tempo-editing="true"] .drummer-song-list,
-.drummer-mode[data-tempo-editing="true"] .drummer-score { display: none; }
 .drummer-mode[data-native-keyboard="true"] .drummer-midi-panel { max-height: 100%; }
 @media (prefers-reduced-motion: reduce) { .drummer-sound-loading > span { animation: none; } }
 
-/* Portrait phones reserve the full reset hit area above transport controls. */
-@media (max-width: 599px) and (orientation: portrait) {
-  .drummer-mode .drummer-tempo label {
-    display: grid; grid-template-columns: minmax(0, 1fr) 28px 44px minmax(0, 1fr);
-    grid-template-rows: auto 44px; align-items: center;
-  }
-  .drummer-mode .drummer-tempo input { grid-column: 1 / -1; grid-row: 1; }
-  .drummer-mode .drummer-tempo label > span:not(.sr-only) { grid-column: 2; grid-row: 2; }
-  .drummer-mode .drummer-reset-tempo {
-    position: static; grid-column: 3; grid-row: 2; width: 44px; height: 44px;
-  }
+html:has(.drummer-mode[data-stage="true"]) { overscroll-behavior-x: none; }
+.drummer-mode .drummer-metronome-settings { flex: 0 0 44px; width: 44px; padding: 8px; }
+.drummer-tempo-readout { user-select: none; -webkit-user-select: none; }
+.drummer-tempo-field { display: flex; align-items: center; gap: 8px; }
+.drummer-tempo-field label { flex: 1; }
+.drummer-tempo-field input { width: 7ch; min-height: 44px; padding: 4px; text-align: center; font-size: 16px; font-variant-numeric: tabular-nums; border: 1px solid var(--color-border); border-radius: 8px; }
+.drummer-tempo-field button { min-width: 44px; }
+@media (max-width: 599px) {
+  .drummer-header .drummer-midi-button span { display: none; }
 }

@@ -28,14 +28,14 @@ it('opens from the setlist using the arrangement tempo, then exits without chang
   const entry = (await screen.findAllByRole('button', { name: '鼓手模式' }))[0];
   fireEvent.click(entry);
   const dialog = await screen.findByRole('dialog', { name: '鼓手模式' });
-  expect(within(dialog).getByRole('textbox', { name: '節拍器速度 BPM' })).toHaveValue('92');
+  expect(within(dialog).getByRole('status', { name: '節拍器速度 BPM' })).toHaveTextContent('92');
   fireEvent.click(within(dialog).getByRole('button', { name: '增加 1 BPM' }));
-  expect(within(dialog).getByRole('textbox', { name: '節拍器速度 BPM' })).toHaveValue('93');
+  expect(within(dialog).getByRole('status', { name: '節拍器速度 BPM' })).toHaveTextContent('93');
   fireEvent.click(within(dialog).getByRole('button', { name: '退出鼓手模式' }));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: '鼓手模式' })).toBeNull());
   expect(document.querySelector<HTMLElement>('[data-app-root]')?.inert).toBe(false);
   fireEvent.click(entry);
-  expect(within(await screen.findByRole('dialog', { name: '鼓手模式' })).getByRole('textbox', { name: '節拍器速度 BPM' })).toHaveValue('92');
+  expect(within(await screen.findByRole('dialog', { name: '鼓手模式' })).getByRole('status', { name: '節拍器速度 BPM' })).toHaveTextContent('92');
   expect(fixture.setlists[0].songs[0].songData?.tempo).toBe(92);
 }, 15000);
 it('allows a joined read-only setlist to use the metronome without edit permissions', async () => {

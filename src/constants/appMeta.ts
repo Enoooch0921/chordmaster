@@ -85,6 +85,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-15',
+        title: 'Drummer touch controls',
+        bullets: ['The drummer BPM readout is touch-safe. Enter a tempo, reset it or change sounds in the toolbar settings. Swipe to turn chart pages and keep the stage and click running when the browser leaves fullscreen.']
+      },
+      {
+        version: '0.12.45',
         date: '2026-11-14',
         title: 'Personal playback preferences',
         bullets: ['Editors can also open playback from the chart toolbar. The reader and editor share playback range, metronome and melody preferences for each account on this device.']
@@ -1231,6 +1237,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-15',
+        title: '鼓手演出防誤觸',
+        bullets: ['鼓手模式的速度數字改為唯讀，手動 BPM、還原速度與音色集中到上方的節拍器設定。橫滑可在演出樂譜翻頁，瀏覽器退出全螢幕時會保留演出版面與節拍。']
+      },
+      {
+        version: '0.12.45',
         date: '2026-11-14',
         title: '記住個人試聽設定',
         bullets: ['編輯者也能從看譜工具列開啟試聽。播放範圍、節拍器與簡譜旋律的選擇會依帳號記在這台裝置，並在看譜和打譜時共用。']

@@ -1,7 +1,7 @@
 import { useLayoutEffect, type RefObject } from 'react';
 
 /** Fit the portalled drummer layer to the keyboard's visual viewport. */
-export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>, tempoRef: RefObject<HTMLInputElement | null>) {
+export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>) {
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -10,7 +10,7 @@ export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>, te
     const touch = /iPad|iPhone|iPod|Android/i.test(navigator.userAgent)
       || ((navigator.platform === 'MacIntel' || /Macintosh/i.test(navigator.userAgent)) && navigator.maxTouchPoints > 1)
       || Boolean(window.matchMedia?.('(pointer: coarse)').matches);
-    let frame = 0, session = false, sawKeyboard = false, tempoSession = false, restoreOffset = false;
+    let frame = 0, session = false, sawKeyboard = false, restoreOffset = false;
     let restingHeight = viewport?.height || window.innerHeight;
     const timers = new Set<number>();
     const resetDocument = () => {
@@ -31,14 +31,13 @@ export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>, te
         // The iPad keyboard's own dismiss button may not dispatch blur.
         if (sawKeyboard && focused) active.blur();
         resetDocument();
-        session = false; sawKeyboard = false; tempoSession = false; restoreOffset = true;
+        session = false; sawKeyboard = false; restoreOffset = true;
       }
       const top = restoreOffset && restored ? 0 : Math.max(0, viewport?.offsetTop ?? 0);
       root.style.top = `${top}px`;
       root.style.height = `${Math.max(1, Math.min(height, window.innerHeight - top))}px`;
       const keyboard = session && sawKeyboard && !restored;
       if (keyboard) root.dataset.nativeKeyboard = 'true'; else delete root.dataset.nativeKeyboard;
-      if (keyboard && tempoSession) root.dataset.tempoEditing = 'true'; else delete root.dataset.tempoEditing;
       if (!session && !restoreOffset) restingHeight = height;
       if (keyboard && focused) {
         // Scroll only the containing settings/control pane, not the document.
@@ -63,7 +62,7 @@ export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>, te
       const target = event.target;
       if (touch && target instanceof HTMLElement && root.contains(target) && target.matches('input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"]')) {
         if (!session) restingHeight = viewport?.height || window.innerHeight;
-        session = true; restoreOffset = false; tempoSession = target === tempoRef.current;
+        session = true; restoreOffset = false;
       }
       settle();
     };
@@ -82,7 +81,7 @@ export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>, te
       window.removeEventListener('orientationchange', settle);
       document.removeEventListener('fullscreenchange', settle); document.removeEventListener('webkitfullscreenchange', settle);
       root.style.top = previous.top; root.style.height = previous.height;
-      delete root.dataset.nativeKeyboard; delete root.dataset.tempoEditing;
+      delete root.dataset.nativeKeyboard;
     };
-  }, [rootRef, tempoRef]);
+  }, [rootRef]);
 }

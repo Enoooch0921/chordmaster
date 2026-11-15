@@ -12,9 +12,10 @@ vi.mock('../hooks/usePerformanceFullscreen', () => ({ usePerformanceFullscreen: 
 vi.mock('./ChordSheet', () => ({ default: ({ song, setlistSongNumber }: { song: Song; setlistSongNumber?: number }) => <div data-testid="chart" data-song-number={setlistSongNumber}>{song.title}{song.title === "雙頁" && <><div data-print-page>第一頁內容</div><div data-print-page>第二頁內容</div></>}</div> }));
 const song = (title: string, tempo?: number, timeSignature = '4/4'): Song => ({ title, tempo, timeSignature, originalKey: 'C', currentKey: 'C', sections: [] });
 const session: DrummerSession = { name: '測試歌單', initialId: 'a', entries: [{ id: 'a', song: song('第一首', 72) }, { id: 'b', song: song('第二首', 110) }, { id: 'c', song: song('未定速度') }, { id: 'd', song: song('第一首', 72) }] };
-const tempo = () => screen.getByRole('textbox', { name: '節拍器速度 BPM' });
-function openSoundSettings() { fireEvent.click(screen.getByRole('button', { name: /聲音與拍號 ·/ })); }
-function closeSoundSettings() { fireEvent.click(screen.getByRole('button', { name: '關閉聲音設定' })); }
+const tempo = () => screen.getByRole('status', { name: '節拍器速度 BPM' });
+const tempoInput = () => screen.getByRole('textbox', { name: '速度（BPM）' });
+function openSoundSettings() { fireEvent.click(screen.getByRole('button', { name: '節拍器設定' })); }
+function closeSoundSettings() { fireEvent.click(screen.getByRole('button', { name: '關閉節拍器設定' })); }
 function controlPointer(button: HTMLElement, type: 'pointerDown' | 'pointerUp' | 'pointerCancel' | 'lostPointerCapture', overrides: Record<string, unknown> = {}) {
   const event = createEvent[type](button, { bubbles: true, cancelable: true });
   Object.defineProperties(event, Object.fromEntries(Object.entries({ pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0, ...overrides }).map(([key, value]) => [key, { value }])));
@@ -60,7 +61,7 @@ describe('drummer session controls', () => {
     expect(audio.stop).toHaveBeenCalledOnce();
     expect(audio.start).not.toHaveBeenCalled();
     expect(songs().getByRole('button', { name: /^1 第一首/ })).toHaveAttribute('aria-current', 'true');
-    expect(tempo()).toHaveValue('72');
+    expect(tempo()).toHaveTextContent('72');
     audio.playing = false; refresh();
     activate();
     expect(audio.start).toHaveBeenCalledOnce();
@@ -161,7 +162,7 @@ describe('drummer session controls', () => {
     mount();
     expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ sound: 'drive', volume: 0.4 }));
     expect(audio.update.mock.lastCall?.[0]).not.toHaveProperty('mixWithOtherAudio');
-    fireEvent.click(screen.getByRole('button', { name: /聲音與拍號 ·/ }));
+    fireEvent.click(screen.getByRole('button', { name: '節拍器設定' }));
     expect(screen.queryByRole('combobox', { name: '音訊播放' })).toBeNull();
     expect(screen.queryByText('與其他 App 音樂混音')).toBeNull();
     expect(JSON.parse(localStorage.getItem('chordmaster.drummer-preferences.v1')!)).toEqual({ sound: 'drive', volume: 0.4, accent: 1, regular: 0.75, subdivisions: 0.4 });
@@ -182,7 +183,7 @@ describe('drummer session controls', () => {
     expect(fullscreen.exitFullscreen).toHaveBeenCalledOnce();
     expect(screen.getByRole('dialog', { name: '鼓手模式' })).toHaveAttribute('data-stage', 'false');
     fireEvent.click(songs().getByRole('button', { name: /1 第一首/ }));
-    expect(tempo()).toHaveValue('73');
+    expect(tempo()).toHaveTextContent('73');
   });
   it('closes the note picker before leaving live mode, and leaves the drummer session open', () => {
     mount();
@@ -233,7 +234,7 @@ describe('drummer session controls', () => {
   it.each(['playing', 'starting'] as const)('restarts with the selected samples while %s', state => {
     audio[state] = true;
     mount();
-    fireEvent.click(screen.getByRole('button', { name: /聲音與拍號/ }));
+    fireEvent.click(screen.getByRole('button', { name: '節拍器設定' }));
     const sound = screen.getByLabelText('音色');
     expect(sound).toBeEnabled();
     fireEvent.change(sound, { target: { value: 'drive' } });
@@ -258,7 +259,7 @@ describe('drummer session controls', () => {
     let resolve!: (result: boolean) => void;
     audio.start.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
     mount();
-    fireEvent.click(screen.getByRole('button', { name: /聲音與拍號/ }));
+    fireEvent.click(screen.getByRole('button', { name: '節拍器設定' }));
     fireEvent.change(screen.getByLabelText('音色'), { target: { value: 'drive' } });
     expect(screen.getByRole('progressbar', { name: '準備音色' })).toBeInTheDocument();
     expect(audio.start.mock.calls.at(-1)?.[1]).toEqual({ quiet: true, fallbackSound: 'ableton-classic' });
@@ -282,7 +283,7 @@ describe('drummer session controls', () => {
     expect(songs().getByRole('button', { name: /1 第一首/ })).toHaveAttribute('aria-current', 'true');
     expect(screen.queryByText('目前')).not.toBeInTheDocument();
     expect(screen.queryByText('播放中')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /聲音與拍號/ }));
+    fireEvent.click(screen.getByRole('button', { name: '節拍器設定' }));
     fireEvent.change(screen.getByLabelText('音色'), { target: { value: 'drive' } });
     expect(audio.start).not.toHaveBeenCalled();
   });
@@ -336,12 +337,12 @@ describe('drummer session controls', () => {
     const original = JSON.stringify(session);
     mount();
     fireEvent.click(screen.getByRole('button', { name: '增加 1 BPM' }));
-    expect(tempo()).toHaveValue('73');
+    expect(tempo()).toHaveTextContent('73');
     fireEvent.click(songs().getByRole('button', { name: /4 第一首/ }));
-    expect(tempo()).toHaveValue('72');
+    expect(tempo()).toHaveTextContent('72');
     expect(audio.start).toHaveBeenCalledWith(expect.objectContaining({ bpm: 72, beats: 4 }));
     fireEvent.click(songs().getByRole('button', { name: /1 第一首/ }));
-    expect(tempo()).toHaveValue('73');
+    expect(tempo()).toHaveTextContent('73');
     expect(JSON.stringify(session)).toBe(original);
     expect(localStorage.getItem('chordmaster.drummer-preferences.v1')).not.toContain('73');
   });
@@ -353,24 +354,26 @@ describe('drummer session controls', () => {
     expect(screen.queryByRole('button', { name: /切換下一首/ })).not.toBeInTheDocument();
     expect(audio.stop).not.toHaveBeenCalled();
     expect(audio.start).toHaveBeenCalledWith(expect.objectContaining({ bpm: 110, beats: 4 }));
-    expect(tempo()).toHaveValue('110');
+    expect(tempo()).toHaveTextContent('110');
   });
   it('stops at a song without BPM rather than carrying over the previous song tempo', () => {
     audio.playing = true;
     mount();
     fireEvent.click(songs().getByRole('button', { name: /3 未定速度/ }));
     expect(audio.stop).toHaveBeenCalledOnce(); expect(audio.start).not.toHaveBeenCalled();
-    expect(tempo()).toHaveValue('');
+    expect(tempo()).toHaveTextContent('—');
   });
   it('requires a valid BPM and confirmed meter, accepts manual entry and TAP', () => {
     mount({ ...session, initialId: 'c' });
     expect(screen.getByRole('button', { name: '播放' })).toBeDisabled();
-    fireEvent.change(tempo(), { target: { value: '999' } }); fireEvent.blur(tempo());
-    expect(tempo()).toHaveAttribute('aria-invalid', 'true');
+    openSoundSettings();
+    fireEvent.change(tempoInput(), { target: { value: '999' } }); fireEvent.blur(tempoInput());
+    expect(tempoInput()).toHaveAttribute('aria-invalid', 'true');
+    closeSoundSettings();
     expect(screen.getByRole('button', { name: '播放' })).toBeDisabled();
     const tap = screen.getByRole('button', { name: 'TAP 點按測速' });
     for (let i = 0; i < 4; i++) { const event = createEvent.click(tap); Object.defineProperty(event, 'timeStamp', { value: (i + 1) * 500 }); fireEvent(tap, event); }
-    expect(tempo()).toHaveValue('120');
+    expect(tempo()).toHaveTextContent('120');
     fireEvent.click(screen.getByRole('button', { name: '播放' }));
     expect(audio.start).toHaveBeenCalledWith(expect.objectContaining({ bpm: 120 }));
   });
@@ -396,7 +399,9 @@ describe('drummer session controls', () => {
   it('does not pass editor shortcuts through the overlay, but supports Enter in the tempo field', () => {
     mount();
     const keydown = vi.fn(); window.addEventListener('keydown', keydown);
-    fireEvent.change(tempo(), { target: { value: '98' } }); fireEvent.keyDown(tempo(), { key: 'Enter' });
+    openSoundSettings();
+    fireEvent.change(tempoInput(), { target: { value: '98' } }); fireEvent.keyDown(tempoInput(), { key: 'Enter' });
+    closeSoundSettings();
     fireEvent.click(screen.getByRole('button', { name: '播放' }));
     expect(audio.start).toHaveBeenCalledWith(expect.objectContaining({ bpm: 98 }));
     expect(keydown).not.toHaveBeenCalled();
@@ -404,10 +409,11 @@ describe('drummer session controls', () => {
   });
   it('retains native decimal precision without truncating pasted values or showing a custom keypad', () => {
     mount();
-    fireEvent.focus(tempo());
-    fireEvent.change(tempo(), { target: { value: '128.56' } });
-    expect(tempo()).toHaveValue('128.56');
-    fireEvent.blur(tempo());
+    openSoundSettings();
+    fireEvent.focus(tempoInput());
+    fireEvent.change(tempoInput(), { target: { value: '128.56' } });
+    expect(tempoInput()).toHaveValue('128.56');
+    fireEvent.blur(tempoInput());
     expect(audio.update.mock.lastCall?.[0]).toEqual(expect.objectContaining({ bpm: 128.56 }));
     expect(screen.queryByRole('dialog', { name: '設定速度' })).not.toBeInTheDocument();
   });
@@ -417,15 +423,15 @@ it('uses previous/next to start songs directly and disables setlist boundaries',
   mount();
   expect(screen.getByRole('button', { name: '上一首' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: '下一首' }));
-  expect(tempo()).toHaveValue('110'); expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ bpm: 110 }));
+  expect(tempo()).toHaveTextContent('110'); expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ bpm: 110 }));
   expect(songs().getByRole('button', { name: /2 第二首/ })).toHaveAttribute('aria-current', 'true');
-  fireEvent.click(screen.getByRole('button', { name: '上一首' })); expect(tempo()).toHaveValue('72');
+  fireEvent.click(screen.getByRole('button', { name: '上一首' })); expect(tempo()).toHaveTextContent('72');
   fireEvent.click(songs().getByRole('button', { name: /4 第一首/ })); expect(screen.getByRole('button', { name: '下一首' })).toBeDisabled();
 });
 it('closes sound settings before leaving live mode and restores trigger focus', async () => {
   mount(); fireEvent.click(screen.getByRole('button', { name: '演出模式' }));
-  const trigger = screen.getByRole('button', { name: /聲音與拍號 ·/ }); fireEvent.click(trigger);
-  await waitFor(() => expect(screen.getByRole('dialog', { name: '聲音與拍號' })).toBeVisible());
+  const trigger = screen.getByRole('button', { name: '節拍器設定' }); fireEvent.click(trigger);
+  await waitFor(() => expect(screen.getByRole('dialog', { name: '節拍器設定' })).toBeVisible());
   expect(screen.queryByRole('button', { name: '下一首' })).not.toBeInTheDocument();
   fireEvent.keyDown(window, { key: 'Escape' });
   expect(trigger).toHaveFocus(); expect(fullscreen.exitFullscreen).not.toHaveBeenCalled();
@@ -441,7 +447,7 @@ it('captures TAP on press without a duplicate on release/click', () => {
     expect(tap).not.toHaveAttribute('data-control-pressed');
     fireEvent.click(tap, { detail: 1 });
   }
-  expect(tempo()).toHaveValue('120'); expect(tap).toHaveTextContent('3 次');
+  expect(tempo()).toHaveTextContent('120'); expect(tap).toHaveTextContent('3 次');
   expect(audio.start).not.toHaveBeenCalled();
   expect(audio.prepare).not.toHaveBeenCalled();
 });
@@ -507,15 +513,15 @@ it('applies rapid MIDI tempo ticks cumulatively and routes song presses through 
   await act(async()=>fireEvent.click(screen.getByRole('button',{name:'連接控制器'})));
   act(()=>events.message({deviceId:'one',data:[0xb0,16,1],timestamp:1000}));
   fireEvent.click(screen.getByRole('button',{name:'關閉 MIDI 設定'}));
-  expect(tempo()).toHaveValue('72');
+  expect(tempo()).toHaveTextContent('72');
   act(()=>{for(let i=0;i<3;i++)events.message({deviceId:'one',data:[0xb0,16,1],timestamp:1100+i});});
-  expect(tempo()).toHaveValue('75');
+  expect(tempo()).toHaveTextContent('75');
   act(()=>{ events.message({deviceId:'one',data:[0x90,40,100],timestamp:1150}); events.message({deviceId:'one',data:[0x90,40,100],timestamp:1160}); });
-  expect(tempo()).toHaveValue('76');
+  expect(tempo()).toHaveTextContent('76');
   act(()=>events.message({deviceId:'one',data:[0x90,41,100],timestamp:1170}));
-  expect(tempo()).toHaveValue('75');
+  expect(tempo()).toHaveTextContent('75');
   act(()=>events.message({deviceId:'one',data:[0x90,39,100],timestamp:1200}));
-  expect(tempo()).toHaveValue('110');expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({bpm:110}));
+  expect(tempo()).toHaveTextContent('110');expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({bpm:110}));
   act(()=>{events.message({deviceId:'one',data:[0x80,39,0],timestamp:1300});events.message({deviceId:'one',data:[0x90,39,100],timestamp:1400});events.message({deviceId:'one',data:[0x80,39,0],timestamp:1450});events.message({deviceId:'one',data:[0x90,39,100],timestamp:1500});});
   expect(songs().getByRole('button',{name:/4 第一首/})).toHaveAttribute('aria-current','true');
 });
@@ -532,7 +538,7 @@ it('turns live chart pages without changing the song or click and returns to pag
   expect(screen.getByText('第一頁內容')).toHaveAttribute('aria-hidden','true');
   expect(screen.queryByRole('button',{name:'下一頁樂譜'})).not.toBeInTheDocument();
   expect(screen.getByText('第二頁內容')).not.toHaveAttribute('aria-hidden');
-  expect(audio.start).not.toHaveBeenCalled(); expect(tempo()).toHaveValue('72');
+  expect(audio.start).not.toHaveBeenCalled(); expect(tempo()).toHaveTextContent('72');
   fireEvent.click(screen.getByRole('button',{name:'一般模式'}));
   expect(screen.getByText('第一頁內容')).not.toHaveAttribute('aria-hidden');
   fireEvent.click(screen.getByRole('button',{name:'演出模式'}));
@@ -552,20 +558,27 @@ it('sets an inactive song subdivision from the list without playback or changing
   expect(control).toHaveFocus();
   fireEvent.click(control);
   fireEvent.click(screen.getByRole('menuitemradio',{name:'八分'}));
-  expect(audio.start).not.toHaveBeenCalled(); expect(tempo()).toHaveValue('72');
+  expect(audio.start).not.toHaveBeenCalled(); expect(tempo()).toHaveTextContent('72');
   fireEvent.click(songs().getByRole('button',{name:/2 第二首/}));
   expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({subdivision:2,bpm:110}));
 });
 
-it('restores the original tempo from a permanent control and shows no missing-tempo spacer', () => {
+it('keeps the BPM display inert and restores the original tempo inside settings', () => {
   mount();
-  const reset = screen.getByRole('button',{name:'還原速度'});
-  expect(reset).toBeDisabled();
-  fireEvent.click(screen.getByRole('button',{name:'增加 1 BPM'}));
-  expect(reset).toBeEnabled(); fireEvent.click(reset); expect(tempo()).toHaveValue('72');
-  fireEvent.click(songs().getByRole('button',{name:/3 未定速度/}));
-  expect(screen.queryByText('這首歌未設定速度。輸入 BPM 或用 TAP 點按測速。')).not.toBeInTheDocument();
-  expect(reset).toBeDisabled();
+  fireEvent.click(tempo());
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('音色')).not.toBeInTheDocument();
+  openSoundSettings();
+  expect(screen.getByRole('button', { name: '還原速度' })).toBeDisabled();
+  closeSoundSettings();
+  fireEvent.click(screen.getByRole('button', { name: '增加 1 BPM' }));
+  openSoundSettings();
+  fireEvent.click(screen.getByRole('button', { name: '還原速度' }));
+  expect(tempoInput()).toHaveValue('72');
+  closeSoundSettings();
+  fireEvent.click(songs().getByRole('button', { name: /3 未定速度/ }));
+  openSoundSettings();
+  expect(screen.getByRole('button', { name: '還原速度' })).toBeDisabled();
 });
 
 
@@ -579,10 +592,10 @@ it('shows immediate press feedback for all mapped keys without delaying their ac
     saveKeyboardControls(); mount();
     const up = screen.getByRole('button',{name:'增加 1 BPM'});
     fireEvent.keyDown(window,{code:'KeyU'});
-    expect(tempo()).toHaveValue('73'); expect(up).toHaveAttribute('data-control-pressed','true');
+    expect(tempo()).toHaveTextContent('73'); expect(up).toHaveAttribute('data-control-pressed','true');
     act(()=>vi.advanceTimersByTime(60));
     fireEvent.keyDown(window,{code:'KeyU',repeat:true});
-    expect(tempo()).toHaveValue('74');
+    expect(tempo()).toHaveTextContent('74');
     act(()=>vi.advanceTimersByTime(60));
     expect(up).toHaveAttribute('data-control-pressed','true');
     act(()=>vi.advanceTimersByTime(40));
@@ -599,8 +612,10 @@ it('shows immediate press feedback for all mapped keys without delaying their ac
 });
 it('keeps feedback off for protected input/settings and disabled controls, and supports focused TAP', () => {
   saveKeyboardControls(); const rendered = mount();
-  fireEvent.keyDown(tempo(),{code:'KeyU'});
-  expect(tempo()).toHaveValue('72'); expect(document.querySelector('[data-control-pressed]')).toBeNull();
+  openSoundSettings();
+  fireEvent.keyDown(tempoInput(),{code:'KeyU'});
+  closeSoundSettings();
+  expect(tempo()).toHaveTextContent('72'); expect(document.querySelector('[data-control-pressed]')).toBeNull();
   fireEvent.keyDown(window,{code:'KeyL'});
   expect(screen.getByRole('button',{name:'上一首'})).not.toHaveAttribute('data-control-pressed');
   fireEvent.click(screen.getByRole('button',{name:'設定 MIDI 控制器'}));
@@ -613,34 +628,51 @@ it('keeps feedback off for protected input/settings and disabled controls, and s
   rendered.unmount();
   expect(tap).not.toHaveAttribute('data-control-pressed');
 });
-it('explicitly exits existing fullscreen and follows a browser-driven fullscreen exit', () => {
-  fullscreen.isFullscreen = true;
-  const rendered = mount();
-  fireEvent.click(screen.getByRole('button',{name:'演出模式'}));
-  fireEvent.click(screen.getByRole('button',{name:'一般模式'}));
-  expect(fullscreen.exitFullscreen).toHaveBeenLastCalledWith(true);
-  fireEvent.click(screen.getByRole('button',{name:'演出模式'}));
+it('keeps the stage and playback after browser fullscreen ends and offers re-entry', () => {
+  fullscreen.isFullscreen = true; fullscreen.canRequestFullscreen = true;
+  audio.playing = true;
+  const view = mount();
+  fireEvent.click(screen.getByRole('button', {name:'演出模式'}));
   fullscreen.isFullscreen = false;
-  rendered.rerender(<DrummerMode {...session} language="zh" onClose={vi.fn()}/>);
-  expect(screen.getByRole('dialog',{name:'鼓手模式'})).toHaveAttribute('data-stage','false');
-  expect(screen.getByRole('button',{name:'演出模式'})).toBeInTheDocument();
+  view.rerender(<DrummerMode {...session} language="zh" onClose={vi.fn()}/>);
+  expect(screen.getByRole('dialog', {name:'鼓手模式'})).toHaveAttribute('data-stage', 'true');
+  expect(audio.stop).not.toHaveBeenCalled();
+  expect(fullscreen.exitFullscreen).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', {name:'進入全螢幕'}));
+  expect(fullscreen.requestFullscreen).toHaveBeenCalledTimes(2);
+  fullscreen.canRequestFullscreen = false;
 });
 
-it('exits fullscreen on primary press and consumes the trailing click without re-entry', () => {
-  fullscreen.isFullscreen = true;
-  mount();
-  fireEvent.click(screen.getByRole('button', { name: '演出模式' }));
-  const toggle = screen.getByRole('button', { name: '一般模式' });
-  fireEvent(toggle, new MouseEvent('pointerdown', { button: 2, bubbles: true }));
+it('contains horizontal navigation in the stage and turns one chart page per trackpad swipe', () => {
+  mount({...session, entries:[{id:'a', song:song('雙頁',72)}]});
+  fireEvent.click(screen.getByRole('button', {name:'演出模式'}));
+  const chart = screen.getByLabelText('翻頁樂譜');
+  fireEvent.touchStart(chart, { touches: [{clientX:100,clientY:20}] });
+  expect(fireEvent.touchMove(chart, { touches: [{clientX:50,clientY:22}] })).toBe(false);
+  expect(fireEvent.touchMove(chart, { touches: [{clientX:96,clientY:80}] })).toBe(true);
+  expect(fireEvent.touchMove(chart, { touches: [{clientX:50,clientY:22}, {clientX:130,clientY:24}] })).toBe(true);
+  expect(fireEvent.wheel(chart, {deltaX:60,deltaY:2})).toBe(false);
+  expect(screen.getByText('第二頁內容')).toHaveAttribute('data-drummer-page-active','true');
+  fireEvent.wheel(chart, {deltaX:-80,deltaY:0});
+  expect(screen.getByText('第二頁內容')).toHaveAttribute('data-drummer-page-active','true');
+  expect(fireEvent.wheel(chart, {deltaX:0,deltaY:40})).toBe(true);
+  expect(fireEvent.wheel(chart, {deltaX:80,deltaY:0,ctrlKey:true})).toBe(true);
   expect(fullscreen.exitFullscreen).not.toHaveBeenCalled();
-  fireEvent(toggle, new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+});
+
+it('leaves the stage on a completed tap, while a drag starting on its toggle stays in performance', () => {
+  mount();
+  fireEvent.click(screen.getByRole('button', {name:'演出模式'}));
+  const toggle = screen.getByRole('button', {name:'一般模式'});
+  controlPointer(toggle, 'pointerDown', {clientX:80,clientY:20});
+  fireEvent(toggle, new MouseEvent('pointermove', {clientX:35,clientY:22,bubbles:true}));
+  controlPointer(toggle, 'pointerUp', {clientX:35,clientY:22});
+  fireEvent.click(toggle, { detail: 1 });
+  expect(fullscreen.exitFullscreen).not.toHaveBeenCalled();
+  controlPointer(toggle, 'pointerDown', {clientX:80,clientY:20});
+  controlPointer(toggle, 'pointerUp', {clientX:80,clientY:20});
+  fireEvent.click(toggle, { detail: 1 });
   expect(fullscreen.exitFullscreen).toHaveBeenCalledWith(true);
-  expect(screen.getByRole('dialog', { name: '鼓手模式' })).toHaveAttribute('data-stage', 'false');
-  fireEvent.click(toggle, { detail: 1 });
-  expect(fullscreen.requestFullscreen).toHaveBeenCalledOnce();
-  fireEvent(toggle, new MouseEvent('pointerdown', { button: 0, bubbles: true }));
-  fireEvent.click(toggle, { detail: 1 });
-  expect(fullscreen.requestFullscreen).toHaveBeenCalledTimes(2);
 });
 
 it('maps chart pages independently from songs and clamps page boundaries without disturbing playback', () => {
@@ -657,7 +689,7 @@ it('maps chart pages independently from songs and clamps page boundaries without
   expect(screen.getByText('第二頁內容')).not.toHaveAttribute('aria-hidden');
   pageKey('PageUp'); pageKey('PageUp');
   expect(screen.getByText('第一頁內容')).not.toHaveAttribute('aria-hidden');
-  expect(tempo()).toHaveValue('72');
+  expect(tempo()).toHaveTextContent('72');
   expect(audio.start).not.toHaveBeenCalled(); expect(audio.stop).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '設定 MIDI 控制器' }));
   expect(screen.getByRole('button', { name: '設定鍵盤樂譜上一頁' })).toBeInTheDocument();
@@ -678,16 +710,16 @@ it('receives live song/key/order changes without retiming the active click, then
   expect(songs().getByRole('button', { name: /^2 第一首更新/ })).toHaveAttribute('aria-current', 'true');
   expect(songs().getByRole('button', { name: /^3 手機新加入/ })).toBeInTheDocument();
   expect(screen.getByTestId('chart')).toHaveTextContent('第一首更新');
-  expect(tempo()).toHaveValue('72');
+  expect(tempo()).toHaveTextContent('72');
   expect(audio.update.mock.calls.every(([value]) => value.bpm === 72 && value.beats === 4)).toBe(true);
   expect(audio.start).not.toHaveBeenCalled(); expect(audio.stop).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '增加 1 BPM' }));
-  expect(tempo()).toHaveValue('73');
+  expect(tempo()).toHaveTextContent('73');
   // A local tempo adjustment remains a session preference across remote edits.
   fireEvent.click(screen.getByRole('button', { name: '停止' }));
   audio.playing = false;
   view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
-  expect(tempo()).toHaveValue('73');
+  expect(tempo()).toHaveTextContent('73');
   expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({ bpm: 73, beats: 3 }));
   fireEvent.click(songs().getByRole('button', { name: /^3 手機新加入/ }));
   expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({ bpm: 88, beats: 4 }));
@@ -699,14 +731,14 @@ it('keeps a remotely removed playing song until stop, then selects a surviving e
   audio.playing = true;
   const remote = { ...session, entries: [session.entries[1]] };
   view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
-  expect(tempo()).toHaveValue('72');
+  expect(tempo()).toHaveTextContent('72');
   expect(screen.getByTestId('chart')).toHaveTextContent('第一首');
   expect(songs().queryByRole('button', { name: /第一首/ })).toBeNull();
   audio.start.mockClear();
   fireEvent.click(screen.getByRole('button', { name: '停止' }));
   audio.playing = false;
   view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
-  expect(tempo()).toHaveValue('110');
+  expect(tempo()).toHaveTextContent('110');
   expect(audio.start).not.toHaveBeenCalled();
   view.rerender(<DrummerMode {...remote} entries={[]} language="zh" onClose={vi.fn()}/>);
   expect(screen.getByText('這份歌單還沒有可播放的歌曲。')).toBeInTheDocument();
@@ -719,11 +751,11 @@ it('applies an incoming tempo after stopping when the drummer has not overridden
   const remote = { ...session, entries: session.entries.map(entry => entry.id === 'a'
     ? { ...entry, song: { ...entry.song, tempo: 140 } } : entry) };
   view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
-  expect(tempo()).toHaveValue('72');
+  expect(tempo()).toHaveTextContent('72');
   fireEvent.click(screen.getByRole('button', { name: '停止' }));
   audio.playing = false;
   view.rerender(<DrummerMode {...remote} language="zh" onClose={vi.fn()}/>);
-  expect(tempo()).toHaveValue('140');
+  expect(tempo()).toHaveTextContent('140');
 });
 
 
@@ -784,7 +816,7 @@ it('does not paginate hidden phone charts when selecting songs; opens only the s
   mount();
   expect(screen.queryByTestId('chart')).not.toBeInTheDocument();
   fireEvent.click(songs().getByRole('button', { name: /^2 第二首/ }));
-  expect(tempo()).toHaveValue('110');
+  expect(tempo()).toHaveTextContent('110');
   expect(screen.queryByTestId('chart')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '樂譜' }));
   expect(screen.getByTestId('chart')).toHaveTextContent('第二首');
@@ -825,11 +857,12 @@ it('keeps config effects from replacing a pending song start and applies the lat
   expect(audio.update).toHaveBeenCalledWith(expect.objectContaining({ bpm: 111 }));
 });
 it('rejects a pasted BPM range without modifying the current tempo or truncating the draft', () => {
-  mount(); audio.update.mockClear();
-  fireEvent.change(tempo(), { target: { value: '100–120' } });
-  fireEvent.blur(tempo());
-  expect(tempo()).toHaveValue('100–120'); expect(tempo()).toHaveAttribute('aria-invalid', 'true');
+  mount(); openSoundSettings(); audio.update.mockClear();
+  fireEvent.change(tempoInput(), { target: { value: '100–120' } });
+  fireEvent.blur(tempoInput());
+  expect(tempoInput()).toHaveValue('100–120'); expect(tempoInput()).toHaveAttribute('aria-invalid', 'true');
   expect(audio.update).not.toHaveBeenCalled();
+  closeSoundSettings();
   expect(songs().getByRole('button', { name: /^1 第一首/ })).toHaveAccessibleName(/72 BPM/);
 });
 

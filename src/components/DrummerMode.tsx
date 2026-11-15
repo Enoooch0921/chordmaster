@@ -228,7 +228,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   const [stage, setStage] = useState(false);
   const chartVisible = useDrummerChartVisibility(view, stage);
   const stageActive = useRef(false);
-  const stagePointerExit = useRef(false);
+  const stageSwipe = useRef<{ x: number; y: number; dragged: boolean } | null>(null);
   const scoreControls = useRef<DrummerScoreControls>(null);
   const fullscreen = usePerformanceFullscreen();
   const exitStage = useCallback(() => {
@@ -242,12 +242,6 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     setView('songs');
     fullscreen.requestFullscreen();
   };
-  const hadStageFullscreen = useRef(false);
-  useEffect(() => {
-    if (!stage) { hadStageFullscreen.current = false; return; }
-    if (fullscreen.isFullscreen) hadStageFullscreen.current = true;
-    else if (hadStageFullscreen.current) exitStage();
-  }, [stage, fullscreen.isFullscreen, exitStage]);
   const [tapCount, setTapCount] = useState(0);
   const taps = useRef(new DrummerTapTempo());
   const songList = useRef<HTMLDivElement>(null);
@@ -287,8 +281,49 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     document.addEventListener('visibilitychange', clear);
     return () => { clear(); window.removeEventListener('blur', clear); document.removeEventListener('visibilitychange', clear); };
   }, []);
-  const tempoInput = useRef<HTMLInputElement>(null);
-  useDrummerViewport(dialog, tempoInput);
+  useEffect(() => {
+    const root = dialog.current;
+    if (!stage || !root) return;
+    // Keep horizontal swipes in the stage while preserving vertical scrolling,
+    // native settings controls, and multi-touch zoom.
+    let start: { x: number; y: number } | null = null;
+    const begin = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      start = event.touches.length === 1 && !(event.target instanceof Element && event.target.closest('.drummer-midi-backdrop'))
+        ? { x: touch.clientX, y: touch.clientY } : null;
+    };
+    const move = (event: TouchEvent) => {
+      if (!start || event.touches.length !== 1 || !event.cancelable) return;
+      const dx = Math.abs(event.touches[0].clientX - start.x);
+      const dy = Math.abs(event.touches[0].clientY - start.y);
+      if (dx > 6 && dx > dy * 1.5) event.preventDefault();
+    };
+    let lastWheel = -Infinity, wheelDistance = 0, pageTurned = false;
+    const wheel = (event: WheelEvent) => {
+      const target = event.target;
+      if (!event.cancelable || event.ctrlKey || Math.abs(event.deltaX) <= Math.abs(event.deltaY) * 1.5
+          || !(target instanceof Element) || target.closest('.drummer-midi-backdrop')) return;
+      event.preventDefault();
+      if (!target.closest('.drummer-score-scroll')) return;
+      if (event.timeStamp - lastWheel > 200) { wheelDistance = 0; pageTurned = false; }
+      lastWheel = event.timeStamp;
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? root.clientWidth : 1;
+      wheelDistance += event.deltaX * unit;
+      if (!pageTurned && Math.abs(wheelDistance) >= 48) {
+        scoreControls.current?.turnPage(Math.sign(wheelDistance));
+        pageTurned = true;
+      }
+    };
+    root.addEventListener('touchstart', begin, { passive: true });
+    root.addEventListener('touchmove', move, { passive: false });
+    root.addEventListener('wheel', wheel, { passive: false });
+    return () => {
+      root.removeEventListener('touchstart', begin);
+      root.removeEventListener('touchmove', move);
+      root.removeEventListener('wheel', wheel);
+    };
+  }, [stage]);
+  useDrummerViewport(dialog);
   const click = useMetronome();
   const requestClose = useCallback(() => { click.stop(); fullscreen.exitFullscreen(stageActive.current); onClose(closeInstant.current); }, [click.stop, fullscreen.exitFullscreen, onClose]);
   const activeIndex = entries.findIndex(entry => entry.id === activeId);
@@ -554,6 +589,18 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   if (!active) return createPortal(<div ref={dialog} className="drummer-mode" role="dialog" aria-modal="true" aria-label={t('鼓手模式', 'Drummer mode')}><p>{t('這份歌單還沒有可播放的歌曲。', 'This setlist has no songs.')}</p><button onClick={() => requestClose()}>{t('返回歌單', 'Back to setlist')}</button></div>, document.body);
 
   return createPortal(<div ref={dialog} className="drummer-mode" role="dialog" aria-modal="true" aria-labelledby="drummer-title" data-drummer-mode data-stage={stage} data-fullscreen={fullscreen.isFullscreen} data-view={view}
+    onPointerDownCapture={event => {
+      stageSwipe.current = stage && event.isPrimary !== false ? { x: event.clientX, y: event.clientY, dragged: false } : null;
+    }}
+    onPointerMoveCapture={event => {
+      const start = stageSwipe.current;
+      if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) start.dragged = true;
+    }}
+    onPointerCancelCapture={() => { if (stageSwipe.current) stageSwipe.current.dragged = true; }}
+    onClickCapture={event => {
+      if (event.detail > 0 && stageSwipe.current?.dragged) { event.preventDefault(); event.stopPropagation(); }
+      stageSwipe.current = null;
+    }}
     onKeyDownCapture={event => {
       if (event.repeat || !['Enter', ' '].includes(event.key)) return;
       const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button[data-drummer-action]') : null;
@@ -563,20 +610,12 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     <header className="drummer-header" inert={midiOpen || soundOpen} aria-hidden={midiOpen || soundOpen || undefined}>
       <button onClick={requestClose} aria-label={t('退出鼓手模式', 'Exit drummer mode')}><ChevronLeft size={20}/><span>{t('退出', 'Exit')}</span></button>
       <div><h1 id="drummer-title">{t('鼓手模式', 'Drummer mode')}</h1><p>{name}</p></div>
+      <button ref={soundTrigger} className="drummer-metronome-settings" aria-label={t('節拍器設定', 'Metronome settings')} title={t('節拍器設定', 'Metronome settings')} aria-haspopup="dialog" onClick={() => {
+        setDraft(bpm?.toString() ?? ''); setInvalidTempo(false); setSubdivisionOpen(false); setSoundOpen(true);
+      }}><Settings2 size={20} aria-hidden="true"/></button>
       <button ref={midiTrigger} className="drummer-midi-button" aria-label={t('設定 MIDI 控制器', 'MIDI controller settings')} aria-haspopup="dialog" data-connected={midi.source === 'keyboard' ? Object.keys(midi.keyboard).length > 0 : Boolean(midi.selectedId)} onClick={() => { setSubdivisionOpen(false); setMidiOpen(true); }}><Cable size={18}/><span>MIDI</span></button>
       {stage && !fullscreen.isFullscreen && fullscreen.canRequestFullscreen && <button className="drummer-fullscreen-retry" onClick={fullscreen.requestFullscreen} aria-label={t('進入全螢幕', 'Enter fullscreen')}><Maximize size={18}/><span>{t('全螢幕', 'Fullscreen')}</span></button>}
-      <button className="drummer-stage-toggle"
-        onPointerDown={event => {
-          if (event.button !== 0 || event.isPrimary === false) return;
-          stagePointerExit.current = stage;
-          // Leaving fullscreen can move the button before pointerup. Exit on
-          // press, and consume that gesture's click rather than re-entering.
-          if (stage) { event.preventDefault(); exitStage(); }
-        }}
-        onClick={event => {
-          if (event.detail > 0 && stagePointerExit.current) { stagePointerExit.current = false; return; }
-          (stage ? exitStage : enterStage)();
-        }} aria-pressed={stage} aria-label={stage ? t('一般模式', 'Standard mode') : t('演出模式', 'Performance mode')}>
+      <button className="drummer-stage-toggle" onClick={stage ? exitStage : enterStage} aria-pressed={stage} aria-label={stage ? t('一般模式', 'Standard mode') : t('演出模式', 'Performance mode')}>
         {stage ? <Minimize size={18}/> : <Maximize size={18}/>}<span>{stage ? t('一般模式', 'Standard') : t('演出模式', 'Performance mode')}</span>
       </button>
       <div className="drummer-view-switch" aria-label={t('檢視方式', 'View')}>
@@ -615,8 +654,11 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
           </div>
           <div className="drummer-tempo">
             <button data-drummer-action="tempoDown" aria-label={t('減少 1 BPM', 'Decrease 1 BPM')} disabled={bpm === undefined || bpm <= 20} onClick={() => adjustTempo(-1)}><Minus size={24}/></button>
-            <label><input ref={tempoInput} aria-label={t('節拍器速度 BPM', 'Metronome tempo BPM')} aria-describedby="drummer-beat-unit" style={{ '--tempo-digits': Math.max(3, Math.min(6, draft.length)) } as React.CSSProperties} inputMode="decimal" autoComplete="off" value={draft} placeholder="—" aria-invalid={invalidTempo || undefined}
-              onFocus={event => event.currentTarget.select()} onChange={event => { const next = sanitizeTempoInput(event.target.value); setDraft(next); setInvalidTempo(!isValidTempoDraft(next)); }} onBlur={commitTempo} onKeyDown={event => { if (event.key === 'Enter') { commitTempo(); event.currentTarget.blur(); } }}/><span>BPM</span><button className="drummer-reset-tempo" aria-label={t('還原速度', 'Reset tempo')} title={isPlayableTempo(active.song.tempo) ? `${t('還原速度', 'Reset tempo')} · ${active.song.tempo} BPM` : t('未設定原始速度', 'No original tempo')} disabled={!isPlayableTempo(active.song.tempo) || bpm === active.song.tempo} onClick={event => {event.preventDefault(); if (isPlayableTempo(active.song.tempo)) setTempo(active.song.tempo!);}}><RotateCcw size={16}/></button><span id="drummer-beat-unit" className="sr-only">{t('BPM 計拍單位：', 'BPM beat unit: ')}{beatUnit}</span></label>
+            <div className="drummer-tempo-readout">
+              <output aria-label={t('節拍器速度 BPM', 'Metronome tempo BPM')} aria-describedby="drummer-beat-unit" style={{ '--tempo-digits': Math.max(3, String(bpm ?? '').length) } as React.CSSProperties}>{bpm ?? '—'}</output>
+              <span aria-hidden="true">BPM</span>
+              <span id="drummer-beat-unit" className="sr-only">{t('BPM 計拍單位：', 'BPM beat unit: ')}{beatUnit}</span>
+            </div>
             <button data-drummer-action="tempoUp" aria-label={t('增加 1 BPM', 'Increase 1 BPM')} disabled={bpm === undefined || bpm >= 400} onClick={() => adjustTempo(1)}><Plus size={24}/></button>
           </div>
           <div className="drummer-beats" role="group" aria-label={t('每拍重音', 'Beat accents')} style={{ gridTemplateColumns: `repeat(${Math.min(beats, 6)}, minmax(0, 1fr))` }}>
@@ -633,10 +675,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
             <button data-drummer-action="tap" className="drummer-tap" {...pressHandlers('tap')} aria-label={t('TAP 點按測速', 'Tap tempo')}>TAP<span>{tapCount > 0 ? t(`${tapCount} 次`, `${tapCount} taps`) : t('點按測速', 'Tap tempo')}</span></button>
             <div className="drummer-song-navigation"><button data-drummer-action="previous" aria-label={t('上一首', 'Previous song')} title={t('上一首', 'Previous song')} disabled={activeIndex <= 0} onClick={() => adjacentSong(-1)}><SkipBack size={23}/></button><button data-drummer-action="next" aria-label={t('下一首', 'Next song')} title={t('下一首', 'Next song')} disabled={activeIndex >= entries.length - 1} onClick={() => adjacentSong(1)}><SkipForward size={23}/></button></div>
           </div>
-          <p className="drummer-notice" role="status">{notice || (invalidTempo ? t('請輸入 20–400 BPM。', 'Enter 20–400 BPM.') : !canPlay ? (bpm === undefined ? '' : t('請在設定中選擇拍號。', 'Choose a meter in settings.')) : '')}</p>
-        </div>
-        <div className="drummer-settings">
-          <button ref={soundTrigger} className="drummer-settings-toggle" aria-label={`${t('聲音與拍號', 'Sound & meter')} · ${CLICK_SOUNDS[preferences.sound]}`} aria-haspopup="dialog" onClick={() => { setSubdivisionOpen(false); setSoundOpen(true); }}><Settings2 size={18}/><span className="drummer-settings-label">{t('聲音與拍號', 'Sound & meter')}</span><span>{CLICK_SOUNDS[preferences.sound]}</span><ChevronDown size={16}/></button>
+          <p className="drummer-notice" role="status">{notice || (bpm !== undefined && !meter ? t('請在設定中選擇拍號。', 'Choose a meter in settings.') : '')}</p>
         </div>
         </div>
       </section>
@@ -701,8 +740,17 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     </div>}
     <AnimatePresence initial={false}>
     {soundOpen && <DrummerSettingsSurface key="sound-settings" panelRef={soundPanel} className="drummer-sound-panel" titleId="drummer-sound-title" onClose={() => setSoundOpen(false)}>
-        <header><h2 id="drummer-sound-title">{t('聲音與拍號', 'Sound & meter')}</h2><button aria-label={t('關閉聲音設定', 'Close sound settings')} onClick={() => setSoundOpen(false)}><X size={22}/></button></header>
+        <header><h2 id="drummer-sound-title">{t('節拍器設定', 'Metronome settings')}</h2><button aria-label={t('關閉節拍器設定', 'Close metronome settings')} onClick={() => setSoundOpen(false)}><X size={22}/></button></header>
           <div className="drummer-settings-body">
+            <div className="drummer-tempo-field">
+              <label htmlFor="drummer-manual-tempo">{t('速度（BPM）', 'Tempo (BPM)')}</label>
+              <input id="drummer-manual-tempo" name="tempo" inputMode="decimal" autoComplete="off" value={draft}
+                placeholder="20–400" aria-invalid={invalidTempo || undefined} aria-describedby={invalidTempo ? 'drummer-tempo-error' : undefined}
+                onFocus={event => event.currentTarget.select()} onChange={event => { const next = sanitizeTempoInput(event.target.value); setDraft(next); setInvalidTempo(!isValidTempoDraft(next)); }}
+                onBlur={commitTempo} onKeyDown={event => { if (event.key === 'Enter') { commitTempo(); event.currentTarget.blur(); } }}/>
+              <button aria-label={t('還原速度', 'Reset tempo')} title={t('還原速度', 'Reset tempo')} disabled={!isPlayableTempo(active.song.tempo) || (bpm === active.song.tempo && draft === String(bpm))} onClick={() => { if (isPlayableTempo(active.song.tempo)) setTempo(active.song.tempo!); }}><RotateCcw size={18} aria-hidden="true"/></button>
+            </div>
+            {invalidTempo && <p id="drummer-tempo-error" role="status">{t('請輸入 20–400 BPM。', 'Enter 20–400 BPM.')}</p>}
             <label>{t('音色', 'Click sound')}<select aria-label={t('音色', 'Click sound')} aria-busy={Boolean(loadingSound)} value={preferences.sound}
               onFocus={() => { soundPickerWasPlaying.current ||= busyRef.current; }}
               onPointerDown={() => { soundPickerWasPlaying.current = busyRef.current; }}
