@@ -30,7 +30,7 @@ it('fits the visible keyboard area and returns the full surface to zero offset w
   document.documentElement.scrollTop = 120; document.body.scrollTop = 120;
   resize(800, 120); // Safari may retain the keyboard's offset after it is gone.
   expect(document.activeElement).not.toBe(input);
-  expect(root.style.top).toBe('0px'); expect(root.style.height).toBe('800px');
+  expect(root.style.top).toBe('0px'); expect(root.style.height).toBe('100dvh');
   expect(root).not.toHaveAttribute('data-native-keyboard');
   expect(document.documentElement.scrollTop).toBe(0); expect(document.body.scrollTop).toBe(0);
   expect(songList.scrollTop).toBe(77);
@@ -44,7 +44,7 @@ it('waits for the keyboard animation after blur, including a missing final resiz
   expect(root).toHaveAttribute('data-native-keyboard', 'true');
   viewport.height = 800; // No final resize event: a bounded follow-up must recover it.
   act(() => vi.advanceTimersByTime(300));
-  expect(root.style.height).toBe('800px'); expect(root.style.top).toBe('0px');
+  expect(root.style.height).toBe('100dvh'); expect(root.style.top).toBe('0px');
   expect(root).not.toHaveAttribute('data-native-keyboard');
 });
 it.each([['Macintosh', 0], ['Windows', 10]])('does not treat %s desktop physical-keyboard input and window resizing as a software keyboard', (userAgent, maxTouchPoints) => {
@@ -62,4 +62,20 @@ it('preserves pinch zoom and removes pending viewport work on exit', () => {
   hook.unmount(); expect(vi.getTimerCount()).toBe(0);
   resize(800);
   expect(root.style.height).toBe('');
+});
+
+it('ignores stale keyboard geometry when rotating or switching fullscreen without a keyboard', () => {
+  const {root,songList}=setup();
+  songList.scrollTop=77;
+  viewport.height=380; viewport.offsetTop=120;
+  for (const type of ['orientationchange','fullscreenchange','webkitfullscreenchange']) {
+    document.body.scrollTop=120;
+    act(()=>(type==='orientationchange'?window:document).dispatchEvent(new Event(type)));
+    frame();
+    expect(root.style.height).toBe('100dvh');
+    expect(root.style.top).toBe('0px');
+    expect(document.body.scrollTop).toBe(0);
+    expect(songList.scrollTop).toBe(77);
+    expect(vi.getTimerCount()).toBe(0);
+  }
 });

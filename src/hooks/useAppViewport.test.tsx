@@ -24,7 +24,9 @@ describe('contained app viewport', () => {
   viewport.height=380;viewport.offsetTop=60;act(()=>viewport.dispatchEvent(new Event('resize')));frame();
   expect(root.style.height).toBe('380px');
   input.blur();
+  document.body.scrollTop=60;
   fireEvent(document,new Event(type));frame();
+  expect(document.body.scrollTop).toBe(0);
   // The old visual size may persist indefinitely, but must not pin the app.
   expect(root.style.height).toBe('100dvh');expect(root.style.top).toBe('0px');
  });
@@ -121,10 +123,10 @@ it('fits a newly mounted performance overlay and keeps it aligned through native
  hook.unmount();
 });
 
-it('cancels pending fullscreen recalibration and removes its listeners on unmount', () => {
+it('does not poll fullscreen geometry without a keyboard and removes its listeners on unmount', () => {
  const {root,hook,frame}=setup();
  fireEvent(document,new Event('fullscreenchange'));frame();
- expect(vi.getTimerCount()).toBeGreaterThan(0);
+ expect(vi.getTimerCount()).toBe(0);
  hook.unmount();expect(vi.getTimerCount()).toBe(0);
  viewport.height=300;
  for(const type of ['fullscreenchange','webkitfullscreenchange','visibilitychange'])fireEvent(document,new Event(type));

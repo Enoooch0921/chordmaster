@@ -1,7 +1,8 @@
+import { canOpenSoftwareKeyboard, fitViewportLayer, resetLockedDocumentScroll } from './viewportBounds';
 import { useLayoutEffect, type RefObject } from 'react';
 
 /** Fit the portalled drummer layer to the keyboard's visual viewport. */
-export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>) {
+export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>, stage = false) {
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -10,35 +11,27 @@ export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>) {
     const touch = /iPad|iPhone|iPod|Android/i.test(navigator.userAgent)
       || ((navigator.platform === 'MacIntel' || /Macintosh/i.test(navigator.userAgent)) && navigator.maxTouchPoints > 1)
       || Boolean(window.matchMedia?.('(pointer: coarse)').matches);
-    let frame = 0, session = false, sawKeyboard = false, restoreOffset = false;
+    let frame = 0, session = false, sawKeyboard = false;
     let restingHeight = viewport?.height || window.innerHeight;
     const timers = new Set<number>();
-    const resetDocument = () => {
-      // WebKit can restore the painting but retain the keyboard's hit-test offset.
-      // Reset only the locked document, never the song/chart scroll panes.
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-      if (window.scrollX || window.scrollY) window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    };
     const update = () => {
       if (viewport && Math.abs(viewport.scale - 1) > .01) return;
       const height = viewport?.height || window.innerHeight;
       const active = document.activeElement;
-      const focused = active instanceof HTMLElement && root.contains(active) && active.matches('input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"]');
+      const focused = canOpenSoftwareKeyboard(active) && root.contains(active);
       if (session && restingHeight - height > 80) sawKeyboard = true;
       const restored = height >= restingHeight - 48;
       if (session && restored && (sawKeyboard || !focused)) {
         // The iPad keyboard's own dismiss button may not dispatch blur.
         if (sawKeyboard && focused) active.blur();
-        resetDocument();
-        session = false; sawKeyboard = false; restoreOffset = true;
+        resetLockedDocumentScroll();
+        session = false; sawKeyboard = false;
       }
-      const top = restoreOffset && restored ? 0 : Math.max(0, viewport?.offsetTop ?? 0);
-      root.style.top = `${top}px`;
-      root.style.height = `${Math.max(1, Math.min(height, window.innerHeight - top))}px`;
       const keyboard = session && sawKeyboard && !restored;
+      fitViewportLayer(root, keyboard);
+      if (!keyboard && !focused) resetLockedDocumentScroll();
       if (keyboard) root.dataset.nativeKeyboard = 'true'; else delete root.dataset.nativeKeyboard;
-      if (!session && !restoreOffset) restingHeight = height;
+      if (!session) restingHeight = height;
       if (keyboard && focused) {
         // Scroll only the containing settings/control pane, not the document.
         for (let pane = active.parentElement; pane && pane !== root; pane = pane.parentElement) {
@@ -53,6 +46,7 @@ export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>) {
     const settle = () => {
       timers.forEach(timer => window.clearTimeout(timer)); timers.clear();
       schedule();
+      if (!session) return;
       for (const delay of [100, 250, 500, 1000]) {
         const timer = window.setTimeout(() => { timers.delete(timer); schedule(); }, delay);
         timers.add(timer);
@@ -60,9 +54,9 @@ export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>) {
     };
     const focus = (event: FocusEvent) => {
       const target = event.target;
-      if (touch && target instanceof HTMLElement && root.contains(target) && target.matches('input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"]')) {
+      if (touch && target instanceof HTMLElement && root.contains(target) && canOpenSoftwareKeyboard(target)) {
         if (!session) restingHeight = viewport?.height || window.innerHeight;
-        session = true; restoreOffset = false;
+        session = true;
       }
       settle();
     };
@@ -83,5 +77,5 @@ export function useDrummerViewport(rootRef: RefObject<HTMLDivElement | null>) {
       root.style.top = previous.top; root.style.height = previous.height;
       delete root.dataset.nativeKeyboard;
     };
-  }, [rootRef]);
+  }, [rootRef, stage]);
 }

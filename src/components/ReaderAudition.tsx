@@ -37,9 +37,9 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const measureRef = useRef<HTMLSelectElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (open) measureRef.current?.focus({ preventScroll: true });
+    if (open) panelRef.current?.focus({ preventScroll: true });
   }, [open]);
   const close = () => {
     setOpen(false);
@@ -101,14 +101,14 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
         aria-expanded={open} aria-controls={panelId} aria-label={toggleLabel} onClick={() => open ? close() : setOpen(true)}>
         <Headphones size={16} aria-hidden="true" />{open ? (zh ? '收起' : 'Hide') : toggleLabel}
       </button>, triggerHost)}
-    <div id={panelId} hidden={!open} role="region" aria-label={zh ? '和弦試聽' : 'Chord playback'}
+    <div ref={panelRef} id={panelId} tabIndex={-1} hidden={!open} role="region" aria-label={zh ? '和弦試聽' : 'Chord playback'}
       className="reader-audition" data-keyboard-refined data-preview-only-control
       onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) {
         event.stopPropagation(); close();
       } }}>
       {open && <div className="reader-audition-controls">
         <label className="reader-measure"><span>{measureLabel}</span>
-          <select ref={measureRef} value={measureIndex} onChange={e => setSelection({ measure: Number(e.target.value), position: 0 })}>
+          <select value={measureIndex} onChange={e => setSelection({ measure: Number(e.target.value), position: 0 })}>
             {measures.map((m, index) => <option key={index} value={index}>{m.sectionTitle} · {zh ? `第 ${m.barIndex + 1} 小節` : `Bar ${m.barIndex + 1}`}</option>)}
           </select>
         </label>

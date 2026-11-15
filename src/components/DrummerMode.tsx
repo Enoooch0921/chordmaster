@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence } from 'motion/react';
+import DrummerTempoStep from './DrummerTempoStep';
 import DrummerSettingsSurface from './DrummerSettingsSurface';
 import { AnimatedPopover } from './ui/InteractionMotion';
 import { Cable, ChevronDown, ChevronLeft, Maximize, Minimize, Minus, Plus, Play, RotateCcw, Settings2, SkipBack, SkipForward, Square, VolumeX, X } from 'lucide-react';
@@ -32,7 +33,7 @@ export interface DrummerSession {
   entries: { id: string; song: Song }[];
   initialId: string;
 }
-interface Props extends DrummerSession { language: AppLanguage; onClose: (instant?: boolean) => void; midiConnector?: MidiConnector }
+interface Props extends DrummerSession { userId?: string; language: AppLanguage; onClose: (instant?: boolean) => void; midiConnector?: MidiConnector }
 type Preferences = Pick<MetronomeConfig, 'sound' | 'volume' | 'accent' | 'regular' | 'subdivisions'>;
 type Subdivision = MetronomeConfig['subdivision'];
 const PREFERENCE_KEY = 'chordmaster.drummer-preferences.v1';
@@ -47,6 +48,14 @@ function loadPreferences(): Preferences {
     }
     return prefs;
   } catch { return { ...defaults }; }
+}
+
+function savedBeatLevels(key: string, beats: number): BeatLevel[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+    if (Array.isArray(value) && value.length === beats && value.every(level => [0, 1, 2, 3].includes(level))) return value;
+  } catch { /* Unavailable storage or an invalid preference uses the original accents. */ }
+  return defaultBeatLevels(beats);
 }
 
 const subdivisionKey = (id: string, meter: string, grouped: boolean) => JSON.stringify([id, meter, grouped]);
@@ -169,7 +178,7 @@ const DrummerScore = React.memo(function DrummerScore({ song, songNumber, langua
   </div>;
 });
 
-export default function DrummerMode({ id, name, entries, initialId, language, onClose, midiConnector }: Props) {
+export default function DrummerMode({ id, name, entries, initialId, userId, language, onClose, midiConnector }: Props) {
   useUiMotion();
   const closeInstant = useRef(false);
   const zh = language === 'zh';
@@ -323,7 +332,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
       root.removeEventListener('wheel', wheel);
     };
   }, [stage]);
-  useDrummerViewport(dialog);
+  useDrummerViewport(dialog, stage);
   const click = useMetronome();
   const requestClose = useCallback(() => { click.stop(); fullscreen.exitFullscreen(stageActive.current); onClose(closeInstant.current); }, [click.stop, fullscreen.exitFullscreen, onClose]);
   const activeIndex = entries.findIndex(entry => entry.id === activeId);
@@ -341,8 +350,15 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
   const activeSubdivisionKey = subdivisionKey(activeId, meterText, grouped);
   const subdivision = songSubdivisions[activeSubdivisionKey] ?? 1;
   const beats = meter ? meter.count / (grouped ? 3 : 1) : 4;
-  const patternKey = `${activeId}:${beats}`;
-  const beatLevels = useMemo(() => patterns[patternKey] ?? defaultBeatLevels(beats), [patterns, patternKey, beats]);
+  const accentKey = (entry: string, signature: string, groupedBeats: boolean) =>
+    'chordmaster.drummer-accents.v1:' + JSON.stringify([userId ?? null, id ?? name, entry, signature, groupedBeats]);
+  const patternKey = accentKey(activeId, meterText, grouped);
+  const beatLevels = useMemo(() => patterns[patternKey] ?? savedBeatLevels(patternKey, beats), [patterns, patternKey, beats]);
+  const cycleAccent = (index: number) => {
+    const next = beatLevels.map((level, i) => i === index ? (level + 1) % 4 as BeatLevel : level);
+    setPatterns(current => ({ ...current, [patternKey]: next }));
+    try { localStorage.setItem(patternKey, JSON.stringify(next)); } catch { /* Keep this session's change. */ }
+  };
   const config = useMemo<MetronomeConfig>(() => ({ ...preferences, subdivision, bpm: bpm ?? 120, beats, beatLevels, muted: false }), [preferences, subdivision, bpm, beats, beatLevels]);
   const busyRef = useRef(busy);
   busyRef.current = busy;
@@ -410,7 +426,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     const root = document.querySelector<HTMLElement>('[data-app-root]');
     const wasInert = root?.inert;
     if (root) root.inert = true;
-    dialog.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    dialog.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         markKeyboardInteraction();
@@ -457,6 +473,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     setDraft(String(Math.round(value * 100) / 100)); setInvalidTempo(false);
   };
   const commitTempo = () => {
+    if (stageActive.current) return;
     const value = Number(draft);
     if (draft.trim() && isValidTempoDraft(draft) && isPlayableTempo(value)) setTempo(value);
     else setInvalidTempo(true);
@@ -485,7 +502,8 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     if (isPlayableTempo(selectedBpm) && selectedMeter) {
       const selectedGrouped = Boolean(selectedMeter.compound && groupings[id]);
       const selectedBeats = selectedMeter.count / (selectedGrouped ? 3 : 1);
-      void click.start({ ...config, subdivision: songSubdivisions[subdivisionKey(id, selectedMeterText, selectedGrouped)] ?? 1, bpm: selectedBpm, beats: selectedBeats, beatLevels: patterns[`${id}:${selectedBeats}`] ?? defaultBeatLevels(selectedBeats) });
+      const key = accentKey(id, selectedMeterText, selectedGrouped);
+      void click.start({ ...config, subdivision: songSubdivisions[subdivisionKey(id, selectedMeterText, selectedGrouped)] ?? 1, bpm: selectedBpm, beats: selectedBeats, beatLevels: patterns[key] ?? savedBeatLevels(key, selectedBeats) });
     } else click.stop();
   };
   const activateSong = (id: string) => {
@@ -507,7 +525,8 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
     setTempos(current => {
       const previous = current[target] ?? original;
       if (!isPlayableTempo(previous)) return current;
-      return { ...current, [target]: Math.round(Math.min(400, Math.max(20, previous + delta)) * 10) / 10 };
+      const next = Math.round(Math.min(400, Math.max(20, previous + delta)) * 100) / 100;
+      return next === previous ? current : { ...current, [target]: next };
     });
   };
   const togglePlayback = () => {
@@ -653,17 +672,19 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
             </div>
           </div>
           <div className="drummer-tempo">
-            <button data-drummer-action="tempoDown" aria-label={t('減少 1 BPM', 'Decrease 1 BPM')} disabled={bpm === undefined || bpm <= 20} onClick={() => adjustTempo(-1)}><Minus size={24}/></button>
+            <DrummerTempoStep key={`${activeId}-${stage}-tempoDown`} direction={-1} disabled={bpm === undefined || bpm <= 20}
+              label={t('減少 1 BPM', 'Decrease 1 BPM')} hint={t('點一下減少 1 BPM，長按每次減少 10 BPM', 'Tap to decrease by 1 BPM. Hold to decrease by 10 BPM at a time.')} onStep={adjustTempo}/>
             <div className="drummer-tempo-readout">
               <output aria-label={t('節拍器速度 BPM', 'Metronome tempo BPM')} aria-describedby="drummer-beat-unit" style={{ '--tempo-digits': Math.max(3, String(bpm ?? '').length) } as React.CSSProperties}>{bpm ?? '—'}</output>
               <span aria-hidden="true">BPM</span>
               <span id="drummer-beat-unit" className="sr-only">{t('BPM 計拍單位：', 'BPM beat unit: ')}{beatUnit}</span>
             </div>
-            <button data-drummer-action="tempoUp" aria-label={t('增加 1 BPM', 'Increase 1 BPM')} disabled={bpm === undefined || bpm >= 400} onClick={() => adjustTempo(1)}><Plus size={24}/></button>
+            <DrummerTempoStep key={`${activeId}-${stage}-tempoUp`} direction={1} disabled={bpm === undefined || bpm >= 400}
+              label={t('增加 1 BPM', 'Increase 1 BPM')} hint={t('點一下增加 1 BPM，長按每次增加 10 BPM', 'Tap to increase by 1 BPM. Hold to increase by 10 BPM at a time.')} onStep={adjustTempo}/>
           </div>
           <div className="drummer-beats" role="group" aria-label={t('每拍重音', 'Beat accents')} style={{ gridTemplateColumns: `repeat(${Math.min(beats, 6)}, minmax(0, 1fr))` }}>
             {beatLevels.map((strength, index) => <button key={index} className="drummer-beat" data-active={click.beat === index} aria-label={t(`第 ${index + 1} 拍：${strengthNames[strength]}，點按切換`, `Beat ${index + 1}: ${strengthNames[strength]}, tap to change`)}
-              onClick={() => setPatterns(values => ({ ...values, [patternKey]: beatLevels.map((value, beatIndex) => beatIndex === index ? (value + 1) % 4 as BeatLevel : value) }))}>
+              onClick={() => cycleAccent(index)}>
               <span className="drummer-beat-stack" aria-hidden="true">{[3, 2, 1].map(level => <span key={level} data-filled={strength >= level}/>)}</span>
               <span className="drummer-beat-number" aria-hidden="true">{index + 1}{strength === 0 && <VolumeX size={12}/>}</span>
             </button>)}
@@ -744,7 +765,7 @@ export default function DrummerMode({ id, name, entries, initialId, language, on
           <div className="drummer-settings-body">
             <div className="drummer-tempo-field">
               <label htmlFor="drummer-manual-tempo">{t('速度（BPM）', 'Tempo (BPM)')}</label>
-              <input id="drummer-manual-tempo" name="tempo" inputMode="decimal" autoComplete="off" value={draft}
+              <input id="drummer-manual-tempo" disabled={stage} name="tempo" inputMode="decimal" autoComplete="off" value={draft}
                 placeholder="20–400" aria-invalid={invalidTempo || undefined} aria-describedby={invalidTempo ? 'drummer-tempo-error' : undefined}
                 onFocus={event => event.currentTarget.select()} onChange={event => { const next = sanitizeTempoInput(event.target.value); setDraft(next); setInvalidTempo(!isValidTempoDraft(next)); }}
                 onBlur={commitTempo} onKeyDown={event => { if (event.key === 'Enter') { commitTempo(); event.currentTarget.blur(); } }}/>

@@ -86,6 +86,15 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-15',
+        title: 'Drummer tempo, accents and tablet controls',
+        bullets: [
+          'Drummer performance locks manual BPM entry. Tap for one BPM or hold for steps of ten. Beat accents are saved on this device per account and setlist entry.',
+          'Performance layouts follow fullscreen and orientation changes. Tablet chart actions show labels, and Listen opens the playback tools without focusing a picker.'
+        ]
+      },
+      {
+        version: '0.12.46',
+        date: '2026-11-15',
         title: 'Drummer touch controls',
         bullets: ['The drummer BPM readout is touch-safe. Enter a tempo, reset it or change sounds in the toolbar settings. Swipe to turn chart pages and keep the stage and click running when the browser leaves fullscreen.']
       },
@@ -1237,6 +1246,15 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-15',
+        title: '鼓手速度、重音與平板看譜工具',
+        bullets: [
+          '鼓手演出模式鎖住 BPM 數字輸入。點加減鍵微調 1 BPM，長按每次增減 10 BPM。每首歌的逐拍重音依帳號與歌單記在這台裝置。',
+          '演出畫面在全螢幕與橫直向切換時跟隨視窗尺寸。平板看譜工具列顯示手寫、歌詞和演出模式文字，點試聽只展開工具。'
+        ]
+      },
+      {
+        version: '0.12.46',
         date: '2026-11-15',
         title: '鼓手演出防誤觸',
         bullets: ['鼓手模式的速度數字改為唯讀，手動 BPM、還原速度與音色集中到上方的節拍器設定。橫滑可在演出樂譜翻頁，瀏覽器退出全螢幕時會保留演出版面與節拍。']

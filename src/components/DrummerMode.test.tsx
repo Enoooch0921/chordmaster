@@ -896,3 +896,68 @@ it('keeps the drummer score inside the light paper scope in night mode', () => {
     expect(paper).toHaveStyle({ colorScheme: 'light' });
   } finally { document.documentElement.classList.remove('dark'); }
 });
+
+it('disables typed BPM only on stage and restores manual input on return', () => {
+  mount();
+  fireEvent.click(screen.getByRole('button', { name:'演出模式' }));
+  openSoundSettings(); expect(tempoInput()).toBeDisabled(); closeSoundSettings();
+  fireEvent.click(screen.getByRole('button', { name:'增加 1 BPM' }));
+  expect(tempo()).toHaveTextContent('73');
+  fireEvent.click(screen.getByRole('button', { name:'一般模式' }));
+  openSoundSettings(); expect(tempoInput()).toBeEnabled(); expect(tempoInput()).toHaveValue('73');
+});
+
+it.each([[1, '增加 1 BPM'], [-1, '減少 1 BPM']] as const)('repeats steps of ten while held (%i) without adding a single on release', (direction,label) => {
+  vi.useFakeTimers();
+  try {
+    mount();
+    const button=screen.getByRole('button',{name:label});
+    controlPointer(button,'pointerDown');
+    act(()=>vi.advanceTimersByTime(449));
+    expect(tempo()).toHaveTextContent('72');
+    act(()=>vi.advanceTimersByTime(501));
+    expect(tempo()).toHaveTextContent(String(72+30*direction));
+    controlPointer(button,'pointerUp');
+    fireEvent.click(button,{detail:1}); act(()=>vi.advanceTimersByTime(1000));
+    expect(tempo()).toHaveTextContent(String(72+30*direction));
+    controlPointer(button,'pointerDown'); controlPointer(button,'pointerUp'); fireEvent.click(button,{detail:1});
+    expect(tempo()).toHaveTextContent(String(72+31*direction));
+  } finally {vi.useRealTimers();}
+});
+
+it('cancels a pending tempo hold on a lost touch or song change and clamps at the tempo limit', () => {
+  vi.useFakeTimers();
+  try {
+    mount({...session,entries:[{id:'a',song:song('快速',395.25)},session.entries[1]]});
+    const up=screen.getByRole('button',{name:'增加 1 BPM'});
+    controlPointer(up,'pointerDown'); controlPointer(up,'pointerCancel'); act(()=>vi.advanceTimersByTime(800));
+    expect(tempo()).toHaveTextContent('395.25');
+    controlPointer(up,'pointerDown'); act(()=>vi.advanceTimersByTime(450)); expect(up).toBeDisabled();
+    expect(tempo()).toHaveTextContent('400');
+    controlPointer(screen.getByRole('button',{name:'減少 1 BPM'}),'pointerDown');
+    fireEvent.click(screen.getByRole('button',{name:'下一首'})); act(()=>vi.advanceTimersByTime(900));
+    expect(tempo()).toHaveTextContent('110');
+  } finally {vi.useRealTimers();}
+});
+
+it('restores each account’s accents per arrangement on opening and when starting a different entry', () => {
+  const open = (userId?: string) => render(<DrummerMode {...session} id="sunday" userId={userId} language="zh" onClose={vi.fn()}/>);
+  const first = open('drummer-a');
+  fireEvent.click(screen.getByRole('button', { name:'第 1 拍：重音，點按切換' }));
+  fireEvent.click(screen.getByRole('button', { name:'第 4 拍：輕拍，點按切換' }));
+  fireEvent.click(songs().getByRole('button', { name:/2 第二首/ }));
+  fireEvent.click(screen.getByRole('button', { name:'第 3 拍：輕拍，點按切換' }));
+  first.unmount();
+
+  for (const user of ['drummer-b', undefined]) {
+    const other = open(user);
+    expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({beatLevels:[3,1,1,1]}));
+    other.unmount();
+  }
+  open('drummer-a');
+  expect(audio.update).toHaveBeenLastCalledWith(expect.objectContaining({beatLevels:[0,1,1,2]}));
+  fireEvent.click(songs().getByRole('button', { name:/2 第二首/ }));
+  expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({beatLevels:[3,1,2,1]}));
+  fireEvent.click(songs().getByRole('button', { name:/4 第一首/ }));
+  expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({beatLevels:[3,1,1,1]}));
+});

@@ -1,3 +1,4 @@
+import { canOpenSoftwareKeyboard, fitViewportLayer, resetLockedDocumentScroll } from './viewportBounds';
 import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
 
 /** Keep the application in the visual viewport; only its own scroll panes move. */
@@ -7,21 +8,12 @@ export function useAppViewport(overlay?: RefObject<HTMLDivElement | null>, overl
     const viewport = window.visualViewport;
     if (viewport && Math.abs(viewport.scale - 1) > 0.01) return;
     const active = document.activeElement;
-    const editing = active instanceof HTMLElement && active.inputMode !== 'none' && (
-      ((active instanceof HTMLInputElement && /^(text|search|tel|url|email|password|number)$/.test(active.type)
-        || active instanceof HTMLTextAreaElement) && !active.readOnly && !active.disabled)
-      || active.isContentEditable || active.matches('[contenteditable="true"], [contenteditable=""]'));
-    // Safari can retain an old visualViewport size after leaving fullscreen.
-    // Let dvh track browser chrome/rotation natively; only use visual bounds
-    // while an editor is occluded by the software keyboard.
-    const keyboard = editing && viewport && viewport.height + viewport.offsetTop < window.innerHeight - 1;
-    const dynamicHeight = typeof CSS === 'undefined' || !CSS.supports || CSS.supports('height', '100dvh');
-    const height = keyboard ? viewport.height : window.innerHeight;
+    const editing = canOpenSoftwareKeyboard(active);
+    const keyboard = Boolean(editing && viewport && viewport.height + viewport.offsetTop < window.innerHeight - 1);
     for (const element of [root.current, overlay?.current]) {
-      if (!element) continue;
-      if (height > 0) element.style.height = keyboard || !dynamicHeight ? `${height}px` : '100dvh';
-      element.style.top = `${keyboard ? viewport.offsetTop : 0}px`;
+      if (element) fitViewportLayer(element, keyboard && element.contains(active));
     }
+    if (root.current && !editing) resetLockedDocumentScroll();
   }, [overlay]);
   const attach = useCallback((element: HTMLDivElement | null) => { root.current = element; update(); }, [update]);
   // The performance overlay mounts independently of the persistent app root.
@@ -34,8 +26,8 @@ export function useAppViewport(overlay?: RefObject<HTMLDivElement | null>, overl
       settleTimers.forEach(timer => window.clearTimeout(timer));
       settleTimers.clear();
       schedule();
-      // Fullscreen/rotation events may precede the toolbar animation's final
-      // dimensions. Bounded follow-ups also cover a missing final resize event.
+      // Only a software keyboard needs follow-ups for a missing final resize.
+      if (!canOpenSoftwareKeyboard(document.activeElement)) return;
       for (const delay of [100, 250, 500, 1000]) {
         const timer = window.setTimeout(() => { settleTimers.delete(timer); schedule(); }, delay);
         settleTimers.add(timer);

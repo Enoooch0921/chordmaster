@@ -1,3 +1,4 @@
+import { useToolbarActionLabels } from './hooks/useToolbarActionLabels';
 import SongLibraryRow, { type SongLibraryAction } from './components/SongLibraryRow';
 import SongLibraryResults from './components/SongLibraryResults';
 import SongLibraryFilters from './components/SongLibraryFilters';
@@ -2339,6 +2340,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const denseDesktopHeaderMinMain = hasFinePointer ? 1024 : 1200;
   const usesDenseDesktopHeader = isSheetView && mainViewportWidth >= denseDesktopHeaderMinMain;
   const usesTabletHeader = isSheetView && !isPhoneViewport && !usesDenseDesktopHeader;
+  const tabletActionLabels = usesTabletHeader || (!isPhoneViewport && !hasFinePointer);
+  const { ref: toolbarActionLabelsRef, showLabels: measuredActionLabels } = useToolbarActionLabels(
+    usesDenseDesktopHeader && !tabletActionLabels, `${usesDenseDesktopHeader}:${language}:${workspaceMode}`
+  );
+  const toolbarActionLabelsVisible = tabletActionLabels || measuredActionLabels;
   const isToolbarSecondaryCollapsed = mainViewportWidth < 1240;
   const toolbarPrimaryGridClassName = mainViewportWidth < 1040
     ? 'grid-cols-4'
@@ -3374,27 +3380,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       setViewportHeight(window.innerHeight);
     };
 
-    // iOS/iPadOS reports stale window dimensions while a rotation is animating,
-    // which can leave the layout broken after rotating back. Re-measure a few
-    // times after the orientation settles.
-    const settleTimers: number[] = [];
-    const handleOrientationChange = () => {
-      handleResize();
-      settleTimers.push(window.setTimeout(handleResize, 200));
-      settleTimers.push(window.setTimeout(handleResize, 450));
-      settleTimers.push(window.setTimeout(handleResize, 800));
-    };
-
+    // Observe the layout viewport itself. Safari can settle on its new size
+    // after orientationchange, even without another window resize event.
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(handleResize) : null;
+    observer?.observe(document.documentElement);
     handleResize();
     window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleOrientationChange);
-    window.visualViewport?.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
 
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', handleResize);
-      window.removeEventListener('orientationchange', handleOrientationChange);
-      window.visualViewport?.removeEventListener('resize', handleResize);
-      settleTimers.forEach((timer) => window.clearTimeout(timer));
+      window.removeEventListener('orientationchange', handleResize);
     };
   }, []);
 
@@ -13408,8 +13405,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </div>
               </div>
 
-              <div className="flex min-w-0 items-center justify-end gap-2">
-                <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+                <div ref={toolbarActionLabelsRef} className="flex min-w-0 flex-1 overflow-x-auto pb-1 no-scrollbar">
+                  <div data-toolbar-label-content className="ml-auto flex w-max shrink-0 items-center gap-2">
                   <button
                     type="button"
                     onClick={handleToggleHandwriting}
@@ -13417,10 +13415,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     title={authenticatedUser ? handwritingLabel : (language === 'zh' ? '登入後使用個人筆記' : 'Sign in to use personal notes')}
                     aria-label={handwritingLabel}
                     aria-pressed={isHandwriting}
-                    className={`${isHandwriting ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
+                    className={`${isHandwriting ? desktopToolbarPrimaryActionClassName : desktopToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
                   >
                     <Edit3 size={14} />
-                    {denseToolbarShowsLabels ? <span>{language === 'zh' ? '手寫' : 'Write'}</span> : null}
+                    <span data-toolbar-action-label aria-hidden={!toolbarActionLabelsVisible} className={toolbarActionLabelsVisible ? undefined : 'pointer-events-none absolute invisible'}>{language === 'zh' ? '手寫' : 'Write'}</span>
                   </button>
 
                   <button
@@ -13428,10 +13426,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     onClick={handleToggleLyricsMode}
                     title={copy.lyricsMode}
                     aria-label={copy.lyricsMode}
-                    className={denseToolbarToggleClassName(isLyricsMode, 'accent')}
+                    className={desktopToolbarToggleClassName(isLyricsMode, 'accent')}
                   >
                     <FileText size={14} />
-                    {denseToolbarShowsLabels ? <span>{compactLyricsToggleLabel}</span> : null}
+                    <span data-toolbar-action-label aria-hidden={!toolbarActionLabelsVisible} className={toolbarActionLabelsVisible ? undefined : 'pointer-events-none absolute invisible'}>{compactLyricsToggleLabel}</span>
                   </button>
 
                   <button
@@ -13439,10 +13437,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     onClick={handleEnterPerformanceMode}
                     title={copy.performanceMode}
                     aria-label={copy.performanceMode}
-                    className={denseToolbarActionClassName}
+                    className={desktopToolbarActionClassName}
                   >
                     <Play size={14} />
-                    {denseToolbarShowsLabels ? <span>{copy.performanceMode}</span> : null}
+                    <span data-toolbar-action-label aria-hidden={!toolbarActionLabelsVisible} className={toolbarActionLabelsVisible ? undefined : 'pointer-events-none absolute invisible'}>{copy.performanceMode}</span>
                   </button>
 
                   {renderReferenceButtons(denseToolbarActionClassName, {
@@ -13539,6 +13537,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       </button>
                     </>
                   )}
+                  </div>
                 </div>
 
                 <div ref={toolbarOverflowMenuRef} className="relative shrink-0">
@@ -13677,7 +13676,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               </div>
 
               <div className="flex min-w-0 items-center justify-end">
-                <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+                <div ref={toolbarActionLabelsRef} className="flex min-w-0 flex-1 overflow-x-auto pb-1 no-scrollbar">
+                  <div data-toolbar-label-content className="ml-auto flex w-max shrink-0 items-center gap-2">
                   <button
                     type="button"
                     onClick={handleToggleHandwriting}
@@ -13685,9 +13685,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     title={authenticatedUser ? handwritingLabel : (language === 'zh' ? '登入後使用個人筆記' : 'Sign in to use personal notes')}
                     aria-label={handwritingLabel}
                     aria-pressed={isHandwriting}
-                    className={`${isHandwriting ? denseToolbarPrimaryActionClassName : denseToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
+                    className={`${isHandwriting ? desktopToolbarPrimaryActionClassName : desktopToolbarActionClassName} disabled:cursor-default disabled:opacity-40`}
                   >
                     <Edit3 size={14} />
+                    <span data-toolbar-action-label aria-hidden={!toolbarActionLabelsVisible} className={toolbarActionLabelsVisible ? undefined : 'pointer-events-none absolute invisible'}>{language === 'zh' ? '手寫' : 'Write'}</span>
                   </button>
 
                   <button
@@ -13695,9 +13696,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     onClick={handleToggleLyricsMode}
                     title={copy.lyricsMode}
                     aria-label={copy.lyricsMode}
-                    className={denseToolbarToggleClassName(isLyricsMode, 'accent')}
+                    className={desktopToolbarToggleClassName(isLyricsMode, 'accent')}
                   >
                     <FileText size={14} />
+                    <span data-toolbar-action-label aria-hidden={!toolbarActionLabelsVisible} className={toolbarActionLabelsVisible ? undefined : 'pointer-events-none absolute invisible'}>{compactLyricsToggleLabel}</span>
                   </button>
 
                   <button
@@ -13705,9 +13707,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                     onClick={handleEnterPerformanceMode}
                     title={copy.performanceMode}
                     aria-label={copy.performanceMode}
-                    className={denseToolbarActionClassName}
+                    className={desktopToolbarActionClassName}
                   >
                     <Play size={14} />
+                    <span data-toolbar-action-label aria-hidden={!toolbarActionLabelsVisible} className={toolbarActionLabelsVisible ? undefined : 'pointer-events-none absolute invisible'}>{copy.performanceMode}</span>
                   </button>
 
                   {renderReferenceButtons(denseToolbarActionClassName, {
@@ -13787,6 +13790,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                       </button>
                     </>
                   )}
+                  </div>
                 </div>
               </div>
 
@@ -15889,7 +15893,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onToggle={(userId, enabled) => { void handleToggleSetlistAssignment(userId, enabled); }}
       />
 
-      {liveDrummerSession && <DrummerMode key={liveDrummerSession.instanceId ?? liveDrummerSession.id ?? liveDrummerSession.name} {...liveDrummerSession} language={language} onClose={closeDrummerMode}/>}
+      {liveDrummerSession && <DrummerMode key={liveDrummerSession.instanceId ?? liveDrummerSession.id ?? liveDrummerSession.name} {...liveDrummerSession} userId={authenticatedUser?.id} language={language} onClose={closeDrummerMode}/>}
 
       {activeReferenceKind && activeReferenceSong && (
         <ReferencePlayer
