@@ -12,7 +12,7 @@ vi.mock('../hooks/usePerformanceFullscreen', () => ({ usePerformanceFullscreen: 
 vi.mock('./ChordSheet', () => ({ default: ({ song, setlistSongNumber }: { song: Song; setlistSongNumber?: number }) => <div data-testid="chart" data-song-number={setlistSongNumber}>{song.title}{song.title === "雙頁" && <><div data-print-page>第一頁內容</div><div data-print-page>第二頁內容</div></>}</div> }));
 const song = (title: string, tempo?: number, timeSignature = '4/4'): Song => ({ title, tempo, timeSignature, originalKey: 'C', currentKey: 'C', sections: [] });
 const session: DrummerSession = { name: '測試歌單', initialId: 'a', entries: [{ id: 'a', song: song('第一首', 72) }, { id: 'b', song: song('第二首', 110) }, { id: 'c', song: song('未定速度') }, { id: 'd', song: song('第一首', 72) }] };
-const tempo = () => screen.getByRole('status', { name: '節拍器速度 BPM' });
+const tempo = () => screen.getByRole('slider', { name: '節拍器速度 BPM' });
 const tempoInput = () => screen.getByRole('textbox', { name: '速度（BPM）' });
 function openSoundSettings() { fireEvent.click(screen.getByRole('button', { name: '節拍器設定' })); }
 function closeSoundSettings() { fireEvent.click(screen.getByRole('button', { name: '關閉節拍器設定' })); }
@@ -361,7 +361,7 @@ describe('drummer session controls', () => {
     mount();
     fireEvent.click(songs().getByRole('button', { name: /3 未定速度/ }));
     expect(audio.stop).toHaveBeenCalledOnce(); expect(audio.start).not.toHaveBeenCalled();
-    expect(tempo()).toHaveTextContent('—');
+    expect(screen.getByRole('status', { name: '節拍器速度 BPM' })).toHaveTextContent('—');
   });
   it('requires a valid BPM and confirmed meter, accepts manual entry and TAP', () => {
     mount({ ...session, initialId: 'c' });
@@ -563,7 +563,7 @@ it('sets an inactive song subdivision from the list without playback or changing
   expect(audio.start.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({subdivision:2,bpm:110}));
 });
 
-it('keeps the BPM display inert and restores the original tempo inside settings', () => {
+it('keeps direct BPM typing in settings and restores the original tempo there', () => {
   mount();
   fireEvent.click(tempo());
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
@@ -910,18 +910,21 @@ it('disables typed BPM only on stage and restores manual input on return', () =>
 it.each([[1, '增加 1 BPM'], [-1, '減少 1 BPM']] as const)('repeats steps of ten while held (%i) without adding a single on release', (direction,label) => {
   vi.useFakeTimers();
   try {
-    mount();
+    mount({...session,entries:[{id:'a',song:song('整十',77)}]});
     const button=screen.getByRole('button',{name:label});
     controlPointer(button,'pointerDown');
     act(()=>vi.advanceTimersByTime(449));
-    expect(tempo()).toHaveTextContent('72');
-    act(()=>vi.advanceTimersByTime(501));
-    expect(tempo()).toHaveTextContent(String(72+30*direction));
+    expect(tempo()).toHaveTextContent('77');
+    act(()=>vi.advanceTimersByTime(1));
+    const first = direction === 1 ? 80 : 70;
+    expect(tempo()).toHaveAttribute('aria-valuenow', String(first));
+    act(()=>vi.advanceTimersByTime(500));
+    expect(tempo()).toHaveTextContent(String(first+20*direction));
     controlPointer(button,'pointerUp');
     fireEvent.click(button,{detail:1}); act(()=>vi.advanceTimersByTime(1000));
-    expect(tempo()).toHaveTextContent(String(72+30*direction));
+    expect(tempo()).toHaveTextContent(String(first+20*direction));
     controlPointer(button,'pointerDown'); controlPointer(button,'pointerUp'); fireEvent.click(button,{detail:1});
-    expect(tempo()).toHaveTextContent(String(72+31*direction));
+    expect(tempo()).toHaveTextContent(String(first+21*direction));
   } finally {vi.useRealTimers();}
 });
 
@@ -960,4 +963,27 @@ it('restores each account’s accents per arrangement on opening and when starti
   expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({beatLevels:[3,1,2,1]}));
   fireEvent.click(songs().getByRole('button', { name:/4 第一首/ }));
   expect(audio.start).toHaveBeenLastCalledWith(expect.objectContaining({beatLevels:[3,1,1,1]}));
+});
+
+it('scrubs the BPM relative to the press, ignores vertical drags, and restores the arrangement tempo on stage', () => {
+  mount();
+  fireEvent.click(screen.getByRole('button',{name:'演出模式'}));
+  const slider = tempo();
+  const point = (type: string, x: number, y: number) => {
+    const event = new MouseEvent(type, {clientX:x,clientY:y,button:0,bubbles:true});
+    Object.defineProperty(event,'pointerId',{value:1});
+    fireEvent(slider,event);
+  };
+  point('pointerdown',100,60); point('pointermove',103,61); point('pointerup',103,61);
+  expect(slider).toHaveAttribute('aria-valuenow','72');
+  point('pointerdown',100,60); point('pointermove',113,95); point('pointerup',148,98);
+  expect(slider).toHaveAttribute('aria-valuenow','72');
+  point('pointerdown',100,60); point('pointermove',148,61);
+  expect(slider).toHaveAttribute('aria-valuenow','84');
+  point('pointerup',80,61);
+  expect(slider).toHaveAttribute('aria-valuenow','67');
+  fireEvent.keyDown(slider,{key:'ArrowRight'}); expect(slider).toHaveAttribute('aria-valuenow','68');
+  fireEvent.keyDown(slider,{key:'End'}); expect(slider).toHaveAttribute('aria-valuenow','400');
+  fireEvent.click(screen.getByRole('button',{name:'還原速度'})); expect(slider).toHaveAttribute('aria-valuenow','72');
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 });

@@ -6,7 +6,7 @@ type Props = {
   disabled: boolean;
   label: string;
   hint: string;
-  onStep: (delta: number) => void;
+  onStep: (direction: number, toNextTen?: boolean) => void;
 };
 
 export default function DrummerTempoStep({ direction, disabled, label, hint, onStep }: Props) {
@@ -47,7 +47,7 @@ export default function DrummerTempoStep({ direction, disabled, label, hint, onS
     try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch { /* Synthetic events have no active pointer. */ }
     const repeat = () => {
       suppressClick.current = true;
-      step.current(10 * direction);
+      step.current(direction, true);
       timer.current = window.setTimeout(repeat, 250);
     };
     timer.current = window.setTimeout(repeat, 450);

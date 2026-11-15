@@ -53,6 +53,7 @@ export function useDrummerMidi({ settingsOpen, onAction, connector = connectMidi
       if (sourceRef.current !== 'keyboard' || document.hidden || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
       const target = event.target instanceof Element ? event.target : null;
       if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      if (target?.closest('[role="slider"]') && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
       const learn = keyLearningRef.current;
       if (settingsRef.current && !learn) return;
       if (!isControlKey(event.code)) return;

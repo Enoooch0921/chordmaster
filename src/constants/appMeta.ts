@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-15',
+        title: 'Drummer tempo controls',
+        bullets: ['Tap the larger buttons for one BPM, or hold to move through multiples of ten. Drag the tempo left or right and tap Reset below it to restore the song tempo.']
+      },
+      {
+        version: '0.12.47',
+        date: '2026-11-15',
         title: 'Drummer tempo, accents and tablet controls',
         bullets: [
           'Drummer performance locks manual BPM entry. Tap for one BPM or hold for steps of ten. Beat accents are saved on this device per account and setlist entry.',
@@ -1246,6 +1252,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-15',
+        title: '鼓手速度控制',
+        bullets: ['鼓手模式的加減鍵已加大。從 77 BPM 長按加號會依序到 80、90，長按減號則到 70、60。左右拖動速度數字可連續調速，點數字下方的「原速」即可回到歌曲原本的 BPM。']
+      },
+      {
+        version: '0.12.47',
         date: '2026-11-15',
         title: '鼓手速度、重音與平板看譜工具',
         bullets: [

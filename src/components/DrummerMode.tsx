@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence } from 'motion/react';
+import DrummerTempoReadout from './DrummerTempoReadout';
 import DrummerTempoStep from './DrummerTempoStep';
 import DrummerSettingsSurface from './DrummerSettingsSurface';
 import { AnimatedPopover } from './ui/InteractionMotion';
@@ -520,12 +521,14 @@ export default function DrummerMode({ id, name, entries, initialId, userId, lang
     const next = entries[index < 0 ? (offset > 0 ? 0 : -1) : index + offset];
     if (next) select(next.id);
   };
-  const adjustTempo = (delta: number) => {
+  const adjustTempo = (delta: number, toNextTen = false) => {
     const target = activeIdRef.current, original = timingSong?.tempo;
     setTempos(current => {
       const previous = current[target] ?? original;
       if (!isPlayableTempo(previous)) return current;
-      const next = Math.round(Math.min(400, Math.max(20, previous + delta)) * 100) / 100;
+      let requested = previous + delta;
+      if (toNextTen) requested = delta > 0 ? (Math.floor(previous / 10) + 1) * 10 : (Math.ceil(previous / 10) - 1) * 10;
+      const next = Math.round(Math.min(400, Math.max(20, requested)) * 100) / 100;
       return next === previous ? current : { ...current, [target]: next };
     });
   };
@@ -673,14 +676,11 @@ export default function DrummerMode({ id, name, entries, initialId, userId, lang
           </div>
           <div className="drummer-tempo">
             <DrummerTempoStep key={`${activeId}-${stage}-tempoDown`} direction={-1} disabled={bpm === undefined || bpm <= 20}
-              label={t('減少 1 BPM', 'Decrease 1 BPM')} hint={t('點一下減少 1 BPM，長按每次減少 10 BPM', 'Tap to decrease by 1 BPM. Hold to decrease by 10 BPM at a time.')} onStep={adjustTempo}/>
-            <div className="drummer-tempo-readout">
-              <output aria-label={t('節拍器速度 BPM', 'Metronome tempo BPM')} aria-describedby="drummer-beat-unit" style={{ '--tempo-digits': Math.max(3, String(bpm ?? '').length) } as React.CSSProperties}>{bpm ?? '—'}</output>
-              <span aria-hidden="true">BPM</span>
-              <span id="drummer-beat-unit" className="sr-only">{t('BPM 計拍單位：', 'BPM beat unit: ')}{beatUnit}</span>
-            </div>
+              label={t('減少 1 BPM', 'Decrease 1 BPM')} hint={t('點一下減少 1 BPM，長按往下跳到整十 BPM', 'Tap to decrease by 1 BPM. Hold for successive lower multiples of ten.')} onStep={adjustTempo}/>
+            <DrummerTempoReadout key={`${activeId}-${stage}-readout`} bpm={bpm} original={isPlayableTempo(active.song.tempo) ? active.song.tempo : undefined}
+              zh={zh} beatUnit={beatUnit} onChange={setTempo}/>
             <DrummerTempoStep key={`${activeId}-${stage}-tempoUp`} direction={1} disabled={bpm === undefined || bpm >= 400}
-              label={t('增加 1 BPM', 'Increase 1 BPM')} hint={t('點一下增加 1 BPM，長按每次增加 10 BPM', 'Tap to increase by 1 BPM. Hold to increase by 10 BPM at a time.')} onStep={adjustTempo}/>
+              label={t('增加 1 BPM', 'Increase 1 BPM')} hint={t('點一下增加 1 BPM，長按往上跳到整十 BPM', 'Tap to increase by 1 BPM. Hold for successive higher multiples of ten.')} onStep={adjustTempo}/>
           </div>
           <div className="drummer-beats" role="group" aria-label={t('每拍重音', 'Beat accents')} style={{ gridTemplateColumns: `repeat(${Math.min(beats, 6)}, minmax(0, 1fr))` }}>
             {beatLevels.map((strength, index) => <button key={index} className="drummer-beat" data-active={click.beat === index} aria-label={t(`第 ${index + 1} 拍：${strengthNames[strength]}，點按切換`, `Beat ${index + 1}: ${strengthNames[strength]}, tap to change`)}
