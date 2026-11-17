@@ -152,7 +152,6 @@ import { resolveSetlistCopySourceId } from './lib/teamSetlistCopy';
 import { canArrangeTeamSetlist, canEditTeamSetlistScore, canManageTeamProject, isTeamAdministrator } from './lib/teamPermissions';
 import { assertTeamWorkspaceSaveAllowed, TeamWorkspacePermissionError } from './lib/teamWorkspacePermissions';
 import ChordSheet, { ChordSheetElementClickMeta, ChordSheetElementField, ChordSheetElementTarget, ChordSheetMetaField, ChordSheetPreviewBarContextMenuTarget, ChordSheetPreviewBarTarget, getChordSheetMetaAnchorKey, PreviewAnchorRect } from './components/ChordSheet';
-import LyricsDocEditor from './components/LyricsDocEditor';
 import LyricsSheet from './components/LyricsSheet';
 import LyricsBook from './components/LyricsBook';
 import SetlistLyricsWorkspace from './components/SetlistLyricsWorkspace';
@@ -167,7 +166,6 @@ import PreviewSectionActionMenu from './components/preview-edit/PreviewSectionAc
 import PreviewBarMenuActions from './components/preview-edit/PreviewBarMenuActions';
 import PreviewSectionTitleEditor from './components/preview-edit/PreviewSectionTitleEditor';
 import KeyboardShortcutsDialog from './components/KeyboardShortcutsDialog';
-const SongEditor = React.lazy(() => import('./components/SongEditor'));
 import KeyPicker from './components/KeyPicker';
 import CapoPicker from './components/CapoPicker';
 import TempoPicker from './components/TempoPicker';
@@ -314,7 +312,6 @@ const SELECTED_SETLIST_SONG_STORAGE_KEY = 'chordmaster.selected-setlist-song-id.
 const SETLIST_SORT_STORAGE_KEY = 'chordmaster.setlist-sort.v1';
 const LIBRARY_SORT_STORAGE_KEY = 'chordmaster.library-sort.v1';
 const WORKSPACE_MODE_STORAGE_KEY = 'chordmaster.workspace-mode.v1';
-const PREVIEW_QUICK_EDIT_STORAGE_KEY = 'chordmaster.preview-quick-edit.v1';
 const JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY = 'chordmaster.joined-setlist-display-preferences.v1';
 const GOOGLE_SESSION_STORAGE_KEY = 'chordmaster.google-session.v1';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'chordmaster.sidebar-width.v1';
@@ -326,30 +323,7 @@ const MIN_EXPANDED_SIDEBAR_WIDTH = 420;
 const MAX_EXPANDED_SIDEBAR_WIDTH = 640;
 const PHONE_VIEWPORT_BREAKPOINT = 640;
 const SIDEBAR_OVERLAY_BREAKPOINT = 1280;
-const SPLIT_EDITOR_BREAKPOINT = 1360;
-// User-draggable editor/preview split bounds (desktop split view only).
-const EDITOR_PANE_MIN_WIDTH = 440;
-const PREVIEW_PANE_MIN_WIDTH = 360;
-const EDITOR_WIDTH_STORAGE_KEY = 'chordmaster.editor-width.v1';
-// Editor-pane widths at which the inner layout flips to its richer form: the
-// full bar cards appear once content width >= 640 (≈720px pane after ~80px of
-// padding) and the wide metadata panel once content width >= 820 (≈900px pane).
-// Each detent sits a safe margin *inside* the richer side of its threshold, and
-// pulls symmetrically from both directions, so wherever you release near a
-// boundary the editor always lands on the richer ("more info") layout — never
-// snapping onto the simpler one — regardless of drag direction.
-const EDITOR_SNAP_POINTS = [720, 900];
-const EDITOR_SNAP_DETENT = 12;
-const EDITOR_SNAP_PULL = 36;
-const snapEditorPaneWidth = (rawWidth: number) => {
-  for (const threshold of EDITOR_SNAP_POINTS) {
-    const detent = threshold + EDITOR_SNAP_DETENT;
-    if (Math.abs(rawWidth - detent) <= EDITOR_SNAP_PULL) {
-      return detent;
-    }
-  }
-  return rawWidth;
-};
+const DEFAULT_VIEWPORT_WIDTH = 1360;
 const PREVIEW_TARGET_WIDTH = 794;
 const PREVIEW_MIN_SCALE = 0.35;
 const PREVIEW_MAX_SCALE = 2.4;
@@ -751,7 +725,6 @@ const EMPTY_LIBRARY_PREVIEW_SONG: StoredSong = {
 
 
 type AppView = 'sheet' | 'about' | 'help';
-type EditorFocusField = 'chords' | 'riff' | 'label' | 'annotation' | 'rhythm' | 'lyrics' | 'sectionName' | 'marker';
 
 interface PreviewSectionActionTarget {
   previewIdentity: string;
@@ -771,18 +744,6 @@ interface PreviewBarContextMenuState extends PreviewBarSelectionTarget {
 interface PreviewBarClipboard {
   bars: Bar[];
   content: PreviewClipboard;
-}
-
-interface EditorFocusRequest {
-  sIdx: number;
-  bIdx: number;
-  field: EditorFocusField;
-  requestId: number;
-  // When the editor is being opened (or the song is being switched) by this
-  // request, jump straight to the bar with an instant scroll instead of the
-  // smooth scroll used for in-editor navigation — the panel is still settling
-  // its layout, so a smooth scroll would visibly bounce up/down several times.
-  instant?: boolean;
 }
 
 interface PreviewDragState {
@@ -1270,11 +1231,6 @@ const loadWorkspaceMode = (): WorkspaceMode => {
   return window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY) === 'setlists' ? 'setlists' : 'songs';
 };
 
-const loadPreviewQuickEditPreference = (): boolean => {
-  if (typeof window === 'undefined') return true;
-  return window.localStorage.getItem(PREVIEW_QUICK_EDIT_STORAGE_KEY) !== 'false';
-};
-
 const loadSetlistSortPreference = (): SetlistSortMode => {
   if (typeof window === 'undefined') {
     return 'updated-desc';
@@ -1444,26 +1400,6 @@ const loadSidebarWidthPreference = () => {
   return Math.max(MIN_EXPANDED_SIDEBAR_WIDTH, Math.min(MAX_EXPANDED_SIDEBAR_WIDTH, rawValue));
 };
 
-// null = use the automatic (responsive) editor width; a number = the user's
-// dragged preference, clamped against the current viewport when applied.
-const loadEditorWidthPreference = (): number | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const raw = window.localStorage.getItem(EDITOR_WIDTH_STORAGE_KEY);
-  if (raw === null || raw === '') {
-    return null;
-  }
-
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-
-  return value;
-};
-
 const parseGoogleCredential = (credential: string): GoogleUserSession | null => {
   try {
     const payloadSegment = credential.split('.')[1];
@@ -1581,7 +1517,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const personalSetlistRows = useSetlistBarRowPreference(authenticatedUser?.id);
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
   const [previewMetaEditTarget, setPreviewMetaEditTarget] = useState<PreviewWysiwygTarget | null>(null);
-  const [isPreviewQuickEditEnabled, setIsPreviewQuickEditEnabled] = useState(loadPreviewQuickEditPreference);
+  // Score entry always uses preview editors, including for former opt-out preferences.
   const [previewEditSession, setPreviewEditSession] = useState<PreviewEditSession | null>(null);
   const [preferredChordInputMode, setPreferredChordInputMode] = useState(loadChordInputPreference);
   const rememberChordInputMode = React.useCallback((mode: PreviewEditSession['chordInputMode']) => {
@@ -1698,7 +1634,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
 
   const [librarySelectionIds, setSelectedLibrarySongIds] = useState<string[]>([]);
-  const [isEditing, setIsEditing] = useState(false);
   const [isLyricsMode, setIsLyricsMode] = useState(false);
   const [isLyricsReading, setIsLyricsReading] = useState(false);
   const [isLyricsContinuous, setIsLyricsContinuous] = useState(true);
@@ -1714,9 +1649,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(initialLibrary.lastSavedAt);
   const [highlightedSectionIds, setHighlightedSectionIds] = useState<string[]>([]);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
-  const [editorFocusRequest, setEditorFocusRequest] = useState<EditorFocusRequest | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => (
-    typeof window === 'undefined' ? SPLIT_EDITOR_BREAKPOINT : window.innerWidth
+    typeof window === 'undefined' ? DEFAULT_VIEWPORT_WIDTH : window.innerWidth
   ));
   const [viewportHeight, setViewportHeight] = useState(() => (
     typeof window === 'undefined' ? 800 : window.innerHeight
@@ -1755,9 +1689,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidthPreference);
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
-  const [editorWidthPreference, setEditorWidthPreference] = useState<number | null>(loadEditorWidthPreference);
-  const [isEditorResizing, setIsEditorResizing] = useState(false);
-  const editorPaneLeftRef = useRef(0);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [libraryScope, setLibraryScope] = useState<LibraryScope>('all');
   const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(EMPTY_LIBRARY_FILTERS);
@@ -1945,8 +1876,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const mobileLongPressRef = useRef<{ kind: 'song' | 'setlist'; id: string; x: number; y: number } | null>(null);
   const mobileLongPressTimerRef = useRef<number | null>(null);
   const mobileLongPressTriggeredRef = useRef(false);
-  const editorFocusTimeoutRef = useRef<number | null>(null);
-  const editorFocusRequestIdRef = useRef(0);
   const pendingPreviewTransitionRef = useRef<(() => void) | null>(null);
   // When a section/chord of a *non-selected* setlist song is clicked in the
   // preview, we first switch the focused setlist song (async) and stash the
@@ -2120,7 +2049,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     enabled: isCloudMode && !usingStartupCache && isTeamWorkspace && workspaceOwnerId === authenticatedUser?.id
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
     editingSongId: workspaceMode === 'songs' && canEditTeamSongs && activeAppView === 'sheet' && !isPerformanceMode
-      ? isLibraryEditing ? libraryTitleEditingSongId : (isPreviewEditingActive || isEditing) ? song.id : null
+      ? isLibraryEditing ? libraryTitleEditingSongId : (isPreviewEditingActive) ? song.id : null
       : null
   });
   const songEditorsById = React.useMemo(() => {
@@ -2153,7 +2082,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     enabled: isCloudMode && !usingStartupCache && workspaceOwnerId === authenticatedUser?.id
       && !isLoadingCloudWorkspace && !isSwitchingLibrary,
     paused: isPreviewEditingActive || workspaceIsDirty || activeCloudMutationCount > 0 || syncStatus === 'syncing'
-      || (isTeamWorkspace && (isEditing || isLibraryEditing))
+      || (isTeamWorkspace && (isLibraryEditing))
       || Boolean(previewEditSession?.dirty) || Boolean(draggingSetlistSongId)
       || (isTeamWorkspace && !teamDraft.ready) || Boolean(teamDraft.pending) || Boolean(teamDraft.error),
     workspace: { songs, setlists, projects },
@@ -2309,34 +2238,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [sidebarShellMotion, sidebarContentMotion, sidebarShellTarget, sidebarContentTarget, sidebarShellOpacity, sidebarContentOpacity, sidebarMotionDuration, uiMotion.reduced, isPhoneViewport]);
   const isPhoneSetlistDrawer = isPhoneViewport && isSetlistMode;
   const mainViewportWidth = Math.max(0, viewportWidth - sidebarShellWidth);
-  // Desktop laptops (fine pointer) keep the side-by-side split far below the
-  // touch threshold so 14" MacBooks — especially with "Larger Text" display
-  // scaling or a pinned song list — stay on the desktop layout instead of the
-  // iPad-style floating overlay editor.
-  const splitEditorMinMain = hasFinePointer ? 1024 : SPLIT_EDITOR_BREAKPOINT;
-  const shouldUseSplitEditor = mainViewportWidth >= splitEditorMinMain;
-  // On desktops give the editor pane whatever is left after reserving a
-  // readable minimum preview width, capped so it never grows absurdly wide.
-  // This lets the editor reach its full desktop layout (wide metadata panel +
-  // full bar cards) whenever the screen allows, while still keeping the preview
-  // usable. On genuinely narrow laptops the editor simply gets less room and
-  // gracefully degrades to its compact cards rather than squeezing the preview.
-  const splitPreviewMinWidth = 440;
-  const splitEditorMaxWidth = 1040;
-  const autoSplitEditorWidth = hasFinePointer
-    ? Math.min(splitEditorMaxWidth, Math.max(560, mainViewportWidth - splitPreviewMinWidth))
-    : Math.max(680, Math.min(860, Math.round(mainViewportWidth * 0.5)));
-  // When the user has dragged the divider, honour their width (clamped so the
-  // editor stays usable and the preview keeps a readable minimum); otherwise
-  // fall back to the automatic responsive width.
-  const draggedEditorMaxWidth = Math.max(EDITOR_PANE_MIN_WIDTH, mainViewportWidth - PREVIEW_PANE_MIN_WIDTH);
-  const splitEditorWidth = editorWidthPreference != null
-    ? Math.max(EDITOR_PANE_MIN_WIDTH, Math.min(draggedEditorMaxWidth, editorWidthPreference))
-    : autoSplitEditorWidth;
-  const overlayEditorWidth = Math.min(
-    isPhoneViewport ? mainViewportWidth : Math.max(560, Math.round(mainViewportWidth * 0.52)),
-    Math.max(0, mainViewportWidth - (isPhoneViewport ? 0 : 32))
-  );
   const denseDesktopHeaderMinMain = hasFinePointer ? 1024 : 1200;
   const usesDenseDesktopHeader = isSheetView && mainViewportWidth >= denseDesktopHeaderMinMain;
   const usesTabletHeader = isSheetView && !isPhoneViewport && !usesDenseDesktopHeader;
@@ -2822,36 +2723,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         <Save size={14} />
         <span>{isExportingPdf ? copy.preparingPdf : isSetlistMode ? copy.exportSetlistPdf : copy.exportPdf}</span>
       </button>
-
-      {isSheetView && canOpenEditor && (
-        <button
-          type="button"
-          onClick={() => {
-            const nextEnabled = !isPreviewQuickEditEnabled;
-            if (!nextEnabled && previewEditSession?.dirty) {
-              pendingPreviewTransitionRef.current = () => {
-                setPreviewEditSession(null);
-                setIsPreviewQuickEditEnabled(false);
-              };
-              setIsPreviewEditExitPromptOpen(true);
-            } else {
-              if (!nextEnabled) setPreviewEditSession(null);
-              setIsPreviewQuickEditEnabled(nextEnabled);
-            }
-            setIsToolbarOverflowMenuOpen(false);
-          }}
-          className={`mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
-            isPreviewQuickEditEnabled
-              ? 'bg-indigo-50 text-indigo-700'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-[color:var(--color-text-muted)] dark:hover:bg-[color:var(--color-surface)] dark:hover:text-[color:var(--color-text)]'
-          }`}
-          role="menuitemcheckbox"
-          aria-checked={isPreviewQuickEditEnabled}
-        >
-          <span className="flex items-center gap-2"><Edit3 size={14} /><span>{language === 'zh' ? '預覽快捷編輯' : 'Preview quick edit'}</span></span>
-          <span className="text-[11px] font-bold">{isPreviewQuickEditEnabled ? copy.on : copy.off}</span>
-        </button>
-      )}
 
       {isAuthenticated ? (
         <>
@@ -3466,55 +3337,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [isSidebarResizing, responsiveSidebarMaxWidth, responsiveSidebarMinWidth]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (editorWidthPreference == null) {
-      window.localStorage.removeItem(EDITOR_WIDTH_STORAGE_KEY);
-    } else {
-      window.localStorage.setItem(EDITOR_WIDTH_STORAGE_KEY, String(Math.round(editorWidthPreference)));
-    }
-  }, [editorWidthPreference]);
-
-  useEffect(() => {
-    if (!isEditorResizing) {
-      return;
-    }
-
-    const handlePointerMove = (event: MouseEvent) => {
-      const maxWidth = Math.max(EDITOR_PANE_MIN_WIDTH, mainViewportWidth - PREVIEW_PANE_MIN_WIDTH);
-      const rawWidth = Math.max(
-        EDITOR_PANE_MIN_WIDTH,
-        Math.min(maxWidth, event.clientX - editorPaneLeftRef.current)
-      );
-      // Snap onto layout boundaries so crossing them feels magnetic rather than
-      // jumpy; keep the snapped value within the usable range.
-      const nextWidth = Math.max(
-        EDITOR_PANE_MIN_WIDTH,
-        Math.min(maxWidth, snapEditorPaneWidth(rawWidth))
-      );
-      setEditorWidthPreference(nextWidth);
-    };
-
-    const handlePointerUp = () => {
-      setIsEditorResizing(false);
-    };
-
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', handlePointerMove);
-    window.addEventListener('mouseup', handlePointerUp);
-
-    return () => {
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      window.removeEventListener('mousemove', handlePointerMove);
-      window.removeEventListener('mouseup', handlePointerUp);
-    };
-  }, [isEditorResizing, mainViewportWidth]);
-
-  useEffect(() => {
     const repository = cloudRepositoryRef.current;
     const linkedSongs = songs.filter((item) => item.teamSource);
 
@@ -3563,33 +3385,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       isCancelled = true;
     };
   }, [authenticatedUser, isTeamWorkspace, linkedTeamSourceSignature, songs]);
-
-  useEffect(() => {
-    if (skipNextActiveSectionPreviewScrollRef.current) {
-      skipNextActiveSectionPreviewScrollRef.current = false;
-      return;
-    }
-    if (!isEditing || !activeSectionId) return;
-
-    const scrollRoot = previewRef.current;
-    if (!scrollRoot) return;
-
-    const target = scrollRoot.querySelector<HTMLElement>(`[data-preview-section-id="${activeSectionId}"]`);
-    if (!target) return;
-
-    const rootRect = scrollRoot.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    const currentTop = scrollRoot.scrollTop;
-    const offsetTop = targetRect.top - rootRect.top + currentTop;
-    const desiredTop = Math.max(0, offsetTop - Math.min(120, rootRect.height * 0.18));
-
-    if (Math.abs(scrollRoot.scrollTop - desiredTop) < 12) return;
-
-    scrollRoot.scrollTo({
-      top: desiredTop,
-      behavior: 'smooth'
-    });
-  }, [activeSectionId, isEditing]);
 
   const performWorkspacePersistence = async (
     nextSongs: StoredSong[],
@@ -4137,7 +3932,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     const open = !isHandwriting;
     const change = () => {
       setPreviewEditSession(null);
-      setIsEditing(false);
       if (isLyricsMode && open) { setIsLyricsContinuous(true); setIsLyricsReading(true); }
       setIsSidebarPinned(false); setIsSidebarHovered(false); setIsMobileNavOpen(false);
       setIsHandwriting(open);
@@ -4150,8 +3944,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     change();
   };
   useEffect(() => {
-    if (isEditing || activePreviewEditSession || !authenticatedUser || (isLyricsMode && (!isLyricsReading || !isLyricsContinuous))) setIsHandwriting(false);
-  }, [isEditing, activePreviewEditSession, isLyricsMode, isLyricsReading, isLyricsContinuous, authenticatedUser?.id]);
+    if (activePreviewEditSession || !authenticatedUser || (isLyricsMode && (!isLyricsReading || !isLyricsContinuous))) setIsHandwriting(false);
+  }, [activePreviewEditSession, isLyricsMode, isLyricsReading, isLyricsContinuous, authenticatedUser?.id]);
 
   const handleToggleLibraryEditing = () => {
     if (!isLibraryEditing && !canEditTeamSongs) {
@@ -4652,7 +4446,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [isEditing, isSheetView, isPerformanceMode, isLyricsWorkspace, sidebarShellWidth, shouldUseSplitEditor, splitEditorWidth, usesDenseDesktopHeader, usesTabletHeader]);
+  }, [isSheetView, isPerformanceMode, isLyricsWorkspace, sidebarShellWidth, usesDenseDesktopHeader, usesTabletHeader]);
 
   React.useLayoutEffect(() => {
     if (!isSheetView || isPerformanceMode) return;
@@ -4842,7 +4636,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setSongs(nextSongs);
     setSelectedSongId(newSong.id);
     setActiveAppView('sheet');
-    setIsEditing(true);
+    setIsMobileNavOpen(false);
     setWorkspaceMode('songs');
   });
 
@@ -4894,7 +4688,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setSelectedSetlistSongId(null);
     setWorkspaceMode('setlists');
     setActiveAppView('sheet');
-    setIsEditing(false);
     setSetlistPanelView('detail');
     setSetlistSongSearchQuery('');
     setIsCreateSetlistOpen(false);
@@ -6162,11 +5955,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     // automatically by the currentPreviewIdentity effect when the song
     // changes, so we don't double-set them here — doing so causes a visible
     // flicker as the editor re-renders twice.)
-    if (editorFocusTimeoutRef.current !== null) {
-      window.clearTimeout(editorFocusTimeoutRef.current);
-      editorFocusTimeoutRef.current = null;
-    }
-    setEditorFocusRequest(null);
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
@@ -6620,11 +6408,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   useEffect(() => {
-    if (!teamLibraryUpdatePending || syncStatus !== 'saved' || teamLibraryReloadIsUnsafe || isPreviewEditingActive || isEditing || isLibraryEditing) return;
+    if (!teamLibraryUpdatePending || syncStatus !== 'saved' || teamLibraryReloadIsUnsafe || isPreviewEditingActive || isLibraryEditing) return;
     void refreshActiveTeamSongs(false);
     // refreshActiveTeamSongs intentionally reads the latest values through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncStatus, teamLibraryReloadIsUnsafe, teamLibraryUpdatePending, isPreviewEditingActive, isEditing, isLibraryEditing]);
+  }, [syncStatus, teamLibraryReloadIsUnsafe, teamLibraryUpdatePending, isPreviewEditingActive, isLibraryEditing]);
 
   const requireTeamSongImportContext = (context = teamSongImportContextRef.current) => {
     if (!navigator.onLine) throw new Error(language === 'zh' ? '連線後才能複製到團隊。' : 'Reconnect before copying to a team.');
@@ -6874,7 +6662,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             && item.songs.some((setlistSong) => setlistSong.id === activeSession.previewIdentity)
           ))) {
             setPreviewEditSession(null);
-            setIsEditing(false);
           }
           toast.info(language === 'zh'
             ? '你的歌單編輯指派已被移除，該歌單已恢復為雲端版本並改為唯讀。'
@@ -6959,7 +6746,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           setIsCreateSetlistOpen(false);
           setNewSetlistProjectId('');
           setPreviewEditSession(null);
-          setIsEditing(false);
           toast.info(language === 'zh'
             ? `你的團隊角色已更新為「${getTeamRoleLabel(currentLibrary.role, language)}」。${hadUnsavedChanges ? '未儲存修改仍保留在畫面；若新權限不允許，這些修改不會上傳。' : ''}`
             : `Your team role is now ${getTeamRoleLabel(currentLibrary.role, language)}.${hadUnsavedChanges ? ' Unsaved edits remain on screen; they will not upload if the new role does not allow it.' : ''}`);
@@ -7002,7 +6788,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           setProjectPicker(null);
           setIsCreateSetlistOpen(false);
           setPreviewEditSession(null);
-          setIsEditing(false);
           setSyncStatus('failed');
           toast.info(language === 'zh'
             ? '你已不是該團隊成員。未儲存修改已保留在目前畫面並改為唯讀；切換曲庫時可明確選擇是否捨棄。'
@@ -7074,7 +6859,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         setNewSetlistProjectId('');
         setShowArchivedSongs(false);
         setPreviewEditSession(null);
-        setIsEditing(false);
         setTeamLibraryUpdatePending(false);
         setIsRefreshingTeamLibrary(false);
         saveActiveLibraryPreference(authenticatedUser.id, nextLibrary.id);
@@ -7165,7 +6949,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
     setSelectedSongId(duplicatedSong.id);
     setActiveAppView('sheet');
-    setIsEditing(true);
+    setIsMobileNavOpen(false);
   };
 
   const handleCopyTeamSongToPersonal = async (songId: string) => {
@@ -7505,12 +7289,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     onRedo: handleActiveRedo,
     gestureSession:historyGestureSession
   });
-
-  const handleScrollEditorToTop = () => {
-    const editorScrollRoot = document.querySelector<HTMLElement>('[data-editor-scroll-root]');
-    if (!editorScrollRoot) return;
-    editorScrollRoot.scrollTo({ top: 0, behavior: 'smooth' });
-  };
 
   const exportCaptureHostToPdf = async (captureHost: HTMLElement, fileName: string) => {
     const { exportCaptureHostToPdf: exportPdf } = await import('./lib/pdfExport');
@@ -8391,13 +8169,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
   }, []);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(PREVIEW_QUICK_EDIT_STORAGE_KEY, isPreviewQuickEditEnabled ? 'true' : 'false');
-    } catch {
-      // Preference persistence is optional; editing remains usable in memory.
-    }
-  }, [isPreviewQuickEditEnabled]);
 
   useEffect(() => {
     try {
@@ -8495,11 +8266,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
   }, [isLibraryEditing, selectedLibrarySongIds.length]);
 
-  useEffect(() => {
-    if (isEditing && !canOpenEditor) {
-      setIsEditing(false);
-    }
-  }, [canOpenEditor, isEditing]);
 
   useEffect(() => {
     const handleSaveKeyDown = (event: KeyboardEvent) => {
@@ -8597,12 +8363,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [isPhoneViewport]);
 
   useEffect(() => {
-    if (!isEditing) {
-      setIsMobileMetadataOpen(false);
-    }
-  }, [isEditing]);
-
-  useEffect(() => {
     if (!isSheetView) {
       setIsMobileActionsSheetOpen(false);
       setIsMobileMetadataOpen(false);
@@ -8623,9 +8383,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   useEffect(() => {
     return () => {
-      if (editorFocusTimeoutRef.current !== null) {
-        window.clearTimeout(editorFocusTimeoutRef.current);
-      }
       if (autoSaveTimeoutRef.current !== null) {
         window.clearTimeout(autoSaveTimeoutRef.current);
       }
@@ -8696,16 +8453,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       isCancelled = true;
     };
   }, [copy.googleCredentialError, copy.googleLoadError, googleClientId, googleUser, isMobileActionsSheetOpen, isPhoneViewport, showGoogleAuth]);
-
-  const focusEditorField = React.useCallback((sIdx: number, bIdx: number, field: EditorFocusField, instant = false) => {
-    setEditorFocusRequest({
-      sIdx,
-      bIdx,
-      field,
-      requestId: editorFocusRequestIdRef.current += 1,
-      instant
-    });
-  }, []);
 
   const findPreviewAnchorRect = React.useCallback((anchorKey: string, occurrence?: number): PreviewAnchorRect | null => {
     const root = sheetRef.current;
@@ -9693,7 +9440,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   });
 
   React.useEffect(() => {
-    if (!isSheetView || !canOpenEditor || isEditing || isLyricsMode || isPerformanceMode
+    if (!isSheetView || !canOpenEditor || isLyricsMode || isPerformanceMode
       || isKeyboardShortcutsOpen || isSwitchingLibrary || isLoadingCloudWorkspace
       || !activePreviewSelectedBars.length) return;
     const removeSelectedBars = (event: KeyboardEvent) => {
@@ -9714,7 +9461,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     window.addEventListener('keydown', removeSelectedBars, true);
     return () => window.removeEventListener('keydown', removeSelectedBars, true);
   }, [activePreviewSelectedBars, canOpenEditor, deletePreviewBars, getPreviewBatchSong,
-    isEditing, isKeyboardShortcutsOpen, isLoadingCloudWorkspace, isLyricsMode, isPerformanceMode,
+    isKeyboardShortcutsOpen, isLoadingCloudWorkspace, isLyricsMode, isPerformanceMode,
     isSheetView, isSwitchingLibrary]);
 
   React.useEffect(() => {
@@ -9722,7 +9469,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       if (
         event.defaultPrevented
         || !canOpenEditor
-        || isEditing
         || isLyricsMode
         || !event.altKey
         || event.metaKey
@@ -9760,7 +9506,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     getActivePreviewBarTarget,
     getPreviewBatchSong,
     getPreviewBatchTargets,
-    isEditing,
     isLyricsMode
   ]);
 
@@ -9844,7 +9589,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
 
-    if (isPreviewQuickEditEnabled && field === 'sectionName') {
+    if (field === 'sectionName') {
       const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
       if (!previewIdentity) return;
       if (bIdx < 0 && target?.sectionId) {
@@ -9954,7 +9699,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               : field === 'label' || field === 'annotation'
                 ? 'text'
                 : null;
-    if (isPreviewQuickEditEnabled && previewField && bIdx >= 0) {
+    if (previewField && bIdx >= 0) {
       const previewIdentity = target?.previewIdentity ?? getPreviewIdentityForCurrentMode();
       if (previewIdentity) {
         if (requestedNotationMode === 'rhythm' || requestedNotationMode === 'jianpu') {
@@ -10074,25 +9819,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       }
     }
 
-    if (editorFocusTimeoutRef.current !== null) {
-      window.clearTimeout(editorFocusTimeoutRef.current);
-      editorFocusTimeoutRef.current = null;
-    }
-
-    const fallbackField: EditorFocusField = field === 'lower'
-      ? (lastPreviewNonChordMode === 'rhythm' ? 'rhythm' : 'riff')
-      : field;
-
-    if (!isEditing) {
-      setIsEditing(true);
-      editorFocusTimeoutRef.current = window.setTimeout(() => {
-        focusEditorField(nextSectionIndex, bIdx, fallbackField, true);
-        editorFocusTimeoutRef.current = null;
-      }, 500);
-    } else {
-      focusEditorField(nextSectionIndex, bIdx, fallbackField);
-    }
-  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSectionId, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession, findPreviewAnchorRect, focusEditorField, getPreviewIdentityForCurrentMode, hasFinePointer, isEditing, isPreviewQuickEditEnabled, lastPreviewNonChordMode, makePreviewTargetAnchorKey, previewEditorDeviceLayout, previewSectionActionTarget, refreshPreviewEditAnchorRect, rememberPreviewNonChordMode, preferredChordInputMode]);
+  }, [activeDraftEditorSong, activeDraftNavigationPreviewSong, activeEditorSong, activeNavigationPreviewSong, activePreviewEditSession, activeSectionId, canOpenEditor, clearPendingPreviewSectionAction, commitPreviewEditSession, findPreviewAnchorRect, getPreviewIdentityForCurrentMode, hasFinePointer, lastPreviewNonChordMode, makePreviewTargetAnchorKey, previewEditorDeviceLayout, previewSectionActionTarget, refreshPreviewEditAnchorRect, rememberPreviewNonChordMode, preferredChordInputMode]);
 
   const handleMetaClick = React.useCallback((field: ChordSheetMetaField, meta: ChordSheetElementClickMeta) => {
     if (!canOpenEditor) {
@@ -10179,9 +9906,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       target
     };
     setPreviewMetaEditTarget(null);
-    if (canOpenEditor && !isPreviewQuickEditEnabled) {
-      setIsEditing(true);
-    }
     handleSelectSetlistSong(itemId);
   });
 
@@ -10235,25 +9959,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setActiveSectionId(nextSectionId ?? targetSection.id ?? null);
     setActiveBar({ sIdx: targetIndex, bIdx: newBarIndex });
 
-    if (editorFocusTimeoutRef.current !== null) {
-      window.clearTimeout(editorFocusTimeoutRef.current);
-      editorFocusTimeoutRef.current = null;
-    }
 
-    // Adding from the preview must stay a lightweight structural action. Do
-    // not open the full editor just because it was closed; when the editor is
-    // already open, retain the convenient focus handoff to the new bar.
-    if (!isEditing) {
-      return;
-    }
-
-    const focusNewBar = () => {
-      focusEditorField(targetIndex, newBarIndex, 'chords');
-      editorFocusTimeoutRef.current = null;
-    };
-
-    editorFocusTimeoutRef.current = window.setTimeout(focusNewBar, 60);
-  }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlistContent, canEditTeamSongs, focusEditorField, handleSetlistSongContentChange, handleSongChange, isEditing, isSetlistMode]);
+  }, [activeEditorSong, activeNavigationPreviewSong, canEditSelectedSetlistContent, canEditTeamSongs, handleSetlistSongContentChange, handleSongChange, isSetlistMode]);
 
   const handleBarLabelLaneChange = React.useCallback((previewSIdx: number, previewBIdx: number, lane: BarLabelLane) => {
     const canEdit = isSetlistMode ? canEditSelectedSetlistContent : canEditTeamSongs;
@@ -10425,10 +10132,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     return (
       <RecoveryBoundary label="譜面預覽"><PersonalChordSheet
         notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
-        noteOwner={authenticatedUser?.id} noteSongId={song.id} notesActive={!isPerformanceMode && !isEditing && !activePreviewEditSession}
+        noteOwner={authenticatedUser?.id} noteSongId={song.id} notesActive={!isPerformanceMode && !activePreviewEditSession}
         song={renderedSong}
         readerAudition={!isPerformanceMode && !isHandwriting}
-        songMapEditor={canEditTeamSongs && !activePreviewEditSession && !isEditing ? {
+        songMapEditor={canEditTeamSongs && !activePreviewEditSession ? {
           scope: 'library', fallback: sectionSongMap(song.sections), sections: sectionSongMap(song.sections),
           onSave: songMap => handleSongChange({ ...song, songMap }),
         } : undefined}
@@ -10442,8 +10149,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onAddSectionAfterClick={canEditTeamSongs && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
         onBarLabelLaneChange={canEditTeamSongs ? handleBarLabelLaneChange : undefined}
         highlightedSectionIds={highlightedSectionIds}
-        activeSectionId={isEditing || activePreviewEditSession ? activeSectionId : null}
-        activeBar={isEditing || activePreviewEditSession ? activeBar : null}
+        activeSectionId={activePreviewEditSession ? activeSectionId : null}
+        activeBar={activePreviewEditSession ? activeBar : null}
         activePreviewNotationTarget={activePreviewNotationTarget}
         selectedPreviewBars={activePreviewSelectedBars}
         onPreviewBarMetaClick={canOpenEditor ? handlePreviewBarMetaClick : undefined}
@@ -10452,7 +10159,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       /></RecoveryBoundary>
     );
-  }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
+  }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
 
   // Stable dispatchers read the latest committed permissions, selection and handlers.
   const handleLibraryRowAction = useStableEvent((action: SongLibraryAction, id: string) => {
@@ -10464,7 +10171,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         }
         handleSelectSong(id);
         break;
-      case 'edit': handleSelectSong(id); setIsEditing(true); break;
       case 'duplicate': handleDuplicateSong(id); break;
       case 'delete': void handleDeleteSong(id); break;
       case 'restore':
@@ -10602,12 +10308,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           >
             <RecoveryBoundary label="譜面預覽"><SetlistPreviewSong
               notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
-        noteOwner={authenticatedUser?.id} noteSongId={item.songId} notesActive={isInteractive && !isEditing && !activePreviewEditSession}
+        noteOwner={authenticatedUser?.id} noteSongId={item.songId} notesActive={isInteractive && !activePreviewEditSession}
               entryId={item.id}
               readerAudition={isInteractive && !isHandwriting}
               song={previewSong}
               setlistSongNumber={songIndex + 1}
-              songMapEditor={isInteractive && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession && !isEditing ? {
+              songMapEditor={isInteractive && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession ? {
                 scope: 'setlist', setlistName: selectedSetlist?.name, fallback: getSongMap({ songMap: libraryMap, sections: previewSong.sections }), sections: sectionSongMap(previewSong.sections),
                 onSave: setlistSongMap => handleUpdateSetlistSong(item.id, current => ({
                   ...current, songData: { ...(current.songData ?? activeSetlistEditableSong), setlistSongMap },
@@ -10622,8 +10328,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               onAddSectionAfterClick={isInteractive && canEditSelectedSetlistContent && !activePreviewEditSession ? handleAddSectionAfterPreviewSection : undefined}
               onBarLabelLaneChange={isInteractive && canEditSelectedSetlistContent ? handleBarLabelLaneChange : undefined}
               highlightedSectionIds={isInteractive ? highlightedSectionIds : EMPTY_PREVIEW_IDS}
-              activeSectionId={isInteractive && (isEditing || activePreviewEditSession) ? activeSectionId : null}
-              activeBar={isInteractive && (isEditing || activePreviewEditSession) ? activeBar : null}
+              activeSectionId={isInteractive && (activePreviewEditSession) ? activeSectionId : null}
+              activeBar={isInteractive && (activePreviewEditSession) ? activeBar : null}
               activePreviewNotationTarget={isInteractive ? activePreviewNotationTarget : null}
               selectedPreviewBars={isInteractive ? activePreviewSelectedBars : EMPTY_PREVIEW_BARS}
               onPreviewBarMetaClick={isInteractive && canOpenEditor ? handlePreviewBarMetaClick : undefined}
@@ -10636,7 +10342,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         })}
       </div>
     );
-  }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isEditing, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
+  }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -10709,16 +10415,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   useEffect(() => {
     if (isLyricsMode) {
       setPreviewMetaEditTarget(null);
-      setIsEditing(false);
       setIsLyricsReading(true);
       setIsLyricsContinuous(true);
     }
   }, [isLyricsMode, isSetlistMode]);
 
-  // Resolve a pending cross-song setlist click once the freshly selected song
-  // becomes the active editor song. We schedule the focus on a timeout so it
-  // runs after the currentPreviewIdentity reset effect above (which clears the
-  // active bar/section on every song switch) and after the editor mounts.
+  // Retarget the preview editor after a cross-song setlist selection resolves.
   useEffect(() => {
     const pending = pendingSetlistElementFocusRef.current;
     if (!pending || !isSetlistMode) {
@@ -10735,7 +10437,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       : -1;
     const targetIndex = sectionIndexById >= 0 ? sectionIndexById : pending.sIdx;
 
-    if (isPreviewQuickEditEnabled && pending.target) {
+    if (pending.target) {
       const section = activeEditorSong.sections[targetIndex];
       const bar = section?.bars[pending.bIdx];
       if (section?.id && bar?.id) {
@@ -10758,26 +10460,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       }
     }
 
-    if (editorFocusTimeoutRef.current !== null) {
-      window.clearTimeout(editorFocusTimeoutRef.current);
-    }
-    editorFocusTimeoutRef.current = window.setTimeout(() => {
-      setActiveSectionId(activeEditorSong.sections[targetIndex]?.id ?? null);
-      setActiveBar({ sIdx: targetIndex, bIdx: pending.bIdx });
-      const fallbackField: EditorFocusField = pending.field === 'lower'
-        ? (lastPreviewNonChordMode === 'rhythm' ? 'rhythm' : 'riff')
-        : pending.field;
-      focusEditorField(targetIndex, pending.bIdx, fallbackField, true);
-      editorFocusTimeoutRef.current = null;
-    }, 520);
-  }, [activeEditorSong, findPreviewAnchorRect, focusEditorField, handleElementClick, isPreviewQuickEditEnabled, isSetlistMode, lastPreviewNonChordMode, makePreviewTargetAnchorKey, selectedSetlistSongId]);
+    window.requestAnimationFrame(() => handleElementClick(targetIndex, pending.bIdx, pending.field));
+  }, [activeEditorSong, findPreviewAnchorRect, handleElementClick, isSetlistMode, lastPreviewNonChordMode, makePreviewTargetAnchorKey, selectedSetlistSongId]);
 
   useSetlistPreviewNavigation({
     previewRef,
     enabled: !isPerformanceMode && isSetlistMode && !isLyricsWorkspace,
     // Covering the score pauses observation, not navigation's lifetime. Treating
     // it as a reopened preview would jump back to the song's start on dismissal.
-    trackScroll: !isLyricsMode && !isEditing && !previewEditSession && !(isPhoneViewport && isMobileNavOpen),
+    trackScroll: !isLyricsMode && !previewEditSession && !(isPhoneViewport && isMobileNavOpen),
     selectedSongId: selectedSetlistSongId,
     songCount: setlistPreviewSongs.length,
     skipNextAutoScrollRef: skipNextSetlistPreviewAutoScrollRef,
@@ -11527,18 +11218,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setIsSidebarResizing(true);
   };
 
-  const handleEditorResizeStart = (event: React.MouseEvent<HTMLElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const pane = (event.currentTarget as HTMLElement).closest('[data-editor-pane]');
-    editorPaneLeftRef.current = pane ? pane.getBoundingClientRect().left : 0;
-    setIsEditorResizing(true);
-  };
-
-  const handleEditorResizeReset = () => {
-    setEditorWidthPreference(null);
-  };
-
   const metadataSuggestions = React.useMemo(() => {
     const versions = new Set<string>();
     const translators = new Set<string>();
@@ -11614,48 +11293,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           )}
         />
       ) : null;
-
-  const mobileMetadataSummaryCard = isPhoneViewport && isEditing && isSheetView && mobileMetadataSong && metadataPanelContent ? (
-    <button
-      type="button"
-      onClick={() => {
-        setIsMobileMetadataOpen(true);
-        setIsMobileActionsSheetOpen(false);
-      }}
-      className="w-full rounded-2xl border border-gray-200 bg-white p-3 text-left shadow-sm transition-colors hover:border-indigo-200 hover:bg-gray-50"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-400">{mobileMetadataTitle}</div>
-          <div className="mt-1 truncate text-base font-bold text-gray-900">
-            {mobileMetadataSong.title || copy.untitledSong}
-          </div>
-          {(mobileMetadataVersion || mobileMetadataTranslator) ? (
-            <div className="mt-1 truncate text-xs font-medium text-gray-500">
-              {[mobileMetadataVersion, mobileMetadataTranslator].filter(Boolean).join(' · ')}
-            </div>
-          ) : null}
-        </div>
-        <span className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700">
-          {language === 'zh' ? '編輯' : 'Edit'}
-        </span>
-      </div>
-
-      <div className="mt-3 grid grid-cols-4 gap-1.5">
-        {[
-          { label: copy.key, value: mobileMetadataKey },
-          { label: 'Capo', value: String(mobileMetadataCapo) },
-          { label: copy.editor.tempo, value: mobileMetadataTempo },
-          { label: copy.editor.timeSignature, value: mobileMetadataTime }
-        ].map((item) => (
-          <div key={item.label} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-2 py-2">
-            <div className="truncate text-[9px] font-bold uppercase tracking-[0.12em] text-gray-400">{item.label}</div>
-            <div className="mt-1 truncate text-sm font-semibold text-gray-800">{item.value}</div>
-          </div>
-        ))}
-      </div>
-    </button>
-  ) : null;
 
   const backFromSetlistMembers = () => {
     setSetlistPanelView('detail');
@@ -12587,7 +12224,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   const appUpdateBlockedReason = isSwitchingLibrary || isLoadingCloudWorkspace || globalHistory.busy || historyForwardBusy || activeCloudMutationCount > 0 || pendingWorkspaceSwitch
     ? (language === 'zh' ? '請等目前的操作完成後再更新。' : 'Wait for the current operation to finish.')
-    : isEditing || previewMetaEditTarget || teamDraft.pending
+    : previewMetaEditTarget || teamDraft.pending
       ? (language === 'zh' ? '請先完成目前的編輯或草稿處理，再更新。' : 'Finish the current editor or draft recovery before updating.')
       : undefined;
 
@@ -14270,162 +13907,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         {/* Content Area - Split View */}
         {isSheetView ? (
         <div data-content-area className="relative flex min-h-0 flex-1 overflow-hidden">
-          {!shouldUseSplitEditor && isEditing && (
-            <button
-              type="button"
-              onClick={() => setIsEditing(false)}
-              className="absolute inset-0 z-20 bg-stone-950/10 backdrop-blur-[1px]"
-              aria-label={copy.closeEditor}
-            />
-          )}
-
-          {/* Editor Pane */}
-          <AnimatePresence initial={false} custom={uiMotion}>
-            {isEditing && (
-              <motion.div
-                data-editor-pane
-                initial={false}
-                animate={{ opacity: 1, transform: 'none' }}
-                exit={{ opacity: 0, transition: { duration: 0 } }}
-                transition={{ duration: 0 }}
-                className={`overflow-hidden border-r border-gray-200 bg-white shadow-xl ${
-                  shouldUseSplitEditor
-                    ? 'relative z-10 flex-shrink-0'
-                    : isPhoneViewport
-                      ? 'absolute inset-0 z-30 max-w-full shadow-none'
-                      : 'absolute inset-y-0 left-0 z-30 max-w-full rounded-r-[28px] shadow-[0_24px_60px_rgba(15,23,42,0.18)]'
-                }`}
-                style={{ width: shouldUseSplitEditor ? splitEditorWidth : overlayEditorWidth > 0 ? overlayEditorWidth : '100%' }}
-              >
-                {shouldUseSplitEditor && !isPhoneViewport && hasFinePointer && (
-                  <div
-                    onMouseDown={handleEditorResizeStart}
-                    onDoubleClick={handleEditorResizeReset}
-                    role="separator"
-                    aria-orientation="vertical"
-                    title={language === 'zh' ? '拖曳調整編輯區寬度（雙擊還原自動）' : 'Drag to resize editor (double-click to reset)'}
-                    className="group absolute inset-y-0 right-0 z-30 flex w-3 cursor-col-resize touch-none items-center justify-center"
-                  >
-                    <span className={`h-12 w-1 rounded-full transition-colors ${isEditorResizing ? 'bg-indigo-400' : 'bg-gray-200 group-hover:bg-indigo-300'}`} />
-                  </div>
-                )}
-                <div data-editor-scroll-root className="h-full overflow-y-auto">
-                  <div className="min-w-0 p-4 pb-24 sm:p-6 lg:p-8">
-                    {isSetlistMode && selectedSetlist && selectedSetlistSong && selectedSetlistSourceSong ? (
-                      <div className="space-y-5">
-                        {isPhoneViewport ? mobileMetadataSummaryCard : <div>{metadataPanelContent}</div>}
-                        {isLyricsMode ? (
-                          <LyricsDocEditor
-                            key={`${selectedSetlistSong.id}-lyrics`}
-                            song={activeSetlistEditableSong ?? selectedSetlistSourceSong}
-                            language={language}
-                            onChange={handleSetlistSongContentChange}
-                          />
-                        ) : (
-                          <RecoveryBoundary label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><SongEditor
-                            key={`${selectedSetlistSong.id}-song`}
-                            song={activeDraftEditorSong ?? activeSetlistEditableSong ?? selectedSetlistSourceSong}
-                            language={language}
-                            isPhoneViewport={isPhoneViewport}
-                            history={activePreviewEditSession
-                              ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future }
-                              : { past: globalHistory.canUndo ? [song] : [], future: globalHistory.canRedo ? [song] : [] }}
-                            onUndo={handleActiveUndo}
-                            onRedo={handleActiveRedo}
-                            onChange={handleActiveEditorSongChange}
-                            jianpuPitchContext={activeJianpuPitchContext}
-                            metadataMode="setlist"
-                            hideMetadataPanel
-                            hideBarNumberControls
-                            hideBottomAddSectionButton
-                            showInlineAddSectionButton
-                            activeSectionId={activeSectionId}
-                            onActiveSectionChange={setActiveSectionId}
-                            activeBar={activeBar}
-                            onActiveBarChange={setActiveBar}
-                            focusRequest={editorFocusRequest}
-                            onFocusRequestHandled={(requestId) => {
-                              setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
-                            }}
-                          /></React.Suspense></RecoveryBoundary>
-                        )}
-                      </div>
-                    ) : isSetlistMode ? (
-                      <div className="rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-6 py-8 text-sm text-gray-500">
-                        {selectedSetlist ? copy.selectSetlistSong : copy.noSetlists}
-                      </div>
-                    ) : !hasSongs ? (
-                      <div className="rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-6 py-8 text-sm leading-6 text-gray-500">
-                        {language === 'zh' ? '歌曲庫還沒有歌曲。請先新增第一首歌。' : 'Your library has no songs yet. Add your first song.'}
-                      </div>
-                    ) : (
-                      <div className="space-y-5">
-                        {isPhoneViewport ? mobileMetadataSummaryCard : metadataPanelContent}
-                        {isLyricsMode ? (
-                          <LyricsDocEditor
-                            key={`${song.id}-lyrics`}
-                            song={song}
-                            language={language}
-                            onChange={handleSongChange}
-                          />
-                        ) : (
-                          <RecoveryBoundary label="編輯器"><React.Suspense fallback={<div role="status" className="p-4">正在載入編輯器…</div>}><SongEditor
-                            key={song.id}
-                            song={(activeDraftEditorSong ?? song) as StoredSong}
-                            language={language}
-                            isPhoneViewport={isPhoneViewport}
-                            history={activePreviewEditSession ? { past: activePreviewEditSession.past, future: activePreviewEditSession.future } : { past: globalHistory.canUndo ? [song] : [], future: globalHistory.canRedo ? [song] : [] }}
-                            onUndo={handleActiveUndo}
-                            onRedo={handleActiveRedo}
-                            onChange={handleActiveEditorSongChange}
-                            jianpuPitchContext={activeJianpuPitchContext}
-                            hideMetadataPanel
-                            showInlineAddSectionButton
-                            activeSectionId={activeSectionId}
-                            onActiveSectionChange={setActiveSectionId}
-                            activeBar={activeBar}
-                            onActiveBarChange={setActiveBar}
-                            focusRequest={editorFocusRequest}
-                            onFocusRequestHandled={(requestId) => {
-                              setEditorFocusRequest(current => current?.requestId === requestId ? null : current);
-                            }}
-                          /></React.Suspense></RecoveryBoundary>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className={`absolute z-40 pointer-events-none ${isPhoneViewport ? 'bottom-4 left-4' : 'left-6 bottom-6'}`}>
-                  <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-gray-200 bg-white/95 px-2 py-2 shadow-lg backdrop-blur-sm">
-                    <button
-                      onClick={handleScrollEditorToTop}
-                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm"
-                      title={copy.backToTop}
-                    >
-                      <ChevronUp size={18} />
-                    </button>
-                    <button
-                      onClick={handleActiveUndo}
-                      disabled={activePreviewEditSession ? activePreviewEditSession.past.length === 0 : !globalHistory.canUndo}
-                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-colors shadow-sm"
-                      title={copy.undo}
-                    >
-                      <Undo2 size={18} />
-                    </button>
-                    <button
-                      onClick={handleActiveRedo}
-                      disabled={activePreviewEditSession ? activePreviewEditSession.future.length === 0 : !globalHistory.canRedo}
-                      className="p-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:text-indigo-600 hover:border-indigo-200 disabled:opacity-30 disabled:hover:text-gray-600 disabled:hover:border-gray-200 transition-colors shadow-sm"
-                      title={copy.redo}
-                    >
-                      <Redo2 size={18} />
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
           {/* Sheet Preview Pane */}
           <div data-setlist-preview-pane role={isSetlistMode && selectedSetlist ? 'region' : undefined}
             aria-label={isSetlistMode && selectedSetlist ? selectedSetlist.name || copy.untitledSetlist : undefined}
@@ -14522,7 +14003,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               </div>
             )}
             <div className="flex h-full min-h-0 flex-col">
-            {isSheetView && !isEditing && !activePreviewEditSession && !isLyricsMode && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
+            {isSheetView && !activePreviewEditSession && !isLyricsMode && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
               && !setlistOpening.opening && activeNavigationPreviewSong && activePreviewIdentity &&
               <ReaderAudition key={activePreviewIdentity} song={activeNavigationPreviewSong} identity={activePreviewIdentity}
                 userId={authenticatedUser?.id} language={language} chartRef={previewRef} triggerHost={readerAuditionHost} />}
@@ -14817,7 +14298,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
                 </button>
               </div>
             )}
-            {(!isLyricsWorkspace || !isLyricsContinuous) && !(isPhoneViewport && isEditing) && (
+            {(!isLyricsWorkspace || !isLyricsContinuous) && (
               <div className={`pointer-events-none absolute z-40 ${
                 isPhoneViewport ? 'bottom-3 right-3' : 'bottom-2 right-2 sm:bottom-4 sm:right-4 lg:bottom-6 lg:right-6'
               }`}>

@@ -10,6 +10,8 @@ web
 
 ChordMaster serves worship teams preparing and reading chord, rhythm and jianpu charts. The user confirmed on 2026-10-26 that mobile chart reading and full song editing are equally important.
 
+On 2026-11-12 the user retired the legacy left editor and its song-library menu entry. Keep editing directly on the sheet, including new and duplicated songs; retain the song library and setlist navigation.
+
 ## Product Purpose
 
 Keep song charts, musical metadata and service setlists together, with immediate chart preview and transposition.

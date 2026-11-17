@@ -48,7 +48,7 @@ const localizedMeta: Record<AppLanguage, {
         title: 'Quick Start',
         description: 'Create a song first, then use the Song Library on the left and the preview on the right to confirm the result.',
         bullets: [
-          'Click `New Song` to create a song, then `Open Editor` to edit it.',
+          'Create a song with `New Song`, then click its title, chords or notation in the preview to edit.',
           'Use the top bar to change Key, Capo, 123 Nashville numbers, fixed-do jianpu, and PDF export.',
           'Use the Song Library to search, duplicate, delete, import, or export the full library.'
         ]
@@ -57,8 +57,8 @@ const localizedMeta: Record<AppLanguage, {
         title: 'Fast Entry',
         description: 'Common rehearsal entry flows have been streamlined for speed.',
         bullets: [
-          'New bars start empty and focus jumps to the new chord field automatically.',
-          'Press `Enter` inside a chord field to insert a new bar after the current one.',
+          'New bars start empty; click a chord or notation area in the sheet to begin entry.',
+          'In chord entry, Tab or Space moves to the next beat; Enter moves to the next bar.',
           'Common section names such as Count-In, Verse, Chorus, Turnaround, Breakdown, Bridge, and Interlude are ready to use.',
           'Sections can define their own key changes, and later sections can inherit those changes automatically.'
         ]
@@ -76,7 +76,7 @@ const localizedMeta: Record<AppLanguage, {
         title: 'Preview & Export',
         description: 'The right-side preview is designed for layout verification before printing or PDF export.',
         bullets: [
-          'Use zoom, pan, and bar-click navigation to inspect the sheet without disturbing the left editor.',
+          'Use zoom and pan to inspect the sheet, and click chords or notation to edit directly.',
           '`Export JSON` is recommended for regular backup.',
           '`Export PDF` exports the current preview directly to PDF.'
         ]
@@ -85,6 +85,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-17',
+        title: 'Edit new songs directly on the sheet',
+        bullets: ['New and duplicated songs open directly on the sheet. Click the title, chords or notation to edit; the retired full editor no longer opens.']
+      },
+      {
+        version: '0.12.48',
         date: '2026-11-15',
         title: 'Drummer tempo controls',
         bullets: ['Tap the larger buttons for one BPM, or hold to move through multiples of ten. Drag the tempo left or right and tap Reset below it to restore the song tempo.']
@@ -1215,7 +1221,7 @@ const localizedMeta: Record<AppLanguage, {
         title: '快速開始',
         description: '先建立歌曲，再用左側歌庫管理與右側譜面預覽確認結果。',
         bullets: [
-          '點 `New Song` 建立新歌，`Open Editor` 打開編輯器。',
+          '點「新歌」建立歌曲，再直接點譜面的標題、和弦或簡譜編輯。',
           '在 top bar 可切換 Key、Capo、123 級數譜、固定調簡譜與 PDF 匯出。',
           '左側 Song Library 可搜尋、複製、刪除、匯入與匯出整個歌庫。'
         ]
@@ -1224,8 +1230,8 @@ const localizedMeta: Record<AppLanguage, {
         title: '快速輸入',
         description: '常用的輸入流程已經針對排練用法做過加速。',
         bullets: [
-          '新增小節時預設為空白，焦點會自動跳到新的 chord 欄位。',
-          '在 chord input 內按 `Enter` 可以直接在後方插入新小節。',
+          '新增小節時預設為空白，點譜面的和弦或記譜區即可開始輸入。',
+          '和弦輸入時，Tab 或 Space 到下一拍，Enter 到下一小節。',
           '段落預設已補齊常見的 Count-In、Verse、Chorus、Turnaround、Breakdown、Bridge、Interlude 等名稱。',
           '段落可設定自己的轉調，後面段落也會自動承接新的 key。'
         ]
@@ -1241,9 +1247,9 @@ const localizedMeta: Record<AppLanguage, {
       },
       {
         title: '預覽與輸出',
-        description: '右側預覽可在匯出或列印前先確認排版，不會影響左側編輯。',
+        description: '可直接在譜面編輯，並在匯出或列印前確認排版。',
         bullets: [
-          '可用縮放、拖曳與點擊小節回跳來檢查譜面細節。',
+          '可用縮放與拖曳檢查譜面細節，點和弦或簡譜即可編輯。',
           '`Export JSON` 建議作為定期備份。',
           '`Export PDF` 會直接把目前預覽輸出成 PDF。'
         ]
@@ -1252,6 +1258,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-17',
+        title: '新歌直接在譜面編輯',
+        bullets: ['新增與複製歌曲直接顯示譜面，點標題、和弦或簡譜即可編輯，不再開啟舊的整頁編輯器。']
+      },
+      {
+        version: '0.12.48',
         date: '2026-11-15',
         title: '鼓手速度控制',
         bullets: ['鼓手模式的加減鍵已加大。從 77 BPM 長按加號會依序到 80、90，長按減號則到 70、60。左右拖動速度數字可連續調速，點數字下方的「原速」即可回到歌曲原本的 BPM。']

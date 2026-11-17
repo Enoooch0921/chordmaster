@@ -190,7 +190,18 @@ it('only deduplicates the selected songs, even when an unselected identical copy
   } finally { confirm.mockRestore(); }
 });
 
-it('keeps the current song when a different row menu is dismissed and edits the requested song', async () => {
+it('duplicates a library song into preview editing without opening the retired left editor', async () => {
+  await mount();
+  fireEvent.click(within(row('first')).getByRole('button', { name: '歌曲操作：第一首歌曲' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: '複製歌曲' }));
+  await waitFor(() => expect(document.querySelectorAll('[data-library-song-id]')).toHaveLength(4));
+  expect(selectedSongId()).not.toBe('first');
+  expect(document.querySelector('[data-editor-pane]')).toBeNull();
+  fireEvent.click(document.querySelector('[data-preview-slot-index="0"]')!);
+  expect(await screen.findByRole('textbox', { name: '和弦直接輸入' })).toHaveValue('C');
+});
+
+it('keeps management actions without a full-editor entry and opens songs for preview editing', async () => {
   await mount();
   const trigger = within(row('second')).getByRole('button', { name: '歌曲操作：第二首歌曲' });
   fireEvent.click(trigger);
@@ -203,13 +214,17 @@ it('keeps the current song when a different row menu is dismissed and edits the 
   expect(selectedSongId()).toBe('first');
 
   fireEvent.click(trigger);
-  fireEvent.click(await screen.findByRole('menuitem', { name: '編輯歌曲' }));
+  expect(screen.queryByRole('menuitem', { name: '編輯歌曲' })).toBeNull();
+  expect(screen.getByRole('menuitem', { name: '複製歌曲' })).toBeInTheDocument();
+  expect(screen.getByRole('menuitem', { name: '封存歌曲' })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('menu', { name: '歌曲操作：第二首歌曲' }), { key: 'Escape' });
+  fireEvent.click(openSong('第二首歌曲'));
   await waitFor(() => expect(selectedSongId()).toBe('second'));
   expect(openSong('第二首歌曲')).toHaveAttribute('aria-current', 'true');
   expect(openSong('第一首歌曲')).not.toHaveAttribute('aria-current', 'true');
-  const main = document.querySelector<HTMLElement>('[data-main-panel]')!;
-  expect(await within(main).findByDisplayValue('第二首歌曲')).toBeVisible();
-  expect(within(main).queryByDisplayValue('第一首歌曲')).toBeNull();
+  expect(document.querySelector('[data-editor-pane]')).toBeNull();
+  fireEvent.click(document.querySelector('[data-preview-slot-index="0"]')!);
+  expect(await screen.findByRole('textbox', { name: '和弦直接輸入' })).toBeInTheDocument();
 });
 
 it('lets a team viewer select songs without exposing management or write actions', async () => {

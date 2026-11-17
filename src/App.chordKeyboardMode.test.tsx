@@ -27,6 +27,30 @@ async function openKeyboard() {
   fireEvent.click(document.querySelector('[data-preview-slot-index="0"]')!);
   return screen.findByRole('textbox', { name: '和弦直接輸入' });
 }
+it.each(['songs', 'setlists'])('keeps preview editing available with a retired false preference and exposes no full editor in %s', async mode => {
+  localStorage.setItem('chordmaster.workspace-mode.v1', mode);
+  localStorage.setItem('chordmaster.preview-quick-edit.v1', 'false');
+  mount();
+  expect(await openKeyboard()).toHaveValue('1');
+  expect(document.querySelector('[data-editor-pane]')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '完成' }));
+  fireEvent.click(screen.getByRole('button', { name: '更多' }));
+  expect(screen.queryByRole('menuitemcheckbox', { name: /預覽快捷編輯/ })).toBeNull();
+});
+
+it.each(['songs', 'setlists'])('opens a new song from %s directly in the preview despite a retired opt-out preference', async mode => {
+  localStorage.setItem('chordmaster.workspace-mode.v1', mode);
+  localStorage.setItem('chordmaster.preview-quick-edit.v1', 'false');
+  mount();
+  await waitFor(() => expect(document.querySelector('[data-preview-slot-index="0"]')).not.toBeNull());
+  if (mode === 'setlists') fireEvent.click(document.querySelector('[data-sidebar-workspace="songs"]')!);
+  fireEvent.click(screen.getAllByRole('button', { name: '新歌' })[0]);
+  await screen.findAllByRole('heading', { name: /^新歌/ });
+  expect(document.querySelector('[data-editor-pane]')).toBeNull();
+  await openKeyboard();
+  expect(screen.getByRole('textbox', { name: '和弦直接輸入' })).toHaveFocus();
+});
+
 it.each(['songs', 'setlists'])('uses Tab for individual beats and Enter for bars, retains edits and crosses bar boundaries in %s', async mode => {
   localStorage.setItem('chordmaster.workspace-mode.v1', mode);
   fixture.songs[0].sections = [

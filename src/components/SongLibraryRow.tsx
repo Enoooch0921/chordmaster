@@ -1,5 +1,5 @@
 import { memo, type TouchEvent } from 'react';
-import { Archive, ArchiveRestore, Copy, Download, Edit3, Star, Trash2, Upload } from 'lucide-react';
+import { Archive, ArchiveRestore, Copy, Download, Star, Trash2, Upload } from 'lucide-react';
 import type { AppLanguage, StoredSong } from '../types';
 import type { SongEditorPresence } from '../lib/songEditingPresence';
 import { getUiCopy } from '../constants/i18n';
@@ -9,7 +9,7 @@ import { ManagementActions } from './ProjectManagementPanel';
 import { SongEditingNotice } from './SongEditingNotice';
 import SongTitle from './SongTitle';
 
-export type SongLibraryAction = 'select' | 'edit' | 'duplicate' | 'delete' | 'restore'
+export type SongLibraryAction = 'select' | 'duplicate' | 'delete' | 'restore'
   | 'sync-team' | 'copy-to-team' | 'copy-to-personal' | 'toggle-selection' | 'toggle-favorite';
 
 interface Props {
@@ -135,7 +135,6 @@ export default memo(function SongLibraryRow({
                 { label: language === 'zh' ? '永久刪除歌曲' : 'Permanently delete song', icon: <Trash2 size={16} />, run: () => onAction('delete', item.id), danger: true }
               ] : [
                 { label: language === 'zh' ? '複製歌曲' : 'Duplicate song', icon: <Copy size={16} />, run: () => onAction('duplicate', item.id) },
-                { label: language === 'zh' ? '編輯歌曲' : 'Edit song', icon: <Edit3 size={16} />, run: () => onAction('edit', item.id) },
                 { label: language === 'zh' ? '封存歌曲' : 'Archive song', icon: <Archive size={16} />, run: () => onAction('delete', item.id) }
               ])
             ]} />}
