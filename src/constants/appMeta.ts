@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-17',
+        title: 'More reliable app updates',
+        bullets: ['Confirm worker activation even when a browser event is missed. Updates still save first and leave other open pages running; stalled updates show recovery steps without clearing browser data.']
+      },
+      {
+        version: '0.12.49',
+        date: '2026-11-17',
         title: 'Edit new songs directly on the sheet',
         bullets: ['New and duplicated songs open directly on the sheet. Click the title, chords or notation to edit; the retired full editor no longer opens.']
       },
@@ -1258,6 +1264,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-17',
+        title: '版本更新切換修正',
+        bullets: ['更新會同時確認新版啟用狀態，避免漏掉瀏覽器通知就持續等待。更新前仍先儲存內容；無法切換時會提示復原步驟，不必清除瀏覽器資料。']
+      },
+      {
+        version: '0.12.49',
         date: '2026-11-17',
         title: '新歌直接在譜面編輯',
         bullets: ['新增與複製歌曲直接顯示譜面，點標題、和弦或簡譜即可編輯，不再開啟舊的整頁編輯器。']

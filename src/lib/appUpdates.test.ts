@@ -6,12 +6,12 @@ afterEach(() => { disposals.splice(0).forEach(dispose => dispose()); vi.useRealT
 function setup(firstInstall = false) {
   const worker = Object.assign(new EventTarget(), { state: 'installed', postMessage: vi.fn() });
   const container = Object.assign(new EventTarget(), { controller: firstInstall ? null : {} });
-  const registration = Object.assign(new EventTarget(), { waiting: worker as typeof worker | null, installing: null as typeof worker | null, update: vi.fn(async () => {}) });
+  const registration = Object.assign(new EventTarget(), { active: container.controller, waiting: worker as typeof worker | null, installing: null as typeof worker | null, update: vi.fn(async () => {}) });
   const reload = vi.fn();
   const updates = createAppUpdates(container as unknown as ServiceWorkerContainer, reload);
   updates.watch(registration as unknown as ServiceWorkerRegistration);
   disposals.push(updates.dispose);
-  const activate = () => { registration.waiting = null; container.controller = {}; container.dispatchEvent(new Event('controllerchange')); };
+  const activate = () => { registration.waiting = null; worker.state = 'activated'; registration.active = worker; container.controller = worker; container.dispatchEvent(new Event('controllerchange')); };
   return { worker, container, registration, reload, updates, activate };
 }
 
@@ -74,8 +74,69 @@ describe('explicit app updates', () => {
     vi.useFakeTimers();
     const { updates, reload, activate } = setup();
     const pending = updates.apply(async () => {});
-    const rejected = expect(pending).rejects.toThrow('更新尚未完成');
+    const rejected = expect(pending).rejects.toThrow('關閉所有 ChordMaster 視窗');
     await vi.advanceTimersByTimeAsync(30_000); await rejected;
     activate(); expect(reload).not.toHaveBeenCalled();
+  });
+  it('accepts worker activation even when controllerchange never arrives', async () => {
+    const { updates, worker, registration, reload } = setup();
+    const pending = updates.apply(async () => {});
+    await Promise.resolve();
+    registration.waiting = null; registration.active = worker; worker.state = 'activated';
+    worker.dispatchEvent(new Event('statechange'));
+    await pending;
+    expect(reload).toHaveBeenCalledOnce();
+  });
+  it('detects activation by polling when both browser events are missed', async () => {
+    vi.useFakeTimers();
+    const { updates, worker, registration, reload } = setup();
+    const pending = updates.apply(async () => {});
+    await Promise.resolve();
+    registration.waiting = null; registration.active = worker; worker.state = 'activated';
+    await vi.advanceTimersByTimeAsync(500); await pending;
+    expect(reload).toHaveBeenCalledOnce();
+  });
+  it('uses an update activated in another tab while saving without changing this controller', async () => {
+    const { updates, worker, registration, reload } = setup();
+    let saved!: () => void;
+    const pending = updates.apply(() => new Promise<void>(resolve => { saved = resolve; }));
+    registration.waiting = null; registration.active = worker; worker.state = 'activated';
+    expect(reload).not.toHaveBeenCalled();
+    saved(); await pending;
+    expect(reload).toHaveBeenCalledOnce();
+    expect(worker.postMessage).not.toHaveBeenCalled();
+  });
+  it('switches to a replacement worker if another deployment supersedes the waiting update', async () => {
+    const { updates, worker, registration, reload } = setup();
+    const pending = updates.apply(async () => {});
+    await Promise.resolve();
+    const replacement = Object.assign(new EventTarget(), { state: 'installed', postMessage: vi.fn(() => {
+      registration.waiting = null; registration.active = replacement; replacement.state = 'activated';
+      replacement.dispatchEvent(new Event('statechange'));
+    }) });
+    registration.waiting = replacement; worker.state = 'redundant'; worker.dispatchEvent(new Event('statechange'));
+    await pending;
+    expect(replacement.postMessage).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+  it('retries a missed activation request and stops polling after success', async () => {
+    vi.useFakeTimers();
+    const { updates, worker, activate, reload } = setup();
+    worker.postMessage.mockImplementationOnce(() => {}).mockImplementation(activate);
+    const pending = updates.apply(async () => {});
+    await Promise.resolve();
+    expect(worker.postMessage).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000); await pending;
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+  it('gives recovery steps immediately instead of waiting for a nonexistent worker', async () => {
+    const { updates, registration, reload } = setup();
+    registration.waiting = null;
+    await expect(updates.apply(async () => {})).rejects.toThrow('不需要清除瀏覽器資料');
+    expect(registration.update).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
   });
 });

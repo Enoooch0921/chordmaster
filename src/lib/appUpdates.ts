@@ -1,3 +1,7 @@
+const activationError = () => new Error(
+  '新版尚未切換完成。請確認內容已同步，關閉所有 ChordMaster 視窗後重新開啟；不需要清除瀏覽器資料。 / The new version has not taken over. After syncing, close all ChordMaster windows and reopen the app. Do not clear browser data.'
+);
+
 /** Installed updates are offered explicitly; changing controllers never reloads other tabs. */
 export function createAppUpdates(
   container: ServiceWorkerContainer | undefined,
@@ -7,6 +11,7 @@ export function createAppUpdates(
   let ready = false;
   let controller = container?.controller;
   let pageController = controller;
+  let pageActiveWorker: ServiceWorker | null | undefined;
   let operation: Promise<void> | null = null;
   let lastCheck = 0;
   const listeners = new Set<() => void>();
@@ -41,6 +46,7 @@ export function createAppUpdates(
       registration = next;
       controller = container.controller;
       pageController = controller;
+      pageActiveWorker = registration.active;
       container.addEventListener('controllerchange', controllerChanged);
       registration.addEventListener('updatefound', watchInstalling);
       window.addEventListener('focus', check);
@@ -62,23 +68,49 @@ export function createAppUpdates(
       operation = (async () => {
         if (!ready || !container || !registration) throw new Error('尚未有可用的更新。 / No update is ready yet.');
         await prepare();
-        const waiting = registration.waiting;
-        if (waiting || container.controller === pageController) {
+        // Another tab can activate the update while this tab saves. Navigation
+        // can use that active worker even if controllerchange was missed here.
+        const hasNewActiveWorker = () => Boolean(registration?.active
+          && registration.active !== pageActiveWorker && registration.active.state === 'activated');
+        const hasNewController = () => Boolean(container.controller && container.controller !== pageController);
+        if (registration.waiting || (!hasNewActiveWorker() && !hasNewController())) {
+          let target = registration.waiting ?? registration.installing;
+          if (!target) throw activationError();
           await new Promise<void>((resolve, reject) => {
-            const previous = container.controller;
+            const workers = new Set<ServiceWorker>();
+            let requested: ServiceWorker | null = null;
+            let lastRequest = 0;
             const cleanup = () => {
               window.clearTimeout(timer);
+              window.clearInterval(poll);
               container.removeEventListener('controllerchange', changed);
+              workers.forEach(worker => worker.removeEventListener('statechange', changed));
             };
             const changed = () => {
-              if (container.controller && container.controller !== previous) { cleanup(); resolve(); }
+              if (target?.state === 'activated'
+                || (!registration?.waiting && !registration?.installing && (hasNewController() || hasNewActiveWorker()))) {
+                cleanup(); resolve(); return;
+              }
+              const next = registration?.waiting ?? registration?.installing;
+              if (next && next !== target) { target = next; requested = null; }
+              if (!target || target.state === 'redundant') { cleanup(); reject(activationError()); return; }
+              if (!workers.has(target)) {
+                workers.add(target);
+                target.addEventListener('statechange', changed);
+              }
+              if (target.state === 'installed' && (requested !== target || Date.now() - lastRequest >= 1_000)) {
+                requested = target; lastRequest = Date.now();
+                try { target.postMessage({ type: 'CHORDMASTER_ACTIVATE_UPDATE' }); }
+                catch (error) { cleanup(); reject(error); }
+              }
             };
             const timer = window.setTimeout(() => {
-              cleanup(); reject(new Error('更新尚未完成，請稍後再試。 / Update did not finish. Please try again.'));
+              cleanup(); reject(activationError());
             }, 30_000);
+            // Check state as well as events: activation may finish before an
+            // event listener is attached, or a background tab may miss it.
+            const poll = window.setInterval(changed, 500);
             container.addEventListener('controllerchange', changed);
-            try { waiting?.postMessage({ type: 'CHORDMASTER_ACTIVATE_UPDATE' }); }
-            catch (error) { cleanup(); reject(error); }
             changed();
           });
         }
