@@ -17,8 +17,10 @@ describe('KeyboardShortcutsDialog', () => {
     await user.click(opener);
     const close = screen.getByRole('button', { name: 'Close shortcuts' });
     expect(close).toHaveFocus();
-    await user.tab(); expect(close).toHaveFocus();
+    await user.tab(); expect(screen.getByRole('searchbox')).toHaveFocus();
     await user.tab({ shift: true }); expect(close).toHaveFocus();
+    await user.tab({ shift: true }); expect(screen.getByRole('region', {name:'Shortcut list'})).toHaveFocus();
+    await user.tab(); expect(close).toHaveFocus();
     screen.getByRole('button', { name: 'Background action' }).focus();
     expect(close).toHaveFocus();
     await user.keyboard('{Escape}');
@@ -29,10 +31,23 @@ describe('KeyboardShortcutsDialog', () => {
     render(<KeyboardShortcutsDialog language="zh" onClose={vi.fn()} />);
 
     expect(screen.getByRole('dialog', { name: '快捷鍵' })).toBeInTheDocument();
-    expect(screen.getByText('全站')).toBeInTheDocument();
+    expect(screen.getByRole('heading', {name:'全站'})).toBeInTheDocument();
     expect(screen.getAllByText('預覽快捷編輯')[0]).toBeInTheDocument();
     expect(screen.getByText('開啟快捷鍵清單')).toBeInTheDocument();
     expect(screen.getAllByText('?')[0]).toBeInTheDocument();
+  });
+
+  it('searches across categories by action and key, and clears search on category selection', () => {
+    render(<KeyboardShortcutsDialog language="zh" onClose={vi.fn()}/>);
+    const search = screen.getByRole('searchbox');
+    fireEvent.change(search, {target:{value:'試聽'}});
+    expect(screen.getByText('開始或停止目前範圍的和弦試聽')).toBeInTheDocument();
+    fireEvent.change(search, {target:{value:'Ctrl+S'}});
+    expect(screen.getByText('儲存歌庫')).toBeInTheDocument();
+    expect(screen.queryByText('重做')).toBeNull();
+    fireEvent.click(screen.getByRole('button', {name:'演出模式'}));
+    expect(search).toHaveValue('');
+    expect(screen.getByText('下一頁')).toBeInTheDocument();
   });
 
   it('closes with Escape or the close button', () => {

@@ -78,7 +78,7 @@ export function buildPracticeSession(song: Song, range: PracticeRange, startInde
       const harmony = tonic(current.soundingKey);
       section = {duration, fallbackTempo: false,
         bars:[{...current, pickup:false, firstBeat:0, start:0, end:duration, practiceBar:1, practiceTotal:1,
-          mapVisit:-1, mapLabel:label, sourceTitle:undefined}],
+          mapVisit:-1, mapLabel:label, sourceTitle:undefined, sectionId:'', barId:'', writtenPosition:undefined}],
         sounds: label === 'Ending' && 'notes' in harmony ? [{start:0,end:duration,notes:harmony.notes}] : []};
     }
     if (!section) return;

@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 
 /** Keep keyboard focus in a sheet, including its portalled pickers. */
-export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>) {
+export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>, includeTabStops = false) {
   const opener = useRef<HTMLElement | null>(null);
   const generation = useRef(0);
   useLayoutEffect(() => {
@@ -11,7 +11,7 @@ export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>)
     const previous = document.activeElement;
     if (previous instanceof HTMLElement && !dialog.contains(previous)) opener.current = previous;
     const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>(
-      'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled)'
+      'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled)' + (includeTabStops ? ', [tabindex="0"]' : '')
     ));
     const isPicker = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('[data-placement]'));
     const focusFirst = () => controls()[0]?.focus({ preventScroll: true });
@@ -41,5 +41,5 @@ export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>)
         opener.current = null;
       });
     };
-  }, [open, ref]);
+  }, [open, ref, includeTabStops]);
 }

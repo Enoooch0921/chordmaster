@@ -1,106 +1,125 @@
 import React from 'react';
-import { Keyboard, X } from 'lucide-react';
+import { AudioLines, BookOpen, Keyboard, ListMusic, PencilLine, Search, SlidersHorizontal, SquareDashedMousePointer, X } from 'lucide-react';
 import type { AppLanguage } from '../types';
-import { KEYBOARD_SHORTCUT_SECTIONS } from '../constants/keyboardShortcuts';
+import { KEYBOARD_SHORTCUT_SECTIONS as sections, type KeyboardShortcutEntry } from '../constants/keyboardShortcuts';
 import { useModalFocus } from '../hooks/useModalFocus';
+import MeasuredSlidingSelection from './ui/MeasuredSlidingSelection';
+import './KeyboardShortcutsDialog.css';
 
-interface KeyboardShortcutsDialogProps {
+interface Props {
   language: AppLanguage;
   onClose: () => void;
 }
 
-const keyClassName = 'inline-flex min-h-6 items-center justify-center rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-black leading-none text-slate-700 shadow-[0_1px_0_rgba(15,23,42,0.08)]';
+const icons = { global: Keyboard, performance: BookOpen, preview: PencilLine, rhythm: AudioLines, jianpu: ListMusic, fields: SlidersHorizontal };
+const arrows: Record<string, string> = { ArrowLeft: '←', ArrowRight: '→', ArrowDown: '↓', ArrowUp: '↑' };
 
-const KeyboardShortcutsDialog: React.FC<KeyboardShortcutsDialogProps> = ({ language, onClose }) => {
-  const dialogRef = React.useRef<HTMLElement>(null);
-  useModalFocus(true, dialogRef);
+function keyLabel(key: string, mac: boolean, zh: boolean) {
+  switch (key) {
+    case 'Ctrl/Cmd': return mac ? '⌘' : 'Ctrl';
+    case 'Option/Alt': case 'Alt': return mac ? '⌥' : 'Alt';
+    case 'Shift': return mac ? '⇧' : 'Shift';
+    case 'Space': return zh ? '空白鍵' : 'Space';
+    case 'click': return zh ? '點選' : 'Click';
+    default: return arrows[key] ?? key;
+  }
+}
 
+function Rows({ entries, language }: { entries: KeyboardShortcutEntry[]; language: AppLanguage }) {
+  const mac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+  return <dl className="shortcuts-rows">
+    {entries.map(entry => <div className="shortcuts-row" key={entry.action.en}>
+      <dt>{entry.action[language]}{entry.context && <small>{entry.context[language]}</small>}</dt>
+      <dd>{entry.keys.map(combo => <span className="shortcuts-combo" translate="no" key={combo} title={combo}>
+        <span className="sr-only">{combo}</span>
+        {combo.split(' + ').map((key, i) => <kbd aria-hidden="true" key={i}>{keyLabel(key, mac, language === 'zh')}</kbd>)}
+      </span>)}</dd>
+    </div>)}
+  </dl>;
+}
+
+function normalize(value: string) {
+  return value.normalize('NFKC').toLowerCase().replaceAll('⌘', 'cmd').replaceAll('⇧', 'shift')
+    .replaceAll('⌥', 'alt').replace(/ctrl\/cmd|command|control|ctrl|cmd/g, 'mod')
+    .replace(/option\/alt|option/g, 'alt').replace(/[\s+]/g, '');
+}
+
+export default function KeyboardShortcutsDialog({ language, onClose }: Props) {
+  const dialog = React.useRef<HTMLElement>(null);
+  const content = React.useRef<HTMLDivElement>(null);
+  const input = React.useRef<HTMLInputElement>(null);
+  const [group, setGroup] = React.useState(sections[0].id);
+  const [query, setQuery] = React.useState('');
+  const titleId = React.useId();
+  const zh = language === 'zh';
+  const title = zh ? '快捷鍵' : 'Keyboard Shortcuts';
+  const category = zh ? '操作分類' : 'Categories';
+  const needle = normalize(query.trim());
+  const searching = !!query.trim();
+  const isCombination = /[⌘⇧⌥]|(?:cmd|ctrl|control|command|shift|alt|option)\s*\+/i.test(query);
+  const visible = searching ? sections.map(section => ({
+    ...section,
+    shortcuts: section.shortcuts.filter(entry => {
+      const symbols = entry.keys.map(key => key.split(' + ').map(part => keyLabel(part, true, zh)).join(''));
+      const keys = [...entry.keys, ...symbols];
+      if (isCombination) return keys.some(key => normalize(key) === needle);
+      const searchable = [section.title[language], entry.action[language], entry.context?.[language] ?? '', ...keys];
+      return searchable.some(text => needle ? normalize(text).includes(needle) : text.includes(query.trim()));
+    })
+  })).filter(section => section.shortcuts.length) : sections.filter(section => section.id === group);
+  const count = visible.reduce((total, section) => total + section.shortcuts.length, 0);
+  useModalFocus(true, dialog, true);
+  React.useLayoutEffect(() => { if (content.current) content.current.scrollTop = 0; }, [group, query]);
   React.useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing) return;
       event.preventDefault();
       event.stopPropagation();
       onClose();
     };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
   }, [onClose]);
 
-  const title = language === 'zh' ? '快捷鍵' : 'Keyboard Shortcuts';
-  const subtitle = language === 'zh'
-    ? '整理目前可用的鍵盤操作；按 ? 或 Ctrl/Cmd + / 可重新開啟。'
-    : 'A map of the keyboard actions currently available. Press ? or Ctrl/Cmd + / to reopen it.';
-
-  return (
-    <div
-      data-keyboard-shortcuts-dialog
-      className="fixed inset-0 z-[6200] flex items-center justify-center bg-slate-950/45 px-3 py-5 backdrop-blur-[2px]"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="flex max-h-[min(860px,calc(100dvh-2.5rem))] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_28px_80px_rgba(15,23,42,0.32)]"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-indigo-500">
-              <Keyboard size={15} />
-              <span>{language === 'zh' ? '操作速查' : 'Reference'}</span>
-            </div>
-            <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950">{title}</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-500">{subtitle}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700"
-            aria-label={language === 'zh' ? '關閉快捷鍵' : 'Close shortcuts'}
-          >
-            <X size={18} />
-          </button>
+  const select = (id: string) => { setGroup(id); setQuery(''); };
+  return <div className="shortcuts-backdrop" data-keyboard-shortcuts-dialog onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <section ref={dialog} className="shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}
+      onKeyDown={e => e.stopPropagation()}>
+      <button type="button" className="shortcuts-close" aria-label={zh ? '關閉快捷鍵' : 'Close shortcuts'} onClick={onClose}><X size={19} aria-hidden="true"/></button>
+      <header className="shortcuts-header">
+        <h2 id={titleId}><span className="shortcuts-emblem"><Keyboard size={24} aria-hidden="true"/></span>{title}</h2>
+        <label className="shortcuts-search"><Search size={16} aria-hidden="true"/>
+          <input type="search" name="shortcut-search" ref={input} aria-label={zh ? '搜尋全部快捷鍵' : 'Search all shortcuts'} placeholder={zh ? '搜尋操作或按鍵…' : 'Search actions or keys…'}
+            autoComplete="off" spellCheck={false} value={query} onChange={e => setQuery(e.target.value)}/>
+        </label>
+      </header>
+      <div className="shortcuts-body">
+        <nav className="shortcuts-categories ui-selection-list" aria-label={category}>
+          <MeasuredSlidingSelection value={searching ? '' : group} layoutKey={language} orientation="vertical" />
+          {sections.map(section => {
+            const Icon = icons[section.id as keyof typeof icons];
+            return <button type="button" key={section.id} aria-pressed={!searching && group === section.id} onClick={() => select(section.id)}>
+              <Icon size={17} aria-hidden="true"/><span>{section.title[language]}</span>
+            </button>;
+          })}
+        </nav>
+        <label className="shortcuts-picker">{category}
+          <select name="shortcut-category" value={searching ? '' : group} onChange={e => select(e.target.value)}>
+            {searching && <option value="" disabled>{zh ? '搜尋結果' : 'Search results'}</option>}
+            {sections.map(s => <option key={s.id} value={s.id}>{s.title[language]}</option>)}
+          </select>
+        </label>
+        <div className="shortcuts-content" ref={content} tabIndex={0} role="region" aria-label={zh ? '快捷鍵列表' : 'Shortcut list'}>
+          {searching && <p className="shortcuts-result" role="status">{zh ? `找到 ${count} 項操作` : `${count} matching actions`}</p>}
+          {visible.map(section => <section className="shortcuts-group" key={section.id}>
+            <header><h3>{section.title[language]}</h3>{section.description && <p>{section.description[language]}</p>}</header>
+            <Rows entries={section.shortcuts} language={language}/>
+          </section>)}
+          {searching && !count && <div className="shortcuts-empty"><SquareDashedMousePointer size={28} aria-hidden="true"/>
+            <p>{zh ? '試試操作名稱或鍵盤上的字。' : 'Try an action name or a key on your keyboard.'}</p>
+            <button type="button" onClick={() => { setQuery(''); input.current?.focus(); }}>{zh ? '清除搜尋' : 'Clear search'}</button></div>}
         </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-          <div className="grid gap-5 lg:grid-cols-2">
-            {KEYBOARD_SHORTCUT_SECTIONS.map((section) => (
-              <section key={section.id} className="min-w-0">
-                <h3 className="text-sm font-black tracking-tight text-slate-950">{section.title[language]}</h3>
-                {section.description ? (
-                  <p className="mt-1 text-xs leading-5 text-slate-500">{section.description[language]}</p>
-                ) : null}
-                <div className="mt-2 overflow-hidden rounded-lg border border-slate-200">
-                  {section.shortcuts.map((shortcut, index) => (
-                    <div
-                      key={`${section.id}-${shortcut.keys.join('-')}-${shortcut.action.en}`}
-                      className={`grid gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] ${index === 0 ? '' : 'border-t border-slate-100'}`}
-                    >
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {shortcut.keys.map((key) => (
-                          <kbd key={key} className={keyClassName}>{key}</kbd>
-                        ))}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold leading-5 text-slate-800">{shortcut.action[language]}</div>
-                        {shortcut.context ? (
-                          <div className="mt-0.5 text-xs leading-5 text-slate-500">{shortcut.context[language]}</div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-};
-
-export default KeyboardShortcutsDialog;
+      </div>
+    </section>
+  </div>;
+}

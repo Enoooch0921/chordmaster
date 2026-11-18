@@ -314,6 +314,13 @@
 }
 @media screen {
   [data-audition-playing] { background-color: rgb(88 176 126 / 26%) !important; box-shadow: inset 0 -2px #33784f; }
+  [data-practice-beat] {
+    background-color: rgb(88 176 126 / 18%) !important;
+    background-image: linear-gradient(#33784f, #33784f);
+    background-repeat: no-repeat;
+    background-size: var(--practice-beat-width) 3px;
+    background-position: var(--practice-beat-position) bottom;
+  }
 }
 
 /* Playback stays at reading size outside the scaled score and the phone key grid. */

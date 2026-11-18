@@ -36,12 +36,15 @@ interface Props extends PersonalNotesOptions {
   phoneHandwritingButton?: boolean;
   preferenceKey?: string;
   practiceSong?: Song;
+  chartViewport?: React.RefObject<HTMLDivElement | null>;
+  chartControlsHost?: HTMLElement | null;
+  onPracticePlayingChange?: (playing: boolean) => void;
   chordPlayback?: { stop: () => void } | null;
   readingPositions?: Map<string, ReadingAnchor | 'last'>;
 }
 const PAPER_WIDTH = 794;
 
-export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, practiceSong, chordPlayback, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
+export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, practiceSong, chartViewport, chartControlsHost, onPracticePlayingChange, chordPlayback, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
   const zh = language === 'zh';
   const practiceUser = notes.noteOwner ?? (preferenceKey.startsWith('user:') ? preferenceKey.slice(5) : null);
   const [practice, setPractice] = React.useState<PracticeReaderState>();
@@ -66,7 +69,7 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
   const currentId = current?.id;
   const [fontSize, setFontSize] = useSongReadingSize(preferenceKey, current?.sourceSongId ?? currentId, defaults.fontSize);
   const readingSettings = { ...defaults, fontSize };
-  const isFocused = focused && mode === 'reading';
+  const isFocused = focused && mode === 'reading' && !chartViewport;
   useModalFocus(isFocused, workspaceRef);
   useModalScrollLock(isFocused, backgroundRef);
   React.useLayoutEffect(() => {
@@ -179,8 +182,9 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
     </div>}
   </section>;
   return <>
-    {showPractice && <PracticeControl key={current.id} song={practiceSong ?? current.song} language={language} userId={practiceUser}
-      controlsHost={controlsHost} feedbackHost={feedbackHost} onReaderChange={setPractice}/>}
-    {isFocused ? createPortal(content, document.body) : content}
+    {showPractice && <PracticeControl key={current.id} identity={current.id} song={practiceSong ?? current.song} language={language} userId={practiceUser}
+      controlsHost={chartViewport ? chartControlsHost ?? null : controlsHost} feedbackHost={feedbackHost} onReaderChange={setPractice}
+      chartViewport={chartViewport} onPlayingChange={onPracticePlayingChange}/>}
+    {!chartViewport && (isFocused ? createPortal(content, document.body) : content)}
   </>;
 }

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
+import { AuditionPiano } from './lib/auditionPiano';
 import { mockLyricsReadingGeometry } from './test/lyricsReadingGeometry';
 import { ToastProvider } from './components/Toast';
 import { getNavigationStorageKey, saveNavigationLocation } from './lib/setlistNavigationMemory';
@@ -52,6 +53,53 @@ const mountLyrics = async () => {
   fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
   await waitFor(() => expect(document.querySelector('.adaptive-lyrics-reader')).not.toBeNull());
 };
+
+it.each(['written', 'arranged'])('continues one %s practice session at the current beat across lyrics and chart', async route => {
+  const song = fixture.songs[0];
+  song.sections[0].bars.push({ id: 'second-bar', chords: ['G'] });
+  if (route === 'arranged') song.songMap = ['Verse 1', 'Verse 2', 'Ending'].map(label => ({ label, repeats: 1 }));
+  const play = vi.spyOn(AuditionPiano.prototype, 'play').mockImplementation(async function (plan, paint) {
+    this.redirect = (_next, at) => at ?? 0;
+    paint(0, plan);
+    return { metronomeUnavailable: false };
+  });
+  const stop = vi.spyOn(AuditionPiano.prototype, 'stop');
+  await mountLyrics();
+  fireEvent.click(screen.getByRole('button', { name: '開始練唱' }));
+  const [plan, paint, done] = play.mock.calls[0];
+  const bar = plan.bars.filter(bar => bar.sourceTitle === 'Verse').at(-1)!;
+  act(() => paint(bar.start + bar.beatSeconds, plan));
+  const rail = () => screen.getByRole('group', { name: '播放段落' });
+  fireEvent.click(rail().querySelector<HTMLButtonElement>('button:last-child')!);
+
+  const toggle = () => fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
+  const mark = () => document.querySelector('[data-practice-beat]');
+  toggle();
+  await waitFor(() => expect(mark()).toHaveAttribute('data-audition-bar', 'second-bar'));
+  expect(mark()).toHaveAttribute('data-practice-beat', '2');
+  expect(mark()).toHaveAttribute('data-audition-chart', 'entry-one');
+  expect(screen.getByRole('button', { name: '停止練唱' })).toHaveTextContent(bar.mapLabel!);
+  act(() => paint(bar.start + 2 * bar.beatSeconds, plan));
+  expect(mark()).toHaveAttribute('data-practice-beat', '3');
+  toggle();
+  expect(rail().querySelector('button[aria-pressed=true]')).toHaveTextContent('Ending');
+  expect(mark()).toBeNull();
+  toggle();
+  await waitFor(() => expect(mark()).toHaveAttribute('data-practice-beat', '3'));
+  expect(play).toHaveBeenCalledTimes(1);
+  expect(stop).not.toHaveBeenCalled();
+  if (route === 'arranged') {
+    act(() => paint(plan.bars.at(-1)!.start, plan));
+    expect(mark()).toBeNull();
+    expect(screen.getByRole('button', { name: '停止練唱' })).toHaveTextContent('Ending');
+    act(done);
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: '停止練唱' }));
+  }
+  expect(stop).toHaveBeenCalled();
+  expect(mark()).toBeNull();
+  expect(screen.getByRole('button', { name: '試聽' })).toBeInTheDocument();
+});
 
 it('opens locked reading, navigates songs, and retains both A4 layouts independently of reading size', async () => {
   const original = JSON.stringify(fixture);

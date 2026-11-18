@@ -146,7 +146,8 @@ import { useToast } from './components/Toast';
 import { PdfExportCancelledError, type PdfExportProgressState } from './lib/pdfExportTypes';
 import { DEFAULT_CHORD_FONT_PRESET } from './constants/chordFonts';
 import { DEFAULT_NASHVILLE_FONT_PRESET } from './constants/nashvilleFonts';
-import { APP_NAME, APP_VERSION, APP_GITHUB_URL, getLocalizedAppMeta } from './constants/appMeta';
+import AppInformation from './components/AppInformation';
+import { APP_NAME, APP_VERSION } from './constants/appMeta';
 import { getUiCopy } from './constants/i18n';
 import { canManageTeamMember, DEFAULT_TEAM_INVITE_ROLE, getAssignableTeamRoles, getTeamRoleLabel } from './constants/teamRoles';
 import { resolveSetlistCopySourceId } from './lib/teamSetlistCopy';
@@ -1643,7 +1644,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [pdfExportProgress, setPdfExportProgress] = useState<PdfExportProgressState | null>(null);
   const [isLibraryEditing, setIsLibraryEditing] = useState(false);
   const [libraryTitleEditingSongId, setLibraryTitleEditingSongId] = useState<string | null>(null);
-  const [activeAppView, setActiveAppView] = useState<AppView>('sheet');
+  const [activeAppView, setActiveAppView] = useState<AppView>(() => {
+    const view = new URLSearchParams(window.location.search).get('view');
+    return view === 'about' || view === 'help' ? view : 'sheet';
+  });
   // Auto-save is always on now (the toggle was removed). Kept as a constant so
   // the existing "auto-saved" hints and the auto-save effect read true.
   const isAutoSaveEnabled = true;
@@ -1861,6 +1865,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const appViewportRef = useAppViewport(performanceOverlayRef, isPerformanceMode);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const [chordPlayback, setChordPlayback] = useState<ChordPlayback | null>(null);
+  const [practicePlaying, setPracticePlaying] = useState(false);
   const [readerAuditionHost, setReaderAuditionHost] = useState<HTMLSpanElement | null>(null);
   const mobileMetadataRef = React.useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLDivElement>(null);
@@ -1926,7 +1931,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const [isPreviewDragging, setIsPreviewDragging] = useState(false);
   const logoSrc = `${import.meta.env.BASE_URL}logo.svg`;
   const copy = getUiCopy(language);
-  const { aboutSections, helpSections, changelogEntries } = getLocalizedAppMeta(language);
   const googleClientId = '';
   const showGoogleAuth = false;
   const isAuthenticated = Boolean(authenticatedUser && (session || usingStartupCache));
@@ -2462,6 +2466,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const activePreviewEditSession = previewEditSession?.previewIdentity === activePreviewIdentity
     ? previewEditSession
     : null;
+  const practiceOnChart = practicePlaying && isSheetView && !isLyricsMode && !activePreviewEditSession
+    && !isPerformanceMode && !isExportingPdf && !isHandwriting && !setlistOpening.opening;
   const activePreviewSelectedBars = React.useMemo(() => (
     activePreviewIdentity
       ? previewSelectedBars.filter((target) => target.previewIdentity === activePreviewIdentity)
@@ -14002,7 +14008,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               </div>
             )}
             <div className="flex h-full min-h-0 flex-col">
-            {isSheetView && !activePreviewEditSession && (!isLyricsMode || chordPlayback) && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
+            {isSheetView && !practicePlaying && !activePreviewEditSession && (!isLyricsMode || chordPlayback) && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
               && !setlistOpening.opening && activeNavigationPreviewSong && activePreviewIdentity &&
               <ReaderAudition key={activePreviewIdentity} song={activeNavigationPreviewSong} identity={activePreviewIdentity}
                 userId={authenticatedUser?.id} language={language} chartRef={previewRef} triggerHost={readerAuditionHost}
@@ -14010,11 +14016,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             <div className="relative min-h-0 flex-1">
             <CoveredPreview covered={isPhoneViewport && isMobileNavOpen}
               scope={JSON.stringify([historyScope, selectedSongId, selectedSetlistId, selectedSetlistSongId, isLyricsMode])}>
-            {isLyricsWorkspace ? <div className="h-full" inert={setlistOpening.opening ? true : undefined}><SetlistLyricsWorkspace
+            {(isLyricsWorkspace || practiceOnChart) && (!isSetlistMode || selectedSetlist) && <div className={practiceOnChart ? 'contents' : 'h-full'} inert={setlistOpening.opening ? true : undefined}><SetlistLyricsWorkspace
               key={isSetlistMode ? selectedSetlist!.id : song.id}
               title={isSetlistMode ? selectedSetlist!.name : song.title}
               noteOwner={authenticatedUser?.id} notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} notesActive={!isPerformanceMode}
               practiceSong={activeNavigationPreviewSong ?? undefined} chordPlayback={chordPlayback}
+              chartViewport={practiceOnChart ? previewRef : undefined} chartControlsHost={readerAuditionHost} onPracticePlayingChange={setPracticePlaying}
               phoneHandwritingButton={isPhoneViewport} readingPositions={lyricsReadingPositions.current}
               preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}
               entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}
@@ -14027,7 +14034,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               onPrintSettingsChange={setLyricsBookSettings}
               onSongChange={canOpenEditor ? (isSetlistMode ? handleBookLyricsChange : (_id, lyricsDoc) => handleSongChange({ ...song, lyricsDoc })) : undefined}
               onExport={isExportingPdf ? undefined : handleExportPdf}
-            /></div> : <div
+            /></div>}
+            {!isLyricsWorkspace && <div
               ref={previewRef}
               inert={setlistOpening.opening ? true : undefined}
               data-print-preview-container
@@ -14366,122 +14374,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           </div>
         </div>
         ) : (
-        <div data-content-area className="flex-1 overflow-y-auto bg-[#F5F5F4] px-4 py-5 sm:px-5 sm:py-6 lg:px-8 lg:py-8 dark:bg-[color:var(--color-surface-muted)]">
-          <div className="mx-auto flex max-w-5xl flex-col gap-6">
-            <section className="rounded-[28px] border border-gray-200 bg-white px-6 py-7 shadow-sm md:px-8 md:py-8">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="max-w-2xl">
-                  <div className="text-xs font-bold uppercase tracking-[0.24em] text-indigo-500">
-                    {activeAppView === 'about' ? copy.about : copy.help}
-                  </div>
-                  <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-gray-900">
-                    {activeAppView === 'about'
-                      ? (language === 'zh' ? 'ChordMaster 關於頁' : 'ChordMaster About')
-                      : (language === 'zh' ? 'ChordMaster 使用說明' : 'ChordMaster Help')}
-                  </h1>
-                  <p className="mt-3 text-sm leading-7 text-gray-600">
-                    {activeAppView === 'about'
-                      ? (language === 'zh'
-                        ? '這裡集中放目前版本、產品定位與近期更新。之後每次加新功能，只要更新專案版本號，介面會同步顯示。'
-                        : 'This page centralizes the current version, product framing, and recent changes. Future features only need a version bump to stay reflected in the UI.')
-                      : (language === 'zh'
-                        ? '這裡放目前最重要的操作方式，方便你快速回顧編輯流程、快速鍵與備份方法。'
-                        : 'This page summarizes the most important operating flow so you can quickly review editing, shortcuts, and backup habits.')}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-right">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-indigo-500">{copy.currentVersion}</div>
-                  <div className="mt-1 text-2xl font-bold text-indigo-900">v{APP_VERSION}</div>
-                </div>
-              </div>
-            </section>
-
-            {(activeAppView === 'about' ? aboutSections : helpSections).map((section) => (
-              <section
-                key={section.title}
-                className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7"
-              >
-                <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">{section.title}</h2>
-                <p className="mt-2 text-sm leading-7 text-gray-600">{section.description}</p>
-                <div className="mt-4 grid gap-3 md:grid-cols-1">
-                  {section.bullets.map((bullet) => (
-                    <div
-                      key={bullet}
-                      className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm leading-7 text-gray-700"
-                    >
-                      {bullet}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-
-            {activeAppView === 'help' && (
-              <section className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="max-w-2xl">
-                    <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">{copy.github}</h2>
-                    <p className="mt-2 text-sm leading-7 text-gray-600">
-                      {language === 'zh'
-                        ? '如果你想看原始碼、追蹤更新，或之後要整理 release note，這裡可以直接跳到 GitHub repository。'
-                        : 'Use this link to inspect the source, track updates, or review release notes in the GitHub repository.'}
-                    </p>
-                  </div>
-                  <a
-                    href={APP_GITHUB_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-bold text-gray-800 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
-                  >
-                    <span>{copy.openGithub}</span>
-                    <ExternalLink size={16} />
-                  </a>
-                </div>
-                <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                  {APP_GITHUB_URL}
-                </div>
-              </section>
-            )}
-
-            {activeAppView === 'about' && <p className="px-2 text-sm leading-6 text-gray-600">
-              {language === 'zh' ? '鋼琴試聽採用 Alexander Holm 錄製的 ' : 'Piano samples recorded by Alexander Holm for the '}
-              <a className="underline" href="https://sfzinstruments.github.io/pianos/salamander/" target="_blank" rel="noreferrer">Salamander Grand Piano V3</a>
-              {language === 'zh' ? '，經選錄、裁切與轉檔，依 ' : ', excerpted, trimmed and encoded under '}
-              <a className="underline" href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer">CC BY 3.0</a>
-              {language === 'zh' ? ' 授權使用。' : '.'}
-            </p>}
-            {activeAppView === 'about' && (
-              <section className="rounded-[24px] border border-gray-200 bg-white px-6 py-6 shadow-sm md:px-7">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="font-display text-2xl font-bold tracking-tight text-gray-900">{copy.changelog}</h2>
-                  <div className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-500">
-                    {copy.bumpVersionHint}
-                  </div>
-                </div>
-                <div className="mt-5 space-y-4">
-                  {changelogEntries.map((entry) => (
-                    <div key={`${entry.version}-${entry.title}`} className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-indigo-600 shadow-sm">
-                          v{entry.version}
-                        </span>
-                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-gray-400">{entry.date}</span>
-                      </div>
-                      <h3 className="mt-3 text-lg font-bold text-gray-900">{entry.title}</h3>
-                      <div className="mt-3 grid gap-3">
-                        {entry.bullets.map((bullet) => (
-                          <div key={bullet} className="rounded-xl bg-white px-4 py-3 text-sm leading-7 text-gray-700">
-                            {bullet}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        </div>
+        <AppInformation key={activeAppView} page={activeAppView === 'about' ? 'about' : 'help'} language={language}
+          onOpenShortcuts={() => setIsKeyboardShortcutsOpen(true)}/>
         )}
       </main>
 

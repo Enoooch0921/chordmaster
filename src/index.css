@@ -624,6 +624,14 @@ body.exporting-pdf [data-pdf-capture-root] [data-print-page] {
   transform-origin: left top;
 }
 .ui-segmented-control[data-selection-ready="true"] > .ui-measured-selection { display: block; }
+.ui-selection-list,
+.ui-selection-list > button { position: relative; }
+.ui-selection-list[data-selection-ready="true"] > .ui-measured-selection {
+  display: block;
+  border-radius: 7px;
+  background: var(--color-success-soft);
+}
+.ui-selection-list[data-selection-ready="true"] > button[aria-pressed="true"] { background: transparent; }
 .ui-segmented-control[data-selection-ready="true"] > button { transition-property: color; }
 /* Legacy dark utility fills must not paint over the shared selection. */
 .ui-segmented-control[data-selection-ready="true"] > button[aria-pressed="true"] { background-color: transparent !important; }

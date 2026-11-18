@@ -9,6 +9,7 @@ import { missingPracticeSections, type PracticeBindings } from '../lib/auditionS
 import type { PracticeReaderState } from '../lib/practiceLyrics';
 import { isClosedBar } from '../utils/closedBar';
 import { useAuditionPreferences } from '../hooks/useAuditionPreferences';
+import { usePracticeChartCursor } from '../hooks/usePracticeChartCursor';
 import { issueText } from './preview-edit/ChordAuditionControl';
 import ChordAuditionSettings from './preview-edit/ChordAuditionSettings';
 
@@ -16,8 +17,9 @@ type Session = ReturnType<typeof buildPracticeSession>;
 interface Cursor { bar: AuditionBar; lastBar: AuditionBar; nextLabel?: string }
 interface Cue { label: string; at: number }
 
-export default function PracticeControl({ song, language, userId, controlsHost, feedbackHost, onReaderChange }: {
+export default function PracticeControl({ song, identity, language, userId, controlsHost, feedbackHost, onReaderChange, chartViewport, onPlayingChange }: {
   song: Song; language: AppLanguage; userId?: string | null; controlsHost: HTMLElement | null; feedbackHost: HTMLElement | null;
+  identity: string; chartViewport?: React.RefObject<HTMLDivElement | null>; onPlayingChange?: (playing: boolean) => void;
   onReaderChange: (state: PracticeReaderState | undefined) => void;
 }) {
   const zh = language === 'zh';
@@ -31,6 +33,12 @@ export default function PracticeControl({ song, language, userId, controlsHost, 
     && all.findIndex(s => s.id === section.id) === i), [song]);
   const [start, setStart] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const paintChart = usePracticeChartCursor(identity, playing ? chartViewport : undefined);
+  useLayoutEffect(() => {
+    if (!playing) return;
+    onPlayingChange?.(true);
+    return () => onPlayingChange?.(false);
+  }, [playing, onPlayingChange]);
   const [position, setPosition] = useState<Cursor>();
   const [queued, setQueued] = useState<Cue>();
   const [notice, setNotice] = useState('');
@@ -48,6 +56,7 @@ export default function PracticeControl({ song, language, userId, controlsHost, 
     piano.current?.stop();
     pending.current = undefined;
     session.current = undefined;
+    paintChart(null);
     setQueued(undefined); setPosition(undefined); setPlaying(false);
   };
   useLayoutEffect(() => {
@@ -89,6 +98,7 @@ export default function PracticeControl({ song, language, userId, controlsHost, 
       while (index + 1 < bars.length && bars[index].end <= time) index++;
       if (pending.current && time >= pending.current.at) { pending.current = undefined; setQueued(undefined); }
       const bar = bars[index];
+      paintChart(bar, time);
       if (bar === previous) return;
       previous = bar;
       // A repeated or manually re-entered section starts a new visit even when the label matches.
@@ -143,6 +153,10 @@ export default function PracticeControl({ song, language, userId, controlsHost, 
     if (offset < 0) area.scrollLeft += offset;
     else if (offset + current.offsetWidth > area.clientWidth) area.scrollLeft += offset + current.offsetWidth - area.clientWidth;
   }, [label, feedbackHost, controlsHost]);
+  if (chartViewport) return playing && controlsHost ? createPortal(
+    <button type="button" className="reader-audition-toggle" aria-label={action} aria-description={label} title={action} onClick={finish}>
+      <Square className="shrink-0" size={13} fill="currentColor" aria-hidden="true"/><span className="max-w-[8em] truncate">{label ?? title}</span>
+    </button>, controlsHost) : null;
   return controlsHost && createPortal(<div className="chord-audition">
     <div className="chord-audition-split" data-playing={playing || undefined}>
       <button type="button" data-audition-button aria-label={action} title={action} onClick={playing ? finish : play}>

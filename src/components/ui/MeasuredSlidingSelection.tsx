@@ -7,10 +7,11 @@ interface Props {
   value: string;
   layoutKey: string;
   selection?: 'single' | 'range';
+  orientation?: 'horizontal' | 'vertical';
 }
 
 /** Follow one selected button, or a contiguous group, using their actual boxes. */
-export default function MeasuredSlidingSelection({ value, layoutKey, selection = 'single' }: Props) {
+export default function MeasuredSlidingSelection({ value, layoutKey, selection = 'single', orientation = 'horizontal' }: Props) {
   const markerRef = useRef<HTMLSpanElement>(null);
   const animation = useRef<Animation | null>(null);
   const previous = useRef<{ value: string; layoutKey: string; geometry: string; box: Box } | null>(null);
@@ -26,10 +27,15 @@ export default function MeasuredSlidingSelection({ value, layoutKey, selection =
       const boxes = buttons.map(button => ({ left: button.offsetLeft, top: button.offsetTop, width: button.offsetWidth, height: button.offsetHeight }));
       const first = boxes[selected[0]], last = boxes[selected[selected.length - 1]];
       const contiguous = selected.every((index, offset) => index === selected[0] + offset);
-      const box = first && (selection === 'single' ? first : contiguous
-        ? { ...first, width: last.left + last.width - first.left } : null);
+      let box: Box | undefined = first;
+      if (first && selection === 'range') {
+        if (!contiguous) box = undefined;
+        else if (orientation === 'vertical') box = { ...first, height: last.top + last.height - first.top };
+        else box = { ...first, width: last.left + last.width - first.left };
+      }
       // Hidden controls and unexpected wrapping retain their ordinary selected fill.
-      if (!box?.width || !box.height || boxes.some(candidate => candidate.top !== box.top)) {
+      const crossAxis = orientation === 'horizontal' ? 'top' : 'left';
+      if (!box?.width || !box.height || boxes.some(candidate => candidate[crossAxis] !== box[crossAxis])) {
         animation.current?.cancel(); animation.current = null;
         delete container.dataset.selectionReady;
         previous.current = null;
@@ -52,8 +58,8 @@ export default function MeasuredSlidingSelection({ value, layoutKey, selection =
         const scaleX = container.offsetWidth ? parent.width / container.offsetWidth : 1;
         const scaleY = container.offsetHeight ? parent.height / container.offsetHeight : 1;
         if (scaleX > 0 && scaleY > 0) from = {
-          left: (visible.left - parent.left) / scaleX - container.clientLeft,
-          top: (visible.top - parent.top) / scaleY - container.clientTop,
+          left: (visible.left - parent.left) / scaleX - container.clientLeft + container.scrollLeft,
+          top: (visible.top - parent.top) / scaleY - container.clientTop + container.scrollTop,
           width: visible.width / scaleX, height: visible.height / scaleY
         };
       }
@@ -71,7 +77,7 @@ export default function MeasuredSlidingSelection({ value, layoutKey, selection =
       }
     };
     refresh.current(true);
-  }, [value, layoutKey, selection, preference.instant, preference.reduced]);
+  }, [value, layoutKey, selection, orientation, preference.instant, preference.reduced]);
 
   useLayoutEffect(() => {
     const container = markerRef.current?.parentElement;

@@ -64,6 +64,15 @@ const localizedMeta: Record<AppLanguage, {
         ]
       },
       {
+        title: 'Chart playback & lyrics',
+        description: 'Follow the same song from the chart into the lyrics.',
+        bullets: [
+          'Open Listen on the chart. Choose the whole song in map order when you have saved an arrangement.',
+          'Switch between chart and lyrics to keep the chords playing. Use Stop in either view.',
+          'Start Sing along from the lyrics. Close the lyrics to follow the same beat on the chart. Tap a section once to queue it at the section end. Tap it again to jump immediately.'
+        ]
+      },
+      {
         title: 'Reference Practice',
         description: 'Each song can keep band and vocal YouTube references for rehearsal.',
         bullets: [
@@ -85,6 +94,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-18',
+        title: 'Follow practice on the chart',
+        bullets: ['Switch between lyrics and chart at the current beat. Keyboard shortcuts are searchable, and the guide and About page have been redesigned.']
+      },
+      {
+        version: '0.12.55',
         date: '2026-11-18',
         title: 'Section controls in focused reading',
         bullets: ['Queue a section directly from the toolbar and keep playing when entering or leaving focus. Chord playback continues between the chart and lyrics. Joined setlists omit original key and capo from song summaries.']
@@ -1258,7 +1273,7 @@ const localizedMeta: Record<AppLanguage, {
         description: '先建立歌曲，再用左側歌庫管理與右側譜面預覽確認結果。',
         bullets: [
           '點「新歌」建立歌曲，再直接點譜面的標題、和弦或簡譜編輯。',
-          '在 top bar 可切換 Key、Capo、123 級數譜、固定調簡譜與 PDF 匯出。',
+          '在上方工具列可切換 Key、Capo、123 級數譜、固定調簡譜與 PDF 匯出。',
           '左側 Song Library 可搜尋、複製、刪除、匯入與匯出整個歌庫。'
         ]
       },
@@ -1273,7 +1288,16 @@ const localizedMeta: Record<AppLanguage, {
         ]
       },
       {
-        title: 'Reference 練習',
+        title: '試聽與練唱',
+        description: '同一首歌可以一邊播放和弦，一邊切換譜面與歌詞。',
+        bullets: [
+          '在譜面開啟「試聽」。歌曲已有曲序時，可選「按曲序播完整首」。',
+          '播放中切到歌詞，和弦會接著播。要結束播放，可在譜面或歌詞頁按「停止」。',
+          '在歌詞頁點「練唱」，關閉歌詞後可在譜面接著看當前小節和拍位。點段落一次會在當前段落結束後跳轉，再點同一段就立即跳轉。'
+        ]
+      },
+      {
+        title: '參考音源練習',
         description: '每首歌可保存樂團版本與歌手版本 YouTube 參考音源。',
         bullets: [
           '樂團版本與歌手版本可各自保存 YouTube URL、reference 原調與 BPM。',
@@ -1294,6 +1318,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-18',
+        title: '練唱接續看譜',
+        bullets: ['歌詞練唱可切回譜面跟拍並保留預選段落。快捷鍵可跨分類搜尋，使用說明可按主題查閱，關於頁可展開歷史版本。']
+      },
+      {
+        version: '0.12.55',
         date: '2026-11-18',
         title: '專注閱讀時接續練唱',
         bullets: ['練唱工具列可直接預選段落，進出專注閱讀時接續播放。切換同一首歌的譜面與歌詞可繼續播放和弦。加入的共享歌單摘要省略原調和 Capo。']

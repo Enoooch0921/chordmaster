@@ -25,6 +25,7 @@ export interface AuditionTarget {
 }
 export interface AuditionBar {
   pickup?: boolean;
+  writtenPosition?: { section: number; bar: number };
   mapLabel?: string;
   soundingKey?: Key;
   practiceBar?: number;
@@ -146,6 +147,7 @@ export function buildWrittenPractice(song: Song, melodyEnabled = true) {
     bar.mapVisit = visit;
     bar.mapLabel = songMapLabel(sections[visit].title).name || String(visit + 1);
     bar.sourceTitle = sections[visit].title;
+    if (!bar.pickup) bar.writtenPosition = { section: visit, bar: Number(bar.barId) };
   }
   return plan;
 }
