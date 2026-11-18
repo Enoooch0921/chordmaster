@@ -5,6 +5,7 @@ import type { AuditionScope } from '../../lib/chordAudition';
 import { useAnchoredPortalPanel } from '../useAnchoredPortalPanel';
 
 interface Props {
+  children?: React.ReactNode;
   zh: boolean;
   scope: AuditionScope;
   labels: Record<AuditionScope, string>;
@@ -17,7 +18,7 @@ interface Props {
   setMelody: (enabled: boolean) => void;
 }
 
-export default function ChordAuditionSettings({ zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody, visualDelayMs, setVisualDelayMs }: Props) {
+export default function ChordAuditionSettings({ children, zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody, visualDelayMs, setVisualDelayMs }: Props) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -29,7 +30,7 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
   });
   const returnFocus = () => { close(); trigger.current?.focus({ preventScroll: true }); };
   useLayoutEffect(() => {
-    if (open && isPositioned) panel.current?.querySelector<HTMLInputElement>('input:checked, input[type=checkbox]')?.focus({ preventScroll: true });
+    if (open && isPositioned) panel.current?.querySelector<HTMLInputElement>('input:checked:enabled, input[type=checkbox]:enabled')?.focus({ preventScroll: true });
   }, [open, isPositioned]);
   useEffect(() => {
     if (!open) return;
@@ -57,13 +58,14 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
         event.stopPropagation();
         if (event.key === 'Escape') { event.preventDefault(); returnFocus(); }
         // Move out of the portal in the editor's own tab order.
-        const first = panel.current?.querySelector('input[type=radio]:checked') ?? panel.current?.querySelector('input');
+        const first = panel.current?.querySelector('input[type=radio]:checked:enabled') ?? panel.current?.querySelector('input:enabled');
         const last = panel.current?.querySelector('input[name="audition-delay"]');
         if (event.key === 'Tab' && (event.shiftKey ? event.target === first : event.target === last)) {
           if (event.shiftKey) event.preventDefault();
           returnFocus();
         }
       }}>
+      {children}
       {scope !== 'practice' && <fieldset>
         <legend>{zh ? '試聽範圍' : 'Audition range'}</legend>
         {(['chord', 'bar', 'section', 'song', 'map'] as const).map(value =>

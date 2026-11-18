@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-18',
+        title: 'Queue sections during practice',
+        bullets: ['Keep all lyrics visible, follow the current measure, and tap a section once to queue it or twice to jump. Songs without a map follow the written score.']
+      },
+      {
+        version: '0.12.52',
+        date: '2026-11-18',
         title: 'Sing along from Lyrics',
         bullets: ['Start practice from the lyrics toolbar. Bar highlights and practice lyrics follow the audio output timing. Adjust visual delay in playback settings for your headphones.']
       },
@@ -1276,6 +1282,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-18',
+        title: '練唱時預選下一段',
+        bullets: ['完整保留歌詞並標出段落與小節。點一次預選下一段，再點一次立即跳。未設定曲序時依譜面順序播放。']
+      },
+      {
+        version: '0.12.52',
         date: '2026-11-18',
         title: '從歌詞開始練唱',
         bullets: ['在歌詞工具列點「練唱」即可開始。小節與唱詞跟隨音訊輸出時間，使用耳機時可在播放設定微調畫面延遲。']

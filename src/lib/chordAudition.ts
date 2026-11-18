@@ -10,6 +10,7 @@ import { hasUnmeteredChords } from '../utils/unmeteredChords';
 import { resolveAuditionChord, type Harmony } from './auditionChords';
 import { getSongDisplayKeyStates, getSongKeyStates, getSongTimeSignatureStates } from './songEditing';
 
+import { normalizeSongMap, songMapLabel } from './songMap';
 import { arrangeAudition, type MapIssue } from './auditionSongMap';
 
 export type AuditionScope = 'chord' | 'bar' | 'section' | 'song' | 'map' | 'practice';
@@ -24,6 +25,9 @@ export interface AuditionTarget {
 export interface AuditionBar {
   pickup?: boolean;
   mapLabel?: string;
+  soundingKey?: Key;
+  practiceBar?: number;
+  practiceTotal?: number;
   mapVisit?: number;
   sourceTitle?: string;
   sectionId: string;
@@ -130,8 +134,24 @@ function appendMelody(notes: AuditionNote[], riff: string, key: Key, meter: stri
 }
 const rest = /^(?:N\.?C\.?|0(?:_|h|w)?|R(?:_|h|w)?|rest(?:_|h|w)?|(?:whole|half|quarter|eighth|8th)_rest|\|\d{0,3}\|)$/i;
 
+export function buildWrittenPractice(song: Song, melodyEnabled = true) {
+  // Index the written occurrences themselves, including duplicate section IDs in old scores.
+  const sections = song.sections.map((s, i) => ({...s, id: String(i), bars:s.bars.map((bar, n) => ({...bar, id:String(n)}))}));
+  const first = sections.find(section => section.bars.some(bar => !isClosedBar(bar)));
+  const plan = buildLinearAudition({...song, sections}, { slotIndex: 0, sectionId: first?.id ?? '',
+    barId: first?.bars.find(bar => !isClosedBar(bar))?.id ?? '' }, 'song', melodyEnabled);
+  for (const bar of plan.bars) {
+    const visit = Number(bar.pickup ? first?.id : bar.sectionId);
+    bar.mapVisit = visit;
+    bar.mapLabel = songMapLabel(sections[visit].title).name || String(visit + 1);
+    bar.sourceTitle = sections[visit].title;
+  }
+  return plan;
+}
+
 export function buildChordAudition(song: Song, target: AuditionTarget, scope: AuditionScope, melodyEnabled = true): AuditionPlan {
   if (scope !== 'map' && scope !== 'practice') return buildLinearAudition(song, target, scope, melodyEnabled);
+  if (scope === 'practice' && !normalizeSongMap(song.setlistSongMap) && !normalizeSongMap(song.songMap)) return buildWrittenPractice(song, melodyEnabled);
   const route = arrangeAudition(song);
   if ('kind' in route) return { sounds: [], bars: [], duration: 0, fallbackTempo: false, issue: route };
   const first = route.song.sections[0];
@@ -329,7 +349,7 @@ function buildLinearAudition(song: Song, target: AuditionTarget, scope: Exclude<
         plan.fallbackTempo ||= bpm === undefined;
         const start = plan.duration;
         const end = nextDownbeat - origin;
-        plan.bars.push({ sectionId: section.id, sectionOccurrence, barId: bar.id!, start, end, firstBeat: first, beats, beatSeconds });
+        plan.bars.push({ sectionId: section.id, sectionOccurrence, barId: bar.id!, soundingKey: keyKnown ? sounding[s][b] : undefined, start, end, firstBeat: first, beats, beatSeconds });
         plan.duration = end;
       }
       downbeat = nextDownbeat;

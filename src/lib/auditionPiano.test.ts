@@ -85,3 +85,42 @@ it('sustains a long hold with a continuous loop until the scheduled release', as
   expect(voice.stop.mock.calls[0][0]).toBeGreaterThanOrEqual(12);
   engine.dispose();
 });
+
+it('replaces a scheduled section at its audio boundary and cancels it on an immediate second tap', async () => {
+  vi.useFakeTimers();
+  const voices: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }[] = [];
+  let clock = 0;
+  class Context {
+    state = 'running';
+    get currentTime() { return clock; }
+    destination = {};
+    resume = async () => {};
+    close = async () => {};
+    decodeAudioData = async () => ({duration: 2, sampleRate: 1000, getChannelData: () => new Float32Array(64)});
+    createGain = () => ({gain:{setValueAtTime:vi.fn(), linearRampToValueAtTime:vi.fn()}, connect:vi.fn(), disconnect:vi.fn()});
+    createBufferSource = () => {
+      const node = {playbackRate:{}, connect:(gain:object) => gain, disconnect:vi.fn(), start:vi.fn(), stop:vi.fn()};
+      voices.push(node);
+      return node;
+    };
+  }
+  vi.stubGlobal('AudioContext', Context);
+  vi.stubGlobal('fetch', vi.fn(async () => ({ok:true, arrayBuffer:async () => new ArrayBuffer(1)})));
+  vi.stubGlobal('requestAnimationFrame', () => 1);
+  vi.stubGlobal('cancelAnimationFrame', () => {});
+  const engine = new AuditionPiano();
+  const section = {...plan, sounds:[{start:0,end:1,notes:[48]}]};
+  await engine.play(section, vi.fn(), vi.fn(), vi.fn());
+  const origin = voices[0].start.mock.calls[0][0];
+  expect(engine.redirect!(section, 1)).toBe(1);
+  expect(voices).toHaveLength(1);
+  clock = origin + .8;
+  vi.advanceTimersByTime(65);
+  expect(voices[1].start.mock.calls[0][0]).toBeCloseTo(origin + 1);
+  const cut = engine.redirect!(section);
+  expect(cut).toBeLessThan(1);
+  expect(voices[1].stop).toHaveBeenLastCalledWith(clock);
+  expect(voices[0].stop).toHaveBeenLastCalledWith(origin + cut);
+  expect(voices[2].start.mock.calls[0][0]).toBeCloseTo(origin + cut);
+  engine.dispose();
+});

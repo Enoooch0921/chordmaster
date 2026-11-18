@@ -136,3 +136,20 @@
 }
 .slw-practice-page .practice-lyrics h3 { color: var(--color-text-muted); margin-bottom: .6em; }
 .slw-practice-page .practice-lyrics p:not(.practice-lyrics-empty) { font-size: inherit; line-height: inherit; }
+
+.practice-status { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; color: var(--color-text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.practice-status:not(:empty) { margin: 4px 0; }
+.practice-status strong { color: var(--color-text); overflow-wrap: anywhere; }
+.practice-cues, .practice-cue-list { display: flex; gap: 4px; min-width: 0; }
+.practice-cue-list { overflow-x: auto; overscroll-behavior-x: contain; }
+.slw-toolbar .practice-cues button { min-height: 44px; padding: 4px 10px; background: var(--color-surface); border-color: var(--color-border); }
+.slw-toolbar .practice-cues button[aria-current] { box-shadow: inset 0 -3px var(--color-indigo-500); }
+.slw-toolbar .practice-cues button[aria-pressed="true"] { color: white; background: var(--color-indigo-700); }
+.practice-hint { margin: 3px 0 0; font-size: 12px; color: var(--color-text-muted); }
+.practice-start { display: grid; gap: 4px; }
+.practice-start select { max-width: 100%; min-height: 40px; }
+.slw-practice-page .practice-lyrics { scroll-padding-block: 12px; }
+.practice-lyrics article { padding: 4px 12px 12px; margin-bottom: 12px; border-inline-start: 3px solid transparent; }
+.practice-lyrics article[aria-current] { border-color: var(--color-indigo-500); background: var(--color-surface-muted); }
+.practice-lyrics h3 button { min-height: 44px; padding-inline: 4px; color: var(--color-text); font: inherit; text-decoration: underline; text-underline-offset: 3px; touch-action: manipulation; }
+.practice-lyrics h3 button:focus-visible { outline: 2px solid var(--color-indigo-500); }

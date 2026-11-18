@@ -1,3 +1,4 @@
+import { joinAuditions, sliceAudition } from './auditionTimeline';
 import { audioOutputTime } from './audioOutputTime';
 import { auditionBeats, type AuditionPlan } from './chordAudition';
 import { loadClickSamples } from './clickSamples';
@@ -68,13 +69,15 @@ export class AuditionPiano {
   private melodyBus?: GainNode;
   private melodyEnabled = true;
   private metronomeEnabled = true;
-  private sources = new Set<AudioBufferSourceNode>();
+  private sources = new Map<AudioBufferSourceNode, { start: number; end: number }>();
   private timer?: ReturnType<typeof setInterval>;
   private frame?: number;
   private deadline?: ReturnType<typeof setTimeout>;
   private generation = 0;
 
   visualDelayMs = 0;
+  // A queued change edits only the future audio timeline, on the same audio clock.
+  redirect?: (next: AuditionPlan, boundary?: number) => number;
 
   setMetronomeEnabled(enabled: boolean) {
     this.metronomeEnabled = enabled;
@@ -86,17 +89,17 @@ export class AuditionPiano {
     if (this.melodyBus && this.context) this.melodyBus.gain.setValueAtTime(enabled ? 1 : 0, this.context.currentTime);
   }
 
-  async play(plan: AuditionPlan, paint: (elapsed: number) => void, done: () => void, interrupted: () => void) {
+  async play(plan: AuditionPlan, paint: (elapsed: number, timeline: AuditionPlan) => void, done: () => void, interrupted: () => void, extraNotes: number[] = []) {
     this.stop();
     const generation = this.generation;
     const context = this.context ??= new AudioContext({ latencyHint: 'interactive' });
     this.deadline = setTimeout(() => {
       if (this.generation === generation) { this.dispose(); interrupted(); }
     }, 15000);
-    const notes = new Set(plan.sounds.flatMap(sound => sound.notes));
+    const notes = new Set([...extraNotes, ...plan.sounds.flatMap(sound => sound.notes)]);
     const buffers = new Map<number, PianoSample>();
     // resume() must run synchronously inside the user gesture, before any sample fetch.
-    const beats = auditionBeats(plan.bars);
+    let beats = auditionBeats(plan.bars);
     let nextBeat = beats.next();
     const hasBeats = !nextBeat.done;
     const [, clicks] = await Promise.all([
@@ -113,7 +116,7 @@ export class AuditionPiano {
     const bus = this.bus = context.createGain();
     bus.gain.value = 0.85;
     bus.connect(context.destination);
-    if (plan.sounds.some(event => event.voice === 'melody')) {
+    if (extraNotes.length || plan.sounds.some(event => event.voice === 'melody')) {
       this.melodyBus = context.createGain();
       this.melodyBus.gain.value = this.melodyEnabled ? 1 : 0;
       this.melodyBus.connect(bus);
@@ -139,7 +142,7 @@ export class AuditionPiano {
         const click = context.createBufferSource();
         click.buffer = beat.accent ? clicks.accent : clicks.regular;
         click.connect(clickBus);
-        this.sources.add(click);
+        this.sources.set(click, {start: when, end: Math.min(when + click.buffer.duration, origin + plan.duration)});
         click.onended = () => { click.disconnect(); this.sources.delete(click); };
         click.start(when);
         click.stop(Math.min(when + click.buffer.duration, origin + plan.duration));
@@ -169,7 +172,7 @@ export class AuditionPiano {
           gain.gain.setValueAtTime(1, Math.max(start, end - Math.min(.008, (end - start) / 4)));
           gain.gain.linearRampToValueAtTime(0, end);
           source.connect(gain).connect(event.voice === 'melody' ? this.melodyBus! : bus);
-          this.sources.add(source);
+          this.sources.set(source, {start: attackStart, end});
           source.onended = () => { source.disconnect(); gain.disconnect(); this.sources.delete(source); };
           // If the main thread stalls, resume at the corresponding sample position.
           const late = Math.max(0, context.currentTime - attackStart);
@@ -181,12 +184,30 @@ export class AuditionPiano {
         }
       }
     };
+    this.redirect = (next, boundary) => {
+      const earliest = Math.max(0, context.currentTime - origin + longestLead + .008);
+      const cut = Math.min(plan.duration, Math.max(earliest, boundary ?? earliest));
+      const when = origin + cut;
+      for (const [node, span] of this.sources) {
+        if (span.end <= when) continue;
+        node.stop(span.start >= when ? context.currentTime : when);
+        span.end = when;
+      }
+      const prefix = sliceAudition(plan, 0, cut);
+      index = Math.min(index, prefix.sounds.length);
+      const resumeBeats = Math.min(cut, nextBeat.done === false ? nextBeat.value.at : Infinity);
+      plan = joinAuditions(prefix, next);
+      beats = auditionBeats(plan.bars);
+      do { nextBeat = beats.next(); } while (nextBeat.done === false && nextBeat.value.at < resumeBeats - 1e-7);
+      schedule();
+      return cut;
+    };
     const refresh = () => {
       if (this.generation !== generation) return;
       const audible = audioOutputTime(context) - origin;
       const elapsed = audible - this.visualDelayMs / 1000;
       if (Math.min(audible, elapsed) >= plan.duration) { this.stop(); done(); return; }
-      if (elapsed >= 0) paint(Math.min(elapsed, plan.duration - 1e-7));
+      if (elapsed >= 0) paint(Math.min(elapsed, plan.duration - 1e-7), plan);
       this.frame = requestAnimationFrame(refresh);
     };
     schedule();
@@ -197,6 +218,7 @@ export class AuditionPiano {
 
   stop() {
     ++this.generation;
+    this.redirect = undefined;
     clearInterval(this.timer);
     clearTimeout(this.deadline);
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);
@@ -207,7 +229,7 @@ export class AuditionPiano {
     this.melodyBus = undefined;
     this.bus?.disconnect();
     this.bus = undefined;
-    for (const source of this.sources) source.stop();
+    for (const source of this.sources.keys()) source.stop();
     this.sources.clear();
   }
 
