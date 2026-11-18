@@ -31,9 +31,13 @@ export function useAuditionPreferences(userId: string | null | undefined, defaul
   const [range, setScope] = usePreference(prefix + '.scope');
   const [click, setClick] = usePreference(prefix + '.metronome');
   const [lead, setLead] = usePreference(prefix + '.melody');
-  const scope = range === 'chord' || range === 'bar' || range === 'section' || range === 'song' || range === 'map' || range === 'practice' ? range : defaultScope;
+  const [delay, saveDelay] = usePreference('chordmaster.audition.visual-delay-ms.v1');
+  const limitDelay = (value: number) => Number.isFinite(value) ? Math.max(-500, Math.min(1000, value)) : 0;
+  const scope = range === 'chord' || range === 'bar' || range === 'section' || range === 'song' || range === 'map' ? range : range === 'practice' ? 'map' : defaultScope;
   return {
-    scope, setScope, metronome: click !== 'false', melody: lead !== 'false',
+    scope, setScope, visualDelayMs: limitDelay(Number(delay)),
+    setVisualDelayMs: (ms: number) => saveDelay(String(limitDelay(ms))),
+    metronome: click !== 'false', melody: lead !== 'false',
     setMetronome: (on: boolean) => setClick(String(on)),
     setMelody: (on: boolean) => setLead(String(on))
   };

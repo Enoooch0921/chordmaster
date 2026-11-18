@@ -452,3 +452,8 @@
 .practice-lyrics p span { display: block; white-space: pre-wrap; }
 .practice-lyrics p span + span { font-size: .88em; color: var(--keyboard-muted); }
 .practice-lyrics .practice-lyrics-empty { font-size: 14px; color: var(--keyboard-muted); }
+
+.chord-audition-settings .audition-delay { display: grid; gap: 5px; }
+.audition-delay span { display: flex; align-items: baseline; justify-content: space-between; }
+.audition-delay output { font-variant-numeric: tabular-nums; color: var(--keyboard-muted); }
+.audition-delay input { width: 100%; accent-color: var(--keyboard-active); }

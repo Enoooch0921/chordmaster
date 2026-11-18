@@ -49,8 +49,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
     triggerRef.current?.focus({ preventScroll: true });
   };
   const preferences = useAuditionPreferences(userId, 'song');
-  const byMap = preferences.scope === 'map' || preferences.scope === 'practice';
-  const [practiceHost, setPracticeHost] = useState<HTMLDivElement | null>(null);
+  const byMap = preferences.scope === 'map';
   const [feedbackHost, setFeedbackHost] = useState<HTMLDivElement | null>(null);
   const [selection, setSelection] = useState({ measure: 0, position: 0 });
   const measures = useMemo(() => {
@@ -128,7 +127,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
           <ChordAuditionControl song={song} identity={identity} language={language} selectionLabel=""
             target={{ sectionId: measure.sectionId, sectionOccurrence: measure.sectionOccurrence, barId: measure.barId,
               slotIndex: position?.beat ?? 0, offset: position?.offset, orderedIndex: position?.orderedIndex }}
-            {...preferences} feedbackHost={feedbackHost} practiceHost={practiceHost}/>
+            {...preferences} feedbackHost={feedbackHost}/>
           {byMap ? <div ref={setFeedbackHost} /> : <button type="button" className="reader-start" aria-expanded={choosingStart} aria-controls={pickerId}
             aria-label={`${changeStart} · ${location}`} title={zh ? `更換起點（也可點譜） · ${location}` : `Change start or tap the score · ${location}`} onClick={() => setChoosingStart(value => !value)}>
             <span className="reader-start-section">{sectionName(measureIndex)}</span>
@@ -166,7 +165,6 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
         </div>
       </>}
       {!byMap && <div ref={setFeedbackHost} />}
-      {open && preferences.scope === 'practice' && <div ref={setPracticeHost} />}
     </div>
   </>;
 }

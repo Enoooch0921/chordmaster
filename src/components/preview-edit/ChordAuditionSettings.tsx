@@ -11,11 +11,13 @@ interface Props {
   setScope: (scope: AuditionScope) => void;
   metronome: boolean;
   setMetronome: (enabled: boolean) => void;
+  visualDelayMs: number;
+  setVisualDelayMs: (ms: number) => void;
   melody: boolean;
   setMelody: (enabled: boolean) => void;
 }
 
-export default function ChordAuditionSettings({ zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody }: Props) {
+export default function ChordAuditionSettings({ zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody, visualDelayMs, setVisualDelayMs }: Props) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -27,7 +29,7 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
   });
   const returnFocus = () => { close(); trigger.current?.focus({ preventScroll: true }); };
   useLayoutEffect(() => {
-    if (open && isPositioned) panel.current?.querySelector<HTMLInputElement>('input:checked')?.focus({ preventScroll: true });
+    if (open && isPositioned) panel.current?.querySelector<HTMLInputElement>('input:checked, input[type=checkbox]')?.focus({ preventScroll: true });
   }, [open, isPositioned]);
   useEffect(() => {
     if (!open) return;
@@ -55,16 +57,16 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
         event.stopPropagation();
         if (event.key === 'Escape') { event.preventDefault(); returnFocus(); }
         // Move out of the portal in the editor's own tab order.
-        const checkbox = event.target instanceof HTMLInputElement && event.target.type === 'checkbox';
-        const last = panel.current?.querySelector('input[name="audition-melody"]');
-        if (event.key === 'Tab' && (event.shiftKey ? !checkbox : event.target === last)) {
+        const first = panel.current?.querySelector('input[type=radio]:checked') ?? panel.current?.querySelector('input');
+        const last = panel.current?.querySelector('input[name="audition-delay"]');
+        if (event.key === 'Tab' && (event.shiftKey ? event.target === first : event.target === last)) {
           if (event.shiftKey) event.preventDefault();
           returnFocus();
         }
       }}>
-      <fieldset>
+      {scope !== 'practice' && <fieldset>
         <legend>{zh ? '試聽範圍' : 'Audition range'}</legend>
-        {(['chord', 'bar', 'section', 'song', 'map', 'practice'] as const).map(value =>
+        {(['chord', 'bar', 'section', 'song', 'map'] as const).map(value =>
           <label className="chord-audition-option" key={value}>
             <input type="radio" name={id} checked={scope === value} value={value} onChange={() => setScope(value)}
               onClick={event => { if (scope === value) setScope(value); if (event.detail > 0) returnFocus(); }}
@@ -72,7 +74,7 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
             <span>{labels[value]}</span>
             {scope === value && <Check size={16} aria-hidden="true" />}
           </label>)}
-      </fieldset>
+      </fieldset>}
       <label className="chord-audition-click-option">
         <span>{zh ? '連播節拍器' : 'Playback metronome'}</span>
         <input name="audition-metronome" type="checkbox" checked={metronome} onChange={event => setMetronome(event.target.checked)} />
@@ -80,6 +82,12 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
       <label className="chord-audition-melody-option">
         <span>{zh ? '旋律（簡譜）' : 'Melody (jianpu)'}</span>
         <input name="audition-melody" type="checkbox" checked={melody} onChange={event => setMelody(event.target.checked)} />
+      </label>
+      <label className="audition-delay">
+        <span>{zh ? '畫面延遲' : 'Visual delay'} <output>{visualDelayMs} ms</output></span>
+        <input name="audition-delay" type="range" min="-500" max="1000" step="25" value={visualDelayMs}
+          aria-label={zh ? '畫面延遲' : 'Visual delay'} aria-valuetext={`${visualDelayMs} ms`}
+          onChange={event => setVisualDelayMs(Number(event.target.value))}/>
       </label>
     </div>, document.body)}
   </>;

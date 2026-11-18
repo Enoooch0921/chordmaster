@@ -119,3 +119,20 @@
   .slw-toolbar .slw-print-mode, .slw-toolbar .slw-edit, .slw-toolbar .slw-focus { width: 44px; padding: 8px; }
   .slw-print-mode span, .slw-edit span, .slw-focus span { display: none; }
 }
+
+.slw-practice { flex: none; }
+@container lyrics-workspace (max-width: 480px) {
+  [data-lyrics-workspace-mode="reading"] .slw-toolbar-top { flex-wrap: wrap; }
+  .slw-reading-title { min-width: 5ch; }
+}
+.slw-toolbar .slw-practice [data-audition-button] { gap: 4px; padding-inline: 7px; color: var(--color-text); }
+.slw-practice .chord-audition-split { background: var(--color-surface-muted); }
+.slw-toolbar .slw-practice .chord-audition-scope { width: 28px; padding: 0; }
+.slw-practice-page:empty { display: none; }
+.slw-practice-page { height: 100%; }
+.slw-practice-page .practice-lyrics {
+  height: 100%; max-height: none; overflow: auto; padding: 12px clamp(16px, 5%, 64px);
+  border: 0; background: var(--color-surface); color: var(--color-text);
+}
+.slw-practice-page .practice-lyrics h3 { color: var(--color-text-muted); margin-bottom: .6em; }
+.slw-practice-page .practice-lyrics p:not(.practice-lyrics-empty) { font-size: inherit; line-height: inherit; }

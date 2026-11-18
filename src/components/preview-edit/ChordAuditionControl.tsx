@@ -17,6 +17,9 @@ interface Props {
   editorShortcut?: boolean;
   feedbackHost: HTMLElement | null;
   practiceHost?: HTMLElement | null;
+  onPracticeActiveChange?: (active: boolean) => void;
+  visualDelayMs: number;
+  setVisualDelayMs: (ms: number) => void;
   scope: AuditionScope;
   setScope: (value: AuditionScope) => void;
   metronome: boolean;
@@ -38,7 +41,7 @@ function issueText(issue: AuditionPlan['issue'], zh: boolean) {
   }
 }
 
-export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, prominent = false, editorShortcut = false, feedbackHost, practiceHost, metronome, setMetronome, melody, setMelody }: Props) {
+export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, prominent = false, editorShortcut = false, feedbackHost, practiceHost, onPracticeActiveChange, visualDelayMs, setVisualDelayMs, metronome, setMetronome, melody, setMelody }: Props) {
   const zh = language === 'zh';
   const labels = zh ? { chord: '這個和弦', bar: '這個小節', section: '從這裡到段尾', song: '從這裡到曲尾', map: '按曲序播完整首', practice: '練唱模式' }
     : { chord: 'This Chord', bar: 'This Bar', section: 'To Section End', song: 'To Song End', map: 'Whole Song in Map Order', practice: 'Sing-along practice' };
@@ -52,13 +55,19 @@ export default function ChordAuditionControl({ language, song, target, identity,
   const [playing, setPlaying] = useState(false);
   const stopLabel = zh ? '停止' : 'Stop';
   const playTarget = scope === 'chord' && selectionLabel ? selectionLabel : labels[scope];
-  const actionLabel = playing ? (zh ? '停止試聽' : 'Stop audition') : (zh ? `試聽${playTarget}` : `Play ${playTarget}`);
+  const actionLabel = scope === 'practice' ? (playing ? (zh ? '停止練唱' : 'Stop practice') : (zh ? '開始練唱' : 'Start sing-along practice')) : playing ? (zh ? '停止試聽' : 'Stop audition') : (zh ? `試聽${playTarget}` : `Play ${playTarget}`);
   const [mapPosition, setMapPosition] = useState<{ visit: number; label: string; description: string } | null>(null);
+  const practiceActive = scope === 'practice' && playing && Boolean(mapPosition);
+  useLayoutEffect(() => {
+    onPracticeActiveChange?.(practiceActive);
+    return () => onPracticeActiveChange?.(false);
+  }, [onPracticeActiveChange, practiceActive]);
   const [notice, setNotice] = useState('');
   const [clickUnavailable, setClickUnavailable] = useState(false);
   const piano = useRef<AuditionPiano | null>(null);
   useLayoutEffect(() => piano.current?.setMetronomeEnabled(metronome), [metronome]);
   useLayoutEffect(() => piano.current?.setMelodyEnabled(melody), [melody]);
+  useLayoutEffect(() => { if (piano.current) piano.current.visualDelayMs = visualDelayMs; }, [visualDelayMs]);
   const run = useRef(0);
   const loading = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const marked = useRef<HTMLElement | null>(null);
@@ -96,7 +105,9 @@ export default function ChordAuditionControl({ language, song, target, identity,
     if (playing) { stop(); return; }
     setClickUnavailable(false);
     const plan = buildChordAudition(song, target, scope, melody);
-    const problem = issueText(plan.issue, zh);
+    const problem = scope === 'practice' && plan.issue?.kind === 'noMap'
+      ? (zh ? '請先為這首歌設定曲序，再開始練唱。' : 'Add a song map before starting practice.')
+      : issueText(plan.issue, zh);
     if (plan.duration <= 0) { setNotice(problem || issueText({ kind: 'empty' }, zh)); return; }
     const hints = plan.fallbackTempo ? (zh ? '試聽速度 80 BPM' : 'Preview tempo 80 BPM') : '';
     setNotice(hints);
@@ -106,12 +117,14 @@ export default function ChordAuditionControl({ language, song, target, identity,
       if (run.current === request) setNotice(zh ? '正在載入鋼琴…' : 'Loading piano…');
     }, 220);
     piano.current ??= new AuditionPiano();
+    piano.current.visualDelayMs = visualDelayMs;
     piano.current.setMetronomeEnabled(metronome);
     piano.current.setMelodyEnabled(melody);
     let index = 0;
     let priorBeat = -1;
     let priorSpan = -1;
     const paint = (elapsed: number) => {
+      while (index > 0 && elapsed < plan.bars[index].start) index--;
       while (index + 1 < plan.bars.length && plan.bars[index].end <= elapsed) index++;
       const span = plan.bars[index];
       const beat = Math.floor(span.firstBeat + (elapsed - span.start) / span.beatSeconds) % span.beats;
@@ -170,11 +183,11 @@ export default function ChordAuditionControl({ language, song, target, identity,
           <span className="chord-audition-label" style={{ visibility: playing ? undefined : 'hidden' }}>{stopLabel}</span>
         </span>
       </button>
-      <ChordAuditionSettings zh={zh} labels={labels} scope={scope} setScope={setScope}
+      <ChordAuditionSettings visualDelayMs={visualDelayMs} setVisualDelayMs={setVisualDelayMs} zh={zh} labels={labels} scope={scope} setScope={setScope}
         metronome={metronome} setMetronome={setMetronome} melody={melody} setMelody={setMelody} />
     </div>
     {feedbackHost && createPortal(<div aria-live="polite" className="chord-audition-notice">{[playing && mapPosition?.description, notice,
-      (scope === 'map' || scope === 'practice') && !mapPosition && !notice ? (zh ? '從曲序開頭' : 'From map start') : '',
+      scope === 'map' && !mapPosition && !notice ? (zh ? '從曲序開頭' : 'From map start') : '',
       metronome && clickUnavailable ? (zh ? '節拍器載入失敗，可再按播放重試。' : 'Metronome unavailable. Play again to retry.') : ''
     ].filter(Boolean).join(' ')}</div>, feedbackHost)}
     {scope === 'practice' && playing && mapPosition && lyricsHost && createPortal(

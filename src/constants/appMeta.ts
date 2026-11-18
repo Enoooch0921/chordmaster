@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-18',
+        title: 'Sing along from Lyrics',
+        bullets: ['Start practice from the lyrics toolbar. Bar highlights and practice lyrics follow the audio output timing. Adjust visual delay in playback settings for your headphones.']
+      },
+      {
+        version: '0.12.51',
+        date: '2026-11-18',
         title: 'Song map playback and sing-along practice',
         bullets: ['Open the playback menu to follow the song map. Sing-along practice shows each verse’s lyrics even when the verses share a chart.']
       },
@@ -1270,6 +1276,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-18',
+        title: '從歌詞開始練唱',
+        bullets: ['在歌詞工具列點「練唱」即可開始。小節與唱詞跟隨音訊輸出時間，使用耳機時可在播放設定微調畫面延遲。']
+      },
+      {
+        version: '0.12.51',
         date: '2026-11-18',
         title: '曲序播放與練唱模式',
         bullets: ['在試聽設定選擇練唱模式，歌詞會跟著曲序切換。兩段主歌共用同一段譜時，仍顯示各自的歌詞。']

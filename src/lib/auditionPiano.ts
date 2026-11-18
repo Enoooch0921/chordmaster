@@ -1,3 +1,4 @@
+import { audioOutputTime } from './audioOutputTime';
 import { auditionBeats, type AuditionPlan } from './chordAudition';
 import { loadClickSamples } from './clickSamples';
 
@@ -72,6 +73,8 @@ export class AuditionPiano {
   private frame?: number;
   private deadline?: ReturnType<typeof setTimeout>;
   private generation = 0;
+
+  visualDelayMs = 0;
 
   setMetronomeEnabled(enabled: boolean) {
     this.metronomeEnabled = enabled;
@@ -180,9 +183,10 @@ export class AuditionPiano {
     };
     const refresh = () => {
       if (this.generation !== generation) return;
-      const elapsed = context.currentTime - origin;
-      if (elapsed >= plan.duration) { this.stop(); done(); return; }
-      if (elapsed >= 0) paint(elapsed);
+      const audible = audioOutputTime(context) - origin;
+      const elapsed = audible - this.visualDelayMs / 1000;
+      if (Math.min(audible, elapsed) >= plan.duration) { this.stop(); done(); return; }
+      if (elapsed >= 0) paint(Math.min(elapsed, plan.duration - 1e-7));
       this.frame = requestAnimationFrame(refresh);
     };
     schedule();

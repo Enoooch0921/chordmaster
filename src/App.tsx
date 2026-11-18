@@ -14014,6 +14014,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               key={isSetlistMode ? selectedSetlist!.id : song.id}
               title={isSetlistMode ? selectedSetlist!.name : song.title}
               noteOwner={authenticatedUser?.id} notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} notesActive={!isPerformanceMode}
+              practiceSong={activeNavigationPreviewSong ?? undefined}
               phoneHandwritingButton={isPhoneViewport} readingPositions={lyricsReadingPositions.current}
               preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}
               entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}
