@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-18',
+        title: 'Section controls in focused reading',
+        bullets: ['Queue a section directly from the toolbar and keep playing when entering or leaving focus. Chord playback continues between the chart and lyrics. Joined setlists omit original key and capo from song summaries.']
+      },
+      {
+        version: '0.12.54',
+        date: '2026-11-18',
         title: 'Practice on the reading page',
         bullets: ['Sing along in the original lyrics layout. Practice follows written D.S. and Coda signs or a saved map with section assignments.']
       },
@@ -1288,6 +1294,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-18',
+        title: '專注閱讀時接續練唱',
+        bullets: ['練唱工具列可直接預選段落，進出專注閱讀時接續播放。切換同一首歌的譜面與歌詞可繼續播放和弦。加入的共享歌單摘要省略原調和 Capo。']
+      },
+      {
+        version: '0.12.54',
         date: '2026-11-18',
         title: '在原來的歌詞頁練唱',
         bullets: ['沿用閱讀字型、欄位與分頁。未排曲序時依譜面 D.S.、Coda 記號行進，有曲序時可為未對應的步驟指定譜段。']

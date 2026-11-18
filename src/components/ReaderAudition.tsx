@@ -8,7 +8,7 @@ import { isClosedBar } from '../utils/closedBar';
 import { getChordEvents } from '../utils/chordSubdivisions';
 import { chordBeatPositionLabel } from '../utils/chordBeatOffsets';
 import { hasUnmeteredChords } from '../utils/unmeteredChords';
-import ChordAuditionControl from './preview-edit/ChordAuditionControl';
+import ChordAuditionControl, { type ChordPlayback } from './preview-edit/ChordAuditionControl';
 import './preview-edit/PreviewKeyboard.css';
 
 interface Props {
@@ -17,6 +17,9 @@ interface Props {
   language: AppLanguage;
   userId?: string | null;
   triggerHost: HTMLSpanElement | null;
+  chartVisible: boolean;
+  hidePanel: boolean;
+  onPlaybackChange: (playback: ChordPlayback | null) => void;
   chartRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -32,7 +35,7 @@ function auditionPositions(bar: Bar, beats: number) {
   ).flat();
 }
 
-export default function ReaderAudition({ song, identity, language, chartRef, triggerHost, userId }: Props) {
+export default function ReaderAudition({ song, identity, language, chartRef, triggerHost, userId, chartVisible, hidePanel, onPlaybackChange }: Props) {
   const zh = language === 'zh';
   const [open, setOpen] = useState(false);
   const [choosingStart, setChoosingStart] = useState(false);
@@ -76,7 +79,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
   // Listen on the visible chart only. The reader never opens an editing session.
   useEffect(() => {
     const chart = chartRef.current;
-    if (!open || !chart) return;
+    if (!open || !chart || !chartVisible) return;
     const pick = (event: MouseEvent) => {
       if (event.defaultPrevented || !(event.target instanceof Element) || event.target.closest('button,select,a,input')) return;
       const cell = event.target.closest<HTMLElement>('[data-audition-section-index][data-audition-bar-index]');
@@ -96,7 +99,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
     };
     chart.addEventListener('click', pick, true);
     return () => chart.removeEventListener('click', pick, true);
-  }, [open, chartRef, identity, measures, byMap]);
+  }, [open, chartRef, chartVisible, identity, measures, byMap]);
 
   if (!measure) return null;
   const position = positions[selection.position] ?? positions[0];
@@ -117,7 +120,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
         aria-expanded={open} aria-controls={panelId} aria-label={toggleLabel} onClick={() => open ? close() : setOpen(true)}>
         <Headphones size={16} aria-hidden="true" />{open ? (zh ? '收起' : 'Hide') : toggleLabel}
       </button>, triggerHost)}
-    <div ref={panelRef} id={panelId} tabIndex={-1} hidden={!open} role="region" aria-label={zh ? '和弦試聽' : 'Chord playback'}
+    <div ref={panelRef} id={panelId} tabIndex={-1} hidden={!open || hidePanel} role="region" aria-label={zh ? '和弦試聽' : 'Chord playback'}
       className="reader-audition" data-keyboard-refined data-preview-only-control
       onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) {
         event.stopPropagation(); close();
@@ -127,7 +130,7 @@ export default function ReaderAudition({ song, identity, language, chartRef, tri
           <ChordAuditionControl song={song} identity={identity} language={language} selectionLabel=""
             target={{ sectionId: measure.sectionId, sectionOccurrence: measure.sectionOccurrence, barId: measure.barId,
               slotIndex: position?.beat ?? 0, offset: position?.offset, orderedIndex: position?.orderedIndex }}
-            {...preferences} feedbackHost={feedbackHost}/>
+            {...preferences} onPlaybackChange={onPlaybackChange} feedbackHost={feedbackHost}/>
           {byMap ? <div ref={setFeedbackHost} /> : <button type="button" className="reader-start" aria-expanded={choosingStart} aria-controls={pickerId}
             aria-label={`${changeStart} · ${location}`} title={zh ? `更換起點（也可點譜） · ${location}` : `Change start or tap the score · ${location}`} onClick={() => setChoosingStart(value => !value)}>
             <span className="reader-start-section">{sectionName(measureIndex)}</span>

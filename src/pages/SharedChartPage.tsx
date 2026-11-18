@@ -7,6 +7,7 @@ import { invitationPath, type InvitationResource } from '../lib/invitationJourne
 import { useThemeMode } from '../hooks/useThemeMode';
 import { useParams, useNavigate } from 'react-router-dom';
 import ChordSheet from '../components/ChordSheet';
+import type { ChordPlayback } from '../components/preview-edit/ChordAuditionControl';
 import ReaderAudition from '../components/ReaderAudition';
 import SetlistLyricsWorkspace, { type SetlistLyricsMode } from '../components/SetlistLyricsWorkspace';
 import { DEFAULT_LYRICS_BOOK_SETTINGS } from '../utils/lyricsBook';
@@ -41,22 +42,24 @@ const rememberSetlistLanding = (setlistId: string, firstSetlistSongId?: string |
   }
 };
 
-function SharedAuditionChart({ song, language, identity, triggerHost, userId }: { song: Song; language: AppLanguage; identity: string; userId: string | null; triggerHost: HTMLSpanElement | null }) {
+function SharedSongPreview({ song, language, identity, triggerHost, userId, lyrics }: {
+  song: Song; language: AppLanguage; identity: string; userId: string | null; triggerHost: HTMLSpanElement | null; lyrics: boolean;
+}) {
   const chartRef = useRef<HTMLDivElement>(null);
-  return <>
-    <ReaderAudition userId={userId} key={identity} song={song} identity={identity} chartRef={chartRef} language={language} triggerHost={triggerHost} />
-    <div ref={chartRef} className="shared-audition-score">
-      <ChordSheet readerAudition song={song} language={language} currentKey={song.currentKey} previewIdentity={identity} />
-    </div>
-  </>;
-}
-
-function SharedLyricsReader({ song, identity, language, userId }: { song: Song; identity: string; language: AppLanguage; userId: string | null }) {
+  const [chordPlayback, setChordPlayback] = useState<ChordPlayback | null>(null);
   const [mode, setMode] = useState<SetlistLyricsMode>('reading');
   const [printSettings, setPrintSettings] = useState(DEFAULT_LYRICS_BOOK_SETTINGS);
-  return <div style={{ height: '80dvh' }}><SetlistLyricsWorkspace preferenceKey={userId ? `user:${userId}` : 'local'} title={song.title} entries={[{ id: identity, song }]} selectedId={identity}
-    onSelectSong={() => {}} language={language} mode={mode} onModeChange={setMode}
-    printSettings={printSettings} onPrintSettingsChange={setPrintSettings}/></div>;
+  return <>
+    {(!lyrics || chordPlayback) && <ReaderAudition userId={userId} song={song} identity={identity} chartRef={chartRef}
+      language={language} triggerHost={lyrics ? null : triggerHost} chartVisible={!lyrics} hidePanel={lyrics && mode === 'reading'}
+      onPlaybackChange={setChordPlayback}/>}
+    {lyrics ? <div style={{ height: '80dvh' }}><SetlistLyricsWorkspace preferenceKey={userId ? `user:${userId}` : 'local'} title={song.title}
+      entries={[{ id: identity, song }]} selectedId={identity} chordPlayback={chordPlayback} onSelectSong={() => {}}
+      language={language} mode={mode} onModeChange={setMode} printSettings={printSettings} onPrintSettingsChange={setPrintSettings}/></div>
+      : <div ref={chartRef} className="shared-audition-score">
+        <ChordSheet readerAudition song={song} language={language} currentKey={song.currentKey} previewIdentity={identity} />
+      </div>}
+  </>;
 }
 
 export default function SharedChartPage() {
@@ -599,11 +602,8 @@ export default function SharedChartPage() {
                     <span className="contents" ref={setAuditionHost} />
                   </div>
                   <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-1 shadow-sm sm:p-6">
-                    {showSharedLyrics ? (
-                      <SharedLyricsReader userId={authUserId} identity={selectedBundleSong.id} song={selectedBundleSong.song} language={language} />
-                    ) : (
-                      <SharedAuditionChart userId={authUserId} triggerHost={auditionHost} song={selectedBundleSong.song} language={language} identity={selectedBundleSong.id} />
-                    )}
+                    <SharedSongPreview key={selectedBundleSong.id} identity={selectedBundleSong.id} song={selectedBundleSong.song} language={language}
+                    lyrics={showSharedLyrics} triggerHost={auditionHost} userId={authUserId}/>
                   </div>
                 </div>
               </div>
@@ -636,11 +636,8 @@ export default function SharedChartPage() {
                 ) : null}
               </div>
               <div className="overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white p-1 shadow-sm sm:p-6">
-                {showSharedLyrics ? (
-                  <SharedLyricsReader userId={authUserId} identity={payload.song.id} song={payload.song.song} language={language} />
-                ) : (
-                  <SharedAuditionChart userId={authUserId} triggerHost={auditionHost} song={payload.song.song} language={language} identity={payload.song.id} />
-                )}
+                <SharedSongPreview key={payload.song.id} identity={payload.song.id} song={payload.song.song} language={language}
+                    lyrics={showSharedLyrics} triggerHost={auditionHost} userId={authUserId}/>
               </div>
               {renderSongImportControls()}
             </>

@@ -166,7 +166,7 @@ it('retains incoming shared setlists while suppressing an owned duplicate and it
  fixture.setlists[0]={...fixture.setlists[0],projectId:null};
  fixture.joinedSetlists=[
    {...fixture.setlists[0],isJoined:true},
-   {...fixture.setlists[0],id:'incoming',name:'外部共享聚會',songs:[],isJoined:true}
+   {...fixture.setlists[0],id:'incoming',name:'外部共享聚會',isJoined:true}
  ];
  state.load.mockResolvedValue(fixture);
  saveNavigationLocation(getNavigationStorageKey('user','team'),{...remembered,filter:{kind:'all'},view:'list'});mount();
@@ -175,6 +175,9 @@ it('retains incoming shared setlists while suppressing an owned duplicate and it
  expect(within(list()).getAllByRole('button',{name:/^聚會一(?: |$)/})).toHaveLength(1);
  expect(within(list()).getAllByRole('button',{name:/^外部共享聚會(?: |$)/})).toHaveLength(1);
  expect(within(list()).getAllByText('共享歌單').map(label=>label.parentElement?.textContent)).toContain('共享歌單1');
+ const card=within(list()).getByRole('button',{name:/^外部共享聚會/});
+ expect(card).toHaveTextContent('Key C');
+ expect(card).not.toHaveTextContent(/原調|Original Key|Capo/i);
  expect(fixture.joinedSetlists).toHaveLength(2);
 });
 it('keeps a shared project setlist inside its folder and deduplicates its direct-share search result', async () => {

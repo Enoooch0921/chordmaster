@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AuditionPiano } from '../lib/auditionPiano';
 import type { Song } from '../types';
 import { DEFAULT_LYRICS_BOOK_SETTINGS } from '../utils/lyricsBook';
 import { mockLyricsReadingGeometry } from '../test/lyricsReadingGeometry';
@@ -24,6 +25,29 @@ beforeEach(() => { localStorage.clear(); mockLyricsReadingGeometry(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('setlist lyrics reading workspace', () => {
+  it('keeps the playing session and queued section across both focus transitions', async () => {
+    const play = vi.spyOn(AuditionPiano.prototype, 'play').mockImplementation(async function (this: AuditionPiano, plan, paint) {
+      this.redirect = (_next, boundary) => boundary ?? 0;
+      paint(0, plan);
+      return {metronomeUnavailable:false};
+    });
+    const dispose = vi.spyOn(AuditionPiano.prototype, 'dispose');
+    render(<Harness items={[{id:'first-entry', song:{...song, sections:[
+      {id:'verse', title:'Verse', bars:[{id:'b', chords:['C']}]}
+    ]}}]}/>);
+    fireEvent.click(screen.getByRole('button', {name:'開始練唱'}));
+    const ending = () => within(screen.getByRole('group', {name:'播放段落'})).getByRole('button', {name:'Ending'});
+    fireEvent.click(ending());
+    for (const name of ['專注閱讀', '離開專注閱讀']) {
+      fireEvent.click(screen.getByRole('button', {name}));
+      expect(ending()).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', {name:'停止練唱'})).toBeInTheDocument();
+    }
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(dispose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', {name:'停止練唱'}));
+    expect(screen.queryByRole('group', {name:'播放段落'})).toBeNull();
+  });
   it('includes source-confirmed English-only sections in main-language navigation', () => {
     const { container } = render(<Harness items={[{ id: 'first-entry', song: { ...song, lyricsDoc: { chinese: '', blocks: [
       { id: 'v', marker: 'Verse 1', chinese: '中文主歌', english: '' },

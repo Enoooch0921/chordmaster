@@ -145,3 +145,15 @@
 .practice-apply:disabled { opacity: .55; }
 .practice-start { display: grid; gap: 4px; }
 .practice-start select { max-width: 100%; min-height: 40px; }
+
+.slw-reading-tools { display: contents; }
+[data-lyrics-workspace-mode="reading"] .slw-reading-tools { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; gap: inherit; }
+.slw-toolbar .practice-now { flex: 0 1 auto; max-width: 40%; min-width: 44px; }
+.practice-section-rail { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; gap: 4px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.slw-toolbar .practice-section-rail button { min-width: 44px; min-height: 44px; padding-inline: 10px; background: var(--color-surface-muted); white-space: nowrap; }
+.slw-toolbar .practice-section-rail button[aria-current="step"] { box-shadow: inset 0 -3px var(--color-indigo-500); }
+.slw-toolbar .practice-section-rail button[aria-pressed="true"] { outline: 2px dashed var(--color-indigo-500); outline-offset: -3px; }
+@container lyrics-workspace (max-width: 699px) {
+  .slw-reading-tools:has(.practice-section-rail) .slw-reading-title { position: static; }
+  .slw-reading-tools:has(.practice-section-rail) > button { visibility: hidden; }
+}

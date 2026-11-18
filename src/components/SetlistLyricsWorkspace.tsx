@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Pencil, PenLine, Check, Download, Maximize2, Minimize2, Printer } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Pencil, PenLine, Check, Download, Square, Maximize2, Minimize2, Printer } from 'lucide-react';
 import type { AppLanguage, Song } from '../types';
 import LyricsBook, { type LyricsBookEntry } from './LyricsBook';
 import LyricsSheet from './LyricsSheet';
@@ -36,14 +36,16 @@ interface Props extends PersonalNotesOptions {
   phoneHandwritingButton?: boolean;
   preferenceKey?: string;
   practiceSong?: Song;
+  chordPlayback?: { stop: () => void } | null;
   readingPositions?: Map<string, ReadingAnchor | 'last'>;
 }
 const PAPER_WIDTH = 794;
 
-export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, practiceSong, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
+export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, practiceSong, chordPlayback, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
   const zh = language === 'zh';
   const practiceUser = notes.noteOwner ?? (preferenceKey.startsWith('user:') ? preferenceKey.slice(5) : null);
   const [practice, setPractice] = React.useState<PracticeReaderState>();
+  const [controlsHost, setControlsHost] = React.useState<HTMLDivElement | null>(null);
   const [feedbackHost, setFeedbackHost] = React.useState<HTMLDivElement | null>(null);
   const [defaults, setReadingSettings] = useLyricsReadingPreferences(preferenceKey);
   const [focused, setFocused] = React.useState(false);
@@ -103,6 +105,7 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
     return () => observer?.disconnect();
   }, [mode, entries.length]);
 
+  const showPractice = !chordPlayback && mode === 'reading' && current && notes.notesActive !== false && !notes.notesOpen;
   const content = <section ref={workspaceRef} className={`setlist-lyrics-workspace${isFocused ? ' slw-focused' : ''}`} role={isFocused ? 'dialog' : undefined} aria-modal={isFocused || undefined}
     aria-label={isFocused ? (zh ? '專注閱讀歌詞' : 'Focused lyrics reading') : (zh ? '歌單歌詞' : 'Setlist lyrics')} data-lyrics-workspace-mode={mode} data-lyrics-focused={isFocused || undefined}
     onKeyDown={event => {
@@ -117,26 +120,29 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
       }
     }}>
       <div className="slw-toolbar-top">
-        {mode === 'reading' && current && <div className="slw-reading-title">{entries.length > 1
-          ? <select aria-label={zh ? '目前歌曲' : 'Current song'} value={current.id} onChange={event => selectSong(event.target.value)}>{entries.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.song.title}</option>)}</select>
-          : <h1><SongTitle title={current.song.title}/></h1>}<div className="slw-practice-position" ref={setFeedbackHost}/></div>}
-        {mode !== 'reading' && <strong className="slw-title" title={title}>{title || (zh ? '歌單歌詞' : 'Setlist lyrics')}</strong>}
-        {mode === 'reading' && current && notes.notesActive !== false && !notes.notesOpen && <div className="slw-practice" data-keyboard-refined>
-          <PracticeControl key={current.id} song={practiceSong ?? current.song} language={language} userId={practiceUser}
-            feedbackHost={feedbackHost} onReaderChange={setPractice}/>
-        </div>}
-        {mode === 'reading' && (isFocused || phoneHandwritingButton) && notes.noteOwner && current && <button type="button" className="slw-icon" aria-label={zh ? '手寫筆記' : 'Handwriting'}
-          title={zh ? '手寫筆記' : 'Handwriting'} aria-pressed={notes.notesOpen ?? false} onClick={() => notes.onNotesOpenChange?.(!notes.notesOpen)}><PenLine size={20}/></button>}
-        {isFocused ? <button type="button" className="slw-focus-exit" aria-label={zh ? '離開專注閱讀' : 'Exit focused reading'} onClick={() => changeFocus(false)}><Minimize2 size={20} aria-hidden="true"/><span>{zh ? '離開專注' : 'Exit focus'}</span></button> : mode === 'edit' ? <button type="button" className="slw-done" onClick={() => changeMode('reading')}><Check size={18} aria-hidden="true"/>{zh ? '完成編輯' : 'Done editing'}</button> : <>
-          {mode === 'reading' ? <button type="button" className="slw-print-mode" aria-label={zh ? '列印排版' : 'Print layout'} title={zh ? '列印排版' : 'Print layout'} onClick={() => changeMode('print')}><Printer size={18} aria-hidden="true"/><span>{zh ? '列印' : 'Print'}</span></button> : <div className="slw-modes ui-segmented-control" role="group" aria-label={zh ? '歌詞用途' : 'Lyrics view'}>
-            <MeasuredSlidingSelection value={mode} layoutKey={language} />
-            <button type="button" aria-pressed={false} onClick={() => changeMode('reading')}>{zh ? '閱讀' : 'Read'}</button>
-            <button type="button" aria-label={zh ? '列印排版' : 'Print layout'} aria-pressed={mode === 'print'} onClick={() => changeMode('print')}>{zh ? '列印' : 'Print'}</button>
-          </div>}
-          <button ref={optionsTriggerRef} type="button" className="slw-icon" aria-label={zh ? (mode === 'print' ? '列印設定' : '閱讀設定') : (mode === 'print' ? 'Print settings' : 'Reading settings')} aria-expanded={optionsOpen} aria-controls={optionsId} onClick={() => { setOptionsOpen(value => !value); }}><Settings2 size={20} aria-hidden="true"/></button>
-          {mode === 'reading' && onSongChange && <button type="button" className="slw-edit" aria-label={zh ? '編輯' : 'Edit'} disabled={!current} onClick={() => changeMode('edit')}><Pencil size={18} aria-hidden="true"/><span>{zh ? '編輯' : 'Edit'}</span></button>}
-          {mode === 'reading' && <button ref={focusTriggerRef} type="button" className="slw-focus" disabled={!current} aria-label={zh ? '專注閱讀' : 'Focus reading'} onClick={() => changeFocus(true)}><Maximize2 size={18} aria-hidden="true"/><span>{zh ? '專注閱讀' : 'Focus'}</span></button>}
-        </>}
+        <div className="slw-reading-tools">
+          {mode === 'reading' && current && <div className="slw-reading-title">{entries.length > 1
+            ? <select aria-label={zh ? '目前歌曲' : 'Current song'} value={current.id} onChange={event => selectSong(event.target.value)}>{entries.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.song.title}</option>)}</select>
+            : <h1><SongTitle title={current.song.title}/></h1>}<div className="slw-practice-position" ref={setFeedbackHost}/></div>}
+          {mode !== 'reading' && <strong className="slw-title" title={title}>{title || (zh ? '歌單歌詞' : 'Setlist lyrics')}</strong>}
+          {mode === 'reading' && (isFocused || phoneHandwritingButton) && notes.noteOwner && current && <button type="button" className="slw-icon" aria-label={zh ? '手寫筆記' : 'Handwriting'}
+            title={zh ? '手寫筆記' : 'Handwriting'} aria-pressed={notes.notesOpen ?? false} onClick={() => notes.onNotesOpenChange?.(!notes.notesOpen)}><PenLine size={20}/></button>}
+          {!isFocused && (mode === 'edit' ? <button type="button" className="slw-done" onClick={() => changeMode('reading')}><Check size={18} aria-hidden="true"/>{zh ? '完成編輯' : 'Done editing'}</button> : <>
+            {mode === 'reading' ? <button type="button" className="slw-print-mode" aria-label={zh ? '列印排版' : 'Print layout'} title={zh ? '列印排版' : 'Print layout'} onClick={() => changeMode('print')}><Printer size={18} aria-hidden="true"/><span>{zh ? '列印' : 'Print'}</span></button> : <div className="slw-modes ui-segmented-control" role="group" aria-label={zh ? '歌詞用途' : 'Lyrics view'}>
+              <MeasuredSlidingSelection value={mode} layoutKey={language} />
+              <button type="button" aria-pressed={false} onClick={() => changeMode('reading')}>{zh ? '閱讀' : 'Read'}</button>
+              <button type="button" aria-label={zh ? '列印排版' : 'Print layout'} aria-pressed={mode === 'print'} onClick={() => changeMode('print')}>{zh ? '列印' : 'Print'}</button>
+            </div>}
+            <button ref={optionsTriggerRef} type="button" className="slw-icon" aria-label={zh ? (mode === 'print' ? '列印設定' : '閱讀設定') : (mode === 'print' ? 'Print settings' : 'Reading settings')} aria-expanded={optionsOpen} aria-controls={optionsId} onClick={() => { setOptionsOpen(value => !value); }}><Settings2 size={20} aria-hidden="true"/></button>
+            {mode === 'reading' && onSongChange && <button type="button" className="slw-edit" aria-label={zh ? '編輯' : 'Edit'} disabled={!current} onClick={() => changeMode('edit')}><Pencil size={18} aria-hidden="true"/><span>{zh ? '編輯' : 'Edit'}</span></button>}
+          </>)}
+        </div>
+        {chordPlayback && mode === 'reading' && <button type="button" className="slw-chord-stop"
+          aria-label={zh ? '停止和弦播放' : 'Stop chord playback'} onClick={chordPlayback.stop}>
+          <Square size={13} fill="currentColor" aria-hidden="true"/>{zh ? '停止' : 'Stop'}
+        </button>}
+        {showPractice && <div className="slw-practice" ref={setControlsHost} data-keyboard-refined/>}
+        {isFocused ? <button type="button" className="slw-focus-exit" aria-label={zh ? '離開專注閱讀' : 'Exit focused reading'} onClick={() => changeFocus(false)}><Minimize2 size={20} aria-hidden="true"/><span>{zh ? '離開專注' : 'Exit focus'}</span></button> : mode === 'reading' && <button ref={focusTriggerRef} type="button" className="slw-focus" disabled={!current} aria-label={zh ? '專注閱讀' : 'Focus reading'} onClick={() => changeFocus(true)}><Maximize2 size={18} aria-hidden="true"/><span>{zh ? '專注閱讀' : 'Focus'}</span></button>}
       </div>
       {mode === 'print' && <div className="slw-print-actions">
         <label>{zh ? 'A4 版面' : 'A4 layout'}<select aria-label={zh ? 'A4 版面' : 'A4 layout'} value={printSettings.layout ?? 'readable'} onChange={event => onPrintSettingsChange({ ...printSettings, layout: event.target.value as LyricsBookSettings['layout'] })}><option value="readable">{zh ? '易讀版' : 'Readable'}</option><option value="compact">{zh ? '省紙版' : 'Compact'}</option></select></label>
@@ -172,5 +178,9 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
       <button type="button" className="slw-icon" aria-label={zh ? '下一首' : 'Next song'} disabled={!current || currentIndex === entries.length - 1} onClick={() => selectSong(entries[currentIndex + 1].id)}><ChevronRight size={22} aria-hidden="true"/></button>
     </div>}
   </section>;
-  return isFocused ? createPortal(content, document.body) : content;
+  return <>
+    {showPractice && <PracticeControl key={current.id} song={practiceSong ?? current.song} language={language} userId={practiceUser}
+      controlsHost={controlsHost} feedbackHost={feedbackHost} onReaderChange={setPractice}/>}
+    {isFocused ? createPortal(content, document.body) : content}
+  </>;
 }

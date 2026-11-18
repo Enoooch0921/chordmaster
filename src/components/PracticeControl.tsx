@@ -16,8 +16,8 @@ type Session = ReturnType<typeof buildPracticeSession>;
 interface Cursor { bar: AuditionBar; lastBar: AuditionBar; nextLabel?: string }
 interface Cue { label: string; at: number }
 
-export default function PracticeControl({ song, language, userId, feedbackHost, onReaderChange }: {
-  song: Song; language: AppLanguage; userId?: string | null; feedbackHost: HTMLElement | null;
+export default function PracticeControl({ song, language, userId, controlsHost, feedbackHost, onReaderChange }: {
+  song: Song; language: AppLanguage; userId?: string | null; controlsHost: HTMLElement | null; feedbackHost: HTMLElement | null;
   onReaderChange: (state: PracticeReaderState | undefined) => void;
 }) {
   const zh = language === 'zh';
@@ -134,7 +134,16 @@ export default function PracticeControl({ song, language, userId, feedbackHost, 
     onClick={() => select(label)}>{label}</button>;
   const labels = zh ? {chord:'', bar:'這個小節', section:'從這裡到段尾', song:'從這裡到曲尾', map:'按曲序播完整首', practice:title}
     : {chord:'', bar:'This bar', section:'To section end', song:'To song end', map:'Whole song in map order', practice:title};
-  return <div className="chord-audition">
+  const rail = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const area = rail.current;
+    const current = area?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (!area || !current) return;
+    const offset = current.offsetLeft - area.scrollLeft;
+    if (offset < 0) area.scrollLeft += offset;
+    else if (offset + current.offsetWidth > area.clientWidth) area.scrollLeft += offset + current.offsetWidth - area.clientWidth;
+  }, [label, feedbackHost, controlsHost]);
+  return controlsHost && createPortal(<div className="chord-audition">
     <div className="chord-audition-split" data-playing={playing || undefined}>
       <button type="button" data-audition-button aria-label={action} title={action} onClick={playing ? finish : play}>
         {playing ? <Square size={13} fill="currentColor" aria-hidden/> : <Play size={13} fill="currentColor" aria-hidden/>}
@@ -171,9 +180,13 @@ export default function PracticeControl({ song, language, userId, feedbackHost, 
         </fieldset>}
       </ChordAuditionSettings>
     </div>
-    {feedbackHost && position && createPortal(<button className="practice-now" type="button" aria-haspopup="dialog" aria-expanded={settingsOpen}
+    {feedbackHost && position && createPortal(<><button className="practice-now" type="button" aria-haspopup="dialog" aria-expanded={settingsOpen}
       aria-label={zh ? `跳至段落，目前 ${label}，第 ${position.bar.practiceBar} 小節` : `Jump to section, currently ${label}, bar ${position.bar.practiceBar}`}
       onClick={() => setSettingsOpen(true)}><strong>{label}</strong><small>{position.bar.practiceBar || (zh ? '弱起' : 'Pickup')} / {position.bar.practiceTotal}
-        {(queued?.label ?? position.nextLabel) && ` → ${queued?.label ?? position.nextLabel}`}</small></button>, feedbackHost)}
-  </div>;
+        {(queued?.label ?? position.nextLabel) && ` → ${queued?.label ?? position.nextLabel}`}</small></button>
+      <div ref={rail} className="practice-section-rail" role="group" aria-label={zh ? '播放段落' : 'Playback sections'}
+        aria-description={zh ? '點一次預選，唱完當前段落後跳轉。再點同一段可立即跳轉。' : 'Tap once to queue at the section end, or twice to jump immediately.'}>
+        {session.current?.labels.map(cueButton)}
+      </div></>, feedbackHost)}
+  </div>, controlsHost);
 }

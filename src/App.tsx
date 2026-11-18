@@ -12,6 +12,7 @@ import PersonalChordSheet from './components/PersonalChordSheet';
 import PerformanceSetlistSheets, { type PerformanceSetlistHandle } from './components/PerformanceSetlistSheets';
 import SetlistPreviewSong from './components/SetlistPreviewSong';
 import ReaderAudition from './components/ReaderAudition';
+import type { ChordPlayback } from './components/preview-edit/ChordAuditionControl';
 import { findPreviewAnchor, samePreviewAnchorRect } from './lib/previewAnchor';
 import { useHandwritingSelectionGuard } from './hooks/useHandwritingSelectionGuard';
 import { getSongMap, sectionSongMap } from './lib/songMap';
@@ -1859,6 +1860,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const performanceOverlayRef = useRef<HTMLDivElement>(null);
   const appViewportRef = useAppViewport(performanceOverlayRef, isPerformanceMode);
   const previewRef = React.useRef<HTMLDivElement>(null);
+  const [chordPlayback, setChordPlayback] = useState<ChordPlayback | null>(null);
   const [readerAuditionHost, setReaderAuditionHost] = useState<HTMLSpanElement | null>(null);
   const mobileMetadataRef = React.useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLDivElement>(null);
@@ -3023,15 +3025,12 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [songs]);
   const getSetlistSongInfoSummary = (item: SetlistSong, sourceSong: Song) => {
     const effectiveKey = item.overrideKey ?? sourceSong.currentKey;
-    const effectiveCapo = resolveSetlistSongCapo(item, sourceSong, setlistCapoResolutionOptions);
     const displaySong = item.songData ?? sourceSong;
     const versionSummary = getSongVersionSummary(displaySong);
     const translator = displaySong.translator?.trim();
 
     return [
-      `${copy.editor.originalKey} ${formatKeyName(displaySong.originalKey, displaySong.originalKeyMode)}`,
       `${copy.key} ${formatKeyName(effectiveKey, currentKeyMode(displaySong))}`,
-      `Capo ${effectiveCapo}`,
       typeof displaySong.tempo === 'number' ? `${displaySong.tempo} BPM` : '',
       displaySong.timeSignature,
       versionSummary,
@@ -11904,7 +11903,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               const sourceStatusLabel = getSetlistSourceStatusLabel(sourceStatus, language);
               const effectiveTempo = activePreviewEditSession?.previewIdentity === item.id ? activePreviewEditSession.draftSong.tempo : displaySong.tempo;
               const songInfoSummary = [
-                `${language === 'zh' ? '原調' : 'Original'} ${formatKeyName(displaySong.originalKey, displaySong.originalKeyMode)}`,
+                !isJoinedSetlist && `${language === 'zh' ? '原調' : 'Original'} ${formatKeyName(displaySong.originalKey, displaySong.originalKeyMode)}`,
                 displaySong.timeSignature,
                 getSongVersionSummary(displaySong), displaySong.translator?.trim()
               ].filter(Boolean).join(' · ');
@@ -14003,10 +14002,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               </div>
             )}
             <div className="flex h-full min-h-0 flex-col">
-            {isSheetView && !activePreviewEditSession && !isLyricsMode && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
+            {isSheetView && !activePreviewEditSession && (!isLyricsMode || chordPlayback) && !isPerformanceMode && !isExportingPdf && !isHandwriting && !(isPhoneViewport && isMobileNavOpen)
               && !setlistOpening.opening && activeNavigationPreviewSong && activePreviewIdentity &&
               <ReaderAudition key={activePreviewIdentity} song={activeNavigationPreviewSong} identity={activePreviewIdentity}
-                userId={authenticatedUser?.id} language={language} chartRef={previewRef} triggerHost={readerAuditionHost} />}
+                userId={authenticatedUser?.id} language={language} chartRef={previewRef} triggerHost={readerAuditionHost}
+                chartVisible={!isLyricsMode} hidePanel={isLyricsWorkspace && isLyricsReading && isLyricsContinuous} onPlaybackChange={setChordPlayback} />}
             <div className="relative min-h-0 flex-1">
             <CoveredPreview covered={isPhoneViewport && isMobileNavOpen}
               scope={JSON.stringify([historyScope, selectedSongId, selectedSetlistId, selectedSetlistSongId, isLyricsMode])}>
@@ -14014,7 +14014,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               key={isSetlistMode ? selectedSetlist!.id : song.id}
               title={isSetlistMode ? selectedSetlist!.name : song.title}
               noteOwner={authenticatedUser?.id} notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} notesActive={!isPerformanceMode}
-              practiceSong={activeNavigationPreviewSong ?? undefined}
+              practiceSong={activeNavigationPreviewSong ?? undefined} chordPlayback={chordPlayback}
               phoneHandwritingButton={isPhoneViewport} readingPositions={lyricsReadingPositions.current}
               preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}
               entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}

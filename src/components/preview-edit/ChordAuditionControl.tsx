@@ -6,7 +6,10 @@ import { AuditionPiano } from '../../lib/auditionPiano';
 import { buildChordAudition, type AuditionPlan, type AuditionScope, type AuditionTarget } from '../../lib/chordAudition';
 import ChordAuditionSettings from './ChordAuditionSettings';
 
+export interface ChordPlayback { stop: () => void }
+
 interface Props {
+  onPlaybackChange?: (playback: ChordPlayback | null) => void;
   language: AppLanguage;
   song: Song;
   target: AuditionTarget;
@@ -38,7 +41,7 @@ export function issueText(issue: AuditionPlan['issue'], zh: boolean) {
   }
 }
 
-export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, prominent = false, editorShortcut = false, feedbackHost, visualDelayMs, setVisualDelayMs, metronome, setMetronome, melody, setMelody }: Props) {
+export default function ChordAuditionControl({ language, song, target, identity, scope, setScope, selectionLabel, prominent = false, editorShortcut = false, feedbackHost, visualDelayMs, setVisualDelayMs, metronome, setMetronome, melody, setMelody, onPlaybackChange }: Props) {
   const zh = language === 'zh';
   const labels = zh ? { chord: '這個和弦', bar: '這個小節', section: '從這裡到段尾', song: '從這裡到曲尾', map: '按曲序播完整首', practice: '練唱模式' }
     : { chord: 'This Chord', bar: 'This Bar', section: 'To Section End', song: 'To Song End', map: 'Whole Song in Map Order', practice: 'Sing-along practice' };
@@ -92,6 +95,12 @@ export default function ChordAuditionControl({ language, song, target, identity,
       piano.current = null;
     };
   }, [stop]);
+
+  useLayoutEffect(() => {
+    if (!playing || !onPlaybackChange) return;
+    onPlaybackChange({stop});
+    return () => onPlaybackChange(null);
+  }, [playing, onPlaybackChange, stop]);
 
   const play = async () => {
     if (playing) { stop(); return; }
