@@ -126,7 +126,9 @@
   .slw-reading-title { min-width: 5ch; }
 }
 .slw-toolbar .slw-practice [data-audition-button] { gap: 4px; padding-inline: 7px; color: var(--color-text); }
-.slw-practice .chord-audition-split { background: var(--color-surface-muted); }
+.slw-practice .chord-audition-split { background: var(--color-surface-muted); color: var(--color-text); }
+.slw-practice .chord-audition-split[data-playing] { background: var(--keyboard-active); color: white; }
+.slw-toolbar .slw-practice .chord-audition-split[data-playing] button { background: transparent; color: inherit; }
 .slw-toolbar .slw-practice .chord-audition-scope { width: 28px; padding: 0; }
 .slw-practice-page:empty { display: none; }
 .slw-practice-page { height: 100%; }
