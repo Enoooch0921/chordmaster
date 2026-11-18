@@ -31,7 +31,7 @@ export function useAuditionPreferences(userId: string | null | undefined, defaul
   const [range, setScope] = usePreference(prefix + '.scope');
   const [click, setClick] = usePreference(prefix + '.metronome');
   const [lead, setLead] = usePreference(prefix + '.melody');
-  const scope = range === 'chord' || range === 'bar' || range === 'section' || range === 'song' ? range : defaultScope;
+  const scope = range === 'chord' || range === 'bar' || range === 'section' || range === 'song' || range === 'map' || range === 'practice' ? range : defaultScope;
   return {
     scope, setScope, metronome: click !== 'false', melody: lead !== 'false',
     setMetronome: (on: boolean) => setClick(String(on)),

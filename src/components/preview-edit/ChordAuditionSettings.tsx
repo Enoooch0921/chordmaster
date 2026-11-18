@@ -64,7 +64,7 @@ export default function ChordAuditionSettings({ zh, labels, scope, setScope, met
       }}>
       <fieldset>
         <legend>{zh ? '試聽範圍' : 'Audition range'}</legend>
-        {(['chord', 'bar', 'section', 'song'] as const).map(value =>
+        {(['chord', 'bar', 'section', 'song', 'map', 'practice'] as const).map(value =>
           <label className="chord-audition-option" key={value}>
             <input type="radio" name={id} checked={scope === value} value={value} onChange={() => setScope(value)}
               onClick={event => { if (scope === value) setScope(value); if (event.detail > 0) returnFocus(); }}

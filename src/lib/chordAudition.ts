@@ -10,7 +10,9 @@ import { hasUnmeteredChords } from '../utils/unmeteredChords';
 import { resolveAuditionChord, type Harmony } from './auditionChords';
 import { getSongDisplayKeyStates, getSongKeyStates, getSongTimeSignatureStates } from './songEditing';
 
-export type AuditionScope = 'chord' | 'bar' | 'section' | 'song';
+import { arrangeAudition, type MapIssue } from './auditionSongMap';
+
+export type AuditionScope = 'chord' | 'bar' | 'section' | 'song' | 'map' | 'practice';
 export interface AuditionTarget {
   sectionId: string;
   sectionOccurrence?: number;
@@ -21,6 +23,9 @@ export interface AuditionTarget {
 }
 export interface AuditionBar {
   pickup?: boolean;
+  mapLabel?: string;
+  mapVisit?: number;
+  sourceTitle?: string;
   sectionId: string;
   sectionOccurrence: number;
   barId: string;
@@ -36,7 +41,7 @@ export interface AuditionPlan {
   bars: AuditionBar[];
   duration: number;
   fallbackTempo: boolean;
-  issue?: { kind: 'timing' | 'key' | 'unsupported' | 'empty' | 'repeat'; token?: string };
+  issue?: MapIssue | { kind: 'timing' | 'key' | 'unsupported' | 'empty' | 'repeat'; token?: string };
 }
 
 /** Walk the printed beat grid, independently of the shifted chord attacks. */
@@ -125,14 +130,35 @@ function appendMelody(notes: AuditionNote[], riff: string, key: Key, meter: stri
 }
 const rest = /^(?:N\.?C\.?|0(?:_|h|w)?|R(?:_|h|w)?|rest(?:_|h|w)?|(?:whole|half|quarter|eighth|8th)_rest|\|\d{0,3}\|)$/i;
 
-/** Work in printed order. The prefix supplies harmonic context, but never contributes elapsed playback time. */
 export function buildChordAudition(song: Song, target: AuditionTarget, scope: AuditionScope, melodyEnabled = true): AuditionPlan {
+  if (scope !== 'map' && scope !== 'practice') return buildLinearAudition(song, target, scope, melodyEnabled);
+  const route = arrangeAudition(song);
+  if ('kind' in route) return { sounds: [], bars: [], duration: 0, fallbackTempo: false, issue: route };
+  const first = route.song.sections[0];
+  const plan = buildLinearAudition(route.song, { sectionId: first.id!, barId: first.bars[0].id!, slotIndex: 0 },
+    'song', melodyEnabled, route.written);
+  for (const bar of plan.bars) {
+    bar.mapVisit = bar.pickup ? 0 : Number(bar.sectionId);
+    const visit = route.visits[bar.mapVisit];
+    bar.mapLabel = visit.label;
+    bar.sourceTitle = visit.source?.title;
+    if (bar.pickup) continue;
+    bar.barId = visit.source?.bars[Number(bar.barId)].id ?? '';
+    bar.sectionId = visit.source?.id ?? '';
+    bar.sectionOccurrence = visit.occurrence;
+  }
+  return plan;
+}
+
+/** The prefix supplies harmonic context, but never contributes elapsed playback time. */
+function buildLinearAudition(song: Song, target: AuditionTarget, scope: Exclude<AuditionScope, 'map' | 'practice'>,
+  melodyEnabled: boolean, sourceKeys?: Key[][]): AuditionPlan {
   const plan: AuditionPlan = { sounds: [], bars: [], duration: 0, fallbackTempo: false };
   const sectionIndex = song.sections.map((section, index) => section.id === target.sectionId ? index : -1)
     .filter(index => index >= 0)[target.sectionOccurrence ?? 0];
   const startBar = song.sections[sectionIndex]?.bars.findIndex(bar => bar.id === target.barId) ?? -1;
   if (startBar < 0) return { ...plan, issue: { kind: 'empty' } };
-  const written = getSongKeyStates(song).barActiveKeys;
+  const written = sourceKeys ?? getSongKeyStates(song).barActiveKeys;
   const sounding = getSongDisplayKeyStates(song).barActiveKeys;
   const meters = getSongTimeSignatureStates(song).barActiveTimeSignatures;
   const tempos = getSongTempoStates(song).barTempos;

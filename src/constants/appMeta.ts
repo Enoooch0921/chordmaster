@@ -85,6 +85,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-18',
+        title: 'Song map playback and sing-along practice',
+        bullets: ['Open the playback menu to follow the song map. Sing-along practice shows each verse’s lyrics even when the verses share a chart.']
+      },
+      {
+        version: '0.12.50',
         date: '2026-11-17',
         title: 'More reliable app updates',
         bullets: ['Confirm worker activation even when a browser event is missed. Updates still save first and leave other open pages running; stalled updates show recovery steps without clearing browser data.']
@@ -1264,6 +1270,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-18',
+        title: '曲序播放與練唱模式',
+        bullets: ['在試聽設定選擇練唱模式，歌詞會跟著曲序切換。兩段主歌共用同一段譜時，仍顯示各自的歌詞。']
+      },
+      {
+        version: '0.12.50',
         date: '2026-11-17',
         title: '版本更新切換修正',
         bullets: ['更新會同時確認新版啟用狀態，避免漏掉瀏覽器通知就持續等待。更新前仍先儲存內容；無法切換時會提示復原步驟，不必清除瀏覽器資料。']

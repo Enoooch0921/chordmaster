@@ -39,6 +39,10 @@ it.each(['owner', 'viewer'] as const)('removes empty team-setlist chrome and per
   const toggle = await screen.findByRole('button', { name: '試聽', expanded: false });
   expect(screen.queryByRole('combobox', { name: '拍位' })).toBeNull();
   fireEvent.click(toggle);
+  const start = await screen.findByRole('button', { name: /更換起點.*Verse/ });
+  expect(start).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('combobox', { name: '拍位' })).toBeNull();
+  fireEvent.click(start);
   const beat = await screen.findByRole('combobox', { name: '拍位' });
   fireEvent.change(beat, { target: { value: '2' } });
   expect(beat).toHaveValue('2');
@@ -48,6 +52,7 @@ it.each(['owner', 'viewer'] as const)('removes empty team-setlist chrome and per
   expect(toggle).toHaveFocus();
   expect(toggle).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(toggle);
+  fireEvent.click(screen.getByRole('button', { name: /更換起點.*第 3 拍/ }));
   expect(screen.getByRole('combobox', { name: '拍位' })).toHaveValue('2');
   const controls = screen.getByRole('group', { name: '個人顯示模式' });
   expect(within(controls).getByRole('button', { name: '級數' })).toBeEnabled();

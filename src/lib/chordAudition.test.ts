@@ -204,3 +204,54 @@ it('orders a late subdivision and a pushed downbeat on the same timeline without
     .toEqual([[0,2,5]]);
   expect(buildChordAudition(song,{...target,barId:'1',slotIndex:1},'chord').sounds[0].notes[0]%12).toBe(5);
 });
+
+it('starts at the first setlist map step and reuses chart bars, including a transposed Intro and tonic Ending', () => {
+  const song = score([], { currentKey: 'D', sections: [
+    { id: 'i', title: 'Intro', bars: [{ id: 'first', keyChangeTo: 'C', chords: ['G'] }] },
+    { id: 'v', title: 'Verse 1/2', bars: [{ id: 'shared', chords: ['C'] }] },
+    { id: 'c', title: 'Chorus', keyChangeTo: 'D', bars: [{ id: 'lift', chords: ['1'] }] },
+  ], songMap: [{ label: 'Intro', repeats: 1 }],
+  setlistSongMap: ['V1', 'Interlude', 'Verse 2', 'Instrumental', 'Chorus', 'Outro', 'Ending'].map(label => ({ label, repeats: 1 })) });
+  const before = structuredClone(song);
+  const plan = buildChordAudition(song, {sectionId: 'c', barId: 'lift', slotIndex: 3}, 'map');
+  expect(plan.issue).toBeUndefined();
+  expect(plan.bars.map(b => [b.mapLabel, b.sectionId, b.sectionOccurrence, b.barId])).toEqual([
+    ['Verse 1','v',0,'shared'], ['Interlude','i',0,'first'], ['Verse 2','v',0,'shared'],
+    ['Instrumental','i',0,'first'], ['Chorus','c',0,'lift'], ['Outro','i',0,'first'], ['Ending','',0,''],
+  ]);
+  expect(plan.sounds.map(s => s.notes[0] % 12)).toEqual([2,9,2,9,4,11,4]);
+  expect(plan.duration).toBe(14);
+  expect(song).toEqual(before);
+});
+
+it('chooses exact, numbered and generic verses and reports ambiguous or missing steps before playback', () => {
+  const verse = { id: 'v', title: 'Verse', bars: [{ id: 'v1', chords: ['F'] }] };
+  const v2 = { ...verse, id: 'v2', title: 'Verse 2' };
+  const intro = { ...verse, id: 'i', title: 'Intro / Outro' };
+  const ending = { ...verse, id: 'e', title: 'Ending' };
+  const make = (sections: Song['sections'], labels: string[]) => score([], { sections, songMap: labels.map(label => ({ label, repeats: 1 })) });
+  const plan = buildChordAudition(make([intro, verse, v2, ending], ['V1','V2','Outro','Ending']), target, 'map');
+  expect(plan.bars.map(b => b.sectionId)).toEqual(['v','v2','i','e']);
+  const ambiguous = buildChordAudition(make([intro,{...verse,title:'Verse 1'},v2], ['Intro','Verse']), target, 'map');
+  expect(ambiguous).toMatchObject({ duration: 0, issue: { kind: 'mapSection', step: 2, token: 'Verse' } });
+  expect(buildChordAudition(make([verse], ['Outro']), target, 'map').issue?.kind).toBe('mapSection');
+  expect(buildChordAudition(make([verse], []), target, 'map').issue?.kind).toBe('noMap');
+});
+
+it('applies pass-specific harmony and alternate endings without doubling a mapped whole-section repeat', () => {
+  const song = score([
+    { chords: ['1'], repeatStart: true, chordPassVariants: [{pass: 2, chords: ['4']}] },
+    { chords: ['5'], ending: '1', repeatEnd: true }, { chords: ['1'], ending: '2' },
+  ], { songMap: [{label:'Verse', repeats:2}] });
+  for (const repeats of [1, 2]) {
+    const plan = buildChordAudition({...song, songMap:[{label:'Verse',repeats}]}, target, 'map');
+    expect(plan.bars.map(b => b.barId)).toEqual(['0','1','0','2']);
+    expect(plan.sounds.map(n => n.notes[0] % 12)).toEqual([0,7,5,0]);
+  }
+});
+
+it('uses a minor tonic for a synthesized ending and rejects unreasonable repeat counts', () => {
+  const song = score([{chords:['5']}], { originalKey:'A', currentKey:'A', currentKeyMode:'minor', songMap:[{label:'Ending', repeats:1}] });
+  expect(buildChordAudition(song,target,'map').sounds[0].notes).toEqual([45,57,60,64]);
+  expect(buildChordAudition({...song,songMap:[{label:'Verse',repeats:Number.MAX_SAFE_INTEGER}]},target,'map').issue?.kind).toBe('mapSize');
+});

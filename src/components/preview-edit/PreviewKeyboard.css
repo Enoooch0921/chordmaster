@@ -51,7 +51,7 @@
 [data-keyboard-refined] button {
   position: relative;
   border-radius: 7px !important;
-  box-shadow: 0 1px 0 #193d2412 !important;
+  box-shadow: var(--keyboard-button-shadow, 0 1px 0 #193d2412) !important;
   font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", sans-serif;
   font-weight: 550 !important;
   transition: background-color 90ms;
@@ -324,7 +324,7 @@
   color: var(--keyboard-text);
   border-bottom: 1px solid var(--keyboard-border);
 }
-.reader-audition-controls, .phone-audition-row { display: flex; align-items: center; gap: 10px; }
+.phone-audition-row { display: flex; align-items: center; gap: 10px; }
 .reader-audition[hidden] { display: none; }
 .reader-audition-toggle, .reader-audition .reader-audition-close {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -332,7 +332,10 @@
   color: var(--color-text-muted, #4b5563); background: transparent; border-radius: 7px;
   font-size: 14px; white-space: nowrap; cursor: pointer; touch-action: manipulation;
 }
-.reader-audition .reader-audition-close { margin-inline-start: auto; align-self: end; box-shadow: none !important; }
+.reader-audition .reader-audition-close {
+  margin-inline-start: auto; min-width: var(--reader-hit); min-height: var(--reader-hit); padding: 0;
+  box-shadow: none !important;
+}
 .reader-audition-toggle[aria-expanded="true"] { color: var(--color-text, #111827); }
 .reader-audition-toggle:focus-visible, .reader-audition-close:focus-visible { outline: 2px solid var(--color-focus-ring, #548367); }
 @media (hover: hover) {
@@ -342,20 +345,77 @@
   .reader-audition-controls { animation: reader-audition-open 140ms ease-out; }
   @keyframes reader-audition-open { from { opacity: 0; } to { opacity: 1; } }
 }
-.reader-audition-controls { flex-wrap: wrap; }
-.reader-audition label { display: grid; gap: 2px; min-width: 0; font-size: 12px; line-height: 1.2; color: var(--keyboard-muted); }
-.reader-audition select {
-  height: 44px; max-width: 100%; min-width: 0; padding: 0 6px; border: 1px solid var(--keyboard-border);
+.reader-audition {
+  container-type: inline-size; --reader-hit: 32px; --keyboard-button-shadow: none;
+  padding: 0 8px; background: var(--color-surface, #fff);
+}
+.reader-audition-controls {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 6px;
+}
+.reader-audition .chord-audition-split { background: transparent; color: var(--keyboard-text); }
+.reader-audition [data-audition-button] { min-height: var(--reader-hit); gap: 5px; padding-inline: 2px 4px; }
+.reader-audition .chord-audition [data-audition-button] svg {
+  box-sizing: border-box; width: 21px; height: 21px; padding: 5px;
+  border-radius: 50%; background: var(--keyboard-active); color: #fff;
+}
+.reader-audition .chord-audition-scope { flex: none; width: var(--reader-hit); min-height: var(--reader-hit); }
+.reader-audition .chord-audition-scope::before { content: none; }
+.reader-start {
+  justify-self: start; display: flex; align-items: center; gap: 6px; position: relative;
+  min-width: 0; max-width: 100%; min-height: var(--reader-hit); padding: 0 7px 0 10px;
+  border: 0; background: transparent; color: var(--keyboard-text);
+  box-shadow: none !important; text-align: start; cursor: pointer; font-size: 13px;
+}
+.reader-start::before {
+  content: ""; position: absolute; inset-inline-start: 0; height: 14px; border-inline-start: 1px solid var(--keyboard-border);
+}
+.reader-start-section, .reader-start-bar { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reader-start-bar {
+  flex: 0 0 auto; max-width: 65%; font-size: 12px; font-weight: 400;
+  color: var(--keyboard-muted); font-variant-numeric: tabular-nums;
+}
+@media (pointer: coarse) {
+  .reader-audition { --reader-hit: 40px; }
+}
+.reader-start svg { flex: none; color: var(--keyboard-muted); }
+.reader-start[aria-expanded="true"] svg { transform: rotate(180deg); }
+.reader-start[aria-expanded="true"] { background: var(--keyboard-pressed); }
+.reader-start-picker:not([hidden]) {
+  display: grid; grid-template-columns: minmax(0, 14rem) auto minmax(4rem, 7rem);
+  justify-content: start; gap: 8px; padding-block: 4px 6px;
+  border-top: 1px solid var(--keyboard-border);
+}
+.reader-start-picker label, .reader-bar-field {
+  display: grid; gap: 4px; min-width: 0; color: var(--keyboard-muted); font-size: 12px;
+}
+.reader-start-picker select, .reader-bar-stepper {
+  height: var(--reader-hit); min-width: 0; max-width: 100%; border: 1px solid var(--keyboard-border);
   border-radius: 7px; background: var(--keyboard-key); color: var(--keyboard-text); font-size: 16px;
 }
-.reader-audition select:focus-visible { outline: 2px solid var(--color-focus-ring, #548367); outline-offset: 2px; }
+.reader-start-picker select { width: 100%; padding-inline: 6px; }
+.reader-bar-stepper { display: flex; align-items: center; }
+.reader-bar-stepper button {
+  display: grid; place-items: center; width: var(--reader-hit); height: 100%;
+  border: 0; background: transparent; color: inherit; cursor: pointer; box-shadow: none !important;
+}
+.reader-bar-stepper button:disabled { opacity: .35; cursor: default; }
+.reader-bar-stepper output { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; }
+.reader-audition button:focus-visible, .reader-start-picker select:focus-visible {
+  outline: 2px solid var(--color-focus-ring, #548367); outline-offset: 1px;
+}
+@media (hover: hover) {
+  .reader-start:hover, .reader-bar-stepper button:enabled:hover { background: var(--keyboard-pressed); }
+}
+@container (max-width: 25rem) {
+  .reader-audition-controls { gap: 2px; }
+  .reader-start { padding-inline: 8px 3px; gap: 4px; }
+  .reader-start-picker:not([hidden]) { grid-template-columns: minmax(0, 1fr) auto minmax(3.5rem, .55fr); }
+}
 @media screen {
   .shared-audition-score { overflow-x: auto; }
   .shared-audition-score > [data-chord-sheet] { min-width: 44rem; }
 }
-.reader-measure { flex: 0 1 15rem; }
-.reader-beat { flex: 0 1 5rem; }
-.reader-audition-controls > .chord-audition { align-self: end; }
 .phone-audition-position { flex: 1 1 35%; min-width: 0; display: grid; line-height: 1.35; }
 .phone-audition-position strong, .phone-audition-position span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phone-audition-position strong { font-size: 14px; }
@@ -376,12 +436,19 @@
   .chord-audition[data-prominent] .chord-audition-split button:hover { background: #194b32; }
 }
 @media (max-width: 600px) {
-  .reader-audition { padding: 6px 8px; }
-  .reader-audition-controls { gap: 6px; }
-  .reader-measure { flex: 1 1 90px; }
-  .reader-beat { flex: 0 1 48px; }
-  .reader-audition-controls > .chord-audition { flex: none; }
   .phone-audition-row .chord-audition { flex: 0 1 auto; max-width: 70%; }
   .chord-audition-settings label { min-height: 44px; font-size: 16px; }
 }
 @media print { .reader-audition, .reader-audition-toggle { display: none !important; } }
+
+.practice-lyrics {
+  box-sizing: border-box; width: 100%; min-width: 0;
+  max-height: min(36dvh, 19rem); overflow: auto; overscroll-behavior: contain;
+  padding: 6px 12px 12px; border-top: 1px solid var(--keyboard-border);
+  background: var(--keyboard-header); color: var(--keyboard-text);
+}
+.practice-lyrics h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; color: var(--keyboard-muted); }
+.practice-lyrics p { margin: 0; font-size: clamp(16px, 2vw, 21px); line-height: 1.55; overflow-wrap: anywhere; }
+.practice-lyrics p span { display: block; white-space: pre-wrap; }
+.practice-lyrics p span + span { font-size: .88em; color: var(--keyboard-muted); }
+.practice-lyrics .practice-lyrics-empty { font-size: 14px; color: var(--keyboard-muted); }

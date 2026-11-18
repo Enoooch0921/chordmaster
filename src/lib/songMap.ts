@@ -84,7 +84,7 @@ export function songMapDisplayCode(label: string) {
   return cue ? `${code} · ${cue}` : code;
 }
 
-function sharedIntroOutro(label: string): string[] | undefined {
+export function sharedIntroOutro(label: string): string[] | undefined {
   if (!/[/／]/.test(label)) return undefined;
   const parts = label.split(/[/／]/).map(part => songMapLabel(part).name);
   return parts.length === 2 && /^Intro(?: \d+)?$/.test(parts[0]) && /^Outro(?: \d+)?$/.test(parts[1]) ? parts : undefined;
