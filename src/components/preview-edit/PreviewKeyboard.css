@@ -441,18 +441,6 @@
 }
 @media print { .reader-audition, .reader-audition-toggle { display: none !important; } }
 
-.practice-lyrics {
-  box-sizing: border-box; width: 100%; min-width: 0;
-  max-height: min(36dvh, 19rem); overflow: auto; overscroll-behavior: contain;
-  padding: 6px 12px 12px; border-top: 1px solid var(--keyboard-border);
-  background: var(--keyboard-header); color: var(--keyboard-text);
-}
-.practice-lyrics h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; color: var(--keyboard-muted); }
-.practice-lyrics p { margin: 0; font-size: clamp(16px, 2vw, 21px); line-height: 1.55; overflow-wrap: anywhere; }
-.practice-lyrics p span { display: block; white-space: pre-wrap; }
-.practice-lyrics p span + span { font-size: .88em; color: var(--keyboard-muted); }
-.practice-lyrics .practice-lyrics-empty { font-size: 14px; color: var(--keyboard-muted); }
-
 .chord-audition-settings .audition-delay { display: grid; gap: 5px; }
 .audition-delay span { display: flex; align-items: baseline; justify-content: space-between; }
 .audition-delay output { font-variant-numeric: tabular-nums; color: var(--keyboard-muted); }

@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Minus, Plus, Settings2, Pencil, PenLine, Che
 import type { AppLanguage, Song } from '../types';
 import LyricsBook, { type LyricsBookEntry } from './LyricsBook';
 import LyricsSheet from './LyricsSheet';
-import { LYRICS_BOOK_FONT, type LyricsBookSettings } from '../utils/lyricsBook';
+import type { LyricsBookSettings } from '../utils/lyricsBook';
 import { useLyricsReadingPreferences, useSongReadingSize } from '../hooks/useLyricsReadingPreferences';
 import { useModalFocus } from '../hooks/useModalFocus';
 import { useModalScrollLock } from '../hooks/useModalScrollLock';
@@ -15,6 +15,7 @@ import SongTitle from './SongTitle';
 import type { ReadingAnchor } from '../utils/lyricsReading';
 import MeasuredSlidingSelection from './ui/MeasuredSlidingSelection';
 import { AnimatedDisclosure } from './ui/InteractionMotion';
+import type { PracticeReaderState } from '../lib/practiceLyrics';
 import PracticeControl from './PracticeControl';
 import './preview-edit/PreviewKeyboard.css';
 import './SetlistLyricsWorkspace.css';
@@ -42,8 +43,7 @@ const PAPER_WIDTH = 794;
 export default function SetlistLyricsWorkspace({ title, entries, language, selectedId, onSelectSong, mode, onModeChange, printSettings, onPrintSettingsChange, onSongChange, onExport, practiceSong, preferenceKey = 'local', readingPositions, phoneHandwritingButton, ...notes }: Props) {
   const zh = language === 'zh';
   const practiceUser = notes.noteOwner ?? (preferenceKey.startsWith('user:') ? preferenceKey.slice(5) : null);
-  const [practiceActive, setPracticeActive] = React.useState(false);
-  const [practiceHost, setPracticeHost] = React.useState<HTMLDivElement | null>(null);
+  const [practice, setPractice] = React.useState<PracticeReaderState>();
   const [feedbackHost, setFeedbackHost] = React.useState<HTMLDivElement | null>(null);
   const [defaults, setReadingSettings] = useLyricsReadingPreferences(preferenceKey);
   const [focused, setFocused] = React.useState(false);
@@ -119,11 +119,11 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
       <div className="slw-toolbar-top">
         {mode === 'reading' && current && <div className="slw-reading-title">{entries.length > 1
           ? <select aria-label={zh ? '目前歌曲' : 'Current song'} value={current.id} onChange={event => selectSong(event.target.value)}>{entries.map((entry, index) => <option key={entry.id} value={entry.id}>{index + 1}. {entry.song.title}</option>)}</select>
-          : <h1><SongTitle title={current.song.title}/></h1>}</div>}
+          : <h1><SongTitle title={current.song.title}/></h1>}<div className="slw-practice-position" ref={setFeedbackHost}/></div>}
         {mode !== 'reading' && <strong className="slw-title" title={title}>{title || (zh ? '歌單歌詞' : 'Setlist lyrics')}</strong>}
         {mode === 'reading' && current && notes.notesActive !== false && !notes.notesOpen && <div className="slw-practice" data-keyboard-refined>
           <PracticeControl key={current.id} song={practiceSong ?? current.song} language={language} userId={practiceUser}
-            displayLanguage={readingSettings.language} practiceHost={practiceHost} feedbackHost={feedbackHost} onActive={setPracticeActive}/>
+            feedbackHost={feedbackHost} onReaderChange={setPractice}/>
         </div>}
         {mode === 'reading' && (isFocused || phoneHandwritingButton) && notes.noteOwner && current && <button type="button" className="slw-icon" aria-label={zh ? '手寫筆記' : 'Handwriting'}
           title={zh ? '手寫筆記' : 'Handwriting'} aria-pressed={notes.notesOpen ?? false} onClick={() => notes.onNotesOpenChange?.(!notes.notesOpen)}><PenLine size={20}/></button>}
@@ -155,11 +155,9 @@ export default function SetlistLyricsWorkspace({ title, entries, language, selec
         <label>{zh ? '行距' : 'Spacing'}<select aria-label={zh ? '歌詞行距' : 'Lyrics spacing'} value={activeSettings.lineHeight} onChange={event => changeSettings({ ...activeSettings, lineHeight: Number(event.target.value) })}>{(mode === 'print' ? [1.5, 1.875, 2] : [1.42, 1.5, 1.7, 2]).map((spacing, index) => <option key={spacing} value={spacing}>{mode === 'print' ? (zh ? ['緊密', '標準', '寬鬆'][index] : ['Compact', 'Standard', 'Spacious'][index]) : (zh ? ['緊密', '標準', '寬鬆', '加寬'][index] : ['Compact', 'Standard', 'Spacious', 'Extra spacious'][index])}</option>)}</select></label>
         <label>{zh ? '語言' : 'Language'}<select aria-label={zh ? '歌詞語言' : 'Lyrics language'} value={activeSettings.language} onChange={event => changeSettings({ ...activeSettings, language: event.target.value as LyricsBookSettings['language'] })}><option value="chinese">{mainLyricsLabel(entries.flatMap(entry => getLyricsBlocks(entry.song.lyricsDoc)), language)}</option><option value="english">{zh ? '對照語言' : 'Translation'}</option><option value="bilingual">{zh ? '雙語對照' : 'Bilingual'}</option><option value="mixed">{zh ? '雙語逐行' : 'Alternating lines'}</option></select></label>
       </div></AnimatedDisclosure>
-      {mode === 'reading' && <div ref={setFeedbackHost} />}
     </header>
     <div ref={scrollRef} className={`slw-scroll slw-scroll-${mode}`} tabIndex={0} aria-label={zh ? (mode === 'print' ? 'A4 歌詞預覽' : '歌詞內容') : (mode === 'print' ? 'A4 lyrics preview' : 'Lyrics content')}>
-      {mode === 'reading' && <div ref={setPracticeHost} className="slw-practice-page" style={{fontSize, lineHeight: readingSettings.lineHeight, fontFamily: readingSettings.font === 'kaiti' ? LYRICS_BOOK_FONT : undefined}} />}
-      {!entries.length ? <div className="slw-empty"><h2>{zh ? '歌單還沒有歌曲' : 'No songs in this setlist'}</h2><p>{zh ? '從歌單加入歌曲後，就能在這裡閱讀歌詞。' : 'Add songs to the setlist to read their lyrics here.'}</p></div> : mode === 'reading' ? !practiceActive && <AdaptiveLyricsReader {...notes} noteSongId={current.sourceSongId ?? current.id} key={current.id} identity={current.id} song={current.song} language={language} settings={readingSettings} onSizeChange={setFontSize} hideHeading
+      {!entries.length ? <div className="slw-empty"><h2>{zh ? '歌單還沒有歌曲' : 'No songs in this setlist'}</h2><p>{zh ? '從歌單加入歌曲後，就能在這裡閱讀歌詞。' : 'Add songs to the setlist to read their lyrics here.'}</p></div> : mode === 'reading' ? <AdaptiveLyricsReader practice={practice} {...notes} noteSongId={current.sourceSongId ?? current.id} key={current.id} identity={current.id} song={current.song} language={language} settings={readingSettings} onSizeChange={setFontSize} hideHeading
         initialAnchor={anchors.get(current.id)} onAnchorChange={anchor => anchors.set(current.id, anchor)}
         onNextSong={currentIndex < entries.length - 1 ? () => selectSong(entries[currentIndex + 1].id) : undefined}
         onPreviousSong={currentIndex > 0 ? () => selectSong(entries[currentIndex - 1].id, true) : undefined}/>

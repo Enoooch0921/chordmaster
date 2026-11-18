@@ -86,6 +86,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-18',
+        title: 'Practice on the reading page',
+        bullets: ['Sing along in the original lyrics layout. Practice follows written D.S. and Coda signs or a saved map with section assignments.']
+      },
+      {
+        version: '0.12.53',
+        date: '2026-11-18',
         title: 'Queue sections during practice',
         bullets: ['Keep all lyrics visible, follow the current measure, and tap a section once to queue it or twice to jump. Songs without a map follow the written score.']
       },
@@ -1282,6 +1288,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-18',
+        title: '在原來的歌詞頁練唱',
+        bullets: ['沿用閱讀字型、欄位與分頁。未排曲序時依譜面 D.S.、Coda 記號行進，有曲序時可為未對應的步驟指定譜段。']
+      },
+      {
+        version: '0.12.53',
         date: '2026-11-18',
         title: '練唱時預選下一段',
         bullets: ['完整保留歌詞並標出段落與小節。點一次預選下一段，再點一次立即跳。未設定曲序時依譜面順序播放。']

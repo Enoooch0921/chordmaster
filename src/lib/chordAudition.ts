@@ -10,8 +10,9 @@ import { hasUnmeteredChords } from '../utils/unmeteredChords';
 import { resolveAuditionChord, type Harmony } from './auditionChords';
 import { getSongDisplayKeyStates, getSongKeyStates, getSongTimeSignatureStates } from './songEditing';
 
+import { followPracticeSigns } from './writtenPracticeRoute';
 import { normalizeSongMap, songMapLabel } from './songMap';
-import { arrangeAudition, type MapIssue } from './auditionSongMap';
+import { arrangeAudition, type MapIssue, type PracticeBindings } from './auditionSongMap';
 
 export type AuditionScope = 'chord' | 'bar' | 'section' | 'song' | 'map' | 'practice';
 export interface AuditionTarget {
@@ -149,10 +150,10 @@ export function buildWrittenPractice(song: Song, melodyEnabled = true) {
   return plan;
 }
 
-export function buildChordAudition(song: Song, target: AuditionTarget, scope: AuditionScope, melodyEnabled = true): AuditionPlan {
+export function buildChordAudition(song: Song, target: AuditionTarget, scope: AuditionScope, melodyEnabled = true, bindings?: PracticeBindings): AuditionPlan {
   if (scope !== 'map' && scope !== 'practice') return buildLinearAudition(song, target, scope, melodyEnabled);
-  if (scope === 'practice' && !normalizeSongMap(song.setlistSongMap) && !normalizeSongMap(song.songMap)) return buildWrittenPractice(song, melodyEnabled);
-  const route = arrangeAudition(song);
+  if (scope === 'practice' && !normalizeSongMap(song.setlistSongMap) && !normalizeSongMap(song.songMap)) return followPracticeSigns(song, buildWrittenPractice(song, melodyEnabled));
+  const route = arrangeAudition(song, bindings);
   if ('kind' in route) return { sounds: [], bars: [], duration: 0, fallbackTempo: false, issue: route };
   const first = route.song.sections[0];
   const plan = buildLinearAudition(route.song, { sectionId: first.id!, barId: first.bars[0].id!, slotIndex: 0 },

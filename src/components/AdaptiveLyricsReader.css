@@ -54,3 +54,8 @@
   .alr-footer { margin-top: 8px; }
   .alr-page-note { display: none; }
 }
+
+.alr-block[aria-current="step"] { background: color-mix(in srgb, var(--color-indigo-500) 7%, transparent); box-shadow: inset -2px 0 var(--color-indigo-500); }
+.alr-block .alr-cue { display: inline; position: relative; padding: 0; border: 0; font: inherit; letter-spacing: inherit; color: inherit; text-align: inherit; touch-action: manipulation; cursor: pointer; }
+.alr-cue::after { content: ""; position: absolute; inset: -3px -2px; }
+.alr-cue:focus-visible { outline: 2px solid var(--color-focus-ring); }

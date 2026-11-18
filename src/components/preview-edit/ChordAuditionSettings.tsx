@@ -5,6 +5,8 @@ import type { AuditionScope } from '../../lib/chordAudition';
 import { useAnchoredPortalPanel } from '../useAnchoredPortalPanel';
 
 interface Props {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children?: React.ReactNode;
   zh: boolean;
   scope: AuditionScope;
@@ -18,13 +20,15 @@ interface Props {
   setMelody: (enabled: boolean) => void;
 }
 
-export default function ChordAuditionSettings({ children, zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody, visualDelayMs, setVisualDelayMs }: Props) {
-  const [open, setOpen] = useState(false);
+export default function ChordAuditionSettings({ children, open: controlled, onOpenChange, zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody, visualDelayMs, setVisualDelayMs }: Props) {
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = controlled ?? localOpen;
+  const setOpen = onOpenChange ?? setLocalOpen;
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const id = useId();
   const title = zh ? '試聽設定' : 'Audition settings';
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback(() => setOpen(false), [setOpen]);
   const { panelStyle, isPositioned } = useAnchoredPortalPanel({
     isOpen: open, align: 'center', triggerRef: trigger, panelRef: panel, onRequestClose: close, zIndex: 6500
   });
@@ -49,7 +53,7 @@ export default function ChordAuditionSettings({ children, zh, labels, scope, set
   return <>
     <button ref={trigger} type="button" className="chord-audition-scope" title={title} aria-label={title}
       aria-controls={open ? id : undefined} aria-haspopup="dialog" aria-expanded={open}
-      onClick={() => setOpen(value => !value)}>
+      onClick={() => setOpen(!open)}>
       <ChevronDown size={15} aria-hidden="true" />
     </button>
     {open && createPortal(<div id={id} ref={panel} role="dialog" aria-label={title} data-preview-edit-ui data-keyboard-refined

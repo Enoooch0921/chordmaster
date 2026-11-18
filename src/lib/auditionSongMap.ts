@@ -60,21 +60,37 @@ function barsForVisit(bars: Bar[], pass: number, visits: number): Bar[] {
   return result;
 }
 
-export function arrangeAudition(song: Song): Arrangement | MapIssue {
-  const steps = normalizeSongMap(song.setlistSongMap) ?? normalizeSongMap(song.songMap)
-    ?? (song.showSongMap ? sectionSongMap(song.sections) : undefined);
-  if (!steps?.length) return { kind: 'noMap' };
+function uniqueSections(song: Song) {
   const seen = new Set<string>();
-  const sources = song.sections.filter(section => {
+  return song.sections.filter(section => {
     if (!section.id) return true;
     if (seen.has(section.id)) return false;
     seen.add(section.id);
     return true;
   });
+}
+
+export type PracticeBindings = Readonly<Record<string, string>>;
+export function missingPracticeSections(song: Song) {
+  const steps = normalizeSongMap(song.setlistSongMap) ?? normalizeSongMap(song.songMap) ?? [];
+  const sections = uniqueSections(song);
+  return [...new Set(steps.map(step => step.label))].filter(label => {
+    const matches = sectionCandidates(label, sections);
+    if (!matches.length && label === 'Ending') return false;
+    return matches.length !== 1 || matches[0].bars.every(isClosedBar);
+  });
+}
+
+export function arrangeAudition(song: Song, bindings?: PracticeBindings): Arrangement | MapIssue {
+  const steps = normalizeSongMap(song.setlistSongMap) ?? normalizeSongMap(song.songMap)
+    ?? (song.showSongMap ? sectionSongMap(song.sections) : undefined);
+  if (!steps?.length) return { kind: 'noMap' };
+  const sources = uniqueSections(song);
   const resolved = [];
   const totals = new Map<Section, number>();
   for (const [i, step] of steps.entries()) {
-    const matches = sectionCandidates(step.label, sources);
+    const chosen = bindings?.[step.label];
+    const matches = chosen ? sources.filter(section => section.id === chosen) : sectionCandidates(step.label, sources);
     const source = matches[0];
     if (matches.length > 1 || (!source && step.label !== 'Ending') || source?.bars.every(isClosedBar)) {
       return { kind: 'mapSection', step: i + 1, token: step.label };

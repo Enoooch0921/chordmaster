@@ -5,24 +5,30 @@ import type { AppLanguage, Song } from '../types';
 import { AuditionPiano } from '../lib/auditionPiano';
 import type { AuditionBar, AuditionPlan } from '../lib/chordAudition';
 import { buildPracticeSession, writtenPractice, type PracticeRange } from '../lib/practicePlayback';
-import type { LyricsLanguage } from '../utils/lyricsDocument';
+import { missingPracticeSections, type PracticeBindings } from '../lib/auditionSongMap';
+import type { PracticeReaderState } from '../lib/practiceLyrics';
+import { isClosedBar } from '../utils/closedBar';
 import { useAuditionPreferences } from '../hooks/useAuditionPreferences';
 import { issueText } from './preview-edit/ChordAuditionControl';
 import ChordAuditionSettings from './preview-edit/ChordAuditionSettings';
-import PracticeLyrics from './PracticeLyrics';
 
 type Session = ReturnType<typeof buildPracticeSession>;
 interface Cursor { bar: AuditionBar; lastBar: AuditionBar; nextLabel?: string }
 interface Cue { label: string; at: number }
 
-export default function PracticeControl({ song, language, userId, practiceHost, feedbackHost, onActive, displayLanguage }: {
-  song: Song; language: AppLanguage; userId?: string | null; practiceHost: HTMLElement | null; feedbackHost: HTMLElement | null;
-  onActive: (active: boolean) => void; displayLanguage: LyricsLanguage;
+export default function PracticeControl({ song, language, userId, feedbackHost, onReaderChange }: {
+  song: Song; language: AppLanguage; userId?: string | null; feedbackHost: HTMLElement | null;
+  onReaderChange: (state: PracticeReaderState | undefined) => void;
 }) {
   const zh = language === 'zh';
   const preferences = useAuditionPreferences(userId, 'song');
   const {metronome, melody, visualDelayMs} = preferences;
   const [range, setRange] = useState<PracticeRange>('map');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [bindings, setBindings] = useState<PracticeBindings>({});
+  const missing = useMemo(() => missingPracticeSections(song), [song]);
+  const sources = useMemo(() => song.sections.filter((section, i, all) => section.id && section.bars.some(b => !isClosedBar(b))
+    && all.findIndex(s => s.id === section.id) === i), [song]);
   const [start, setStart] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState<Cursor>();
@@ -54,11 +60,6 @@ export default function PracticeControl({ song, language, userId, practiceHost, 
       finish(); piano.current?.dispose();
     };
   }, [song]);
-  const active = Boolean(position);
-  useLayoutEffect(() => {
-    onActive(active);
-    return () => onActive(false);
-  }, [active, onActive]);
   useLayoutEffect(() => {
     if (!piano.current) return;
     piano.current.visualDelayMs = visualDelayMs;
@@ -68,8 +69,9 @@ export default function PracticeControl({ song, language, userId, practiceHost, 
   const play = async () => {
     setNotice('');
     const run = ++generation.current;
-    const data = buildPracticeSession(song, range, start);
-    if (!data.initial.bars.length) { setNotice(issueText(data.initial.issue ?? {kind:'empty'}, zh)); return; }
+    const data = buildPracticeSession(song, range, start, bindings);
+    if (!data.initial.bars.length) { setNotice(issueText(data.initial.issue ?? {kind:'empty'}, zh)); setSettingsOpen(true); return; }
+    setSettingsOpen(false);
     session.current = data;
     const player = piano.current ??= new AuditionPiano();
     player.visualDelayMs = visualDelayMs;
@@ -100,13 +102,13 @@ export default function PracticeControl({ song, language, userId, practiceHost, 
     };
     const failed = () => {
       if (run !== generation.current) return;
-      finish(); setNotice(zh ? '播放中斷，請再按一次練唱。' : 'Playback interrupted. Start practice again.');
+      finish(); setSettingsOpen(true); setNotice(zh ? '播放中斷，請再按一次練唱。' : 'Playback interrupted. Start practice again.');
     };
     try {
       const result = await player.play(data.initial, paint, () => {
         if (run !== generation.current) return;
         const problem = activePlan.issue;
-        finish(); setNotice(issueText(problem, zh));
+        finish(); setNotice(issueText(problem, zh)); if (problem) setSettingsOpen(true);
       }, failed, data.auxiliaryNotes);
       if (result?.metronomeUnavailable && run === generation.current) setNotice(zh ? '節拍器載入失敗' : 'Metronome unavailable');
     } catch { failed(); }
@@ -119,6 +121,14 @@ export default function PracticeControl({ song, language, userId, practiceHost, 
     const at = piano.current.redirect(next, immediate ? undefined : pending.current?.at ?? position.lastBar.end);
     pending.current = {label, at}; setQueued(pending.current);
   };
+  const selectRef = useRef(select);
+  useLayoutEffect(() => { selectRef.current = select; });
+  const label = position?.bar.mapLabel;
+  const visit = position?.bar.mapVisit;
+  useLayoutEffect(() => {
+    onReaderChange(label && session.current ? {label, visit, labels:session.current.labels, select:value => selectRef.current(value)} : undefined);
+    return () => onReaderChange(undefined);
+  }, [label, visit, onReaderChange]);
   const cueButton = (label: string) => <button type="button" key={label}
     aria-current={position?.bar.mapLabel === label ? 'step' : undefined} aria-pressed={queued?.label === label}
     onClick={() => select(label)}>{label}</button>;
@@ -128,10 +138,20 @@ export default function PracticeControl({ song, language, userId, practiceHost, 
     <div className="chord-audition-split" data-playing={playing || undefined}>
       <button type="button" data-audition-button aria-label={action} title={action} onClick={playing ? finish : play}>
         {playing ? <Square size={13} fill="currentColor" aria-hidden/> : <Play size={13} fill="currentColor" aria-hidden/>}
-        {playing ? (zh ? '停止' : 'Stop') : title}
+        <span className="chord-audition-labels" aria-hidden="true"><span className="chord-audition-label" style={{visibility:playing ? 'hidden' : 'visible'}}>{title}</span>
+          <span className="chord-audition-label" style={{visibility:playing ? 'visible' : 'hidden'}}>{zh ? '停止' : 'Stop'}</span></span>
       </button>
-      <ChordAuditionSettings {...preferences} zh={zh} labels={labels} scope="practice">
-        <fieldset disabled={playing}><legend>{zh ? '練唱範圍' : 'Practice range'}</legend>
+      <ChordAuditionSettings {...preferences} zh={zh} labels={labels} scope="practice" open={settingsOpen} onOpenChange={setSettingsOpen}>
+        {notice && <p role="status" className="practice-hint">{notice}</p>}
+        {position && session.current && <>
+          <div className="practice-cues" role="group" aria-label={zh ? '跳至段落' : 'Jump to section'}>
+            {cueButton('Intro')}
+            {session.current.labels.filter(label => label !== 'Intro' && label !== 'Ending').map(cueButton)}
+            {cueButton('Ending')}
+          </div>
+          <p className="practice-hint">{zh ? '點段落可在段尾跳轉，再點同一段立即跳。' : 'Tap to queue at the section end. Tap again to jump now.'}</p>
+        </>}
+        {!playing && <fieldset><legend>{zh ? '練唱範圍' : 'Practice range'}</legend>
           {(['map','song','section','bar'] as const).map(value => <label key={value} className="chord-audition-option">
             <input type="radio" name="practice-range" checked={range === value} onChange={() => setRange(value)}/><span>{labels[value]}</span>{range === value && <Check size={16} aria-hidden/>}
           </label>)}
@@ -139,20 +159,21 @@ export default function PracticeControl({ song, language, userId, practiceHost, 
             <select name="practice-start" value={startBars.indexOf(selected)} onChange={e => setStart(Number(e.target.value))}>
               {startBars.map((b,i) => <option key={i} value={i}>{b.mapLabel} · {b.practiceBar || (zh ? '弱起' : 'Pickup')}</option>)}
             </select></label>}
-        </fieldset>
+        </fieldset>}
+        {!playing && range === 'map' && missing.length > 0 && <fieldset><legend>{zh ? '指定這次練唱的譜段' : 'Match sections for this practice'}</legend>
+          {missing.map(label => <label className="practice-start" key={label}>{label}
+            <select aria-label={label} value={bindings[label] ?? ''} onChange={e => {
+              setBindings({...bindings, [label]:e.target.value}); setNotice('');
+            }}><option value="">{zh ? '選擇譜段' : 'Choose a section'}</option>
+              {sources.map(section => <option key={section.id} value={section.id}>{section.title}</option>)}</select></label>)}
+          <button type="button" className="practice-apply" disabled={missing.some(l => !sources.some(s => s.id === bindings[l]))} onClick={play}>
+            {zh ? '按曲序開始' : 'Start in map order'}</button>
+        </fieldset>}
       </ChordAuditionSettings>
     </div>
-    {feedbackHost && createPortal(<>
-      <div role="status" className="practice-status">{position && <><strong>{position.bar.mapLabel}</strong>
-        <span>{zh ? '小節' : 'Bar'} {position.bar.practiceBar || (zh ? '弱起' : 'pickup')} / {position.bar.practiceTotal}</span></>}
-        {queued ? <strong>{zh ? '已預選' : 'Queued'} · {queued.label}</strong> : position?.nextLabel && <span>{zh ? '接下來' : 'Next'} · {position.nextLabel}</span>}{notice}</div>
-      {position && session.current && <><div className="practice-cues" role="group" aria-label={zh ? '跳至段落' : 'Jump to section'}>
-        {cueButton('Intro')}
-        <div className="practice-cue-list">{session.current.labels.filter(label => label !== 'Intro' && label !== 'Ending').map(cueButton)}</div>
-        {cueButton('Ending')}
-      </div><p className="practice-hint">{zh ? '點段落可在段尾跳轉，再點同一段立即跳。' : 'Tap to queue at the section end. Tap again to jump now.'}</p></>}
-    </>, feedbackHost)}
-    {practiceHost && position && createPortal(<PracticeLyrics doc={song.lyricsDoc} label={position.bar.mapLabel!}
-      labels={session.current?.labels} onSelect={select} language={language} displayLanguage={displayLanguage}/>, practiceHost)}
+    {feedbackHost && position && createPortal(<button className="practice-now" type="button" aria-haspopup="dialog" aria-expanded={settingsOpen}
+      aria-label={zh ? `跳至段落，目前 ${label}，第 ${position.bar.practiceBar} 小節` : `Jump to section, currently ${label}, bar ${position.bar.practiceBar}`}
+      onClick={() => setSettingsOpen(true)}><strong>{label}</strong><small>{position.bar.practiceBar || (zh ? '弱起' : 'Pickup')} / {position.bar.practiceTotal}
+        {(queued?.label ?? position.nextLabel) && ` → ${queued?.label ?? position.nextLabel}`}</small></button>, feedbackHost)}
   </div>;
 }

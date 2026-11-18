@@ -1,3 +1,5 @@
+import { followPracticeSigns } from './writtenPracticeRoute';
+import type { PracticeBindings } from './auditionSongMap';
 import { sliceAudition, joinAuditions } from './auditionTimeline';
 import type { Song } from '../types';
 import { lyricsSectionLabel } from '../utils/lyricsSections';
@@ -37,10 +39,11 @@ function limitRange(plan: AuditionPlan, index: number, range: PracticeRange) {
   return sliceAudition(plan, first.start, range === 'bar' ? first.end : next?.start ?? plan.duration);
 }
 
-export function buildPracticeSession(song: Song, range: PracticeRange, startIndex = 0) {
+export function buildPracticeSession(song: Song, range: PracticeRange, startIndex = 0, bindings?: PracticeBindings) {
   const written = writtenPractice(song);
   const arranged = range === 'map' && Boolean(normalizeSongMap(song.setlistSongMap) ?? normalizeSongMap(song.songMap));
-  const route = arranged ? numberMeasures(buildChordAudition(song, target, 'map')) : written;
+  const route = arranged ? numberMeasures(buildChordAudition(song, target, 'map', true, bindings))
+    : range === 'map' ? numberMeasures(followPracticeSigns(song, written)) : written;
   const initial = limitRange(route, range === 'map' ? 0 : startIndex, range);
   const options = new Set(['Intro', ...route.bars.map(b => b.mapLabel!), ...written.bars.map(b => b.mapLabel!)]);
   const borrowed = new Map<string, AuditionPlan>();

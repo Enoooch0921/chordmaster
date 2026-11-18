@@ -276,3 +276,23 @@ it('keeps every song, page and viewport at the same requested size until the use
   await waitFor(() => expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-column-count', '1'));
   expect(size()).toBe('30');
 });
+
+it('follows practice inside the same columns, keeping instrumental cues on the last lyric page', () => {
+  const score = {...song, lyricsDoc:{chinese:'[Verse 1]\nFirst\n[Verse 2]\nSecond\n[Bridge]\nShared'}};
+  const select = vi.fn();
+  const view = (label?: string) => <AdaptiveLyricsReader song={score} identity="same" language="zh" settings={DEFAULT_LYRICS_READING_SETTINGS}
+    practice={label ? {label, labels:['Verse 1','Verse 2'], select} : undefined}/>;
+  const {container,rerender} = render(view());
+  const original = container.querySelector('.alr-columns');
+  const widths = container.querySelector('[data-column-widths]')?.getAttribute('data-column-widths');
+  rerender(view('Verse 2'));
+  expect(container.querySelector('.alr-columns')).toBe(original);
+  expect(container.querySelector('[aria-current="step"]')).toHaveTextContent('Second');
+  fireEvent.click(screen.getByRole('button',{name:'Verse 1'})); expect(select).toHaveBeenCalledWith('Verse 1');
+  rerender(view('Intro'));
+  expect(container.querySelector('[aria-current="step"]')).toBeNull();
+  expect(container.querySelector('.alr-columns')).toHaveTextContent('Second');
+  rerender(view('Bridge 4'));
+  expect(container.querySelector('[aria-current="step"]')).toHaveTextContent('Shared');
+  expect(container.querySelector('[data-column-widths]')).toHaveAttribute('data-column-widths', widths);
+});

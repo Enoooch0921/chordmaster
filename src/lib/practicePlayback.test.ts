@@ -27,3 +27,24 @@ it('uses the next mapped occurrence and the requested starting bar and range', (
   expect(buildPracticeSession(arranged,'bar',1).initial.bars.map(b => b.practiceBar)).toEqual([2]);
   expect(buildPracticeSession(arranged,'section').initial.bars).toHaveLength(2);
 });
+
+it('follows a written D.S. and Coda once, retaining distinct short and long choruses and shared verse lyrics', () => {
+  const part = (id: string, title: string, markers = {}) => ({id, title, bars:[{id, chords:['1'], ...markers}]});
+  const written: Song = {...song, sections:[
+    part('i','Intro'), part('v','Verse 2/3',{leftMarker:'segno',repeatStart:true}), part('p','Pre-Chorus',{rightMarker:'coda'}),
+    part('c1','Chorus'), part('t','Turnaround',{rightMarker:'ds',repeatEnd:true}), part('c2','Chorus',{leftMarker:'coda'}),
+    part('e','Ending',{rightMarker:'fine'}),
+  ]};
+  const route = buildPracticeSession(written,'map').initial;
+  expect(route.bars.map(b=>b.mapLabel)).toEqual(['Intro','Verse 2','Pre Chorus','Chorus','Turnaround','Verse 3','Pre Chorus','Chorus','Ending']);
+  expect(route.bars.map(b=>b.sectionId)).toEqual(['0','1','2','3','4','1','2','5','6']);
+  expect(route.duration).toBe(18);
+  expect(route.sounds.map(n=>n.start)).toEqual([0,2,4,6,8,10,12,14,16]);
+});
+
+it('requires ambiguous or missing map sections to be assigned to a source in this score', () => {
+  const mapped = {...song,songMap:['Verse 1','Refrain','Ending'].map(label=>({label,repeats:1}))};
+  expect(buildPracticeSession(mapped,'map').initial.issue).toMatchObject({kind:'mapSection',token:'Refrain'});
+  const session = buildPracticeSession(mapped,'map',0, {Refrain:'c'});
+  expect(session.initial.bars.map(b=>[b.mapLabel,b.sectionId])).toEqual([['Verse 1','v'],['Verse 1','v'],['Refrain','c'],['Ending','']]);
+});
