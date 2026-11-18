@@ -165,6 +165,16 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
   };
   const singingIds = React.useMemo(() => practiceLyricIds(sections, practice?.label), [sections, practice?.label]);
   const singingId = singingIds[0];
+  const sectionCues = React.useMemo(() => {
+    const cues = new Map<string,string>();
+    if (!practice) return cues;
+    for (const section of sections) {
+      const aliases = expandSongMapSectionLabel(section.label);
+      const label = practice.labels.find(item => aliases.includes(item));
+      if (label) cues.set(section.id, label);
+    }
+    return cues;
+  }, [sections, practice?.labels]);
   React.useLayoutEffect(() => {
     if (!singingId || layout.sections !== sections) return;
     const target = layout.pages.findIndex(p => p.some(column => column.some(part => sections[part.section].id === singingId)));
@@ -194,15 +204,17 @@ const AdaptiveLyricsReader = React.forwardRef<LyricsReaderHandle, Props>(functio
       {!sections.length ? <div className="alr-empty">{zh ? '尚無此語言的歌詞，可在閱讀設定切換語言。' : 'No lyrics in this language. Choose another language in reading settings.'}</div> : <div className="alr-columns" style={{ gridTemplateColumns: layout.widths.map(width => `minmax(0, ${width}fr)`).join(" "), fontSize: layout.fontSize }}>
         {(layout.sections === sections ? layout.pages[active] ?? [] : []).map((column, c) => <div className="alr-column" key={`${active}-${c}`}><div data-lyrics-note-page>{column.map(segment => {
           const section = sections[segment.section];
-          const aliases = expandSongMapSectionLabel(section.label);
-          const cue = practice?.labels.find(label => aliases.includes(label));
+          const cue = sectionCues.get(section.id);
           return <section aria-current={singingIds.includes(section.id) ? 'step' : undefined} className="alr-block" key={`${section.id}:${segment.start}`} data-reading-section={section.id}>{section.label && <h2>{cue && practice ? <button className="alr-cue" type="button" onClick={() => practice.select(cue)}>{section.label}</button> : section.label}{segment.continued && <small>(cont.)</small>}</h2>}<Rows section={section} start={segment.start} end={segment.end}/></section>;
         })}</div></div>)}
       </div>}
     </div>
     {notes.noteOwner && notes.noteSongId && (sections.length > 0 || notes.notesOpen) && <PersonalNotes key={JSON.stringify([notes.noteOwner, notes.noteSongId])}
       {...notes} noteOwner={notes.noteOwner} noteSongId={notes.noteSongId} surface="lyrics" layoutRevision={layout} root={canvas} language={language} />}
-    {layout.pages.length > 1 && <LyricsSectionNavigation sections={sections} visibleIds={visibleSectionIds} page={active + 1} pages={layout.pages.length} language={language} onSelect={id => {
+    {layout.pages.length > 1 && <LyricsSectionNavigation sections={sections} visibleIds={visibleSectionIds} page={active + 1} pages={layout.pages.length} language={language}
+      practiceCues={sectionCues} queued={practice?.queued} singingIds={singingIds} onSelect={id => {
+      const cue = sectionCues.get(id);
+      if (practice && cue) { practice.select(cue); return; }
       const target = layout.pages.findIndex(p => p.some(col => col.some(segment => sections[segment.section].id === id)));
       if (target >= 0) turn(target, { blockId: id, line: 0 });
     }}/>}

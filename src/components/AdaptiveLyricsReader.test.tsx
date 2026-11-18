@@ -296,3 +296,19 @@ it('follows practice inside the same columns, keeping instrumental cues on the l
   expect(container.querySelector('[aria-current="step"]')).toHaveTextContent('Shared');
   expect(container.querySelector('[data-column-widths]')).toHaveAttribute('data-column-widths', widths);
 });
+
+it('queues from the existing page rail and leaves the current page in place until playback arrives', async () => {
+  geometry.resize(390, 110);
+  const doc = {chinese:'[Verse 1]\nFirst line\nSecond line\nThird line\n[Verse 2]\nFourth line\nFifth line'};
+  const select = vi.fn();
+  const lyrics = {...song, lyricsDoc:doc};
+  const view = (label:string) => <AdaptiveLyricsReader song={lyrics} identity="rail-practice" language="zh"
+    settings={DEFAULT_LYRICS_READING_SETTINGS} practice={{label,labels:['Verse 1','Verse 2'],select}}/>;
+  const {container, rerender} = render(view('Verse 1'));
+  const rail = await screen.findByRole('button',{name:'預選 Verse 2'});
+  fireEvent.click(rail); fireEvent.click(rail);
+  expect(select.mock.calls).toEqual([['Verse 2'],['Verse 2']]);
+  expect(container.querySelector('.adaptive-lyrics-reader')).toHaveAttribute('data-reading-page','1');
+  rerender(view('Verse 2'));
+  expect(container.querySelector('.alr-columns [aria-current="step"]')).toHaveTextContent('Fourth line');
+});

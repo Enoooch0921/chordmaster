@@ -4,13 +4,16 @@ import type { ReadingSection } from '../utils/lyricsReading';
 import { songMapDisplayCode } from '../lib/songMap';
 import MeasuredSlidingSelection from './ui/MeasuredSlidingSelection';
 
-export default function LyricsSectionNavigation({ sections, visibleIds, onSelect, page, pages, language }: {
+export default function LyricsSectionNavigation({ sections, visibleIds, onSelect, page, pages, language, practiceCues, queued, singingIds }: {
   sections: ReadingSection[];
   visibleIds: string[];
   onSelect: (id: string) => void;
   page: number;
   pages: number;
   language: AppLanguage;
+  practiceCues?: ReadonlyMap<string,string>;
+  queued?: string;
+  singingIds?: readonly string[];
 }) {
   const viewport = React.useRef<HTMLDivElement>(null);
   const zh = language === 'zh';
@@ -38,13 +41,15 @@ export default function LyricsSectionNavigation({ sections, visibleIds, onSelect
   }, [selectionKey, sections]);
 
   return <footer className="alr-footer" data-lyrics-navigation>
-    {sections.length > 0 && <nav className="alr-section-scroll" ref={viewport} aria-label={zh ? '歌詞段落' : 'Lyrics sections'} aria-description={zh ? '亮起的標籤為當頁所有段落；點按可跳到該段落所在頁' : 'Highlighted tags show all sections on this page; press to go to a section’s page'}>
+    {sections.length > 0 && <nav className="alr-section-scroll" ref={viewport} aria-label={zh ? '歌詞段落' : 'Lyrics sections'} aria-description={practiceCues?.size ? (zh ? '點段落可在段尾跳轉，再點同一段立即跳。' : 'Tap a playable section to queue. Tap again to jump now.') : zh ? '亮起的標籤為當頁所有段落；點按可跳到該段落所在頁' : 'Highlighted tags show all sections on this page; press to go to a section’s page'}>
       <div className="alr-section-tabs">
         <MeasuredSlidingSelection value={selectionKey} selection="range" layoutKey={`${language}:${sections.map(section => section.id).join(',')}`}/>
         {sections.map((section, index) => {
           const label = section.label || `${zh ? '段落' : 'Section'} ${index + 1}`;
+          const cue = practiceCues?.get(section.id);
+          const action = cue ? (zh ? `預選 ${label}` : `Queue ${label}`) : (zh ? `跳到 ${label}` : `Go to ${label}`);
           return <button type="button" key={section.id} className="alr-section-button ui-press" data-lyrics-section-target={section.id}
-            aria-label={zh ? `跳到 ${label}` : `Go to ${label}`} title={label} aria-pressed={visible.has(section.id)}
+            aria-label={action} aria-current={singingIds?.includes(section.id) ? 'step' : undefined} data-practice-queued={cue && cue === queued || undefined} title={label} aria-pressed={visible.has(section.id)}
             onClick={() => onSelect(section.id)}><span>{songMapDisplayCode(section.label) || String(index + 1)}</span></button>;
         })}
       </div>

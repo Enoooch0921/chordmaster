@@ -3,6 +3,7 @@ import { expandSongMapSectionLabel, songMapDisplayParts, songMapLabel } from './
 export interface PracticeReaderState {
   label: string;
   visit?: number;
+  queued?: string;
   labels: readonly string[];
   select: (label: string) => void;
 }

@@ -126,9 +126,9 @@ export default function PracticeControl({ song, language, userId, feedbackHost, 
   const label = position?.bar.mapLabel;
   const visit = position?.bar.mapVisit;
   useLayoutEffect(() => {
-    onReaderChange(label && session.current ? {label, visit, labels:session.current.labels, select:value => selectRef.current(value)} : undefined);
+    onReaderChange(label && session.current ? {label, visit, queued:queued?.label, labels:session.current.labels, select:value => selectRef.current(value)} : undefined);
     return () => onReaderChange(undefined);
-  }, [label, visit, onReaderChange]);
+  }, [label, visit, queued?.label, onReaderChange]);
   const cueButton = (label: string) => <button type="button" key={label}
     aria-current={position?.bar.mapLabel === label ? 'step' : undefined} aria-pressed={queued?.label === label}
     onClick={() => select(label)}>{label}</button>;
