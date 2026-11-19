@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
-import { isAuthRetryableFetchError, type Session } from '@supabase/supabase-js';
+import { isAuthRefreshDiscardedError, isAuthRetryableFetchError, type Session } from '@supabase/supabase-js';
 import { AuthenticatedUser } from '../types';
 import { hasSupabaseConfig, supabase } from './supabase';
 import { clearInvitationAuthReturn, invitationPath, rememberInvitationAuthReturn, type InvitationAuthReturn } from './invitationJourney';
 import { clearCloudStartupPointer } from './cloudWorkspaceCache';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'unconfigured' | 'offline';
-const SESSION_EXPIRY_SAFETY_WINDOW_SECONDS = 30;
+const INITIAL_RETRY_MS = 5_000;
+const MAX_RETRY_MS = 60_000;
 export const NATIVE_AUTH_NEXT_PATH_STORAGE_KEY = 'chordmaster.native-auth-next-path.v1';
 
 const mapSessionUser = (session: Session | null): AuthenticatedUser | null => {
@@ -83,38 +84,20 @@ export const signInWithGoogleRedirect = async (nextPath = '/', invitation?: Invi
 };
 
 const isSessionUsable = (session: Session | null) => {
-  if (!session?.access_token?.trim()) {
-    return false;
-  }
-
-  if (!session.expires_at) {
-    return true;
-  }
-
-  return session.expires_at > (Date.now() / 1000) + SESSION_EXPIRY_SAFETY_WINDOW_SECONDS;
+  return Boolean(session?.access_token?.trim() && (!session.expires_at || session.expires_at * 1000 > Date.now()));
 };
 
 export const resolveActiveSession = async (): Promise<Session | null> => {
-  if (!supabase) {
-    return null;
-  }
-
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) {
-    throw sessionError;
-  }
-
-  if (isSessionUsable(sessionData.session)) {
-    return sessionData.session;
-  }
-
-  const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
-  if (refreshError) {
-    if (isAuthRetryableFetchError(refreshError)) throw refreshError;
-    return null;
-  }
-
-  return isSessionUsable(refreshedData.session) ? refreshedData.session : null;
+  if (!supabase) return null;
+  // getSession already renews near-expiry tokens under the SDK's auth lock.
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  if (!data.session?.access_token?.trim()) return null;
+  if (isSessionUsable(data.session)) return data.session;
+  // The access token can expire as getSession returns a proactive fallback.
+  const renewed = await supabase.auth.refreshSession();
+  if (renewed.error) throw renewed.error;
+  return renewed.data.session;
 };
 
 export const useSupabaseAuth = () => {
@@ -131,68 +114,78 @@ export const useSupabaseAuth = () => {
 
     let isMounted = true;
     let generation = 0;
+    let checking = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let nextDelay = INITIAL_RETRY_MS;
 
-    const syncSession = async (nextSession?: Session | null) => {
-      const request = ++generation;
+    const cancelRetry = () => {
+      clearTimeout(timer);
+      timer = undefined;
+    };
+    const applySession = (value: Session | null) => {
+      generation += 1;
+      cancelRetry();
+      nextDelay = INITIAL_RETRY_MS;
+      knownSession.current = value;
+      if (!value) clearCloudStartupPointer();
+      setSession(value);
+      setStatus(value ? 'authenticated' : 'unauthenticated');
+    };
+    const isVisible = () => document.visibilityState !== 'hidden';
+    const syncSession = async () => {
+      if (!isMounted || checking || !isVisible()) return;
+      cancelRetry();
+      if (navigator.onLine === false) {
+        setStatus(knownSession.current ? 'authenticated' : 'offline');
+        return;
+      }
+      const request = generation;
+      checking = true;
       try {
-        const localSession = nextSession ?? knownSession.current;
-        if (navigator.onLine === false && !isSessionUsable(localSession)) {
-          setStatus(knownSession.current ? 'authenticated' : 'offline');
-          return;
-        }
-        const resolvedSession = isSessionUsable(localSession)
-          ? localSession
-          : await resolveActiveSession();
-
-        if (!isMounted || request !== generation) {
-          return;
-        }
-
-        knownSession.current = resolvedSession;
-        if (!resolvedSession) clearCloudStartupPointer();
-        setSession(resolvedSession);
-        setStatus(resolvedSession ? 'authenticated' : 'unauthenticated');
+        const value = await resolveActiveSession();
+        if (isMounted && request === generation) applySession(value);
       } catch (error) {
-        if (!isMounted || request !== generation) {
-          return;
+        if (!isMounted || request !== generation) return;
+        if (isAuthRetryableFetchError(error) || isAuthRefreshDiscardedError(error)
+          || error instanceof TypeError) {
+          setStatus(knownSession.current ? 'authenticated' : 'offline');
+          if (navigator.onLine && isVisible()) {
+            timer = setTimeout(syncSession, nextDelay);
+            nextDelay = Math.min(nextDelay * 2, MAX_RETRY_MS);
+          }
+        } else {
+          applySession(null);
         }
-
-        const networkError = navigator.onLine === false || isAuthRetryableFetchError(error) || error instanceof TypeError;
-        if (networkError && knownSession.current) return;
-        knownSession.current = null;
-        setSession(null);
-        setStatus(networkError ? 'offline' : 'unauthenticated');
+      } finally {
+        checking = false;
       }
     };
 
     void syncSession();
-
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      if (event === 'SIGNED_OUT') {
-        generation += 1;
-        clearTimeout(timer);
-        clearCloudStartupPointer();
-        knownSession.current = null;
-        setSession(null);
-        setStatus('unauthenticated');
-        return;
-      }
-      // Supabase holds its auth lock while invoking this callback. Resolve or
-      // refresh only after returning, so a weak connection cannot deadlock it.
-      clearTimeout(timer);
-      timer = setTimeout(() => { void syncSession(nextSession); }, 0);
+      if (!isMounted) return;
+      if (event === 'SIGNED_OUT') applySession(null);
+      else if (nextSession && isSessionUsable(nextSession)) applySession(nextSession);
+      // INITIAL_SESSION can be null when a renewal times out. The separate
+      // getSession call distinguishes that from an empty session store.
     });
     const reconnect = () => { void syncSession(); };
+    const visibilityChanged = () => {
+      if (document.visibilityState === 'hidden') cancelRetry();
+      else reconnect();
+    };
     window.addEventListener('online', reconnect);
     window.addEventListener('focus', reconnect);
+    window.addEventListener('pageshow', reconnect);
+    document.addEventListener('visibilitychange', visibilityChanged);
 
     return () => {
       isMounted = false;
-      generation += 1;
-      clearTimeout(timer);
+      cancelRetry();
       window.removeEventListener('online', reconnect);
       window.removeEventListener('focus', reconnect);
+      window.removeEventListener('pageshow', reconnect);
+      document.removeEventListener('visibilitychange', visibilityChanged);
       data.subscription.unsubscribe();
     };
   }, [retryAttempt]);

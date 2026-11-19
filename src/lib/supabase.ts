@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createAuthFetch } from './authRefreshFetch';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
@@ -16,6 +17,7 @@ export async function checkSupabaseConnection(signal: AbortSignal): Promise<void
 
 export const supabase = hasSupabaseConfig
   ? createClient(supabaseUrl!, supabaseAnonKey!, {
+      global: { fetch: createAuthFetch(supabaseUrl!) },
       auth: {
         persistSession: true,
         autoRefreshToken: true,

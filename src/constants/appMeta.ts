@@ -95,6 +95,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-19',
+        title: 'Keep your session when the server is busy',
+        bullets: ['If renewal times out, ChordMaster keeps your account and retries while open or when you return. On startup you can read a previously cached library while reconnecting.']
+      },
+      {
+        version: '0.12.57',
+        date: '2026-11-19',
         title: 'Adjust the key and tempo during practice',
         bullets: ['Open Practice settings to transpose by semitones or change BPM while singing. Stopping restores the song or setlist settings.']
       },
@@ -1324,6 +1330,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-19',
+        title: 'NAS 忙碌時保留登入狀態',
+        bullets: ['已登入的手機遇到 NAS 忙碌或連線逾時時，會保留帳號並自動重試。從主畫面重新開啟時，可以先查看已快取的曲庫。']
+      },
+      {
+        version: '0.12.57',
         date: '2026-11-19',
         title: '練唱時調整調性與速度',
         bullets: ['在「練唱設定」可逐半音升降調或調整 BPM。停止練唱後恢復歌曲或歌單設定。']
