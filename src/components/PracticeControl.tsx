@@ -12,14 +12,16 @@ import { useAuditionPreferences } from '../hooks/useAuditionPreferences';
 import { usePracticeChartCursor } from '../hooks/usePracticeChartCursor';
 import { issueText } from './preview-edit/ChordAuditionControl';
 import ChordAuditionSettings from './preview-edit/ChordAuditionSettings';
+import PracticeTuningControls from './PracticeTuningControls';
+import { DEFAULT_PRACTICE_TUNING, type PracticeTuning } from '../lib/practiceTuning';
 
 type Session = ReturnType<typeof buildPracticeSession>;
 interface Cursor { bar: AuditionBar; lastBar: AuditionBar; nextLabel?: string }
 interface Cue { label: string; at: number }
 
-export default function PracticeControl({ song, identity, language, userId, controlsHost, feedbackHost, onReaderChange, chartViewport, onPlayingChange }: {
+export default function PracticeControl({ song, identity, language, userId, controlsHost, feedbackHost, onReaderChange, chartViewport, onPlaybackChange }: {
   song: Song; language: AppLanguage; userId?: string | null; controlsHost: HTMLElement | null; feedbackHost: HTMLElement | null;
-  identity: string; chartViewport?: React.RefObject<HTMLDivElement | null>; onPlayingChange?: (playing: boolean) => void;
+  identity: string; chartViewport?: React.RefObject<HTMLDivElement | null>; onPlaybackChange?: (tuning: PracticeTuning | null) => void;
   onReaderChange: (state: PracticeReaderState | undefined) => void;
 }) {
   const zh = language === 'zh';
@@ -33,12 +35,14 @@ export default function PracticeControl({ song, identity, language, userId, cont
     && all.findIndex(s => s.id === section.id) === i), [song]);
   const [start, setStart] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [tuning, setTuning] = useState(DEFAULT_PRACTICE_TUNING);
   const paintChart = usePracticeChartCursor(identity, playing ? chartViewport : undefined);
   useLayoutEffect(() => {
     if (!playing) return;
-    onPlayingChange?.(true);
-    return () => onPlayingChange?.(false);
-  }, [playing, onPlayingChange]);
+    piano.current?.setPracticeTuning(tuning);
+    onPlaybackChange?.(tuning);
+    return () => onPlaybackChange?.(null);
+  }, [playing, tuning, onPlaybackChange]);
   const [position, setPosition] = useState<Cursor>();
   const [queued, setQueued] = useState<Cue>();
   const [notice, setNotice] = useState('');
@@ -57,6 +61,8 @@ export default function PracticeControl({ song, identity, language, userId, cont
     pending.current = undefined;
     session.current = undefined;
     paintChart(null);
+    setTuning(DEFAULT_PRACTICE_TUNING);
+    setSettingsOpen(false);
     setQueued(undefined); setPosition(undefined); setPlaying(false);
   };
   useLayoutEffect(() => {
@@ -83,6 +89,7 @@ export default function PracticeControl({ song, identity, language, userId, cont
     setSettingsOpen(false);
     session.current = data;
     const player = piano.current ??= new AuditionPiano();
+    player.setPracticeTuning(tuning);
     player.visualDelayMs = visualDelayMs;
     player.setMetronomeEnabled(metronome); player.setMelodyEnabled(melody);
     setPlaying(true);
@@ -153,18 +160,18 @@ export default function PracticeControl({ song, identity, language, userId, cont
     if (offset < 0) area.scrollLeft += offset;
     else if (offset + current.offsetWidth > area.clientWidth) area.scrollLeft += offset + current.offsetWidth - area.clientWidth;
   }, [label, feedbackHost, controlsHost]);
-  if (chartViewport) return playing && controlsHost ? createPortal(
-    <button type="button" className="reader-audition-toggle" aria-label={action} aria-description={label} title={action} onClick={finish}>
-      <Square className="shrink-0" size={13} fill="currentColor" aria-hidden="true"/><span className="max-w-[8em] truncate">{label ?? title}</span>
-    </button>, controlsHost) : null;
-  return controlsHost && createPortal(<div className="chord-audition">
+  if (chartViewport && !playing) return null;
+  return controlsHost && createPortal(<div className="chord-audition" data-keyboard-refined>
     <div className="chord-audition-split" data-playing={playing || undefined}>
-      <button type="button" data-audition-button aria-label={action} title={action} onClick={playing ? finish : play}>
+      {chartViewport ? <button type="button" className="reader-audition-toggle" aria-label={action} aria-description={label} title={action} onClick={finish}>
+      <Square className="shrink-0" size={13} fill="currentColor" aria-hidden="true"/><span className="max-w-[8em] truncate">{label ?? title}</span>
+      </button> : <button type="button" data-audition-button aria-label={action} title={action} onClick={playing ? finish : play}>
         {playing ? <Square size={13} fill="currentColor" aria-hidden/> : <Play size={13} fill="currentColor" aria-hidden/>}
         <span className="chord-audition-labels" aria-hidden="true"><span className="chord-audition-label" style={{visibility:playing ? 'hidden' : 'visible'}}>{title}</span>
           <span className="chord-audition-label" style={{visibility:playing ? 'visible' : 'hidden'}}>{zh ? '停止' : 'Stop'}</span></span>
-      </button>
+      </button>}
       <ChordAuditionSettings {...preferences} zh={zh} labels={labels} scope="practice" open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <PracticeTuningControls song={song} tuning={tuning} onChange={setTuning} zh={zh}/>
         {notice && <p role="status" className="practice-hint">{notice}</p>}
         {position && session.current && <>
           <div className="practice-cues" role="group" aria-label={zh ? '跳至段落' : 'Jump to section'}>

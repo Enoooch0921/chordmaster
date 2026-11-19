@@ -6,6 +6,7 @@ import { getParenthesizedChordInner } from '../utils/musicUtils';
 import { getChordEvents } from '../utils/chordSubdivisions';
 import { isClosedBar } from '../utils/closedBar';
 import { getSongTempoStates } from '../utils/tempoEvents';
+import { AUDITION_FALLBACK_BPM } from './practiceTuning';
 import { hasUnmeteredChords } from '../utils/unmeteredChords';
 import { resolveAuditionChord, type Harmony } from './auditionChords';
 import { getSongDisplayKeyStates, getSongKeyStates, getSongTimeSignatureStates } from './songEditing';
@@ -225,7 +226,7 @@ function buildLinearAudition(song: Song, target: AuditionTarget, scope: Exclude<
       const cursor = target.slotIndex + offset;
       const single = selected && scope === 'chord';
       const bpm = tempos[s][b];
-      const quarterSeconds = 60 / (bpm ?? 80);
+      const quarterSeconds = 60 / (bpm ?? AUDITION_FALLBACK_BPM);
       const beatSeconds = quarterSeconds * 4 / denominator;
       // For an anticipated downbeat the preceding tempo is still in effect.
       const attackTime = (position: number) => downbeat + position * (position < 0 && previousQuarterSeconds !== undefined

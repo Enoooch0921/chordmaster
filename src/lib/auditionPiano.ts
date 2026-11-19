@@ -2,6 +2,7 @@ import { joinAuditions, sliceAudition } from './auditionTimeline';
 import { audioOutputTime } from './audioOutputTime';
 import { auditionBeats, type AuditionPlan } from './chordAudition';
 import { loadClickSamples } from './clickSamples';
+import { DEFAULT_PRACTICE_TUNING, type PracticeTuning } from './practiceTuning';
 
 const CLICK_VOLUME = 0.32;
 
@@ -74,10 +75,18 @@ export class AuditionPiano {
   private frame?: number;
   private deadline?: ReturnType<typeof setTimeout>;
   private generation = 0;
+  private tuning = DEFAULT_PRACTICE_TUNING;
+  private rescheduleTuning?: () => void;
 
   visualDelayMs = 0;
   // A queued change edits only the future audio timeline, on the same audio clock.
   redirect?: (next: AuditionPlan, boundary?: number) => number;
+
+  setPracticeTuning(tuning: PracticeTuning) {
+    if (this.tuning.semitones === tuning.semitones && this.tuning.tempoRatio === tuning.tempoRatio) return;
+    this.tuning = tuning;
+    this.rescheduleTuning?.();
+  }
 
   setMetronomeEnabled(enabled: boolean) {
     this.metronomeEnabled = enabled;
@@ -126,38 +135,55 @@ export class AuditionPiano {
       clickBus.gain.value = this.metronomeEnabled ? CLICK_VOLUME : 0;
       clickBus.connect(bus);
     }
-    const longestLead = Math.max(0, ...Array.from(buffers, ([midi, sample]) =>
+    const sampleLead = Math.max(0, ...Array.from(buffers, ([midi, sample]) =>
       sample.attackSeconds / 2 ** ((midi - nearest(midi).midi) / 12)));
+    let longestLead = sampleLead / 2 ** (this.tuning.semitones / 12);
     const origin = context.currentTime + 0.025 + longestLead;
+    // The plan, queued jumps and cursor stay in score seconds. Each tempo change
+    // anchors the same score position to the audio clock, including output latency.
+    const tempos = [{ audio: origin, score: 0, ratio: this.tuning.tempoRatio }];
+    const scoreAt = (audio: number) => {
+      let i = tempos.length - 1;
+      while (i > 0 && audio < tempos[i].audio) i--;
+      const anchor = tempos[i];
+      return anchor.score + (audio - anchor.audio) * anchor.ratio;
+    };
+    const audioAt = (score: number) => {
+      let i = tempos.length - 1;
+      while (i > 0 && score < tempos[i].score) i--;
+      const anchor = tempos[i];
+      return anchor.audio + (score - anchor.score) / anchor.ratio;
+    };
     let index = 0;
     const schedule = () => {
       const now = context.currentTime;
       const horizon = now + 0.25 + longestLead;
       while (clicks && clickBus && nextBeat.done === false) {
         const beat = nextBeat.value;
-        const when = origin + beat.at;
+        const when = audioAt(beat.at);
         if (when > horizon) break;
         nextBeat = beats.next();
         if (when < now) continue;
         const click = context.createBufferSource();
         click.buffer = beat.accent ? clicks.accent : clicks.regular;
         click.connect(clickBus);
-        this.sources.set(click, {start: when, end: Math.min(when + click.buffer.duration, origin + plan.duration)});
+        const end = Math.min(when + click.buffer.duration, audioAt(plan.duration));
+        this.sources.set(click, {start: when, end});
         click.onended = () => { click.disconnect(); this.sources.delete(click); };
         click.start(when);
-        click.stop(Math.min(when + click.buffer.duration, origin + plan.duration));
+        click.stop(end);
       }
-      while (index < plan.sounds.length && origin + plan.sounds[index].start <= horizon) {
+      while (index < plan.sounds.length && audioAt(plan.sounds[index].start) <= horizon) {
         const event = plan.sounds[index++];
-        if (event.start >= event.end || origin + event.end <= context.currentTime) continue;
+        const start = audioAt(event.start);
+        const end = audioAt(event.end);
+        if (event.start >= event.end || end <= context.currentTime) continue;
         for (const midi of event.notes) {
           const source = context.createBufferSource();
           const gain = context.createGain();
-          const rate = 2 ** ((midi - nearest(midi).midi) / 12);
-          const start = origin + event.start;
-          const end = origin + event.end;
+          const rate = 2 ** ((midi + this.tuning.semitones - nearest(midi).midi) / 12);
           const sample = buffers.get(midi)!;
-          const attackStart = start - sample.attackSeconds / rate;
+          const attackStart = Math.max(0, start - sample.attackSeconds / rate);
           const sustain = sample.buffer.duration >= 6 && (end - attackStart) * rate > sample.buffer.duration - 1;
           source.buffer = sustain ? sustainedBuffer(context, sample) : sample.buffer;
           if (sustain) {
@@ -184,10 +210,26 @@ export class AuditionPiano {
         }
       }
     };
+    this.rescheduleTuning = () => {
+      const now = context.currentTime;
+      const score = Math.max(0, scoreAt(now));
+      if (tempos.at(-1)!.ratio !== this.tuning.tempoRatio) {
+        tempos.push({ audio: Math.max(origin, now), score, ratio: this.tuning.tempoRatio });
+      }
+      longestLead = sampleLead / 2 ** (this.tuning.semitones / 12);
+      for (const source of this.sources.keys()) source.stop();
+      this.sources.clear();
+      // Re-schedule sounding holds at their sample offset, plus the lookahead.
+      index = 0;
+      while (index < plan.sounds.length && plan.sounds[index].end <= score) index++;
+      beats = auditionBeats(plan.bars);
+      do { nextBeat = beats.next(); } while (nextBeat.done === false && nextBeat.value.at < score);
+      schedule();
+    };
     this.redirect = (next, boundary) => {
-      const earliest = Math.max(0, context.currentTime - origin + longestLead + .008);
+      const earliest = Math.max(0, scoreAt(context.currentTime + longestLead + .008));
       const cut = Math.min(plan.duration, Math.max(earliest, boundary ?? earliest));
-      const when = origin + cut;
+      const when = audioAt(cut);
       for (const [node, span] of this.sources) {
         if (span.end <= when) continue;
         node.stop(span.start >= when ? context.currentTime : when);
@@ -204,8 +246,9 @@ export class AuditionPiano {
     };
     const refresh = () => {
       if (this.generation !== generation) return;
-      const audible = audioOutputTime(context) - origin;
-      const elapsed = audible - this.visualDelayMs / 1000;
+      const output = audioOutputTime(context);
+      const audible = scoreAt(output);
+      const elapsed = scoreAt(output - this.visualDelayMs / 1000);
       if (Math.min(audible, elapsed) >= plan.duration) { this.stop(); done(); return; }
       if (elapsed >= 0) paint(Math.min(elapsed, plan.duration - 1e-7), plan);
       this.frame = requestAnimationFrame(refresh);
@@ -219,6 +262,7 @@ export class AuditionPiano {
   stop() {
     ++this.generation;
     this.redirect = undefined;
+    this.rescheduleTuning = undefined;
     clearInterval(this.timer);
     clearTimeout(this.deadline);
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);

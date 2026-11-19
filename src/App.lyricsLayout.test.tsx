@@ -56,8 +56,11 @@ const mountLyrics = async () => {
 
 it.each(['written', 'arranged'])('continues one %s practice session at the current beat across lyrics and chart', async route => {
   const song = fixture.songs[0];
-  song.sections[0].bars.push({ id: 'second-bar', chords: ['G'] });
+  song.tempo = 96;
+  fixture.setlists[0].songs[0].overrideKey = 'D';
+  song.sections[0].bars.push({ id: 'second-bar', chords: ['G'], tempo: 120 });
   if (route === 'arranged') song.songMap = ['Verse 1', 'Verse 2', 'Ending'].map(label => ({ label, repeats: 1 }));
+  const saved = JSON.stringify(fixture);
   const play = vi.spyOn(AuditionPiano.prototype, 'play').mockImplementation(async function (plan, paint) {
     this.redirect = (_next, at) => at ?? 0;
     paint(0, plan);
@@ -65,12 +68,26 @@ it.each(['written', 'arranged'])('continues one %s practice session at the curre
   });
   const stop = vi.spyOn(AuditionPiano.prototype, 'stop');
   await mountLyrics();
+  const settings = () => {
+    const trigger = screen.getByRole('button', { name: '練唱設定' });
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(new DOMRect(120, 60, 44, 44));
+    fireEvent.click(trigger);
+  };
+  const stepUp = () => fireEvent.click(screen.getByRole('button', { name: '升半音' }));
+  settings();
+  expect(screen.getByLabelText('目前練唱調性')).toHaveTextContent('D');
+  stepUp();
+  fireEvent.keyDown(screen.getByRole('button', { name: '升半音' }), { key: 'Escape' });
   fireEvent.click(screen.getByRole('button', { name: '開始練唱' }));
   const [plan, paint, done] = play.mock.calls[0];
   const bar = plan.bars.filter(bar => bar.sourceTitle === 'Verse').at(-1)!;
   act(() => paint(bar.start + bar.beatSeconds, plan));
   const rail = () => screen.getByRole('group', { name: '播放段落' });
   fireEvent.click(rail().querySelector<HTMLButtonElement>('button:last-child')!);
+  settings();
+  stepUp();
+  fireEvent.change(screen.getByRole('spinbutton', { name: '練唱速度 (BPM)' }), { target: { value: '72' } });
+  fireEvent.keyDown(screen.getByRole('button', { name: '升半音' }), { key: 'Escape' });
 
   const toggle = () => fireEvent.click(screen.getAllByRole('button', { name: '歌詞模式' })[0]);
   const mark = () => document.querySelector('[data-practice-beat]');
@@ -78,6 +95,12 @@ it.each(['written', 'arranged'])('continues one %s practice session at the curre
   await waitFor(() => expect(mark()).toHaveAttribute('data-audition-bar', 'second-bar'));
   expect(mark()).toHaveAttribute('data-practice-beat', '2');
   expect(mark()).toHaveAttribute('data-audition-chart', 'entry-one');
+  expect(document.querySelector('[data-audition-chart="entry-one"][data-audition-bar="one-bar"]')).toHaveTextContent('E');
+  expect(document.querySelector('[data-tempo-event="second-bar"]')).toHaveTextContent('90');
+  settings();
+  expect(screen.getByLabelText('目前練唱調性')).toHaveTextContent('E');
+  expect(screen.getByRole('spinbutton', { name: '練唱速度 (BPM)' })).toHaveValue(72);
+  fireEvent.keyDown(screen.getByRole('button', { name: '升半音' }), { key: 'Escape' });
   expect(screen.getByRole('button', { name: '停止練唱' })).toHaveTextContent(bar.mapLabel!);
   act(() => paint(bar.start + 2 * bar.beatSeconds, plan));
   expect(mark()).toHaveAttribute('data-practice-beat', '3');
@@ -99,6 +122,13 @@ it.each(['written', 'arranged'])('continues one %s practice session at the curre
   expect(stop).toHaveBeenCalled();
   expect(mark()).toBeNull();
   expect(screen.getByRole('button', { name: '試聽' })).toBeInTheDocument();
+  expect(document.querySelector('[data-audition-chart="entry-one"][data-audition-bar="one-bar"]')).toHaveTextContent('D');
+  expect(document.querySelector('[data-tempo-event="second-bar"]')).toHaveTextContent('120');
+  toggle();
+  settings();
+  expect(screen.getByLabelText('目前練唱調性')).toHaveTextContent('D');
+  expect(screen.getByRole('spinbutton', { name: '練唱速度 (BPM)' })).toHaveValue(96);
+  expect(JSON.stringify(fixture)).toBe(saved);
 });
 
 it('opens locked reading, navigates songs, and retains both A4 layouts independently of reading size', async () => {

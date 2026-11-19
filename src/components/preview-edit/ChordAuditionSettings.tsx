@@ -20,6 +20,8 @@ interface Props {
   setMelody: (enabled: boolean) => void;
 }
 
+const firstControl = 'button:enabled, select:enabled, input:enabled:not([type=radio]), input[type=radio]:enabled:checked';
+
 export default function ChordAuditionSettings({ children, open: controlled, onOpenChange, zh, labels, scope, setScope, metronome, setMetronome, melody, setMelody, visualDelayMs, setVisualDelayMs }: Props) {
   const [localOpen, setLocalOpen] = useState(false);
   const open = controlled ?? localOpen;
@@ -27,14 +29,14 @@ export default function ChordAuditionSettings({ children, open: controlled, onOp
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const id = useId();
-  const title = zh ? '試聽設定' : 'Audition settings';
+  const title = scope === 'practice' ? (zh ? '練唱設定' : 'Practice settings') : (zh ? '試聽設定' : 'Audition settings');
   const close = useCallback(() => setOpen(false), [setOpen]);
-  const { panelStyle, isPositioned } = useAnchoredPortalPanel({
+  const { panelStyle, isPositioned, placement } = useAnchoredPortalPanel({
     isOpen: open, align: 'center', triggerRef: trigger, panelRef: panel, onRequestClose: close, zIndex: 6500
   });
   const returnFocus = () => { close(); trigger.current?.focus({ preventScroll: true }); };
   useLayoutEffect(() => {
-    if (open && isPositioned) panel.current?.querySelector<HTMLInputElement>('input:checked:enabled, input[type=checkbox]:enabled')?.focus({ preventScroll: true });
+    if (open && isPositioned) panel.current?.querySelector<HTMLElement>(firstControl)?.focus({ preventScroll: true });
   }, [open, isPositioned]);
   useEffect(() => {
     if (!open) return;
@@ -57,12 +59,12 @@ export default function ChordAuditionSettings({ children, open: controlled, onOp
       <ChevronDown size={15} aria-hidden="true" />
     </button>
     {open && createPortal(<div id={id} ref={panel} role="dialog" aria-label={title} data-preview-edit-ui data-keyboard-refined
-      className="chord-audition-settings" style={panelStyle}
+      className="chord-audition-settings" data-placement={placement} style={panelStyle}
       onKeyDown={event => {
         event.stopPropagation();
         if (event.key === 'Escape') { event.preventDefault(); returnFocus(); }
         // Move out of the portal in the editor's own tab order.
-        const first = panel.current?.querySelector('input[type=radio]:checked:enabled') ?? panel.current?.querySelector('input:enabled');
+        const first = panel.current?.querySelector(firstControl);
         const last = panel.current?.querySelector('input[name="audition-delay"]');
         if (event.key === 'Tab' && (event.shiftKey ? event.target === first : event.target === last)) {
           if (event.shiftKey) event.preventDefault();

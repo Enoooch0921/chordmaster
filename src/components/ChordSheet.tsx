@@ -5,7 +5,7 @@ import { projectNotationVoice } from '../lib/notationVoiceEditing';
 import PickupPreview from './PickupPreview';
 import { getPickupDisplay, PICKUP_EDITOR_SECTION_ID } from '../utils/pickupUtils';
 import { getSongTempoStates, hasTempoEvent } from '../utils/tempoEvents';
-import { formatTempoBpm } from '../utils/tempoUtils';
+import { practiceKey, practiceTempo, type PracticeTuning } from '../lib/practiceTuning';
 import { currentKeyMode } from '../utils/keyMode';
 import type { TonalMode } from '../types';
 import { hasUnmeteredChords } from '../utils/unmeteredChords';
@@ -803,6 +803,7 @@ interface ChordSheetProps {
   lastEditedAt?: number | null;
   language: AppLanguage;
   currentKey: Key;
+  practiceTuning?: PracticeTuning | null;
   transposeFromOriginal?: boolean;
   showWrittenKeyInMetadata?: boolean;
   onElementClick?: (sIdx: number, bIdx: number, field: ChordSheetElementField, target: ChordSheetElementTarget) => void;
@@ -1373,7 +1374,7 @@ const ChordBeatGroup: React.FC<{
   </div>
 );
 
-const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, lastEditedAt, language, currentKey, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, readerAudition = false, showPageBadges = true, excerpt, onSectionReorder }) => {
+const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMapEditor, lastEditedAt, language, currentKey, practiceTuning, transposeFromOriginal = true, showWrittenKeyInMetadata = false, onElementClick, onMetaClick, onAddBarClick, onAddSectionAfterClick, onBarLabelLaneChange, highlightedSectionIds = [], activeSectionId = null, activeBar = null, activePreviewNotationTarget = null, activeChordSlot = null, selectedPreviewBars = [], onPreviewBarMetaClick, onPreviewBarContextMenu, previewIdentity = null, readerAudition = false, showPageBadges = true, excerpt, onSectionReorder }) => {
   const editedAt = lastEditedAt === undefined ? getChartEditedAt(song) : lastEditedAt;
   const phraseCarries = React.useMemo(() => song.sections.map(section => {
     let primary = 0;
@@ -1915,7 +1916,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
   }, [previewIdentity]);
 
   const capo = song.capo || 0;
-  const displayedCurrentKey = normalizeKeySpelling(currentKey);
+  const displayedCurrentKey = normalizeKeySpelling(practiceKey(currentKey, practiceTuning?.semitones ?? 0));
   const baseWrittenKey = transposeFromOriginal ? song.originalKey : displayedCurrentKey;
   const songKeyStates = transposeFromOriginal
     ? getSongKeyStates(song)
@@ -1940,6 +1941,12 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
         : [displayedCurrentKey]
   );
   const tempoStates = getSongTempoStates(song);
+  const displayTempo = (bpm: number | undefined) => practiceTuning ? practiceTempo(bpm, practiceTuning.tempoRatio) : bpm;
+  const baseTempo = displayTempo(song.tempo);
+  const tempoLabel = (section: number, bar: number) => {
+    const bpm = displayTempo(tempoStates.barTempos[section]?.[bar]);
+    return bpm === undefined ? (language === 'zh' ? '回到全曲速度' : 'Restore song tempo') : `♩ = ${bpm}`;
+  };
   const metadataKeySequence = showWrittenKeyInMetadata
     ? getConsecutiveKeySequence(chartWrittenKeySequence)
     : displayedChartKeySequence;
@@ -2354,7 +2361,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                         </div>
                       </>
                     )}
-                    {typeof song.tempo === 'number' && (
+                    {typeof baseTempo === 'number' && (
                       <>
                         <span className="text-gray-400">|</span>
                         <div
@@ -2366,7 +2373,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                             {...getMetaValueAnchorProps('tempo')}
                             className="text-gray-900 font-bold"
                           >
-                            {song.tempo}
+                            {baseTempo}
                           </span>
                         </div>
                       </>
@@ -2428,7 +2435,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                 let nextChordIndex = 0;
                 const orderedLines = block.unmeteredChordLines!.map(line => line.map(chord => ({ chord, index: nextChordIndex++ })));
                 const writtenKey = songKeyStates.barActiveKeys[row.sIdx]?.[row.startBIdx] ?? songKeyStates.sectionActiveKeys[row.sIdx] ?? song.originalKey;
-                const playKey = getPlayKey(displayKeyStates.barActiveKeys[row.sIdx]?.[row.startBIdx] ?? displayKeyStates.sectionActiveKeys[row.sIdx] ?? currentKey, capo);
+                const playKey = getPlayKey(displayKeyStates.barActiveKeys[row.sIdx]?.[row.startBIdx] ?? displayKeyStates.sectionActiveKeys[row.sIdx] ?? displayedCurrentKey, capo);
                 const offset = getTransposeOffset(writtenKey, playKey);
                 return <div key={`unmetered-${row.sIdx}-${block.id || row.startBIdx}`} data-audition-chart={onElementClick || readerAudition ? previewIdentity : undefined} data-audition-section={section?.id} data-audition-bar={block.id} data-audition-section-index={readerAudition ? row.sIdx : undefined} data-audition-bar-index={readerAudition ? row.startBIdx : undefined} data-unmetered-chord-block={block.id} data-preview-layout-weight={row.layoutWeight} className="flex w-full min-w-0 gap-2 py-1" style={{ flexGrow: row.layoutWeight }}>
                   <div className="w-16 shrink-0 pt-1 text-xs font-bold sm:w-20">
@@ -2437,7 +2444,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                   <div className="min-w-0 flex-1">
                     <div role={onElementClick ? 'button' : undefined} tabIndex={onElementClick ? 0 : undefined} data-preview-edit-anchor={`${previewIdentity || 'preview'}|${section?.id || row.sIdx}|${block.id || row.startBIdx}|chords|all`} className="min-w-0 space-y-2 rounded-lg p-1 text-left hover:bg-slate-50" onClick={event=>emitElementClick(event,row.sIdx,row.startBIdx,'chords')} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();event.currentTarget.click()}}} onContextMenu={event=>emitPreviewBarContextMenu(event,section?.id,block.id)}>
                       <div className="text-[10px] font-semibold text-amber-700">{language==='zh'?'和弦順序・拍位待核':'Chord order · timing unspecified'}</div>
-                      {(hasTempoEvent(block) || (row.startBIdx === 0 && hasTempoEvent(section))) && <div data-tempo-event={block.id} className="text-[10px] font-bold">{tempoStates.barTempos[row.sIdx]?.[row.startBIdx] !== undefined ? `♩ = ${formatTempoBpm(tempoStates.barTempos[row.sIdx][row.startBIdx])}` : (language === 'zh' ? '回到全曲速度' : 'Restore song tempo')}</div>}
+                      {(hasTempoEvent(block) || (row.startBIdx === 0 && hasTempoEvent(section))) && <div data-tempo-event={block.id} className="text-[10px] font-bold">{tempoLabel(row.sIdx, row.startBIdx)}</div>}
                       {block.chordKeyUnspecified && <div data-chord-key-unspecified={block.id} className="text-[10px] text-amber-800">{language==='zh'?'調性未標 · 原譜級數':'Key unspecified · source degrees'}</div>}
                       {(block.keyChangeTo || (row.startBIdx === 0 && section?.keyChangeTo)) && <div data-unmetered-key-change className="text-xs font-bold text-amber-800">{language==='zh'?'轉調':'Key change'} · {playKey}</div>}
                       {orderedLines.map((line,lineIndex)=><div key={lineIndex} data-unmetered-chord-line className="flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2 leading-7">
@@ -3335,7 +3342,7 @@ const ChordSheet: React.FC<ChordSheetProps> = ({ song, setlistSongNumber, songMa
                             {showKeyChangeTag && <span>{copy.key}: {barCurrentKey}</span>}
                             {showKeyChangeTag && showTempoChangeTag && <span className="mx-1">·</span>}
                             {showTempoChangeTag && <span data-tempo-event={bar.id}>
-                              {tempoStates.barTempos[row.sIdx]?.[globalBarIndex] !== undefined ? `♩ = ${formatTempoBpm(tempoStates.barTempos[row.sIdx][globalBarIndex])}` : (language === 'zh' ? '回到全曲速度' : 'Restore song tempo')}
+                              {tempoLabel(row.sIdx, globalBarIndex)}
                             </span>}
                           </div>
                         )}

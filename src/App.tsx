@@ -9,6 +9,7 @@ import { searchItemsWithMatches } from './lib/songSearch';
 import { getSongLibraryMeta } from './lib/songLibraryPresentation';
 import SongTitle from './components/SongTitle';
 import PersonalChordSheet from './components/PersonalChordSheet';
+import type { PracticeTuning } from './lib/practiceTuning';
 import PerformanceSetlistSheets, { type PerformanceSetlistHandle } from './components/PerformanceSetlistSheets';
 import SetlistPreviewSong from './components/SetlistPreviewSong';
 import ReaderAudition from './components/ReaderAudition';
@@ -1865,7 +1866,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const appViewportRef = useAppViewport(performanceOverlayRef, isPerformanceMode);
   const previewRef = React.useRef<HTMLDivElement>(null);
   const [chordPlayback, setChordPlayback] = useState<ChordPlayback | null>(null);
-  const [practicePlaying, setPracticePlaying] = useState(false);
+  const [practiceTuning, setPracticeTuning] = useState<PracticeTuning | null>(null);
+  const practicePlaying = practiceTuning !== null;
   const [readerAuditionHost, setReaderAuditionHost] = useState<HTMLSpanElement | null>(null);
   const mobileMetadataRef = React.useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLDivElement>(null);
@@ -10139,6 +10141,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting}
         noteOwner={authenticatedUser?.id} noteSongId={song.id} notesActive={!isPerformanceMode && !activePreviewEditSession}
         song={renderedSong}
+        practiceTuning={practiceOnChart ? practiceTuning : null}
         readerAudition={!isPerformanceMode && !isHandwriting}
         songMapEditor={canEditTeamSongs && !activePreviewEditSession ? {
           scope: 'library', fallback: sectionSongMap(song.sections), sections: sectionSongMap(song.sections),
@@ -10164,7 +10167,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         onSectionReorder={canEditTeamSongs ? handlePreviewSectionReorder : undefined}
       /></RecoveryBoundary>
     );
-  }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
+  }, [practiceOnChart, practiceTuning, authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, activeBar, activeDraftNavigationPreviewSong, activeNavigationPreviewSong, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditTeamSongs, canOpenEditor, copy.newSong, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleCreateSong, handleElementClick, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, hasSongs, highlightedSectionIds, isLyricsMode, isLyricsReading, handleSongChange, language, song]);
 
   // Stable dispatchers read the latest committed permissions, selection and handlers.
   const handleLibraryRowAction = useStableEvent((action: SongLibraryAction, id: string) => {
@@ -10317,6 +10320,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               entryId={item.id}
               readerAudition={isInteractive && !isHandwriting}
               song={previewSong}
+              practiceTuning={isSelected && practiceOnChart ? practiceTuning : null}
               setlistSongNumber={songIndex + 1}
               songMapEditor={isInteractive && canEditSelectedSetlistContent && activeSetlistEditableSong && !activePreviewEditSession ? {
                 scope: 'setlist', setlistName: selectedSetlist?.name, fallback: getSongMap({ songMap: libraryMap, sections: previewSong.sections }), sections: sectionSongMap(previewSong.sections),
@@ -10347,7 +10351,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         })}
       </div>
     );
-  }, [authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
+  }, [practiceOnChart, practiceTuning, authenticatedUser?.id, isPerformanceMode, isHandwriting, savedChartEditedAt, allowDefaultSetlistSelection, selectedSetlistId, activeBar, activePreviewEditSession, activePreviewNotationTarget, activePreviewSelectedBars, activeSectionId, canEditSelectedSetlistContent, canOpenEditor, handleAddBarToSection, handleAddSectionAfterPreviewSection, handleBarLabelLaneChange, handleMetaClick, handlePreviewBarContextMenu, handlePreviewBarMetaClick, handlePreviewSectionReorder, handleSetlistElementClick, highlightedSectionIds, isLyricsMode, isLyricsReading, activeSetlistEditableSong, handleSetlistSongContentChange, language, selectedSetlistSong?.id, setlistPreviewSongs, selectedSetlist?.name, setlistLyricsEntries, isLyricsContinuous, lyricsBookSettings, handleBookLyricsChange]);
   const activePreviewSheet = isSetlistMode ? setlistPreviewSheet : previewSheet;
   const currentPreviewIdentity = isSetlistMode
     ? (selectedSetlistSong?.id ?? null)
@@ -14021,7 +14025,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
               title={isSetlistMode ? selectedSetlist!.name : song.title}
               noteOwner={authenticatedUser?.id} notesOpen={isHandwriting} onNotesOpenChange={setIsHandwriting} notesActive={!isPerformanceMode}
               practiceSong={activeNavigationPreviewSong ?? undefined} chordPlayback={chordPlayback}
-              chartViewport={practiceOnChart ? previewRef : undefined} chartControlsHost={readerAuditionHost} onPracticePlayingChange={setPracticePlaying}
+              chartViewport={practiceOnChart ? previewRef : undefined} chartControlsHost={readerAuditionHost} onPracticePlaybackChange={setPracticeTuning}
               phoneHandwritingButton={isPhoneViewport} readingPositions={lyricsReadingPositions.current}
               preferenceKey={authenticatedUser?.id ? `user:${authenticatedUser.id}` : 'local'}
               entries={isSetlistMode ? setlistLyricsEntries : [{ id: song.id, song }]}

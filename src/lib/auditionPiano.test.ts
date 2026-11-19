@@ -86,9 +86,9 @@ it('sustains a long hold with a continuous loop until the scheduled release', as
   engine.dispose();
 });
 
-it('replaces a scheduled section at its audio boundary and cancels it on an immediate second tap', async () => {
+function mockPianoClock() {
   vi.useFakeTimers();
-  const voices: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }[] = [];
+  const voices: { playbackRate: { value?: number }; start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }[] = [];
   let clock = 0;
   class Context {
     state = 'running';
@@ -106,15 +106,22 @@ it('replaces a scheduled section at its audio boundary and cancels it on an imme
   }
   vi.stubGlobal('AudioContext', Context);
   vi.stubGlobal('fetch', vi.fn(async () => ({ok:true, arrayBuffer:async () => new ArrayBuffer(1)})));
-  vi.stubGlobal('requestAnimationFrame', () => 1);
+  let frame: FrameRequestCallback;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1; });
   vi.stubGlobal('cancelAnimationFrame', () => {});
+  return { voices, setClock: (time: number) => { clock = time; }, paintFrame: () => frame(0) };
+}
+
+it('replaces a scheduled section at its audio boundary and cancels it on an immediate second tap', async () => {
+  const { voices, setClock } = mockPianoClock();
   const engine = new AuditionPiano();
   const section = {...plan, sounds:[{start:0,end:1,notes:[48]}]};
   await engine.play(section, vi.fn(), vi.fn(), vi.fn());
   const origin = voices[0].start.mock.calls[0][0];
   expect(engine.redirect!(section, 1)).toBe(1);
   expect(voices).toHaveLength(1);
-  clock = origin + .8;
+  const clock = origin + .8;
+  setClock(clock);
   vi.advanceTimersByTime(65);
   expect(voices[1].start.mock.calls[0][0]).toBeCloseTo(origin + 1);
   const cut = engine.redirect!(section);
@@ -122,5 +129,38 @@ it('replaces a scheduled section at its audio boundary and cancels it on an imme
   expect(voices[1].stop).toHaveBeenLastCalledWith(clock);
   expect(voices[0].stop).toHaveBeenLastCalledWith(origin + cut);
   expect(voices[2].start.mock.calls[0][0]).toBeCloseTo(origin + cut);
+  engine.dispose();
+});
+
+it('retunes held accompaniment and melody and rescales upcoming clicks and queued jumps on the same beat', async () => {
+  const { voices, setClock, paintFrame } = mockPianoClock();
+  const bar = { sectionId: 'v', sectionOccurrence: 0, barId: 'b', start: 0, end: 2, beats: 4, firstBeat: 0, beatSeconds: .5 };
+  const verse: AuditionPlan = { ...plan, duration: 2, bars: [bar], sounds: [
+    { start: 0, end: 2, notes: [48] }, { voice: 'melody', start: 0, end: 2, notes: [60] },
+  ] };
+  const engine = new AuditionPiano();
+  const paint = vi.fn();
+  await engine.play(verse, paint, vi.fn(), vi.fn());
+  const origin = voices[0].start.mock.calls[0][0];
+  engine.redirect!({ ...verse, bars: [{ ...bar, barId: 'ending' }] }, 2);
+  const cut = origin + .25;
+  setClock(cut);
+  engine.setPracticeTuning({ semitones: -2, tempoRatio: .5 });
+  const held = voices.slice(-2);
+  for (const voice of held) {
+    expect(voice.playbackRate.value).toBeCloseTo(2 ** (-2 / 12));
+    expect(voice.start.mock.calls[0][0]).toBeCloseTo(cut);
+    expect(voice.start.mock.calls[0][1]).toBeGreaterThan(0);
+    expect(voice.stop.mock.calls[0][0]).toBeCloseTo(cut + 3.5);
+  }
+  setClock(cut + .4);
+  vi.advanceTimersByTime(65);
+  // Clicks keep their pitch. The next half-second score beat is now .5 real seconds away from the cut.
+  expect(voices.at(-1)!.playbackRate.value).toBeUndefined();
+  expect(voices.at(-1)!.start.mock.calls[0][0]).toBeCloseTo(cut + .5);
+  paintFrame();
+  const [scoreTime, timeline] = paint.mock.lastCall!;
+  expect(scoreTime).toBeCloseTo(.45);
+  expect(timeline.bars.at(-1)).toMatchObject({ barId: 'ending', start: 2 });
   engine.dispose();
 });

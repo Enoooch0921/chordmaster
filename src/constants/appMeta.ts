@@ -94,6 +94,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-19',
+        title: 'Adjust the key and tempo during practice',
+        bullets: ['Open Practice settings to transpose by semitones or change BPM while singing. Stopping restores the song or setlist settings.']
+      },
+      {
+        version: '0.12.56',
         date: '2026-11-18',
         title: 'Follow practice on the chart',
         bullets: ['Switch between lyrics and chart at the current beat. Keyboard shortcuts are searchable, and the guide and About page have been redesigned.']
@@ -1318,6 +1324,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-19',
+        title: '練唱時調整調性與速度',
+        bullets: ['在「練唱設定」可逐半音升降調或調整 BPM。停止練唱後恢復歌曲或歌單設定。']
+      },
+      {
+        version: '0.12.56',
         date: '2026-11-18',
         title: '練唱接續看譜',
         bullets: ['歌詞練唱可切回譜面跟拍並保留預選段落。快捷鍵可跨分類搜尋，使用說明可按主題查閱，關於頁可展開歷史版本。']
