@@ -85,11 +85,11 @@ const enqueue = <T>(key: string, operation: () => Promise<T>): Promise<T> => {
   return pending;
 };
 
-const transact = async <T>(key: string, update: (value: unknown, store: IDBObjectStore) => T): Promise<T> => {
+const transact = async <T>(key: string, update: (value: unknown, store: IDBObjectStore) => T, mode: IDBTransactionMode = 'readwrite'): Promise<T> => {
   const db = await openDatabase();
   try {
     return await new Promise<T>((resolve, reject) => {
-      const transaction = db.transaction(STORE, 'readwrite');
+      const transaction = db.transaction(STORE, mode);
       const store = transaction.objectStore(STORE);
       let result: T;
       let failure: unknown;
@@ -130,19 +130,28 @@ export const readTeamDraft = (userId: string, libraryId: string): Promise<TeamDr
   const key = draftKey(userId, libraryId);
   return enqueue(key, async () => {
     const raw = legacyRaw(key);
-    const draft = await transact(key, (value, store) => {
-      const current = value === undefined ? null : validateDraft(value, userId, libraryId);
-      if (raw === null) return current;
-      const legacy = validateDraft(JSON.parse(raw), userId, libraryId);
-      // An older app tab may have written another legacy draft since migration.
-      if (current && current.savedAt >= legacy.savedAt) return current;
-      const migrated = compactDraft(legacy);
-      store.put(migrated, key);
-      return migrated;
-    });
-    // Never delete the only legacy backup before the migration commits.
-    clearLegacy(key, raw);
-    return draft;
+    const currentDraft = (value: unknown) => value === undefined ? null : validateDraft(value, userId, libraryId);
+    if (raw === null) return transact(key, currentDraft, 'readonly');
+    const legacy = validateDraft(JSON.parse(raw), userId, libraryId);
+    const newest = (value: unknown) => {
+      const current = currentDraft(value);
+      return current && current.savedAt >= legacy.savedAt ? current : legacy;
+    };
+    try {
+      const draft = await transact(key, (value, store) => {
+        const selected = newest(value);
+        if (selected !== legacy) return selected;
+        const migrated = compactDraft(legacy);
+        store.put(migrated, key);
+        return migrated;
+      });
+      clearLegacy(key, raw);
+      return draft;
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'QuotaExceededError')) throw error;
+      // The original is still durable. Compare both copies without a migration.
+      return transact(key, newest, 'readonly');
+    }
   });
 };
 

@@ -8,7 +8,8 @@ import { ToastProvider } from './components/Toast';
 import { loadActiveLibraryPreference, saveActiveLibraryPreference } from './lib/activeLibraryPreference';
 import { getNavigationStorageKey, saveNavigationLocation } from './lib/setlistNavigationMemory';
 import type { WorkspaceSnapshot } from './types';
-import type { CloudWorkspaceCache } from './lib/cloudWorkspaceCache';
+import { clearCloudStartupPointer, type CloudWorkspaceCache } from './lib/cloudWorkspaceCache';
+import userEvent from '@testing-library/user-event';
 
 const state = vi.hoisted(() => ({ auth: 'authenticated', userId: 'user', cache: null as CloudWorkspaceCache | null,
   probe: undefined as undefined | ((signal: AbortSignal) => Promise<void>), saveCache: vi.fn(), saveSong: vi.fn(), list: vi.fn(), load: vi.fn(), setActive: vi.fn(), refresh: vi.fn(() => false) }));
@@ -60,7 +61,7 @@ beforeAll(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn(); HTMLElement.prototype.scrollTo = vi.fn();
 });
 beforeEach(() => {
-  localStorage.clear(); state.saveSong.mockReset(); state.probe = undefined; state.auth = 'authenticated'; state.userId = 'user'; state.cache = null; state.saveCache.mockReset(); state.saveCache.mockResolvedValue(undefined);
+  clearCloudStartupPointer(); localStorage.clear(); state.saveSong.mockReset(); state.probe = undefined; state.auth = 'authenticated'; state.userId = 'user'; state.cache = null; state.saveCache.mockReset(); state.saveCache.mockResolvedValue(undefined);
   state.list.mockReset(); state.load.mockReset(); state.setActive.mockReset(); state.refresh.mockClear();
   localWorkspace = { songs: [makeSong('personal-song', '個人快取歌曲')], setlists: [], projects: [], joinedSetlists: [], joinedProjects: [], lastSavedAt: 1 };
   remoteWorkspace = { ...localWorkspace, songs: [makeSong('team-song', '點燃（官方版）')] };
@@ -429,4 +430,112 @@ it('retries a queued personal save when the NAS recovers on the same network', a
     await waitFor(() => expect(loadPendingSync(scope)).toBeNull());
     expect(state.saveSong).toHaveBeenCalledWith(expect.objectContaining({ id: 'queued', title: '離線修改' }));
   } finally { schedule.mockRestore(); }
+});
+
+const otherTeam = { ...team, id: 'choir', name: '詩班', kind: 'team' as const, role: 'viewer' as const };
+const choirWorkspace = (): WorkspaceSnapshot => ({ ...localWorkspace, songs: [makeSong('choir-song', '詩班的譜')] });
+function setUpCachedTeams() {
+  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(834);
+  cacheTeam();
+  state.cache!.libraries.push(otherTeam);
+  state.list.mockResolvedValue([personal, team, otherTeam]);
+  localStorage.setItem('cloud-cache:user:choir', JSON.stringify({
+    ...state.cache, library: otherTeam, workspace: choirWorkspace(),
+  }));
+}
+async function chooseTeam(name: RegExp) {
+  if (!screen.queryByRole('button', { name: '顯示工作區選項' })) {
+    fireEvent.click(await screen.findByRole('button', { name: '固定歌曲列表' }));
+  }
+  const chooser = screen.getByRole('button', { name: '顯示工作區選項' });
+  fireEvent.click(chooser);
+  const target = await screen.findByRole('button', { name });
+  target.focus();
+  await userEvent.keyboard('{Enter}');
+}
+
+it('switches cached teams read-only with both stores full, then verifies the chosen team after reconnect', async () => {
+  setUpCachedTeams(); state.auth = 'offline';
+  const mounted = render(view());
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+  state.saveCache.mockRejectedValue(new DOMException('Full', 'QuotaExceededError'));
+  await chooseTeam(/詩班/);
+  await screen.findByRole('button', { name: '開啟歌曲：詩班的譜' });
+  expect(screen.getByRole('status', { name: '連線狀態: 離線模式' })).toBeInTheDocument();
+  expect(state.load).not.toHaveBeenCalled();
+  expect(state.saveSong).not.toHaveBeenCalled();
+  expect(loadActiveLibraryPreference('user')).toBe('team');
+  state.auth = 'authenticated';
+  state.load.mockResolvedValue({ ...choirWorkspace(), songs: [makeSong('choir-song', '連線後的詩班譜')] });
+  mounted.rerender(view());
+  await screen.findByRole('button', { name: '開啟歌曲：連線後的詩班譜' });
+  expect(state.load).toHaveBeenCalledWith('choir');
+  expect(state.load).not.toHaveBeenCalledWith('team');
+});
+
+it('uses a visited team from memory when its disk cache failed and NAS reads later report disk full', async () => {
+  setUpCachedTeams(); state.cache = null;
+  localStorage.removeItem('cloud-cache:user:choir');
+  state.saveCache.mockRejectedValue(new DOMException('Full', 'QuotaExceededError'));
+  state.load.mockImplementation(async (id: string) => id === 'choir' ? choirWorkspace() : remoteWorkspace);
+  render(view());
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  await chooseTeam(/詩班/);
+  await screen.findByRole('button', { name: '開啟歌曲：詩班的譜' });
+  state.load.mockRejectedValue({ code: '53100', message: 'no space left on device' });
+  await chooseTeam(/TopChurchWorship/);
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  await waitFor(() => expect(document.querySelector('[data-connection-mode="offline"]')).toBeInTheDocument());
+  expect(state.saveSong).not.toHaveBeenCalled();
+});
+
+it('keeps the source visible for an uncached offline team or an explicit permission denial', async () => {
+  setUpCachedTeams(); state.auth = 'offline';
+  const raw = localStorage.getItem('cloud-cache:user:choir')!;
+  localStorage.removeItem('cloud-cache:user:choir');
+  const mounted = render(view());
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  await chooseTeam(/詩班/);
+  await screen.findByText(/這台裝置還沒有這個工作區的離線副本/);
+  expect(loadActiveLibraryPreference('user')).toBe('team');
+  state.auth = 'authenticated'; mounted.rerender(view());
+  await waitFor(() => expect(state.load).toHaveBeenCalledWith('team'));
+  await waitFor(() => expect(document.querySelector('[data-connection-mode="online"]')).toBeInTheDocument());
+  localStorage.setItem('cloud-cache:user:choir', raw);
+  state.load.mockRejectedValue({ code: '42501', message: 'permission denied' });
+  await chooseTeam(/詩班/);
+  await waitFor(() => expect(state.load).toHaveBeenCalledWith('choir'));
+  expect(await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '開啟歌曲：詩班的譜' })).toBeNull();
+  expect(loadActiveLibraryPreference('user')).toBe('team');
+});
+
+it('covers a cached team when the NAS rejects access during revalidation', async () => {
+  setUpCachedTeams(); state.auth = 'offline';
+  const mounted = render(view());
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  await chooseTeam(/詩班/);
+  await screen.findByRole('button', { name: '開啟歌曲：詩班的譜' });
+  state.load.mockRejectedValue({ code: '42501', message: 'permission denied' });
+  state.auth = 'authenticated'; mounted.rerender(view());
+  await screen.findByRole('button', { name: '重試' });
+  expect(root()).toHaveAttribute('inert');
+  expect(screen.queryByRole('button', { name: '開啟歌曲：詩班的譜' })).toBeNull();
+  expect(localStorage.getItem('chordmaster.cloud-startup.v1')).toBeNull();
+});
+
+it('opens an uncached team from the server once and ignores the older workspace request', async () => {
+  setUpCachedTeams(); localStorage.removeItem('cloud-cache:user:choir');
+  const previous = deferred<WorkspaceSnapshot>();
+  state.load.mockImplementation((id: string) => id === 'team' ? previous.promise : Promise.resolve(choirWorkspace()));
+  render(view());
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  await waitFor(() => expect(state.load).toHaveBeenCalledWith('team'));
+  await chooseTeam(/詩班/);
+  await screen.findByRole('button', { name: '開啟歌曲：詩班的譜' });
+  await act(async () => previous.resolve(remoteWorkspace));
+  expect(screen.queryByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toBeNull();
+  expect(state.load.mock.calls.filter(([id]) => id === 'choir')).toHaveLength(1);
+  expect(state.setActive).toHaveBeenLastCalledWith('choir');
 });

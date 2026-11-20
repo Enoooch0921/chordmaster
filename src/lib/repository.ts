@@ -51,6 +51,7 @@ import {
   inspectSharedSongImport as inspectEdgeSharedSongImport,
   resolveShareLink as resolveEdgeShareLink
 } from './sharing';
+import { isTemporaryWorkspaceFailure } from './sync';
 import { checkSupabaseConnection, supabase } from './supabase';
 import { parseConditionalSnapshot, type ConditionalSnapshot } from './conditionalSnapshot';
 import type { JoinedWorkspace } from './joinedWorkspaceRefresh';
@@ -1556,6 +1557,7 @@ export const createCloudRepository = (params: {
   let cachedLibraryId: string | null = null;
   let activeLibraryId: string | null = null;
 
+  let knownTeamIds = new Set<string>();
   let openingPersonalLibrary: Promise<string> | undefined;
   const ensurePersonalLibraryId = async () => {
     if (cachedLibraryId) return cachedLibraryId;
@@ -1790,8 +1792,7 @@ export const createCloudRepository = (params: {
       // calls setActiveLibrary only after this complete snapshot succeeds;
       // background Realtime/access reads must never redirect later writes.
       const workspace = await retryTransientFetch(() => getLibraryWorkspace(libraryId, params.userId));
-      const personalLibraryId = await ensurePersonalLibraryId();
-      const isPersonal = libraryId === personalLibraryId;
+      const isPersonal = !knownTeamIds.has(libraryId) && libraryId === await ensurePersonalLibraryId();
       const [joinedSetlists, joinedProjects] = await Promise.all([
         isPersonal ? getJoinedSetlists(params.userId) : Promise.resolve([] as JoinedSetlist[]),
         isPersonal ? getJoinedProjects() : Promise.resolve([] as JoinedProject[])
@@ -1832,10 +1833,19 @@ export const createCloudRepository = (params: {
 
     async listLibraries() {
       if (!supabase) throw new Error('Supabase is not configured.');
-      await ensurePersonalLibraryId();
+      let provisioningFailure: unknown;
+      try {
+        await ensurePersonalLibraryId();
+      } catch (error) {
+        if (!isTemporaryWorkspaceFailure(error)) throw error;
+        provisioningFailure = error;
+      }
       const { data, error } = await supabase.rpc('get_user_libraries');
       if (error) throw error;
-      return normalizeLibrarySummaries(data);
+      const libraries = normalizeLibrarySummaries(data);
+      knownTeamIds = new Set(libraries.filter(library => library.kind === 'team').map(library => library.id));
+      if (provisioningFailure && !libraries.length) throw provisioningFailure;
+      return libraries;
     },
 
     setActiveLibrary(libraryId) {

@@ -133,3 +133,12 @@ describe('team drafts', () => {
     expect(localStorage.getItem(legacyKey)).toBe('{broken');
   });
 });
+
+it('can read the newest legacy draft when migration runs out of disk space', async () => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const original = seedLegacy();
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+  expect(await readTeamDraft('a', 't')).toEqual(original);
+  expect(JSON.parse(localStorage.getItem(legacyKey)!)).toEqual(original);
+  localStorage.clear();
+});

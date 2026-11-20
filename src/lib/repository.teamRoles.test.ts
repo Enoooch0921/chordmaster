@@ -49,3 +49,14 @@ describe('team administrator role normalization', () => {
     expect(result.members.slice(1).map((member) => member.scope)).toEqual([undefined, undefined, undefined]);
   });
 });
+
+it('can list existing teams when provisioning the personal library runs out of disk space', async () => {
+  const query: Record<string, ReturnType<typeof vi.fn>> = {};
+  for (const method of ['select', 'eq', 'order', 'limit']) query[method] = vi.fn(() => query);
+  query.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+  query.upsert = vi.fn().mockResolvedValue({ error: { code: '53100', message: 'disk full' } });
+  mocks.from.mockReturnValue(query);
+  mocks.rpc.mockResolvedValue({ data: [{ id: 'team', name: 'Team', kind: 'team', role: 'viewer' }], error: null });
+  expect(await makeRepository().listLibraries()).toEqual([expect.objectContaining({ id: 'team', role: 'viewer' })]);
+  expect(query.upsert).toHaveBeenCalledOnce();
+});

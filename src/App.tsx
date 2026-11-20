@@ -217,7 +217,7 @@ import { motion, AnimatePresence, useAnimationControls } from 'motion/react';
 import { useSupabaseAuth } from './lib/auth';
 import { createCloudRepository } from './lib/repository';
 import { loadActiveLibraryPreference, resolveInitialLibrary, saveActiveLibraryPreference } from './lib/activeLibraryPreference';
-import { clearCloudStartupPointer, loadCloudStartupCache, saveCloudWorkspaceCache, type CloudWorkspaceCache } from './lib/cloudWorkspaceCache';
+import { clearCloudStartupPointer, getViewedLibrary, rememberViewedLibrary, loadCloudStartupCache, saveCloudWorkspaceCache, type CloudWorkspaceCache } from './lib/cloudWorkspaceCache';
 import {
   consumeLocalWorkspaceRecoveryNotice,
   hasCompletedMigration,
@@ -229,7 +229,7 @@ import {
   mutatePersistentWorkspaceSnapshot,
   savePendingSync
 } from './lib/workspace';
-import { isTemporaryWorkspaceFailure, syncWorkspaceDiff } from './lib/sync';
+import { isTemporaryWorkspaceFailure, isWorkspaceAccessDenied, syncWorkspaceDiff } from './lib/sync';
 import { collectWorkspaceDeletions, mergeWorkspaceByUpdatedAt } from './lib/workspaceMerge';
 import { applySongLibraryImport, getSongLibraryImportMode, resolveImportedSongIdentity } from './lib/songLibraryImport';
 import { hasSupabaseConfig } from './lib/supabase';
@@ -1360,12 +1360,8 @@ const loadJoinedSetlistDisplayPreferences = (): Record<string, JoinedSetlistDisp
   }
 };
 
-const saveJoinedSetlistDisplayPreferences = (preferences: Record<string, JoinedSetlistDisplayPreference>) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+const rememberPreference = (key: string, value: string) => {
+  try { window.localStorage.setItem(key, value); } catch { /* The current view keeps its selection. */ }
 };
 
 const loadGoogleSession = (): GoogleUserSession | null => {
@@ -1461,7 +1457,23 @@ const loadGoogleIdentityScript = async () => {
   });
 };
 
+const readWorkspaceWithTimeout = async <T,>(operation: Promise<T>, language: AppLanguage): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([operation, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        const message = language === 'zh' ? '曲庫連線逾時，請稍候重試。' : 'The library connection timed out. Please try again.';
+        reject(Object.assign(new Error(message), { code: 'request_timeout' }));
+      }, 35_000);
+    })]);
+  } finally { clearTimeout(timer); }
+};
+
 export default function App() {
+  const auth = useSupabaseAuth();
+  const [selectedWorkspace, setSelectedWorkspace] = useState<{
+    cache: CloudWorkspaceCache; source: 'cache' | 'server'; revision: number;
+  } | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null);
   const [startupCache, setStartupCache] = useState<CloudWorkspaceCache | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -1475,11 +1487,16 @@ export default function App() {
   }, []);
   if (error) throw error;
   return workspace
-    ? <WorkspaceApp initialWorkspace={workspace} startupCache={startupCache} />
+    ? <WorkspaceApp key={selectedWorkspace?.revision ?? 0} auth={auth} initialWorkspace={workspace}
+        startupCache={selectedWorkspace?.cache ?? startupCache} selectedSource={selectedWorkspace?.source}
+        onOpenLibrary={(cache, source) => setSelectedWorkspace(current => ({ cache, source, revision: (current?.revision ?? 0) + 1 }))} />
     : <AppLoadingScreen />;
 }
 
-function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { initialWorkspace: WorkspaceSnapshot; startupCache: CloudWorkspaceCache | null }) {
+function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache, auth, selectedSource, onOpenLibrary }: {
+  initialWorkspace: WorkspaceSnapshot; startupCache: CloudWorkspaceCache | null; auth: ReturnType<typeof useSupabaseAuth>;
+  selectedSource?: 'cache' | 'server'; onOpenLibrary: (cache: CloudWorkspaceCache, source: 'cache' | 'server') => void;
+}) {
   const {
     user: rawAuthenticatedUser,
     session,
@@ -1488,7 +1505,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     signInWithGoogle,
     signOut,
     retry: retryAuthentication
-  } = useSupabaseAuth();
+  } = auth;
   const [cacheValidated, setCacheValidated] = useState(!startupCache);
   const [cacheAllowed, setCacheAllowed] = useState(Boolean(startupCache));
   const hasVerifiedAuth = Boolean(rawAuthenticatedUser && session);
@@ -1516,6 +1533,13 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [effectiveUser?.id]
   );
+  const workspaceAccount = useRef(authenticatedUser?.id);
+  React.useLayoutEffect(() => {
+    workspaceAccount.current = authenticatedUser?.id;
+    return () => { workspaceAccount.current = undefined; };
+  }, [authenticatedUser?.id]);
+  const prefetchedWorkspace = useRef(selectedSource === 'server' ? startupCache : null);
+  const manualLibrary = useRef(selectedSource && startupCache ? { userId: startupCache.user.id, id: startupCache.library.id } : null);
   const personalSetlistDisplay = useSetlistDisplayModePreference(authenticatedUser?.id);
   const personalSetlistRows = useSetlistBarRowPreference(authenticatedUser?.id);
   const [activeBar, setActiveBar] = useState<{ sIdx: number; bIdx: number } | null>(null);
@@ -1848,6 +1872,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const libraryTransitionOwnerRef = useRef<symbol | null>(null);
   const switchCloudLibraryHandlerRef = useRef<((libraryId: string, decision?: 'save' | 'discard') => Promise<void>) | null>(null);
   const workspacePersistenceInFlightRef = useRef<Promise<void> | null>(null);
+  const confirmedLibraryIds = useRef<Set<string> | null>(null);
   const revokedLibraryIdsRef = useRef(new Set<string>());
   const cloudMutationCountRef = useRef(0);
   const beginCloudMutation = () => {
@@ -3295,27 +3320,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    rememberPreference(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(SETLIST_SORT_STORAGE_KEY, setlistSortMode);
+    rememberPreference(SETLIST_SORT_STORAGE_KEY, setlistSortMode);
   }, [setlistSortMode]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(LIBRARY_SORT_STORAGE_KEY, librarySortMode);
+    rememberPreference(LIBRARY_SORT_STORAGE_KEY, librarySortMode);
   }, [librarySortMode]);
 
   useEffect(() => {
@@ -3401,7 +3414,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   const performWorkspacePersistence = async (
     nextSongs: StoredSong[],
     nextSetlists: Setlist[],
-    nextProjects: Project[] = projects
+    nextProjects: Project[] = projects,
+    leavingLibrary = false
   ) => {
     if (usingStartupCache) throw new Error(language === 'zh' ? '目前為離線模式，連線確認後才能儲存修改。' : 'Offline Mode. Reconnect before saving edits.');
     const input = { songs: nextSongs, setlists: nextSetlists };
@@ -3457,6 +3471,10 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       if (isTeamWorkspace) {
         setSyncStatus(localStorageError ? 'failed' : 'offline');
         if (localStorageError) throw new Error(language === 'zh' ? '目前沒有連線，而且本機草稿寫入失敗。請保留頁面並下載目前修改。' : 'Offline and unable to save a local draft. Keep this page open and download your changes.');
+        if (leavingLibrary) {
+          toast.info(language === 'zh' ? '原團隊的修改已存成這台裝置的草稿。' : 'Edits are saved as a draft for the previous team on this device.');
+          return;
+        }
         throw new Error(language === 'zh' ? '修改已保留為本機團隊草稿，恢復連線後請再次儲存。' : 'Changes are saved as a local team draft. Save again when online.');
       }
       try {
@@ -3535,13 +3553,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         }
       }
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+      if (leavingLibrary && isTemporaryWorkspaceFailure(error) && (isTeamWorkspace ? !localStorageError : !pendingSyncError)) {
+        toast.info(isTeamWorkspace
+          ? (language === 'zh' ? '原團隊的修改已存成這台裝置的草稿。' : 'Edits are saved as a draft for the previous team on this device.')
+          : (language === 'zh' ? '個人區的修改已加入待同步佇列。' : 'Personal edits are queued for sync.'));
+        return;
+      }
       const fallbackMessage = language === 'zh'
         ? '雲端儲存失敗，請確認網路後再試一次。'
         : 'Cloud save failed. Please check your connection and try again.';
       const detail = error instanceof Error && error.message.trim() ? error.message.trim() : '';
-      const pendingDetail = pendingSyncError
-        ? (language === 'zh' ? '此外，變更也無法加入本機待同步佇列。' : 'The changes also could not be queued locally for sync.')
-        : '';
+      const pendingDetail = isTeamWorkspace && localStorageError
+        ? (language === 'zh' ? '本機草稿也無法儲存，請保留目前頁面。' : 'The local draft could not be saved either. Keep this page open.')
+        : pendingSyncError
+          ? (language === 'zh' ? '此外，變更也無法加入本機待同步佇列。' : 'The changes also could not be queued locally for sync.')
+          : '';
       throw new Error([fallbackMessage, detail, pendingDetail].filter(Boolean).join('\n\n'));
     }
 
@@ -3584,7 +3610,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       if (previousPersistence) {
         await previousPersistence.catch(() => undefined);
       }
-      await performWorkspacePersistence(nextSongs, nextSetlists, nextProjects);
+      await performWorkspacePersistence(nextSongs, nextSetlists, nextProjects, options.allowDuringLibraryTransition);
     })();
 
     workspacePersistenceInFlightRef.current = operation;
@@ -3875,22 +3901,6 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     handleUpdateSetlistSong(itemId, current => ({ ...current, songData: { ...previous, lyricsDoc } }));
   });
 
-  const restoreSavedWorkspace = () => {
-    const restoredSongs = cloneSong(savedSongs);
-    const restoredSetlists = cloneSong(savedSetlists);
-    setSongs(restoredSongs);
-    setSetlists(restoredSetlists);
-
-    const nextSelectedSongId = restoredSongs.some((item) => item.id === selectedSongId)
-      ? selectedSongId
-      : restoredSongs[0]?.id ?? '';
-    setSelectedSongId(nextSelectedSongId);
-
-    const nextSetlist = restoredSetlists.find((item) => item.id === selectedSetlistId) ?? restoredSetlists[0] ?? null;
-    setSelectedSetlistId(nextSetlist?.id ?? null);
-    setSelectedSetlistSongId(nextSetlist?.songs.find((item) => item.id === selectedSetlistSongId)?.id ?? nextSetlist?.songs[0]?.id ?? null);
-  };
-
   const runSelectionChange = async (applySelection: () => void, onStart?: () => void) => {
     const performSelectionChange = async () => {
       onStart?.();
@@ -4024,14 +4034,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   };
 
   const handleSwitchCloudLibrary = async (libraryId: string, decision?: 'save' | 'discard') => {
-    if (usingStartupCache) {
-      toast.info(language === 'zh' ? '目前為離線模式，連線確認後即可切換工作區。' : 'Offline Mode. Reconnect to switch workspaces.');
-      return;
-    }
     const repository = cloudRepositoryRef.current;
-    if (!repository || libraryId === activeLibraryId || libraryTransitionOwnerRef.current) {
-      return;
-    }
+    const account = authenticatedUser;
+    if (!account || (!usingStartupCache && !repository) || libraryId === activeLibraryId || libraryTransitionOwnerRef.current) return;
     if (cloudMutationCountRef.current > 0) {
       toast.info(language === 'zh'
         ? '目前的雲端操作完成後才能切換曲庫。'
@@ -4078,18 +4083,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       setSelectedProjectShareStatus(null);
       setIsLoadingProjectShareStatus(false);
 
-      if (workspaceIsDirty && !isLeavingRevokedLibrary) {
-        if (decision === 'discard') {
-          restoreSavedWorkspace();
-        } else {
+      if (workspaceIsDirty && !isLeavingRevokedLibrary && decision !== 'discard') {
+        try {
           await persistWorkspace(songs, setlists, projects, { allowDuringLibraryTransition: true });
+        } catch (error) {
+          if (!decision && workspaceAccount.current === account.id) setPendingWorkspaceSwitch(libraryId);
+          throw error;
         }
       }
 
       // A save that began before the switch may still be using the repository.
       // Never redirect that operation halfway through its multi-row diff.
       if (workspacePersistenceInFlightRef.current) {
-        if (isLeavingRevokedLibrary) {
+        if (isLeavingRevokedLibrary || decision === 'discard') {
           await workspacePersistenceInFlightRef.current.catch(() => undefined);
         } else {
           await workspacePersistenceInFlightRef.current;
@@ -4098,9 +4104,51 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
       // Reading another library is side-effect free. Keep every write pointed
       // at the current workspace until the complete target snapshot is ready.
-      const workspace = await repository.loadLibraryWorkspace(libraryId);
-      if (cloudRepositoryRef.current !== repository || libraryTransitionOwnerRef.current !== transitionOwner) return;
-
+      const current = () => workspaceAccount.current === account.id && cloudRepositoryRef.current === repository
+        && libraryTransitionOwnerRef.current === transitionOwner && !revokedLibraryIdsRef.current.has(libraryId);
+      const openCache = async () => {
+        const cached = await getViewedLibrary(account.id, libraryId);
+        if (!cached || !current()) return false;
+        const libraries = cloudLibraries.filter(library => !revokedLibraryIdsRef.current.has(library.id)
+          && (!confirmedLibraryIds.current || confirmedLibraryIds.current.has(library.id)));
+        const summary = libraries.find(library => library.id === libraryId);
+        if (!summary) return false;
+        if (usingStartupCache && startupCache) rememberViewedLibrary(startupCache);
+        saveActiveLibraryPreference(account.id, libraryId);
+        onOpenLibrary({ ...cached, user: account, library: summary, libraries }, 'cache');
+        return true;
+      };
+      if ((usingStartupCache || isOfflineMode || !navigator.onLine) && await openCache()) return;
+      if (!current()) return;
+      if (!repository || !hasVerifiedAuth || !navigator.onLine) {
+        toast.info(language === 'zh' ? '這台裝置還沒有這個工作區的離線副本，請在連線後開啟。' : 'This workspace has no offline copy on this device. Open it when connected.');
+        return;
+      }
+      let workspace: WorkspaceSnapshot;
+      try {
+        if (usingStartupCache) {
+          const libraries = await readWorkspaceWithTimeout(repository.listLibraries(), language);
+          if (!current()) return;
+          confirmedLibraryIds.current = new Set(libraries.map(item => item.id));
+          const library = libraries.find(item => item.id === libraryId);
+          if (!library) {
+            setCloudLibraries(libraries);
+            throw new Error(language === 'zh' ? '你已無法存取這個工作區。' : 'You no longer have access to this workspace.');
+          }
+          workspace = await readWorkspaceWithTimeout(repository.loadLibraryWorkspace(libraryId), language);
+          if (!current()) return;
+          saveActiveLibraryPreference(account.id, libraryId);
+          onOpenLibrary({ version: 1, cachedAt: Date.now(), user: account, library, libraries, workspace }, 'server');
+          return;
+        }
+        workspace = await readWorkspaceWithTimeout(repository.loadLibraryWorkspace(libraryId), language);
+      } catch (error) {
+        if (!current()) return;
+        if (isTemporaryWorkspaceFailure(error) && await openCache()) return;
+        throw error;
+      }
+      if (!current()) return;
+      manualLibrary.current = { userId: account.id, id: libraryId };
       repository.setActiveLibrary(libraryId);
       activeLibraryIdRef.current = libraryId;
       switchWasActivated = true;
@@ -4129,9 +4177,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         teamLibraryRefreshGenerationRef.current += 1;
         assignmentAccessRefreshGenerationRef.current += 1;
         activeLibraryIdRef.current = previousLibraryId;
-        repository.setActiveLibrary(previousLibraryId);
+        repository?.setActiveLibrary(previousLibraryId);
       }
-      setAuthUiError(getTeamFeatureErrorMessage(error, language));
+      const message = getTeamFeatureErrorMessage(error, language);
+      setAuthUiError(message);
+      toast.error(message, { id: 'workspace-switch-error' });
       setSyncStatus(navigator.onLine ? 'failed' : 'offline');
     } finally {
       if (libraryTransitionOwnerRef.current === transitionOwner) {
@@ -5718,7 +5768,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           ...updates
         }
       };
-      saveJoinedSetlistDisplayPreferences(next);
+      rememberPreference(JOINED_SETLIST_DISPLAY_PREFERENCES_STORAGE_KEY, JSON.stringify(next));
       return next;
     });
   };
@@ -6699,6 +6749,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         const libraries = await repository.listLibraries();
         if (cancelled || libraryTransitionOwnerRef.current || isPerformanceModeRef.current) return;
 
+        confirmedLibraryIds.current = new Set(libraries.map(item => item.id));
         const currentLibrary = libraries.find((item) => item.id === activeLibraryId) ?? null;
         const roleChanged = currentLibrary?.role !== activeLibraryRoleRef.current;
         if (currentLibrary && !roleChanged) {
@@ -7713,17 +7764,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     setBootstrapRetryable(false);
     const openedFromCache = usingStartupCache;
     let cacheCanRemainVisible = openedFromCache;
-    const request = async <T,>(operation: Promise<T>): Promise<T> => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        return await Promise.race([operation, new Promise<never>((_, reject) => {
-          timer = setTimeout(() => {
-            const message = language === 'zh' ? '曲庫連線逾時，請稍候重試。' : 'The library connection timed out. Please try again.';
-            reject(Object.assign(new Error(message), { code: 'request_timeout' }));
-          }, 35_000);
-        })]);
-      } finally { clearTimeout(timer); }
-    };
+    const request = <T,>(operation: Promise<T>) => readWorkspaceWithTimeout(operation, language);
 
     const loadCloudWorkspace = async () => {
       // Keep the local personal snapshot covered until this account's complete
@@ -7738,14 +7779,19 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         const repository = cloudRepositoryRef.current!;
         const storedSelectedSetlistId = getStoredSelectedSetlistId();
         const storedSelectedSetlistSongId = getStoredSelectedSetlistSongId();
-        const requestedTeamId = typeof window !== 'undefined'
+        const selectedLibrary = manualLibrary.current?.userId === authenticatedUser.id ? manualLibrary.current.id : null;
+        const requestedTeamId = !selectedLibrary && typeof window !== 'undefined'
           ? new URLSearchParams(window.location.search).get('team')
           : null;
-        const rememberedLibraryId = loadActiveLibraryPreference(authenticatedUser.id);
+        const rememberedLibraryId = selectedLibrary ?? loadActiveLibraryPreference(authenticatedUser.id);
+        const prefetched = prefetchedWorkspace.current?.user.id === authenticatedUser.id ? prefetchedWorkspace.current : null;
+        prefetchedWorkspace.current = null;
         let libraries: CloudLibrarySummary[] = [];
         let libraryListError: string | null = null;
         try {
-          libraries = await request(repository.listLibraries());
+          libraries = prefetched?.libraries ?? await request(repository.listLibraries());
+          if (isCancelled) return;
+          confirmedLibraryIds.current = new Set(libraries.map(item => item.id));
         } catch (error) {
           // A temporary failure must not replace a remembered team's selection
           // with personal content. Let startup offer a retry instead.
@@ -7767,7 +7813,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
           : null;
         const targetLibrary = resolveInitialLibrary(libraries, {
           requestedTeamId,
-          rememberedLibraryId: navigationLinkSetlistId || navigationLinkProjectId ? null : rememberedLibraryId
+          rememberedLibraryId: selectedLibrary ?? (navigationLinkSetlistId || navigationLinkProjectId ? null : rememberedLibraryId)
         });
         if (isCancelled) return;
         if (openedFromCache && targetLibrary?.id !== startupCache?.library.id) {
@@ -7782,9 +7828,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         if (targetLibrary) {
           repository.setActiveLibrary(targetLibrary.id);
         }
-        const cloudWorkspace = targetLibrary
-          ? await request(repository.loadLibraryWorkspace(targetLibrary.id))
-          : await request(repository.loadWorkspace());
+        const cloudWorkspace = prefetched && targetLibrary?.id === prefetched.library.id
+          ? prefetched.workspace
+          : await request(targetLibrary ? repository.loadLibraryWorkspace(targetLibrary.id) : repository.loadWorkspace());
         if (isCancelled) {
           return;
         }
@@ -7898,6 +7944,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         if (!isCancelled) {
           const message = getTeamFeatureErrorMessage(error, language);
           setBootstrapRetryable(navigator.onLine === false || isTemporaryWorkspaceFailure(error));
+          if (cacheCanRemainVisible && isWorkspaceAccessDenied(error)) {
+            cacheCanRemainVisible = false;
+            clearCloudStartupPointer();
+            if (startupCache) revokedLibraryIdsRef.current.add(startupCache.library.id);
+          }
           if (cacheCanRemainVisible) {
             setCacheConnectionError(message);
             setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -7948,9 +7999,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   useEffect(() => {
     if (usingStartupCache || !hasVerifiedAuth || !authenticatedUser || !activeCloudLibrary || workspaceIsDirty
       || workspaceOwnerId !== authenticatedUser.id || isLoadingCloudWorkspace || isSwitchingLibrary || isImportPromptOpen) return;
+    const snapshot = { user: authenticatedUser, library: activeCloudLibrary, libraries: cloudLibraries,
+      workspace: { songs, setlists, projects, joinedSetlists, joinedProjects, lastSavedAt } };
+    rememberViewedLibrary({ ...snapshot, version: 1, cachedAt: Date.now() });
     const timer = setTimeout(() => {
-      void saveCloudWorkspaceCache({ user: authenticatedUser, library: activeCloudLibrary, libraries: cloudLibraries,
-        workspace: { songs, setlists, projects, joinedSetlists, joinedProjects, lastSavedAt } }).catch(() => {
+      void saveCloudWorkspaceCache(snapshot).catch(() => {
         toast.info(language === 'zh' ? '目前可正常使用，但這台裝置的離線快取未能更新。' : 'The workspace is available, but this device could not update its offline cache.', { id: 'cloud-cache-warning' });
       });
     }, 200);
@@ -8311,7 +8364,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
 
     if (googleUser) {
-      window.localStorage.setItem(GOOGLE_SESSION_STORAGE_KEY, JSON.stringify(googleUser));
+      rememberPreference(GOOGLE_SESSION_STORAGE_KEY, JSON.stringify(googleUser));
       return;
     }
 

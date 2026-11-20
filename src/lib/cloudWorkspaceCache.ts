@@ -13,6 +13,17 @@ export interface CloudWorkspaceCache {
   workspace: WorkspaceSnapshot;
   cachedAt: number;
 }
+// Recently viewed libraries remain available within this tab when disk writes fail.
+const recent = new Map<string, CloudWorkspaceCache>();
+export const rememberViewedLibrary = (cache: CloudWorkspaceCache) => {
+  const key = keyFor(cache.user.id, cache.library.id);
+  recent.delete(key);
+  recent.set(key, cache);
+  if (recent.size > 3) recent.delete(recent.keys().next().value!);
+};
+export const getViewedLibrary = (userId: string, libraryId: string) =>
+  recent.get(keyFor(userId, libraryId)) ?? loadCloudWorkspaceCache(userId, libraryId);
+
 const parse = (raw: unknown, userId: string, libraryId: string): CloudWorkspaceCache | null => {
   try {
     const value = typeof raw === 'string' ? JSON.parse(raw) as CloudWorkspaceCache : null;
@@ -29,6 +40,7 @@ const parse = (raw: unknown, userId: string, libraryId: string): CloudWorkspaceC
 
 export const clearCloudStartupPointer = () => {
   pointerEpoch += 1;
+  recent.clear();
   try { window.localStorage.removeItem(POINTER_KEY); } catch { /* Cache is optional. */ }
 };
 

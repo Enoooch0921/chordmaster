@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
+import { readTeamDraft } from './lib/teamDrafts';
 import App from './App';
 import { ToastProvider } from './components/Toast';
 import { saveActiveLibraryPreference } from './lib/activeLibraryPreference';
@@ -59,7 +61,7 @@ beforeEach(() => {
 afterEach(() => { localStorage.clear(); window.history.replaceState(null, '', '/'); });
 
 const editChord = async () => {
-  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' });
+  await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' }, { timeout: 5000 });
   fireEvent.click(document.querySelector('[data-preview-slot-index="0"]')!);
   const chord = await screen.findByRole('textbox', { name: '和弦直接輸入' });
   fireEvent.change(chord, { target: { value: 'Dm' } });
@@ -119,4 +121,27 @@ it('names and saves the team setlist copy without changing its library source', 
   await waitFor(()=>expect(state.load).toHaveBeenCalledWith('personal'));
   expect(state.saveSong).not.toHaveBeenCalled();
   expect(state.saveSetlist).toHaveBeenCalledWith(expect.objectContaining({songs:[expect.objectContaining({songData:expect.objectContaining({lastEditedAt:expect.any(Number)})})]}),expect.anything(),expect.anything());
+});
+
+it.each([true, false])('switches after NAS disk full only when the source draft is durable (local disk writable: %s)', async writable => {
+  const originalDatabase = window.indexedDB;
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  state.saveSong.mockRejectedValue({ code: '53100', message: 'no space left on device' });
+  if (!writable) vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
+    throw new DOMException('Disk full', 'QuotaExceededError');
+  });
+  try {
+    render(view()); await editChord(); await choosePersonal();
+    fireEvent.click(await screen.findByRole('button', { name: '儲存並切換' }));
+    await waitFor(() => expect(state.saveSong).toHaveBeenCalled());
+    if (writable) {
+      await waitFor(() => expect(state.load).toHaveBeenCalledWith('personal'));
+      expect((await readTeamDraft('user', 'team'))?.workspace.songs[0].sections[0].bars[0].chords).toContain('Dm');
+      expect(await readTeamDraft('user', 'personal')).toBeNull();
+    } else {
+      await waitFor(() => expect(screen.getByRole('button', { name: '顯示工作區選項' })).toHaveAttribute('title', expect.stringContaining('TopChurchWorship')));
+      expect(state.load).not.toHaveBeenCalledWith('personal');
+      expect(await readTeamDraft('user', 'team')).toBeNull();
+    }
+  } finally { vi.stubGlobal('indexedDB', originalDatabase); }
 });

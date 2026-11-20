@@ -1,14 +1,21 @@
 import { LibraryRole, Project, Setlist, StoredSong } from '../types';
 import { PendingSyncPayload, savePendingSync, serializeProjects, serializeSetlists, serializeSongLibrary } from './workspace';
-import { WorkspaceRepository } from './repository';
+import type { WorkspaceRepository } from './repository';
 import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
 
 export { mergeWorkspaceByUpdatedAt } from './workspaceMerge';
 
-export const isTemporaryWorkspaceFailure = (error: unknown): boolean => {
+export const isWorkspaceAccessDenied = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') return false;
+  const { status, code } = error as { status?: number; code?: string };
+  return status === 401 || status === 403 || code === '42501' || code === 'PGRST301' || code === 'PGRST303';
+};
+
+export const isTemporaryWorkspaceFailure = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object' || isWorkspaceAccessDenied(error)) return false;
   const { code, status, message } = error as { code?: string; status?: number; message?: string };
-  return status === 408 || status === 429 || (typeof status === 'number' && status >= 500)
+  return code === '53100' || code === 'ENOSPC' || /no space left on device|disk (?:is )?full/i.test(message ?? '')
+    || status === 408 || status === 429 || (typeof status === 'number' && status >= 500)
     || code === 'request_timeout' || code === 'PGRST003' || code === '57014'
     || /timed?\s*out|timeout|failed to fetch|fetch failed|load failed|network(error| request failed)|bad gateway|service unavailable/i.test(message ?? '');
 };

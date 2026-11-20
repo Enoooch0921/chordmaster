@@ -95,6 +95,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-20',
+        title: 'Switch teams when storage is full',
+        bullets: ['Open a cached library read-only during a server outage. When the server is available, ChordMaster verifies access and reloads the selected library.']
+      },
+      {
+        version: '0.12.59',
+        date: '2026-11-20',
         title: 'Update the app while reconnecting',
         bullets: ['Install a ready web update while sign-in or library loading is waiting. After a temporary failure, the app retries opening the library and syncing queued personal edits.']
       },
@@ -1336,6 +1342,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-20',
+        title: '空間不足時也能切換團隊',
+        bullets: ['裝置儲存空間不足時仍可切換團隊。NAS 暫時無法讀取時，可唯讀開啟已有副本的曲庫，恢復連線後會重新確認權限並載入最新譜面。']
+      },
+      {
+        version: '0.12.59',
         date: '2026-11-20',
         title: '等候連線時也能更新 App',
         bullets: ['登入或曲庫載入期間可以安裝已下載的網頁版更新。遇到暫時連線錯誤，App 會重試開啟曲庫及同步已排隊的個人修改。']
