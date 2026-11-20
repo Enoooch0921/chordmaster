@@ -77,6 +77,20 @@ describe('cloud repository personal workspace imports', () => {
     mocks.rpc.mockResolvedValue({ data: [], error: null });
   });
 
+  it('shares concurrent personal library opens and skips unchanged metadata writes', async () => {
+    const existing = (data: object) => makeBuilder({ maybeSingle: vi.fn().mockResolvedValue({ data, error: null }) });
+    const library = existing({ id: 'personal-1', owner_user_id: 'user-1', kind: 'personal' });
+    const profile = existing({ email: 'user@example.com', display_name: 'User One', avatar_url: null });
+    const membership = existing({ role: 'owner' });
+    const tables: Record<string, typeof library> = { libraries: library, profiles: profile, library_members: membership };
+    mocks.from.mockImplementation((table: string) => tables[table]);
+    const repo = createRepository();
+    expect(await Promise.all([repo.getPersonalLibraryId(), repo.getPersonalLibraryId()])).toEqual(['personal-1', 'personal-1']);
+    expect(library.maybeSingle).toHaveBeenCalledOnce();
+    expect(profile.upsert).not.toHaveBeenCalled();
+    expect(membership.upsert).not.toHaveBeenCalled();
+  });
+
   it('refreshes joined data without reloading or persisting the owned workspace', async () => {
     const repository = createRepository();
     expect(await repository.loadJoinedWorkspace()).toEqual({ joinedSetlists: [], joinedProjects: [] });

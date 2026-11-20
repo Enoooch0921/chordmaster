@@ -26,7 +26,7 @@ export function createAuthFetch(backendUrl: string): typeof fetch {
         }
       }
       // A rejected fetch enters the SDK's normal retry and storage handling.
-      if (response.status === 408 || response.status === 429) {
+      if (response.status === 408 || response.status === 429 || response.status >= 500) {
         throw new Error(`Session renewal temporarily unavailable (HTTP ${response.status})`);
       }
       return complete;

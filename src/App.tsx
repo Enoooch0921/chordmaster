@@ -229,7 +229,7 @@ import {
   mutatePersistentWorkspaceSnapshot,
   savePendingSync
 } from './lib/workspace';
-import { syncWorkspaceDiff } from './lib/sync';
+import { isTemporaryWorkspaceFailure, syncWorkspaceDiff } from './lib/sync';
 import { collectWorkspaceDeletions, mergeWorkspaceByUpdatedAt } from './lib/workspaceMerge';
 import { applySongLibraryImport, getSongLibraryImportMode, resolveImportedSongIdentity } from './lib/songLibraryImport';
 import { hasSupabaseConfig } from './lib/supabase';
@@ -1762,6 +1762,11 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     userId: string; libraryName: string | null; ready: boolean; error: string | null;
   } | null>(cacheIdentityEligible ? { userId: startupCache!.user.id, libraryName: startupCache!.library.name, ready: true, error: null } : null);
   const [workspaceBootstrapAttempt, setWorkspaceBootstrapAttempt] = useState(0);
+  const [bootstrapRetryable, setBootstrapRetryable] = useState(false);
+  const retryPendingSave = useRef<(() => void) | null>(null);
+  const queuedEditSource = useRef<(Pick<WorkspaceSnapshot, 'songs' | 'setlists' | 'projects'> & {
+    userId: string; libraryId: string | null; savedAt: number;
+  }) | null>(null);
   const [cacheConnectionError, setCacheConnectionError] = useState<string | null>(null);
   const [cacheConnecting, setCacheConnecting] = useState(false);
   const [isImportPromptOpen, setIsImportPromptOpen] = useState(false);
@@ -3523,6 +3528,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             projects: cloneSong(nextProjects),
             savedAt
           });
+          queuedEditSource.current = { ...input, projects: nextProjects, userId: authenticatedUser.id, libraryId: activeLibraryId, savedAt };
+          if (isTemporaryWorkspaceFailure(error)) retryPendingSave.current?.();
         } catch (pendingError) {
           pendingSyncError = pendingError;
         }
@@ -7703,13 +7710,17 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     }
 
     let isCancelled = false;
+    setBootstrapRetryable(false);
     const openedFromCache = usingStartupCache;
     let cacheCanRemainVisible = openedFromCache;
     const request = async <T,>(operation: Promise<T>): Promise<T> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([operation, new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(language === 'zh' ? '連線較慢，已保留本機快取。' : 'The connection is slow. Your local cache is still available.')), 12000);
+          timer = setTimeout(() => {
+            const message = language === 'zh' ? '曲庫連線逾時，請稍候重試。' : 'The library connection timed out. Please try again.';
+            reject(Object.assign(new Error(message), { code: 'request_timeout' }));
+          }, 35_000);
         })]);
       } finally { clearTimeout(timer); }
     };
@@ -7886,6 +7897,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       } catch (error) {
         if (!isCancelled) {
           const message = getTeamFeatureErrorMessage(error, language);
+          setBootstrapRetryable(navigator.onLine === false || isTemporaryWorkspaceFailure(error));
           if (cacheCanRemainVisible) {
             setCacheConnectionError(message);
             setSyncStatus(navigator.onLine ? 'failed' : 'offline');
@@ -7916,13 +7928,21 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
   }, [authenticatedUser, hasVerifiedAuth, language, workspaceBootstrapAttempt]);
 
   useEffect(() => {
-    if (!usingStartupCache || !hasVerifiedAuth) return;
-    const retry = () => setWorkspaceBootstrapAttempt(attempt => attempt + 1);
+    if (!hasVerifiedAuth || !(bootstrapRetryable || (usingStartupCache && cacheConnectionError))) return;
+    const retry = () => {
+      if (navigator.onLine && document.visibilityState !== 'hidden') setWorkspaceBootstrapAttempt(attempt => attempt + 1);
+    };
     window.addEventListener('online', retry);
     window.addEventListener('focus', retry);
-    const timer = cacheConnectionError ? setInterval(retry, 15000) : undefined;
-    return () => { window.removeEventListener('online', retry); window.removeEventListener('focus', retry); clearInterval(timer); };
-  }, [usingStartupCache, hasVerifiedAuth, cacheConnectionError]);
+    document.addEventListener('visibilitychange', retry);
+    const timer = bootstrapRetryable ? window.setTimeout(retry, 15_000) : undefined;
+    return () => {
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+      document.removeEventListener('visibilitychange', retry);
+      window.clearTimeout(timer);
+    };
+  }, [usingStartupCache, hasVerifiedAuth, bootstrapRetryable, cacheConnectionError]);
 
 
   useEffect(() => {
@@ -7958,6 +7978,17 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       return;
     }
 
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    let retryDelay = 15_000;
+    const scheduleRetry = () => {
+      if (cancelled || retryTimer !== undefined) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = undefined;
+        if (document.visibilityState !== 'hidden' && navigator.onLine) flushPending();
+      }, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 60_000);
+    };
     const performPendingFlush = async () => {
       const pending = loadPendingSync({ userId: authenticatedUser.id, libraryId: activeLibraryId! });
       if (!pending || !navigator.onLine || workspacePersistenceInFlightRef.current || cloudMutationCountRef.current > 0
@@ -7966,13 +7997,23 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         return;
       }
 
-      const repository = cloudRepositoryRef.current!;
-      const release = beginCloudMutation();
       const initialWorkspace = pendingSyncWorkspaceRef.current;
+      const source = queuedEditSource.current;
+      const queued = source?.userId === authenticatedUser.id && source.libraryId === activeLibraryId && source.savedAt === pending.savedAt ? source : pending;
+      const queuedWorkspace = { songs: queued.songs, setlists: queued.setlists, projects: queued.projects };
+      if (previewEditSessionRef.current?.dirty || (workspaceIsDirtyRef.current && hasUnsavedWorkspaceChanges(initialWorkspace, queuedWorkspace))) return;
+      const repository = cloudRepositoryRef.current!;
+      const isCurrent = () => !cancelled && cloudRepositoryRef.current === repository
+        && activeLibraryIdRef.current === activeLibraryId && !previewEditSessionRef.current?.dirty
+        && pendingSyncWorkspaceRef.current.songs === initialWorkspace.songs
+        && pendingSyncWorkspaceRef.current.setlists === initialWorkspace.setlists
+        && pendingSyncWorkspaceRef.current.projects === initialWorkspace.projects;
+      const queueUnchanged = () => JSON.stringify(loadPendingSync({ userId: authenticatedUser.id, libraryId: activeLibraryId })) === JSON.stringify(pending);
+      const release = beginCloudMutation();
       try {
         setSyncStatus('syncing');
         const remoteWorkspace = await repository.loadLibraryWorkspace(activeLibraryId);
-        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId) return;
+        if (!isCurrent() || !queueUnchanged()) return;
         const mergedWorkspace = mergeWorkspaceByUpdatedAt(pending, remoteWorkspace);
         const savedAt = Math.max(
           pending.savedAt,
@@ -7994,12 +8035,8 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
         // Do not replace edits or clear a newer queued snapshot created while
         // the request was in flight (including pagehide/offline saves).
-        if (cloudRepositoryRef.current !== repository || activeLibraryIdRef.current !== activeLibraryId
-          || pendingSyncWorkspaceRef.current.songs !== initialWorkspace.songs
-          || pendingSyncWorkspaceRef.current.setlists !== initialWorkspace.setlists
-          || pendingSyncWorkspaceRef.current.projects !== initialWorkspace.projects
-          || JSON.stringify(loadPendingSync({ userId: authenticatedUser.id, libraryId: activeLibraryId! })) !== JSON.stringify(pending)) {
-          if (cloudRepositoryRef.current === repository) setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+        if (!isCurrent() || !queueUnchanged()) {
+          if (!cancelled && cloudRepositoryRef.current === repository) setSyncStatus(navigator.onLine ? 'failed' : 'offline');
           return;
         }
         try {
@@ -8014,6 +8051,9 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
             id: 'local-workspace-cache-warning'
           });
         }
+        if (!isCurrent()) return;
+        retryDelay = 15_000;
+        queuedEditSource.current = null;
         setSongs(mergedWorkspace.songs);
         setSavedSongs(cloneSong(mergedWorkspace.songs));
         setSetlists(mergedWorkspace.setlists);
@@ -8024,13 +8064,15 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
         setJoinedProjects(remoteWorkspace.joinedProjects ?? []);
         setLastSavedAt(savedAt);
         setSyncStatus('saved');
-      } catch {
+      } catch (error) {
+        if (cancelled) return;
         setSyncStatus(navigator.onLine ? 'failed' : 'offline');
+        if (isTemporaryWorkspaceFailure(error)) scheduleRetry();
       } finally { release(); }
     };
 
     const flushPending = () => {
-      if (workspacePersistenceInFlightRef.current) return;
+      if (workspacePersistenceInFlightRef.current) { scheduleRetry(); return; }
       const operation = performPendingFlush();
       workspacePersistenceInFlightRef.current = operation;
       const releaseOperation = () => {
@@ -8043,9 +8085,18 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
       void flushPending();
     };
 
+    const onVisible = () => { if (document.visibilityState !== 'hidden' && navigator.onLine) flushPending(); };
+    retryPendingSave.current = scheduleRetry;
     void flushPending();
     window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      retryPendingSave.current = null;
+      window.clearTimeout(retryTimer);
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [usingStartupCache, authenticatedUser, activeLibraryId, isTeamWorkspace, isLoadingCloudWorkspace, language, toast]);
 
   useEffect(() => {
@@ -12231,7 +12282,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
     isRestoringWorkspace, isLoadingCloudWorkspace, isSwitchingLibrary, usingStartupCache, navigationMemoryReady,
     workspaceMode, selectedSetlistId, setlistPanelView, setlistProjectFilter, language]);
 
-  const appUpdateBlockedReason = isSwitchingLibrary || isLoadingCloudWorkspace || globalHistory.busy || historyForwardBusy || activeCloudMutationCount > 0 || pendingWorkspaceSwitch
+  const appUpdateBlockedReason = isSwitchingLibrary || (isLoadingCloudWorkspace && !isRestoringWorkspace) || globalHistory.busy || historyForwardBusy || activeCloudMutationCount > 0 || pendingWorkspaceSwitch
     ? (language === 'zh' ? '請等目前的操作完成後再更新。' : 'Wait for the current operation to finish.')
     : previewMetaEditTarget || teamDraft.pending
       ? (language === 'zh' ? '請先完成目前的編輯或草稿處理，再更新。' : 'Finish the current editor or draft recovery before updating.')
@@ -12278,7 +12329,7 @@ function WorkspaceApp({ initialWorkspace: restoredWorkspace, startupCache }: { i
 
   return (
     <>
-    <AppUpdateNotice language={language} hidden={isRestoringWorkspace || isPerformanceMode || Boolean(drummerSession)}
+    <AppUpdateNotice language={language} hidden={isPerformanceMode || Boolean(drummerSession)}
       blockedReason={appUpdateBlockedReason} prepare={prepareForAppUpdate} onUpdatingChange={setIsApplyingAppUpdate} />
     {isRestoringWorkspace && <AppLoadingScreen message={startupMessage}
       error={startupError}

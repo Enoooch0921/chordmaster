@@ -94,6 +94,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-20',
+        title: 'Update the app while reconnecting',
+        bullets: ['Install a ready web update while sign-in or library loading is waiting. After a temporary failure, the app retries opening the library and syncing queued personal edits.']
+      },
+      {
+        version: '0.12.58',
         date: '2026-11-19',
         title: 'Keep your session when the server is busy',
         bullets: ['If renewal times out, ChordMaster keeps your account and retries while open or when you return. On startup you can read a previously cached library while reconnecting.']
@@ -1330,6 +1336,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-20',
+        title: '等候連線時也能更新 App',
+        bullets: ['登入或曲庫載入期間可以安裝已下載的網頁版更新。遇到暫時連線錯誤，App 會重試開啟曲庫及同步已排隊的個人修改。']
+      },
+      {
+        version: '0.12.58',
         date: '2026-11-19',
         title: 'NAS 忙碌時保留登入狀態',
         bullets: ['已登入的手機遇到 NAS 忙碌或連線逾時時，會保留帳號並自動重試。從主畫面重新開啟時，可以先查看已快取的曲庫。']

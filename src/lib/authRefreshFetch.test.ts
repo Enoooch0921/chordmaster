@@ -10,7 +10,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 it.each([
   [409, { code: 'conflict' }], [409, { error_code: 'conflict' }],
-  [408, {}], [429, {}], [504, { error_code: 'request_timeout' }]
+  [408, {}], [429, {}], [504, { error_code: 'request_timeout' }], [507, {}]
 ])('preserves an expired stored session through HTTP %i and renews it after recovery', async (status, body) => {
   let now = Date.now();
   vi.spyOn(Date, 'now').mockImplementation(() => now);

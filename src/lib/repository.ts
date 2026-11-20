@@ -1059,10 +1059,22 @@ const ensureProfileAndLibrary = async (userId: string, email: string, name: stri
   const existingLibrary = await getExistingPersonalLibrary(userId);
 
   if (existingLibrary?.id) {
-    const maintenanceResults = await Promise.allSettled([
-      upsertProfile(userId, email, name, picture),
-      ensureLibraryMembership(existingLibrary.id, userId)
-    ]);
+    const client = supabase;
+    const refreshProfile = async () => {
+      const { data, error } = await client.from('profiles')
+        .select('email, display_name, avatar_url').eq('id', userId).maybeSingle();
+      if (error) throw error;
+      if (!data || data.email !== email || data.display_name !== name || data.avatar_url !== (picture ?? null)) {
+        await upsertProfile(userId, email, name, picture);
+      }
+    };
+    const restoreMembership = async () => {
+      const { data, error } = await client.from('library_members')
+        .select('role').eq('library_id', existingLibrary.id).eq('user_id', userId).maybeSingle();
+      if (error) throw error;
+      if (data?.role !== 'owner') await ensureLibraryMembership(existingLibrary.id, userId);
+    };
+    const maintenanceResults = await Promise.allSettled([refreshProfile(), restoreMembership()]);
     maintenanceResults.forEach((result) => {
       if (result.status === 'rejected') {
         console.warn('Unable to refresh account metadata while opening an existing library.', result.reason);
@@ -1544,14 +1556,16 @@ export const createCloudRepository = (params: {
   let cachedLibraryId: string | null = null;
   let activeLibraryId: string | null = null;
 
+  let openingPersonalLibrary: Promise<string> | undefined;
   const ensurePersonalLibraryId = async () => {
-    if (cachedLibraryId) {
-      return cachedLibraryId;
-    }
-
-    const library = await ensureProfileAndLibrary(params.userId, params.email, params.name, params.picture);
-    cachedLibraryId = library.id;
-    return library.id;
+    if (cachedLibraryId) return cachedLibraryId;
+    openingPersonalLibrary ??= ensureProfileAndLibrary(params.userId, params.email, params.name, params.picture)
+      .then(library => {
+        cachedLibraryId = library.id;
+        return library.id;
+      })
+      .finally(() => { openingPersonalLibrary = undefined; });
+    return openingPersonalLibrary;
   };
 
   const ensureLibraryId = async () => activeLibraryId ?? await ensurePersonalLibraryId();

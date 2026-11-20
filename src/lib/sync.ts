@@ -5,6 +5,14 @@ import { isLocalOnlySymbolTestSong } from './symbolTestSongs';
 
 export { mergeWorkspaceByUpdatedAt } from './workspaceMerge';
 
+export const isTemporaryWorkspaceFailure = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const { code, status, message } = error as { code?: string; status?: number; message?: string };
+  return status === 408 || status === 429 || (typeof status === 'number' && status >= 500)
+    || code === 'request_timeout' || code === 'PGRST003' || code === '57014'
+    || /timed?\s*out|timeout|failed to fetch|fetch failed|load failed|network(error| request failed)|bad gateway|service unavailable/i.test(message ?? '');
+};
+
 const diffSongs = (currentSongs: StoredSong[], savedSongs: StoredSong[]) => {
   const savedById = new Map(savedSongs.map((song) => [song.id, song] as const));
   const currentById = new Map(currentSongs.map((song) => [song.id, song] as const));

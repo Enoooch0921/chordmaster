@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { InvitationTransitionProvider, useInvitationTransition } from './components/InvitationTransition';
+import { loadPendingSync, savePendingSync } from './lib/workspace';
 import App from './App';
 import { ToastProvider } from './components/Toast';
 import { loadActiveLibraryPreference, saveActiveLibraryPreference } from './lib/activeLibraryPreference';
@@ -10,7 +11,7 @@ import type { WorkspaceSnapshot } from './types';
 import type { CloudWorkspaceCache } from './lib/cloudWorkspaceCache';
 
 const state = vi.hoisted(() => ({ auth: 'authenticated', userId: 'user', cache: null as CloudWorkspaceCache | null,
-  probe: undefined as undefined | ((signal: AbortSignal) => Promise<void>), saveCache: vi.fn(), list: vi.fn(), load: vi.fn(), setActive: vi.fn(), refresh: vi.fn(() => false) }));
+  probe: undefined as undefined | ((signal: AbortSignal) => Promise<void>), saveCache: vi.fn(), saveSong: vi.fn(), list: vi.fn(), load: vi.fn(), setActive: vi.fn(), refresh: vi.fn(() => false) }));
 vi.mock('./lib/cloudWorkspaceCache', async original => ({ ...await original<typeof import('./lib/cloudWorkspaceCache')>(),
   loadCloudStartupCache: async () => state.cache, saveCloudWorkspaceCache: state.saveCache }));
 vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({
@@ -22,7 +23,7 @@ vi.mock('./lib/workspace', async original => ({ ...await original<typeof import(
   loadPersistentWorkspaceSnapshot: async () => localWorkspace
 }));
 vi.mock('./lib/repository', () => ({ createCloudRepository: () => ({
-  checkConnection: state.probe, listLibraries: state.list, setActiveLibrary: state.setActive, loadLibraryWorkspace: state.load,
+  checkConnection: state.probe, saveSong: state.saveSong, listLibraries: state.list, setActiveLibrary: state.setActive, loadLibraryWorkspace: state.load,
   getNotifications: async () => [], getShareContacts: async () => [], getPendingTeamInvites: async () => [],
   getSetlistShareStatus: async () => ({ activeToken: null, activeCreatedAt: null, participantCount: 0, participants: [] }),
   getSetlistEditorAssignments: async () => ({ members: [], assignments: [] }), subscribeToLibraryChanges: () => () => {}
@@ -59,7 +60,7 @@ beforeAll(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn(); HTMLElement.prototype.scrollTo = vi.fn();
 });
 beforeEach(() => {
-  localStorage.clear(); state.probe = undefined; state.auth = 'authenticated'; state.userId = 'user'; state.cache = null; state.saveCache.mockReset(); state.saveCache.mockResolvedValue(undefined);
+  localStorage.clear(); state.saveSong.mockReset(); state.probe = undefined; state.auth = 'authenticated'; state.userId = 'user'; state.cache = null; state.saveCache.mockReset(); state.saveCache.mockResolvedValue(undefined);
   state.list.mockReset(); state.load.mockReset(); state.setActive.mockReset(); state.refresh.mockClear();
   localWorkspace = { songs: [makeSong('personal-song', '個人快取歌曲')], setlists: [], projects: [], joinedSetlists: [], joinedProjects: [], lastSavedAt: 1 };
   remoteWorkspace = { ...localWorkspace, songs: [makeSong('team-song', '點燃（官方版）')] };
@@ -397,4 +398,35 @@ it('reports server reachability before cached discovery completes without switch
   expect(screen.getByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toBeInTheDocument();
   await act(async () => discovery.resolve([personal, team]));
   await waitFor(() => expect(state.load).toHaveBeenCalledTimes(1));
+});
+
+it('reopens the requested team on foreground after a temporary startup failure without a cache', async () => {
+  state.list.mockRejectedValueOnce({ code: 'request_timeout', message: 'Gateway timeout' });
+  render(view());
+  await screen.findByRole('button', { name: '重試' });
+  expectPersonalHidden();
+  fireEvent.focus(window);
+  expect(await screen.findByRole('button', { name: '開啟歌曲：點燃（官方版）' })).toBeInTheDocument();
+});
+
+it('retries a queued personal save when the NAS recovers on the same network', async () => {
+  const scope = { userId: 'user', libraryId: 'personal' };
+  saveActiveLibraryPreference('user', 'personal');
+  state.list.mockResolvedValue([personal]);
+  state.load.mockResolvedValueOnce(remoteWorkspace)
+    .mockRejectedValueOnce({ code: 'request_timeout', message: 'Gateway timeout' })
+    .mockResolvedValue(remoteWorkspace);
+  const queuedSong = { ...makeSong('queued', '離線修改'), updatedAt: 42 };
+  savePendingSync({ ...scope, songs: [queuedSong], projects: [], setlists: [], savedAt: 42 });
+  const schedule = vi.spyOn(window, 'setTimeout');
+  try {
+    render(view());
+    await waitFor(() => expect(schedule.mock.calls.some(([, delay]) => delay === 15_000)).toBe(true));
+    expect(loadPendingSync(scope)).not.toBeNull();
+    expect(state.saveSong).not.toHaveBeenCalled();
+    const retry = schedule.mock.calls.find(([, delay]) => delay === 15_000)![0] as () => void;
+    await act(async () => { retry(); });
+    await waitFor(() => expect(loadPendingSync(scope)).toBeNull());
+    expect(state.saveSong).toHaveBeenCalledWith(expect.objectContaining({ id: 'queued', title: '離線修改' }));
+  } finally { schedule.mockRestore(); }
 });

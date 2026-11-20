@@ -5,13 +5,13 @@ import App from './App';
 import { ToastProvider } from './components/Toast';
 import type { WorkspaceSnapshot } from './types';
 
-const updateMocks = vi.hoisted(() => ({ reloaded: vi.fn(), persisted: vi.fn(async (..._args: unknown[]) => 1), apply: vi.fn() }));
+const updateMocks = vi.hoisted(() => ({ auth: 'unconfigured', reloaded: vi.fn(), persisted: vi.fn(async (..._args: unknown[]) => 1), apply: vi.fn() }));
 let fixture: WorkspaceSnapshot;
 vi.mock('./lib/appUpdates', () => ({ appUpdates: {
   getSnapshot: () => true, subscribe: () => () => {},
   apply: async (prepare: () => Promise<void>) => { updateMocks.apply(); await prepare(); updateMocks.reloaded(); }
 } }));
-vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: null, session: null, status: 'signed-out', isConfigured: false, signInWithGoogle: vi.fn(), signOut: vi.fn() }) }));
+vi.mock('./lib/auth', () => ({ useSupabaseAuth: () => ({ user: null, session: null, status: updateMocks.auth, isConfigured: updateMocks.auth !== 'unconfigured', signInWithGoogle: vi.fn(), signOut: vi.fn() }) }));
 vi.mock('./lib/workspace', async original => ({ ...await original<typeof import('./lib/workspace')>(),
   loadPersistentWorkspaceSnapshot: async () => fixture,
   persistPersistentWorkspaceSnapshot: updateMocks.persisted,
@@ -22,6 +22,7 @@ beforeAll(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn(); HTMLElement.prototype.scrollTo = vi.fn();
 });
 beforeEach(() => {
+  updateMocks.auth = 'unconfigured';
   localStorage.clear(); updateMocks.persisted.mockReset().mockResolvedValue(1); updateMocks.reloaded.mockClear(); updateMocks.apply.mockClear();
   const song = { id: 'update-song', updatedAt: 1, title: '更新前草稿', originalKey: 'C' as const, currentKey: 'C' as const,
     timeSignature: '4/4', sections: [{ id: 'verse', title: 'Verse', bars: [{ id: 'first', chords: ['C'] }] }] };
@@ -55,3 +56,16 @@ it('keeps the page and edited score when saving fails', async () => {
   expect(document.querySelector('[data-preview-clipboard-bar="first"]')).toHaveTextContent('Em7');
   expect(document.querySelector('[data-app-root]')).not.toHaveAttribute('inert');
 }, 15000);
+
+it.each(['loading', 'offline'])('can apply an installed web update while authentication is %s', async status => {
+  updateMocks.auth = status;
+  render(<MemoryRouter><ToastProvider><App /></ToastProvider></MemoryRouter>);
+  const update = await screen.findByRole('button', { name: '立即更新' });
+  expect(document.querySelector('.app-loading')).toBeInTheDocument();
+  expect(document.querySelector('[data-app-root]')).toHaveAttribute('inert');
+  update.focus();
+  expect(update).toHaveFocus();
+  fireEvent.click(update);
+  await waitFor(() => expect(updateMocks.reloaded).toHaveBeenCalledOnce());
+  expect(updateMocks.persisted).not.toHaveBeenCalled();
+});
