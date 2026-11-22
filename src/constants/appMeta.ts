@@ -95,6 +95,12 @@ const localizedMeta: Record<AppLanguage, {
       {
         version: APP_VERSION,
         date: '2026-11-22',
+        title: 'One action for PDF export',
+        bullets: ['On phones and tablets, exported charts and setlists have a single Open or download PDF action. Use the system file menu to share the attachment to LINE or another app.']
+      },
+      {
+        version: '0.12.62',
+        date: '2026-11-22',
         title: 'Send a PDF attachment from a phone or tablet',
         bullets: ['In the iPhone or iPad Home Screen app, tap Open or download PDF, then More below the filename to choose a receiving app. In Safari, download the PDF and share it from Files to LINE or another app.']
       },
@@ -1354,6 +1360,12 @@ const localizedMeta: Record<AppLanguage, {
     changelogEntries: [
       {
         version: APP_VERSION,
+        date: '2026-11-22',
+        title: '簡化手機與平板的 PDF 匯出',
+        bullets: ['手機和平板匯出歌譜或歌單後，只需點「開啟或下載 PDF」，即可用系統的檔案選單分享給 LINE 或其他 App。']
+      },
+      {
+        version: '0.12.62',
         date: '2026-11-22',
         title: '從手機和平板傳送 PDF 附件',
         bullets: ['在 iPhone 或 iPad 主畫面版匯出後，點「開啟或下載 PDF」，再點檔名下方的「更多⋯」選擇接收 App。在 Safari 可下載 PDF，再從「檔案」分享給 LINE 或其他 App。']

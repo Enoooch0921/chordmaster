@@ -171,27 +171,22 @@ it('exports the selected layout through the real PDF action, including from read
   }
 });
 
-it('releases the capture workspace and shares the prepared setlist PDF on the next tap', async () => {
+it('releases the capture workspace and offers the prepared setlist PDF as a named download', async () => {
   const file = new File(['%PDF-1.4'], '歌詞排版聚會_首調.pdf', { type: 'application/pdf' });
   exports.mockResolvedValueOnce(file);
-  const share = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, 'share', { configurable: true, value: share });
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:setlist');
-  try {
-    await mountLyrics();
-    fireEvent.click(screen.getAllByRole('button', { name: '更多' })[0]);
-    fireEvent.click(await screen.findByRole('button', { name: '匯出歌單 PDF' }));
-    const dialog = await screen.findByRole('dialog', { name: 'PDF 已準備好' });
-    expect(dialog).toHaveTextContent(file.name);
-    expect(document.querySelector('[data-pdf-capture-root]')).toBeNull();
-    expect(document.body).not.toHaveClass('exporting-pdf');
-    expect(share).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '分享 PDF' }));
-    expect(share).toHaveBeenCalledWith({ files: [file] });
-    await waitFor(() => expect(dialog).not.toBeInTheDocument());
-  } finally {
-    Reflect.deleteProperty(navigator, 'share');
-  }
+  await mountLyrics();
+  fireEvent.click(screen.getAllByRole('button', { name: '更多' })[0]);
+  fireEvent.click(await screen.findByRole('button', { name: '匯出歌單 PDF' }));
+  const dialog = await screen.findByRole('dialog', { name: 'PDF 已準備好' });
+  expect(dialog).toHaveTextContent(file.name);
+  expect(document.querySelector('[data-pdf-capture-root]')).toBeNull();
+  expect(document.body).not.toHaveClass('exporting-pdf');
+  const download = screen.getByRole('link', { name: '開啟或下載 PDF' });
+  expect(download).toHaveAttribute('download', file.name);
+  expect(download).toHaveAttribute('href', 'blob:setlist');
+  fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+  await waitFor(() => expect(dialog).not.toBeInTheDocument());
 });
 
 it('uses screen reading in performance independently of the chosen A4 layout', async () => {
